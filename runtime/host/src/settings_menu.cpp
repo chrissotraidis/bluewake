@@ -774,7 +774,8 @@ extern "C" bool bluewake_settings_menu_event(const void* sdl_event) {
     case SDL_EVENT_KEY_DOWN:
         if (event->key.repeat)
             break;
-        if (event->key.scancode == SDL_SCANCODE_F1) {
+        // Android's Back button or gesture reads as AC_BACK.
+        if (event->key.scancode == SDL_SCANCODE_F1 || event->key.scancode == SDL_SCANCODE_AC_BACK) {
             g_open ? close_menu() : open_menu();
             return true;
         }
