@@ -53,8 +53,13 @@ extern "C" void bluewake_settings_tick(void) {
         aurora_set_frame_buffer_scale(static_cast<float>(s.render_scale));
         if (s.anisotropy > 0)
             aurora_set_forced_anisotropy(static_cast<unsigned>(s.anisotropy));
-        std::fprintf(stderr, "[settings] render scale %d, anisotropy %d, camera invert x=%d y=%d, buttons %s\n",
-                     s.render_scale, s.anisotropy, s.invert_x, s.invert_y,
+        // Smooth Motion: Aurora's in-between frames (RecompCore frame_interp),
+        // 1 for 60 FPS or 3 for 120 FPS from the game's own 30.
+        if (s.smooth_motion > 0)
+            aurora_set_frame_interp_steps(s.smooth_motion);
+        aurora_set_frame_interpolation(s.smooth_motion > 0);
+        std::fprintf(stderr, "[settings] render scale %d, anisotropy %d, smooth motion %d, camera invert x=%d y=%d, buttons %s\n",
+                     s.render_scale, s.anisotropy, s.smooth_motion, s.invert_x, s.invert_y,
                      s.remapped ? "remapped" : "default");
     }
     // A controller that connects starts from Aurora's defaults; look twice a

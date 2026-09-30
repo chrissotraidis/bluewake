@@ -61,13 +61,15 @@ void bluewake_remap_reset(void) {
 // Snapshot read on the main thread when settings change; applied by
 // controller_apply.cpp (which needs Aurora's pad header, whose BOOL clashes
 // with Objective-C's).
-BWSettingsSnapshot g_bw_settings = {1u, 3, 0, false, false, {0}, false};
+BWSettingsSnapshot g_bw_settings = {1u, 3, 0, false, false, {0}, false, 0};
 
 void bluewake_settings_changed(void) {
     NSUserDefaults* defaults = NSUserDefaults.standardUserDefaults;
     g_bw_settings.render_scale = [defaults objectForKey:@BW_RENDER_SCALE_KEY] != nil
                                      ? (int)[defaults integerForKey:@BW_RENDER_SCALE_KEY] : 3;
     g_bw_settings.anisotropy = (int)[defaults integerForKey:@BW_ANISOTROPY_KEY];
+    const NSInteger smooth = [defaults integerForKey:@BW_SMOOTH_MOTION_KEY];
+    g_bw_settings.smooth_motion = smooth == 1 || smooth == 3 ? (int)smooth : 0;
     g_bw_settings.invert_x = [defaults boolForKey:@BW_INVERT_CAMERA_X_KEY];
     g_bw_settings.invert_y = [defaults boolForKey:@BW_INVERT_CAMERA_Y_KEY];
     g_bw_settings.remapped = [defaults dictionaryForKey:@BW_BUTTON_MAP_KEY] != nil;

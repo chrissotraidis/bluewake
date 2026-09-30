@@ -53,8 +53,8 @@ BlueWake is a static recompilation with a hardware compatibility layer, not an "
 - **Developer build: 30 FPS at full speed** on an iPad Pro (M2), the game's native frame rate, with stereo audio
 - **Touch controls** with a layout editor, opacity and size settings
 - **Game controllers and keyboards**, with camera inversion and button remapping
-- **The ⋯ menu:** FPS display, render resolution up to 4×, texture filtering up to 16× anisotropic,
-  aspect ratio, mods, save backup and restore, and Report a Problem
+- **The ⋯ menu:** FPS display, Smooth Motion (60 or 120 FPS), render resolution up to 4×, texture
+  filtering up to 16× anisotropic, aspect ratio, mods, save backup and restore, and Report a Problem
 - **Mods:** 16:9 widescreen, Dolphin-format HD texture packs and
   [Better Wind Waker](https://github.com/WideBoner/betterww)
 
@@ -80,6 +80,14 @@ faster than the developer build; iPad frame-rate tests of it are still to come. 
 In the measured slow scenes, the CPU is the main limit, so lowering render resolution alone has
 not recovered full speed. Other scenes and HD texture packs can have different limits. Performance
 on smaller devices is active work.
+
+**Smooth Motion** (⋯ › Display, off by default) draws in-between frames from the game's own 30, so the
+picture moves at 60 FPS, or 120 FPS on a ProMotion screen, while the game itself keeps its normal
+speed. It costs one extra half frame of display latency and backs off on its own when the device falls
+behind. On the iPad Pro (M2) it held a steady 60 and 120 FPS at full speed through the title scenes
+and Outset Island play, with the game thread near its limit outdoors. On the iPhone 14, which is
+already below full speed in the busiest Outset views, it costs a few more points of game speed, so
+leave it off there.
 
 <p align="center">
   <img alt="BlueWake on an iPhone 14, with the touch controls in the black bars beside the picture" src="docs/images/bluewake-iphone-title.jpg" width="720">
@@ -184,7 +192,8 @@ card, timing) comes from a Dolphin-derived runtime.
 ### Why 30 FPS?
 
 That is the game's own frame rate on the GameCube. BlueWake targets that frame rate at 100% game
-speed; raising the speed would make gameplay run faster too.
+speed; raising the speed would make gameplay run faster too. For a smoother picture, turn on
+**⋯ › Display › Smooth Motion**, which adds in-between frames without changing the game's speed.
 
 ### Does it work on iPhone?
 
@@ -224,6 +233,8 @@ and the BlueWake slot to put it in; your current saves are backed up first. USA 
 - [RecompCore](https://github.com/chrissotraidis/RecompCore) and
   [DolRecomp](https://github.com/chrissotraidis/DolRecomp), forked for BlueWake, with the Aurora
   renderer and Dawn
+- [elliotttate](https://github.com/elliotttate), for Smooth Motion's in-between frames and the
+  viewport and outline fixes in [his RecompCore work](https://github.com/elliotttate/RecompCore)
 - [zeldaret/tww](https://github.com/zeldaret/tww), the Wind Waker decompilation, for research
 - [Better Wind Waker](https://github.com/WideBoner/betterww) by WideBoner
 - HD texture pack authors, including

@@ -33,7 +33,7 @@ PROFILE_COMPOSITE_PGO=scripts/builder/profiles/bluewake/composite-rt.profdata
 PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=2d6063614a9bc899f6b4d11c7e7b3cd66e4d96f3
+RECOMPCORE_SHA=314b13d238f9a16ecf0a919d7eb5ca5944fff2e2
 DOLRECOMP_SHA=5c91d6ed1ac7ac2f1aa6535b893eabb70f0f0d8f
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

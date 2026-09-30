@@ -480,8 +480,28 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
         [weakSelf refreshMenu];
     }];
     showFPS.state = BWBoolDefault(kShowFPSKey, NO) ? UIMenuElementStateOn : UIMenuElementStateOff;
+
+    // Smooth Motion: in-between frames drawn from the game's own 30 a second
+    // (applies at once). 120 FPS only on a ProMotion screen.
+    NSInteger smooth = [defaults integerForKey:@BW_SMOOTH_MOTION_KEY];
+    UIAction* (^smoothAction)(NSString*, NSInteger) = ^UIAction*(NSString* title, NSInteger value) {
+        UIAction* action = [UIAction actionWithTitle:title image:nil identifier:nil handler:^(__kindof UIAction* a) {
+            (void)a;
+            [[NSUserDefaults standardUserDefaults] setInteger:value forKey:@BW_SMOOTH_MOTION_KEY];
+            bluewake_settings_changed();
+            [weakSelf refreshMenu];
+        }];
+        action.state = smooth == value ? UIMenuElementStateOn : UIMenuElementStateOff;
+        return action;
+    };
+    NSMutableArray<UIMenuElement*>* smoothChoices = [NSMutableArray arrayWithObjects:
+        smoothAction(@"Off (Original 30 FPS)", 0), smoothAction(@"60 FPS", 1), nil];
+    if (self.window.windowScene.screen.maximumFramesPerSecond >= 120 || smooth == 3)
+        [smoothChoices addObject:smoothAction(@"120 FPS (ProMotion)", 3)];
+    UIMenu* smoothMenu = [UIMenu menuWithTitle:@"Smooth Motion" image:[UIImage systemImageNamed:@"wind"]
+                                    identifier:nil options:0 children:smoothChoices];
     UIMenu* displayMenu = [UIMenu menuWithTitle:@"Display" image:[UIImage systemImageNamed:@"display"]
-                                     identifier:nil options:0 children:@[ showFPS, resolutionMenu, filteringMenu, aspectMenu ]];
+                                     identifier:nil options:0 children:@[ showFPS, smoothMenu, resolutionMenu, filteringMenu, aspectMenu ]];
 
     // Controller: camera stick direction and face-button mapping.
     UIAction* (^toggle)(NSString*, const char*) = ^UIAction*(NSString* title, const char* key) {

@@ -116,7 +116,10 @@ void fps_tick() {
     const unsigned long long cpu = bluewake_host_thread_cpu_us();
     DolAuroraFrameTiming timing{};
     dol_aurora_frame_timing(&timing);
-    const double shown = frames / elapsed;
+    // Frames on screen: every present, in-between frames included (Smooth
+    // Motion); the overlay tick itself runs once per game frame.
+    const double shown = timing.shown > timing0.shown ? (timing.shown - timing0.shown) / elapsed
+                                                       : frames / elapsed;
     const double speed = (retrace - retrace0) / elapsed / 60.0 * 100.0;
     g_fps_shown = static_cast<float>(shown);
     g_fps_speed = static_cast<float>(speed);

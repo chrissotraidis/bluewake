@@ -1,3 +1,27 @@
+## 2026-09-30 Smooth Motion on devices, and why Skip Black Screens was not built
+
+**Smooth Motion (elliotttate's in-between frames, RecompCore 314b13d) on the iPad Pro (M2).** Installed in
+place over the Sept 28 module; Quest Log 1 loaded by BLUEWAKE_KEY_TAPS, then walking, swimming and
+camera turns on Outset: 59.9-60.0 FPS shown with the game at 30 and 100 percent speed throughout, the game
+thread 80-99 percent busy outdoors (little headroom). The 120 FPS mode held 119.8-120.1 on the title
+scenes. A QuickTime recording of the camera turn, stepped frame by frame, shows no torn, doubled or
+misplaced geometry around Link, the cliff or the HUD. The memory card hash was unchanged after every run.
+
+**iPhone 14, same route.** The iPhone is CPU-bound in the busiest Outset views with Smooth Motion off
+(mean game speed after load 87.6 percent) and slightly more so with it on (84.8 percent). The README says
+to leave it off there.
+
+**Skip Black Screens: measured, not built.** elliotttate's RecompCore adds dol_aurora_set_fast_forward
+(render without presenting, drop audio past 100 ms) for the host to call while a scene change is fully
+black; with no wall-clock pacing, that lets the guest run ahead. A probe of the game's fader
+(GZLE01 mDoGph_gInf_c::mFader at 0x803F6898, a JUTFader: status at +4, 0 = faded out; colour at +0xC)
+reads correctly on the iPad with Better Wind Waker on. But BlueWake loads from memory, so the black is
+short: file select to Outset was 0.87 s fading out, 37 retraces (0.6 s) fully black, of which about
+0.28 s is the guest busy loading, then 0.87 s fading in; title to file select was 14 retraces black.
+Fast-forward could save a few tenths of a second per transition. The visible time is the game's own
+fades and door animations, which need a code mod (mod_variants, a full module rebuild). The probe
+(BLUEWAKE_FADE_LOG) is kept on the local branch codex/skip-black.
+
 ## 2026-09-27 (day) Release fixes from the iPad test: transitions, Mods and Game Data menus
 
 **Fixed: a strip of the previous area along the bottom during transitions.** The iPad test showed the
