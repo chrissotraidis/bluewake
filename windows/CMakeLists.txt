@@ -245,7 +245,7 @@ add_test(NAME bluewake_restart_request_test COMMAND bluewake_restart_request_tes
 
 
 add_executable(bluewake_memory_card_io_test ${BLUEWAKE_REPO_ROOT}/tests/memory_card_io_test.c)
-target_include_directories(bluewake_memory_card_io_test PRIVATE ${GXRUNTIME_DIR}/include)
+target_include_directories(bluewake_memory_card_io_test PRIVATE ${GXRUNTIME_DIR}/include ${BLUEWAKE_COMPAT_INCLUDES})
 target_compile_options(bluewake_memory_card_io_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME bluewake_memory_card_io_test COMMAND bluewake_memory_card_io_test)
 set_tests_properties(bluewake_memory_card_io_test PROPERTIES TIMEOUT 15)
