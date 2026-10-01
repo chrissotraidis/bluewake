@@ -587,3 +587,7 @@ add_test(NAME bluewake_atomic_file_test COMMAND bluewake_atomic_file_test)
 
 add_executable(bluewake_restart_request_test ../../tests/restart_request_test.cpp)
 add_test(NAME bluewake_restart_request_test COMMAND bluewake_restart_request_test)
+
+add_executable(bluewake_launch_marker_test ../../tests/launch_marker_test.c)
+target_include_directories(bluewake_launch_marker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)

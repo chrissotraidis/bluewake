@@ -41,6 +41,7 @@
 #include <aurora/aurora.h>
 
 #include "win_settings.h"
+#include "launch_marker.h"
 
 int bluewake_host_main(int argc, char** argv);
 
@@ -538,6 +539,10 @@ int main(int argc, char** argv) {
             _putenv_s("DOL_AURORA_ASPECT_FIT", "0");
         } else if (strcmp(a, "--no-mouse-camera") == 0) {
             _putenv_s("BLUEWAKE_MOUSE_CAMERA", "0");
+        } else if (strcmp(a, "--safe-mode") == 0) {
+            _putenv_s("BLUEWAKE_SAFE_MODE", "1");
+        } else if (strcmp(a, "--hle-audio") == 0) {
+            _putenv_s("BLUEWAKE_DSP_MODE", "hle");
         } else if (strcmp(a, "--lle-audio") == 0) {
             _putenv_s("BLUEWAKE_DSP_MODE", "lle");
         } else if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
@@ -631,7 +636,15 @@ int main(int argc, char** argv) {
     bw_settings_install();
     start_profile();
     char* host_argv[3] = {argv[0], module, NULL};
+    char launch_marker[MAX_PATH * 4];
+    snprintf(launch_marker, sizeof launch_marker, "%slaunch.pending", g_data_dir);
+    if (!bw_launch_begin(launch_marker)) {
+        fatal_box("BlueWake could not create its launch recovery marker. Check that its data folder is writable.");
+        return 1;
+    }
     const int status = bluewake_host_main(2, host_argv);
+    if (status == 0 && !bw_launch_clear(launch_marker))
+        fprintf(stderr, "[safe-mode] could not clear launch marker on clean exit\n");
     fflush(stdout);
     fflush(stderr);
     if (status != 0) {

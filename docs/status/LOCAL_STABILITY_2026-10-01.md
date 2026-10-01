@@ -58,3 +58,8 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   Synthetic request failure/consumption and stop-status regression passes under
   ASan/UBSan; registered on Mac/Windows. Real Windows Restart with HLE/LLE, worker
   teardown and subsequent save/reload remain unverified.
+- 2.2: Windows launch.pending is flushed just before host entry; clean exit or 600
+  rendered frames clears it. A pending marker or --safe-mode backs up settings and
+  resets restart-only choices, forces HLE/mods-off session defaults, and shows a
+  recovery banner. --hle-audio is explicit. Marker/backup/clear sanitizer test passes
+  and is registered on Mac/Windows. Real crash/relaunch recovery needs Windows.

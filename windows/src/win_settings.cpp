@@ -15,6 +15,7 @@
 // aside, so the menu's clicks and keys do not move Link.
 #include "win_settings.h"
 #include "restart_request.h"
+#include "launch_marker.h"
 #include "atomic_file.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -98,6 +99,7 @@ std::string g_data_dir, g_path;
 std::vector<wchar_t> g_environment;  // as BlueWake was started, for Restart
 
 RestartRequest g_restart;
+bool g_safe_mode;
 bool g_menu_open;
 bool g_toggle_menu, g_toggle_fullscreen;  // from the hotkeys, done in the frame
 bool g_dirty;
@@ -795,6 +797,15 @@ void frame(void*) {
             apply_controller();
         }
     }
+    static unsigned healthy_frames;
+    if (!g_menu_open && ++healthy_frames == 600u && !bw_launch_clear((g_data_dir + "launch.pending").c_str()))
+        std::fprintf(stderr, "[safe-mode] could not clear launch marker\n");
+    if (g_safe_mode && SDL_GetTicks() - g_first_frame_at < 15000) {
+        ImGui::SetNextWindowBgAlpha(0.85f);
+        ImGui::Begin("Launch recovery", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::TextWrapped("Safe mode: HLE audio, mods off. Previous settings were kept in a backup when possible.");
+        ImGui::End();
+    }
     if (g_menu_open)
         draw_menu(w);
     draw_hint(w);
@@ -824,6 +835,38 @@ extern "C" void bw_settings_load(const char* data_dir) {
     g_data_dir = data_dir;
     g_path = g_data_dir + "settings.ini";
     load_file();
+    g_safe_mode = env_set("BLUEWAKE_SAFE_MODE") || bw_launch_pending((g_data_dir + "launch.pending").c_str());
+    if (g_safe_mode) {
+        if (!bw_launch_backup(g_path.c_str())) {
+            std::fprintf(stderr, "[safe-mode] settings backup failed; refusing to reset preferences\n");
+            // Keep preferences intact; session safety still forces HLE/mods off.
+        } else {
+            Settings defaults;
+            g_saved.aspect = defaults.aspect;
+            g_saved.keep_aspect = defaults.keep_aspect;
+            g_saved.betterww = false;
+            g_saved.options.clear();
+            g_saved.hd_textures = false;
+            g_saved.lle_audio = false;
+            g_saved.movement_extras = false;
+            g_saved.fast_transitions = false;
+            g_saved.quick_doors = false;
+            g_dirty = true;
+            save_file();
+        }
+        _putenv_s("BLUEWAKE_DSP_MODE", "hle");
+        _putenv_s("BLUEWAKE_MODS", "none");
+        _putenv_s("BLUEWAKE_OPTIONS", "none");
+        _putenv_s("BLUEWAKE_ASPECT", "4:3");
+        _putenv_s("DOL_AURORA_ASPECT_FIT", "1");
+        _putenv_s("DOL_AURORA_TEXTURE_PACK", "");
+        _putenv_s("BLUEWAKE_JUMP_BUTTON", "0");
+        _putenv_s("BLUEWAKE_SPRINT_SPEED", "1");
+        _putenv_s("BLUEWAKE_FAST_FORWARD", "0");
+        _putenv_s("BLUEWAKE_FADE_FRAMES", "0");
+        _putenv_s("BLUEWAKE_QUICK_DOORS", "0");
+        std::fprintf(stderr, "[safe-mode] recovering a pending launch; HLE audio and restart defaults\n");
+    }
     g_launched = g_saved;
 }
 
