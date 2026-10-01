@@ -41,6 +41,8 @@ bool bw_state_write_chunk(BwStateWriter* writer, const char* tag,
                           const void* data, uint64_t size);
 // Writes the END chunk and closes the file; false if anything failed.
 bool bw_state_writer_close(BwStateWriter* writer);
+// Close a producer's attempt. An incomplete attempt never replaces the old file.
+bool bw_state_writer_finish(BwStateWriter* writer, bool complete);
 
 typedef struct BwStateChunk {
     char tag[BW_STATE_TAG_LEN + 1u];

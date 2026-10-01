@@ -178,6 +178,11 @@ target_include_directories(bluewake_save_state_test PRIVATE ${CMAKE_CURRENT_SOUR
 target_link_libraries(bluewake_save_state_test PRIVATE z)
 add_test(NAME bluewake_save_state_test COMMAND bluewake_save_state_test)
 
+set(BLUEWAKE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+set(BLUEWAKE_HOST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+include("${BLUEWAKE_REPO_ROOT}/cmake/host_state_save_test.cmake")
+target_link_libraries(bluewake_host_state_save_failure_test PRIVATE z)
+
 add_executable(bluewake_interrupt_sources_test
     ../../tests/interrupt_sources_test.c
     src/cycle_domain.c

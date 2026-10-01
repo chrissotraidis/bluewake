@@ -6128,7 +6128,7 @@ static bool host_state_save(const char* path, CPUState* cpu,
     if (gx_size != 0u)
         ok = ok && bw_state_write_chunk(writer, "GX", gx, gx_size);
     free(gx);
-    ok = bw_state_writer_close(writer) && ok;
+    ok = bw_state_writer_finish(writer, ok);
     if (!ok) {
         fprintf(stderr, "[state] save to %s failed\n", path);
         return false;

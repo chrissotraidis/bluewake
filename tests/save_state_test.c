@@ -40,6 +40,10 @@ int main(void) {
     assert(bw_state_writer_close(writer));
     writer = bw_state_writer_open(path);
     assert(writer != NULL);
+    assert(bw_state_write_chunk(writer, "PARTIAL", blob, size));
+    assert(!bw_state_writer_finish(writer, false));
+    writer = bw_state_writer_open(path);
+    assert(writer != NULL);
     assert(!bw_state_write_chunk(writer, "INVALID", NULL, 1));
     assert(!bw_state_writer_close(writer));
     BwStateReader reader;

@@ -89,9 +89,10 @@ bool bw_state_write_chunk(BwStateWriter* writer, const char* tag,
     return writer->ok;
 }
 
-bool bw_state_writer_close(BwStateWriter* writer) {
+bool bw_state_writer_finish(BwStateWriter* writer, bool complete) {
     if (writer == NULL)
         return false;
+    writer->ok = writer->ok && complete;
     bw_state_write_chunk(writer, "END", NULL, 0u);
     bool ok = writer->ok;
     if (gzclose(writer->file) != Z_OK)
@@ -105,6 +106,10 @@ bool bw_state_writer_close(BwStateWriter* writer) {
     free(writer->pending);
     free(writer);
     return ok;
+}
+
+bool bw_state_writer_close(BwStateWriter* writer) {
+    return bw_state_writer_finish(writer, true);
 }
 
 bool bw_state_reader_open(BwStateReader* reader, const char* path) {

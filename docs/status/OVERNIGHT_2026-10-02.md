@@ -44,9 +44,28 @@ native Windows execution. The complete state-container regression passes on
 Mac and is now registered in Windows CMake/CI, including compression truncation
 and preservation after a rejected second write. Native CI result is pending.
 
+### Producer failures preserve the previous state
+
+The host's own serialization status now reaches the writer's finish operation;
+an incomplete attempt closes/removes only its staged output. Previously the
+writer knew about gzip/chunk failures but not missing alias storage, allocation
+or subsystem serialization failures in the caller. It could publish a partial
+state, then the host reported failure.
+
+A regression compiles the actual host save function with synthetic CPU/RAM and
+subsystem inputs. Missing alias storage and failed field serialization both
+preserve the previous decompressed state byte-for-byte. The alias case fails
+against the old host function; both cases pass with ASan/UBSan and in CTest on
+the M3 Max. The state-container regression also tests an explicit incomplete
+attempt. Both targets are registered on Windows; native CI is pending. No game
+module is loaded, and gameplay state restore remains unverified.
+
+The pre-pass Mac/iOS app executables were preserved locally for later control
+runs: Mac `f4f377b4478975b90902d98e3c3e27ffc5531f68096e5492fd2f5d51d5a51993`,
+iOS `d1461c63bba43c03717a6a93beb2aac119c28a60307e0c9eff0a590c4bc138ae`.
+
 ## Remaining work
 
-- Producer failures publishing incomplete save states.
 - Card memory/disk divergence after a post-rename sync error.
 - Apple recovery losing its prompt after interrupted/failed replacement.
 - Paused full audio queue blocking output recovery.

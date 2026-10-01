@@ -262,6 +262,11 @@ target_compile_options(bluewake_save_state_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_
 target_link_libraries(bluewake_save_state_test PRIVATE ZLIB::ZLIB bluewake_posix_compat)
 add_test(NAME bluewake_save_state_test COMMAND bluewake_save_state_test)
 
+include("${BLUEWAKE_REPO_ROOT}/cmake/host_state_save_test.cmake")
+target_include_directories(bluewake_host_state_save_failure_test PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})
+target_compile_options(bluewake_host_state_save_failure_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+target_link_libraries(bluewake_host_state_save_failure_test PRIVATE ZLIB::ZLIB bluewake_posix_compat)
+
 
 add_executable(bluewake_restart_request_test ${BLUEWAKE_REPO_ROOT}/tests/restart_request_test.cpp)
 add_test(NAME bluewake_restart_request_test COMMAND bluewake_restart_request_test)
