@@ -34,3 +34,5 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   slots (one snapshot per day, rotated weekly). Backup failure refuses the save.
   Sanitizer regression loads .bak after two writes and verifies the first write's
   bytes. Runtime patch 0119. Physical save/reload and backup recovery remain unverified.
+- 1.7 SRAM: staged, checked writes/flush/close/rename preserve the previous file
+  on failure. Synthetic rename-failure/retry test passes under ASan/UBSan.

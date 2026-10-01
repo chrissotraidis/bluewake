@@ -580,3 +580,7 @@ target_include_directories(bluewake_memory_card_io_test PRIVATE ${GXRUNTIME_DIR}
 target_compile_options(bluewake_memory_card_io_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME bluewake_memory_card_io_test COMMAND bluewake_memory_card_io_test)
 set_tests_properties(bluewake_memory_card_io_test PROPERTIES TIMEOUT 15)
+
+add_executable(bluewake_atomic_file_test ../../tests/atomic_file_test.c)
+target_include_directories(bluewake_atomic_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${GXRUNTIME_DIR}/include)
+add_test(NAME bluewake_atomic_file_test COMMAND bluewake_atomic_file_test)
