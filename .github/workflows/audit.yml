@@ -13,6 +13,8 @@ jobs:
         run: python3 tests/test_signing_entitlements.py
       - name: Check synthetic profiling fixtures
         run: python3 tests/test_sample_owners.py
+      - name: Keep retrace and display timing separate
+        run: python3 tests/test_frame_tail.py
       - name: Preserve one-game profiling isolation
         run: python3 tests/test_one_game_guard.py
       - name: Preserve synthetic Mac launcher cards

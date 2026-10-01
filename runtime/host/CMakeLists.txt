@@ -623,3 +623,7 @@ target_include_directories(bluewake_desktop_controller_test PRIVATE ${GXRUNTIME_
 target_link_libraries(bluewake_desktop_controller_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
 add_test(NAME bluewake_desktop_controller_test COMMAND bluewake_desktop_controller_test)
 set_tests_properties(bluewake_desktop_controller_test PROPERTIES TIMEOUT 15)
+
+add_executable(bluewake_gx_flush_metrics_test ../../tests/gx_flush_metrics_test.c)
+target_include_directories(bluewake_gx_flush_metrics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_gx_flush_metrics_test COMMAND bluewake_gx_flush_metrics_test)

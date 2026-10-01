@@ -130,3 +130,15 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   stick while blocked, held A swallowed after close, and new A accepted after release.
   Registered on Windows. Real menu/controller navigation and Link movement still need
   Windows/Switch Pro/Xbox acceptance; synthetic input is not hands-on gameplay.
+## Performance diagnostics
+
+- 5: BLUEWAKE_GX_FLUSH_FROM controls the per-retrace census start (default 13,800;
+  zero includes startup). Exit prints all-call totals/max, including presents. Fixed
+  nanosecond rollover arithmetic that could manufacture a huge flush time.
+  DOL_AURORA_PRESENT_LOG emits actual surface-present completion timestamps;
+  frame_tail.py --kind retrace|display separates VI delivery from shown-frame
+  intervals, reports p50/p95/p99/rate/stalls, and no longer calls VI gaps rendered
+  acceptance. C rollover/parser sanitizer test and two Python timing fixtures pass.
+  Runtime patch 0124. No QoS, cache, worker, frame-slot or quality optimization is
+  made without a matched measurement. The 30 Hz game rate stays distinct from
+  nominal 60 VI retraces/s and selected 30/60/120 presentation.

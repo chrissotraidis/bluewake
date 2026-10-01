@@ -23,6 +23,7 @@
 #include "ipl_sram.h"
 #include "card_runtime.h"
 #include "host_stop.h"
+#include "gx_flush_metrics.h"
 #include "edge_intercepts.h"
 #include "game_options.h"
 #include "fast_load.h"
@@ -1003,6 +1004,7 @@ static void report_credit_census(void) {
 // whether the slow retrace is waiting on the worker or doing its own work. It is
 // a host call site, so this needs no patch inside the pinned dependency.
 static bool g_gx_flush_census;
+static u64 g_gx_flush_min_retrace;
 static u64 g_gx_flush_calls;
 static u64 g_gx_flush_us_total;
 static u64 g_gx_flush_us_max;
@@ -7421,6 +7423,7 @@ int main(int argc, char** argv) {
                           strcmp(getenv("BLUEWAKE_INPUT_LOG"), "0") != 0;
     pc_sample_start(&cpu);
     g_gx_flush_census = getenv("BLUEWAKE_GX_FLUSH_CENSUS") != NULL;
+    g_gx_flush_min_retrace = bw_gx_flush_start(getenv("BLUEWAKE_GX_FLUSH_FROM"));
     if (getenv("BLUEWAKE_CREDIT_CENSUS") != NULL) {
         g_cycle_credit_census = true;
         g_turn_census_enabled = true;
@@ -9308,7 +9311,7 @@ int main(int argc, char** argv) {
             struct timespec flush_before;
             if (g_gx_flush_census) {
                 if (g_gx_flush_retrace != g_host_retrace_count &&
-                    g_gx_flush_retrace >= 13800u && g_gx_flush_lines < 2000u) {
+                    g_gx_flush_retrace >= g_gx_flush_min_retrace && g_gx_flush_lines < 2000u) {
                     g_gx_flush_lines++;
                     fprintf(stderr,
                             "[gx-flush] retrace=%llu calls=%llu us=%llu\n",
@@ -9327,9 +9330,7 @@ int main(int argc, char** argv) {
             if (g_gx_flush_census) {
                 struct timespec flush_after;
                 clock_gettime(CLOCK_MONOTONIC, &flush_after);
-                const u64 spent =
-                    (u64)(flush_after.tv_sec - flush_before.tv_sec) * 1000000ull +
-                    (u64)(flush_after.tv_nsec - flush_before.tv_nsec) / 1000ull;
+                const u64 spent = bw_elapsed_us(flush_before, flush_after);
                 g_gx_flush_calls++;
                 g_gx_flush_us_total += spent;
                 g_gx_flush_retrace_calls++;
@@ -15393,5 +15394,13 @@ int main(int argc, char** argv) {
 #endif
     bluewake_card_runtime_close();
     cpu_free(&cpu);
+    if (g_gx_flush_census) {
+        fprintf(stderr, "[gx-flush] retrace=%llu calls=%llu us=%llu\n",
+            (unsigned long long)g_gx_flush_retrace, (unsigned long long)g_gx_flush_retrace_calls,
+            (unsigned long long)g_gx_flush_retrace_us);
+        fprintf(stderr, "[gx-flush-summary] scope=all calls=%llu total_us=%llu max_us=%llu lines=%u from=%llu includes_presents=1\n",
+            (unsigned long long)g_gx_flush_calls, (unsigned long long)g_gx_flush_us_total,
+            (unsigned long long)g_gx_flush_us_max, g_gx_flush_lines, (unsigned long long)g_gx_flush_min_retrace);
+    }
     return bw_host_stop_status(stop_reason);
 }
