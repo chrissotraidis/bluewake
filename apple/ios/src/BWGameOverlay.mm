@@ -1,5 +1,6 @@
 extern "C" {
 #include "card_runtime.h"
+#include "gxruntime/aurora_backend.h"
 #include "process_close.h"
 }
 // BlueWake's mobile shell over the game view: touch controls, the three-dot
@@ -2068,6 +2069,8 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
     [center addObserver:self selector:@selector(applyControllerVisibility) name:GCControllerDidConnectNotification object:nil];
     [center addObserver:self selector:@selector(applyControllerVisibility) name:GCControllerDidDisconnectNotification object:nil];
+    [center addObserver:self selector:@selector(recoverAudio)
+                   name:UIApplicationDidBecomeActiveNotification object:nil];
     // Every held touch is released when the app stops being active.
     [center addObserver:self selector:@selector(clearTouchInput) name:UIApplicationWillResignActiveNotification object:nil];
     [center addObserver:self selector:@selector(clearTouchInput) name:UISceneWillDeactivateNotification object:nil];
@@ -2084,7 +2087,23 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
     fprintf(stderr, "[shell] audio interruption %s\n", began ? "began" : "ended");
     if (began)
         [self clearTouchInput];
-    bluewake_pause_set(BLUEWAKE_PAUSE_AUDIO, began);
+    if (began) bluewake_pause_set(BLUEWAKE_PAUSE_AUDIO, true);
+    else [self recoverAudio];
+}
+
+- (void)recoverAudio {
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
+    NSError* error = nil;
+    if (![AVAudioSession.sharedInstance setActive:YES error:&error]) {
+        fprintf(stderr, "[shell] audio activation failed: %s\n", error.localizedDescription.UTF8String);
+        bluewake_pause_set(BLUEWAKE_PAUSE_AUDIO, true);
+        __weak BWGameOverlay* weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [weakSelf recoverAudio]; });
+        return;
+    }
+    dol_aurora_audio_resume();
+    bluewake_pause_set(BLUEWAKE_PAUSE_AUDIO, false);
+    fprintf(stderr, "[shell] audio session active; output recovery requested\n");
 }
 
 @end

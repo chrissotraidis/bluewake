@@ -102,6 +102,7 @@ set_target_properties(BlueWake PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION ${BLUEWAKE_BUILD}
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "${BLUEWAKE_DEVICE_FAMILY}")
 target_include_directories(BlueWake PRIVATE
+    ${BLUEWAKE_HOST_SRC}
     ${GXRUNTIME_DIR}/include
     ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
 target_compile_definitions(BlueWake PRIVATE

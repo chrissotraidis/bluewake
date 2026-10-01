@@ -101,3 +101,9 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   proves discard and full-queue drops/counts, and verifies capture bytes/length.
   Mac CTest passes (0.64 s). Runtime patch 0122. Captured sink input still does not
   prove speaker playback; iOS/Windows intro guest-versus-sink comparisons are pending.
+- 3.3: iOS reactivates AVAudioSession on interruption end and app activation,
+  checks errors and retries while active. Successful activation requests host-thread
+  sink recovery. Runtime checks paused/lost devices on a bounded 250 ms interval,
+  resets playing, and resumes after prebuffering. Extended actual dummy-sink pause/
+  resume test passes (0.58 s). Runtime patch 0123. Siri/call/Music and backgrounded
+  interruption checks remain unverified on iOS; no iPad access.
