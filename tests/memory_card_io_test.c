@@ -12,9 +12,21 @@
 #else
 #include <unistd.h>
 #endif
+#ifndef _WIN32
+#include <fcntl.h>
+#endif
+static int fail_flush;
+static unsigned flush_calls;
+static int card_test_fflush(FILE* file) {
+    ++flush_calls;
+    if (fail_flush) { errno = EIO; return EOF; }
+    return fflush(file);
+}
+#define fflush card_test_fflush
 static int fail_rename;
 static unsigned rename_calls;
 static int card_test_rename(const char* from, const char* to) {
+    assert(flush_calls > rename_calls);
     ++rename_calls;
     if (fail_rename) { errno = EACCES; return -1; }
     return rename(from, to);
@@ -23,6 +35,7 @@ static int card_test_rename(const char* from, const char* to) {
 #define rename card_test_rename
 #include "../ref/recompcore/GXRuntime/src/memory_card.c"
 #undef rename
+#undef fflush
 
 int main(void) {
     char path[256];
@@ -37,6 +50,11 @@ int main(void) {
     memset(before, 0x21, sizeof before);
     memset(after, 0x43, sizeof after);
     assert(dol_card_write_file(card, file_no, 0, before, sizeof before) == 0);
+    fail_flush = 1;
+    unsigned flush_before = rename_calls;
+    assert(dol_card_write_file(card, file_no, 0, after, sizeof after) == DOL_CARD_RESULT_IO_ERROR);
+    assert(rename_calls == flush_before);
+    fail_flush = 0;
     fail_rename = 1;
     unsigned calls = rename_calls;
     assert(dol_card_write_file(card, file_no, 0, after, sizeof after) == DOL_CARD_RESULT_IO_ERROR);
