@@ -188,6 +188,13 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
+
+add_executable(bluewake_audio_sink_test ${GXRUNTIME_DIR}/graphics/aurora/tests/audio_sink_test.cpp)
+target_include_directories(bluewake_audio_sink_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_audio_sink_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_audio_sink_test COMMAND bluewake_audio_sink_test)
+set_tests_properties(bluewake_audio_sink_test PROPERTIES TIMEOUT 15)
+
     add_executable(bluewake_windows_crash_driver src/win_crash.cpp ${BLUEWAKE_REPO_ROOT}/tests/windows_crash_driver.cpp)
     target_compile_definitions(bluewake_windows_crash_driver PRIVATE BLUEWAKE_ENABLE_DEVELOPER_TRACING=1)
     add_test(NAME bluewake_windows_crash_test COMMAND powershell -NoProfile -ExecutionPolicy Bypass

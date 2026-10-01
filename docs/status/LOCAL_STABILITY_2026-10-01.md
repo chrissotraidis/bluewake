@@ -86,3 +86,11 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   in-process handlers; external WER/minidump collection remains needed for that case.
   Also moved normal log writes before console output, added PID to session names,
   checked the hotkey hook and released it/timer resolution on exit (2.7 subset).
+## Audio
+
+- 3.1: retry unavailable output every two seconds and on device-added events; show
+  an audio-unavailable overlay. Actual sink test fails SDL initialization with a
+  nonexistent driver, verifies backoff, then recovers with the dummy driver and
+  avoids reopening an existing stream. Mac CTest passes (2.18 s), registered on
+  Windows. Runtime patch 0121. Output-disabled/enabled Windows and iOS speaker
+  recovery remain unverified; dummy-driver PCM is not speaker acceptance.

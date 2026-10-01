@@ -607,3 +607,9 @@ set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)
 
 add_executable(bluewake_crash_text_test ../../tests/crash_text_test.c)
 add_test(NAME bluewake_crash_text_test COMMAND bluewake_crash_text_test)
+
+add_executable(bluewake_audio_sink_test ${GXRUNTIME_DIR}/graphics/aurora/tests/audio_sink_test.cpp)
+target_include_directories(bluewake_audio_sink_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_audio_sink_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_audio_sink_test COMMAND bluewake_audio_sink_test)
+set_tests_properties(bluewake_audio_sink_test PROPERTIES TIMEOUT 15)
