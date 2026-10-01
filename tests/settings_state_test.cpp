@@ -19,4 +19,15 @@ int main() {
     bw_settings_keep_edits(saved, before, session);
     assert(saved.render_scale == 2 && saved.options["edited"] == false);
     assert(saved.options.count("session_only") == 0 && saved.options["old"]);
+    before = session;
+    session.options.erase("old"); // Player restores this option to its default.
+    bw_settings_keep_edits(saved, before, session);
+    assert(saved.options.count("old") == 0);
+    session.option_defaults_off = true;
+    assert(!bw_settings_option_value(session, "default_on", true));
+    before = session;
+    session.options["default_on"] = true;
+    bw_settings_keep_edits(saved, before, session);
+    assert(bw_settings_option_value(saved, "default_on", false));
+    assert(!saved.option_defaults_off);
 }

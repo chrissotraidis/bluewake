@@ -533,18 +533,13 @@ void tab_enhancements() {
         if (name == nullptr)
             break;
         any = true;
-        const auto chosen = d.options.find(name);
-        bool value = chosen != d.options.end() ? chosen->second : default_on;
+        bool value = bw_settings_option_value(d, name, default_on);
         ImGui::PushID(name);
         if (ImGui::Checkbox(title != nullptr ? title : name, &value)) {
-            if (value == default_on)
-                d.options.erase(name);
-            else
-                d.options[name] = value;
+            d.options[name] = value;
             changed();
         }
-        const auto launched = g_launched.options.find(name);
-        const bool was = launched != g_launched.options.end() ? launched->second : default_on;
+        const bool was = bw_settings_option_value(g_launched, name, default_on);
         restart_note(value != was);
         ImGui::PopID();
     }
@@ -946,6 +941,7 @@ extern "C" void bw_settings_apply_launch(void) {
     if (env_set("BLUEWAKE_OPTIONS")) {
         d.options.clear();
         std::string options = std::getenv("BLUEWAKE_OPTIONS");
+        d.option_defaults_off = options.rfind("none", 0) == 0;
         size_t start = 0;
         while (start < options.size()) {
             size_t end = options.find(',', start);

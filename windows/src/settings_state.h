@@ -24,12 +24,18 @@ struct Settings {
     bool keep_aspect = true;
     bool betterww = false;
     std::map<std::string, bool> options;  // only those changed from their default
+    bool option_defaults_off = false; // Session-only --options none baseline.
     bool hd_textures = false;
     bool lle_audio = false;
     bool movement_extras = false;
     bool fast_transitions = false;
     bool quick_doors = false;
 };
+
+inline bool bw_settings_option_value(const Settings& settings, const std::string& name, bool default_on) {
+    auto chosen = settings.options.find(name);
+    return chosen != settings.options.end() ? chosen->second : default_on && !settings.option_defaults_off;
+}
 
 inline void bw_settings_keep_edits(Settings& saved, const Settings& before, const Settings& session) {
     if (before.fullscreen != session.fullscreen) saved.fullscreen = session.fullscreen;
@@ -60,5 +66,8 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     for (const auto& [key, value] : session.options) {
         auto old = before.options.find(key);
         if (old == before.options.end() || old->second != value) saved.options[key] = value;
+    }
+    for (const auto& [key, value] : before.options) {
+        if (!session.options.count(key)) saved.options.erase(key);
     }
 }
