@@ -21,3 +21,15 @@
 CPUState bw_guest_cpu;
 
 BW_GUEST_CPU_EXPORT CPUState* bluewake_composite_guest_cpu(void) { return &bw_guest_cpu; }
+
+#if defined(BW_GUEST_MEM1)
+// MEM1 at a fixed address too (core/cpu.h's BW_GUEST_MEM1), the size the host
+// gives the guest (linked REL data above the GameCube's 24 MiB). The host
+// runs the guest on it, as on bw_guest_cpu.
+__attribute__((aligned(4096))) u8 BW_GUEST_MEM1[BW_GUEST_MEM1_SIZE];
+
+BW_GUEST_CPU_EXPORT u8* bluewake_composite_guest_mem1(u32* size) {
+    *size = BW_GUEST_MEM1_SIZE;
+    return BW_GUEST_MEM1;
+}
+#endif
