@@ -40,6 +40,10 @@ int main(void) {
     assert(writer != NULL);
     assert(bw_state_write_chunk(writer, "FIELDS", blob, size));
     assert(bw_state_writer_close(writer));
+    writer = bw_state_writer_open(path);
+    assert(writer != NULL);
+    assert(!bw_state_write_chunk(writer, "INVALID", NULL, 1));
+    assert(!bw_state_writer_close(writer));
     BwStateReader reader;
     assert(bw_state_reader_open(&reader, path));
     const BwStateChunk* chunk = bw_state_find(&reader, "FIELDS");

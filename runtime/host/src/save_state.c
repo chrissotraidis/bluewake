@@ -1,4 +1,5 @@
 #include "save_state.h"
+#include "atomic_file.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +8,8 @@
 
 struct BwStateWriter {
     gzFile file;
+    char* path;
+    char* pending;
     bool ok;
 };
 
@@ -50,8 +53,12 @@ BwStateWriter* bw_state_writer_open(const char* path) {
     BwStateWriter* writer = (BwStateWriter*)calloc(1u, sizeof(*writer));
     if (writer == NULL)
         return NULL;
-    writer->file = gzopen(path, "wb1");
+    writer->path = strdup(path);
+    writer->pending = bw_atomic_path(path);
+    writer->file = writer->path && writer->pending ? gzopen(writer->pending, "wb1") : NULL;
     if (writer->file == NULL) {
+        free(writer->path);
+        free(writer->pending);
         free(writer);
         return NULL;
     }
@@ -67,8 +74,11 @@ BwStateWriter* bw_state_writer_open(const char* path) {
 
 bool bw_state_write_chunk(BwStateWriter* writer, const char* tag,
                           const void* data, uint64_t size) {
-    if (writer == NULL || tag == NULL || (data == NULL && size != 0u))
+    if (writer == NULL) return false;
+    if (tag == NULL || (data == NULL && size != 0u)) {
+        writer->ok = false;
         return false;
+    }
     uint8_t header[BW_STATE_TAG_LEN + 8u];
     memset(header, 0, sizeof header);
     strncpy((char*)header, tag, BW_STATE_TAG_LEN);
@@ -86,6 +96,13 @@ bool bw_state_writer_close(BwStateWriter* writer) {
     bool ok = writer->ok;
     if (gzclose(writer->file) != Z_OK)
         ok = false;
+    if (ok) {
+        FILE* file = fopen(writer->pending, "rb");
+        ok = file != NULL && bw_atomic_finish(file, writer->pending, writer->path, true);
+    }
+    if (!ok) remove(writer->pending);
+    free(writer->path);
+    free(writer->pending);
     free(writer);
     return ok;
 }

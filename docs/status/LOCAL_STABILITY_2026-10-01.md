@@ -40,3 +40,8 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   replacement. Windows retries no sooner than one second after a failed attempt.
   Shared synthetic dirty/failure/retry regression passes under ASan/UBSan. Actual
   options-menu persistence, permissions errors and Windows settings remain unverified.
+- 1.7 save states: write to a per-process staged file; publish only after successful
+  gzip close and disk flush. Invalid chunk requests poison the writer instead of
+  publishing a partial state. Extended ASan/UBSan state test passes and verifies an
+  interrupted/rejected second save leaves the first loadable. Gameplay state restore
+  on the candidate remains unverified.
