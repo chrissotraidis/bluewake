@@ -116,3 +116,11 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   and patch diff. The 15-option specification still parses and skip remains off.
   New personal option-module compile resumed locally with two jobs; speaker/scene
   checks with mods off and skip on remain pending. No DOL/module/capture is published.
+## Controls
+
+- 4.1: Mac/Windows Swap A/B and X/Y settings apply to each controller's restored
+  default targets, preserving its native/NSO layout. Settings persist and reapply
+  on port changes. Shared pure-C regression passes exhaustive 16-bit combinations,
+  involution/non-face preservation and three default orders under ASan/UBSan;
+  registered in both CMake files and Windows CI. Real Switch Pro/Xbox/hot-plug UI
+  acceptance remains unverified; no controller hardware has been assumed.

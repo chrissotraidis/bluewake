@@ -15,6 +15,7 @@
 // aside, so the menu's clicks and keys do not move Link.
 #include "win_settings.h"
 #include "settings_state.h"
+#include "controller_face_swap.h"
 #include "restart_request.h"
 #include "launch_marker.h"
 #include "atomic_file.h"
@@ -119,6 +120,8 @@ void load_file() {
         else if (k == "mouse_camera") d.mouse_camera = parse_bool(v);
         else if (k == "mouse_sensitivity") d.mouse_sensitivity = std::clamp(std::atof(v.c_str()), 0.1, 10.0);
         else if (k == "mouse_invert_y") d.mouse_invert_y = parse_bool(v);
+        else if (k == "controller_swap_ab") d.controller_swap_ab = parse_bool(v);
+        else if (k == "controller_swap_xy") d.controller_swap_xy = parse_bool(v);
         else if (k == "controller_invert_x") d.pad_invert_x = parse_bool(v);
         else if (k == "controller_invert_y") d.pad_invert_y = parse_bool(v);
         else if (k == "aspect") d.aspect = (v == "16:9" || v == "16:10") ? v : "4:3";
@@ -150,6 +153,7 @@ void save_file() {
                  d.render_scale, d.anisotropy, d.smooth_motion, d.show_fps, d.pause_unfocused);
     std::fprintf(f, "mouse_camera=%d\nmouse_sensitivity=%.2f\nmouse_invert_y=%d\n", d.mouse_camera,
                  d.mouse_sensitivity, d.mouse_invert_y);
+    std::fprintf(f, "controller_swap_ab=%d\ncontroller_swap_xy=%d\n", d.controller_swap_ab, d.controller_swap_xy);
     std::fprintf(f, "controller_invert_x=%d\ncontroller_invert_y=%d\n", d.pad_invert_x, d.pad_invert_y);
     std::fprintf(f, "aspect=%s\nkeep_aspect=%d\nbetterww=%d\nhd_textures=%d\nlle_audio=%d\n", d.aspect.c_str(),
                  d.keep_aspect, d.betterww, d.hd_textures, d.lle_audio);
@@ -293,11 +297,12 @@ void reset_window(SDL_Window* w) {
 // an axis, so a mapping set elsewhere is otherwise left alone.
 void apply_controller() {
     const Settings& d = g_session;
-    if (!d.pad_invert_x && !d.pad_invert_y && !g_pad_applied)
+    if (!d.pad_invert_x && !d.pad_invert_y && !d.controller_swap_ab && !d.controller_swap_xy && !g_pad_applied)
         return;
     if (PADGetIndexForPort(0) < 0)
         return;
     PADRestoreDefaultMapping(0);
+    bw_apply_face_swaps(0, d.controller_swap_ab, d.controller_swap_xy);
     const PADAxisMapping axes[4] = {
         {{SDL_GAMEPAD_AXIS_RIGHTX, d.pad_invert_x ? AXIS_SIGN_NEGATIVE : AXIS_SIGN_POSITIVE},
          SDL_GAMEPAD_BUTTON_INVALID, PAD_AXIS_RIGHT_X_POS},
@@ -456,6 +461,8 @@ void tab_controls() {
     ImGui::Spacing();
     bool pad = ImGui::Checkbox("Controller: camera stick left and right inverted", &d.pad_invert_x);
     pad |= ImGui::Checkbox("Controller: camera stick up and down inverted", &d.pad_invert_y);
+    pad |= ImGui::Checkbox("Swap A and B", &d.controller_swap_ab);
+    pad |= ImGui::Checkbox("Swap X and Y", &d.controller_swap_xy);
     if (pad) {
         apply_controller();
         changed();

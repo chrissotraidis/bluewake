@@ -17,6 +17,7 @@ struct Settings {
     bool mouse_camera = true;
     double mouse_sensitivity = 1.0;
     bool mouse_invert_y = false;
+    bool controller_swap_ab = false, controller_swap_xy = false;
     bool pad_invert_x = false, pad_invert_y = false;
     // At the next launch.
     std::string aspect = "4:3";
@@ -54,6 +55,8 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.movement_extras != session.movement_extras) saved.movement_extras = session.movement_extras;
     if (before.fast_transitions != session.fast_transitions) saved.fast_transitions = session.fast_transitions;
     if (before.quick_doors != session.quick_doors) saved.quick_doors = session.quick_doors;
+    if (before.controller_swap_ab != session.controller_swap_ab) saved.controller_swap_ab = session.controller_swap_ab;
+    if (before.controller_swap_xy != session.controller_swap_xy) saved.controller_swap_xy = session.controller_swap_xy;
     for (const auto& [key, value] : session.options) {
         auto old = before.options.find(key);
         if (old == before.options.end() || old->second != value) saved.options[key] = value;

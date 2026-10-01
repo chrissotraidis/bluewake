@@ -613,3 +613,7 @@ target_include_directories(bluewake_audio_sink_test PRIVATE ${GXRUNTIME_DIR}/gra
 target_link_libraries(bluewake_audio_sink_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
 add_test(NAME bluewake_audio_sink_test COMMAND bluewake_audio_sink_test)
 set_tests_properties(bluewake_audio_sink_test PROPERTIES TIMEOUT 15)
+
+add_executable(bluewake_face_button_swap_test ../../tests/face_button_swap_test.c)
+target_include_directories(bluewake_face_button_swap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_face_button_swap_test COMMAND bluewake_face_button_swap_test)

@@ -1,6 +1,7 @@
 // The options menu (the Mac host): the settings the host reads from the
 // environment, in a window over the paused game, saved to a settings file.
 #include "settings_menu.h"
+#include "controller_face_swap.h"
 #include "atomic_file.h"
 
 // The host's modules are C.
@@ -51,7 +52,7 @@ const char* const kKeys[] = {
     "DOL_AURORA_FRAME_INTERP",  "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_SHOW_FPS", "DOL_AURORA_FORCE_ANISO",
     "DOL_AURORA_TEXTURE_PACK",  "BLUEWAKE_MODS",            "BLUEWAKE_OPTIONS",
     "BLUEWAKE_FADE_FRAMES",     "BLUEWAKE_FAST_FORWARD",    "BLUEWAKE_QUICK_DOORS",
-    "BLUEWAKE_JUMP_BUTTON",
+    "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_SWAP_XY",
     "BLUEWAKE_SPRINT_SPEED",    "BLUEWAKE_MOUSE_CAMERA",    "BLUEWAKE_MOUSE_SENSITIVITY",
     "BLUEWAKE_MOUSE_INVERT_Y",  "BLUEWAKE_STICK_CAMERA",    "BLUEWAKE_STICK_CAMERA_SPEED",
     "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_STICK_AIM_SPEED",
@@ -391,7 +392,24 @@ void gameplay_tab() {
     }
 }
 
+void apply_controller_swaps() {
+    static int previous = -2;
+    static bool applied = false, last_ab = false, last_xy = false;
+    int index = PADGetIndexForPort(0);
+    bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = env_on("BLUEWAKE_PAD_SWAP_XY", false);
+    if (index == previous && ab == last_ab && xy == last_xy) return;
+    previous = index; last_ab = ab; last_xy = xy;
+    if (index < 0 || (!ab && !xy && !applied)) return;
+    PADRestoreDefaultMapping(0);
+    bw_apply_face_swaps(0, ab, xy);
+    applied = true;
+}
+
 void controls_tab() {
+    bool swap_ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), swap_xy = env_on("BLUEWAKE_PAD_SWAP_XY", false);
+    if (ImGui::Checkbox("Swap A and B", &swap_ab)) set_env("BLUEWAKE_PAD_SWAP_AB", swap_ab ? "1" : "0");
+    if (ImGui::Checkbox("Swap X and Y", &swap_xy)) set_env("BLUEWAKE_PAD_SWAP_XY", swap_xy ? "1" : "0");
+    apply_controller_swaps();
     bool mouse = env_on("BLUEWAKE_MOUSE_CAMERA", true);
     if (ImGui::Checkbox("Mouse camera (click the game to use it)", &mouse)) {
         set_env("BLUEWAKE_MOUSE_CAMERA", mouse ? "1" : "0");
@@ -549,6 +567,7 @@ void load_mac_font() {
 }
 
 void draw(void*) {
+    apply_controller_swaps();
     if (!g_font_ready) {
         load_mac_font();
         g_font_ready = true;
