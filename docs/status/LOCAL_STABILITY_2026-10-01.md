@@ -36,3 +36,7 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   bytes. Runtime patch 0119. Physical save/reload and backup recovery remain unverified.
 - 1.7 SRAM: staged, checked writes/flush/close/rename preserve the previous file
   on failure. Synthetic rename-failure/retry test passes under ASan/UBSan.
+- 1.7 desktop settings: checked staged writes; clear dirty only after successful
+  replacement. Windows retries no sooner than one second after a failed attempt.
+  Shared synthetic dirty/failure/retry regression passes under ASan/UBSan. Actual
+  options-menu persistence, permissions errors and Windows settings remain unverified.

@@ -1,6 +1,7 @@
 // The options menu (the Mac host): the settings the host reads from the
 // environment, in a window over the paused game, saved to a settings file.
 #include "settings_menu.h"
+#include "atomic_file.h"
 
 // The host's modules are C.
 extern "C" {
@@ -138,9 +139,11 @@ void save() {
             mkdir(dir.substr(0, at).c_str(), 0755);
         mkdir(dir.c_str(), 0755);
     }
-    FILE* file = std::fopen(g_path.c_str(), "w");
+    char* pending = bw_atomic_path(g_path.c_str());
+    FILE* file = pending != nullptr ? std::fopen(pending, "w") : nullptr;
     if (file == nullptr) {
         std::fprintf(stderr, "[settings] cannot write %s: %s\n", g_path.c_str(), std::strerror(errno));
+        free(pending);
         return;
     }
     std::fputs("# BlueWake settings, written by the options menu (Esc or F1 in the game).\n"
@@ -162,9 +165,9 @@ void save() {
     }
     for (const auto& [key, value] : g_other)
         std::fprintf(file, "%s=%s\n", key.c_str(), value.c_str());
-    std::fclose(file);
-    g_dirty = false;
-    std::fprintf(stderr, "[settings] saved %s\n", g_path.c_str());
+    bool ok = bw_atomic_finish_dirty(file, pending, g_path.c_str(), &g_dirty);
+    free(pending);
+    std::fprintf(stderr, "[settings] %s %s\n", ok ? "saved" : "save failed; retry pending for", g_path.c_str());
 }
 
 // The launch-time choices as they are now (the environment after the launch

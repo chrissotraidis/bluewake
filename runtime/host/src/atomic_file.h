@@ -35,4 +35,9 @@ static inline bool bw_atomic_finish(FILE* file, const char* pending, const char*
     if (!ok) remove(pending);
     return ok;
 }
+static inline bool bw_atomic_finish_dirty(FILE* file, const char* pending, const char* path, bool* dirty) {
+    bool ok = bw_atomic_finish(file, pending, path, true);
+    if (ok) *dirty = false;
+    return ok;
+}
 #endif

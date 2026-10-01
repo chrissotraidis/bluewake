@@ -29,7 +29,18 @@ int main(void) {
     assert(file && fread(bytes, 1, sizeof bytes, file) == sizeof bytes);
     fclose(file);
     assert(memcmp(old, bytes, sizeof bytes) == 0);
+    bool dirty = true;
+    char* pending = bw_atomic_path(path);
+    FILE* settings = fopen(pending, "wb");
+    assert(settings && fputs("settings=new", settings) >= 0);
+    assert(!bw_atomic_finish_dirty(settings, pending, path, &dirty));
+    assert(dirty);
     failing = 0;
+    settings = fopen(pending, "wb");
+    assert(settings && fputs("settings=new", settings) >= 0);
+    assert(bw_atomic_finish_dirty(settings, pending, path, &dirty));
+    assert(!dirty);
+    free(pending);
     persist(&d);
     file = fopen(path, "rb");
     assert(file && fread(bytes, 1, sizeof bytes, file) == sizeof bytes);

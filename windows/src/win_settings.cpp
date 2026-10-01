@@ -14,6 +14,7 @@
 // open the keyboard is taken off the game's pad and the mouse camera stands
 // aside, so the menu's clicks and keys do not move Link.
 #include "win_settings.h"
+#include "atomic_file.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -155,10 +156,10 @@ void load_file() {
 }
 
 void save_file() {
-    const std::string pending = g_path + ".tmp";
-    FILE* f = std::fopen(pending.c_str(), "w");
-    if (f == nullptr)
-        return;
+    g_dirty_at = SDL_GetTicks(); // back off after failures rather than retry every frame
+    char* pending = bw_atomic_path(g_path.c_str());
+    FILE* f = pending != nullptr ? std::fopen(pending, "w") : nullptr;
+    if (f == nullptr) { free(pending); return; }
     const Settings& d = g_saved;
     std::fprintf(f, "# BlueWake settings (the in-game menu, F1, writes this file)\n");
     std::fprintf(f, "fullscreen=%d\n", d.fullscreen);
@@ -177,10 +178,9 @@ void save_file() {
         std::fprintf(f, "option.%s=%d\n", name.c_str(), on);
     std::fprintf(f, "movement_extras=%d\nfast_transitions=%d\nquick_doors=%d\n",
                  d.movement_extras, d.fast_transitions, d.quick_doors);
-    const bool ok = std::fclose(f) == 0;
-    if (ok)
-        MoveFileExA(pending.c_str(), g_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-    g_dirty = false;
+    const bool ok = bw_atomic_finish_dirty(f, pending, g_path.c_str(), &g_dirty);
+    free(pending);
+    if (!ok) std::fprintf(stderr, "[settings] save failed; previous file kept, retry pending\n");
 }
 
 void changed() {
