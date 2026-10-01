@@ -93,8 +93,8 @@ on smaller devices is active work.
 
 You need:
 
-- a Mac with Apple silicon, Xcode, CMake and Ninja, and at least 12 GB of free disk space
-  (25 GB recommended)
+- a Mac with Apple silicon, Xcode, CMake and Ninja, and at least 25 GB of free disk space
+  (PadMint's required disk-space check, not a measured peak-space guarantee)
 - your `GZLE01` revision 0 disc image
 - an A13 or newer iPhone or iPad on iOS/iPadOS 17 or later, with Developer Mode on
 - Or an Apple TV on tvOS 17 or later, with Developer Mode on ([Apple TV build guide](docs/status/TVOS_BUILD.md))
