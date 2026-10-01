@@ -116,6 +116,22 @@ but the Documents listing timed out after 30 seconds. No install/launch or
 data mutation has been attempted there. SpaghettiPad owns the physical iPad
 through 00:30 JST; BlueWake has not touched it.
 
+## Validation after the six fixes
+
+M3 Max Mac: all **241/241 registered CTests passed** (3.12 seconds).
+Mac host and iOS app targets both compiled against runtime
+`34dee04950e950ab5c84b38428a8276d2a99e713`.
+Candidate executable SHA-256: Mac
+`af07435568a4ed2d397168f3e9f3d2d44440c84d2c9e08f063eff58f04daa6ff`;
+iOS `907ffed663f8a294c5825bff511cd77c31041e53ee568bee9e19435f139e4f62`.
+These builds do not by themselves establish gameplay. Public-source safety audit
+passed after all six fixes. Native Windows CI and real device tests are pending.
+
+At 00:33 JST, both iPhone Documents listing and the changed experiment of a
+direct Preferences copy had timed out. No iPhone install or launch was attempted.
+SpaghettiPad released the iPad at 00:30; BlueWake reserved 00:35–01:30 JST.
+The iPad reports no passcode requirement; a Documents backup is in progress.
+
 ## Remaining work
 
 - Matched scene/device frame-time and audio-drop measurements, then supported fixes.
