@@ -1,0 +1,91 @@
+From 7d2b20034d4db6b72bd024953ce06fe1b5358f12 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:11:41 +0900
+Subject: [PATCH] card: retain previous save and seven daily backup slots
+
+---
+ GXRuntime/src/memory_card.c | 54 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 54 insertions(+)
+
+diff --git a/GXRuntime/src/memory_card.c b/GXRuntime/src/memory_card.c
+index 9154408d..f0e27f6e 100644
+--- a/GXRuntime/src/memory_card.c
++++ b/GXRuntime/src/memory_card.c
+@@ -6,6 +6,7 @@
+ #include <string.h>
+ #include <time.h>
+ #include <errno.h>
++#include <sys/stat.h>
+ #ifdef _WIN32
+ #include <io.h>
+ #include <windows.h>
+@@ -214,6 +215,57 @@ static bool lock_card(DolMemoryCard* card) {
+     return ok;
+ }
+ 
++static bool backup_card(const DolMemoryCard* card) {
++    FILE* source = fopen(card->path, "rb");
++    if (source == NULL)
++        return errno == ENOENT;
++    size_t capacity = strlen(card->path) + 64u;
++    char* temporary = (char*)malloc(capacity);
++    char* backup = (char*)malloc(capacity);
++    if (temporary == NULL || backup == NULL) {
++        fclose(source); free(temporary); free(backup); return false;
++    }
++    snprintf(temporary, capacity, "%s.backup-tmp", card->path);
++    snprintf(backup, capacity, "%s.bak", card->path);
++    FILE* output = fopen(temporary, "wb");
++    bool ok = output != NULL;
++    u8 buffer[8192];
++    size_t count;
++    while (ok && (count = fread(buffer, 1, sizeof buffer, source)) != 0)
++        ok = fwrite(buffer, 1, count, output) == count;
++    if (ferror(source)) ok = false;
++    if (fclose(source) != 0) ok = false;
++    if (output != NULL) {
++        if (ok && !flush_card_file(output)) ok = false;
++        if (fclose(output) != 0) ok = false;
++    }
++    if (ok && rename(temporary, backup) != 0) ok = false;
++    if (!ok) remove(temporary);
++    // Seven fixed daily slots bound storage; update a slot only once per UTC
++    // day. Rotation uses atomic replacement, just like the live card.
++    time_t now = time(NULL);
++    unsigned day = (unsigned)(now / 86400);
++    snprintf(temporary, capacity, "%s.bak-day-%u", card->path, day % 7u);
++    struct stat status;
++    if (ok && (stat(temporary, &status) != 0 || (unsigned)(status.st_mtime / 86400) != day)) {
++        FILE* daily = fopen(temporary, "rb");
++        if (daily != NULL) fclose(daily);
++        // Copy the already flushed .bak, then atomically rotate the daily slot.
++        source = fopen(backup, "rb");
++        snprintf(backup, capacity, "%s.daily-tmp", card->path);
++        output = source != NULL ? fopen(backup, "wb") : NULL;
++        ok = source != NULL && output != NULL;
++        while (ok && (count = fread(buffer, 1, sizeof buffer, source)) != 0)
++            ok = fwrite(buffer, 1, count, output) == count;
++        if (source != NULL) { if (ferror(source)) ok = false; if (fclose(source) != 0) ok = false; }
++        if (output != NULL) { if (ok && !flush_card_file(output)) ok = false; if (fclose(output) != 0) ok = false; }
++        if (ok && rename(backup, temporary) != 0) ok = false;
++        if (!ok) remove(backup);
++    }
++    free(temporary); free(backup);
++    return ok;
++}
++
+ static bool write_container(const DolMemoryCard* card) {
+     if (card->path == NULL)
+         return true;
+@@ -290,6 +342,8 @@ static bool write_container(const DolMemoryCard* card) {
+     if (success && directory_fd < 0)
+         success = false;
+ #endif
++    if (success && !backup_card(card))
++        success = false;
+     // POSIX rename and the Windows replacement shim preserve the old card
+     // on failure. Never delete the destination to retry a failed replacement.
+     if (success && rename(temporary_path, card->path) != 0)
+-- 
+2.46.0
+

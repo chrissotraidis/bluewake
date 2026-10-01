@@ -30,3 +30,7 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   cleanup closes the stream. Truncation/bit-flip sanitizer tests pass and prove
   rejected bytes are unchanged. Runtime patch 0118. UIKit recovery needs simulator
   and physical-device interaction checks; no device was accessed.
+- 1.5: flushed atomic .bak copy before live replacement, plus seven fixed UTC-day
+  slots (one snapshot per day, rotated weekly). Backup failure refuses the save.
+  Sanitizer regression loads .bak after two writes and verifies the first write's
+  bytes. Runtime patch 0119. Physical save/reload and backup recovery remain unverified.

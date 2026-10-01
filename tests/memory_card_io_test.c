@@ -26,9 +26,10 @@ static int card_test_fflush(FILE* file) {
 static int fail_rename;
 static unsigned rename_calls;
 static int card_test_rename(const char* from, const char* to) {
-    assert(flush_calls > rename_calls);
-    ++rename_calls;
-    if (fail_rename) { errno = EACCES; return -1; }
+    size_t length = strlen(to);
+    int live = length >= 5 && strcmp(to + length - 5, ".card") == 0;
+    if (live) { assert(flush_calls > rename_calls); ++rename_calls; }
+    if (live && fail_rename) { errno = EACCES; return -1; }
     return rename(from, to);
 }
 #undef rename
@@ -50,6 +51,19 @@ int main(void) {
     u8 before[8192], after[8192];
     memset(before, 0x21, sizeof before);
     memset(after, 0x43, sizeof after);
+    assert(dol_card_write_file(card, file_no, 0, before, sizeof before) == 0);
+    char backup_path[300];
+    snprintf(backup_path, sizeof backup_path, "%s.bak", path);
+    assert(dol_card_validate(backup_path));
+    assert(dol_card_write_file(card, file_no, 0, after, sizeof after) == 0);
+    DolMemoryCardConfig backup_config = config;
+    backup_config.path = backup_path;
+    DolMemoryCard* backup_card_handle = dol_card_open(&backup_config);
+    assert(backup_card_handle && dol_card_mount(backup_card_handle) == 0);
+    u8 backup_bytes[8192];
+    assert(dol_card_read_file(backup_card_handle, file_no, 0, backup_bytes, sizeof backup_bytes) == 0);
+    assert(memcmp(backup_bytes, before, sizeof before) == 0);
+    dol_card_close(backup_card_handle);
     assert(dol_card_write_file(card, file_no, 0, before, sizeof before) == 0);
     fail_flush = 1;
     unsigned flush_before = rename_calls;
