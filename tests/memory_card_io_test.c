@@ -68,6 +68,29 @@ int main(void) {
     assert(dol_card_read_file(card, file_no, 0, after, sizeof after) == 0);
     assert(memcmp(before, after, sizeof before) == 0);
     dol_card_close(card);
+    assert(dol_card_validate(path));
+    u8* bytes = NULL;
+    size_t size = 0;
+    assert(read_whole_file(path, &bytes, &size));
+    char bad[300];
+    snprintf(bad, sizeof bad, "%s.bad", path);
+    for (int mode = 0; mode < 2; ++mode) {
+        FILE* file = fopen(bad, "wb");
+        assert(file);
+        if (mode == 1) bytes[size - 1] ^= 1;
+        assert(fwrite(bytes, 1, mode == 0 ? size - 1 : size, file) == (mode == 0 ? size - 1 : size));
+        assert(fclose(file) == 0);
+        assert(!dol_card_validate(bad));
+        config.path = bad;
+        assert(dol_card_open(&config) == NULL);
+        u8* check = NULL; size_t check_size = 0;
+        assert(read_whole_file(bad, &check, &check_size));
+        assert(check_size == (mode == 0 ? size - 1 : size));
+        assert(memcmp(bytes, check, check_size) == 0);
+        free(check);
+    }
+    free(bytes);
+    remove(bad);
     remove(path);
     puts("memory-card I/O regression passed");
     return 0;

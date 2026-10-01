@@ -21,6 +21,8 @@
 // In the simulator dev loop, BLUEWAKE_ROOT (passed as SIMCTL_CHILD_BLUEWAKE_ROOT)
 // points at the repository instead and the host resolves its usual layout.
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#include "gxruntime/memory_card.h"
 #include <TargetConditionals.h>
 #include <SDL3/SDL_main.h>
 #include <pthread.h>
@@ -161,6 +163,104 @@ static void bw_start_session_log(NSString* data) {
     pthread_t thread;
     pthread_create(&thread, NULL, bw_log_pump, (void*)(intptr_t)fds[0]);
     pthread_detach(thread);
+}
+
+// Keep damaged cards and let the player choose a local backup or a new card.
+// This runs before the host opens storage, on UIKit's existing SDL main loop.
+@interface BWCardRecovery : UIViewController
+@property(nonatomic, copy) NSString* card;
+@property(nonatomic, copy) NSString* backups;
+@property(nonatomic) BOOL finished;
+@end
+@implementation BWCardRecovery
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self choose];
+}
+- (void)replaceFrom:(NSString*)backup {
+    NSFileManager* fm = NSFileManager.defaultManager;
+    NSString* staged = [self.card stringByAppendingString:@".recovery"];
+    NSError* error = nil;
+    if (backup && (!dol_card_validate(backup.fileSystemRepresentation) ||
+                   ![fm copyItemAtPath:backup toPath:staged error:&error])) {
+        [self failure:error.localizedDescription ?: @"That backup is incomplete or damaged."];
+        return;
+    }
+    NSString* preserved = [self.card stringByAppendingFormat:@".corrupt-%@", NSUUID.UUID.UUIDString];
+    if (![fm moveItemAtPath:self.card toPath:preserved error:&error]) {
+        [self failure:error.localizedDescription];
+        return;
+    }
+    if (backup && rename(staged.fileSystemRepresentation, self.card.fileSystemRepresentation) != 0) {
+        // The original remains at the unique preserved path; never remove it.
+        [self failure:@"The backup could not be put in place. Your original card was preserved."];
+        return;
+    }
+    fprintf(stderr, "[card-recovery] original preserved at %s\n", preserved.fileSystemRepresentation);
+    self.finished = YES;
+}
+- (void)failure:(NSString*)message {
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Card Not Replaced"
+        message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
+        handler:^(UIAlertAction* action) { (void)action; [self choose]; }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)chooseBackup {
+    NSFileManager* fm = NSFileManager.defaultManager;
+    NSMutableArray<NSString*>* candidates = [NSMutableArray new];
+    for (NSString* name in [fm contentsOfDirectoryAtPath:self.backups error:nil]) {
+        NSString* path = [self.backups stringByAppendingPathComponent:name];
+        if (dol_card_validate(path.fileSystemRepresentation)) [candidates addObject:path];
+    }
+    NSString* bak = [self.card stringByAppendingString:@".bak"];
+    if (dol_card_validate(bak.fileSystemRepresentation)) [candidates addObject:bak];
+    if (!candidates.count) {
+        [self failure:@"No valid local backup was found. Your damaged card is kept. You can start a new card and use Restore Saves from the menu to choose an exported backup."];
+        return;
+    }
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Choose a Backup"
+        message:@"Your damaged card will be preserved before restoring."
+        preferredStyle:UIAlertControllerStyleAlert];
+    for (NSString* path in [candidates sortedArrayUsingSelector:@selector(compare:)])
+        [alert addAction:[UIAlertAction actionWithTitle:path.lastPathComponent style:UIAlertActionStyleDefault
+            handler:^(UIAlertAction* action) { (void)action; [self replaceFrom:path]; }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Back" style:UIAlertActionStyleCancel
+        handler:^(UIAlertAction* action) { (void)action; [self choose]; }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)choose {
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"Memory Card Needs Recovery"
+        message:@"BlueWake cannot read this card. Your saves will be kept unchanged unless you choose a backup or a new card. The original is always preserved."
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Backups" style:UIAlertActionStyleDefault
+        handler:^(UIAlertAction* action) { (void)action; [self chooseBackup]; }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Start a New Card" style:UIAlertActionStyleDestructive
+        handler:^(UIAlertAction* action) { (void)action; [self replaceFrom:nil]; }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+@end
+
+static void bw_recover_card(NSString* card, NSString* backups) {
+    if (![NSFileManager.defaultManager fileExistsAtPath:card] ||
+        dol_card_validate(card.fileSystemRepresentation)) return;
+    BWCardRecovery* controller = [BWCardRecovery new];
+    controller.card = card;
+    controller.backups = backups;
+    UIWindow* window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
+        if ([scene isKindOfClass:UIWindowScene.class]) { window.windowScene = (UIWindowScene*)scene; break; }
+    window.windowLevel = UIWindowLevelAlert + 1;
+    window.rootViewController = controller;
+    [window makeKeyAndVisible];
+    while (!controller.finished) {
+        @autoreleasepool {
+            [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode
+                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        }
+    }
+    window.hidden = YES;
+    window.rootViewController = nil;
 }
 
 int main(int argc, char** argv) {
@@ -326,6 +426,9 @@ int main(int argc, char** argv) {
 #if !TARGET_OS_TV
         bluewake_touch_controls_install();
 #endif
+        const char* card_path = getenv("BLUEWAKE_CARD_PATH");
+        if (card_path != NULL)
+            bw_recover_card(@(card_path), [data stringByAppendingPathComponent:@"Backups"]);
         const int status = bluewake_host_main(host_argc, host_argv);
         // Returning from SDL's main leaves UIKit running with no game. The
         // host only returns at a bounded stop (BLUEWAKE_MAX_RETRACES), a quit

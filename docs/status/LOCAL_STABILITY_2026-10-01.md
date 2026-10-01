@@ -22,3 +22,11 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   then reopens after close. Restore/import now suspends card dispatch under a mutex,
   waiting for in-flight writes before replacement; failure resumes dispatch. Runtime
   patch 0117. iOS concurrency and Windows two-process behavior need platform checks.
+- 1.4: read-only dol_card_validate uses the complete loader and its checksums;
+  restore/import reject invalid replacements and retain them. Startup recovery on
+  Apple offers valid local Backups/.bak or a new card, preserving the original at
+  a unique .corrupt path only after the player chooses. Unreadable existing cards
+  are never mistaken for missing cards. Loader size is bounded and short-read
+  cleanup closes the stream. Truncation/bit-flip sanitizer tests pass and prove
+  rejected bytes are unchanged. Runtime patch 0118. UIKit recovery needs simulator
+  and physical-device interaction checks; no device was accessed.

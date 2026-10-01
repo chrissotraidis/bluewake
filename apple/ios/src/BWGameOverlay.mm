@@ -967,14 +967,9 @@ static NSString* BWDateStamp(NSString* format) {
 
 - (void)confirmRestoreFrom:(NSURL*)source {
     __weak BWGameOverlay* weakSelf = self;
-    // BlueWake's card files start with this tag (GXRuntime memory_card.c).
-    NSFileHandle* f = [NSFileHandle fileHandleForReadingFromURL:source error:nil];
-    NSData* magic = [f readDataOfLength:8];
-    [f closeFile];
-    if (![magic isEqualToData:[@"DOLCARD1" dataUsingEncoding:NSASCIIStringEncoding]]) {
-        [[NSFileManager defaultManager] removeItemAtURL:source error:nil];
-        [self showMessage:@"Not a BlueWake Save File"
-                     text:@"Pick a .card file made by Back Up Saves or copied from BlueWake's folder."];
+    if (!dol_card_validate(source.path.fileSystemRepresentation)) {
+        [self showMessage:@"Not a Valid BlueWake Save File"
+                     text:@"This card is damaged or incomplete. It has been kept unchanged. Choose another backup."];
         return;
     }
     NSString* stamp = BWDateStamp(@"yyyyMMdd-HHmmss");
@@ -988,7 +983,6 @@ static NSString* BWDateStamp(NSString* format) {
                                      source.lastPathComponent, stamp]
                   preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[self actionTitled:@"Cancel" style:UIAlertActionStyleCancel handler:^{
-        [[NSFileManager defaultManager] removeItemAtURL:source error:nil];
     }]];
     [alert addAction:[self actionTitled:@"Replace Saves" style:UIAlertActionStyleDestructive handler:^{
         [weakSelf restoreSavesFrom:source stamp:stamp];
@@ -1009,6 +1003,10 @@ static NSString* BWDateStamp(NSString* format) {
 // its place. The file at path is used up either way. Says why and returns NO
 // if the card was not changed.
 - (BOOL)replaceCardWith:(NSString*)path stamp:(NSString*)stamp {
+    if (!dol_card_validate(path.fileSystemRepresentation)) {
+        [self showMessage:@"Saves Not Changed" text:@"The replacement card is damaged or incomplete. It has been kept unchanged."];
+        return NO;
+    }
     bluewake_card_runtime_suspend_writes(true);
     NSFileManager* fm = [NSFileManager defaultManager];
     NSString* card = [self cardPath];
@@ -1018,7 +1016,6 @@ static NSString* BWDateStamp(NSString* format) {
         [fm createDirectoryAtPath:backups withIntermediateDirectories:YES attributes:nil error:nil];
         NSString* backup = [backups stringByAppendingPathComponent:[NSString stringWithFormat:@"GZLE01-%@.card", stamp]];
         if (![fm copyItemAtPath:card toPath:backup error:&error]) {
-            [fm removeItemAtPath:path error:nil];
             [self showMessage:@"Saves Not Changed"
                          text:[NSString stringWithFormat:@"Your current saves could not be backed up, so nothing "
                                                          @"was replaced. %@", error.localizedDescription]];
@@ -1032,7 +1029,6 @@ static NSString* BWDateStamp(NSString* format) {
     if (![fm moveItemAtPath:path toPath:staged error:&error] || rename(staged.fileSystemRepresentation,
                                                                        card.fileSystemRepresentation) != 0) {
         [fm removeItemAtPath:staged error:nil];
-        [fm removeItemAtPath:path error:nil];
         [self showMessage:@"Saves Not Changed"
                      text:[NSString stringWithFormat:@"The save file could not be put in place. %@",
                                                      error.localizedDescription ?: @""]];
