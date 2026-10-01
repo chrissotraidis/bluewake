@@ -25,7 +25,8 @@ The alias-cache epoch is atomic across the game and graphics threads. Existing d
 fetch the parent without recursively fetching a new submodule from its old remote, then synchronize
 the translator's remote before updating it.
 
-RecompCore is pinned at `8ab24daee9c641634fda5cac30389ad4b2cfda5e` and DolRecomp at
+RecompCore was pinned at `8ab24daee9c641634fda5cac30389ad4b2cfda5e` for this import (now
+`chrissotraidis/RecompCore` `bluewake-next`, which adds the fork's 9618e9d and the Windows DSP fix) and DolRecomp at
 `b8b534591cba8ca7cd43943a655ee6e2591cf5de`. These are the fork's changes over BlueWake's previous
 `2d60636` and `5c91d6e`. Base translation must still satisfy the existing composite digest.
 New Better Wind Waker options and 16:10 require rebuilding the personal module. App-only upgrades

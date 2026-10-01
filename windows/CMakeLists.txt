@@ -158,6 +158,11 @@ target_compile_options(bluewake_dsp_donor PRIVATE -fno-strict-aliasing -w)
 # assert macros forward __VA_ARGS__ through __VA_OPT__, which clang's MSVC
 # compatibility mode expands the old MSVC way, miscounting format arguments.
 target_compile_options(bluewake_dsp_donor PRIVATE -fno-ms-compatibility)
+# Under the Microsoft ABI a member pointer's size depends on whether its class
+# is complete where the pointer type is first used; a forward-declared one gave
+# the DSP interpreter's op table two layouts and Exact audio a call to address 0
+# (patches/recompcore/0114). Refuse such pointers in the donor DSP.
+target_compile_options(bluewake_dsp_donor PRIVATE -fcomplete-member-pointers)
 target_link_libraries(bluewake_dsp_donor PUBLIC fmt::fmt xxhash ZLIB::ZLIB)
 
 add_library(bluewake_dsp_adapter STATIC
@@ -226,6 +231,15 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     target_link_libraries(bluewake_frame_interp_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore bluewake_posix_compat)
     add_test(NAME bluewake_frame_interp_test COMMAND bluewake_frame_interp_test)
     set_tests_properties(bluewake_frame_interp_test PROPERTIES TIMEOUT 30)
+
+    add_executable(bluewake_dsp_interpreter_layout_test
+        ${BLUEWAKE_REPO_ROOT}/tests/dsp_interpreter_layout_test.cpp
+        ${BLUEWAKE_REPO_ROOT}/tests/dsp_interpreter_layout_tables_first.cpp)
+    target_include_directories(bluewake_dsp_interpreter_layout_test PRIVATE ${BLUEWAKE_REPO_ROOT}/tests)
+    target_compile_options(bluewake_dsp_interpreter_layout_test PRIVATE -fno-ms-compatibility)
+    target_link_libraries(bluewake_dsp_interpreter_layout_test PRIVATE bluewake_dsp_donor)
+    add_test(NAME bluewake_dsp_interpreter_layout_test COMMAND bluewake_dsp_interpreter_layout_test)
+    set_tests_properties(bluewake_dsp_interpreter_layout_test PROPERTIES TIMEOUT 15)
 endif()
 
 # The app folder: the executable, its runtime DLLs (SDL3, Dawn and the DXC
