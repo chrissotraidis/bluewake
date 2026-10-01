@@ -20,6 +20,7 @@ extern "C" {
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <sys/utsname.h>
 #include <stdio.h>
+#include "atomic_file.h"
 
 #include <SDL3/SDL_properties.h>
 #include <SDL3/SDL_video.h>
@@ -1002,7 +1003,7 @@ static NSString* BWDateStamp(NSString* format) {
 }
 
 // Keeps a copy of the current card in Backups, then puts the file at path in
-// its place. The file at path is used up either way. Says why and returns NO
+// its place. Keep the source and any failed staged replacement. Says why and returns NO
 // if the card was not changed.
 - (BOOL)replaceCardWith:(NSString*)path stamp:(NSString*)stamp {
     if (!dol_card_validate(path.fileSystemRepresentation)) {
@@ -1026,11 +1027,12 @@ static NSString* BWDateStamp(NSString* format) {
         }
     }
     // Staged beside the card and renamed over it, so the card is never half written.
-    NSString* staged = [card stringByAppendingString:@".restore"];
-    [fm removeItemAtPath:staged error:nil];
-    if (![fm moveItemAtPath:path toPath:staged error:&error] || rename(staged.fileSystemRepresentation,
+    NSString* staged = [card stringByAppendingFormat:@".restore-%@", NSUUID.UUID.UUIDString];
+    if (![fm copyItemAtPath:path toPath:staged error:&error] ||
+        !bw_atomic_flush_path(staged.fileSystemRepresentation) ||
+        !dol_card_validate(staged.fileSystemRepresentation) || rename(staged.fileSystemRepresentation,
                                                                        card.fileSystemRepresentation) != 0) {
-        [fm removeItemAtPath:staged error:nil];
+        fprintf(stderr, "[card-restore] replacement retained at %s\n", staged.fileSystemRepresentation);
         [self showMessage:@"Saves Not Changed"
                      text:[NSString stringWithFormat:@"The save file could not be put in place. %@",
                                                      error.localizedDescription ?: @""]];

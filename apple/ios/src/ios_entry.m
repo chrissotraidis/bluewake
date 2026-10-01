@@ -183,7 +183,9 @@ static void bw_start_session_log(NSString* data) {
     NSString* staged = [self.card stringByAppendingFormat:@".recovery-%@", NSUUID.UUID.UUIDString];
     NSError* error = nil;
     if (backup && (!dol_card_validate(backup.fileSystemRepresentation) ||
-                   ![fm copyItemAtPath:backup toPath:staged error:&error])) {
+                   ![fm copyItemAtPath:backup toPath:staged error:&error] ||
+                   !bw_atomic_flush_path(staged.fileSystemRepresentation) ||
+                   !dol_card_validate(staged.fileSystemRepresentation))) {
         [self failure:error.localizedDescription ?: @"That backup is incomplete or damaged."];
         return;
     }

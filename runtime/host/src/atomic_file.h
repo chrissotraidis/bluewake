@@ -42,6 +42,13 @@ static inline bool bw_atomic_finish_dirty(FILE* file, const char* pending, const
     if (ok) *dirty = false;
     return ok;
 }
+static inline bool bw_atomic_flush_path(const char* path) {
+    FILE* file = fopen(path, "r+b");
+    if (!file) return false;
+    bool ok = bw_atomic_flush(file);
+    if (fclose(file) != 0) ok = false;
+    return ok;
+}
 // Startup migration retains the source and never replaces an existing target.
 static inline bool bw_atomic_copy_if_missing(const char* from, const char* to) {
     struct stat status;

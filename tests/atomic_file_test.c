@@ -29,6 +29,9 @@ int main(void) {
     assert(file && fread(bytes, 1, sizeof bytes, file) == sizeof bytes);
     fclose(file);
     assert(memcmp(old, bytes, sizeof bytes) == 0);
+    assert(bw_atomic_flush_path(path));
+    char missing[320]; snprintf(missing, sizeof missing, "%s.missing", path);
+    assert(!bw_atomic_flush_path(missing));
     bool dirty = true;
     char* pending = bw_atomic_path(path);
     FILE* settings = fopen(pending, "wb");
