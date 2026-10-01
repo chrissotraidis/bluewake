@@ -594,3 +594,8 @@ add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)
 
 add_executable(bluewake_settings_state_test ../../tests/settings_state_test.cpp)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
+if(UNIX)
+    add_executable(bluewake_process_close_test ../../tests/process_close_test.c)
+    target_include_directories(bluewake_process_close_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    add_test(NAME bluewake_process_close_test COMMAND bluewake_process_close_test)
+endif()

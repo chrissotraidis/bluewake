@@ -96,9 +96,12 @@ bool bluewake_card_runtime_open(const char* explicit_path) {
 }
 
 void bluewake_card_runtime_close(void) {
+    pthread_mutex_lock(&g_card_mutex);
     if (g_card_open)
         dol_hle_card_close();
     g_card_open = false;
+    g_card_suspended = false;
+    pthread_mutex_unlock(&g_card_mutex);
 }
 
 const char* bluewake_card_runtime_path(void) {

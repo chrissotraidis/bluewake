@@ -2,6 +2,7 @@
 #define BLUEWAKE_CARD_RUNTIME_H
 
 #include "core/cpu.h"
+#include "gxruntime/memory_card.h"
 
 #include <stdbool.h>
 

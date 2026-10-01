@@ -1,5 +1,6 @@
 extern "C" {
 #include "card_runtime.h"
+#include "process_close.h"
 }
 // BlueWake's mobile shell over the game view: touch controls, the three-dot
 // menu, touch settings and the layout editor.
@@ -1043,7 +1044,7 @@ static NSString* BWDateStamp(NSString* format) {
 - (void)closeForSavesTitled:(NSString*)title message:(NSString*)message {
     UIAlertController* alert = [UIAlertController
         alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[self actionTitled:@"Close BlueWake" style:UIAlertActionStyleDefault handler:^{ exit(0); }]];
+    [alert addAction:[self actionTitled:@"Close BlueWake" style:UIAlertActionStyleDefault handler:^{ bw_process_close(bluewake_card_runtime_close, 0); }]];
     [self presentAlert:alert];
 }
 
@@ -1263,7 +1264,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
                                      @"ask for your disc when you open it again."
                       preferredStyle:UIAlertControllerStyleAlert];
         [done addAction:[weakSelf actionTitled:@"Close BlueWake" style:UIAlertActionStyleDefault
-                                       handler:^{ exit(0); }]];
+                                       handler:^{ bw_process_close(bluewake_card_runtime_close, 0); }]];
         [weakSelf presentAlert:done];
     }]];
     [self presentAlert:alert];

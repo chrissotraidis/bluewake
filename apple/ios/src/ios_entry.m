@@ -449,6 +449,22 @@ int main(int argc, char** argv) {
         // or a fatal error, and in each case the process should end.
         fflush(stdout);
         fflush(stderr);
-        exit(status);
+        if (status != 0) {
+            UIWindow* errorWindow = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+            for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
+                if ([scene isKindOfClass:UIWindowScene.class]) { errorWindow.windowScene = (UIWindowScene*)scene; break; }
+            errorWindow.windowLevel = UIWindowLevelAlert + 1;
+            errorWindow.rootViewController = [UIViewController new];
+            [errorWindow makeKeyAndVisible];
+            UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"BlueWake Could Not Continue"
+                message:@"Your saves have been kept. Check the session log in BlueWake’s Documents folder for the error."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Close BlueWake" style:UIAlertActionStyleDefault
+                handler:^(UIAlertAction* action) { (void)action; _exit(status); }]];
+            [errorWindow.rootViewController presentViewController:alert animated:YES completion:nil];
+            for (;;) [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode
+                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        }
+        _exit(status);
     }
 }

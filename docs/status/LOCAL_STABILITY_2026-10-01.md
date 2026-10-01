@@ -68,3 +68,9 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   the baseline, not an edit. HLE/LLE and option overrides now appear in the session
   UI. Synthetic scale/fullscreen/LLE/Smooth Motion and option isolation test passes
   under ASan/UBSan, registered on Mac/Windows. Actual Windows UI still needs hardware.
+- 2.4: UIKit close actions serialize card close with dispatch, flush logs, then use
+  _exit, bypassing static renderer destruction. Host failures now display an alert
+  instead of a silent process exit. Synthetic child-process test proves card-close
+  callback runs and static/atexit callback does not. Fixed a compile-time missing
+  card-result declaration found by the local host build. Simulator crash-log and
+  physical Restore/Import close checks remain unverified.
