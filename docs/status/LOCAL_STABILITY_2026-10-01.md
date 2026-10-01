@@ -181,7 +181,11 @@ backup commands, Parallels control, public build upload or release was performed
   At 2,400 retraces it exits normally; Opening.arc is reached at retrace 916.
   Guest WAV is 1,278,984 frames at 32 kHz; post-sink PCM is 5,145,628 bytes.
   Output reports 159,873 pushes, zero dropped pushes/frames, 453 starvation events
-  and 5,089 stretch events. A single UI screenshot was black and the later capture
+  and 5,089 stretch events. In the 30-32 second windows, comparison with the private
+  decoded `1tale.afc` gives stereo/mono correlations 0.999997/0.999998 for guest PCM
+  and 0.991281/0.991089 for sink PCM (independent best offsets 11.449906/11.217937 s
+  in the reference). This identifies the expected music in the actual SDL submission
+  path despite stretching; it does not prove speakers or stutter-free playback. A single UI screenshot was black and the later capture
   timed out; correct intro pictures and audible speakers are not accepted by this
   observation. Neither PCM nor an opening-resource milestone proves the whole intro.
 - Counter smoke run: same host/module/settings, restored Outset `sea` room 44,
@@ -192,6 +196,14 @@ backup commands, Parallels control, public build upload or release was performed
   starvation events 175. Flush summary: 299 calls, 84,211 us total, 49,956 us max,
   explicitly includes presentation. The game remains a 30 Hz update simulation;
   these two interval streams do not change its update rate or prove an FPS gain.
+
+- A separate bounded restored-Outset run renders Link on the bridge to the house;
+  native UI observation confirms the scene and F1 menu open/close/resume. The menu
+  shows Smooth Motion off. Automated tab clicks and Tab/Right do not visibly select
+  Controls; no menu-tab or real-controller acceptance is claimed. Need independent
+  real input to distinguish automation failure from an existing menu input bug.
+  Settings remain disabled, no player card/preferences are edited, and the bounded
+  run exits normally. Menu redraws near 120/s are UI redraws, not game updates.
 
 ## Pending checks and deliberate deferrals
 
