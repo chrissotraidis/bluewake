@@ -44,6 +44,7 @@ int main(void) {
         .game_code = {'G','Z','L','E'}, .company = {'0','1'}};
     DolMemoryCard* card = dol_card_open(&config);
     assert(card && dol_card_mount(card) == 0);
+    assert(dol_card_open(&config) == NULL);
     s32 file_no;
     assert(dol_card_create_file(card, "synthetic", 8192, &file_no) == 0);
     u8 before[8192], after[8192];

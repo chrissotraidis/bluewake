@@ -1,3 +1,6 @@
+extern "C" {
+#include "card_runtime.h"
+}
 // BlueWake's mobile shell over the game view: touch controls, the three-dot
 // menu, touch settings and the layout editor.
 //
@@ -1006,6 +1009,7 @@ static NSString* BWDateStamp(NSString* format) {
 // its place. The file at path is used up either way. Says why and returns NO
 // if the card was not changed.
 - (BOOL)replaceCardWith:(NSString*)path stamp:(NSString*)stamp {
+    bluewake_card_runtime_suspend_writes(true);
     NSFileManager* fm = [NSFileManager defaultManager];
     NSString* card = [self cardPath];
     NSString* backups = [[self dataDirectory] stringByAppendingPathComponent:@"Backups"];
@@ -1018,6 +1022,7 @@ static NSString* BWDateStamp(NSString* format) {
             [self showMessage:@"Saves Not Changed"
                          text:[NSString stringWithFormat:@"Your current saves could not be backed up, so nothing "
                                                          @"was replaced. %@", error.localizedDescription]];
+            bluewake_card_runtime_suspend_writes(false);
             return NO;
         }
     }
@@ -1031,6 +1036,7 @@ static NSString* BWDateStamp(NSString* format) {
         [self showMessage:@"Saves Not Changed"
                      text:[NSString stringWithFormat:@"The save file could not be put in place. %@",
                                                      error.localizedDescription ?: @""]];
+        bluewake_card_runtime_suspend_writes(false);
         return NO;
     }
     return YES;

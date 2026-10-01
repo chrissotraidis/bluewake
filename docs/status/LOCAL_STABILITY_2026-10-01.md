@@ -17,3 +17,8 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   sanitizer regression passes. Runtime patch 0116. Power-loss durability and forced
   reboot on Windows/iPhone remain unverified. A directory-sync failure after rename
   reports failure although replacement may already be visible; no durability claim.
+- 1.3: nonblocking session lock (flock/LockFileEx), retained lock-file inode,
+  process-specific temporary file. The sanitizer regression rejects a second handle,
+  then reopens after close. Restore/import now suspends card dispatch under a mutex,
+  waiting for in-flight writes before replacement; failure resumes dispatch. Runtime
+  patch 0117. iOS concurrency and Windows two-process behavior need platform checks.
