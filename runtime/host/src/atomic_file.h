@@ -2,6 +2,8 @@
 #ifndef BLUEWAKE_ATOMIC_FILE_H
 #define BLUEWAKE_ATOMIC_FILE_H
 #include <stdbool.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +40,25 @@ static inline bool bw_atomic_finish(FILE* file, const char* pending, const char*
 static inline bool bw_atomic_finish_dirty(FILE* file, const char* pending, const char* path, bool* dirty) {
     bool ok = bw_atomic_finish(file, pending, path, true);
     if (ok) *dirty = false;
+    return ok;
+}
+// Startup migration retains the source and never replaces an existing target.
+static inline bool bw_atomic_copy_if_missing(const char* from, const char* to) {
+    struct stat status;
+    if (stat(to, &status) == 0) return true;
+    if (errno != ENOENT) return false;
+    FILE* source = fopen(from, "rb");
+    if (source == NULL) return errno == ENOENT;
+    char* pending = bw_atomic_path(to);
+    FILE* target = pending ? fopen(pending, "wb") : NULL;
+    bool ok = target != NULL;
+    char buffer[8192]; size_t count;
+    while (ok && (count = fread(buffer, 1, sizeof buffer, source)) != 0)
+        ok = fwrite(buffer, 1, count, target) == count;
+    if (ferror(source)) ok = false;
+    if (fclose(source) != 0) ok = false;
+    if (target) ok = bw_atomic_finish(target, pending, to, ok);
+    free(pending);
     return ok;
 }
 #endif

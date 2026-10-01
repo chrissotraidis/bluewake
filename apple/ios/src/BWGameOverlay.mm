@@ -1230,7 +1230,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
     UIAlertController* alert = [UIAlertController
         alertControllerWithTitle:@"Your Files"
                          message:@"In the Files app, open On My iPad › BlueWake › BlueWake.\n\n"
-                                  "GZLE01.card holds your saves. Back Up Saves makes a copy you can keep anywhere, "
+                                  "Your live saves are protected in BlueWake’s private storage. Back Up Saves makes a copy you can keep anywhere, "
                                   "and Restore Saves brings one back; earlier cards are kept in Backups. "
                                   "Import Dolphin Save brings in a quest log from a Dolphin .gci or memory card file. "
                                   "GZLE01.iso is your disc image, and main.dol and rels are made from it. "

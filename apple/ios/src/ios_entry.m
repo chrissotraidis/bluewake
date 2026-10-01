@@ -36,6 +36,7 @@
 #include <CommonCrypto/CommonDigest.h>
 
 #include "first_run.h"
+#include "atomic_file.h"
 #include "controller_settings.h" // Shared settings keys; the tvOS shell uses controller defaults.
 #if !TARGET_OS_TV
 #include "touch_controls.h"
@@ -179,7 +180,7 @@ static void bw_start_session_log(NSString* data) {
 }
 - (void)replaceFrom:(NSString*)backup {
     NSFileManager* fm = NSFileManager.defaultManager;
-    NSString* staged = [self.card stringByAppendingString:@".recovery"];
+    NSString* staged = [self.card stringByAppendingFormat:@".recovery-%@", NSUUID.UUID.UUIDString];
     NSError* error = nil;
     if (backup && (!dol_card_validate(backup.fileSystemRepresentation) ||
                    ![fm copyItemAtPath:backup toPath:staged error:&error])) {
@@ -187,7 +188,7 @@ static void bw_start_session_log(NSString* data) {
         return;
     }
     NSString* preserved = [self.card stringByAppendingFormat:@".corrupt-%@", NSUUID.UUID.UUIDString];
-    if (![fm moveItemAtPath:self.card toPath:preserved error:&error]) {
+    if ([fm fileExistsAtPath:self.card] && ![fm moveItemAtPath:self.card toPath:preserved error:&error]) {
         [self failure:error.localizedDescription];
         return;
     }
@@ -407,9 +408,22 @@ int main(int argc, char** argv) {
                 [data stringByAppendingPathComponent:@"dsp_rom.bin"]);
             bw_default_if_exists("BLUEWAKE_DSP_COEF",
                 [data stringByAppendingPathComponent:@"dsp_coef.bin"]);
-            // Card and SRAM save alongside the imported data.
-            bw_default("BLUEWAKE_CARD_PATH",
-                [data stringByAppendingPathComponent:@"GZLE01.card"]);
+#if TARGET_OS_TV
+            bw_default("BLUEWAKE_CARD_PATH", [data stringByAppendingPathComponent:@"GZLE01.card"]);
+#else
+            NSString* support = [[NSSearchPathForDirectoriesInDomains(
+                NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject]
+                stringByAppendingPathComponent:@"BlueWake"];
+            NSError* storageError = nil;
+            BOOL ready = [NSFileManager.defaultManager createDirectoryAtPath:support
+                withIntermediateDirectories:YES attributes:nil error:&storageError];
+            NSString* card = [support stringByAppendingPathComponent:@"GZLE01.card"];
+            NSString* legacy = [data stringByAppendingPathComponent:@"GZLE01.card"];
+            // Keep the Documents copy; migration never consumes the player's file.
+            ready = ready && bw_atomic_copy_if_missing(legacy.fileSystemRepresentation, card.fileSystemRepresentation);
+            if (!ready) fprintf(stderr, "[card] migration failed; using preserved legacy card\n");
+            bw_default("BLUEWAKE_CARD_PATH", ready ? card : legacy);
+#endif
         }
 
         fprintf(stderr, "[ios] data=%s root=%s composite=%s\n",

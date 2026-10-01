@@ -45,3 +45,9 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   publishing a partial state. Extended ASan/UBSan state test passes and verifies an
   interrupted/rejected second save leaves the first loadable. Gameplay state restore
   on the candidate remains unverified.
+- 1.7 iOS card location: new live cards use Application Support/BlueWake; exports
+  and Backups remain in Documents. Startup copies legacy storage byte-for-byte,
+  retaining the original and any existing target. Migration failure logs and uses
+  the preserved legacy path. Synthetic copy/existing-target test passes. tvOS stays
+  in Caches; 1.6 cloud storage is deferred (requires Apple TV/cloud entitlement work).
+  Physical iOS migration and Files-app isolation remain unverified.

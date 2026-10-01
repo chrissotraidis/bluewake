@@ -46,6 +46,19 @@ int main(void) {
     assert(file && fread(bytes, 1, sizeof bytes, file) == sizeof bytes);
     fclose(file);
     assert(memcmp(d.sram, bytes, sizeof bytes) == 0);
+    char copy[300]; snprintf(copy, sizeof copy, "%s.copy", path);
+    assert(bw_atomic_copy_if_missing(path, copy));
+    file = fopen(copy, "rb");
+    assert(file && fread(bytes, 1, sizeof bytes, file) == sizeof bytes);
+    fclose(file);
+    assert(memcmp(d.sram, bytes, sizeof bytes) == 0);
+    d.sram[19] ^= 1; persist(&d);
+    assert(bw_atomic_copy_if_missing(path, copy));
+    file = fopen(copy, "rb");
+    assert(file && fread(old, 1, sizeof old, file) == sizeof old);
+    fclose(file);
+    assert(memcmp(old, bytes, sizeof old) == 0);
+    remove(copy);
     remove(path);
     puts("atomic file failure/retry regression passed");
 }
