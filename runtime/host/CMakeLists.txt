@@ -599,3 +599,8 @@ if(UNIX)
     target_include_directories(bluewake_process_close_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME bluewake_process_close_test COMMAND bluewake_process_close_test)
 endif()
+
+add_executable(bluewake_pipeline_shutdown_test ${GXRUNTIME_DIR}/graphics/aurora/tests/pipeline_shutdown_test.cpp)
+target_link_libraries(bluewake_pipeline_shutdown_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_pipeline_shutdown_test COMMAND bluewake_pipeline_shutdown_test)
+set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)

@@ -74,3 +74,7 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   callback runs and static/atexit callback does not. Fixed a compile-time missing
   card-result declaration found by the local host build. Simulator crash-log and
   physical Restore/Import close checks remain unverified.
+- 2.5: pipeline end flag is published under the predicate wait mutex before
+  notification. Actual pipeline-cache init/shutdown test passes 1,000 cycles in
+  1.01 seconds on Mac, with a 45-second CTest timeout and an empty synthetic cache.
+  Runtime patch 0120. No GPU/game is needed; rare pre-fix hang was not reproduced.

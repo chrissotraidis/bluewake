@@ -188,6 +188,12 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
 
+add_executable(bluewake_pipeline_shutdown_test ${GXRUNTIME_DIR}/graphics/aurora/tests/pipeline_shutdown_test.cpp)
+target_link_libraries(bluewake_pipeline_shutdown_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_pipeline_shutdown_test COMMAND bluewake_pipeline_shutdown_test)
+set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)
+
+
 add_executable(bluewake_settings_state_test ${BLUEWAKE_REPO_ROOT}/tests/settings_state_test.cpp)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
 

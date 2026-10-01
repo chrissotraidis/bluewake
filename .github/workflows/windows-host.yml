@@ -40,7 +40,7 @@ jobs:
           $env:PATH = "$vs\VC\Tools\Llvm\x64\bin;$env:PATH"
           cmake -S windows -B build/windows-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DBUILD_TESTING=OFF -DBLUEWAKE_WINDOWS_REGRESSION_TESTS=ON -DAURORA_DAWN_PROVIDER=package
           if ($LASTEXITCODE) { throw 'Windows configuration failed' }
-          cmake --build build/windows-host --target BlueWake bluewake_settings_state_test bluewake_launch_marker_test bluewake_restart_request_test bluewake_memory_card_io_test bluewake_disc_extract bluewake_windows_getenv_cache_test bluewake_windows_clock_test bluewake_feature_dispatch_test bluewake_bmg_patch_test bluewake_audio_dma_stereo_test bluewake_fps_watch_test bluewake_frame_interp_test bluewake_dsp_interpreter_layout_test --parallel 2
+          cmake --build build/windows-host --target BlueWake bluewake_pipeline_shutdown_test bluewake_settings_state_test bluewake_launch_marker_test bluewake_restart_request_test bluewake_memory_card_io_test bluewake_disc_extract bluewake_windows_getenv_cache_test bluewake_windows_clock_test bluewake_feature_dispatch_test bluewake_bmg_patch_test bluewake_audio_dma_stereo_test bluewake_fps_watch_test bluewake_frame_interp_test bluewake_dsp_interpreter_layout_test --parallel 2
           if ($LASTEXITCODE) { throw 'Windows host build failed' }
           if (-not (Test-Path build/windows-host/BlueWake.exe)) { throw 'Windows host missing' }
           if (Get-ChildItem build/windows-host -Recurse -Filter 'gGZLE01_recomp*') { throw 'Unexpected personal game module' }
