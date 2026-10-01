@@ -96,9 +96,28 @@ successful backup restore, and an explicit new-card choice. No game module is
 used. UIKit presentation, app interruption/termination and physical-device
 recovery remain unverified; this is a filesystem/control-flow regression.
 
+### Audio recovery resumes an already full queue
+
+Patch 0127 resumes paused output with an existing prebuffer before the push
+path can discard overflow/fast-forward samples and return. It retains queued
+PCM rather than clearing it to make the regression pass. The previous dummy
+test explicitly cleared the queue before resuming and missed this state.
+
+The extended actual SDL dummy-device test fails against the pre-fix audio
+object at its full-queue recovery assertion; it passes against the candidate
+runtime on the M3 Max. Existing unavailable-device backoff, discard/drop
+counts, exact sink capture and empty-queue prebuffer checks still pass. It is
+registered in native Windows CI. Real speaker/interruption acceptance remains
+unverified. The runtime commit and exported patch/pins follow the required
+maintainer workflow.
+
+At 00:23 JST the iPhone is discoverable and its app is container-accessible,
+but the Documents listing timed out after 30 seconds. No install/launch or
+data mutation has been attempted there. SpaghettiPad owns the physical iPad
+through 00:30 JST; BlueWake has not touched it.
+
 ## Remaining work
 
-- Paused full audio queue blocking output recovery.
 - Matched scene/device frame-time and audio-drop measurements, then supported fixes.
 - Build-time/resource measurements and safe improvements.
 - Remaining renderer race/trace review and hardware acceptance from SUGGESTIONS.md.
