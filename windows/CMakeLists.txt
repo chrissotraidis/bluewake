@@ -187,6 +187,14 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
+
+add_executable(bluewake_memory_card_io_test ${BLUEWAKE_REPO_ROOT}/tests/memory_card_io_test.c)
+target_include_directories(bluewake_memory_card_io_test PRIVATE ${GXRUNTIME_DIR}/include)
+target_compile_options(bluewake_memory_card_io_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME bluewake_memory_card_io_test COMMAND bluewake_memory_card_io_test)
+set_tests_properties(bluewake_memory_card_io_test PROPERTIES TIMEOUT 15)
+target_link_libraries(bluewake_memory_card_io_test PRIVATE bluewake_posix_compat)
+
     add_executable(bluewake_audio_dma_stereo_test ${BLUEWAKE_REPO_ROOT}/tests/audio_dma_stereo_test.c)
     target_include_directories(bluewake_audio_dma_stereo_test PRIVATE ${BLUEWAKE_HOST_SRC})
     target_compile_options(bluewake_audio_dma_stereo_test PRIVATE -Wall -Wextra -Werror)

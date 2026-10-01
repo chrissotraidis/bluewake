@@ -1,0 +1,34 @@
+From 5357a24a41532b5a43d6858f00f61c29ff95cc18 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:05:26 +0900
+Subject: [PATCH] card: preserve previous save when replacement fails
+
+---
+ GXRuntime/src/memory_card.c | 11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/GXRuntime/src/memory_card.c b/GXRuntime/src/memory_card.c
+index d6d25abc..adb652d1 100644
+--- a/GXRuntime/src/memory_card.c
++++ b/GXRuntime/src/memory_card.c
+@@ -202,13 +202,10 @@ static bool write_container(const DolMemoryCard* card) {
+         output = NULL;
+     }
+ 
+-    if (success && rename(temporary_path, card->path) != 0) {
+-        // ISO C does not require rename to replace an existing file. POSIX
+-        // does; hosts that do not get a remove-and-retry fallback.
+-        if (remove(card->path) != 0 ||
+-            rename(temporary_path, card->path) != 0)
+-            success = false;
+-    }
++    // POSIX rename and the Windows replacement shim preserve the old card
++    // on failure. Never delete the destination to retry a failed replacement.
++    if (success && rename(temporary_path, card->path) != 0)
++        success = false;
+     if (!success)
+         remove(temporary_path);
+ 
+-- 
+2.46.0
+
