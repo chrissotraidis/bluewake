@@ -19,7 +19,7 @@ on Windows), with the same DolRecomp. The Builder fetches it at the commit pinne
 
 Patches 0115-0125 add the ordered save, shutdown and audio fixes, opt-in display
 timing, and a render-worker identity fix reproduced with ThreadSanitizer. The current
-pin is `34dee04950e950ab5c84b38428a8276d2a99e713`. Tests and hardware limits are in
+pin is `10ae01a8dd2ff2366de8059a79678a00fe9de702`. Tests and hardware limits are in
 [the local stability ledger](../../docs/status/LOCAL_STABILITY_2026-10-01.md).
 
 Patch 0126 preserves the published in-memory card contents after a directory-sync
@@ -28,3 +28,7 @@ error, while continuing to report the error. Evidence is in
 
 Patch 0127 resumes a paused, already buffered output before the overflow/drop
 path can prevent recovery; its actual SDL dummy-device regression covers the full queue.
+
+Patch 0128 keeps FIFO translation on the caller for the whole armed trace,
+including frames before capture starts. Its synthetic regression compiles the
+production start decision and preserves normal repeated worker starts/joins.

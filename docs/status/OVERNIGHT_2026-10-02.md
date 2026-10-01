@@ -132,6 +132,60 @@ direct Preferences copy had timed out. No iPhone install or launch was attempted
 SpaghettiPad released the iPad at 00:30; BlueWake reserved 00:35–01:30 JST.
 The iPad reports no passcode requirement; a Documents backup is in progress.
 
+## Trace capture ownership
+
+Runtime `10ae01a8`, patch 0128, refuses FIFO worker startup while capture is
+armed, including before the requested first frame. The previous condition only
+refused startup during the recording window. A synthetic regression compiles the
+actual production start function with a bounded worker: it fails at the armed,
+pre-window assertion against runtime `34dee049`; it passes after the change with
+ASan/UBSan and CTest. It also starts and joins the normal worker 100 times and
+checks a repeated start does not replace a joinable thread. Native Windows CI is
+registered; GPU trace replay/pixel equivalence remains unverified.
+
+## Physical M2 iPad initial checks
+
+The folder-copy timeout was narrowed: explicit card, SRAM and preferences copies
+succeeded. Card and preferences second reads matched SHA-256 before installation.
+The app was upgraded in place using the existing authorized provisioning profile;
+the preserved card's post-install hash still matched. Signed executable SHA-256
+`8c102a979228f0075ceccea8038f7ec0c78d11f969c4777a421c64cbf4d26ce0`, source
+`68b7db7`, runtime `34dee049`, private bundled module SHA-256
+`55e9b802bbcd38afc55cceab30ca724e3db606b95faeeba978ebbc230fe7a709`.
+The module reports ABI 3, CPU ABI 6, 748 chunks and 415 RELs; it lacks the new
+option API. An iOS option-module compile is running separately and has no gameplay
+acceptance yet.
+
+Two bounded 2,400-retrace title/bird-attract runs used HLE, 1x scale, normal
+pacing/transitions, mods and HD textures off, Smooth Motion off, independent test
+card/SRAM paths and session-only NSArgumentDomain preference overrides. Native
+QuickTime capture confirms the title scene, bird and Link on the tower. This is
+title/attract scene evidence, not interactive Outset gameplay. All thermal logs
+were nominal (0). Both exited with code 0 and reported zero dropped audio frames.
+Player preferences read back byte-identical after the tests. The local 79-second
+QuickTime recording has video and audio tracks; it stays private and does not
+prove audible speaker quality.
+
+| Stream / window | First run p50/p95/p99 ms | Repeat p50/p95/p99 ms | Rate | Stalls >50/>100 ms |
+| --- | --- | --- | --- | --- |
+| VI, retraces 600–2400 | 16.69 / 21.14 / 21.74 | 16.80 / 20.34 / 20.84 | Both 59.94/s | Both 0 / 0 |
+| Display, presents 350–1300 | 33.37 / 34.26 / 35.02 | 33.36 / 34.26 / 35.08 | Both 29.95/s | First 1 / 0; repeat 0 / 0 |
+
+Audio starvation/stretch totals were 162/1498 and 183/2048. The first run's full
+startup display stream included 166 and 137 ms stalls; the post-startup windows
+above deliberately do not hide those events or call the whole run stall-free.
+VI and display clocks have different origins and are analyzed independently.
+The 30 Hz game updates remain distinct from 60/s VI delivery and display rate.
+There is no before/after optimization claim from these two same-build runs.
+
+An attempted restored-Outset launch lost the devicectl console connection and ran
+without the requested session environment, instead showing the narrated intro
+with stored mods/HD preferences. It is rejected as an Outset/performance result.
+Its persistent log is preserved locally; the test process was stopped and a
+smaller launch environment is the next discriminating experiment. The migration
+created the Application Support card while retaining the Documents card; their
+hashes are being checked. No player save deletion or preference reset was used.
+
 ## Remaining work
 
 - Matched scene/device frame-time and audio-drop measurements, then supported fixes.

@@ -1,0 +1,27 @@
+From 10ae01a8dd2ff2366de8059a79678a00fe9de702 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 00:53:11 +0900
+Subject: [PATCH] Keep FIFO translation on the caller while trace capture is
+ armed
+
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 4624f002..40a80a4d 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -644,7 +644,8 @@ void wait_for_present(std::unique_lock<std::mutex>& recording) {
+ }
+ 
+ void g_fifo_worker_start() {
+-    if (g_fifo_worker_started || trace_should_record())
++    // Armed traces own translation before and during their frame window.
++    if (g_fifo_worker_started || g_trace_armed)
+         return;
+     // DOL_GX_FIFO_WORKER=0 translates on the guest thread (A/B and diagnosis).
+     static const bool disabled = [] {
+-- 
+2.46.0
+

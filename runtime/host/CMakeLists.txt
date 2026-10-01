@@ -668,6 +668,8 @@ target_link_libraries(bluewake_render_worker_identity_test PRIVATE gxruntime GXR
 add_test(NAME bluewake_render_worker_identity_test COMMAND bluewake_render_worker_identity_test)
 set_tests_properties(bluewake_render_worker_identity_test PROPERTIES TIMEOUT 30)
 
+include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
+
 add_executable(bluewake_card_dispatch_lock_test ../../tests/card_dispatch_lock_test.c)
 target_include_directories(bluewake_card_dispatch_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${GXRUNTIME_DIR}/include)
 target_link_libraries(bluewake_card_dispatch_lock_test PRIVATE gxruntime)

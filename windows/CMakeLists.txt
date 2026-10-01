@@ -200,6 +200,8 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     add_test(NAME bluewake_render_worker_identity_test COMMAND bluewake_render_worker_identity_test)
     set_tests_properties(bluewake_render_worker_identity_test PROPERTIES TIMEOUT 30)
 
+    include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
+
 add_executable(bluewake_gx_flush_metrics_test ${BLUEWAKE_REPO_ROOT}/tests/gx_flush_metrics_test.c)
 target_include_directories(bluewake_gx_flush_metrics_test PRIVATE ${BLUEWAKE_HOST_SRC})
 add_test(NAME bluewake_gx_flush_metrics_test COMMAND bluewake_gx_flush_metrics_test)
