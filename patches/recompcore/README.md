@@ -19,5 +19,9 @@ on Windows), with the same DolRecomp. The Builder fetches it at the commit pinne
 
 Patches 0115-0125 add the ordered save, shutdown and audio fixes, opt-in display
 timing, and a render-worker identity fix reproduced with ThreadSanitizer. The current
-pin is `6699be9c9e48ec27e78730a4c1e089a71d50fdb7`. Tests and hardware limits are in
+pin is `ba0a5d52ff78f8f975c767038d49497d9651369c`. Tests and hardware limits are in
 [the local stability ledger](../../docs/status/LOCAL_STABILITY_2026-10-01.md).
+
+Patch 0126 preserves the published in-memory card contents after a directory-sync
+error, while continuing to report the error. Evidence is in
+[the overnight ledger](../../docs/status/OVERNIGHT_2026-10-02.md).

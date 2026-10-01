@@ -14,6 +14,15 @@
 #endif
 #ifndef _WIN32
 #include <fcntl.h>
+#include <sys/stat.h>
+static int fail_directory_sync;
+static int card_test_fsync(int fd) {
+    struct stat status;
+    assert(fstat(fd, &status) == 0);
+    if (fail_directory_sync && S_ISDIR(status.st_mode)) { errno = EIO; return -1; }
+    return fsync(fd);
+}
+#define fsync card_test_fsync
 #endif
 static int fail_flush;
 static unsigned flush_calls;
@@ -37,6 +46,23 @@ static int card_test_rename(const char* from, const char* to) {
 #include "../ref/recompcore/GXRuntime/src/memory_card.c"
 #undef rename
 #undef fflush
+#ifndef _WIN32
+#undef fsync
+static void assert_disk_matches_memory(DolMemoryCard* card) {
+    DolMemoryCard disk = {0};
+    disk.path = card->path;
+    assert(load_container(&disk));
+    for (unsigned i = 0; i < DOL_CARD_MAX_FILES; ++i) {
+        assert(card->files[i].used == disk.files[i].used);
+        if (!card->files[i].used) continue;
+        assert(card->files[i].stat.length == disk.files[i].stat.length);
+        assert(card->files[i].stat.banner_format == disk.files[i].stat.banner_format);
+        assert(card->files[i].stat.time == disk.files[i].stat.time);
+        assert(memcmp(card->files[i].data, disk.files[i].data, card->files[i].stat.length) == 0);
+    }
+    clear_files(&disk);
+}
+#endif
 
 int main(void) {
     char path[256];
@@ -81,6 +107,34 @@ int main(void) {
     assert(dol_card_open_file(card, "synthetic", &file_no, NULL) == 0);
     assert(dol_card_read_file(card, file_no, 0, after, sizeof after) == 0);
     assert(memcmp(before, after, sizeof before) == 0);
+#ifndef _WIN32
+    // Every mutating operation must stay consistent after publication, while
+    // still returning the directory-sync error to the guest.
+    memset(after, 0x43, sizeof after);
+    fail_directory_sync = 1;
+    assert(dol_card_write_file(card, file_no, 0, after, sizeof after) == DOL_CARD_RESULT_IO_ERROR);
+    assert_disk_matches_memory(card);
+    fail_directory_sync = 0;
+    DolMemoryCardStat metadata;
+    assert(dol_card_get_status(card, file_no, &metadata) == 0);
+    metadata.banner_format = 1;
+    assert(dol_card_set_status(card, file_no, &metadata) == 0);
+    assert_disk_matches_memory(card);
+    assert(memcmp(card->files[file_no].data, after, sizeof after) == 0);
+    fail_directory_sync = 1;
+    metadata.banner_format = 2;
+    assert(dol_card_set_status(card, file_no, &metadata) == DOL_CARD_RESULT_IO_ERROR);
+    assert_disk_matches_memory(card);
+    assert(dol_card_create_file(card, "published", 8192, NULL) == DOL_CARD_RESULT_IO_ERROR);
+    assert_disk_matches_memory(card);
+    assert(dol_card_delete_file(card, "published") == DOL_CARD_RESULT_IO_ERROR);
+    assert_disk_matches_memory(card);
+    assert(dol_card_format(card) == DOL_CARD_RESULT_IO_ERROR);
+    assert_disk_matches_memory(card);
+    fail_directory_sync = 0;
+    assert(dol_card_create_file(card, "synthetic", 8192, &file_no) == 0);
+    assert(dol_card_write_file(card, file_no, 0, before, sizeof before) == 0);
+#endif
     dol_card_close(card);
     assert(dol_card_validate(path));
     u8* bytes = NULL;

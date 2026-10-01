@@ -64,9 +64,24 @@ The pre-pass Mac/iOS app executables were preserved locally for later control
 runs: Mac `f4f377b4478975b90902d98e3c3e27ffc5531f68096e5492fd2f5d51d5a51993`,
 iOS `d1461c63bba43c03717a6a93beb2aac119c28a60307e0c9eff0a590c4bc138ae`.
 
+### Card memory follows a published replacement
+
+Runtime `ba0a5d52ff78f8f975c767038d49497d9651369c`, patch 0126, distinguishes
+failure before publication, publication with a sync error, and successful sync.
+Only the first rolls memory back. All sync errors still return I/O failure;
+this does not claim power-loss durability. Write, metadata, create, delete and
+format now retain the same contents as the published disk container.
+
+The expanded real card-I/O regression injects directory-fsync failure. It
+fails against runtime `6699be9` because memory differs from disk, and passes
+with ASan/UBSan on the M3 Max. A following metadata-only save preserves the
+published payload. All three card/dispatch CTests pass. These are synthetic
+cards with no module. The runtime commit was pushed to the maintainer's
+bluewake-next branch, exported, and all three required pins updated.
+Forced-reboot durability and real in-game error handling remain unverified.
+
 ## Remaining work
 
-- Card memory/disk divergence after a post-rename sync error.
 - Apple recovery losing its prompt after interrupted/failed replacement.
 - Paused full audio queue blocking output recovery.
 - Matched scene/device frame-time and audio-drop measurements, then supported fixes.
