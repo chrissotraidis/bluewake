@@ -52,6 +52,8 @@ static char g_data_dir[1024];
 static char g_internal_dir[1024];
 static char g_game_dir[1100];
 static FILE* g_log_file;
+static int g_log_pumping;   // the pump thread runs and stdout/stderr go to it
+static int g_log_pump_done; // set by the pump at the pipe's end
 
 static int file_exists(const char* path) {
     struct stat st;
@@ -106,6 +108,7 @@ static void* log_pump(void* arg) {
             line_len = 0;
         }
     }
+    __atomic_store_n(&g_log_pump_done, 1, __ATOMIC_RELEASE);
     return NULL;
 }
 
@@ -148,15 +151,42 @@ static void start_session_log(void) {
     int fds[2];
     if (pipe(fds) != 0)
         return;
+    // The pump first: stdout and stderr go to the pipe only once something
+    // reads it, or the host's writes would block when its buffer filled.
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, log_pump, (void*)(intptr_t)fds[0]) != 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return;
+    }
+    pthread_detach(thread);
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IOLBF, 0);
     dup2(fds[1], STDOUT_FILENO);
     dup2(fds[1], STDERR_FILENO);
     close(fds[1]);
-    pthread_t thread;
-    if (pthread_create(&thread, NULL, log_pump, (void*)(intptr_t)fds[0]) == 0)
-        pthread_detach(thread);
+    g_log_pumping = 1;
     fprintf(stderr, "[android] session log %s\n", path);
+}
+
+// Before the process ends: stdout and stderr leave the pipe, which closes its
+// last writers, and the pump writes what is left and stops at the pipe's end.
+// It is waited for up to five seconds (something else holding a copy of the
+// pipe would keep it open).
+static void finish_session_log(void) {
+    if (!g_log_pumping)
+        return;
+    fflush(stdout);
+    fflush(stderr);
+    const int devnull = open("/dev/null", O_WRONLY);
+    if (devnull >= 0) {
+        dup2(devnull, STDOUT_FILENO);
+        dup2(devnull, STDERR_FILENO);
+        close(devnull);
+    }
+    for (int waited = 0; waited < 500 && !__atomic_load_n(&g_log_pump_done, __ATOMIC_ACQUIRE); waited++)
+        usleep(10000);
+    g_log_pumping = 0;
 }
 
 static void resolve_dirs(void) {
@@ -302,9 +332,7 @@ int main(int argc, char** argv) {
             if (__llvm_profile_reset_counters != NULL)
                 __llvm_profile_reset_counters();
         }
-        fflush(stdout);
-        fflush(stderr);
-        usleep(300000);  // the log pump's last lines
+        finish_session_log();
         exit(status);
     }
     fflush(stdout);

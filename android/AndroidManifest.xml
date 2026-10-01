@@ -4,8 +4,9 @@
     package="@PACKAGE@"
     android:installLocation="auto">
 
-    <uses-feature android:glEsVersion="0x00030000" />
-    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="false" />
+    <!-- The renderer is Aurora's Dawn on Vulkan 1.1; OpenGL ES is not used. -->
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />

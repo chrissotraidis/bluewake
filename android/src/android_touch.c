@@ -5,6 +5,7 @@
 // overlay's does (apple/ios/src/touch_controls.cpp). A connected controller
 // takes over while the overlay publishes nothing.
 #include <jni.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include <dolphin/pad.h>
@@ -69,4 +70,14 @@ JNIEXPORT void JNICALL Java_dev_bluewake_android_TouchControlsView_nativePublish
     if (buttons & TOUCH_A) status.analogA = 255;
     if (buttons & TOUCH_B) status.analogB = 255;
     PADSetVirtualStatus(PAD_CHAN0, &status);
+}
+
+// While the options menu is open, a touch away from the controls is the
+// menu's (runtime/host/src/settings_menu.cpp).
+bool bluewake_settings_is_open(void);
+
+JNIEXPORT jboolean JNICALL Java_dev_bluewake_android_TouchControlsView_nativeMenuOpen(JNIEnv* env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    return bluewake_settings_is_open() ? JNI_TRUE : JNI_FALSE;
 }

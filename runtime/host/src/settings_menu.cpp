@@ -718,6 +718,12 @@ void draw(void*) {
 
 } // namespace
 
+// Whether the options menu is open, for a touch overlay that must leave the
+// menu's touches to it (android/src/android_touch.c). Read from another thread.
+extern "C" bool bluewake_settings_is_open(void) {
+    return __atomic_load_n(&g_open, __ATOMIC_RELAXED);
+}
+
 extern "C" void bluewake_settings_load(void) {
     const char* chosen = std::getenv("BLUEWAKE_SETTINGS");
     if (chosen != nullptr && std::strcmp(chosen, "none") == 0)

@@ -1,5 +1,6 @@
 package dev.bluewake.android;
 
+import android.content.Intent;
 import android.hardware.input.InputManager;
 import android.os.Bundle;
 import android.view.InputDevice;
@@ -28,13 +29,7 @@ public class BlueWakeActivity extends SDLActivity implements InputManager.InputD
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // Development over adb only: `am start ... --ez showWhenLocked true` shows
-        // the game over the lock screen, so a locked test phone can run it. A
-        // launch from the home screen never sets it.
-        if (getIntent() != null && getIntent().getBooleanExtra("showWhenLocked", false)) {
-            setShowWhenLocked(true);
-            setTurnScreenOn(true);
-        }
+        applyLockScreenSwitch(getIntent());
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // The game draws 30 frames a second (60 with Smooth Motion): ask the
@@ -53,6 +48,29 @@ public class BlueWakeActivity extends SDLActivity implements InputManager.InputD
         if (inputManager != null)
             inputManager.registerInputDeviceListener(this, null);
         updateTouchVisibility();
+    }
+
+    // Development over adb only: `am start ... --ez showWhenLocked true` shows
+    // the game over the lock screen, so a locked test phone can run it. The
+    // switch counts only while files/launch.env exists: the builder and
+    // install.py write that file over adb, and no other app can write in this
+    // app's storage, so another app's intent cannot bring the game over the
+    // lock screen. Every launch decides again: the activity is
+    // singleInstance, so a later launch arrives through onNewIntent and an
+    // ordinary one turns the switch off.
+    private void applyLockScreenSwitch(Intent intent) {
+        java.io.File files = getExternalFilesDir(null);
+        boolean show = intent != null && intent.getBooleanExtra("showWhenLocked", false)
+                && files != null && new java.io.File(files, "launch.env").isFile();
+        setShowWhenLocked(show);
+        setTurnScreenOn(show);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        applyLockScreenSwitch(intent);
     }
 
     @Override

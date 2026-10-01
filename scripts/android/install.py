@@ -13,6 +13,7 @@ Saves, settings and session logs are in /sdcard/Android/data/<package>/files. Un
 the app deletes that folder, saves included: back up GZLE01.card first (--pull-saves).
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -89,6 +90,22 @@ def main():
         except (ValueError, IndexError):
             return -1
 
+    def remote_digest(path):
+        out = run("shell", f"sha1sum '{path}' 2>/dev/null || echo -", capture=True).strip()
+        return out.split()[0] if out else "-"
+
+    def local_digest(path):
+        digest = hashlib.sha1()
+        with open(path, "rb") as file:
+            for block in iter(lambda: file.read(1 << 22), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    def same_file(local, remote_path):
+        """The device's copy is this file: the same size, then the same SHA-1."""
+        size = local.stat().st_size
+        return remote_size(remote_path) == size and remote_digest(remote_path) == local_digest(local)
+
     print(f"device {serial}, app {package}")
     if args.pull_saves:
         args.pull_saves.mkdir(parents=True, exist_ok=True)
@@ -117,12 +134,20 @@ def main():
         if iso is None:
             sys.exit("the disc image was not found (BuilderProvenance.json names it)")
         print("pushing the prepared game files")
-        run("push", game / "main.dol", f"{remote}/game/main.dol")
-        if remote_size(f"{remote}/game/rels/{rels[-1].name}") != rels[-1].stat().st_size:
+        if not same_file(game / "main.dol", f"{remote}/game/main.dol"):
+            run("push", game / "main.dol", f"{remote}/game/main.dol")
+        else:
+            print("  main.dol is already there")
+        # Every REL by name and size (one listing), so that an interrupted push
+        # is finished rather than taken for a complete one.
+        listing = run("shell", f"cd '{remote}/game/rels' 2>/dev/null && stat -c '%n %s' *.rel 2>/dev/null; true",
+                      capture=True)
+        there = dict(line.rsplit(" ", 1) for line in listing.splitlines() if line.count(" ") >= 1)
+        if any(there.get(rel.name) != str(rel.stat().st_size) for rel in rels):
             run("push", game / "rels", f"{remote}/game/")
         else:
             print("  the RELs are already there")
-        if remote_size(f"{remote}/game/GZLE01.iso") != iso.stat().st_size:
+        if not same_file(iso, f"{remote}/game/GZLE01.iso"):
             print(f"pushing the disc image ({iso.stat().st_size >> 20} MB)")
             run("push", iso, f"{remote}/game/GZLE01.iso")
         else:

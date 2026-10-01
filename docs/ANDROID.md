@@ -109,7 +109,9 @@ the render thread, the app's busiest code (the GX worker is most of a core on th
 builder also compiles an instrumented `libmain.so` (the host, GXRuntime, Aurora and SDL; Dawn is prebuilt),
 installs it with the real game module and plays the same opening once, drawn and at the game's pace with the
 player's settings (about 7 minutes), then compiles the app with those counts. The profile stays in
-`build/android/pgo-app`, and every later app build uses it (`--no-app-profile` leaves it out).
+`build/android/pgo-app`, and every later app build uses it (`--no-app-profile` leaves it out). A later
+`--train-app` reuses it while the module, the app's sources, RecompCore, the compiler and the CPU are unchanged
+(`--retrain` trains again).
 
 Measured on the Fold 7 over 20 seconds of the title's sea (600 game frames, `simpleperf stat --per-thread`), the
 CPU cycles the app's two busy threads spend per frame (the game thread, about 70 M, is the game module's):

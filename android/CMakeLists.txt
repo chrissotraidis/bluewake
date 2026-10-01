@@ -19,12 +19,20 @@ set(BLUEWAKE_HOST_SRC ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
 set(BLUEWAKE_ANDROID_CPU "cortex-a78" CACHE STRING "-mcpu for the app")
 
 add_compile_options("-ffile-prefix-map=${BLUEWAKE_REPO_ROOT}/=" "-mcpu=${BLUEWAKE_ANDROID_CPU}")
-# BLUEWAKE_APP_PROFILE_FLAGS (scripts/android/build.py): -fprofile-instr-generate
-# for the app's training build, -fprofile-instr-use=... for the trained one.
-# Set before GXRuntime is added, so that its graphics code is trained too.
-set(BLUEWAKE_APP_PROFILE_FLAGS "" CACHE STRING "profile flags for the app's code")
-if(BLUEWAKE_APP_PROFILE_FLAGS)
-    separate_arguments(_bluewake_profile_flags UNIX_COMMAND "${BLUEWAKE_APP_PROFILE_FLAGS}")
+# The app's own training (scripts/android/build.py --train-app):
+# BLUEWAKE_APP_PROFILE_GENERATE instruments it, BLUEWAKE_APP_PROFILE_USE names
+# the trained profile to compile it with (one argument, spaces and all). Set
+# before GXRuntime is added, so that its graphics code is trained too.
+option(BLUEWAKE_APP_PROFILE_GENERATE "instrument the app for its training" OFF)
+set(BLUEWAKE_APP_PROFILE_USE "" CACHE FILEPATH "the app's trained profile")
+set(_bluewake_profile_flags "")
+if(BLUEWAKE_APP_PROFILE_GENERATE)
+    set(_bluewake_profile_flags -fprofile-instr-generate)
+elseif(BLUEWAKE_APP_PROFILE_USE)
+    set(_bluewake_profile_flags "-fprofile-instr-use=${BLUEWAKE_APP_PROFILE_USE}"
+        -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date -Wno-backend-plugin)
+endif()
+if(_bluewake_profile_flags)
     add_compile_options(${_bluewake_profile_flags})
 endif()
 # 16 KB page alignment for Android 15+ devices with 16 KB pages.
@@ -110,7 +118,7 @@ target_link_options(main PRIVATE "LINKER:-u,JNI_OnLoad"
 # the GX worker and 4 percent of the render thread on the Fold 7. Nothing
 # loaded before libmain defines them, so nothing could interpose them anyway.
 target_link_options(main PRIVATE "LINKER:-Bsymbolic-functions")
-if(BLUEWAKE_APP_PROFILE_FLAGS)
+if(_bluewake_profile_flags)
     target_link_options(main PRIVATE ${_bluewake_profile_flags})
 endif()
 

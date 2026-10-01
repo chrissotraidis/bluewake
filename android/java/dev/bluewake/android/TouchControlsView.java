@@ -32,6 +32,7 @@ public class TouchControlsView extends View {
     private static final long MIN_HOLD_MS = 80;
 
     static native void nativePublish(int buttons, int stickX, int stickY, int cX, int cY);
+    static native boolean nativeMenuOpen();
 
     private static final class Button {
         final int bit;
@@ -62,9 +63,10 @@ public class TouchControlsView extends View {
     private float cStartX, cStartY, cNowX, cNowY;
     private float stickX, stickY;           // -1..1, +y up
     private float cX, cY;
-    private final int[] pointerBits = new int[16];
+    private final int[] pointerBits = new int[32];   // by pointer id (Android's are 0-31)
     private final long[] pressedAt = new long[32];
     private int latched;                    // released too soon: held until MIN_HOLD_MS
+    private final int[] latchGeneration = new int[16]; // by button: only the newest latch's timer ends it
     private int lastButtons, lastSx, lastSy, lastCx, lastCy;
     private boolean published;
 
@@ -176,13 +178,16 @@ public class TouchControlsView extends View {
             if ((pressed & bit) != 0) {
                 pressedAt[i] = now;
                 latched &= ~bit;
+                latchGeneration[i]++;
             }
             if ((released & bit) != 0) {
                 long held = now - pressedAt[i];
                 if (held < MIN_HOLD_MS) {
                     latched |= bit;
-                    final int unlatch = bit;
+                    final int unlatch = bit, button = i, generation = ++latchGeneration[i];
+                    // An earlier tap's timer must not end this tap's latch early.
                     handler.postDelayed(() -> {
+                        if (latchGeneration[button] != generation) return;
                         latched &= ~unlatch;
                         publish();
                     }, MIN_HOLD_MS - held);
@@ -226,7 +231,9 @@ public class TouchControlsView extends View {
                 } else if (stickPointer < 0 && Math.hypot(x - stickCx, y - stickCy) < stickRadius * 1.6f) {
                     stickPointer = id;
                     updateStick(x, y);
-                } else if (cPointer < 0 && x > getWidth() / 2f) {
+                } else if (cPointer < 0 && x > getWidth() / 2f && !nativeMenuOpen()) {
+                    // The right half's blank area is the C-stick, except while the
+                    // options menu is open: then it is the menu's, as the left is.
                     cPointer = id;
                     cStartX = x;
                     cStartY = y;
