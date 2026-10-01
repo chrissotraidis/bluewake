@@ -188,6 +188,10 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
 
+add_executable(bluewake_settings_state_test ${BLUEWAKE_REPO_ROOT}/tests/settings_state_test.cpp)
+add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
+
+
 add_executable(bluewake_launch_marker_test ${BLUEWAKE_REPO_ROOT}/tests/launch_marker_test.c)
 target_include_directories(bluewake_launch_marker_test PRIVATE ${BLUEWAKE_HOST_SRC})
 add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)

@@ -14,6 +14,7 @@
 // open the keyboard is taken off the game's pad and the mouse camera stands
 // aside, so the menu's clicks and keys do not move Link.
 #include "win_settings.h"
+#include "settings_state.h"
 #include "restart_request.h"
 #include "launch_marker.h"
 #include "atomic_file.h"
@@ -66,34 +67,8 @@ float calculate_game_fps() noexcept;
 
 namespace {
 
-struct Settings {
-    // Display: apply at once.
-    bool fullscreen = false;
-    int window_w = 0, window_h = 0;  // 0: sized from the screen
-    int window_x = INT_MIN, window_y = INT_MIN;
-    int render_scale = 0;  // 0: the window's own pixels; 1-4: x 480 lines
-    int anisotropy = 1;    // 1: the game's own filtering; 2-16 forced
-    bool smooth_motion = false;  // experimental: off unless the player turns it on
-    bool show_fps = false;
-    bool pause_unfocused = false;
-    // Controls: apply at once.
-    bool mouse_camera = true;
-    double mouse_sensitivity = 1.0;
-    bool mouse_invert_y = false;
-    bool pad_invert_x = false, pad_invert_y = false;
-    // At the next launch.
-    std::string aspect = "4:3";
-    bool keep_aspect = true;
-    bool betterww = false;
-    std::map<std::string, bool> options;  // only those changed from their default
-    bool hd_textures = false;
-    bool lle_audio = false;
-    bool movement_extras = false;
-    bool fast_transitions = false;
-    bool quick_doors = false;
-};
-
 Settings g_saved;     // as in the file, changed by the menu and hotkeys
+Settings g_session, g_before_edit;
 Settings g_launched;  // as this session started (what a restart would change)
 std::string g_data_dir, g_path;
 std::vector<wchar_t> g_environment;  // as BlueWake was started, for Restart
@@ -188,6 +163,8 @@ void save_file() {
 }
 
 void changed() {
+    bw_settings_keep_edits(g_saved, g_before_edit, g_session);
+    g_before_edit = g_session;
     g_dirty = true;
     g_dirty_at = SDL_GetTicks();
 }
@@ -246,7 +223,7 @@ void set_fullscreen(SDL_Window* w, bool on) {
     if (w == nullptr)
         return;
     SDL_SetWindowFullscreen(w, on);
-    g_saved.fullscreen = on;
+    g_session.fullscreen = on;
     changed();
     std::fprintf(stderr, "[windows] fullscreen %s\n", on ? "on" : "off");
 }
@@ -257,7 +234,7 @@ void set_fullscreen(SDL_Window* w, bool on) {
 void place_window(SDL_Window* w) {
     if (is_fullscreen(w))
         return;
-    const Settings& d = g_saved;
+    const Settings& d = g_session;
     bool restored = false;
     if (d.window_x != INT_MIN && d.window_y != INT_MIN) {
         const SDL_Point title{d.window_x + 60, d.window_y - 16};
@@ -279,7 +256,16 @@ void track_window(SDL_Window* w) {
     int x = 0, y = 0, width = 0, height = 0;
     if (!SDL_GetWindowPosition(w, &x, &y) || !SDL_GetWindowSize(w, &width, &height))
         return;
-    Settings& d = g_saved;
+    Settings& d = g_session;
+    static bool first = true;
+    if (first) {
+        first = false;
+        d.window_x = g_before_edit.window_x = x;
+        d.window_y = g_before_edit.window_y = y;
+        d.window_w = g_before_edit.window_w = width;
+        d.window_h = g_before_edit.window_h = height;
+        return;
+    }
     if (x != d.window_x || y != d.window_y || width != d.window_w || height != d.window_h) {
         d.window_x = x;
         d.window_y = y;
@@ -306,7 +292,7 @@ void reset_window(SDL_Window* w) {
 // (apple/ios/src/controller_apply.cpp). Only touched once the player inverts
 // an axis, so a mapping set elsewhere is otherwise left alone.
 void apply_controller() {
-    const Settings& d = g_saved;
+    const Settings& d = g_session;
     if (!d.pad_invert_x && !d.pad_invert_y && !g_pad_applied)
         return;
     if (PADGetIndexForPort(0) < 0)
@@ -328,7 +314,7 @@ void apply_controller() {
 }
 
 void apply_live() {
-    const Settings& d = g_saved;
+    const Settings& d = g_session;
     aurora_set_frame_buffer_scale(static_cast<float>(d.render_scale));
     aurora_set_forced_anisotropy(static_cast<unsigned>(d.anisotropy));
     aurora_set_frame_interpolation(d.smooth_motion);
@@ -391,7 +377,7 @@ bool relaunch() {
 // --- the menu ---------------------------------------------------------------
 
 bool needs_restart() {
-    const Settings &a = g_saved, &b = g_launched;
+    const Settings &a = g_session, &b = g_launched;
     return a.aspect != b.aspect || a.keep_aspect != b.keep_aspect || a.betterww != b.betterww ||
            a.options != b.options || a.hd_textures != b.hd_textures || a.lle_audio != b.lle_audio ||
            a.movement_extras != b.movement_extras || a.fast_transitions != b.fast_transitions ||
@@ -406,7 +392,7 @@ void restart_note(bool differs) {
 }
 
 void tab_display(SDL_Window* w) {
-    Settings& d = g_saved;
+    Settings& d = g_session;
     bool full = w != nullptr && is_fullscreen(w);
     if (ImGui::Checkbox("Fullscreen   (F11 or Alt+Enter)", &full))
         set_fullscreen(w, full);
@@ -451,7 +437,7 @@ void tab_display(SDL_Window* w) {
 }
 
 void tab_controls() {
-    Settings& d = g_saved;
+    Settings& d = g_session;
     bool mouse = false;
     if (ImGui::Checkbox("Mouse camera: click the game, then move the mouse (Esc gives it back)", &d.mouse_camera))
         mouse = true;
@@ -498,7 +484,7 @@ void tab_controls() {
 }
 
 void tab_enhancements() {
-    Settings& d = g_saved;
+    Settings& d = g_session;
     ImGui::SeparatorText("Gameplay (after restart)");
     if (ImGui::Checkbox("Jump and Run", &d.movement_extras))
         changed();
@@ -569,7 +555,7 @@ void tab_enhancements() {
 }
 
 void tab_game() {
-    Settings& d = g_saved;
+    Settings& d = g_session;
     ImGui::TextUnformatted("Experimental debug save states");
     if (ImGui::Button("Save state (F6)")) {
         bluewake_save_state_hotkey(false);
@@ -872,7 +858,8 @@ extern "C" void bw_settings_load(const char* data_dir) {
 
 extern "C" void bw_settings_apply_launch(void) {
     // What the command line chose wins for this session (and is shown).
-    Settings& d = g_saved;
+    g_session = g_saved;
+    Settings& d = g_session;
     if (env_set("BLUEWAKE_JUMP_BUTTON"))
         d.movement_extras = std::getenv("BLUEWAKE_JUMP_BUTTON")[0] != '0';
     if (env_set("BLUEWAKE_FAST_FORWARD"))
@@ -937,12 +924,31 @@ extern "C" void bw_settings_apply_launch(void) {
     if (!env_set("DOL_AURORA_FRAME_INTERP"))
         aurora_set_frame_interpolation(d.smooth_motion);
     else
-        g_saved.smooth_motion = std::getenv("DOL_AURORA_FRAME_INTERP")[0] == '1';
+        d.smooth_motion = std::getenv("DOL_AURORA_FRAME_INTERP")[0] == '1';
     if (!env_set("DOL_AURORA_SHOW_FPS"))
         aurora_set_fps_overlay(d.show_fps);
     else
-        g_saved.show_fps = std::getenv("DOL_AURORA_SHOW_FPS")[0] == '1';
-    g_launched = g_saved;
+        d.show_fps = std::getenv("DOL_AURORA_SHOW_FPS")[0] == '1';
+    if (env_set("BLUEWAKE_DSP_MODE")) d.lle_audio = std::strcmp(std::getenv("BLUEWAKE_DSP_MODE"), "lle") == 0;
+    if (env_set("BLUEWAKE_ASPECT")) d.aspect = std::getenv("BLUEWAKE_ASPECT");
+    if (env_set("DOL_AURORA_ASPECT_FIT")) d.keep_aspect = std::getenv("DOL_AURORA_ASPECT_FIT")[0] != '0';
+    if (env_set("BLUEWAKE_MODS")) d.betterww = std::string(std::getenv("BLUEWAKE_MODS")).find("betterww") != std::string::npos;
+    if (env_set("DOL_AURORA_TEXTURE_PACK")) d.hd_textures = true;
+    if (env_set("BLUEWAKE_OPTIONS")) {
+        d.options.clear();
+        std::string options = std::getenv("BLUEWAKE_OPTIONS");
+        size_t start = 0;
+        while (start < options.size()) {
+            size_t end = options.find(',', start);
+            std::string key = options.substr(start, end - start);
+            bool enabled = !key.empty() && key[0] != '-';
+            if (!enabled) key.erase(0, 1);
+            if (!key.empty() && key != "none") d.options[key] = enabled;
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+    }
+    g_launched = g_before_edit = g_session;
 }
 
 extern "C" void bw_settings_install(void) {
@@ -971,10 +977,10 @@ extern "C" int bw_settings_key(unsigned virtual_key, int alt) {
         g_toggle_fullscreen = true;
         return 1;
     case VK_F10:
-        g_saved.smooth_motion = !aurora_get_frame_interpolation();
-        aurora_set_frame_interpolation(g_saved.smooth_motion);
+        g_session.smooth_motion = !aurora_get_frame_interpolation();
+        aurora_set_frame_interpolation(g_session.smooth_motion);
         changed();
-        std::fprintf(stderr, "[windows] Smooth Motion %s\n", g_saved.smooth_motion ? "on" : "off");
+        std::fprintf(stderr, "[windows] Smooth Motion %s\n", g_session.smooth_motion ? "on" : "off");
         return 1;
     case VK_F6:
         bluewake_save_state_hotkey(false);
@@ -983,8 +989,8 @@ extern "C" int bw_settings_key(unsigned virtual_key, int alt) {
         bluewake_save_state_hotkey(true);
         return 1;
     case VK_F9:
-        g_saved.show_fps = !g_saved.show_fps;
-        aurora_set_fps_overlay(g_saved.show_fps);
+        g_session.show_fps = !g_session.show_fps;
+        aurora_set_fps_overlay(g_session.show_fps);
         changed();
         return 1;
     default:

@@ -63,3 +63,8 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   resets restart-only choices, forces HLE/mods-off session defaults, and shows a
   recovery banner. --hle-audio is explicit. Marker/backup/clear sanitizer test passes
   and is registered on Mac/Windows. Real crash/relaunch recovery needs Windows.
+- 2.3: saved/session/launch settings are separate. Only fields explicitly changed
+  in the menu/hotkeys are copied to saved preferences; launch window placement is
+  the baseline, not an edit. HLE/LLE and option overrides now appear in the session
+  UI. Synthetic scale/fullscreen/LLE/Smooth Motion and option isolation test passes
+  under ASan/UBSan, registered on Mac/Windows. Actual Windows UI still needs hardware.
