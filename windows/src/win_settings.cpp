@@ -333,6 +333,7 @@ void set_menu_open(bool open) {
     if (open == g_menu_open)
         return;
     g_menu_open = open;
+    PADBlockInput(open);
     // The menu's keys and clicks are not the game's.
     PADSetKeyboardActive(0, open ? FALSE : TRUE);
     bluewake_mouse_camera_block(open);
@@ -658,6 +659,7 @@ void load_font(SDL_Window* w) {
 
 void draw_menu(SDL_Window* w) {
     ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
     const float scale = ui_scale(w);
     bluewake_ui::begin_theme(scale);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
@@ -1007,4 +1009,13 @@ extern "C" int bw_settings_key(unsigned virtual_key, int alt) {
 
 extern "C" int bw_settings_relaunch(void) {
     return !g_restart.take() || relaunch() ? 0 : 1;
+}
+
+extern "C" bool bluewake_settings_menu_event(const void* sdl_event) {
+    const SDL_Event* event = static_cast<const SDL_Event*>(sdl_event);
+    if (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && event->gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
+        set_menu_open(!g_menu_open);
+        return true;
+    }
+    return g_menu_open;
 }

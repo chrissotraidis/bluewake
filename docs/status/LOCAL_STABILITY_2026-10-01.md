@@ -124,3 +124,9 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   involution/non-face preservation and three default orders under ASan/UBSan;
   registered in both CMake files and Windows CI. Real Switch Pro/Xbox/hot-plug UI
   acceptance remains unverified; no controller hardware has been assumed.
+- 4.2: Windows enables keyboard/gamepad navigation, routes controller Back through
+  the existing event observer, and calls PADBlockInput for the menu. Actual SDL
+  virtual-controller CTest passes on Mac (0.53 s): remap roundtrip, neutral buttons/
+  stick while blocked, held A swallowed after close, and new A accepted after release.
+  Registered on Windows. Real menu/controller navigation and Link movement still need
+  Windows/Switch Pro/Xbox acceptance; synthetic input is not hands-on gameplay.

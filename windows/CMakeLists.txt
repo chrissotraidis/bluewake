@@ -189,6 +189,13 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
 
+add_executable(bluewake_desktop_controller_test ${BLUEWAKE_REPO_ROOT}/tests/desktop_controller_test.cpp)
+target_include_directories(bluewake_desktop_controller_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib ${BLUEWAKE_HOST_SRC})
+target_link_libraries(bluewake_desktop_controller_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_desktop_controller_test COMMAND bluewake_desktop_controller_test)
+set_tests_properties(bluewake_desktop_controller_test PROPERTIES TIMEOUT 15)
+
+
 add_executable(bluewake_face_button_swap_test ${BLUEWAKE_REPO_ROOT}/tests/face_button_swap_test.c)
 target_include_directories(bluewake_face_button_swap_test PRIVATE ${BLUEWAKE_HOST_SRC})
 add_test(NAME bluewake_face_button_swap_test COMMAND bluewake_face_button_swap_test)

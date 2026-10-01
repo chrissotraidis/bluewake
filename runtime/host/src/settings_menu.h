@@ -25,10 +25,14 @@ extern "C" {
 // The iOS and Windows apps have their own menus.
 static inline void bluewake_settings_load(void) {}
 static inline void bluewake_settings_menu_install(void) {}
+#ifdef _WIN32
+bool bluewake_settings_menu_event(const void* sdl_event);
+#else
 static inline bool bluewake_settings_menu_event(const void* sdl_event) {
     (void)sdl_event;
     return false;
 }
+#endif
 #else
 // First thing in main: the saved settings go into the environment, over what
 // the launch gave (the menu's choices win).
