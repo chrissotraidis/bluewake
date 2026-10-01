@@ -19,6 +19,14 @@ set(BLUEWAKE_HOST_SRC ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
 set(BLUEWAKE_ANDROID_CPU "cortex-a78" CACHE STRING "-mcpu for the app")
 
 add_compile_options("-ffile-prefix-map=${BLUEWAKE_REPO_ROOT}/=" "-mcpu=${BLUEWAKE_ANDROID_CPU}")
+# BLUEWAKE_APP_PROFILE_FLAGS (scripts/android/build.py): -fprofile-instr-generate
+# for the app's training build, -fprofile-instr-use=... for the trained one.
+# Set before GXRuntime is added, so that its graphics code is trained too.
+set(BLUEWAKE_APP_PROFILE_FLAGS "" CACHE STRING "profile flags for the app's code")
+if(BLUEWAKE_APP_PROFILE_FLAGS)
+    separate_arguments(_bluewake_profile_flags UNIX_COMMAND "${BLUEWAKE_APP_PROFILE_FLAGS}")
+    add_compile_options(${_bluewake_profile_flags})
+endif()
 # 16 KB page alignment for Android 15+ devices with 16 KB pages.
 add_link_options("LINKER:-z,max-page-size=16384")
 
@@ -93,6 +101,15 @@ target_compile_definitions(main PRIVATE
 target_link_options(main PRIVATE "LINKER:-u,JNI_OnLoad"
     "LINKER:--export-dynamic-symbol=SDL_main" "LINKER:--export-dynamic-symbol=JNI_OnLoad"
     "LINKER:--export-dynamic-symbol=Java_*")
+# Calls between libmain's own functions bind inside libmain. Its exported
+# functions (the host's, for the game module, and Dawn's and SDL's C entry
+# points) were otherwise called through the PLT even from within: 2 percent of
+# the GX worker and 4 percent of the render thread on the Fold 7. Nothing
+# loaded before libmain defines them, so nothing could interpose them anyway.
+target_link_options(main PRIVATE "LINKER:-Bsymbolic-functions")
+if(BLUEWAKE_APP_PROFILE_FLAGS)
+    target_link_options(main PRIVATE ${_bluewake_profile_flags})
+endif()
 
 # The donor DSP (Dolphin's DSP interpreter and its high-level Zelda ucode, from
 # RecompCore) compiled from source, as on iOS and Windows.

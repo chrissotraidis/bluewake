@@ -86,6 +86,8 @@ The steps and their logs (`build/android/logs`) are the Windows builder's, then:
 | Option | |
 | --- | --- |
 | `--device SERIAL` | Train the optimization profile on this adb device (below) |
+| `--train-app` | With `--device`, also train the app (`libmain.so`) on the device, with a drawn playback (below) |
+| `--no-app-profile` | Build the app without its trained profile |
 | `--cpu CPU` | `-mcpu` for the module and the app (default `cortex-a78`) |
 | `--profile FILE` | Compile with this optimization profile instead of training one |
 | `--package ID`, `--label NAME` | The application id (default the profile's bundle id, `dev.bluewake.BlueWake`) and the app's name |
@@ -101,6 +103,25 @@ them with the NDK's `llvm-profdata` and compiles the real module with them. A sh
 is written at all. The runs use their own memory card; the player's saves are not touched. The profile is made from
 the game, so it stays in `build/android/pgo-device` and is never shared. The training APK is left installed: put
 the real one back with `install.py`.
+
+**The app's own training.** The module's training is headless, so it never runs the GX worker's translation or
+the render thread, the app's busiest code (the GX worker is most of a core on the sea). With `--train-app` the
+builder also compiles an instrumented `libmain.so` (the host, GXRuntime, Aurora and SDL; Dawn is prebuilt),
+installs it with the real game module and plays the same opening once, drawn and at the game's pace with the
+player's settings (about 7 minutes), then compiles the app with those counts. The profile stays in
+`build/android/pgo-app`, and every later app build uses it (`--no-app-profile` leaves it out).
+
+Measured on the Fold 7 over 20 seconds of the title's sea (600 game frames, `simpleperf stat --per-thread`), the
+CPU cycles the app's two busy threads spend per frame (the game thread, about 70 M, is the game module's):
+
+| App build | GX worker | Render thread |
+| --- | --- | --- |
+| Before | 51 M | 7.9 M |
+| Linked with `-Bsymbolic-functions` | 49 M | 7.5 M |
+| And trained (`--train-app`) | 47 M | 7.9 M |
+
+`libmain.so` is linked with `-Bsymbolic-functions`: its exported functions (the host's, Dawn's and SDL's C entry
+points) were called through the PLT even from within libmain.
 
 ## Install
 

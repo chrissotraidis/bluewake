@@ -234,15 +234,25 @@ class AndroidBuilder(wb.Builder):
         return module
 
     # --- 9 app: libmain.so ---------------------------------------------------
-    def build_app(self):
-        build = self.out / "app"
-        self.run("app-configure", ["cmake", "-S", ROOT / "android", "-B", build, *self.android_cmake_args(),
-                                   f"-DBLUEWAKE_ANDROID_CPU={self.args.cpu}"])
-        self.run("app-build", ["cmake", "--build", build, "--target", "main", "-j", self.args.jobs], ninja=True)
+    def build_app(self, build=None, profile_flags="", name="app"):
+        build = build or self.out / "app"
+        self.run(f"{name}-configure", ["cmake", "-S", ROOT / "android", "-B", build, *self.android_cmake_args(),
+                                       f"-DBLUEWAKE_ANDROID_CPU={self.args.cpu}",
+                                       f"-DBLUEWAKE_APP_PROFILE_FLAGS={profile_flags}"])
+        self.run(f"{name}-build", ["cmake", "--build", build, "--target", "main", "-j", self.args.jobs], ninja=True)
         lib = build / "libmain.so"
         if not lib.exists():
             die("libmain.so was not produced")
         return lib
+
+    def app_profile_flags(self):
+        """The app's compile flags for its trained profile (OUT/pgo-app), if there is one."""
+        profile = self.out / "pgo-app/app.profdata"
+        if self.args.no_app_profile or not profile.exists():
+            return ""
+        print(f"the app with its optimization profile ({profile.name})")
+        return (f"-fprofile-instr-use={profile.as_posix()} -Wno-profile-instr-unprofiled "
+                "-Wno-profile-instr-out-of-date -Wno-backend-plugin")
 
     # --- 10 package: the APK --------------------------------------------------
     def sdl_java_dir(self):
@@ -451,16 +461,54 @@ class AndroidBuilder(wb.Builder):
         print("the training APK is still installed: put the real one back with scripts/android/install.py")
         return self.hashed_profile(profile)
 
-    def device_training_run(self, run, name, mods, retraces=None):
+    # The app's own training (--train-app): libmain.so instrumented
+    # (-fprofile-instr-generate: the host, GXRuntime, Aurora and SDL; Dawn is
+    # prebuilt) with the real game module, one drawn and paced playback of the
+    # opening, then libmain.so compiled again with those counts. The module's
+    # training cannot stand in for it: headless, it never runs the GX worker's
+    # translation or the render thread, the app's busiest code (the GX worker
+    # alone is most of a core on the sea).
+    def train_app_on_device(self, module):
+        work = self.out / "pgo-app"
+        work.mkdir(parents=True, exist_ok=True)
+        profile = work / "app.profdata"
+        self.adb_exe = self.sdk / "platform-tools/adb.exe"
+        devices = subprocess.run([str(self.adb_exe), "devices"], capture_output=True, text=True).stdout
+        if self.args.device not in devices:
+            die(f"device {self.args.device} is not connected (adb devices)")
+        lib = self.build_app(self.out / "app-train", "-fprofile-instr-generate", "app-train")
+        apk = self.package(module, lib, "WindWakerRecomp-app-training.apk", "apk-app-training", provenance=False)
+        print(f"installing the app's training APK on {self.args.device}")
+        self.adb("shell", "am", "force-stop", self.app_id)
+        self.adb("install", "-r", "-g", apk, timeout=900)
+        for old in work.glob("run-*"):
+            shutil.rmtree(old, ignore_errors=True)
+        try:
+            raw = self.device_training_run(work / "run-drawn", "app-drawn", None, rendered=True)
+        finally:
+            self.adb("shell", "rm", "-f", f"{self.DEVICE_FILES}/launch.env", check=False)
+            self.adb("shell", "am", "force-stop", self.app_id, check=False)
+        self.run("app-training-merge", [self.llvm_profdata, "merge", "-o", profile, *raw])
+        stats = subprocess.run([self.llvm_profdata, "show", profile], capture_output=True, text=True).stdout
+        functions = re.search(r"Total functions: (\d+)", stats)
+        print(f"the app's optimization profile: {functions[1] if functions else '?'} functions")
+        print("the app's training APK is still installed: put the real one back with scripts/android/install.py")
+
+    def device_training_run(self, run, name, mods, retraces=None, rendered=False):
         run.mkdir(parents=True)
         remote = f"{self.DEVICE_FILES}/pgo/{name}"
         self.adb("shell", "rm", "-rf", remote)
         self.adb("shell", "mkdir", "-p", remote)
+        # The game module's training runs headless and unpaced. The app's
+        # (train_app_on_device) draws every frame at the game's own pace, with
+        # the player's settings: its counts are of the GX worker, Aurora and the
+        # render thread at work.
         env = {
             "LLVM_PROFILE_FILE": f"{remote}/%m-%p.profraw",
             "BLUEWAKE_CARD_PATH": f"{remote}/training.card", "BLUEWAKE_SRAM": f"{remote}/sram.bin",
-            "BLUEWAKE_SETTINGS": "none", "BLUEWAKE_RENDERER": "headless",
-            "BLUEWAKE_MAX_RETRACES": str(retraces or self.TRAINING_RETRACES), "BLUEWAKE_WALL_PACE": "0",
+            "BLUEWAKE_SETTINGS": "" if rendered else "none", "BLUEWAKE_RENDERER": "" if rendered else "headless",
+            "BLUEWAKE_MAX_RETRACES": str(retraces or self.TRAINING_RETRACES),
+            "BLUEWAKE_WALL_PACE": "" if rendered else "0",
             "BLUEWAKE_PLAYER_PROBE": "1", "BLUEWAKE_PAD_BUTTONS": "0x0100",
             # The player-control milestone waits on the overlap phase this
             # observation latches (as in the Windows builder's training).
@@ -477,7 +525,8 @@ class AndroidBuilder(wb.Builder):
         self.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP", check=False)
         self.adb("shell", "am", "force-stop", self.app_id)
         self.adb("shell", "am", "start", "-n", f"{self.app_id}/{ACTIVITY}", "--ez", "showWhenLocked", "true")
-        print(f"  training playback {name} on the device (headless, unpaced)", flush=True)
+        print(f"  training playback {name} on the device ({'drawn, paced' if rendered else 'headless, unpaced'})",
+              flush=True)
         start = time.monotonic()
         log_name = None
         text = ""
@@ -575,7 +624,7 @@ class AndroidBuilder(wb.Builder):
         lib = None
         if args.device and self.profile is None and not args.app_only:
             step("9/10 build the app (libmain.so), for the training APK")
-            lib = self.build_app()
+            lib = self.build_app(profile_flags=self.app_profile_flags())
             step(f"local optimization training on {args.device} (the first time: an instrumented game module, "
                  "then two headless playbacks of the opening on the device)")
             self.profile = self.train_on_device(lib)
@@ -588,9 +637,16 @@ class AndroidBuilder(wb.Builder):
             start = time.monotonic()
             module = self.compile_module()
             print(f"game module: {module} ({int(time.monotonic() - start) // 60} min)")
-        if lib is None:
+        if args.train_app:
+            if not args.device:
+                die("--train-app needs --device")
+            step(f"the app's optimization training on {args.device} (an instrumented app, then one drawn "
+                 "playback of the opening at the game's pace)")
+            self.train_app_on_device(module)
+            lib = None
+        if lib is None or args.train_app:
             step("9/10 build the app (libmain.so)")
-            lib = self.build_app()
+            lib = self.build_app(profile_flags=self.app_profile_flags())
         print(f"app: {lib}")
         step("10/10 package")
         apk = self.package(module, lib)
@@ -614,6 +670,10 @@ def main():
     parser.add_argument("--device", metavar="SERIAL",
                         help="train the optimization profile on this adb device (the phone the game is for)")
     parser.add_argument("--retrain", action="store_true", help="train again although nothing it depends on changed")
+    parser.add_argument("--train-app", action="store_true",
+                        help="also train the app (libmain.so) on --device, with a drawn playback; the profile "
+                             "(OUT/pgo-app) is then used by every app build")
+    parser.add_argument("--no-app-profile", action="store_true", help="build the app without its trained profile")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
     parser.add_argument("--source-only", action="store_true", help="stop after generating the source")

@@ -38,6 +38,12 @@
 #include <unistd.h>
 
 int bluewake_host_main(int argc, char** argv);
+// The profiling runtime's writer, in the app's own training build only
+// (scripts/android/build.py train_app_on_device: libmain.so compiled with
+// -fprofile-instr-generate); null in every other build.
+extern int __llvm_profile_write_file(void) __attribute__((weak));
+extern void __llvm_profile_reset_counters(void) __attribute__((weak));
+extern void __llvm_profile_set_filename(const char* name) __attribute__((weak));
 
 #define BW_TAG "BlueWake"
 #define MODULE_NAME "libgGZLE01_recomp.so"
@@ -282,6 +288,19 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[android] optimization profile written (%d)\n", result);
         } else {
             fprintf(stderr, "[android] LLVM_PROFILE_FILE is set but the module is not instrumented\n");
+        }
+        // The app's counts, written here rather than by the runtime's own exit
+        // handler, which would run among the static destructors; the counters
+        // are then cleared, so that handler adds nothing to the file. The
+        // runtime read LLVM_PROFILE_FILE when libmain.so loaded, before
+        // launch.env set it, so it is given the name again.
+        if (__llvm_profile_write_file != NULL) {
+            if (__llvm_profile_set_filename != NULL)
+                __llvm_profile_set_filename(getenv("LLVM_PROFILE_FILE"));
+            const int result = __llvm_profile_write_file();
+            fprintf(stderr, "[android] the app's optimization profile written (%d)\n", result);
+            if (__llvm_profile_reset_counters != NULL)
+                __llvm_profile_reset_counters();
         }
         fflush(stdout);
         fflush(stderr);
