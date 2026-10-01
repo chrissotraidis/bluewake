@@ -15,6 +15,10 @@ Ground rules for whoever implements these:
   `docs/status/DEVICE_BUILD.md`, as PR #12 does.
 - Releases stay paused (AGENTS.md). Never commit or upload discs, modules, saves or builds.
 
+Implementation progress and exact validation limits are recorded in
+[the local October 1 follow-up](status/LOCAL_STABILITY_2026-10-01.md). This review remains
+the work list; source fixes and synthetic passes do not close hardware checks.
+
 Paths starting `GXRuntime/` are inside `ref/recompcore/`.
 
 ---

@@ -34,7 +34,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 
 # RecompCore: chrissotraidis/RecompCore branch bluewake-next, which is
 # elliotttate/RecompCore's windows-release 9618e9d (chrissotraidis 2d60636 plus
-# patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0124. DolRecomp: elliotttate's copy of
+# patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0125. DolRecomp: elliotttate's copy of
 # chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
 RECOMPCORE_SHA=6699be9c9e48ec27e78730a4c1e089a71d50fdb7

@@ -16,3 +16,8 @@ https://github.com/chrissotraidis/RecompCore, branch `bluewake-next`: 9618e9d pl
 interpreter table layout under the Microsoft ABI, so Exact/LLE audio no longer calls address 0
 on Windows), with the same DolRecomp. The Builder fetches it at the commit pinned in
 `scripts/builder/profiles/bluewake.sh`; see docs/status/DEVICE_BUILD.md.
+
+Patches 0115-0125 add the ordered save, shutdown and audio fixes, opt-in display
+timing, and a render-worker identity fix reproduced with ThreadSanitizer. The current
+pin is `6699be9c9e48ec27e78730a4c1e089a71d50fdb7`. Tests and hardware limits are in
+[the local stability ledger](../../docs/status/LOCAL_STABILITY_2026-10-01.md).

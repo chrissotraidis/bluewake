@@ -28,7 +28,8 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   a unique .corrupt path only after the player chooses. Unreadable existing cards
   are never mistaken for missing cards. Loader size is bounded and short-read
   cleanup closes the stream. Truncation/bit-flip sanitizer tests pass and prove
-  rejected bytes are unchanged. Runtime patch 0118. UIKit recovery needs simulator
+  rejected bytes are unchanged. Runtime patch 0118. A follow-up also flushes and validates the staged restore,
+  using unique names and retaining both source and failed stage. UIKit recovery needs simulator
   and physical-device interaction checks; no device was accessed.
 - 1.5: flushed atomic .bak copy before live replacement, plus seven fixed UTC-day
   slots (one snapshot per day, rotated weekly). Backup failure refuses the save.
@@ -66,7 +67,8 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
 - 2.3: saved/session/launch settings are separate. Only fields explicitly changed
   in the menu/hotkeys are copied to saved preferences; launch window placement is
   the baseline, not an edit. HLE/LLE and option overrides now appear in the session
-  UI. Synthetic scale/fullscreen/LLE/Smooth Motion and option isolation test passes
+  UI. Review reproduced an option-reset persistence failure; explicit edits now
+  persist, while the session-only `none` baseline is displayed and never saved. Synthetic scale/fullscreen/LLE/Smooth Motion and option isolation test passes
   under ASan/UBSan, registered on Mac/Windows. Actual Windows UI still needs hardware.
 - 2.4: UIKit close actions serialize card close with dispatch, flush logs, then use
   _exit, bypassing static renderer destruction. Host failures now display an alert
@@ -82,7 +84,8 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   recovery, terminate/SIGABRT hooks, abort policy and startup stack guarantee.
   Allocation-free hex formatter sanitizer test passes; crash driver cross-compiles
   and links with LLVM-MinGW on Mac. Native Windows child-process null/abort/terminate
-  checks are registered with a timeout, but not yet run locally. __fastfail bypasses
+  checks pass on the native Windows CI runner (20-test run at fcb265c);
+  no local Windows game or GPU is involved. __fastfail bypasses
   in-process handlers; external WER/minidump collection remains needed for that case.
   Also moved normal log writes before console output, added PID to session names,
   checked the hotkey hook and released it/timer resolution on exit (2.7 subset).
@@ -142,3 +145,76 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   Runtime patch 0124. No QoS, cache, worker, frame-slot or quality optimization is
   made without a matched measurement. The 30 Hz game rate stays distinct from
   nominal 60 VI retraces/s and selected 30/60/120 presentation.
+
+## Additional reproduced race
+
+- 2.7 / 6: the existing five render-worker tests under ThreadSanitizer reproduce a
+  read/write race on `g_workerThreadId`. Replaced the shared ID with a thread-local
+  worker marker. The identical five tests pass with no sanitizer report, plus a
+  bounded 1,000-cycle actual-worker identity regression passes in CTest. Patch 0125.
+  This does not establish that all renderer races are fixed.
+
+## Validation and device evidence
+
+Candidate source `fcb265c`, RecompCore `6699be9c9e48ec27e78730a4c1e089a71d50fdb7`
+(patches 0115-0125), built on the M3 Max Mac. No iPad/device installation, device
+backup commands, Parallels control, public build upload or release was performed.
+
+- All **237** registered Mac CTests pass, including 41 BlueWake tests and the runtime
+  suites. Three runtime targets excluded from the default build were explicitly
+  built before the complete run. Initial missing-test executables were corrected;
+  no tests were disabled. ASan/UBSan regressions and the five worker TSAN tests pass.
+- Mac host, iOS and tvOS application targets compile/link. Executable SHA-256:
+  - Mac: `3beb82a5ff91a85702a6adb21e6aab4a4ae31b5abf299aaa70220731afe51b9e`.
+  - iOS: `3ba6667872c459b81f9c8b97abf5edaac9c3a9821671a2c3781d8875a720a89c`.
+  - tvOS: `d264a56747bcec5e2a614f056972c49c967cf16ecdc23c11f0000a5bd48cb6fa`.
+  Builds remain private. These hashes identify compilation only.
+- [Native Windows source-only CI at fcb265c](https://github.com/chrissotraidis/bluewake/actions/runs/36853138937)
+  passes host compilation/linking and all 20 regressions, including the actual-worker
+  identity test. The earlier 19-test run at 7b7490f also passed. The first run failed on
+  the new card test's missing compatibility include path; it was fixed and rerun.
+- Mac physical-machine run: current native Metal host with the known personal module
+  SHA-256 `9f3dec4ded4c7516bda6f5d9f5224f1a46af97ccbb0ccb5bb5797d3143eff0ed`
+  (ABI 3 / CPU ABI 6), HLE, mods off, Smooth Motion off, 960x720, 1x scale,
+  normal transitions, fresh isolated card/SRAM and settings disabled. Local fixtures
+  were backed up first; original saves/preferences were not used or changed.
+  At 2,400 retraces it exits normally; Opening.arc is reached at retrace 916.
+  Guest WAV is 1,278,984 frames at 32 kHz; post-sink PCM is 5,145,628 bytes.
+  Output reports 159,873 pushes, zero dropped pushes/frames, 453 starvation events
+  and 5,089 stretch events. A single UI screenshot was black and the later capture
+  timed out; correct intro pictures and audible speakers are not accepted by this
+  observation. Neither PCM nor an opening-resource milestone proves the whole intro.
+- Counter smoke run: same host/module/settings, restored Outset `sea` room 44,
+  600 retraces after state retrace 1,001, no live input. This runs while the personal
+  module compiles and other testing consumes CPU; it is **not a matched benchmark**.
+  Retrace intervals: p50/p95/p99 17.26/22.34/27.27 ms, 58.31/s, >50/>100 ms stalls 2/1.
+  Surface-present intervals: 33.30/35.19/58.16 ms, 29.67/s, stalls 5/0. Audio drops 0,
+  starvation events 175. Flush summary: 299 calls, 84,211 us total, 49,956 us max,
+  explicitly includes presentation. The game remains a 30 Hz update simulation;
+  these two interval streams do not change its update rate or prove an FPS gain.
+
+## Pending checks and deliberate deferrals
+
+- New option-enabled personal module compilation is still local and in progress.
+  Need its exact hash, export verification and two sequential Mac fresh-card runs:
+  mods off, then Better Wind Waker with only skip_intro_movie enabled. Verify the
+  actual intro/skip scene and hear output; compare guest and sink audio. Repeat on
+  each accepted output platform with the reporter's settings. No iPad use is allowed
+  during this work; iPhone/Windows/Apple TV hands-on checks remain unverified.
+- Save/reload UI, power-loss durability, two Windows processes, Apple recovery/
+  migration/Restore/Import close, Siri/call/Music and background interruption,
+  Windows HLE/LLE Restart/F11/safe-mode settings recovery, real Switch Pro/Xbox
+  navigation/swaps/hot-plug all need the named platforms/controllers. Back up saves
+  and preferences before those checks and install in place when applicable.
+- Qualified opening-bird/Outset/busy-area matched serial performance runs need a
+  quiet Mac/device, recorded thermal conditions, a verified route/state for the busy
+  area and consistent settings/module/cache state. No QoS, cache, getenv, frame-slot,
+  FIFO architecture or quality change is justified by the loaded-Mac smoke run.
+- tvOS cloud mirroring (1.6) needs Apple TV/cloud entitlement and conflict/recovery
+  design; compiling tvOS does not address purgeable Caches. Full 2.7 worker-counter/
+  failure-flag race and trace-writer review remains separate from the reproduced
+  worker-ID fix. External WER/minidumps for fast-fail, Linux CI and broader GPU TSAN
+  coverage are not claimed. These were not required to validate the ordered fixes
+  and need their own bounded regressions/platform evidence.
+- Release readiness is not established; releases stay paused. Existing broader
+  gameplay, progression, long-session and pixel-equivalence gates still apply.

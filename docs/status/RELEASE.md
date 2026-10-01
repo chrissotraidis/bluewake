@@ -99,3 +99,7 @@ All entries below are **pending for the next frozen candidate**, even where olde
 
 Once these gates pass, announce only demonstrated fixes, tested platforms/settings and known
 limits, with contributor credit. No publication, version bump or merge is implied by this checklist.
+
+The ordered save/crash/audio/control follow-up and its remaining hardware gates are
+recorded in [LOCAL_STABILITY_2026-10-01.md](LOCAL_STABILITY_2026-10-01.md).
+This does not change the release pause or establish release readiness.
