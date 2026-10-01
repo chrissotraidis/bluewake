@@ -10,6 +10,13 @@
 #ifdef _WIN32
 #include <io.h>
 #include <process.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -64,7 +71,23 @@ static inline bool bw_atomic_copy_if_missing(const char* from, const char* to) {
         ok = fwrite(buffer, 1, count, target) == count;
     if (ferror(source)) ok = false;
     if (fclose(source) != 0) ok = false;
-    if (target) ok = bw_atomic_finish(target, pending, to, ok);
+    if (target) {
+        if (ok && !bw_atomic_flush(target)) ok = false;
+        if (fclose(target) != 0) ok = false;
+        // A target can appear after stat(), before this process holds a card
+        // lock. Publish without replacement so migration cannot clobber it.
+        if (ok) {
+#ifdef _WIN32
+            if (!MoveFileExA(pending, to, MOVEFILE_WRITE_THROUGH)) {
+                DWORD error = GetLastError();
+                ok = error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS;
+            }
+#else
+            ok = link(pending, to) == 0 || errno == EEXIST;
+#endif
+        }
+        remove(pending);
+    }
     free(pending);
     return ok;
 }
