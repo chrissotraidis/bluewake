@@ -37,7 +37,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # patches/recompcore/0098-0113) plus 0114. DolRecomp: elliotttate's copy of
 # chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=789c17837f300d5a482ab7b1a3d8f7f5c73e9dc6
+RECOMPCORE_SHA=792706e53884ef70e388303551529e738014786a
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

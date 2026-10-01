@@ -94,3 +94,10 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   avoids reopening an existing stream. Mac CTest passes (2.18 s), registered on
   Windows. Runtime patch 0121. Output-disabled/enabled Windows and iOS speaker
   recovery remain unverified; dummy-driver PCM is not speaker acceptance.
+- 3.2: summary prints dropped pushes and frames, including unavailable output;
+  opt-in DOL_AUDIO_SINK_CAPTURE writes raw interleaved S16 native-endian L,R bytes
+  only after successful SDL submission, after dropping/stretching. Refuses existing
+  capture files; sample-rate changes log byte offsets. Actual dummy-sink sine test
+  proves discard and full-queue drops/counts, and verifies capture bytes/length.
+  Mac CTest passes (0.64 s). Runtime patch 0122. Captured sink input still does not
+  prove speaker playback; iOS/Windows intro guest-versus-sink comparisons are pending.
