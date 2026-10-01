@@ -584,3 +584,6 @@ set_tests_properties(bluewake_memory_card_io_test PROPERTIES TIMEOUT 15)
 add_executable(bluewake_atomic_file_test ../../tests/atomic_file_test.c)
 target_include_directories(bluewake_atomic_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${GXRUNTIME_DIR}/include)
 add_test(NAME bluewake_atomic_file_test COMMAND bluewake_atomic_file_test)
+
+add_executable(bluewake_restart_request_test ../../tests/restart_request_test.cpp)
+add_test(NAME bluewake_restart_request_test COMMAND bluewake_restart_request_test)

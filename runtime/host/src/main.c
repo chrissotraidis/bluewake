@@ -22,6 +22,7 @@
 #include "audio_dma_stereo.h"
 #include "ipl_sram.h"
 #include "card_runtime.h"
+#include "host_stop.h"
 #include "edge_intercepts.h"
 #include "game_options.h"
 #include "fast_load.h"
@@ -15392,5 +15393,5 @@ int main(int argc, char** argv) {
 #endif
     bluewake_card_runtime_close();
     cpu_free(&cpu);
-    return stop_reason ? 1 : 0;
+    return bw_host_stop_status(stop_reason);
 }

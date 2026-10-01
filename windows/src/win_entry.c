@@ -639,5 +639,7 @@ int main(int argc, char** argv) {
         snprintf(message, sizeof message, "BlueWake stopped with an error (status %d).", status);
         fatal_box(message);
     }
+    if (status == 0 && bw_settings_relaunch() != 0)
+        return 1;
     return status;
 }

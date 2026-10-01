@@ -14,6 +14,7 @@
 // open the keyboard is taken off the game's pad and the mouse camera stands
 // aside, so the menu's clicks and keys do not move Link.
 #include "win_settings.h"
+#include "restart_request.h"
 #include "atomic_file.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -96,6 +97,7 @@ Settings g_launched;  // as this session started (what a restart would change)
 std::string g_data_dir, g_path;
 std::vector<wchar_t> g_environment;  // as BlueWake was started, for Restart
 
+RestartRequest g_restart;
 bool g_menu_open;
 bool g_toggle_menu, g_toggle_fullscreen;  // from the hotkeys, done in the frame
 bool g_dirty;
@@ -353,13 +355,22 @@ void open_folder(const std::string& path) {
         ShellExecuteW(nullptr, L"open", wide, nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+void restart() {
+    if (g_dirty) save_file();
+    bool ok = g_restart.request(!g_dirty, [] {
+        SDL_Event quit{};
+        quit.type = SDL_EVENT_QUIT;
+        return SDL_PushEvent(&quit);
+    });
+    if (!ok) std::fprintf(stderr, "[windows] restart refused: settings save or quit request failed\n");
+}
+
 // Start BlueWake again, with the command line and environment it began with,
 // so the settings file decides what the new session is.
-void restart() {
-    save_file();
+bool relaunch() {
     wchar_t exe[MAX_PATH * 2];
     if (GetModuleFileNameW(nullptr, exe, MAX_PATH * 2) == 0)
-        return;
+        return false;
     std::vector<wchar_t> command(GetCommandLineW(), GetCommandLineW() + wcslen(GetCommandLineW()) + 1);
     STARTUPINFOW startup{};
     startup.cb = sizeof startup;
@@ -367,12 +378,12 @@ void restart() {
     if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_UNICODE_ENVIRONMENT,
                         g_environment.empty() ? nullptr : g_environment.data(), nullptr, &startup, &process)) {
         std::fprintf(stderr, "[windows] restart failed (error %lu)\n", GetLastError());
-        return;
+        return false;
     }
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
     std::fprintf(stderr, "[windows] restarting with the new settings\n");
-    std::exit(0);
+    return true;
 }
 
 // --- the menu ---------------------------------------------------------------
@@ -936,4 +947,8 @@ extern "C" int bw_settings_key(unsigned virtual_key, int alt) {
     default:
         return 0;
     }
+}
+
+extern "C" int bw_settings_relaunch(void) {
+    return !g_restart.take() || relaunch() ? 0 : 1;
 }

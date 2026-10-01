@@ -51,3 +51,10 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   the preserved legacy path. Synthetic copy/existing-target test passes. tvOS stays
   in Caches; 1.6 cloud storage is deferred (requires Apple TV/cloud entitlement work).
   Physical iOS migration and Files-app isolation remain unverified.
+## Crashes
+
+- 2.1: Restart saves successfully, requests SDL quit, and relaunches only after host
+  shutdown/card close. No exit from an overlay frame. Normal quit returns zero.
+  Synthetic request failure/consumption and stop-status regression passes under
+  ASan/UBSan; registered on Mac/Windows. Real Windows Restart with HLE/LLE, worker
+  teardown and subsequent save/reload remain unverified.

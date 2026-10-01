@@ -188,6 +188,10 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
 
+add_executable(bluewake_restart_request_test ${BLUEWAKE_REPO_ROOT}/tests/restart_request_test.cpp)
+add_test(NAME bluewake_restart_request_test COMMAND bluewake_restart_request_test)
+
+
 add_executable(bluewake_memory_card_io_test ${BLUEWAKE_REPO_ROOT}/tests/memory_card_io_test.c)
 target_include_directories(bluewake_memory_card_io_test PRIVATE ${GXRUNTIME_DIR}/include)
 target_compile_options(bluewake_memory_card_io_test PRIVATE -Wall -Wextra -Werror)
