@@ -256,6 +256,12 @@ target_compile_options(bluewake_atomic_copy_race_test PRIVATE ${BLUEWAKE_COMPAT_
 target_link_libraries(bluewake_atomic_copy_race_test PRIVATE bluewake_posix_compat)
 add_test(NAME bluewake_atomic_copy_race_test COMMAND bluewake_atomic_copy_race_test)
 
+add_executable(bluewake_save_state_test ${BLUEWAKE_REPO_ROOT}/tests/save_state_test.c ${BLUEWAKE_HOST_SRC}/save_state.c)
+target_include_directories(bluewake_save_state_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_COMPAT_INCLUDES})
+target_compile_options(bluewake_save_state_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+target_link_libraries(bluewake_save_state_test PRIVATE ZLIB::ZLIB bluewake_posix_compat)
+add_test(NAME bluewake_save_state_test COMMAND bluewake_save_state_test)
+
 
 add_executable(bluewake_restart_request_test ${BLUEWAKE_REPO_ROOT}/tests/restart_request_test.cpp)
 add_test(NAME bluewake_restart_request_test COMMAND bluewake_restart_request_test)

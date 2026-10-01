@@ -17,10 +17,8 @@ static void write_bytes(const char* path, const void* bytes, size_t size) {
 }
 
 int main(void) {
-    char path[] = "/tmp/bluewake-state-test-XXXXXX";
-    int fd = mkstemp(path);
-    assert(fd >= 0);
-    close(fd);
+    char path[256];
+    snprintf(path, sizeof path, "bluewake-state-test-%lu.bwstate", (unsigned long)getpid());
     uint32_t a = 42, b = 17;
     BwStateField fields[] = {{"a", &a, sizeof a}, {"b", &b, sizeof b}};
     uint8_t* blob;
@@ -79,7 +77,11 @@ int main(void) {
     assert(fseek(compressed, 0, SEEK_END) == 0);
     const long compressed_size = ftell(compressed);
     assert(compressed_size > 8);
+#ifdef _WIN32
+    assert(_chsize_s(_fileno(compressed), compressed_size - 8) == 0);
+#else
     assert(ftruncate(fileno(compressed), compressed_size - 8) == 0);
+#endif
     fclose(compressed);
     assert(!bw_state_reader_open(&reader, path));
     free(blob);

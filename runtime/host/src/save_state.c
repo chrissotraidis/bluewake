@@ -97,7 +97,7 @@ bool bw_state_writer_close(BwStateWriter* writer) {
     if (gzclose(writer->file) != Z_OK)
         ok = false;
     if (ok) {
-        FILE* file = fopen(writer->pending, "rb");
+        FILE* file = fopen(writer->pending, "r+b");
         ok = file != NULL && bw_atomic_finish(file, writer->pending, writer->path, true);
     }
     if (!ok) remove(writer->pending);

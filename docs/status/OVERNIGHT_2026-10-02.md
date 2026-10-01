@@ -34,9 +34,18 @@ passes, and the registered migration, atomic-file and launch-marker CTests all
 pass. The test is also registered in native Windows CI; its result is pending.
 Physical iOS migration and Windows runtime behavior remain unverified.
 
+### Windows save-state flush has write access
+
+The completed gzip file was reopened read-only before `_commit`; Microsoft's
+CRT calls FlushFileBuffers, which requires write access. Reopening `r+b` fixes
+the mismatch. The previously failing writable-flush-contract shim now passes
+under ASan/UBSan on the M3 Max. This is a synthetic Windows contract, not a
+native Windows execution. The complete state-container regression passes on
+Mac and is now registered in Windows CMake/CI, including compression truncation
+and preservation after a rejected second write. Native CI result is pending.
+
 ## Remaining work
 
-- Windows state writer's read-only flush handle.
 - Producer failures publishing incomplete save states.
 - Card memory/disk divergence after a post-rename sync error.
 - Apple recovery losing its prompt after interrupted/failed replacement.
