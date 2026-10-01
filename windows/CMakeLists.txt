@@ -188,6 +188,11 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
+    add_executable(bluewake_render_worker_identity_test ${BLUEWAKE_REPO_ROOT}/tests/render_worker_identity_test.cpp)
+    target_include_directories(bluewake_render_worker_identity_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib)
+    target_link_libraries(bluewake_render_worker_identity_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+    add_test(NAME bluewake_render_worker_identity_test COMMAND bluewake_render_worker_identity_test)
+    set_tests_properties(bluewake_render_worker_identity_test PROPERTIES TIMEOUT 30)
 
 add_executable(bluewake_gx_flush_metrics_test ${BLUEWAKE_REPO_ROOT}/tests/gx_flush_metrics_test.c)
 target_include_directories(bluewake_gx_flush_metrics_test PRIVATE ${BLUEWAKE_HOST_SRC})
