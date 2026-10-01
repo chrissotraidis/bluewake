@@ -64,13 +64,15 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/game_options.c
     ${BLUEWAKE_HOST_SRC}/fast_load.c
     ${BLUEWAKE_HOST_SRC}/jump_button.c
+    ${BLUEWAKE_HOST_SRC}/climb.c
     ${BLUEWAKE_HOST_SRC}/simulation_mode.c
     ${BLUEWAKE_HOST_SRC}/sprint.c
     ${BLUEWAKE_HOST_SRC}/quick_doors.c
     ${BLUEWAKE_HOST_SRC}/fps_watch.c
     ${BLUEWAKE_HOST_SRC}/draw_tags.c
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c
-    ${BLUEWAKE_HOST_SRC}/settings_menu.cpp)
+    ${BLUEWAKE_HOST_SRC}/settings_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/save_state.c)
 
 # libmain.so: the name SDL's activity loads (android/java overrides
 # getLibraries() to load only this one, with SDL3 inside).
@@ -82,7 +84,8 @@ add_library(main SHARED
 # owns SDL_main and hands over after setting the defaults.
 set_source_files_properties(${BLUEWAKE_HOST_SRC}/main.c PROPERTIES
     COMPILE_DEFINITIONS "main=bluewake_host_main")
-target_link_libraries(main PRIVATE gxruntime GXRuntime::aurora android log dl m)
+# Save states (save_state.c) are gzip files: the system's zlib, as on iOS.
+target_link_libraries(main PRIVATE gxruntime GXRuntime::aurora android log dl m z)
 if(TARGET imgui)
     target_link_libraries(main PRIVATE imgui)
 endif()
