@@ -393,12 +393,13 @@ void gameplay_tab() {
 }
 
 void apply_controller_swaps() {
-    static int previous = -2;
+    static SDL_JoystickID previous = 0;
     static bool applied = false, last_ab = false, last_xy = false;
     int index = PADGetIndexForPort(0);
+    SDL_JoystickID connection = bw_controller_connection(0);
     bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = env_on("BLUEWAKE_PAD_SWAP_XY", false);
-    if (index == previous && ab == last_ab && xy == last_xy) return;
-    previous = index; last_ab = ab; last_xy = xy;
+    if (connection == previous && ab == last_ab && xy == last_xy) return;
+    previous = connection; last_ab = ab; last_xy = xy;
     if (index < 0 || (!ab && !xy && !applied)) return;
     PADRestoreDefaultMapping(0);
     bw_apply_face_swaps(0, ab, xy);

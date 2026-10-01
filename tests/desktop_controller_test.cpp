@@ -57,6 +57,18 @@ int main() {
     assert(status[0].button & PAD_BUTTON_A); // only a new press reaches the game
     aurora::input::remove_controller(id);
     SDL_CloseJoystick(joystick); assert(SDL_DetachVirtualJoystick(id));
+    SDL_JoystickID replacement = SDL_AttachVirtualJoystick(&desc); assert(replacement && replacement != id);
+    joystick = SDL_OpenJoystick(replacement); assert(joystick);
+    assert(aurora::input::add_controller(replacement));
+    aurora::input::set_player_index(replacement, 0);
+    assert(PADGetIndexForPort(0) == 0); // Same index would miss this replacement.
+    assert(bw_controller_connection(0) == replacement && bw_controller_connection(0) != id);
+    PADRestoreDefaultMapping(0); bw_apply_face_swaps(0, true, false);
+    assert(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true));
+    SDL_UpdateJoysticks(); SDL_UpdateGamepads(); PADRead(status);
+    assert((status[0].button & (PAD_BUTTON_A | PAD_BUTTON_B)) == PAD_BUTTON_B);
+    aurora::input::remove_controller(replacement);
+    SDL_CloseJoystick(joystick); assert(SDL_DetachVirtualJoystick(replacement));
     SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
     std::filesystem::remove_all(directory);
 }

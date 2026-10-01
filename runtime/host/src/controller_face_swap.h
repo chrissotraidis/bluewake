@@ -3,6 +3,14 @@
 #include "face_button_swap.h"
 #include <dolphin/pad.h>
 #include <array>
+#include <SDL3/SDL.h>
+// SDL's attachment ID changes even when a replacement pad reuses array index 0.
+inline SDL_JoystickID bw_controller_connection(unsigned port) {
+    int index = PADGetIndexForPort(port);
+    if (index < 0) return 0;
+    SDL_Gamepad* pad = PADGetSDLGamepadForIndex(static_cast<unsigned>(index));
+    return pad ? SDL_GetGamepadID(pad) : 0;
+}
 // Call after PADRestoreDefaultMapping. Copy first: setting by target while
 // iterating the borrowed map could otherwise overwrite a source mapping.
 inline void bw_apply_face_swaps(unsigned port, bool ab, bool xy) {

@@ -82,7 +82,7 @@ bool g_dirty;
 Uint64 g_dirty_at, g_first_frame_at;
 bool g_placed;
 bool g_pad_applied;
-int g_pad_index = -2;
+SDL_JoystickID g_pad_connection = 0;
 float g_font_scale = 1.0f;  // the scale the UI font was drawn at (see load_font)
 
 const char* const kScaleNames[] = {"The window's own pixels", "1x (640x480)", "2x (1280x960)",
@@ -781,9 +781,9 @@ void frame(void*) {
     // second whether the one on port 0 changed.
     static unsigned frames;
     if ((++frames % 30u) == 0u) {
-        const int index = PADGetIndexForPort(0);
-        if (index != g_pad_index) {
-            g_pad_index = index;
+        const SDL_JoystickID connection = bw_controller_connection(0);
+        if (connection != g_pad_connection) {
+            g_pad_connection = connection;
             apply_controller();
         }
     }
