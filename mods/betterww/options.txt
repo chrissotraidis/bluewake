@@ -135,8 +135,8 @@ site 0x8014EF28 no_song_replays insn 0x60000000 # bge: waiting for the animation
 hook 0x80145648 swing_turn before 1              # lfs f0, -0x5BA8(r2) in procRopeSwing
 
 # Skip the opening movie.
-site 0x80232C78 skip_intro_movie insn 0x60000000
-site 0x80232C88 skip_intro_movie insn 0x60000000
+site 0x80232C78 skip_intro_movie insn 0x60000000 # original 0x48000F6D: bl 0x80233BE4
+site 0x80232C88 skip_intro_movie insn 0x60000000 # original 0x4082000C: bne 0x80232C94
 
 # Faster Ballad of Gales: no wait for KoRL to rise, and no warp music.
 site d_a_ship.rel+0x7A10 faster_ballad insn 0x60000000 # ble: KoRL's height

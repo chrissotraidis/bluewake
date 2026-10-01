@@ -107,3 +107,12 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   resets playing, and resumes after prebuffering. Extended actual dummy-sink pause/
   resume test passes (0.58 s). Runtime patch 0123. Siri/call/Music and backgrounded
   interruption checks remain unverified on iOS; no iPad access.
+- 3.4 source check: personal USA DOL SHA-256
+  `680e347ef8c77739165908cc6a375e5af714f354494daca17a1c34e53c275bec`:
+  `0x80232C78 = 0x48000F6D` (`bl 0x80233BE4`),
+  `0x80232C88 = 0x4082000C` (`bne 0x80232C94`). Recorded originals in the
+  option comments; both NOP replacements match Better Wind Waker commit 4501481's
+  [skipintro assembly](https://github.com/WideBoner/betterww/blob/4501481/asm/patches/skipintro.asm)
+  and patch diff. The 15-option specification still parses and skip remains off.
+  New personal option-module compile resumed locally with two jobs; speaker/scene
+  checks with mods off and skip on remain pending. No DOL/module/capture is published.
