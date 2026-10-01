@@ -232,6 +232,8 @@ asynchronous_or_direct:
 }
 
 bool bluewake_card_runtime_dispatch(CPUState* cpu) {
+    if (!bluewake_card_runtime_intercepts(cpu->pc))
+        return false;
     pthread_mutex_lock(&g_card_mutex);
     bool handled;
     if (g_card_suspended && bluewake_card_runtime_intercepts(cpu->pc)) {

@@ -188,6 +188,12 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
+    add_executable(bluewake_card_dispatch_lock_test ${BLUEWAKE_REPO_ROOT}/tests/card_dispatch_lock_test.c)
+    target_include_directories(bluewake_card_dispatch_lock_test PRIVATE ${BLUEWAKE_HOST_SRC} ${GXRUNTIME_DIR}/include ${BLUEWAKE_COMPAT_INCLUDES})
+    target_compile_options(bluewake_card_dispatch_lock_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+    target_link_libraries(bluewake_card_dispatch_lock_test PRIVATE gxruntime bluewake_posix_compat)
+    set_target_properties(bluewake_card_dispatch_lock_test PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME bluewake_card_dispatch_lock_test COMMAND bluewake_card_dispatch_lock_test)
     add_executable(bluewake_render_worker_identity_test ${BLUEWAKE_REPO_ROOT}/tests/render_worker_identity_test.cpp)
     target_include_directories(bluewake_render_worker_identity_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib)
     target_link_libraries(bluewake_render_worker_identity_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
