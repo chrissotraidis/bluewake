@@ -127,6 +127,11 @@ def main():
             run("push", iso, f"{remote}/game/GZLE01.iso")
         else:
             print("  the disc image is already there")
+        # The folders adb makes in the app's storage are shell's (group
+        # ext_data_rw, 2770). On the Fold 7 (Android 16) a newly installed app
+        # could not search them and stopped with "the prepared game executable
+        # is missing"; the files themselves were readable.
+        run("shell", f"chmod 2775 '{remote}/game' '{remote}/game/rels'")
 
     if args.env:
         lines = [e for e in args.env if e]
