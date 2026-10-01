@@ -80,9 +80,24 @@ cards with no module. The runtime commit was pushed to the maintainer's
 bluewake-next branch, exported, and all three required pins updated.
 Forced-reboot durability and real in-game error handling remain unverified.
 
+### Failed Apple recovery keeps the canonical card present
+
+Backup recovery now copies and flushes the damaged original to its unique
+preserved path, retaining the canonical file until atomic replacement succeeds.
+Only the player's explicit new-card choice moves the canonical file aside.
+Previously failed replacement left the canonical path missing, so the next
+launch skipped recovery and created an empty card.
+
+The regression compiles the actual Objective-C replacement method and startup
+guard with Foundation on the M3 Max, mocking only the failure alert. It fails
+against the old method. With ASan/UBSan and CTest it verifies byte-identical
+preservation, the next-launch recovery condition after injected rename failure,
+successful backup restore, and an explicit new-card choice. No game module is
+used. UIKit presentation, app interruption/termination and physical-device
+recovery remain unverified; this is a filesystem/control-flow regression.
+
 ## Remaining work
 
-- Apple recovery losing its prompt after interrupted/failed replacement.
 - Paused full audio queue blocking output recovery.
 - Matched scene/device frame-time and audio-drop measurements, then supported fixes.
 - Build-time/resource measurements and safe improvements.

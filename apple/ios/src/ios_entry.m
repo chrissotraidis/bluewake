@@ -190,9 +190,16 @@ static void bw_start_session_log(NSString* data) {
         return;
     }
     NSString* preserved = [self.card stringByAppendingFormat:@".corrupt-%@", NSUUID.UUID.UUIDString];
-    if ([fm fileExistsAtPath:self.card] && ![fm moveItemAtPath:self.card toPath:preserved error:&error]) {
-        [self failure:error.localizedDescription];
-        return;
+    if ([fm fileExistsAtPath:self.card]) {
+        // A backup replaces the canonical path atomically. Keep that path
+        // present until publication, so an interrupted restore still offers
+        // recovery on the next launch. Only an explicit new-card choice moves it.
+        BOOL kept = backup ? [fm copyItemAtPath:self.card toPath:preserved error:&error]
+                           : [fm moveItemAtPath:self.card toPath:preserved error:&error];
+        if (!kept || (backup && !bw_atomic_flush_path(preserved.fileSystemRepresentation))) {
+            [self failure:error.localizedDescription ?: @"Your original card could not be preserved."];
+            return;
+        }
     }
     if (backup && rename(staged.fileSystemRepresentation, self.card.fileSystemRepresentation) != 0) {
         // The original remains at the unique preserved path; never remove it.

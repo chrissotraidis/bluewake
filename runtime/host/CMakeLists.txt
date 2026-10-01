@@ -183,6 +183,31 @@ set(BLUEWAKE_HOST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 include("${BLUEWAKE_REPO_ROOT}/cmake/host_state_save_test.cmake")
 target_link_libraries(bluewake_host_state_save_failure_test PRIVATE z)
 
+if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    enable_language(OBJC)
+    set(_recovery_source "${BLUEWAKE_REPO_ROOT}/apple/ios/src/ios_entry.m")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_recovery_source}")
+    file(READ "${_recovery_source}" _recovery)
+    string(FIND "${_recovery}" "- (void)replaceFrom:" _replace_start)
+    string(FIND "${_recovery}" "- (void)failure:" _replace_end)
+    math(EXPR _replace_length "${_replace_end} - ${_replace_start}")
+    string(SUBSTRING "${_recovery}" ${_replace_start} ${_replace_length} _replace)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/card_recovery_under_test.inc" "${_replace}")
+    string(FIND "${_recovery}" "static void bw_recover_card(" _guard_start)
+    string(FIND "${_recovery}" "    BWCardRecovery* controller =" _guard_end)
+    math(EXPR _guard_length "${_guard_end} - ${_guard_start}")
+    string(SUBSTRING "${_recovery}" ${_guard_start} ${_guard_length} _guard)
+    string(REPLACE "static void bw_recover_card(" "static bool recovery_offered(" _guard "${_guard}")
+    string(REPLACE "return;" "return false;" _guard "${_guard}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/card_recovery_guard_under_test.inc" "${_guard}return true;\n}\n")
+    add_executable(bluewake_card_recovery_test ../../tests/card_recovery_test.m)
+    target_include_directories(bluewake_card_recovery_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} ${GXRUNTIME_DIR}/include)
+    target_compile_options(bluewake_card_recovery_test PRIVATE -fobjc-arc)
+    target_link_libraries(bluewake_card_recovery_test PRIVATE gxruntime "-framework Foundation")
+    add_test(NAME bluewake_card_recovery_test COMMAND bluewake_card_recovery_test)
+endif()
+
 add_executable(bluewake_interrupt_sources_test
     ../../tests/interrupt_sources_test.c
     src/cycle_domain.c
