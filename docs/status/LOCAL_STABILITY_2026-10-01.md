@@ -20,7 +20,11 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
 - 1.3: nonblocking session lock (flock/LockFileEx), retained lock-file inode,
   process-specific temporary file. The sanitizer regression rejects a second handle,
   then reopens after close. Restore/import now suspends card dispatch under a mutex,
-  waiting for in-flight writes before replacement; failure resumes dispatch. Runtime
+  waiting for in-flight writes before replacement; failure resumes dispatch. A lock-count
+  regression checks 10,000 ordinary guest dispatches take no card lock, both closed-card
+  SDK probe contracts return to the guest, and suspended writes return BUSY. The first
+  expectation incorrectly treated a handled SDK probe as unhandled, then as a result-code
+  variant; corrected to check boolean CARDProbe and result-code CARDProbeEx. Runtime
   patch 0117. iOS concurrency and Windows two-process behavior need platform checks.
 - 1.4: read-only dol_card_validate uses the complete loader and its checksums;
   restore/import reject invalid replacements and retain them. Startup recovery on
@@ -117,13 +121,16 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   option comments; both NOP replacements match Better Wind Waker commit 4501481's
   [skipintro assembly](https://github.com/WideBoner/betterww/blob/4501481/asm/patches/skipintro.asm)
   and patch diff. The 15-option specification still parses and skip remains off.
-  New personal option-module compile resumed locally with two jobs; speaker/scene
-  checks with mods off and skip on remain pending. No DOL/module/capture is published.
+  The completed private option module was then checked in sequential native Metal
+  runs, mods off then only skip on, as recorded below. Speaker checks remain
+  unverified. No DOL/module/capture is published.
 ## Controls
 
 - 4.1: Mac/Windows Swap A/B and X/Y settings apply to each controller's restored
   default targets, preserving its native/NSO layout. Settings persist and reapply
-  on port changes. Shared pure-C regression passes exhaustive 16-bit combinations,
+  on port or SDL attachment-ID changes, including a replacement at the same port index.
+  Actual SDL virtual-controller disconnect/reconnect at port zero verifies a new ID
+  and reapplies the South-to-B swap. Shared pure-C regression passes exhaustive 16-bit combinations,
   involution/non-face preservation and three default orders under ASan/UBSan;
   registered in both CMake files and Windows CI. Real Switch Pro/Xbox/hot-plug UI
   acceptance remains unverified; no controller hardware has been assumed.
@@ -156,24 +163,28 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
 
 ## Validation and device evidence
 
-Candidate source `fcb265c`, RecompCore `6699be9c9e48ec27e78730a4c1e089a71d50fdb7`
+Candidate source `3d7b5a0`, RecompCore `6699be9c9e48ec27e78730a4c1e089a71d50fdb7`
 (patches 0115-0125), built on the M3 Max Mac. No iPad/device installation, device
 backup commands, Parallels control, public build upload or release was performed.
 
-- All **237** registered Mac CTests pass, including 41 BlueWake tests and the runtime
+- All **238** registered Mac CTests pass, including 42 BlueWake tests and the runtime
   suites. Three runtime targets excluded from the default build were explicitly
   built before the complete run. Initial missing-test executables were corrected;
   no tests were disabled. ASan/UBSan regressions and the five worker TSAN tests pass.
 - Mac host, iOS and tvOS application targets compile/link. Executable SHA-256:
-  - Mac: `3beb82a5ff91a85702a6adb21e6aab4a4ae31b5abf299aaa70220731afe51b9e`.
-  - iOS: `3ba6667872c459b81f9c8b97abf5edaac9c3a9821671a2c3781d8875a720a89c`.
-  - tvOS: `d264a56747bcec5e2a614f056972c49c967cf16ecdc23c11f0000a5bd48cb6fa`.
+  - Mac: `f4f377b4478975b90902d98e3c3e27ffc5531f68096e5492fd2f5d51d5a51993`.
+  - iOS: `d1461c63bba43c03717a6a93beb2aac119c28a60307e0c9eff0a590c4bc138ae`.
+  - tvOS: `e60ed9f97c0f20a0ddd084bdc918a8ab492fd251a93c59b817cfb2c6c3576bf1`.
   Builds remain private. These hashes identify compilation only.
-- [Native Windows source-only CI at fcb265c](https://github.com/chrissotraidis/bluewake/actions/runs/36853138937)
-  passes host compilation/linking and all 20 regressions, including the actual-worker
-  identity test. The earlier 19-test run at 7b7490f also passed. The first run failed on
-  the new card test's missing compatibility include path; it was fixed and rerun.
-- Mac physical-machine run: current native Metal host with the known personal module
+- [Native Windows source-only CI at 3d7b5a0](https://github.com/chrissotraidis/bluewake/actions/runs/36859176055)
+  passes host compilation/linking and all **21** regressions, including the actual-worker,
+  card-dispatch lock and same-port replacement-controller checks. Earlier source-only
+  runs at fcb265c/c0adef9 passed 20 tests. The first card test missed a compatibility
+  include path; the first dispatch-lock test expected the wrong SDK probe contract.
+  Both failures were corrected and the complete target list passed; no tests were disabled.
+- Earlier Mac physical-machine run: native Metal host at `fcb265c`, executable
+  `3beb82a5ff91a85702a6adb21e6aab4a4ae31b5abf299aaa70220731afe51b9e`,
+  with the known personal module
   SHA-256 `9f3dec4ded4c7516bda6f5d9f5224f1a46af97ccbb0ccb5bb5797d3143eff0ed`
   (ABI 3 / CPU ABI 6), HLE, mods off, Smooth Motion off, 960x720, 1x scale,
   normal transitions, fresh isolated card/SRAM and settings disabled. Local fixtures
@@ -205,14 +216,50 @@ backup commands, Parallels control, public build upload or release was performed
   Settings remain disabled, no player card/preferences are edited, and the bounded
   run exits normally. Menu redraws near 120/s are UI redraws, not game updates.
 
+## Sequential option-module intro checks on the physical Mac
+
+Source `3d7b5a0`, runtime `6699be9`, temporary developer-tracing host executable
+SHA-256 `d19f802f55a7f8fb680df813a7145ba884880f69ab4ab28c53410140d18da679`.
+The private option-enabled module SHA-256 is
+`1fe3e36cb1c589263877fe0b2c8a332d09a9ee8f8e6093839726f96a7f794e83`;
+its three option-control exports and 15-option count were verified locally.
+Both runs use this exact module, HLE/Metal, 960x720, 1x scale, Smooth Motion off,
+normal transitions, wall pacing, fresh isolated card/SRAM, disabled saved preferences,
+and `BLUEWAKE_TRACE_BGM_STREAM=1` with developer tracing compiled on.
+The normal host was rebuilt afterward with tracing OFF.
+
+| Check | Mods off (`intro-hle-dgkWuw`) | Better Wind Waker, only skip_intro_movie on (`intro-hle-NQE5F6`) |
+| --- | --- | --- |
+| Options log | none | skip_intro_movie |
+| Native UI observation | Two different opening storyboard pages render | Link renders in the Outset opening cutscene |
+| Scene trace | Opening requested at 916, completes at 14,002, play scene at 14,062 | Opening requested at 916, play scene at 1,043; story-completion marker is bypassed |
+| BGM stream trace | 1tale.afc ready at 1,009, play at 1,110, state 4 at 1,111; handle clears at 14,052 after the opening | No intro-stream prepare/play event; no premature stop of an already-playing intro stream was observed |
+| Normal bounded exit | 15,000 retraces, 11,339,463 guest blocks | 5,000 retraces, 3,812,700 guest blocks |
+| Guest capture | 7,998,984 stereo frames, 32 kHz | 2,665,648 stereo frames, 32 kHz |
+| Actual SDL-submitted sink capture | 32,208,056 bytes | 11,029,336 bytes, 5,049,957 nonzero S16 samples |
+| Audio pushes / dropped pushes / dropped frames | 999,873 / 0 / 0 | 333,206 / 0 / 0 |
+| Starvation / stretch events | 370 / 44,337 | 263 / 62,675 |
+
+For mods off, the same 30-32 second comparison against private decoded 1tale.afc
+identifies the expected track in guest PCM (stereo/mono 0.999997/0.999998) and
+SDL-submitted sink PCM (0.985071/0.985065), with independent alignments and stretching.
+With skip on, the sampled window does not identify that intro track (absolute best
+correlation below 0.056); the trace never prepares/plays it and the scene has already
+advanced. Other PCM still reaches SDL. This verifies the bounded Mac skip path and
+sampled opening pictures, not audible speakers, pixel equivalence, controller play,
+long-session stability or the affected reporter's platform/settings. The two runs
+have different stop limits and are not performance comparisons. A screenshot request
+at the end of the mods-off run timed out; play-scene entry there is log evidence.
+The original fixture and backup hashes were read back unchanged; captures, module,
+app and cards remain private ignored build files. No iPad was accessed.
+
 ## Pending checks and deliberate deferrals
 
-- New option-enabled personal module compilation is still local and in progress.
-  Need its exact hash, export verification and two sequential Mac fresh-card runs:
-  mods off, then Better Wind Waker with only skip_intro_movie enabled. Verify the
-  actual intro/skip scene and hear output; compare guest and sink audio. Repeat on
-  each accepted output platform with the reporter's settings. No iPad use is allowed
-  during this work; iPhone/Windows/Apple TV hands-on checks remain unverified.
+- The sequential option-module Mac checks above are complete within their stated
+  bounds. Hear the intro through real speakers and verify clean interruption/device
+  recovery on each accepted platform with the reporter's exact settings; compare
+  guest and sink audio there. No iPad use is allowed during this work;
+  iPhone/Windows/Apple TV hands-on checks remain unverified.
 - Save/reload UI, power-loss durability, two Windows processes, Apple recovery/
   migration/Restore/Import close, Siri/call/Music and background interruption,
   Windows HLE/LLE Restart/F11/safe-mode settings recovery, real Switch Pro/Xbox
