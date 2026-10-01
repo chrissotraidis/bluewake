@@ -271,7 +271,7 @@ void display_tab() {
     int smooth = !env_on("DOL_AURORA_FRAME_INTERP", false)                      ? 0
                  : std::atoi(env("DOL_AURORA_FRAME_INTERP_STEPS", "1").c_str()) >= 3 ? 2
                                                                                     : 1;
-    if (combo("Smooth Motion", &smooth, kSmooth, 3)) {
+    if (combo("Smooth Motion (experimental)", &smooth, kSmooth, 3)) {
         set_env("DOL_AURORA_FRAME_INTERP", smooth != 0 ? "1" : "0");
         set_env("DOL_AURORA_FRAME_INTERP_STEPS", smooth == 2 ? "3" : "1");
         aurora_set_frame_interp_steps(smooth == 2 ? 3 : 1);

@@ -110,7 +110,7 @@ Command-line options (`BlueWake.exe --help`):
 | --- | --- |
 | `--widescreen` | 16:9: the widescreen mod (a wider camera, culling and HUD) with a 16:9 picture |
 | `--aspect 16:10` | 16:10 instead (`4:3` is the game's own) |
-| `--smooth` | Smooth Motion: 60 FPS, the renderer drawing a blended frame between each of the game's 30 |
+| `--smooth` | Smooth Motion (experimental, off by default): 60 FPS, the renderer drawing a blended frame between each of the game's 30 |
 | `--betterww` | Better Wind Waker's settings at their defaults (Swift Sail, instant text, faster climbing...) |
 | `--options LIST` | Change them: `name,-name,...`, or `none,name,...` (names in `mods/betterww/options.txt`) |
 | `--fullscreen` | Start in fullscreen |

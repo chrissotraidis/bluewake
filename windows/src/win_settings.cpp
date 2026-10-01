@@ -70,7 +70,7 @@ struct Settings {
     int window_x = INT_MIN, window_y = INT_MIN;
     int render_scale = 0;  // 0: the window's own pixels; 1-4: x 480 lines
     int anisotropy = 1;    // 1: the game's own filtering; 2-16 forced
-    bool smooth_motion = true;
+    bool smooth_motion = false;  // experimental: off unless the player turns it on
     bool show_fps = false;
     bool pause_unfocused = false;
     // Controls: apply at once.
@@ -397,11 +397,12 @@ void tab_display(SDL_Window* w) {
     bool full = w != nullptr && is_fullscreen(w);
     if (ImGui::Checkbox("Fullscreen   (F11 or Alt+Enter)", &full))
         set_fullscreen(w, full);
-    if (ImGui::Checkbox("Smooth Motion: 60 FPS   (F10)", &d.smooth_motion)) {
+    if (ImGui::Checkbox("Smooth Motion: 60 FPS (experimental)   (F10)", &d.smooth_motion)) {
         aurora_set_frame_interpolation(d.smooth_motion);
         changed();
     }
     ImGui::TextDisabled("    The renderer draws a blended frame between each of the game's 30.");
+    ImGui::TextDisabled("    The game itself still runs at 30. Experimental: off by default.");
     if (ImGui::Checkbox("Show the frame rate   (F9)", &d.show_fps)) {
         aurora_set_fps_overlay(d.show_fps);
         changed();

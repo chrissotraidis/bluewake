@@ -150,9 +150,9 @@ Open **⋯ › Mods**. Each mod applies the next time BlueWake starts and never 
 Code mods cannot be applied to a statically recompiled game at runtime, so they are translated and built
 into the app. Details are in [docs/MODS.md](docs/MODS.md).
 
-**⋯ › Display › Smooth Motion** draws in-between frames at 60 FPS, or 120 FPS on a ProMotion
-screen. The game keeps its original 30 updates per second. Off is the default; use it if a busy
-scene slows down. **⋯ › Gameplay** adds optional Jump & Sprint, Fast Transitions and Quick Doors.
+**⋯ › Display › Smooth Motion (Experimental)** draws in-between frames at 60 FPS, or 120 FPS on a
+ProMotion screen. The game keeps its original 30 updates per second; only the picture is blended.
+It is experimental and off by default on every platform; turn it off if a busy scene slows down. **⋯ › Gameplay** adds optional Jump & Sprint, Fast Transitions and Quick Doors.
 These apply at the next launch and start off. Jump and Run appear as editable touch buttons when
 movement extras are enabled; keyboards use Space and Shift, and controllers use the left bumper
 and left-stick click. Jump uses the game's ledge jump and respects its movement restrictions.

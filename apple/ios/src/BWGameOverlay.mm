@@ -504,7 +504,7 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
         smoothAction(@"Off (Original 30 FPS)", 0), smoothAction(@"60 FPS", 1), nil];
     if (self.window.windowScene.screen.maximumFramesPerSecond >= 120 || smooth == 3)
         [smoothChoices addObject:smoothAction(@"120 FPS (ProMotion)", 3)];
-    UIMenu* smoothMotion = [UIMenu menuWithTitle:@"Smooth Motion" image:[UIImage systemImageNamed:@"wind"]
+    UIMenu* smoothMotion = [UIMenu menuWithTitle:@"Smooth Motion (Experimental)" image:[UIImage systemImageNamed:@"wind"]
                                     identifier:nil options:0 children:smoothChoices];
     UIMenu* displayMenu = [UIMenu menuWithTitle:@"Display" image:[UIImage systemImageNamed:@"display"]
                                      identifier:nil options:0
