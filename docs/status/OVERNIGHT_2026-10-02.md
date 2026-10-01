@@ -186,6 +186,41 @@ smaller launch environment is the next discriminating experiment. The migration
 created the Application Support card while retaining the Documents card; their
 hashes are being checked. No player save deletion or preference reset was used.
 
+## Renderer shared-field races
+
+Runtime patch 0129 uses relaxed atomic accesses for the frontend failure flag
+and submitted/rejected counters. The normal recording mutex continues to protect
+frontend structures; the flag and counters are independent status/diagnostics.
+The regression links the actual renderer globals and makes concurrent reads and
+writes. ThreadSanitizer identifies data races in all three globals against runtime
+`10ae01a8`. The same instrumented probe passes against the candidate with no TSAN
+reports, and its normal CTest passes. The iOS target compiles. This is bounded
+shared-field evidence, not a whole-GPU TSAN pass or an FPS improvement. Native
+Windows registration and broader renderer/gameplay validation remain pending.
+The normal Mac CTest target now enables ThreadSanitizer so reverting a field to
+plain shared storage fails the regression. All 243 registered tests passed after
+rebuilding every Mac target (18.84 seconds under background compilation).
+Mac/iOS executable hashes before signing are respectively
+`44658eb358076bbb85cac23901e6cc14debb928b0881823ddf2762dcd0b0c46d` and
+`77b902d669eb2a5af5a84d8888489de167f6daee538350e68169594a2bf80e42`.
+
+The initial devicectl process filter using the displayed “Executable Path”
+column returned an empty result despite a live process. Subsequent checks use
+`--search BlueWake` and inspect the actual executable/PID. A console launch
+connection error does not mean the app stopped. Default-settings runs are
+explicitly stopped, and the player card was read back intact: the migrated
+Application Support card hash matches the preserved Documents card exactly.
+
+A smaller restored-Outset environment worked. Native observation confirms Link
+on the bridge to the house. The longer run restored at retrace 1001 and stopped
+normally at 4600. In retraces 1300–4500: VI p50/p95/p99 16.69/19.80/20.36 ms,
+59.94/s, no stalls above 50 or 100 ms. In presents 150–1750: display
+33.36/34.58/35.10 ms, 29.94/s, no stalls above 50 or 100 ms. Thermal state
+remained nominal; audio drops were 0, starvation/stretch 64/3084. This stationary
+bridge view is not the required busy-area or sustained-session gate. A repeat
+console launch lost its session environment, so it is rejected and a no-console
+launch with prefixed environment variables is the next changed experiment.
+
 ## Remaining work
 
 - Matched scene/device frame-time and audio-drop measurements, then supported fixes.

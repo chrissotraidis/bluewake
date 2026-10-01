@@ -670,6 +670,18 @@ set_tests_properties(bluewake_render_worker_identity_test PROPERTIES TIMEOUT 30)
 
 include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
 
+add_executable(bluewake_renderer_shared_flags_test ../../tests/renderer_shared_flags_test.cpp)
+target_compile_definitions(bluewake_renderer_shared_flags_test PRIVATE GXRUNTIME_HAS_AURORA_RECOMP=1)
+target_include_directories(bluewake_renderer_shared_flags_test PRIVATE ${GXRUNTIME_DIR}/backends/aurora ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_renderer_shared_flags_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_renderer_shared_flags_test COMMAND bluewake_renderer_shared_flags_test)
+set_tests_properties(bluewake_renderer_shared_flags_test PROPERTIES TIMEOUT 15)
+# Keep the shared-field race regression meaningful in normal Mac CTest runs.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(bluewake_renderer_shared_flags_test PRIVATE -fsanitize=thread)
+    target_link_options(bluewake_renderer_shared_flags_test PRIVATE -fsanitize=thread)
+endif()
+
 add_executable(bluewake_card_dispatch_lock_test ../../tests/card_dispatch_lock_test.c)
 target_include_directories(bluewake_card_dispatch_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${GXRUNTIME_DIR}/include)
 target_link_libraries(bluewake_card_dispatch_lock_test PRIVATE gxruntime)

@@ -202,6 +202,13 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
 
     include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
 
+    add_executable(bluewake_renderer_shared_flags_test ${BLUEWAKE_REPO_ROOT}/tests/renderer_shared_flags_test.cpp)
+    target_compile_definitions(bluewake_renderer_shared_flags_test PRIVATE GXRUNTIME_HAS_AURORA_RECOMP=1)
+    target_include_directories(bluewake_renderer_shared_flags_test PRIVATE ${GXRUNTIME_DIR}/backends/aurora ${GXRUNTIME_DIR}/graphics/aurora/lib)
+    target_link_libraries(bluewake_renderer_shared_flags_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+    add_test(NAME bluewake_renderer_shared_flags_test COMMAND bluewake_renderer_shared_flags_test)
+    set_tests_properties(bluewake_renderer_shared_flags_test PROPERTIES TIMEOUT 15)
+
 add_executable(bluewake_gx_flush_metrics_test ${BLUEWAKE_REPO_ROOT}/tests/gx_flush_metrics_test.c)
 target_include_directories(bluewake_gx_flush_metrics_test PRIVATE ${BLUEWAKE_HOST_SRC})
 add_test(NAME bluewake_gx_flush_metrics_test COMMAND bluewake_gx_flush_metrics_test)
