@@ -604,3 +604,6 @@ add_executable(bluewake_pipeline_shutdown_test ${GXRUNTIME_DIR}/graphics/aurora/
 target_link_libraries(bluewake_pipeline_shutdown_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
 add_test(NAME bluewake_pipeline_shutdown_test COMMAND bluewake_pipeline_shutdown_test)
 set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)
+
+add_executable(bluewake_crash_text_test ../../tests/crash_text_test.c)
+add_test(NAME bluewake_crash_text_test COMMAND bluewake_crash_text_test)

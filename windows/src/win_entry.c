@@ -41,6 +41,7 @@
 #include <aurora/aurora.h>
 
 #include "win_settings.h"
+#include "win_crash.h"
 #include "launch_marker.h"
 
 int bluewake_host_main(int argc, char** argv);
@@ -110,10 +111,6 @@ static unsigned __stdcall log_pump(void* arg) {
         const int n = _read(read_fd, buffer, sizeof buffer);
         if (n <= 0)
             break;
-        if (g_console != INVALID_HANDLE_VALUE) {
-            DWORD written;
-            WriteFile(g_console, buffer, (DWORD)n, &written, NULL);
-        }
         for (int i = 0; i < n; i++) {
             if (line_len < sizeof line - 1)
                 line[line_len++] = buffer[i];
@@ -127,6 +124,11 @@ static unsigned __stdcall log_pump(void* arg) {
             fflush(g_log_file);
             line_len = 0;
         }
+        if (g_console != INVALID_HANDLE_VALUE) {
+            DWORD written;
+            WriteFile(g_console, buffer, (DWORD)n, &written, NULL);
+        }
+
     }
     return 0;
 }
@@ -193,7 +195,9 @@ static void start_session_log(void) {
     struct tm local;
     localtime_s(&local, &now);
     char name[64];
-    strftime(name, sizeof name, "session-%Y%m%d-%H%M%S.log", &local);
+    char stamp[48];
+    strftime(stamp, sizeof stamp, "session-%Y%m%d-%H%M%S", &local);
+    snprintf(name, sizeof name, "%s-%lu.log", stamp, GetCurrentProcessId());
     snprintf(g_log_path, sizeof g_log_path, "%s%s", logs, name);
     g_log_file = fopen(g_log_path, "w");
     int fds[2];
@@ -393,36 +397,6 @@ static void start_profile(void) {
     fprintf(stderr, "[profile] sampling the game thread into %s\n", g_profile_path);
 }
 
-// A crash leaves its exception, address and module in the session log, so a
-// bug report can say where it happened. Windows then ends the process as usual.
-static LONG WINAPI report_crash(EXCEPTION_POINTERS* info) {
-    const EXCEPTION_RECORD* record = info->ExceptionRecord;
-    const void* address = record->ExceptionAddress;
-    HMODULE module = NULL;
-    char name[MAX_PATH] = "?";
-    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           (LPCSTR)address, &module)) {
-        GetModuleFileNameA(module, name, sizeof name);
-        const char* base = strrchr(name, '\\');
-        if (base != NULL)
-            memmove(name, base + 1, strlen(base));
-    }
-    fprintf(stderr, "[crash] exception 0x%08lX at %p (%s+0x%llx)", (unsigned long)record->ExceptionCode,
-            address, name,
-            (unsigned long long)((const char*)address - (const char*)module));
-    if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2)
-        fprintf(stderr, ", %s address 0x%llx",
-                record->ExceptionInformation[0] == 1 ? "writing" : "reading",
-                (unsigned long long)record->ExceptionInformation[1]);
-    fprintf(stderr, "\n");
-    fflush(stderr);
-    // Give the log pump a moment to write the line before the process ends.
-    Sleep(250);
-    fatal_box("BlueWake crashed. The session log records where.");
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
 // Desktop hotkeys: F11 toggles fullscreen (Return, the other half of the usual
 // Alt+Return, is the game's START), F10 Smooth Motion and F9 the frame rate. A keyboard
 // hook on the game thread, which pumps the window's messages, sees them before
@@ -464,6 +438,8 @@ static void usage(void) {
             "  --fps              show the frame rate\n"
             "  --stretch          fill the window instead of keeping the game's aspect\n"
             "  --no-mouse-camera  keep the mouse out of the camera\n"
+            "  --safe-mode        Recover startup with HLE audio and mods off\n"
+            "  --hle-audio        Fast audio for this session\n"
             "  --lle-audio        run the DSP's own microcode instead of the HLE ucode\n"
             "  --mods LIST        mods compiled into the module, by name\n"
             "  --disc FILE        the disc image to read (default game\\GZLE01.iso)\n"
@@ -625,7 +601,7 @@ int main(int argc, char** argv) {
 
     fprintf(stderr, "[windows] app=%s data=%s module=%s disc=%s\n", g_exe_dir, g_data_dir, module,
             getenv("BLUEWAKE_DISC"));
-    SetUnhandledExceptionFilter(report_crash);
+    bw_crash_install(g_data_dir);
     // 1 ms timer resolution: Aurora paces each frame's start with short
     // std::this_thread::sleep_for waits, which the C++ library turns into
     // Sleep(1), and Windows' default tick would stretch each to 15.6 ms.
@@ -633,6 +609,7 @@ int main(int argc, char** argv) {
     // The name the volume mixer shows for the game's audio.
     SDL_SetAppMetadata("BlueWake", "0.1", "dev.bluewake.BlueWake");
     g_hotkey_hook = SetWindowsHookExW(WH_KEYBOARD, hotkey_hook, NULL, GetCurrentThreadId());
+    if (!g_hotkey_hook) fprintf(stderr, "[windows] hotkey hook failed: %lu\n", GetLastError());
     bw_settings_install();
     start_profile();
     char* host_argv[3] = {argv[0], module, NULL};
@@ -642,6 +619,7 @@ int main(int argc, char** argv) {
         fatal_box("BlueWake could not create its launch recovery marker. Check that its data folder is writable.");
         return 1;
     }
+    bw_crash_test();
     const int status = bluewake_host_main(2, host_argv);
     if (status == 0 && !bw_launch_clear(launch_marker))
         fprintf(stderr, "[safe-mode] could not clear launch marker on clean exit\n");
@@ -652,6 +630,8 @@ int main(int argc, char** argv) {
         snprintf(message, sizeof message, "BlueWake stopped with an error (status %d).", status);
         fatal_box(message);
     }
+    if (g_hotkey_hook) { UnhookWindowsHookEx(g_hotkey_hook); g_hotkey_hook = NULL; }
+    timeEndPeriod(1);
     if (status == 0 && bw_settings_relaunch() != 0)
         return 1;
     return status;

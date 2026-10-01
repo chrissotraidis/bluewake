@@ -78,3 +78,11 @@ Public releases remain paused. Smooth Motion remains experimental and off by def
   notification. Actual pipeline-cache init/shutdown test passes 1,000 cycles in
   1.01 seconds on Mac, with a 45-second CTest timeout and an empty synthetic cache.
   Runtime patch 0120. No GPU/game is needed; rare pre-fix hang was not reproduced.
+- 2.6: separate raw WriteFile crash log, bounded stack walk with null-call caller
+  recovery, terminate/SIGABRT hooks, abort policy and startup stack guarantee.
+  Allocation-free hex formatter sanitizer test passes; crash driver cross-compiles
+  and links with LLVM-MinGW on Mac. Native Windows child-process null/abort/terminate
+  checks are registered with a timeout, but not yet run locally. __fastfail bypasses
+  in-process handlers; external WER/minidump collection remains needed for that case.
+  Also moved normal log writes before console output, added PID to session names,
+  checked the hotkey hook and released it/timer resolution on exit (2.7 subset).

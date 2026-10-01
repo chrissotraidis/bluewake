@@ -78,6 +78,7 @@ set(BLUEWAKE_HOST_SOURCES
 add_executable(BlueWake
     src/win_entry.c
     src/win_settings.cpp
+    src/win_crash.cpp
     src/bluewake.rc
     resources/BlueWake.manifest
     ${BLUEWAKE_HOST_SOURCES})
@@ -187,6 +188,16 @@ target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     enable_testing()
+    add_executable(bluewake_windows_crash_driver src/win_crash.cpp ${BLUEWAKE_REPO_ROOT}/tests/windows_crash_driver.cpp)
+    target_compile_definitions(bluewake_windows_crash_driver PRIVATE BLUEWAKE_ENABLE_DEVELOPER_TRACING=1)
+    add_test(NAME bluewake_windows_crash_test COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File ${BLUEWAKE_REPO_ROOT}/tests/windows_crash_test.ps1 -Driver $<TARGET_FILE:bluewake_windows_crash_driver>)
+    set_tests_properties(bluewake_windows_crash_test PROPERTIES TIMEOUT 30)
+
+
+add_executable(bluewake_crash_text_test ${BLUEWAKE_REPO_ROOT}/tests/crash_text_test.c)
+add_test(NAME bluewake_crash_text_test COMMAND bluewake_crash_text_test)
+
 
 add_executable(bluewake_pipeline_shutdown_test ${GXRUNTIME_DIR}/graphics/aurora/tests/pipeline_shutdown_test.cpp)
 target_link_libraries(bluewake_pipeline_shutdown_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
