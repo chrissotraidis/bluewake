@@ -1,5 +1,46 @@
 # BlueWake Autonomous Goal-Based Implementation Loop
 
+## Current operating loop — fork consolidation, 2026-10-02
+
+Chris reoriented this run after the first integration campaign: finish the
+player experience and migration acceptance. The controlling scope is the
+[fork reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md), including
+its fixed donor baseline, platform matrix and release boundaries. Older v56,
+v55 and Route B instructions below are historical for this reconciliation run;
+do not reopen their campaigns or broaden the migration objective.
+
+Work in this order:
+
+1. Finish the already-running frozen optimized/reference build pair. Run the
+   existing combined correctness routes, then one matched, quiet performance
+   comparison. Decide whether the combined path is suitable for the candidate.
+   Add instrumentation or another optimization only for a reproduced blocker.
+2. While the build finishes, complete the clean Mac owned-disc builder and a
+   relocatable personal app. It must launch outside the source checkout without
+   private caches, preserve the player's normal saves/preferences and record
+   source/dependency provenance. Reuse the existing builder and desktop host.
+3. Qualify that player-produced app: fresh start, existing save, actual save and
+   reload, settings/relaunch/fullscreen, audio and a sustained representative
+   play route. Carry only demonstrated failures into focused fixes.
+4. Finish the corresponding Windows clean-build/gameplay gates and repeat
+   final-source iOS/PadMint acceptance. Coordinate unavailable physical hardware
+   once needed; continue independent work without treating missing checks as
+   passed. Do not claim unimplemented PadMint platforms.
+5. Consolidate the validated BlueWake/runtime source stack, preserving Elliott's
+   authored imports and co-author credit. Finish one set of player instructions,
+   contributor credits, issue disposition and a proposed migration notice.
+
+Each iteration must close a concrete player or cutover blocker, or record a
+specific failure that determines the next change. Do not create more independent
+optimization batches, rerun already-passing fixtures without changed risk, or
+count draft PRs as completed migration. Status reports name the closed gate and
+remaining blockers; percentage estimates are informal, not acceptance evidence.
+
+The goal remains active until all required ledger gates pass. No public build
+release, donor closure, access change or redirect is authorized by this loop.
+
+---
+
 **ACTIVE — v56, 2026-09-23. The iPadOS loop.** The user redirected the project:
 make the game actually work on iPadOS, tested in the iOS simulators one at a
 time, with no hardware iPad yet. Route A is hosted on iPadOS by `apple/ios` and

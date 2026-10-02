@@ -4,6 +4,41 @@ BlueWake is distributed as source. You build it on your Mac from your own copy o
 result is an app for your own iPhone or iPad. The game's code is translated from your disc during the
 build, so **the app you build is yours alone: never share or upload it.**
 
+## Mac personal app (migration candidate)
+
+The reconciliation branch also provides an Apple Silicon Mac target:
+
+```sh
+scripts/builder/build.sh /path/to/your/GZLE01.iso --platform macos --out build/macos
+```
+
+It uses the same supported USA revision-0 disc checks, translation, mods and
+local training as the device builder. The result is
+`build/macos/packaged/BlueWake.app`. It contains your disc, extracted game files
+and translated module. Keep the entire app personal; never share or upload it.
+The app can be moved out of the checkout. Its saves and preferences stay under
+`~/Library/Application Support/BlueWake`, so replacing the app does not replace
+player data. Experimental desktop save states use that folder's `States`
+subdirectory; existing explicit path overrides still work.
+
+Use `--source-only` to verify extraction and translation first, then rerun the
+same command without that flag. `--no-train` skips personal optimization training
+and must not be treated as equivalent performance. The builder retains any
+previous packaged app beside the new one. It signs locally with an ad-hoc
+signature; `--identity NAME` selects an installed Mac signing identity. Device
+options `--ipa`, `--app`, `--profile` and `--install` do not apply to Mac.
+
+`--app-only --platform macos` builds the shell without game files. It is for
+local packaging checks, not a playable build or an accepted public release.
+PadMint's complete Mac path is not implemented or claimed here.
+
+**Acceptance is in progress.** Fresh shell compilation and extraction/translation
+pass; generated source matches the verified digest. A relocated launch using an
+existing test module passes its bounded diagnostic route. Full clean module
+compilation/training, player-app game save/reload, upgrades and sustained performance must pass before this route is
+recommended for migration. See the
+[reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
+
 ## What you need
 
 - A Mac with Apple silicon that runs the current Xcode, and at least 25 GB of free disk space

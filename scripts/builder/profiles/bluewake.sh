@@ -92,6 +92,8 @@ profile_dependencies() {
 
     deps=$root/build/deps
     mkdir -p "$deps"
+    # Desktop Aurora resolves its pinned macOS Dawn package itself.
+    [ "$platform" != macos ] || return 0
     local dawn_tar=$deps/dawn-ios-arm64.tar.gz
     if [ ! -f "$dawn_tar" ] || [ "$(shasum -a 256 "$dawn_tar" | awk '{print $1}')" != "$DAWN_SHA256" ]; then
         run dawn-download curl -fL -o "$dawn_tar" "$DAWN_URL"
@@ -209,7 +211,10 @@ profile_train() {
 }
 
 profile_compile() {
-    local cmake_system=iOS sdk=iphoneos build_dir="$out/composite-ios"
+    local cmake_system=iOS sdk=iphoneos build_dir="$out/composite-ios" deployment=17.0
+    if [ "$platform" = macos ]; then
+        cmake_system=Darwin sdk=macosx build_dir="$out/composite-macos" deployment=14.0
+    fi
     if [ "$platform" = tvos ]; then
         cmake_system=tvOS sdk=appletvos build_dir="$out/composite-tvos"
     fi
@@ -228,7 +233,7 @@ profile_compile() {
     fi
     run "composite-configure-$platform" cmake -S cmake/composite -B "$build_dir" -G Ninja \
         "-DCMAKE_SYSTEM_NAME=$cmake_system" "-DCMAKE_OSX_SYSROOT=$sdk" -DCMAKE_OSX_ARCHITECTURES=arm64 \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_FLAGS=$flags" \
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=$deployment" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_FLAGS=$flags" \
         -DCOMPOSITE_OPTIMIZATION_LEVEL="$opt_level" \
         -DCOMPOSITE_DIR="$out/composite-src" -DGXRUNTIME_DIR="$recompcore/GXRuntime" \
         -DABI_DIR="$recompcore/Source/Core/Core/PowerPC/StaticRecomp"
@@ -254,6 +259,19 @@ profile_build_app() {
         host_flags=$(pgo_flags "$profile_path")
         echo "with the host profile $host_pgo"
     fi
+    if [ "$platform" = macos ]; then
+        app_build="$out/app-macos"
+        run app-configure-macos cmake -S scripts/builder/training -B "$app_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF \
+            -DAURORA_DAWN_PROVIDER=package -DAURORA_DAWN_LINKAGE=static \
+            -DAURORA_SDL3_PROVIDER=vendor -DAURORA_SDL3_LINKAGE=static \
+            '-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local' -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON \
+            "-DCMAKE_C_FLAGS=$host_flags" "-DCMAKE_CXX_FLAGS=$host_flags"
+        run app-build-macos cmake --build "$app_build" --target bluewake_host -j "$jobs"
+        app=$app_build/host/BlueWake.app
+        return
+    fi
     run "app-configure-$platform" cmake -S apple/ios -B "$app_build" -G Ninja \
         "-DCMAKE_SYSTEM_NAME=$cmake_system" "-DCMAKE_OSX_SYSROOT=$sdk" \
         -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
@@ -265,4 +283,20 @@ profile_build_app() {
         '-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local' -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON
     run "app-build-$platform" cmake --build "$app_build" --target BlueWake -j "$jobs"
     app=$app_build/BlueWake.app
+}
+
+# Assemble a movable personal desktop app; never install over player data.
+profile_package_mac() {
+    local args=(--app "$app" --output "$out/packaged/BlueWake.app"
+        --runtime "$recompcore" --source-commit "$source_commit"
+        --identity "${identity:--}")
+    if [ "$app_only" -eq 0 ]; then
+        args+=(--module "$module" --game "$out/game" --disc "$iso")
+    fi
+    if [ "$source_modified" != false ] || [ "$source_commit" != "$(git rev-parse HEAD)" ] ||
+       [ -n "$(git status --porcelain)" ]; then
+        args+=(--source-modified)
+    fi
+    run package-macos python3 "$root/scripts/builder/package_macos.py" "${args[@]}"
+    app=$out/packaged/BlueWake.app
 }

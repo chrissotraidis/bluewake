@@ -579,6 +579,35 @@ acceptance. No donor benchmark is transferred.
 | PadMint / Mac, Windows, tvOS | No complete adapter path accepted; Mac remains planned | Do not claim support; implement/test before widening the matrix |
 | Apple TV | Existing preview source and contributor work preserved | Physical hardware/storage acceptance for any claimed feature; no new acceptance inferred |
 
+Mac player-route implementation now extends the existing builder with
+`--platform macos`, a static desktop shell and a relocatable personal bundle.
+Packaged apps resolve their own game files and cannot fall back to developer
+checkout caches. Personal app replacement preserves previous builder output;
+normal saves/preferences remain in Application Support and experimental states
+use its `States` subdirectory. The default player launch uses real-time pacing
+and HLE audio, with explicit diagnostic overrides retained.
+
+Fresh Mac shell compilation, ad-hoc signing and deep/strict signature checks
+pass, with system-only host dynamic dependencies. Its local app-only archive
+passes the content gate (the gate accepts archive files, not `.app` directories).
+Fresh owned-disc extraction/translation produces all 415 RELs and the verified
+composite digest. Four packaging preservation/failure checks, eight existing
+launcher checks and seven signing-identity regressions pass. The rebuilt app-only
+shell exits with builder guidance when launched outside the checkout without
+game files; it does not find a developer module implicitly.
+
+A personal app relocated outside the checkout launches from bundled inputs,
+using the existing ordinary test module and fresh extracted files. With the
+same unpaced diagnostic setting as the reference, its 2,000-retrace Outset
+route matches all four complete guest checkpoints, 37 player states, both
+captured frames and 1,050 route/card records, with zero delivery/clock drift.
+The source save is unchanged. The normal paced launch also matches movement,
+frames and route/card records, but differs in MEM1 checksums; disabling only
+pacing restores the checkpoint match. This establishes the setting difference
+in this bounded route, not general correctness of paced gameplay. Full fresh
+module compilation/training, game saves, updates and sustained acceptance
+remain open. These runs overlapped compilation and are not benchmarks.
+
 The baseline personal iOS build cannot establish acceptance for every later
 integrated change. Existing artifacts and private profiles are not prerequisites
 for the clean player route. Exact hashes and private evidence stay local.
@@ -601,28 +630,29 @@ bugs. No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-1. Run matched prepared-block O2 measurements when the machine is quiet; both
-   builds and the O2 function/intro/saved-game comparisons now pass. The direct-call three-way
-   headless/Aurora comparisons pass; their traced wall times are not benchmarks.
-   The copied-save route now demonstrates matched scripted movement; extend it
-   to sustained scenes and save/reload acceptance.
-   The baseline full PadMint package is complete; player signing and final-source/
-   device acceptance remain open.
-2. Complete combined optimized and host FIFO batching qualification, including
-   scheduling/hooks, gameplay and matched measurements. All fixed-baseline native
-   helper families now have direct source imports with contributor credit and
-   bounded routing evidence. Finish the combined scene and optimized checks; retain the exact build/input identities. Later lava-rendering
-   and controller-haptics source is imported; the lava colour fix has bounded Mac
-   scene evidence, while real-controller and platform qualification remain open.
-3. Complete final-source clean player routes and the full gameplay matrix:
-   fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
-   fullscreen/restart, real controllers, save/reload, upgrades and sustained play.
-   Windows gameplay hardware and current physical iPad acceptance remain
-   unconfirmed; continue independent work without counting those checks passed.
-4. Reconcile the draft source stack into the intended maintained branch only with
-   its acceptance evidence; finish unified instructions, credits and issue mapping.
+Chris reoriented the loop after the initial integration campaign. The next
+iterations prioritize the complete player experience; see the current section
+of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
+
+1. **Combined performance decision:** finish the frozen O2 reference, execute
+   the existing four-way correctness routes and quiet matched timing. Use the
+   result to select candidate defaults; no new optimization family without a
+   reproduced blocker. Keep original 30 Hz logic and experimental display modes
+   off by default.
+2. **Clean Mac player path (current implementation):** extend the existing
+   builder, assemble a relocatable personal app and launch it outside the repo.
+   Validate disc-to-app provenance, resume, save/reload and data-preserving
+   updates. Existing developer-cache runs do not close this gate.
+3. **Final platform/player acceptance:** qualify the Mac player app through
+   fresh/existing saves, audio, progression, menus/fullscreen/controllers and
+   sustained performance. Complete Windows owned-disc module/training and real
+   gameplay; repeat final-source iOS/PadMint and coordinated device acceptance.
+   Hardware availability remains unconfirmed. Do not seize shared devices.
+4. **Consolidation and migration preparation:** reconcile the validated source
+   stack into the maintained branch, preserve authorship, complete unified
+   instructions and report mapping, and give a concrete cutover recommendation.
    The [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
-   remains unposted. Keep the donor and its history intact until acceptance.
+   stays unposted until migration is accepted.
 
 Primary `codex/fork-reconciliation` at `95adeed` retains the completed baseline
 source-build/PadMint artifacts. The

@@ -5830,6 +5830,7 @@ static void host_capture_path_for_retrace(const char* base, u64 retrace,
 }
 
 static char g_host_root[4096];
+static bool g_host_packaged_app;
 
 // Resolve the repository root that owns this host binary. A double-clicked
 // BlueWake.app inherits no environment and a working directory of "/", so the
@@ -5885,7 +5886,42 @@ static void host_apply_default_env(const char* name, const char* root,
         return;
     if (access(probe, R_OK) != 0)
         return;
-    (void)setenv(name, probe, 0);
+    (void)setenv(name, probe, 1);
+}
+
+// The owned-disc builder creates a relocatable personal bundle. A packaged
+// app must never fall back to a different game's files in a developer checkout.
+static bool host_bundle_defaults(char* module, size_t module_size) {
+#if defined(__APPLE__)
+    char exe[4096], contents[4096], marker[4096 + 128];
+    uint32_t size = (uint32_t)sizeof exe;
+    if (_NSGetExecutablePath(exe, &size) != 0 || realpath(exe, contents) == NULL)
+        return false;
+    for (int i = 0; i < 2; ++i) {
+        char* slash = strrchr(contents, '/');
+        if (slash == NULL) return false;
+        *slash = '\0';
+    }
+    if (snprintf(marker, sizeof marker, "%s/Resources/BuilderProvenance.json", contents) >= (int)sizeof marker ||
+        access(marker, R_OK) != 0)
+        return false;
+    if (snprintf(module, module_size, "%s/Frameworks/gGZLE01_recomp.dylib", contents) >= (int)module_size)
+        return false;
+    host_apply_default_env("BLUEWAKE_DOL", contents, "Resources/Game/main.dol");
+    host_apply_default_env("BLUEWAKE_RELS_DIR", contents, "Resources/Game/rels");
+    host_apply_default_env("BLUEWAKE_DISC", contents, "Resources/Game/GZLE01.iso");
+    host_apply_default_env("BLUEWAKE_DSP_IROM", contents, "Resources/DSP/dsp_rom.bin");
+    host_apply_default_env("BLUEWAKE_DSP_COEF", contents, "Resources/DSP/dsp_coef.bin");
+    // A player launch follows real time and uses the same HLE audio path as
+    // the desktop qualification routes. Explicit diagnostic choices win.
+    if (getenv("BLUEWAKE_WALL_PACE") == NULL) setenv("BLUEWAKE_WALL_PACE", "1", 0);
+    if (getenv("BLUEWAKE_DSP_MODE") == NULL) setenv("BLUEWAKE_DSP_MODE", "hle", 0);
+    return true;
+#else
+    (void)module;
+    (void)module_size;
+    return false;
+#endif
 }
 
 /* BLUEWAKE_ASPECT: the picture's shape. 4:3 is the game's own; 16:10 and 16:9
@@ -6473,10 +6509,19 @@ done:
     return ok;
 }
 
-// Where F5 saves (BLUEWAKE_STATE_DIR, else the working directory).
+// Personal Mac apps keep states with player data, independent of installation.
+// Developer/Windows callers retain the working-directory fallback.
 static const char* host_state_dir(void) {
     const char* dir = getenv("BLUEWAKE_STATE_DIR");
-    return dir != NULL && dir[0] != '\0' ? dir : ".";
+    if (dir != NULL && dir[0] != '\0') return dir;
+#if defined(__APPLE__)
+    static char state_dir[4096];
+    const char* user_home = getenv("HOME");
+    if (g_host_packaged_app && user_home != NULL && user_home[0] != '\0' &&
+        snprintf(state_dir, sizeof state_dir, "%s/Library/Application Support/BlueWake/States", user_home) < (int)sizeof state_dir)
+        return state_dir;
+#endif
+    return ".";
 }
 
 // The newest .bwstate in the state directory: what F9 loads when this run has
@@ -6668,7 +6713,10 @@ int main(int argc, char** argv) {
     host_apply_aspect();
     const char* host_root = host_resolve_root();
     char dylib_scratch[4096 + 128];
+    g_host_packaged_app = host_bundle_defaults(dylib_scratch, sizeof dylib_scratch);
     const char* dylib_path = argc > 1 ? argv[1] : NULL;
+    if (dylib_path == NULL && g_host_packaged_app)
+        dylib_path = dylib_scratch;
     if (dylib_path == NULL) {
         if (snprintf(dylib_scratch, sizeof dylib_scratch,
                      "%s/build/composite-cycle-hybrid-o2-v2/"
@@ -6679,15 +6727,17 @@ int main(int argc, char** argv) {
         else
             dylib_path = "build/composite-lib/gGZLE01_recomp.dylib";
     }
-    host_apply_default_env("BLUEWAKE_DOL", host_root, "generated/full/main.dol");
-    host_apply_default_env("BLUEWAKE_RELS_DIR", host_root,
-                           "generated/full/rels");
-    host_apply_default_env("BLUEWAKE_DSP_IROM", host_root,
-                           "ref/recompcore/Data/Sys/GC/dsp_rom.bin");
-    host_apply_default_env("BLUEWAKE_DSP_COEF", host_root,
-                           "ref/recompcore/Data/Sys/GC/dsp_coef.bin");
-    host_apply_default_env("BLUEWAKE_DISC", host_root,
-                           "ref/The Legend Of Zelda The Wind Waker.iso");
+    if (!g_host_packaged_app) {
+        host_apply_default_env("BLUEWAKE_DOL", host_root, "generated/full/main.dol");
+        host_apply_default_env("BLUEWAKE_RELS_DIR", host_root,
+                               "generated/full/rels");
+        host_apply_default_env("BLUEWAKE_DSP_IROM", host_root,
+                               "ref/recompcore/Data/Sys/GC/dsp_rom.bin");
+        host_apply_default_env("BLUEWAKE_DSP_COEF", host_root,
+                               "ref/recompcore/Data/Sys/GC/dsp_coef.bin");
+        host_apply_default_env("BLUEWAKE_DISC", host_root,
+                               "ref/The Legend Of Zelda The Wind Waker.iso");
+    }
     const char* dol_path   = getenv("BLUEWAKE_DOL");
     // A human plays until they close the window, so an unset budget means no
     // cap at all. BLUEWAKE_MAX_BLOCKS bounds an unattended run; zero is the
@@ -6705,8 +6755,11 @@ int main(int argc, char** argv) {
         max_retraces = strtoull(max_retraces_env, NULL, 10);
     }
     if (!dol_path) {
-        fprintf(stderr,
-                "BLUEWAKE_DOL not set and no generated/full/main.dol was \n"
+        fprintf(stderr, "%s", g_host_packaged_app ?
+                "No game executable found. Build a personal Mac app with "
+                "scripts/builder/build.sh YOUR_DISC.iso --platform macos. "
+                "Developer launches may set BLUEWAKE_DOL.\n" :
+                "BLUEWAKE_DOL not set and no generated/full/main.dol was "
                 "found above this executable; set BLUEWAKE_ROOT or "
                 "BLUEWAKE_DOL\n");
         return 1;

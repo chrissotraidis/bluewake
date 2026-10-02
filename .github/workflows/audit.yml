@@ -19,6 +19,8 @@ jobs:
         run: python3 tests/test_one_game_guard.py
       - name: Preserve synthetic Mac launcher cards
         run: python3 tests/test_mac_launcher.py
+      - name: Preserve Mac packaging inputs and prior output
+        run: python3 tests/test_mac_package.py
       - name: Preserve explicit Windows optimization cache selection
         run: python3 tests/test_windows_prepared_cache.py
       - name: Require complete guest checkpoint comparison coverage
