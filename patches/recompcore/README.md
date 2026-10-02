@@ -41,3 +41,13 @@ Patch 0130 rejects truncated declared vertex spans before attribute reads or
 decoded-vertex allocation. ASan reproduces the original direct-float overread;
 38 direct/u16-indexed one/two-vertex truncations and valid trailing bytes pass
 in the existing runtime conformance test after the fix.
+
+Patches 0131-0135 reconcile the optional global-memory and interpolation work,
+including span and extended-alias safeguards. Patch 0136 directly imports
+Elliott Tate's dual-texture post-transform correction. Patch 0137 preserves those
+matrices in a versioned frontend save-state extension, accepts legacy states,
+and tests direct/indexed FIFO capture and malformed-state rejection. The current
+build pin is `18ba3b642588a33b9e8eac4aba7f713bb8d3d778`; the profile and dependency
+lock are authoritative. New post-texture save states require this or a newer
+runtime; regular memory-card saves are unchanged. BlueWake lava-scene acceptance
+is still required; donor scene results are not transferred.

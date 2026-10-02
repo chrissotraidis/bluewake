@@ -33,8 +33,10 @@ later donor changes separately. Baseline refs were verified October 2 JST.
 
 
 The current candidate's lock and builder profile both select maintained runtime
-`c2905b7a6b2752611a4e1ccb2ac9e3cda1857462` (runtime PR #2, based on #1 / `70bc9957`).
-Patches through 0135 preserve BlueWake's safety changes. The translator remains
+`18ba3b642588a33b9e8eac4aba7f713bb8d3d778` (runtime PR #3, based on #2 / `c2905b7a`).
+Patches through 0137 preserve BlueWake's safety changes and add the later donor
+post-texture renderer correction with save-state serialization. Existing native
+module/scene evidence below remains tied to its stated `c2905b7a` runtime. The translator remains
 `b8b534591cba8ca7cd43943a655ee6e2591cf5de`. Ordinary modules use ABI 3;
 fixed-CPU modules declare ABI 4; fixed-CPU plus module-owned RAM declares ABI 5.
 Old hosts reject unsupported ABIs before player storage. Apple shell support for
@@ -58,9 +60,18 @@ this later-change list before recommending cutover; donor commit descriptions
 are not BlueWake validation. Do not silently repin the active qualification
 builds or treat the fixed baseline as the donor's current head.
 
-Preflight against maintained runtime `c2905b7a` confirms the donor's later
-dual-texture patch applies cleanly (`git apply --check` only). It has not been
-applied, built or gameplay-qualified in BlueWake.
+The later dual-texture patch is now imported into maintained runtime as
+`94e9835`, preserving Elliott's authorship; adaptation `18ba3b64` credits him as
+co-author and preserves the post matrices across save-state reloads. The exact
+import loses those matrices after a synthetic FIFO save/reload; the new versioned
+extension fixes that regression. Legacy frontend states still load with identity
+post rows until the guest updates them; new post-texture states require this or
+a newer runtime. Regular memory-card saves are unchanged. Direct/indexed FIFO
+capture, per-draw snapshots, normalization/disable flags, valid/legacy states and
+malformed-state rejection pass Release and ASan/UBSan, as do the donor matrix-fold
+checks. Five related save/FIFO/replay/texture regressions and the Mac host build
+pass. BlueWake lava-scene, ordinary-scene and native Windows checks are pending.
+No donor screenshot or performance result is counted as BlueWake acceptance.
 
 ## Source checkpoints and integration order
 
@@ -96,8 +107,9 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
 [PR #2](https://github.com/chrissotraidis/RecompCore/pull/2) at `c2905b7a` fixes
-alias tracking above retail 24 MiB. Both are drafts; all public checkpoints are
-source only. No source merge or test result implies release readiness.
+alias tracking above retail 24 MiB. Runtime [PR #3](https://github.com/chrissotraidis/RecompCore/pull/3)
+at `18ba3b64` imports the later post-texture renderer correction and preserves it
+in save states. All are drafts; all public checkpoints are source only. No source merge or test result implies release readiness.
 
 ## Required parity inventory
 
@@ -541,6 +553,8 @@ source-build/PadMint artifacts. The
 managed `bluewake-disc-parity` worktree at `05df605` retains both completed O2
 modules and the required private evidence.
 The managed `bluewake-cpu-contract` worktree holds the current source stack and
-private qualification artifacts; its nested runtime is `c2905b7a`. Both managed
+private qualification artifacts; its nested runtime is `18ba3b64`. The active
+combined/reference O2 builds use frozen copies of source/runtime `0ea7ffb` /
+`c2905b7a`; later renderer edits cannot change their inputs. Both managed
 worktrees contain needed unique artifacts and remain in use. No checkout is
 removed or reset. Preserve saves, settings, inputs and signing material.

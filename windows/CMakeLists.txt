@@ -395,6 +395,11 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     add_test(NAME bluewake_gxcore_test COMMAND bluewake_gxcore_test)
     set_tests_properties(bluewake_gxcore_test PROPERTIES TIMEOUT 30)
 
+    add_executable(bluewake_frontend_test ${GXRUNTIME_DIR}/graphics/frontend/tests/frontend_replay_test.cpp)
+    target_link_libraries(bluewake_frontend_test PRIVATE GXRuntime::retail_gx_frontend)
+    add_test(NAME bluewake_frontend_test COMMAND bluewake_frontend_test)
+    set_tests_properties(bluewake_frontend_test PROPERTIES TIMEOUT 30)
+
     include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
     include("${BLUEWAKE_REPO_ROOT}/cmake/mouse_motion_test.cmake")
 
