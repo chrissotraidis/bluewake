@@ -4,17 +4,18 @@
 
 Make BlueWake the maintained home for the approved consolidation with Elliott.
 The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) owns the
-feature inventory, platform matrix and evidence. Source is substantially
-consolidated; replacement of the donor project is not yet accepted. Finish the
+feature inventory, platform matrix and evidence. Source consolidation is merged
+into `main` at `b5433b3`; runtime is merged into `bluewake-next` at `c74d1034`.
+New development can proceed entirely in BlueWake. Finish the
 player paths and gameplay qualification before recommending cutover. Historical
 v56/v55/Route B campaigns below do not control this goal.
 
 ### Preserve the completed work
 
-- Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
+- Merged cumulative [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
   contains the integration ancestry, including 26 Elliott-authored commits and
   13 Elliott co-author trailers in BlueWake. Runtime adaptations carry their own
-  attribution. Continue here; do not create another import stack.
+  attribution. Continue from `main`; do not create another import stack.
 - Current maintained runtime is `0568fedd`; its product code matches
   `2218107d` (the follow-up only fixes a Windows test output path). Translator
   stays `b8b5345`. Windows host linking and all 58 source regressions pass.
@@ -34,8 +35,8 @@ identified coverage gap. Documentation-only changes do not invalidate binaries.
 
 | Priority / work package | Next action and completion evidence | Current dependency |
 | --- | --- | --- |
-| 1. Source consolidation and candidate identity | Keep one cumulative review, verify source/dependency/patch agreement and authorship, and remove stale current-status claims. Plan runtime integration into `bluewake-next` and BlueWake integration through #37 into `main`. Record the exact final package source, host, module and compatibility; distinguish clean-build provenance from a diagnostic host overlay. | Current PRs are mergeable drafts. Source review and documentation can proceed independently of hardware; merging source is not migration acceptance. |
-| 2. Complete the player build paths | Resume the retained `3392854` PadMint workspace without repinning; verify reused objects/profiles, final assembly and provenance. Then qualify the maintained candidate's reproducible app/update path and determine whether changed module inputs require a rebuild. Finish signing, device run/save/reload and in-place data-preserving upgrade. Do not count the older workspace as a clean build of the newer candidate. | Two previous attempts stopped for low disk. Retain 593 objects. Resume only with stable 30 GiB free or a verified suitable external target. Physical-device coordination remains pending. |
+| 1. Source consolidation and candidate identity | Source landing is complete: BlueWake #37 and runtime #1–#4 are merged with exact tree equality to the tested commits. The live donor heads add documentation and a line-ending cleanup only. New changes start from BlueWake `main` / runtime `bluewake-next`; qualify the final package identity separately. | Closed for the recorded donor source; no hardware prerequisite for collaboration. |
+| 2. Complete the player build paths | Resume the retained `3392854` PadMint workspace without repinning; verify reused objects/profiles, final assembly and provenance. Then qualify the maintained candidate's reproducible app/update path and determine whether changed module inputs require a rebuild. Finish signing, device run/save/reload and in-place data-preserving upgrade. Do not count the older workspace as a clean build of the newer candidate. | Resumed at the exact original revisions after free space exceeded 200 GiB, retaining 593 objects and four profiles for comparison. A disk guard stops this build below 10 GiB. Physical-device coordination remains pending. |
 | 3. Finish local Mac gameplay coverage | Use isolated copied saves and the existing identified app for the remaining option/climbing checks. Establish the relevant gameplay action before an off/on comparison. Complete real mouse/controller input, audible intro/scripted music, and a representative 30-minute gameplay route with actual progression, settings, save/reload and scene transitions. | Small functional checks can proceed. Real controller/audio acceptance needs the relevant input/output observation. Sustained performance needs an uncontended host. |
 | 4. Native Windows player acceptance | On confirmed x64 hardware, build the owned-disc O2 module and run native Direct3D. Cover disc import/recovery, fullscreen/restart, settings, controls/haptics, saves/states/upgrade, Pictobox, startup and scripted-music reports. Record app/module/source identities and distinguish reproduction from a claimed fix. | Hardware/controller availability unconfirmed. CI is green but cannot close these checks. Do not restart Parallels or take a shared device. |
 | 5. Performance and migration decision | Use matched original-30-Hz configurations and scenes, compare correctness plus frame-time tails/stalls, and complete sustained play on each claimed target. Review the single platform matrix, tested instructions, issue dispositions and proposed donor notice against those results. | Quiet hardware and completed player candidates required. Historical 22.8% Outset gain is bounded, not final performance parity. No redirect, donor closure or public release. |
@@ -59,7 +60,7 @@ unless they address an established migration blocker; track later changes apart.
 4. Change source only for an established defect. Run relevant regressions and
    affected gameplay checks; preserve failed evidence and original player data.
 5. Record exact identities, result, limits and the next gate. Checkpoint validated
-   source-only progress in #37 and update the private continuation. Summarize
+   source-only progress from `main` and update the private continuation. Summarize
    closed gates and external dependencies rather than counting probes or PRs.
 
 The October 3 instant-text pair `instant-text-ae5ceqfa` completed but never
@@ -68,15 +69,14 @@ The enabled case patches message data, which is implementation evidence only.
 Its gameplay result is **inconclusive due to setup**, not a pass or game defect.
 Do not repeat that unchanged route.
 
-Storage is volatile: this reorientation observed 28 GiB free, up from the prior
-sub-2-GiB state, still below the resume threshold. Two unrelated simulator test
-processes each consume approximately 200% CPU. Recheck prerequisites when a
-relevant work package becomes actionable; do not start a large build or present
-this as a quiet performance window. Do not terminate other tasks to create one.
+The retained PadMint build is running again after storage recovered beyond
+200 GiB. Check its existing live handle and logs; do not launch another writer.
+Two unrelated simulator tests remain busy, so this is not a quiet performance
+window. Preserve other tasks and all accepted artifacts.
 
 ### Retained state and completion boundary
 
-Primary checkout: `codex/fork-consolidated`; nested runtime:
+Primary checkout: `main`; nested runtime:
 `codex/bluewake-pe-token`. The `bluewake-cpu-contract` worktree stays clean at
 `3392854`, runtime `18ba3b64`, for exact PadMint resume. Keep the other evidence
 worktrees, failed baseline, personal modules, profiles, captures, saves and

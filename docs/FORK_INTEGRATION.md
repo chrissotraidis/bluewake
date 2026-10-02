@@ -1,16 +1,36 @@
 # Source-fork integration
 
-The current fixed donor baseline and outstanding acceptance checks are in the
-[October 2 reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
-The current cumulative review is [PR #37](https://github.com/chrissotraidis/bluewake/pull/37),
-with the clean player-build baseline at `3392854` / runtime `18ba3b64` and
-the later Pictobox host at `9706637` / runtime `2218107d`. The current runtime
-pin `0568fedd` adds only a Windows test-path correction to that host product code.
-It includes the later Windows preparation/native work, post-texture renderer
-correction and haptics; see the ledger for acceptance and intentional differences.
-The sections below describe the earlier October 1 import and retain their
-original source/platform limits. Their then-open implementation items are not
-the current migration checklist.
+The approved source consolidation is **merged into BlueWake `main`** through
+[PR #37](https://github.com/chrissotraidis/bluewake/pull/37), merge `b5433b3`.
+Maintained RecompCore #1–#4 are merged into `bluewake-next` at `c74d1034`;
+that tree equals the tested/pinned `0568fedd`. Original contributor authorship
+and co-author credits are retained.
+
+The October 3 live check covers donor `main` at `d102695` and `windows-release`
+at `9921398`. Their changes after the recorded integration snapshots are
+README/status documentation, not additional implementation. Donor runtime
+`7c629039` adds only a line-ending cleanup after the renderer fix already imported
+in `94e9835` with an identical patch ID. DolRecomp remains `b8b5345`.
+
+## Working together from here
+
+Start new application changes from **BlueWake `main`** and open focused PRs here.
+Runtime changes belong in the maintained RecompCore repository, based on
+**`bluewake-next`**, with the corresponding BlueWake dependency pin/patch update.
+There is no need to wait for the remaining hardware checks before developing in
+BlueWake. For fixes already made on the donor, identify their commits and import
+only the missing delta, preserving the original author; use co-author attribution
+where an adaptation combines work. Do not re-import the completed stack.
+
+Windows source builds and all 58 native source regressions pass, but complete
+owned-disc Windows gameplay/controller/audio/performance acceptance remains open.
+The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) records
+exact feature, build and gameplay limits. The frozen clean Mac player baseline
+is `3392854` / runtime `18ba3b64`; the later Pictobox host is `9706637` /
+`2218107d`, with the test-only runtime follow-up `0568fedd`. The retained PadMint
+build has resumed after storage recovery. Source integration does not authorize
+public builds or a donor redirect, and does not close the remaining acceptance
+requirements. The sections below retain their earlier evidence and limitations.
 
 BlueWake integrates GPL-covered source changes from
 [elliotttate/Wind-Waker-Recomp](https://github.com/elliotttate/Wind-Waker-Recomp), whose source is

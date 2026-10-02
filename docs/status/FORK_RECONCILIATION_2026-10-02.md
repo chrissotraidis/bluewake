@@ -3,7 +3,7 @@
 **In progress.** Chris and Elliott have agreed to consolidate development in
 BlueWake. This migration directly imports Elliott's enhancements, preserves his
 authorship and credits combined implementations with co-author trailers.
-Source integration is consolidated in cumulative draft PR #37; required
+Source integration is merged into `main` through cumulative PR #37; required
 performance, player-build and gameplay acceptance remains open. No release,
 fork redirect, issue closure or migration acceptance is authorized. Personal
 modules, generated source, discs, profiles, builds, saves and captures stay local.
@@ -14,34 +14,48 @@ This is the authoritative current ledger. The
 experiments, failed approaches and exact historical checkpoints. “Integrated”
 below means source is present with bounded evidence, not that parity is accepted.
 
-## Current decision after reorientation, October 3
+## Source landed and live donor check, October 3
 
-The source campaign is substantially consolidated in #37. Do not equate that
-with readiness to shut down the donor project. The remaining critical path is
-complete player builds and qualification on the claimed platforms, followed by
-maintained-branch integration and an evidence-backed migration recommendation.
-The current [goal loop](../GOAL_LOOP.md) orders available work and preserves
-accepted results; earlier evidence below is historical unless explicitly current.
+BlueWake #37 is merged into `main` at **`b5433b3`**. Runtime #1–#4 are merged
+into maintained **`bluewake-next` at `c74d1034`**. Both merge trees equal the
+respective tested source (`406d561` and pinned `0568fedd`); no source was lost
+or replaced during landing. The exact application head passed both repository
+audits and the native Windows source host check in
+[run 37067825932](https://github.com/chrissotraidis/bluewake/actions/runs/37067825932)
+before merge. The earlier recorded suite has all 58 tests passing.
 
-At source `a5da7c2`, #37 is an open, mergeable draft; its current repository audits
-and Windows host check are green. The independently recorded `3574a0c` Windows
-run passes all 58 tests; later commits through `a5da7c2` change only documentation.
-Runtime #4 at `0568fedd` is also an open, mergeable draft. This is source readiness
-information, not Windows gameplay or cutover acceptance. BlueWake ancestry from
-main retains 26 Elliott-authored commits and 13 Elliott co-author trailers.
+The live donor refs are now main `d102695a1847963504ea55d1cf0bc96a9fa663ec`,
+Windows `992139826613a0f5a7f621e2a41e8c01ff614a75`, runtime
+`7c629039cd46bd990d2ddfcf94db72e51bda20d4`, and translator `b8b5345`.
+Application changes after the inventoried snapshots are README/status documents
+only. Runtime's last change normalizes line endings; the preceding renderer
+patch `81d7345f` and our authored import `94e9835c` have the same stable patch ID.
+No additional implementation delta was found in this refresh. Uncommitted donor
+fixes are not visible in these refs and are not claimed imported.
 
-The queued instant-text pair `instant-text-ae5ceqfa` finished both 2,700-retrace
-runs with exit zero and unchanged copied cards/settings. The enabled run logs
-4,426 patched messages and 1,212 removed timed waits. However, the captures show
-idle Link beside the Windfall arch; no dialogue opened, and all seven off/on
-frame pairs are byte-identical. **Gameplay result: inconclusive setup.** Do not
-count it as an option pass or defect. Establish dialogue before repeating an A/B
-check; the private receipt retains both runs and the visual review.
+**Source collaboration can move to BlueWake now.** New application PRs target
+`main`; runtime PRs target maintained `bluewake-next`. Existing donor fixes should
+be identified by commit and ported as a focused delta. The 24 superseded stacked
+BlueWake PRs (#12 and #14–#36) have every head contained in merged main; their
+branches and evidence worktrees are retained. The integration preserves 26
+Elliott-authored commits and 13 Elliott co-author trailers in BlueWake, with
+separate attribution in the maintained runtime.
 
-Storage recovered to 28 GiB at this check but remains below the established
-30-GiB stable-headroom threshold for resuming PadMint. Two unrelated simulator
-test processes remain busy. No build was restarted, no performance measurement
-was accepted, and no device or player data was changed during reorientation.
+Complete source integration does not prove full platform/gameplay/performance
+parity. Those remaining explicit goal requirements stay below. No public build,
+donor closure or redirect is included. Do not make Elliott wait for hardware
+qualification before developing on the maintained source.
+
+The frozen PadMint `3392854` build has resumed with its exact CLI `de13bd7`,
+runtime `18ba3b64`, app-only shell and owned-disc inputs after free space recovered
+to over 200 GiB. Its 593 existing objects and four profile files were hashed
+before resuming, and the owned process has a 10-GiB free-space stop guard.
+Final assembly, reuse verification and device qualification remain pending.
+
+The instant-text pair `instant-text-ae5ceqfa` remains inconclusive: both
+2,700-retrace runs exit zero and preserve cards/settings, but never open dialogue;
+all seven off/on captured frames are identical. The enabled message-patch logs
+are implementation evidence only. Establish dialogue before another A/B check.
 
 ## Fixed baseline and selected dependencies
 
@@ -177,7 +191,7 @@ for `9849eb0`.
 
 ## Source checkpoints and integration order
 
-All listed BlueWake PRs remain drafts. Source checkpoints are evidence identities;
+The source stack below is incorporated through merged #37. Source checkpoints are evidence identities;
 a later documentation-only commit may change the PR head. Preserve the original
 contributor authorship, eight pre-existing edits checkpointed in #12, and other PRs.
 PR #11's SDK preflight is reconciled by #14; do not import it again.
@@ -218,7 +232,7 @@ alias tracking above retail 24 MiB. Runtime [PR #3](https://github.com/chrissotr
 at `18ba3b64` imports the later post-texture renderer correction and preserves it
 in save states. Runtime [PR #4](https://github.com/chrissotraidis/RecompCore/pull/4)
 at `0568fedd` adds PE token/capture readback and the portable test path, stacked
-on #3. All are drafts; all public checkpoints are source only. No source merge or test result implies release readiness.
+on #3. All four are now merged into `bluewake-next`; all public checkpoints are source only. No source merge or test result implies release readiness.
 
 ## Required parity inventory
 
@@ -978,14 +992,14 @@ Pictobox, physical controls/audio, sustained play and device acceptance remain
 open. Source integration and review can proceed while hardware checks await
 availability; neither source merging nor CI closes those gameplay gates.
 
-The retained PadMint build remains stopped at `3392854` with 593 objects and
-verified profiles. Resume it only with stable headroom; retain its exact identity
-and qualify the later maintained candidate separately. The
+The retained PadMint build has resumed at `3392854` after storage recovery,
+with the original 593 objects and four profiles recorded for reuse verification.
+Retain its exact identity and qualify the later maintained candidate separately. The
 [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
 remains unposted until migration is accepted. Runtime's maintained integration
 target is `bluewake-next`, not the unrelated default `codex/galaxypad-integration`.
 
-Primary checkout now uses `codex/fork-consolidated` for the cumulative source
+Primary checkout now uses `main` after landing the cumulative source
 changes; branch `codex/fork-reconciliation` at `95adeed` and its completed
 baseline source-build artifacts remain preserved. The
 managed `bluewake-disc-parity` worktree at `05df605` retains both completed O2
