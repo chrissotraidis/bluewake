@@ -278,6 +278,7 @@ set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)
 
 
 add_executable(bluewake_settings_state_test ${BLUEWAKE_REPO_ROOT}/tests/settings_state_test.cpp)
+target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
 
 

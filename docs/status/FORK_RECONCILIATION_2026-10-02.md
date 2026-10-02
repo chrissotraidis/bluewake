@@ -266,3 +266,18 @@ pass (2/2). Tests cover 59.94/60/90/100/119.88/120/144/165/240/360 Hz, unknown,
 negative/NaN/infinite modes, saved vs session edits and preference retention
 during fallback. Native Windows compilation/execution and real UI/window
 movement/gameplay acceptance remain pending.
+
+The runtime-pin Windows checkpoint `84b7e95` passed **31/31** native
+regressions and app linking (run 36948477930). The display settings follow-up
+compiled the app but its settings fixture had not declared C++17, so
+`std::clamp` failed there. Both Mac and Windows fixture targets now declare
+the standard used by their production headers; the test remains enabled.
+
+For the fixed direct player build, a controlled Ninja interruption stopped
+module compilation at **183/822** with no remaining compiler workers. The
+original stage log is preserved locally. Repeating the documented builder
+command with eight jobs revalidated the disc/source digest and reused
+exactly the same training receipt/profile hashes. Ninja starts the remaining
+**639** build steps; all 183 completed objects were retained. This accepts
+resume at the module-compilation stage only; packaging/install and PadMint
+cancellation still require their separate checks.
