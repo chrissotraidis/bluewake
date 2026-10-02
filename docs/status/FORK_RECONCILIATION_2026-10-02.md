@@ -555,10 +555,14 @@ a claim of identical state at every intervening instruction. The existing route 
   descriptors and its next-region counter; CPU state is identical. Repeating
   reference O2 reproduces those bytes. Disabling only asynchronous EFB depth
   feedback makes the retrace-500 checkpoint and saved CPU/MEM1/ARAM/aliases
-  identical. The full rendered route with that controlled input is pending;
-  production depth feedback remains enabled. No checkpoint bytes are masked,
-  and the original failure is retained. These builds reuse private translation;
-  clean player builds and matched performance remain unaccepted.
+  identical. The full four-way rendered route with that controlled input also
+  passes: four complete checkpoints through retrace 2,000, 37 player states,
+  both images and all route/card records match, with zero delivery/clock drift.
+  Production depth feedback remains enabled. No checkpoint bytes are masked,
+  and the original live-depth failure is retained. A six-run alternating-order
+  timing comparison using normal live depth feedback is running after compiler
+  activity ends. These builds reuse private translation; clean player builds,
+  live-depth full-state equality and overall performance parity remain unaccepted.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -655,8 +659,8 @@ Chris reoriented the loop after the initial integration campaign. The next
 iterations prioritize the complete player experience; see the current section
 of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
 
-1. **Combined performance decision:** finish the rendered correctness check
-   with controlled EFB depth feedback, then assess quiet matched timing. Use the
+1. **Combined performance decision:** collect the quiet matched timing after
+   passing intro and controlled-depth rendered correctness checks. Use the
    result to select candidate defaults; no new optimization family without a
    reproduced blocker. Keep original 30 Hz logic and experimental display modes
    off by default.
