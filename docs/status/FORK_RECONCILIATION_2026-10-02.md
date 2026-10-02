@@ -28,7 +28,9 @@ preflight behavior; do not duplicate them by assuming they are absent. PRs #3/#5
 #6/#8 already have integrated source/credit in #10; leave the originals open.
 The existing checkout was used. Its eight unfinished source changes were backed
 up locally, reviewed, checked and checkpointed in #12 without dropping them.
-No additional clone/worktree was created or existing worktree removed.
+No additional clone/worktree was created during that initial checkpoint; later
+isolation for the running private build is recorded below. No existing worktree
+was removed.
 
 ## Required parity inventory
 
@@ -213,3 +215,15 @@ mirrors, aliases and empty banks. This is not a diagnosis of Pictobox/startup
 reports. Full renderer/host compilation and interpolation checks are running
 in the isolated tree; the expanded display behavior and performance still need
 matched gameplay evidence. Existing modules and experiments-off defaults remain.
+
+## Accepted Windows source regression checkpoint
+
+Disc batch `5d769d2a7cc30691e4692984a2445464ada85942` compiled/linked the
+full native Windows app and passed **29/29** regressions in
+[run 36947951742](https://github.com/chrissotraidis/bluewake/actions/runs/36947951742).
+The repository audits also pass. This supersedes the two fixture failures above;
+the real importer, Unicode path handling, picker interaction and Windows
+gameplay remain open. The default full player builder finished its isolated
+local training at fixed `95adeed` / runtime `99e47480`, merged the newly trained
+profile and started optimized iOS module compilation. Packaging/run acceptance
+still requires terminal results.
