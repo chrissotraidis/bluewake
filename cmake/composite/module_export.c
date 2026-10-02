@@ -92,7 +92,9 @@ typedef struct BlueWakeRelLifecycle
 #include "rel_data.inc"
 
 static const StaticRecompModuleDesc s_desc = {
-#ifdef BLUEWAKE_FIXED_CPU
+#if defined(BW_GUEST_MEM1)
+    BLUEWAKE_FIXED_MEM1_ABI_VERSION,
+#elif defined(BLUEWAKE_FIXED_CPU)
     BLUEWAKE_FIXED_CPU_ABI_VERSION,
 #else
     STATICRECOMP_ABI_VERSION,

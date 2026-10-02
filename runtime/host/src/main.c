@@ -188,7 +188,7 @@ static bool host_add_shared_guest_alias(u32 linked_start, u32 size,
 // full of the modules the stage had linked, the sea by the pirate ship then
 // needed d_a_bb (52 KB) and there was no room, and the game jumped into the
 // module it could not load (2026-09-29).
-#define BLUEWAKE_LINKED_RAM_SIZE 0x02000000u
+#define BLUEWAKE_LINKED_RAM_SIZE BLUEWAKE_MODULE_MEM1_SIZE
 #define BLUEWAKE_DYNAMIC_SCRATCH_BASE 0x81820000u
 #define BLUEWAKE_DYNAMIC_SCRATCH_LIMIT 0x81F80000u
 
@@ -6614,13 +6614,13 @@ int main(int argc, char** argv) {
 
     const StaticRecompModuleDesc* mod = get_module();
     CPUState cpu_storage;
-    CPUState* cpu_state = NULL;
+    BlueWakeModuleStorage module_storage;
     BlueWakeModuleCPUFn module_guest_cpu =
         (BlueWakeModuleCPUFn)dlsym(lib, "bluewake_composite_guest_cpu");
-    const char* module_error = bw_module_select_cpu(
+    const char* module_error = bw_module_select_storage(
         mod, module_guest_cpu,
-        dlsym(lib, "bluewake_composite_guest_mem1") != NULL,
-        &cpu_storage, &cpu_state);
+        (BlueWakeModuleMEM1Fn)dlsym(lib, "bluewake_composite_guest_mem1"),
+        &cpu_storage, &module_storage);
     if (module_error != NULL) {
         fprintf(stderr, "module incompatible: %s\n", module_error);
         return 1;
@@ -6893,8 +6893,8 @@ int main(int argc, char** argv) {
     atexit(bluewake_card_runtime_close);
 
     /* All host callbacks and translated code use the same borrowed state. */
-#define cpu (*cpu_state)
-    if (!cpu_init(&cpu)) { fprintf(stderr, "cpu_init failed\n"); return 1; }
+#define cpu (*module_storage.cpu)
+    if (!bw_module_cpu_init(&module_storage)) { fprintf(stderr, "cpu_init failed\n"); return 1; }
     DolViClock vi_clock;
     dol_vi_clock_init(&vi_clock);
     dol_vi_clock_configure(&vi_clock, GUEST_CPU_CYCLES_PER_VI_RETRACE,
@@ -7188,7 +7188,7 @@ int main(int argc, char** argv) {
            layout.entry_point, layout.bss_address, layout.bss_address + layout.bss_size);
 #ifdef BLUEWAKE_HAS_DSP_ADAPTER
     if (!host_dsp_adapter_init(&cpu)) {
-        cpu_free(&cpu);
+        bw_module_cpu_free(&module_storage);
         return 1;
     }
 #endif
@@ -15395,7 +15395,7 @@ int main(int argc, char** argv) {
     host_dsp_adapter_shutdown();
 #endif
     bluewake_card_runtime_close();
-    cpu_free(&cpu);
+    bw_module_cpu_free(&module_storage);
     if (g_gx_flush_census) {
         fprintf(stderr, "[gx-flush] retrace=%llu calls=%llu us=%llu\n",
             (unsigned long long)g_gx_flush_retrace, (unsigned long long)g_gx_flush_retrace_calls,

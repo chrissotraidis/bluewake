@@ -112,8 +112,8 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "70bc9957b89a145a5b457d1a9e5cd482f34e7e61",
-      "branch": "codex/bluewake-runtime-parity",
+      "sha": "c2905b7a6b2752611a4e1ccb2ac9e3cda1857462",
+      "branch": "codex/bluewake-mem1-alias-parity",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
       "verified": "2026-10-02",
@@ -543,9 +543,10 @@
           "patches/recompcore/0131-optional-global-mem1.patch",
           "patches/recompcore/0132-display-rate-and-slow-game-interpolation.patch",
           "patches/recompcore/0133-check-guest-span-before-subtraction.patch",
-          "patches/recompcore/0134-test-seven-interpolation-steps.patch"
+          "patches/recompcore/0134-test-seven-interpolation-steps.patch",
+          "patches/recompcore/0135-honor-extended-mem1-aliases.patch"
         ],
-        "evidence": "Mac host/renderer linked; memory plain/global bounds tests and seven-step draw/particle/camera regression pass. Native Windows and gameplay/performance acceptance pending."
+        "evidence": "Prior runtime candidate passes Mac/Windows regressions. Extended MEM1 aliases, endian reads/writes, reservations, journals, MEM2 and MMIO pass plain/global ASan/UBSan fixtures; full candidate and gameplay/performance acceptance remain pending."
       }
     },
     {
@@ -575,7 +576,7 @@
         "sha": "8b690b60e699c92e3327886ebd84cf7f05c5d36c",
         "stale": false
       },
-      "vendored_in": "recompcore candidate 70bc9957 at GXRuntime/graphics/aurora (plain files, not a submodule); the build uses that copy with the BlueWake changes included"
+      "vendored_in": "recompcore candidate c2905b7a at GXRuntime/graphics/aurora (plain files, not a submodule); the build uses that copy with the BlueWake changes included"
     },
     {
       "id": "sunpad",

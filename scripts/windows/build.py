@@ -479,7 +479,7 @@ int main(void) {
         # Keep an identical tree in place: rewriting 750 files would make the
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
-        inputs.update(f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n{int(self.args.fixed_cpu)}\n".encode())
+        inputs.update(f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n".encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
                   + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py", ROOT / "scripts/windows/global_guest_cpu.py", Path(__file__)]):
             if f.is_file():
@@ -590,6 +590,7 @@ int main(void) {
         digest = tree_digest(o / "composite-src")
         receipt = {"enabled": self.args.prepared_blocks,
                    "fixed_cpu": self.args.fixed_cpu,
+                   "fixed_mem1": self.args.fixed_mem1,
                    "fixed_cpu_script_sha256": sha256_file(cpu_script),
                    "script_sha256": sha256_file(script),
                    "base_digest": (o / "composite-src.digest").read_text().strip(),
@@ -620,6 +621,7 @@ int main(void) {
             "cmake", "-S", ROOT / "cmake/composite", "-B", build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang",
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_C_FLAGS={flags}", "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
             f"-DBLUEWAKE_FIXED_CPU={'ON' if self.args.fixed_cpu else 'OFF'}",
+            f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={self.args.opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
             f"-DGXRUNTIME_DIR={rc / 'GXRuntime'}", f"-DABI_DIR={rc / 'Source/Core/Core/PowerPC/StaticRecomp'}"])
         # -k 0: a chunk that fails does not stop the others. The usual cause is
@@ -695,6 +697,7 @@ int main(void) {
             "march": self.args.march,
             "prepared_blocks": self.args.prepared_blocks,
             "fixed_cpu": self.args.fixed_cpu,
+            "fixed_mem1": self.args.fixed_mem1,
             "compiler": self.clang_version,
             "module_sha256": sha256_file(app / MODULE),
             "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -816,6 +819,8 @@ def main():
                         help="opt into experimental prepaid-block optimization (off by default; Windows timing pending)")
     parser.add_argument("--fixed-cpu", action="store_true",
                         help="opt into experimental fixed-address CPU state; requires a supporting app")
+    parser.add_argument("--fixed-mem1", action="store_true",
+                        help="opt into module-owned RAM; requires --fixed-cpu and a supporting app")
     parser.add_argument("--console", action="store_true", help="build BlueWake.exe as a console program")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
@@ -823,6 +828,8 @@ def main():
                         help="stop after generating the source: checks tools, disc and translation in minutes")
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
     args = parser.parse_args()
+    if args.fixed_mem1 and not args.fixed_cpu:
+        parser.error("--fixed-mem1 requires --fixed-cpu")
     if args.jobs is None:
         args.jobs = default_jobs()
     if args.jobs < 1:

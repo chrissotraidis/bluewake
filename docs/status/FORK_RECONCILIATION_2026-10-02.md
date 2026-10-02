@@ -52,7 +52,7 @@ translation belongs in each player's private workspace.
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; global MEM1/native batches remain separate | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
-| Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16, default off; oversized span guards fixed; plain/global bounds fixtures pass Mac/Windows. Inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
+| Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
@@ -558,11 +558,56 @@ four runtime test targets excluded from the default build. The initial suite
 run passed its 58 built tests but could not run those four missing targets;
 the completed suite resolves that coverage gap. A fresh source-only ZIP passes
 `check_public_assets.sh`, with zero address-named functions. Repository CI
-audit jobs remain queued; the local repository audit passes.
+audit jobs subsequently pass on the documentation checkpoint `f1c1c7a`, as
+does native Windows [run 36962696208](https://github.com/chrissotraidis/bluewake/actions/runs/36962696208);
+the local repository audit also passes.
 
 The tested fixed-CPU transformer reproduces all 813 generated chunks exactly,
-leaving the other private composite files unchanged. The controlled boot pair
-is scheduled serially behind full PadMint's local training, using the same new
-host for both modules and byte-identical card/SRAM seeds. No boot result is
-claimed while that comparison is waiting. Full PadMint packaging and the
-matched O2 prepared-block comparison remain in progress on their fixed inputs.
+leaving the other private composite files unchanged. The controlled 6,000-retrace boot pair now passes with the same new host for
+both modules and byte-identical card/SRAM seeds: all 1,050 canonical records
+and resulting cards match, delivery/clock drift is zero, and all 600 exact
+guest-state samples match. Both hosts exit normally. The recorded host hash
+matches the tested `6532973` binary, runtime `70bc9957`; both modules use the
+same `99e47480` runtime. This establishes bounded Mac O0 correctness only.
+
+Full PadMint's fresh local training completes normally at 23,000 retraces,
+executing 262 translated functions and merging its own new profile. Its
+headless route admits player control; this is not physical gameplay acceptance.
+The 822-unit iOS module build is now running. Full packaging and the matched
+O2 prepared-block comparison remain in progress on their fixed inputs.
+
+
+### Module-owned RAM and extended-alias candidate
+
+The next source batch, based on #18, imports only donor `f70305c`'s MEM1 storage
+helper, retaining Elliott's authorship in `8defb9f`. Windows exposes explicit
+`--fixed-mem1` together with `--fixed-cpu`; both remain off by default. ABI 5
+declares both required getters, preventing a missing memory export from
+silently selecting a different RAM buffer. The host validates an aligned
+32 MiB buffer separate from CPU storage before graphics/player initialization,
+initializes and adopts it, and detaches it before the ordinary CPU cleanup.
+Ordinary ABI 3 and fixed-CPU ABI 4 remain supported. Missing-CPU and unsupported
+runtime configurations are rejected before compilation. Storage selection and
+cleanup pass ASan/UBSan; all seven preparation/cache regressions pass.
+
+A synthetic 32 MiB probe found an existing runtime bug in both RAM modes:
+an alias at `0x81F00000` returns ordinary RAM (`00000000`) instead of registered
+storage (`ABCDEF12`). The alias shortcut tracked only retail 24 MiB, although
+the host expands memory for linked REL data. Maintained runtime
+`c2905b7a6b2752611a4e1ccb2ac9e3cda1857462` conservatively tracks the cached
+MEM1 address region during insertion and registry rebuild after removal. It
+does not change allocation sizes or CPU layout. The fix is separately reviewable
+in [runtime PR #2](https://github.com/chrissotraidis/RecompCore/pull/2), stacked
+on runtime #1, and retained as patch 0135. Lock, public branch and builder pin
+select that same revision.
+
+Both expanded memory fixtures pass ASan/UBSan, covering upper aliases and
+removal, dispatch-poll stability, cached/uncached reads, endian loads/stores,
+reservation invalidation, write journals, MEM2, MMIO and oversized accesses.
+The rebuilt bundled host and all 247 Mac host/runtime regressions pass.
+Actual ABI-3 and ABI-4 hosts reject synthetic ABI-5 modules before creating
+player storage; the new host also rejects a missing MEM1 getter at that point.
+Native Windows checks and fresh matched ordinary/global modules remain pending. The new modules both use `c2905b7a` to avoid conflating
+the optimization with a runtime change. Inline-memory preparation, optimized
+x86 measurements, actual gameplay and player-build acceptance remain open.
+No donor performance number or public-release acceptance is transferred.

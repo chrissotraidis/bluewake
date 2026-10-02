@@ -85,7 +85,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK)
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
@@ -145,6 +145,22 @@ class PreparedCacheTest(unittest.TestCase):
         self.args.prepared_blocks = False
         self.cycle()
         self.assertEqual(self.chunk().read_text(), CHUNK)
+
+    def test_fixed_mem1_selection_is_recorded_and_invalidates_inputs(self):
+        self.args.fixed_cpu = True
+        self.cycle()
+        prior = (self.out / "composite-inputs.digest").read_text()
+        self.args.fixed_mem1 = True
+        self.cycle()
+        self.assertNotEqual(prior, (self.out / "composite-inputs.digest").read_text())
+        self.assertTrue(json.loads((self.out / "prepared-blocks.json").read_text())["fixed_mem1"])
+        before = self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
+        self.args.fixed_mem1 = False
+        self.cycle()
+        self.assertFalse(json.loads((self.out / "prepared-blocks.json").read_text())["fixed_mem1"])
+        self.assertIn("#define ctx (&bw_guest_cpu)", self.chunk().read_text())
 
     def test_interrupted_preparation_is_not_reused(self):
         self.args.prepared_blocks = True

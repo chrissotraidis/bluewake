@@ -262,6 +262,7 @@ target_include_directories(bluewake_fast_blocks_test PRIVATE
 target_link_libraries(bluewake_fast_blocks_test PRIVATE ${CMAKE_DL_LIBS})
 
 add_executable(bluewake_module_cpu_contract_test ../../tests/module_cpu_contract_test.c)
+target_link_libraries(bluewake_module_cpu_contract_test PRIVATE GXRuntime::runtime)
 target_include_directories(bluewake_module_cpu_contract_test PRIVATE
     ${GXRUNTIME_DIR}/include
     ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)

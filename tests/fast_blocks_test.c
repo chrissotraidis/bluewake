@@ -13,7 +13,7 @@
  * match after each, including the cycle observation suffix. Modules are
  * generated privately from the player's disc; no native replacement sources.
  * Works with either ordinary pointer-state or optional fixed-state modules.
- * Global-MEM1 modules require a separate fixture bound to their own RAM. */
+ * Fixed-MEM1 modules run on their own declared RAM; every byte is compared. */
 #include "core/cpu.h"
 #include "StaticRecompABI.h"
 #include "../cmake/composite/module_cpu_contract.h"
@@ -30,7 +30,7 @@
 #include <dlfcn.h>
 #endif
 
-#define RAM_SIZE GC_MAIN_RAM_SIZE
+#define RAM_SIZE BLUEWAKE_MODULE_MEM1_SIZE
 #define SELF 0x80100000u
 #define MODEL 0x80101000u
 #define MIX_COUNTS 0x80102000u
@@ -158,6 +158,7 @@ static CPUState build(u8* ram, u32 entry, unsigned scenario) {
 typedef struct Module {
     const StaticRecompModuleDesc* desc;
     CPUState* cpu;
+    u8* mem1;
     CPUState storage;
 } Module;
 
@@ -175,21 +176,22 @@ static int open_module(const char* path, Module* out) {
     }
     StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)MODULE_SYMBOL(STATICRECOMP_GET_MODULE_SYMBOL);
     CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))MODULE_SYMBOL("bluewake_composite_guest_cpu");
-    if (MODULE_SYMBOL("bluewake_composite_guest_mem1") != NULL) {
-        fprintf(stderr, "%s: global MEM1 needs a separate RAM comparison fixture\n", path);
-        return 0;
-    }
+    BlueWakeModuleMEM1Fn guest_mem1 =
+        (BlueWakeModuleMEM1Fn)MODULE_SYMBOL("bluewake_composite_guest_mem1");
     if (get == NULL) {
         fprintf(stderr, "%s: not a BlueWake module\n", path);
         return 0;
     }
     out->desc = get();
-    const char* error = bw_module_select_cpu(out->desc, guest_cpu, 0,
-                                             &out->storage, &out->cpu);
+    BlueWakeModuleStorage selected;
+    const char* error = bw_module_select_storage(out->desc, guest_cpu, guest_mem1,
+                                                 &out->storage, &selected);
     if (error != NULL) {
         fprintf(stderr, "%s: %s\n", path, error);
         return 0;
     }
+    out->cpu = selected.cpu;
+    out->mem1 = selected.mem1;
     return 1;
 #undef MODULE_SYMBOL
 }
@@ -236,9 +238,11 @@ int main(int argc, char** argv) {
         fprintf(stderr, "the two modules share one guest CPU: load them under different file names\n");
         return 1;
     }
-    u8* ram_a = calloc(1, RAM_SIZE);
-    u8* ram_b = calloc(1, RAM_SIZE);
-    if (!ram_a || !ram_b) return 1;
+    u8* ram_a = a.mem1 != NULL ? a.mem1 : calloc(1, RAM_SIZE);
+    u8* ram_b = b.mem1 != NULL ? b.mem1 : calloc(1, RAM_SIZE);
+    if (!ram_a || !ram_b || ram_a == ram_b) return 1;
+    memset(ram_a, 0, RAM_SIZE);
+    memset(ram_b, 0, RAM_SIZE);
     unsigned per_entry[ENTRY_COUNT] = {0}, stopped = 0, refunded = 0;
     for (unsigned i = 0; i < cases; ++i) {
         const unsigned which = i % (unsigned)ENTRY_COUNT;
@@ -271,7 +275,7 @@ int main(int argc, char** argv) {
            stopped, refunded);
     for (unsigned k = 0; k < ENTRY_COUNT; ++k)
         printf("  %08X: %u cases\n", ENTRIES[k], per_entry[k]);
-    free(ram_a);
-    free(ram_b);
+    if (a.mem1 == NULL) free(ram_a);
+    if (b.mem1 == NULL) free(ram_b);
     return 0;
 }

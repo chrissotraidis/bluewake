@@ -80,6 +80,7 @@ Options (`--help` lists all):
 | `--no-mods` | Skip the mods (widescreen 16:9 and 16:10, Better Wind Waker's options) |
 | `--prepared-blocks` | Opt into generic prepaid-block optimization; off by default, Windows timing/gameplay pending |
 | `--fixed-cpu` | Opt into experimental fixed-address CPU storage; off by default, requires the matching app |
+| `--fixed-mem1` | Also use module-owned RAM; requires `--fixed-cpu` and the matching app, off by default |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
@@ -208,10 +209,19 @@ BlueWake ABI 4; ordinary modules remain ABI 3. Build the app and module together
 Older apps reject ABI 4 before starting the game. To return to an older app,
 rebuild without `--fixed-cpu`. The new desktop host still accepts ordinary ABI 3
 modules with the matching CPU layout, but rejects older undeclared fixed-CPU
-modules and unsupported global-MEM1 modules with a rebuild message. This option
+or fixed-MEM1 modules with a rebuild message. This option
 does not enable Smooth Motion or 60 Hz simulation. Windows correctness, matched
 timing and gameplay qualification remain open; donor measurements do not establish
 a BlueWake speedup.
+
+The separate `--fixed-mem1` experiment requires `--fixed-cpu` and declares ABI 5.
+The app validates both storage getters, requires an aligned 32 MiB RAM buffer
+separate from the CPU state, and adopts that buffer without freeing it at
+shutdown. Older apps reject ABI 5; rebuild without `--fixed-mem1` to return to a
+fixed-CPU app, or without either storage option for an ordinary ABI-3 app.
+The pinned runtime also fixes aliases in the host's extra 8 MiB of RAM; this
+fix applies to ordinary modules too. Sanitizer checks cover the memory contract,
+but full module correctness, Windows timing and gameplay are still pending.
 
 ## Disc recovery in the reconciliation candidate
 
