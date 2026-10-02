@@ -741,3 +741,25 @@ counter is static and does not reset after a charged block, so it counts
 nonconsecutive zero-charge blocks. Preserve the current loop inputs while the
 corrected FP module compiles, then repair and qualify consecutive-run/reset
 semantics separately. No timing or gameplay conclusion follows from this probe.
+
+
+The corrected inline-FP candidate `9d3729a` now passes native Windows app /
+fixture compilation and **33/33 tests** (35.84 seconds; inline FP 24.06 seconds;
+[run 36969380169](https://github.com/chrissotraidis/bluewake/actions/runs/36969380169)).
+The corrected 822-unit arm64 module also links; its private A/B qualification
+is in progress.
+
+The `7b7e530` old/new-host route completes normally with both hosts. The unchanged
+strict comparator rejects the pair because exactly **one of 1,050 canonical
+records changes**: the collision-provenance summary goes from zero GroundCross
+observations to 1,974, with valid and sentinel values now seen. This is the
+intended restored observation, not a guest-state mismatch. All other 1,049
+records, result cards and 600 exact guest-state samples match; all 1,024 delivery
+cycles and the route clock match exactly. Preserve the strict failure and the
+explicit one-record analysis; no comparator rule is relaxed. This is bounded
+headless evidence for the observation repair, not gameplay/performance acceptance.
+
+The first Windows assertion-fixture run (36969791283) reaches compilation but
+fails because the new edge fixture lacks the existing compatibility-header
+include path (`dlfcn.h` from `game_options.c`). The shared fixture setup now
+uses that path; native build/regressions are being repeated.

@@ -213,7 +213,8 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     foreach(TEST_NAME cycle_domain interrupt_sources delivery_digest composite_dispatch_loop edge_intercepts)
         set(TEST_TARGET bluewake_${TEST_NAME}_test)
         target_include_directories(${TEST_TARGET} PRIVATE
-            ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+            ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/cmake/composite
+            ${BLUEWAKE_COMPAT_INCLUDES})
         target_compile_options(${TEST_TARGET} PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
         target_link_libraries(${TEST_TARGET} PRIVATE gxruntime bluewake_posix_compat)
         set_target_properties(${TEST_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
