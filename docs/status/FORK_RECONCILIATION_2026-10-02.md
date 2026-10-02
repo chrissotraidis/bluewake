@@ -790,7 +790,8 @@ and preserve their copied cards/settings. The enabled run reaches the ordinary
 ladder before the later targeting check, so its rejected jump establishes no
 isolated targeting result. The different positions after jumping also prevent
 using these runs as a matched sprint-distance or performance comparison.
-Physical controls, UI toggles and optional plain-wall climbing remain open.
+Physical controllers and optional plain-wall climbing remain open. The later
+keyboard settings check below qualifies selected UI toggles.
 
 A read-only metadata check loads the final packaged personal module, verifies
 its recorded hash and calls its option accessors: all 15 names, indices, defaults
@@ -799,14 +800,54 @@ are present. This closes export/metadata availability for that module, not the
 15 options' gameplay behavior. No translated code or private test artifacts
 are included in this source-only record.
 
+The fresh app's keyboard-driven Gameplay menu also preserves explicit choices
+across a separate launch: Better Wind Waker on, instant text off, Brisk Sail on,
+jump off and sprint at 1.00. The restarted UI shows those choices and runtime
+startup selects the corresponding option list with 40 values written. Wall
+climbing and Smooth Motion remain off. Re-enabling jump through the live menu
+and pressing Space invokes the guest jump at retrace 3712, reaches airborne
+state and returns to grounded idle by 3747. Both processes exit normally;
+copied and original cards are unchanged. The second run changes only the
+intended jump preference. This accepts the tested keyboard menu/persistence
+and live-jump flow, not pointer/controller navigation, each option's scene
+behavior, audible music or sustained performance.
+
+### Pictobox capture blocker on the fresh Mac candidate
+
+The exact fresh `3392854` app and packaged module reproduce a black shutter
+on Mac/Metal, at original 30 Hz with interpolation and Better Wind Waker off.
+An isolated copy of the preserved Windfall fixture is loaded; the regular
+Pictobox is granted in guest memory because that fixture does not own it.
+Scheduled X enters the view, A takes a photo at retrace 2600, and B at 3300
+fails to return to gameplay. Seven inspected captures show the normal view
+before the photo and the same black shutter afterward. Rendering and retraces
+continue through the normal 4200-retrace exit. Copied card, seed and preferences
+are unchanged. This is a bounded item-path diagnostic, not natural item
+acquisition or reproduction on the reporters' Windows hardware.
+
+The pre-photo state has capture step 0; the post-photo state has step -1,
+cleared capture buffers and no initialized compression thread. The reference
+capture routine uses -1 after its draw-sync timeout, matching this state.
+Runtime `18ba3b64` models PE finish delivery but lacks PE token delivery and
+its token MMIO register. A missing draw-sync callback is the leading diagnosis;
+it is not yet a validated fix or proof that the Windows reports share its cause.
+A second run samples capture step 2 at retraces 2605 and 2625, with both
+buffers allocated, the timeout alarm armed and the photo callback registered;
+by 2700 the timeout has set step -1 and freed the buffers. Both runs exit
+normally and preserve their copied saves. The next check tests the smallest
+complete token-delivery correction with interrupt/acknowledgment regressions,
+photo completion, B return, repeated captures and save/reload. Photo content
+must also be inspected: clearing the shutter alone is insufficient.
+
 ## Report reconciliation
 
-Reports from both repositories are investigation leads, not diagnosed or resolved
-bugs. No issue is closed or externally commented on by this work.
+Reports from both repositories are investigation leads. The bounded Mac
+Pictobox reproduction above does not establish the Windows reports' cause.
+No issue is closed or externally commented on by this work.
 
 | Report | Evidence / disposition | Next discriminating check |
 | --- | --- | --- |
-| [BlueWake #13](https://github.com/chrissotraidis/bluewake/issues/13), [donor #19: Pictobox](https://github.com/elliotttate/Wind-Waker-Recomp/issues/19) | Reporter confirmed donor Windows x64 0.3.0 on Windows 11/RTX 4070; a second Windows/Nvidia user confirms the same symptom. Windfall photo shutter blacks out while sound continues, with 120 displayed FPS / 30 game FPS, maximum render settings and 16:9. Exact binary-to-source identity still unverified | Reproduce on an isolated Windfall save with the final candidate, interpolation off/on; observe GPU/EFB copy and game-thread progress. No cause or fix established; duplicate report mapped without closing either issue |
+| [BlueWake #13](https://github.com/chrissotraidis/bluewake/issues/13), [donor #19: Pictobox](https://github.com/elliotttate/Wind-Waker-Recomp/issues/19) | Reporter confirmed donor Windows x64 0.3.0 on Windows 11/RTX 4070; a second Windows/Nvidia user confirms the same symptom. Windfall photo shutter blacks out while sound continues, with 120 displayed FPS / 30 game FPS, maximum render settings and 16:9. Exact binary-to-source identity still unverified | Mac final-candidate diagnostic now reproduces the black shutter with interpolation off and capture timeout state; see above. Trace and repair token delivery, inspect photo content and repeat/cancel/save behavior, then verify Windows separately. No fix claimed; neither issue closed |
 | [Donor #16: startup freeze](https://github.com/elliotttate/Wind-Waker-Recomp/issues/16) | 0.2.2 Windows logs reject PAL, then accept USA, initialize D3D12 on RTX 2050; stop after gxcore initialization. Also occurs on integrated GPU | Symbolized/blocked-thread evidence at first-frame boundary with exact app/module/pins; avoid assuming disc/settings/GPU cause |
 | [Donor #5: settings/startup crash](https://github.com/elliotttate/Wind-Waker-Recomp/issues/5) | Earlier access violation at zero; #12 startup/restart safeguards do not establish a fix | Windows HLE/LLE and real Restart/settings reproduction; bounded crash/safe-mode recovery |
 | [Donor #12: scripted music](https://github.com/elliotttate/Wind-Waker-Recomp/issues/12), [#1: intro](https://github.com/elliotttate/Wind-Waker-Recomp/issues/1) | #12 identifies Windows x86/0.2.2, ambient-only intro and bird/Zelda/sister/Ganon cues; Mac intro stream/sink evidence covers only its stated scene/build | Fresh-card and matching scripted-scene Windows guest/sink/output comparison, then audible output; do not extrapolate Mac intro captures |
@@ -821,19 +862,22 @@ Chris reoriented the loop after the initial integration campaign. The next
 iterations prioritize the complete player experience; see the current section
 of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
 
-1. **Remaining Mac qualification:** complete actual camera/controller and
+1. **Pictobox blocker:** establish and correct the missing completion path,
+   then verify real photo content, repeat/cancel and save/reload. Preserve the
+   reproducer and baseline; do not bypass capture state or force success.
+2. **Remaining Mac qualification:** complete actual camera/controller and
    required gameplay-option checks, audible intro/scripted music and sustained
    play with matched measurements on an idle host. The fresh build, bounded
    progression, local upgrade, save/reload, settings and current-module states
    stay accepted unless a relevant change invalidates them.
-2. **Final iOS player path:** resume the existing `3392854` build only after
+3. **Final iOS player path:** resume the existing `3392854` build only after
    stable disk headroom is available. It is stopped, not running; 593 objects
    and verified profiles remain intact. Inspect final assembly/provenance, then
    finish coordinated signing, device save/reload and preserved upgrades.
-3. **Windows player acceptance:** complete clean O2 builds and native
+4. **Windows player acceptance:** complete clean O2 builds and native
    gameplay/report checks. Hardware availability remains unconfirmed; continue
    independent work without seizing devices or counting missing checks as passed.
-4. **Consolidation and migration preparation:** continue through cumulative
+5. **Consolidation and migration preparation:** continue through cumulative
    PR #37. Land maintained runtime in `bluewake-next`, not the unrelated default
    `codex/galaxypad-integration`, and BlueWake in `main` with authorship retained.
    Complete one support matrix, tested instructions and report mapping. The
