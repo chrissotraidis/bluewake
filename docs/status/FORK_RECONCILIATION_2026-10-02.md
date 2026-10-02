@@ -65,7 +65,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#25](https://github.com/chrissotraidis/bluewake/pull/25) | `80eb353` | Explicit host writer/batching; 42 native Windows tests and bounded Mac route/card/intro-image comparisons pass; 23,000-retrace route/card match; player-control trigger not reached |
 | [#26](https://github.com/chrissotraidis/bluewake/pull/26) | `9de9cf2` | Optional complete-coverage checkpoint comparisons; six CPU/RAM/REL hash checkpoints match over 6,000 headless retraces; Aurora checkpoints and two intro frames match; native Windows host build passes |
 | [#27](https://github.com/chrissotraidis/bluewake/pull/27) | `8233de9`, import `d176f3e` | Direct/indirect calls and certified register inlining; 30,000 active function cases, three-way headless/Aurora routes and intro frames, and 45 native Windows tests pass; optimized measurements and gameplay remain open |
-| [#28](https://github.com/chrissotraidis/bluewake/pull/28) | `5a9a59a`, import `60a713d` | Recovered J3D matrix functions; 100,000 arm64 differential cases, certification and sanitizer guards pass; builder/module integration and native Windows qualification open |
+| [#28](https://github.com/chrissotraidis/bluewake/pull/28) | `ce31672`, import `60a713d` | Certified J3D module/host selection; 100,000 function cases, three-way intro/saved-game comparisons and 46 native Windows tests pass; optimized/native Windows module measurements open |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -90,7 +90,7 @@ source only. No source merge or test result implies release readiness.
 | Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
 | Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Imported directly with Elliott's authorship in `d176f3e`; candidate adds versioned host readiness, shared feature predicates and guarded/certified register inlining. Builder options remain independent and off by default | Integrated with bounded checks; all 823 private O0 module units link, 30,000 active function cases and three-way headless/Aurora route/checkpoint/intro-image comparisons pass. All 45 native Windows tests pass. Optimized combined modules, gameplay and matched timing remain required |
 | Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; separate default-off `--gather-pipe` prepares modules. Host direct writer/batching now has separate default-off selection; bounded Mac route/card/intro-image comparisons pass. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures and nine cache tests pass locally; 813 chunks prepare reproducibly and unprepared inputs are rejected. Arm64 O0 function/boot comparisons pass with the host writer disabled; optimized modules, sustained renderer/gameplay qualification and matched timing remain required |
-| Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | J3D rotation/translation functions imported in #28 from the fixed donor baseline, with recovered-source attribution verified. Other math/skin/vector replacements remain open; donor benchmarks do not transfer | Open; J3D function-level comparisons and guards pass. Builder/module integration, remaining native imports, same-module state/images and matched measurements required |
+| Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | J3D rotation/translation functions integrated in #28 with certified builder preparation and versioned host opt-in; recovered-source attribution verified. Other math/skin/vector replacements remain open | Open; J3D function and arm64 O0 intro/saved-game state/image comparisons pass. Remaining native imports, combined optimized/native Windows module checks and matched measurements required |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers imported and separately qualified in #23/#24 | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
@@ -225,18 +225,33 @@ a claim of identical state at every intervening instruction. The existing route 
   This is bounded gameplay evidence; sustained play, save/reload, upgrades and
   combined optimized performance remain open.
 - **Recovered J3D functions:** #28 preserves Elliott's five-file import
-  `60a713d`; adaptation `5a9a59a` credits him as co-author and records the fixed
-  zeldaret/tww source/license in RIGHTS_AND_LICENSES.md. The portable fixture
-  uses declared module storage ABIs and no longer masks the cycle-observation
-  suffix. Across 100,000 arm64 cases, 67,695 native executions match every CPU
-  byte and the 40 KiB RAM test area; 32,305 unsupported cases decline unchanged.
-  A null-RAM guard failure is reproduced under ASan/UBSan (the optimized
-  unsanitized fixture did not expose it); the corrected guard passes Release
-  and sanitizers, including aliases, journals, MMIO and budget fallbacks. Three
-  certification test methods pass; both actual functions certify in the retained
-  private translation. Repository/source-archive audits pass. Native Windows CI
-  is pending. This imports and qualifies the functions; player-builder selection,
-  routed module comparisons and matched performance remain open.
+  `60a713d`; adaptations `5a9a59a`/`ce31672` credit him as co-author and record
+  the fixed recovered-source attribution in RIGHTS_AND_LICENSES.md. The
+  independent `--native-j3d` builder option certifies before generic rewrites,
+  fingerprints selection/helpers, and removes routing on disable. Host
+  `BLUEWAKE_NATIVE_J3D=1` requires the versioned module handshake and read-only
+  observation predicate; missing support stays Off. Defaults and module ABI
+  are unchanged. Twelve cache tests, three certification test methods and
+  Release/ASan/UBSan handshake/guard checks pass. A pre-fix null-RAM sanitizer
+  failure is retained. CMake rejects unprepared inputs. The combined fixed-CPU/
+  MEM1, prepared-block, inline-FP/gather/direct-call J3D chunk certifies and
+  passes syntax checking; this is not whole-module combination acceptance.
+  The fresh independent O0 module links all 823 units. Across 100,000 arm64
+  cases, 67,695 native executions match every CPU byte (including cycle suffix)
+  and the 40 KiB RAM test area; 32,305 unsupported cases decline unchanged.
+  All 67,695 accepted calls also match through the active routed module.
+  Same-host three-way ordinary/candidate-Off/candidate-On runs pass the
+  6,000-retrace headless intro (six checkpoints, 1,050 route/card records,
+  zero timing drift; 6,873 native calls/26 guard fallbacks) and the 2,000-retrace
+  Aurora existing-save movement route (four checkpoints, all 37 sampled player
+  states, 1,050 route/card records, zero timing drift and both nonblank frames
+  at retraces 1,200/1,600). The latter executes 235,575 native calls with 1,074
+  guard fallbacks. Original save backup hashes remain unchanged. Native Windows
+  at `ce31672` builds the app and passes all 46 tests (38.16 s;
+  [run 36987957549](https://github.com/chrissotraidis/bluewake/actions/runs/36987957549)).
+  Source/archive audits pass. Traced O0 timings under concurrent compilation
+  are not performance evidence. Combined optimized modules, native Windows
+  translated-module exactness, sustained play and final player routes remain open.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -301,10 +316,9 @@ bugs. No issue is closed or externally commented on by this work.
    to sustained scenes and save/reload acceptance.
    The baseline full PadMint package is complete; player signing and final-source/
    device acceptance remain open.
-2. Connect the imported J3D functions to certified module/player preparation,
-   then directly import the remaining native math/skin/vector enhancements,
+2. Directly import the remaining native math/skin/vector enhancements,
    adapting BlueWake hooks and retaining contributor credit. Direct-call/register
-   source is now integrated. Complete combined optimized and host FIFO batching
+   and certified J3D source are now integrated. Complete combined optimized and host FIFO batching
    qualification, including scheduling/hooks, gameplay and matched measurements.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
