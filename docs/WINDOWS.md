@@ -37,11 +37,19 @@ three tests and the full app link also pass natively at `74da8ee` in
 [CI run 36810799124](https://github.com/chrissotraidis/bluewake/actions/runs/36810799124).
 These checks do not imply Windows gameplay or audio acceptance.
 
-The reconciliation candidate includes generic prepaid-block and fixed-address
-CPU transforms, module-owned RAM, inline floating-point and gather/inline-memory
-helpers as separate builder opt-ins. Other register/native preparation and experimental
-60 Hz simulation remain separate work. Windows PGO training, matched Windows
-measurements and full Windows gameplay remain acceptance gates.
+The current reconciliation candidate (`3392854`) builds the native Windows host
+and passes all 56 source-only regressions in
+[CI run 37033022272](https://github.com/chrissotraidis/bluewake/actions/runs/37033022272).
+This covers app linking and the registered regression suites, not a complete
+player-owned-disc build, Direct3D gameplay, audio or physical controllers.
+
+The candidate includes prepaid blocks, fixed CPU/RAM storage, inline floating
+point, gather helpers, direct calls and certified native replacements as explicit
+builder options. Their bounded Mac evidence is in the
+[reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md); it does not
+establish Windows performance. The Windows builder currently compiles at O2
+without PGO training. Mac local-training receipts do not validate that Windows
+path. Full clean Windows builds, matched performance and gameplay remain open.
 
 ## What you need
 

@@ -3,7 +3,7 @@
 **In progress.** Chris and Elliott have agreed to consolidate development in
 BlueWake. This migration directly imports Elliott's enhancements, preserves his
 authorship and credits combined implementations with co-author trailers.
-Source integration is reviewable in stacked draft PRs; required
+Source integration is consolidated in cumulative draft PR #37; required
 performance, player-build and gameplay acceptance remains open. No release,
 fork redirect, issue closure or migration acceptance is authorized. Personal
 modules, generated source, discs, profiles, builds, saves and captures stay local.
@@ -177,6 +177,8 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#33](https://github.com/chrissotraidis/bluewake/pull/33) | `f861eae`, runtime `18ba3b64` | Later donor post-texture renderer fix with backward-compatible save-state loading; FIFO/fold/sanitizer checks and Outset state/image comparison pass; 51 native Windows tests pass; paired boss-room view confirms the white-to-orange lava correction |
 | [#34](https://github.com/chrissotraidis/bluewake/pull/34) | `193870f` import, `558438a` / `9849eb0` adaptations | Controller feedback with preserved preferences, menu/teardown and guest-cancellation fixes; ten Mac checks, 56 Windows tests, bounded Outset and sanitizer checks pass; real controller qualification open |
 | [#35](https://github.com/chrissotraidis/bluewake/pull/35) | `9c205c3` | Relocatable personal Mac builder; fresh shell/translation, packaging/signing and bounded existing-module relocation checks pass; complete player build and gameplay acceptance open |
+| [#36](https://github.com/chrissotraidis/bluewake/pull/36) | `3392854` | Explicit combined Mac player build; fresh owned-disc training/compilation/packaging, bounded restart recovery and actual save/reload pass; remaining gameplay acceptance open |
+| [#37](https://github.com/chrissotraidis/bluewake/pull/37) | `3392854` | Cumulative review against main, preserving all preceding ancestry, 26 Elliott-authored commits and 13 co-author trailers; current qualification and consolidation home |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -196,7 +198,7 @@ in save states. All are drafts; all public checkpoints are source only. No sourc
 | Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Latest SDL queue timing integrated with window-scoped filtering; prior BlueWake camera/menu code retained | Integrated; actual SDL queue regression passes; real mouse/controller/camera timing acceptance open |
 | Jump, sprint, quick doors, transitions; Apple/Windows | main `22fa284`, `d55ce11`, `2c9f16c`, `df62ae0` | Integrated; Apple touch controls use existing editor, new options remain opt-in | Integrated; final new-module progression and controls on/off open |
 | Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Integrated; clean player-generated module, all exports/options and relevant gameplay open |
-| Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
+| Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Current Mac module F5/F9 and game save/reload pass across processes; climbing and other claimed platforms remain open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches are now imported separately | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
@@ -600,9 +602,9 @@ acceptance. No donor benchmark is transferred.
 | --- | --- | --- |
 | Owned-disc source / iOS | Fresh `95adeed` / runtime `99e47480`: disc validation, translation, mods, locally generated PGO, full module/app link, personal packaging and signature/provenance checks pass. Controlled interruption/resume preserves prior objects/profile hashes | Repeat final integrated-source selection where changed; physical launch, fresh/existing save/reload and in-place upgrade preserving data |
 | PadMint / iOS | Adapter `018a9f0` (CLI 0.2.8), new workspace, exact `95adeed`, matching audited app-only input: translation/mods, new 23,000-retrace local training, full compilation and personal assembly pass; package integrity, module hash and exact source provenance rechecked | Player signing/install (assembled module is unsigned), final integrated-source acceptance, device run/save/reload/upgrade and trained performance |
-| App-only / iOS | Fresh matching candidate excludes translated code; PadMint audit and public-assets gate pass locally | Final-source compatible old-module update and device acceptance; no upload/publication |
-| Owned-disc / Mac | Bundled development host, private module correctness and isolated menu checks pass | Complete documented fresh player route, installation/launcher, actual game/save/reload/upgrade and sustained performance |
-| Owned-disc / Windows | Native app/source fixtures pass; disc/recovery and preparation scripts integrated | Full clean module build/training, real disc/Unicode/UI/recovery, Direct3D/fullscreen/restart, controllers/audio/gameplay and save-preserving upgrade |
+| App-only / iOS | Fresh `3392854` shell excludes translated code; PadMint 0.2.9 audit and public-assets gate pass locally | Final-source compatible old-module update and device acceptance; no upload/publication |
+| Owned-disc / Mac | Fresh `3392854` / runtime `18ba3b64`: owned-disc translation, new training, module compilation, signed relocatable app and actual game save/separate reload pass; bounded completed-build restart recovery passes | Audible intro/scripted music, documented state/rebuild restrictions, remaining real camera checks, real controllers and sustained performance; local replacement from the recorded earlier developer app now passes |
+| Owned-disc / Windows | Native app/source fixtures pass; disc/recovery and preparation scripts integrated | Full clean O2 module build (current builder has no PGO training), real disc/Unicode/UI/recovery, Direct3D/fullscreen/restart, controllers/audio/gameplay and save-preserving upgrade |
 | PadMint / Mac, Windows, tvOS | No complete adapter path accepted; Mac remains planned | Do not claim support; implement/test before widening the matrix |
 | Apple TV | Existing preview source and contributor work preserved | Physical hardware/storage acceptance for any claimed feature; no new acceptance inferred |
 
@@ -631,9 +633,10 @@ captured frames and 1,050 route/card records, with zero delivery/clock drift.
 The source save is unchanged. The normal paced launch also matches movement,
 frames and route/card records, but differs in MEM1 checksums; disabling only
 pacing restores the checkpoint match. This establishes the setting difference
-in this bounded route, not general correctness of paced gameplay. Full fresh
-module compilation/training, game saves, updates and sustained acceptance
-remain open. These runs overlapped compilation and are not benchmarks.
+in this bounded route, not general correctness of paced gameplay. At that earlier checkpoint, fresh module compilation/training and game saves
+were still open; the final fresh app evidence below now closes those bounded
+gates. Updates and sustained acceptance remain open. Those runs overlapped
+compilation and are not benchmarks.
 
 The Windows builder exposes individual module-preparation switches. The Mac
 builder now offers an explicit `--combined-optimizations` candidate using the
@@ -646,12 +649,124 @@ with the retained combined test module: all native families/direct calls and
 gather batching activate without explicit feature environment variables. Its
 controlled-depth 2,000-retrace route matches four complete checkpoints, both
 images and all route/card records; the original save remains unchanged. This
-qualifies bundle configuration, not a clean player build. Full fresh candidate
-preparation, compilation/training and player acceptance remain open.
+qualifies bundle configuration. The subsequent fresh owned-disc run at
+`3392854` completes extraction/translation, all mod variants, combined preparation,
+new 23,000-retrace local training, final O2 compilation and signed personal
+packaging. Dependency pins, all 415 RELs, profile/module provenance and deep/strict
+signatures pass. The bundled app runs outside the checkout without developer
+game-path overrides. A pre-armed restart was interrupted during reconfiguration
+of this completed build; 1,485 finished objects and profiles/module survived,
+and the same-command resume completed with no compilation work. This does not
+claim interruption during initial compilation.
+
+The fresh app then used the game's Save menu to write the selected slot, quit,
+and separately reloaded the saved card into visible, responsive Outset gameplay.
+Independent checks validate both selected-slot copies and the container, preserve
+the other slots and original seed, and confirm the saved payload survives reload.
+The first harness rejected an `Opening.arc` marker occurring after quit; its
+failure is retained. A title-screen capture and sequence review identified that
+over-broad assertion, and the separate reload passed. Scripted movement is not
+physical-controller acceptance; this functional run during compilation is not
+a performance or audible-output result.
+
+On that same fresh app, keyboard-driven fullscreen on and FPS-overlay changes
+persist across a separate launch. The reopened menu shows both selected and
+Smooth Motion still off. Switching fullscreen off and resuming returns to visible
+windowed Outset. F5/F9 also saves and restores a current-module state in the same
+process: retrace/PC/MEM1 match, with 150 fields and zero missing or mismatched.
+Visible gameplay continues; both processes exit normally and copied/original
+cards remain unchanged. Pointer automation did not toggle the control; keyboard
+navigation worked. This closes the bounded menu/fullscreen persistence and
+current-state checks, not physical controls, audio, old-module/cross-process
+state compatibility, in-place updates or performance.
+
+A further fresh-card run of the final app completes 23,000 retraces and reaches
+player control at 20,255. Three inspected captures show the opening story and
+Outset tower dialogue. Its 383.3015 seconds of 32 kHz guest DMA PCM contain
+nonzero output in all 39 ten-second windows. Capture occurs before the platform
+sink: correct music and audible speaker output remain unaccepted. A separate
+app process also restores the current-module state at retrace 3,272 with all
+150 fields matching, resumes visible Outset, and exits normally with unchanged
+card/settings. Old-module and other-scene state compatibility remain separate.
+
+Final-source PadMint 0.2.9 (`de13bd7`) source-only acceptance passes in a new
+workspace. Its full iOS run also completes fresh 23,000-retrace local training;
+final module compilation is interrupted for low disk space; personal assembly remains unverified. The matching
+`3392854` app-only shell passes both content audits. Earlier `95adeed` results
+above remain historical evidence. Native Windows source-only host CI
+[37033022272](https://github.com/chrissotraidis/bluewake/actions/runs/37033022272)
+passes all 56 tests; this is not a Windows owned-disc gameplay result.
 
 The baseline personal iOS build cannot establish acceptance for every later
 integrated change. Existing artifacts and private profiles are not prerequisites
 for the clean player route. Exact hashes and private evidence stay local.
+
+### Local Mac app replacement acceptance
+
+The earlier developer personal app (source `2ecf471`, explicitly modified at
+build time) and the clean final `3392854` app both load the same isolated copied
+save, respond to scripted movement and exit normally after 2,500 retraces.
+The old app is retained and the new app replaces it at the same installed path.
+Card, settings and SRAM hashes remain identical across replacement and both
+launches. All four captured frames were inspected and show rendered Outset with
+Link moving/turning. The replacement signature passes deep/strict verification.
+This accepts the bounded local Mac replacement from that developer app; it does
+not establish an official release-to-release upgrade, iOS installation, arbitrary
+old save-state compatibility, audible audio or sustained performance.
+
+### Fresh Mac bounded progression acceptance
+
+The initial fresh route continued scheduled A presses after player control.
+At retrace 20501 the A bit is set in ladder procedure 60; at 20502 the guest
+changes to procedure 39 above ground. The ordinary-module comparison was
+stopped when this test-input confound was identified; it establishes no
+candidate regression. Both attempts remain preserved.
+
+With the same final app and route, ending scheduled dialogue A presses at
+20200 resolves the ladder failure. The guest exits the ladder at Y=150 at
+retrace 21066, completes all 30 outdoor waypoints at 22009 and performs the
+door confirmation at 22024. Guest overlap resets and completes with a new
+player actor. Captures at 24001 and 26002 show the rendered wooden interior;
+the player returns to ordinary idle state with no active event and the process
+exits normally at 27000 retraces. The original save seed remains unchanged.
+This accepts this fresh-start/ladder/outdoor/door/indoor route, not whole-game
+progression, physical control, correct audible music or sustained performance.
+No game-source change was needed for the test-input problem. The log does not
+print the expected archive name, so no archive-name claim is made.
+
+### Final iOS build interruption and resume
+
+The owned disk guard interrupted the final PadMint compile below 5 GiB free.
+The failed run and build log remain preserved; 567 completed object hashes and
+the merged compilation profile were recorded before resuming. Completed Mac
+mod sources contained byte-identical copies: APFS shared-block replacements
+preserve all 5,215 paths, contents and checked metadata while sharing about
+6.5 GiB of duplicate storage. No saves, binaries or iOS build inputs were
+removed. The identical PadMint command reused verified local training and
+resumed with 256 compile steps remaining, then stopped again below 5 GiB after
+26 further steps. All original 567 object hashes/mtimes and the prior merged
+profile are unchanged; 593 objects are retained now. Final assembly is open.
+Do not restart until storage headroom is stable. The maintainer has been asked
+to free at least 30 GiB or provide suitable external storage.
+
+### Mac mouse and follow-camera diagnosis
+
+On the exact fresh app, real mouse capture and horizontal drag visibly rotate
+Outset's camera. Escape releases capture and F1 opens settings; normal quit
+preserves the copied card. Real wheel input reaches the camera, but the first
+runs keep the effective scale at 1.00 while requesting 0.50 or 2.00. The ordinary
+module reproduces this, so it does not establish a combined-module regression.
+
+A diagnostic then guarantees guest movement and A input before wheel events.
+The camera's frozen flag clears, readiness changes from 0/0/0 to 1/1/1, its
+engine clock advances from 0 to 448 and effective zoom reaches both requested
+scales, 0.64 and 1.57. Inspected captures show a closer and farther view; a nearby
+post obstructs the farther view. The process exits normally and the copied card
+is unchanged. Earlier short live-input attempts did not activate this follow
+camera reliably. The evidence resolves the suspected stuck-zoom diagnosis as a
+dormant-camera test precondition; no guard removal or source fix is justified.
+Complete real wheel/vertical input, camera collision and physical-controller
+acceptance remain open. This diagnostic is not a performance result.
 
 ## Report reconciliation
 
@@ -660,7 +775,7 @@ bugs. No issue is closed or externally commented on by this work.
 
 | Report | Evidence / disposition | Next discriminating check |
 | --- | --- | --- |
-| [BlueWake #13: Pictobox](https://github.com/chrissotraidis/bluewake/issues/13) | Windfall shutter closes, picture stops, sound continues; reports Windows 11/120 FPS but exact product/module unclear. Maintainer already asked for identity | Establish exact build; isolated Windfall save, interpolation off/on, capture GPU/EFB copy and game-thread progress. No reproduced cause |
+| [BlueWake #13](https://github.com/chrissotraidis/bluewake/issues/13), [donor #19: Pictobox](https://github.com/elliotttate/Wind-Waker-Recomp/issues/19) | Reporter confirmed donor Windows x64 0.3.0 on Windows 11/RTX 4070; a second Windows/Nvidia user confirms the same symptom. Windfall photo shutter blacks out while sound continues, with 120 displayed FPS / 30 game FPS, maximum render settings and 16:9. Exact binary-to-source identity still unverified | Reproduce on an isolated Windfall save with the final candidate, interpolation off/on; observe GPU/EFB copy and game-thread progress. No cause or fix established; duplicate report mapped without closing either issue |
 | [Donor #16: startup freeze](https://github.com/elliotttate/Wind-Waker-Recomp/issues/16) | 0.2.2 Windows logs reject PAL, then accept USA, initialize D3D12 on RTX 2050; stop after gxcore initialization. Also occurs on integrated GPU | Symbolized/blocked-thread evidence at first-frame boundary with exact app/module/pins; avoid assuming disc/settings/GPU cause |
 | [Donor #5: settings/startup crash](https://github.com/elliotttate/Wind-Waker-Recomp/issues/5) | Earlier access violation at zero; #12 startup/restart safeguards do not establish a fix | Windows HLE/LLE and real Restart/settings reproduction; bounded crash/safe-mode recovery |
 | [Donor #12: scripted music](https://github.com/elliotttate/Wind-Waker-Recomp/issues/12), [#1: intro](https://github.com/elliotttate/Wind-Waker-Recomp/issues/1) | #12 identifies Windows x86/0.2.2, ambient-only intro and bird/Zelda/sister/Ganon cues; Mac intro stream/sink evidence covers only its stated scene/build | Fresh-card and matching scripted-scene Windows guest/sink/output comparison, then audible output; do not extrapolate Mac intro captures |
@@ -675,35 +790,32 @@ Chris reoriented the loop after the initial integration campaign. The next
 iterations prioritize the complete player experience; see the current section
 of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
 
-1. **Carry the measured configuration into the player build:** the combined
-   path's bounded Outset improvement justifies an explicit Mac builder candidate.
-   Wire the existing preparation, training/compiler choices and bundle defaults
-   consistently, then run it from the player's disc. Preserve the ordinary path
-   while sustained/frame-tail and gameplay acceptance remain open. No new
-   optimization family without a reproduced blocker; original 30 Hz logic and
-   experimental display modes off remain the defaults.
-2. **Clean Mac player path (current implementation):** extend the existing
-   builder, assemble a relocatable personal app and launch it outside the repo.
-   Validate disc-to-app provenance, resume, save/reload and data-preserving
-   updates. Existing developer-cache runs do not close this gate.
-3. **Final platform/player acceptance:** qualify the Mac player app through
-   fresh/existing saves, audio, progression, menus/fullscreen/controllers and
-   sustained performance. Complete Windows owned-disc module/training and real
-   gameplay; repeat final-source iOS/PadMint and coordinated device acceptance.
-   Hardware availability remains unconfirmed. Do not seize shared devices.
-4. **Consolidation and migration preparation:** reconcile the validated source
-   stack into the maintained branch, preserve authorship, complete unified
-   instructions and report mapping, and give a concrete cutover recommendation.
-   The [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
-   stays unposted until migration is accepted.
+1. **Remaining Mac qualification:** complete actual camera/controller and
+   required gameplay-option checks, audible intro/scripted music and sustained
+   play with matched measurements on an idle host. The fresh build, bounded
+   progression, local upgrade, save/reload, settings and current-module states
+   stay accepted unless a relevant change invalidates them.
+2. **Final iOS player path:** resume the existing `3392854` build only after
+   stable disk headroom is available. It is stopped, not running; 593 objects
+   and verified profiles remain intact. Inspect final assembly/provenance, then
+   finish coordinated signing, device save/reload and preserved upgrades.
+3. **Windows player acceptance:** complete clean O2 builds and native
+   gameplay/report checks. Hardware availability remains unconfirmed; continue
+   independent work without seizing devices or counting missing checks as passed.
+4. **Consolidation and migration preparation:** continue through cumulative
+   PR #37. Land maintained runtime in `bluewake-next`, not the unrelated default
+   `codex/galaxypad-integration`, and BlueWake in `main` with authorship retained.
+   Complete one support matrix, tested instructions and report mapping. The
+   [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
+   remains unposted until migration is accepted.
 
 Primary `codex/fork-reconciliation` at `95adeed` retains the completed baseline
 source-build/PadMint artifacts. The
 managed `bluewake-disc-parity` worktree at `05df605` retains both completed O2
 modules and the required private evidence.
 The managed `bluewake-cpu-contract` worktree holds the current source stack and
-private qualification artifacts; its nested runtime is `18ba3b64`. The active
-combined/reference O2 builds use frozen copies of source/runtime `0ea7ffb` /
+private qualification artifacts; its nested runtime is `18ba3b64`. The completed
+combined/reference O2 builds used frozen copies of source/runtime `0ea7ffb` /
 `c2905b7a`; later renderer edits cannot change their inputs. Both managed
 worktrees contain needed unique artifacts and remain in use. No checkout is
 removed or reset. Preserve saves, settings, inputs and signing material.

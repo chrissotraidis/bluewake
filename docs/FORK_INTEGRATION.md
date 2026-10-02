@@ -2,7 +2,13 @@
 
 The current fixed donor baseline and outstanding acceptance checks are in the
 [October 2 reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
-Earlier measurements below retain their original source/platform limits.
+The current cumulative review is [PR #37](https://github.com/chrissotraidis/bluewake/pull/37),
+with executable evidence at `3392854` and maintained runtime `18ba3b64`.
+It includes the later Windows preparation/native work, post-texture renderer
+correction and haptics; see the ledger for acceptance and intentional differences.
+The sections below describe the earlier October 1 import and retain their
+original source/platform limits. Their then-open implementation items are not
+the current migration checklist.
 
 BlueWake integrates GPL-covered source changes from
 [elliotttate/Wind-Waker-Recomp](https://github.com/elliotttate/Wind-Waker-Recomp), whose source is

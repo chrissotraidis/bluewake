@@ -1,50 +1,70 @@
 # BlueWake Autonomous Goal-Based Implementation Loop
 
-## Current operating loop — fork consolidation, 2026-10-02
+## Current operating loop — migration acceptance, 2026-10-03
 
-Chris reoriented this run after the first integration campaign: finish the
-player experience and migration acceptance. The controlling scope is the
-[fork reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md), including
-its fixed donor baseline, platform matrix and release boundaries. Older v56,
-v55 and Route B instructions below are historical for this reconciliation run;
-do not reopen their campaigns or broaden the migration objective.
+Make BlueWake the maintained project using Elliott's approved enhancements.
+The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) controls
+scope and acceptance. All v56, v55 and Route B campaigns below are historical
+for this goal. Do not resume them or add optimization families without a
+reproduced migration blocker.
 
-Work in this order:
+The executable candidate is `3392854`, runtime `18ba3b64`, translator
+`b8b5345`. Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
+retains the existing integration history, including 26 Elliott-authored commits
+and 13 co-author trailers. Documentation-only follow-ups do not change the
+revision of tested binaries. Continue source work in this cumulative review.
 
-1. The frozen optimized/reference comparison is complete: bounded Outset timing
-   improves from 24.43 to 30.01 game FPS, with the correctness scope and slightly
-   worse frame tails recorded in the ledger. Carry that existing combined
-   configuration into an explicit Mac player-build candidate, including matching
-   preparation, training/compiler choices and bundle defaults. Preserve the
-   ordinary path pending end-to-end acceptance. Add instrumentation or another
-   optimization only for a reproduced blocker.
-2. Complete the clean Mac owned-disc builder and a
-   relocatable personal app. It must launch outside the source checkout without
-   private caches, preserve the player's normal saves/preferences and record
-   source/dependency provenance. Reuse the existing builder and desktop host.
-3. Qualify that player-produced app: fresh start, existing save, actual save and
-   reload, settings/relaunch/fullscreen, audio and a sustained representative
-   play route. Carry only demonstrated failures into focused fixes.
-4. Finish the corresponding Windows clean-build/gameplay gates and repeat
-   final-source iOS/PadMint acceptance. Coordinate unavailable physical hardware
-   once needed; continue independent work without treating missing checks as
-   passed. Do not claim unimplemented PadMint platforms.
-5. Consolidate the validated BlueWake/runtime source stack, preserving Elliott's
-   authored imports and co-author credit. Finish one set of player instructions,
-   contributor credits, issue disposition and a proposed migration notice.
+### Accepted work to retain
 
-Each iteration must close a concrete player or cutover blocker, or record a
-specific failure that determines the next change. Do not create more independent
-optimization batches, rerun already-passing fixtures without changed risk, or
-count draft PRs as completed migration. Status reports name the closed gate and
-remaining blockers; percentage estimates are informal, not acceptance evidence.
+The fresh Mac owned-disc route completes translation, local training, compilation,
+relocatable signed packaging and a bounded completed-build interruption/resume
+check. Its app passes actual game save/separate reload, fresh start through
+control, fullscreen/settings persistence, same-module states across processes,
+local app replacement preserving card/settings/SRAM, and bounded ladder, outdoor,
+door and indoor progression. Native Windows host CI passes 56 tests. The exact
+source iOS app-only shell passes content/provenance audits. These bounded results
+remain accepted unless a relevant change invalidates them.
 
-The goal remains active until all required ledger gates pass. No public build
-release, donor closure, access change or redirect is authorized by this loop.
+### Remaining work, in execution order
+
+| Work package | Next action and exit evidence | Availability |
+| --- | --- | --- |
+| Mac controls and options | Finish actual wheel/vertical camera and physical-controller checks; exercise required imported gameplay options on/off. The zoom diagnostic works after guaranteed guest input wakes the follow camera; do not remove its readiness guard. | Local controls can proceed; physical controller coordination pending |
+| Mac audio and sustained gameplay | Establish audible narrated intro/scripted music, then a representative 30-minute play session and matched frame times on an idle host. Guest PCM, screenshots and the historical bounded 22.8% Outset gain do not close these gates. | Audio listening and an uncontended measurement window required |
+| Final iOS / PadMint | Resume the existing exact-revision build, inspect module/assembly/provenance, then coordinated signing, device gameplay/save/reload and in-place upgrade with data readback. | Build stopped twice below 5 GiB free; 593 objects and verified profiles retained. Await stable storage headroom; maintainer asked for 30 GiB or external storage. Device availability pending |
+| Windows player acceptance and reports | Complete the clean owned-disc O2 build, native Direct3D gameplay, UI/recovery/save/upgrade, controls, audible music and matched performance. Reproduce Pictobox/startup/music leads on an identified build before claiming fixes. | Windows x64 machine/controller coordination pending; do not substitute host CI or restart Parallels |
+| Maintained source and migration decision | Reconcile runtime into `bluewake-next`, BlueWake through PR #37 into `main`, retaining authorship. Review the single platform matrix, tested instructions, issue mapping and proposed donor notice against all gate results. | Engineering acceptance remains incomplete; no donor redirect or closure |
+
+Skip unavailable work and continue the next independent required item. The
+current local checkout stays clean at `3392854` so the interrupted PadMint build
+can resume with exact provenance. Documentation may be checkpointed on the
+existing cumulative branch without changing that checkout or starting another
+build. Do not repeatedly retry the disk-limited build, duplicate artifacts, or
+restart an accepted test just because an earlier process handle expired.
+
+### Iteration contract
+
+Name one missing acceptance result; use the smallest discriminating check;
+change source only for an established defect; record exact identities, outcome,
+limits and next action; checkpoint validated source-only progress in PR #37.
+After three materially identical failures, change the experiment. Keep automated
+input failures separate from game failures. Current zoom evidence shows effective
+scales of 0.64 and 1.57 after the follow camera activates; the farther screenshot
+is obstructed by a nearby post, so camera collision and complete real-input
+behavior remain unaccepted. No source fix was required for this diagnosis.
+
+Report closed gates and remaining dependencies. Elapsed time, PR counts and
+compile-task counts are not migration percentages. Do not rebuild for docs,
+broaden platform claims, or turn optional optimization research into cutover work.
+Preserve private artifacts, player data and worktrees containing unique evidence.
+
+The goal remains active until every required ledger item has current acceptance.
+Public releases require a separate private Clear audit. Publishing personal
+builds, donor notices, redirects, closures or access changes is outside this run.
 
 ---
 
-**ACTIVE — v56, 2026-09-23. The iPadOS loop.** The user redirected the project:
+**Historical — v56, 2026-09-23. The iPadOS loop.** The user redirected the project:
 make the game actually work on iPadOS, tested in the iOS simulators one at a
 time, with no hardware iPad yet. Route A is hosted on iPadOS by `apple/ios` and
 already reaches controllable Outset gameplay in the simulator; the loop now

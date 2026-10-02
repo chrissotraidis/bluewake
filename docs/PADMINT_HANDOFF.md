@@ -11,27 +11,35 @@ must reproduce the accepted developer build's performance in matched iPad
 tests. Generating an IPA alone does not satisfy this requirement. Do not present
 the slower unprofiled build as the recommended release path.
 
-## Current reconciliation evidence (October 2)
+## Current reconciliation evidence (October 3)
 
-The current public PadMint CLI at `018a9f0fdd2030d2fa9f328617d6541fd83c9af1`
-(0.2.8) completed a new BlueWake source-only workspace at
-`95adeed0f32a39739341dd9381c50756c5247bf4`. The expected base source digest
-matches. The full mode's `--app` arguments are now isolated from source-only
-mode, fixing the empty-app argument failure. SDK prerequisites are explicit.
+The tested PadMint CLI is 0.2.9 at
+`de13bd769540642f89d6fb2e0492d466a58ae32b`. A new source-only workspace passes at
+BlueWake `3392854c8daaf5d7900cd034694fabe18b699a24`, selecting maintained runtime
+`18ba3b642588a33b9e8eac4aba7f713bb8d3d778` and translator
+`b8b534591cba8ca7cd43943a655ee6e2591cf5de`. The expected base-source digest matches.
+The full run uses the matching locally built app-only shell and fresh local
+training; final iOS module compilation is interrupted for low disk space. Its final assembly and
+provenance must be inspected before marking that run complete.
 
-| Route | Current evidence / remaining gate |
+| Route | Evidence / remaining gate |
 | --- | --- |
-| Apple Silicon Mac → iOS source-only | Actual CLI source generation passes; USA rev-0 disc, exact source/dependency identities |
-| Apple Silicon Mac → iOS full personal IPA | Direct builder's fresh local training completed; compilation running; PadMint full packaging and device save/reload/upgrade/performance remain unaccepted |
-| macOS player app | Planned PadMint route; development host compilation does not establish adapter acceptance |
+| Apple Silicon Mac → iOS source-only | Actual CLI source generation passes at `3392854`; USA rev-0 disc and exact source/dependency identities verified |
+| Apple Silicon Mac → iOS full personal IPA | Earlier `95adeed` / CLI 0.2.8 complete assembly passes. At `3392854` / CLI 0.2.9, fresh 23,000-retrace training passes and final compilation is interrupted for low disk space. Final assembly, signing/install, device save/reload/upgrade and matched performance remain open |
+| macOS player app | Direct BlueWake builder now produces a fresh personal app with save/reload evidence. PadMint Mac remains planned; the direct builder does not establish adapter support |
 | Windows / tvOS / Linux | No complete PadMint adapter acceptance; use each platform's explicitly documented source route or preview boundary |
 
-The local app-only candidate passed both the repository asset gate and PadMint
-audit. It stays local while public releases are paused. Direct compilation
-interruption/resume preserved all completed objects and unchanged validated
-profiles; this is separate from PadMint process-tree cancellation acceptance.
-The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) records
-exact check scope and pending gates. Historical design snapshots follow.
+The exact-source iOS app-only input passes the repository content gate and
+PadMint audit without translated game code. It remains local while public
+releases are paused. Personal assemblies and generated profiles remain private.
+The source-only route must not receive the full mode's `--app` argument.
+A supplied app shell must match the intended source/module compatibility;
+never infer compatibility from the IPA filename alone.
+
+The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) is the
+single current platform and acceptance matrix. Player instructions are in
+[Build your own BlueWake](BUILD_YOUR_OWN.md). Older design and implementation
+snapshots below explain the history; they do not override current evidence.
 
 ## What exists
 

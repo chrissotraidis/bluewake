@@ -1,5 +1,11 @@
 # BlueWake next-candidate readiness
 
+**Current migration status:** use the [reconciliation ledger](FORK_RECONCILIATION_2026-10-02.md)
+and [goal loop](../GOAL_LOOP.md). Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
+is the current source review. The October 1 snapshot below is historical; its
+then-open checks and PR references do not override the current ledger. The
+private release audit and personal-build restrictions still apply.
+
 Reviewed October 1, 2026. **Internal candidate only; not ready for public release.**
 The maintainer's private release audit must mark BlueWake **Clear** before any public
 release or app upload. Passing CI or a content scan does not clear that restriction.

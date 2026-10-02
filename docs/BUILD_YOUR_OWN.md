@@ -1,8 +1,19 @@
 # Build your own BlueWake
 
-BlueWake is distributed as source. You build it on your Mac from your own copy of *The Wind Waker*, and the
-result is an app for your own iPhone or iPad. The game's code is translated from your disc during the
-build, so **the app you build is yours alone: never share or upload it.**
+BlueWake is distributed as source. Build it on an Apple Silicon Mac from your
+own supported *The Wind Waker* disc for your iPhone/iPad, or use the Mac migration
+candidate below. The game's code is translated from your disc during the build,
+so **the app you build is yours alone: never share or upload it.**
+
+The migration candidate is reviewed in
+[PR #37](https://github.com/chrissotraidis/bluewake/pull/37), branch
+`codex/fork-consolidated`; it is not yet merged into `main`. Current executable
+acceptance is tied to `3392854`. For candidate testing from a new checkout use
+`git clone --branch codex/fork-consolidated https://github.com/chrissotraidis/bluewake.git`.
+Do not reset an existing checkout or replace its private build outputs to switch
+revisions. The [platform matrix](status/FORK_RECONCILIATION_2026-10-02.md#player-build-and-platform-gates)
+separates implemented routes from completed player acceptance. Windows has a
+separate [source-build guide](WINDOWS.md).
 
 ## Mac personal app (migration candidate)
 
@@ -42,12 +53,19 @@ matching completed work is reused. This does not enable PadMint Mac support.
 local packaging checks, not a playable build or an accepted public release.
 PadMint's complete Mac path is not implemented or claimed here.
 
-**Acceptance is in progress.** Fresh shell compilation and extraction/translation
-pass; generated source matches the verified digest. A relocated launch using an
-existing test module passes its bounded diagnostic route. Full clean module
-compilation/training, player-app game save/reload, upgrades and sustained performance must pass before this route is
-recommended for migration. See the
-[reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
+**Acceptance is in progress.** At `3392854`, the fresh owned-disc combined
+build completes translation, local training, compilation, packaging and local
+signature checks. Its relocated app passes actual game save/reload while
+preserving the original card and other slots, and fullscreen/preferences survive
+a separate launch. Fresh start reaches player control; a current-module F5/F9
+state also restores correctly after quitting and reopening the app. A fresh
+ladder/outdoor/door/indoor route passes. These checks do not establish every
+scene, audible output, physical
+controllers or sustained performance. A local replacement from the recorded
+earlier developer app also preserves copied saves/settings/SRAM and loads the
+save afterward; physical iOS upgrades remain untested. See the
+[reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) for remaining
+checks before migration is recommended.
 
 ## What you need
 
