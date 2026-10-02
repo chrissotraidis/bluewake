@@ -90,7 +90,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#28](https://github.com/chrissotraidis/bluewake/pull/28) | `ce31672`, import `60a713d` | Certified J3D module/host selection; 100,000 function cases, three-way intro/saved-game comparisons and 46 native Windows tests pass; optimized/native Windows module measurements open |
 | [#29](https://github.com/chrissotraidis/bluewake/pull/29) | `fc02056`, import `ed994c4` | Nine certified native vector functions; strict function/guard/cache checks, three-way intro/saved-game comparisons and 47 native Windows tests pass; combined optimized qualification open |
 | [#30](https://github.com/chrissotraidis/bluewake/pull/30) | `a294985`, import `a080b16` | Four certified native matrix functions, cached dispatch and optional workers; routed fixtures, four-way intro/saved-game state/image comparisons and all 48 native Windows tests pass; combined performance/gameplay open |
-| [#31](https://github.com/chrissotraidis/bluewake/pull/31) | `4cfd99e`, import `46365c2` | Native skinning with certified entry routing; full-CPU/MEM1 fixtures, three-way startup comparisons and all 49 native Windows tests pass; saved-scene qualification in progress |
+| [#31](https://github.com/chrissotraidis/bluewake/pull/31) | `4cfd99e`, import `46365c2` | Native skinning with certified entry routing; full-CPU/MEM1 fixtures, three-way startup comparisons and all 49 native Windows tests pass; saved-game state/image comparisons pass; combined performance open |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -399,18 +399,28 @@ a claim of identical state at every intervening instruction. The existing route 
   Baseline/Off/On startup runs match all six checkpoints through 6,000 retraces,
   1,050 canonical/card records and zero measured timing drift. Enabled skinning
   executes 1,726 native calls over 8,948 joints, with 144 translated fallbacks.
-  The rendered saved-game comparison is still running; combined optimized
-  performance and final gameplay remain open.
-- **Remaining game-math preflight:** the donor's unchanged native arithmetic
+  The rendered baseline/Off/On saved-game comparison also passes: four checkpoints,
+  37 player samples, scripted movement, two images and 1,050 canonical/card records
+  match with zero measured timing drift. The copied source save is unchanged.
+  Combined optimized performance and final gameplay remain open.
+- **Native game-math candidate:** exact five-file Elliott import `ca8c584`
+  preserves the donor's native arithmetic, which
   passes 130,000 private cases across twelve supported entries and one explicitly
   unsupported entry: 67,707 native results match and 62,293 decline unchanged.
-  The portable probe follows complete dispatch windows and compares every CPU
+  The portable fixture follows complete dispatch windows and compares every CPU
   byte, including the observation suffix. It compares the writable 24 KiB RAM
   region per case, protects the rest of MEM1 read-only and compares all MEM1
   after each entry. No microbenchmark result is transferred. Several donor
-  certificates reflect a different preparation stage, so dependency/variant
-  certification and versioned host routing still need adaptation. This source
-  has not been imported or selected in the candidate yet.
+  certificates reflect a different preparation stage. BlueWake now certifies all
+  nineteen pre-transform fragments and twelve entries before other native hooks;
+  missing dependencies, modified variants/hooks and host-observed internal PCs
+  reject preparation before changing sources. A versioned host gate keeps the
+  feature Off by default. The box-line routine additionally asks the host about
+  its certified register-save call with that call's fixed return PC before any
+  state changes. Synthetic guards cover denial of this internal call, unchanged
+  fallback and null CPU/RAM; ASan/UBSan pass. Seventeen builder/cache tests and
+  six synthetic certificate tests pass, including host-source cache invalidation.
+  Full module, routed comparisons and native Windows qualification are pending.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;

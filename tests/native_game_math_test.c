@@ -1,19 +1,8 @@
-/* Full CPU and all 24 MiB RAM comparison, plus per-call microbenchmarks.
- * Run from E:\Github\Wind-Waker-Recomp-natives in an x64 VS tools shell:
- *
- * mkdir .native-study
- * "E:\Microsoft Visual Studio\18\Community\VC\Tools\Llvm\x64\bin\clang.exe" -O2 -march=x86-64-v3 -ffp-contract=off -Icmake/composite -IE:\Github\Wind-Waker-Recomp\ref\recompcore\GXRuntime\include -IE:\Github\Wind-Waker-Recomp\ref\recompcore\Source\Core\Core\PowerPC\StaticRecomp tests/native_game_math_test.c cmake/composite/native_game_math.c E:\Github\Wind-Waker-Recomp\build\windows\app\gxruntime_build\gxruntime.lib -o .native-study/native_game_math_test.exe
- * .native-study\native_game_math_test.exe E:\Github\Wind-Waker-Recomp\build\windows\BlueWake-test\gGZLE01_recomp.dll 100000
- *
- * The case count is PER entry, not divided among entries. Disable the DLL's
- * natives before loading it. Declines compare the entire untouched state and
- * RAM without running unsafe translation inputs (e.g. MMIO/watched memory).
- * Both 24 MiB images start identical; all pages outside the randomized data
- * area are read-only, so an unexpected write fails the test immediately.
- * Compare every writable byte per case and the full images after each entry:
- * this verifies all RAM bytes without rescanning 24 MiB of immutable pages.
- * Accepted cases dispatch the original DLL and compare every byte. Benchmarks
- * include identical CPU reset overhead on both paths; no BlueWake.exe runs.
+/* Elliott's game-math fixture, ported to declared BlueWake module storage.
+ * Every CPU byte and the writable 24 KiB RAM area are compared per case;
+ * other MEM1 pages are read-only and full images are compared after each entry.
+ * No timing benchmark is run. Personal modules remain local.
+ * Usage: native_game_math_test ORIGINAL_MODULE [CASES_PER_ENTRY] [ROUTED_MODULE]
  */
 #include "StaticRecompABI.h"
 #include "native_game_math.h"
@@ -21,7 +10,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#include <sys/mman.h>
+#endif
+#include "module_cpu_contract.h"
 
 #define AREA 0x80100000u
 #define STACK (AREA + 0x1000u)
@@ -50,34 +45,23 @@ static void journal(u32 a, u32 n, void* user) {
     (void)user;
     abort();
 }
-static int edge_service(void* user, CPUState* cpu, u32 at) {
-    (void)user;
-    (void)cpu;
-    return at == 0xFFFFFFFCu;
-}
 static u8* protect_image(u8* p) {
+#if defined(_WIN32)
     DWORD old;
     if (!p || !VirtualProtect(p, GC_MAIN_RAM_SIZE, PAGE_READONLY, &old) ||
-        !VirtualProtect(p + AREA - GC_RAM_BASE, DATA_BYTES, PAGE_READWRITE, &old))
-        return NULL;
+        !VirtualProtect(p + AREA - GC_RAM_BASE, DATA_BYTES, PAGE_READWRITE, &old)) return NULL;
+#else
+    if (!p || p == MAP_FAILED || mprotect(p, GC_MAIN_RAM_SIZE, PROT_READ) ||
+        mprotect(p + AREA - GC_RAM_BASE, DATA_BYTES, PROT_READ | PROT_WRITE)) return NULL;
+#endif
     return p;
 }
 static u8* image(void) {
+#if defined(_WIN32)
     return protect_image(VirtualAlloc(NULL, GC_MAIN_RAM_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-}
-/* A module built with BW_GUEST_MEM1 (the Windows builder's) runs its
- * translated code on its own MEM1 array (page aligned), whatever a state's
- * ram says: the translated side's image has to be that array. */
-static u8* module_image(HMODULE lib) {
-    u8* (*mem1)(u32*) = (u8* (*)(u32*))(void*)GetProcAddress(lib, "bluewake_composite_guest_mem1");
-    u32 size = 0;
-    u8* ram = mem1 != NULL ? mem1(&size) : NULL;
-    if (ram == NULL)
-        return image();
-    if (size < GC_MAIN_RAM_SIZE)
-        return NULL;
-    memset(ram, 0, GC_MAIN_RAM_SIZE);
-    return protect_image(ram);
+#else
+    return protect_image(mmap(NULL,GC_MAIN_RAM_SIZE,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0));
+#endif
 }
 static int ram_diff(const u8* a, const u8* b) {
     if (!memcmp(a + AREA - GC_RAM_BASE, b + AREA - GC_RAM_BASE, DATA_BYTES))
@@ -315,58 +299,71 @@ static void mismatch(const CPUState* got, const CPUState* want, unsigned i, u32 
         if (((const u8*)got)[b] != ((const u8*)want)[b])
             fprintf(stderr, "CPU byte %u: %02X != %02X\n", b, ((const u8*)got)[b], ((const u8*)want)[b]);
 }
-static double bench(const StaticRecompModuleDesc* mod, CPUState* guest, CPUState initial, unsigned which,
-                    bool native) {
-    LARGE_INTEGER start, end, freq;
-    QueryPerformanceFrequency(&freq);
-    ppc_fpscr_updated(&initial);
-    QueryPerformanceCounter(&start);
-    for (unsigned i = 0; i < 200000u; ++i) {
-        *guest = initial;
-        if (native) {
-            if (!bluewake_native_game_math(guest, entries[which]))
-                abort();
-        } else if (!mod->dispatch(guest, entries[which]))
-            abort();
+typedef struct Module {
+    const StaticRecompModuleDesc* desc;
+    CPUState fallback;
+    BlueWakeModuleStorage storage;
+    int (*native_game_math)(bool, BluewakeNativeGameMathReady, void*);
+    void (*report)(void);
+} Module;
+
+static int load_module(const char* path, Module* module) {
+#if defined(_WIN32)
+    HMODULE lib = LoadLibraryA(path);
+#define SYMBOL(name) ((void*)GetProcAddress(lib, name))
+#else
+    void* lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#define SYMBOL(name) dlsym(lib, name)
+#endif
+    if (!lib) { fprintf(stderr, "cannot load %s\n", path); return 0; }
+    StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)SYMBOL(STATICRECOMP_GET_MODULE_SYMBOL);
+    if (!get) return 0;
+    module->desc = get();
+    module->native_game_math = (int (*)(bool, BluewakeNativeGameMathReady, void*))SYMBOL("bluewake_composite_native_game_math_v1");
+    module->report = (void (*)(void))SYMBOL("bluewake_native_game_math_report");
+    const char* error = bw_module_select_storage(module->desc,
+        (BlueWakeModuleCPUFn)SYMBOL("bluewake_composite_guest_cpu"),
+        (BlueWakeModuleMEM1Fn)SYMBOL("bluewake_composite_guest_mem1"),
+        &module->fallback, &module->storage);
+    if (error) { fprintf(stderr, "%s\n", error); return 0; }
+    if (module->storage.mem1 == NULL) {
+        module->storage.mem1 = image();
+        module->storage.mem1_size = GC_MAIN_RAM_SIZE;
     }
-    QueryPerformanceCounter(&end);
-    return (double)(end.QuadPart - start.QuadPart) * 1e9 / (double)freq.QuadPart / 200000.0;
+    return protect_image(module->storage.mem1) != NULL;
+#undef SYMBOL
 }
-/* The cycle observation suffix is dead after an access to RAM: since
- * scripts/windows/lean_memory.py the translation stores it only on the way
- * to an MMIO or timebase handler, its only readers. It is not compared. */
-int main(int argc, char** argv) {
-    if (argc < 2)
-        return 2;
-    _putenv_s("BLUEWAKE_NATIVE_MATH", "0");
-    unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 100000u;
-    HMODULE lib = LoadLibraryA(argv[1]);
-    if (!lib) {
-        fprintf(stderr, "LoadLibrary error %lu\n", GetLastError());
-        return 1;
+
+static unsigned routed_queries;
+static bool routed_ready(void* user, const CPUState* cpu, u32 address) {
+    (void)user;
+    if (!cpu) return false;
+    (void)address;
+    ++routed_queries; return true;
+}
+static int run_window(Module* module, CPUState initial, u8* ram) {
+    CPUState* cpu = module->storage.cpu;
+    *cpu = initial; cpu->ram = ram; module->desc->on_state_loaded(cpu);
+    unsigned turns = 0;
+    while (cpu->pc != 0xFFFFFFFCu && cpu->downcount > -cpu->cycle_budget && !cpu->exception) {
+        if (++turns > 10000 || !module->desc->dispatch(cpu, cpu->pc)) return 0;
     }
-    StaticRecompGetModuleFn get =
-        (StaticRecompGetModuleFn)(void*)GetProcAddress(lib, STATICRECOMP_GET_MODULE_SYMBOL);
-    CPUState* (*guest_cpu)(void) =
-        (CPUState * (*)(void))(void*)GetProcAddress(lib, "bluewake_composite_guest_cpu");
-    if (!get || !guest_cpu)
-        return 1;
-    const StaticRecompModuleDesc* mod = get();
-    if (mod->cpu_state_size != sizeof(CPUState) || strcmp(mod->game_id, "GZLE01"))
-        return 1;
-    void (*set_edge)(int (*)(void*, CPUState*, u32), void*) =
-        (void (*)(int (*)(void*, CPUState*, u32), void*))(void*)GetProcAddress(lib,
-                                                                               "bluewake_set_edge_service");
-    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*) =
-        (int (*)(bool, const bool*, const bool*, const u32*, const u32*))(void*)GetProcAddress(
-            lib, "bluewake_composite_direct_calls");
-    static const bool clear = false;
-    static const u32 zero = 0;
-    if (!set_edge || !direct || !direct(true, &clear, &clear, &zero, &zero))
-        return 1;
-    set_edge(edge_service, NULL);
-    u8* a = image();
-    u8* b = module_image(lib);
+    return 1;
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2 || argc > 4)
+        return 2;
+    unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2],NULL,10) : 10000;
+    Module original = {0}, candidate = {0};
+    if (!load_module(argv[1], &original)) return 1;
+    if (argc > 3 && (!load_module(argv[3], &candidate) || !candidate.native_game_math)) return 1;
+    const StaticRecompModuleDesc* mod = original.desc;
+    if (strcmp(mod->game_id, "GZLE01") != 0) return 1;
+    u8* a=image();
+    u8* b=original.storage.mem1;
+    unsigned routed_cases=0;
+    u8 initial_area[DATA_BYTES];
     if (!a || !b)
         return 1;
     for (unsigned which = 0; which < sizeof entries / sizeof entries[0]; ++which) {
@@ -376,6 +373,7 @@ int main(int argc, char** argv) {
             memcpy(b + AREA - GC_RAM_BASE, a + AREA - GC_RAM_BASE, DATA_BYTES);
             ppc_fpscr_updated(&c);
             CPUState untouched = c;
+            memcpy(initial_area, a + AREA - GC_RAM_BASE, DATA_BYTES);
             if (i % 101u == 19u)
                 g_mem_write_journal = journal;
             if (i % 103u == 20u)
@@ -392,53 +390,45 @@ int main(int argc, char** argv) {
                 continue;
             }
             ++ran;
-            CPUState* g = guest_cpu();
-            *g = untouched;
-            g->ram = b;
-            mod->on_state_loaded(g);
-            if (!mod->dispatch(g, entries[which]))
-                return 1;
-            CPUState ref = *g;
+            if (!run_window(&original, untouched, b)) return 1;
+            CPUState ref = *original.storage.cpu;
             ref.ram = a;
-            ref.cycle_observation_suffix = c.cycle_observation_suffix;
             if (ram_diff(a, b) || memcmp(&c, &ref, sizeof c)) {
                 mismatch(&c, &ref, i, entries[which]);
                 return 1;
+            }
+            if (candidate.desc) {
+                bool enabled = i % 31 != 0;
+                if (candidate.native_game_math(enabled, routed_ready, NULL) != enabled) return 1;
+                u8* routed_ram = candidate.storage.mem1;
+                memcpy(routed_ram + AREA - GC_RAM_BASE, initial_area, DATA_BYTES);
+                if (!run_window(&candidate, untouched, routed_ram)) return 1;
+                CPUState actual = *candidate.storage.cpu; actual.ram = a;
+                if (memcmp(&actual, &ref, sizeof ref) || ram_diff(routed_ram,b)) {
+                    mismatch(&actual,&ref,i,entries[which]);return 1;
+                }
+                ++routed_cases;
             }
         }
         printf("%08X: %u cases, %u identical, %u declined unchanged, zero mismatches\n", entries[which],
                cases, ran, declined);
         fflush(stdout);
-        if (memcmp(a, b, GC_MAIN_RAM_SIZE))
-            return 1;
+        if (memcmp(a, b, GC_MAIN_RAM_SIZE)) return 1;
+        if (candidate.desc && memcmp(candidate.storage.mem1, b, AREA - GC_RAM_BASE)) return 1;
+        if (candidate.desc && memcmp(candidate.storage.mem1 + DATA_BYTES + AREA - GC_RAM_BASE,
+                                     b + DATA_BYTES + AREA - GC_RAM_BASE,
+                                     GC_MAIN_RAM_SIZE - DATA_BYTES - (AREA - GC_RAM_BASE))) return 1;
         if (which == 3) {
             if (ran)
                 return 1;
             continue;
         } /* dropped component multiply is unsupported */
-        CPUState c = build(a, which, which == 8 ? 0 : which == 11 ? 5 : which >= 9 ? 1 : 6, false);
-        c.ram = b;
-        memcpy(b + AREA - GC_RAM_BASE, a + AREA - GC_RAM_BASE, DATA_BYTES);
-        double ts[5], ns[5];
-        for (unsigned j = 0; j < 5; ++j) {
-            if (j & 1) {
-                ns[j] = bench(mod, guest_cpu(), c, which, true);
-                ts[j] = bench(mod, guest_cpu(), c, which, false);
-            } else {
-                ts[j] = bench(mod, guest_cpu(), c, which, false);
-                ns[j] = bench(mod, guest_cpu(), c, which, true);
-            }
-        }
-        for (unsigned j = 0; j < 5; ++j)
-            for (unsigned k = j + 1; k < 5; ++k) {
-                if (ts[k] < ts[j]) { double swap = ts[j]; ts[j] = ts[k]; ts[k] = swap; }
-                if (ns[k] < ns[j]) { double swap = ns[j]; ns[j] = ns[k]; ns[k] = swap; }
-            }
-        const double t = ts[2], n = ns[2];
-        printf("%08X: translation %.2f ns, native %.2f ns, %.2fx\n", entries[which], t, n, t / n);
-        fflush(stdout);
-        if (cases >= 60000 && ran < 30000)
-            return 1;
+        if (!ran) return 1;
+    }
+    if (candidate.desc) {
+        if (!routed_queries || !routed_cases) return 1;
+        if (candidate.report) candidate.report();
+        printf("routed game math: %u calls, %u readiness queries\n", routed_cases, routed_queries);
     }
     return 0;
 }

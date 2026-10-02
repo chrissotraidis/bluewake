@@ -7,7 +7,9 @@
  * preserves the translation's complete CPU/RAM result. Failure changes
  * nothing. scripts/windows/native_game_math.py checks each translated body
  * before inserting the entry hook. No identifier here may be `ctx`. */
-extern int bluewake_native_game_math_enabled;
+typedef bool (*BluewakeNativeGameMathReady)(void*, const CPUState*, u32);
+int bluewake_composite_native_game_math_v1(bool enabled, BluewakeNativeGameMathReady ready, void* user);
+int bluewake_native_game_math_try(CPUState* cpu, u32 address);
 int bluewake_native_game_math(CPUState* cpu, u32 address);
 void bluewake_native_game_math_report(void);
 

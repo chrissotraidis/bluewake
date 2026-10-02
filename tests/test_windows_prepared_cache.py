@@ -90,6 +90,7 @@ class PreparedCacheTest(unittest.TestCase):
                        "scripts/windows/inline_save_restore_gpr.py", "scripts/mods/prepare_native_j3d.py",
                        "cmake/composite/native_j3d.c", "cmake/composite/native_j3d.h",
                        "scripts/mods/prepare_native_vec.py", "cmake/composite/native_vec.c", "cmake/composite/native_vec.h",
+                       "scripts/windows/native_game_math.py", "cmake/composite/native_game_math.c", "cmake/composite/native_game_math.h",
                        "scripts/windows/native_skin.py", "cmake/composite/native_skin.c", "cmake/composite/native_skin.h",
                        "scripts/mods/prepare_native_math.py", "cmake/composite/native_math.c", "cmake/composite/native_math.h",
                        "cmake/composite/native_work_pool.c", "cmake/composite/native_work_pool.h"):
@@ -103,7 +104,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK)
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False, native_skin=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False, native_skin=False, native_game_math=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
@@ -214,6 +215,37 @@ label_80004004:
         self.assertNotIn('bw_native_call', self.chunk().read_text())
         self.assertIn('bw_chunk_fns[1](ctx)', self.chunk().read_text())
         self.assertFalse((prepared.parent / 'native_math.json').exists())
+
+    def test_native_game_math_reuse_host_change_and_disable(self):
+        body = '\nlabel_80000100:\n    ctx->gpr[3] = 1;\n'
+        digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+        script = self.root / "scripts/windows/native_game_math.py"
+        text = script.read_text()
+        begin = text.index('FRAGMENTS = {')
+        end = text.index('def canonical(', begin)
+        definitions = (f"FRAGMENTS = {{'fixture': (0x80000100, 0x80000100, 0x80000104, '{digest}')}}\n"
+                       "ENTRIES = {0x80000100: ('fixture',)}\n\n")
+        script.write_text(text[:begin] + definitions + text[end:])
+        (self.base / 'chunks_dol/chunk_80000100.c').write_text(
+            '#include "../generated.h"\n' + body + '\nlabel_80000104:\n\nreturn_dispatch_80000100:\n')
+        self.digest = bw.tree_digest(self.base)
+        self.args.native_game_math = True
+        self.cycle()
+        source = self.out / 'composite-src/chunks_dol/chunk_80000100.c'
+        self.assertIn('bluewake_native_game_math_try', source.read_text())
+        before = source.read_bytes(), source.stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (source.read_bytes(), source.stat().st_mtime_ns))
+        fingerprint = (self.out / 'composite-inputs.digest').read_text()
+        host = self.root / 'runtime/host/src/test_watch.c'; host.parent.mkdir(parents=True)
+        host.write_text('/* watched 0x80001000 */\n')
+        self.cycle()
+        self.assertNotEqual(fingerprint, (self.out / 'composite-inputs.digest').read_text())
+        self.args.native_game_math = False
+        self.cycle()
+        self.assertNotIn('native_game_math_try', source.read_text())
+        self.assertNotIn('BLUEWAKE_NATIVE_GAME_MATH_PREPARED', (source.parent.parent / 'generated.h').read_text())
+        self.assertFalse((source.parent.parent / 'native_game_math.json').exists())
 
     def test_native_skin_reuse_and_disable(self):
         body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'

@@ -87,6 +87,7 @@ Options (`--help` lists all):
 | `--direct-calls` | Prepare direct cross-chunk/indirect calls; off by default, matching host selection and qualification required |
 | `--native-j3d` | Prepare certified J3D matrix functions; off by default, host opt-in and module qualification required |
 | `--native-vec` | Prepare nine certified SDK vector functions; off by default, host opt-in and module qualification required |
+| `--native-game-math` | Prepare twelve certified game-math functions; off by default, host opt-in and module qualification required |
 | `--native-skin` | Prepare certified model skinning; off by default, host opt-in and module qualification required |
 | `--native-math` | Prepare four certified SDK matrix functions; off by default, host opt-in and module qualification required |
 | `--inline-gpr` | Also inline certified register saves/restores; requires `--direct-calls` |
@@ -95,9 +96,9 @@ Options (`--help` lists all):
 | `--console` | Build `BlueWake.exe` as a console program |
 | `--out DIR` | Build directory (default `build\windows`) |
 
-The independent `--native-j3d`, `--native-vec`, `--native-math` and `--native-skin` options certify
+The independent `--native-j3d`, `--native-vec`, `--native-math`, `--native-skin` and `--native-game-math` options certify
 the original function bodies before other rewrites. `BLUEWAKE_NATIVE_J3D=1`,
-`BLUEWAKE_NATIVE_VEC=1`, `BLUEWAKE_NATIVE_MATH=1` and `BLUEWAKE_NATIVE_SKIN=1` enable their respective
+`BLUEWAKE_NATIVE_VEC=1`, `BLUEWAKE_NATIVE_MATH=1`, `BLUEWAKE_NATIVE_SKIN=1` and `BLUEWAKE_NATIVE_GAME_MATH=1` enable their respective
 supporting host/module paths
 through versioned handshakes; absent support, disabled selection,
 unsupported inputs and observed boundaries retain translated execution.

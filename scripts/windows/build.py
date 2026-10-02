@@ -480,7 +480,7 @@ int main(void) {
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n").encode())
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n").encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
                   + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py",
                      ROOT / "scripts/windows/global_guest_cpu.py", ROOT / "scripts/windows/chunk_headers.py",
@@ -490,13 +490,14 @@ int main(void) {
                      ROOT / "cmake/composite/direct_calls.h", ROOT / "cmake/composite/inline_gpr.h",
                      ROOT / "cmake/composite/native_j3d.c", ROOT / "cmake/composite/native_j3d.h",
                      ROOT / "cmake/composite/native_vec.c", ROOT / "cmake/composite/native_vec.h",
-                     ROOT / "scripts/windows/native_skin.py", ROOT / "cmake/composite/native_skin.c",
+                     ROOT / "scripts/windows/native_game_math.py", ROOT / "cmake/composite/native_game_math.c",
+                     ROOT / "cmake/composite/native_game_math.h", ROOT / "scripts/windows/native_skin.py", ROOT / "cmake/composite/native_skin.c",
                      ROOT / "cmake/composite/native_skin.h", ROOT / "cmake/composite/native_math.c", ROOT / "cmake/composite/native_math.h",
                      ROOT / "cmake/composite/native_work_pool.c", ROOT / "cmake/composite/native_work_pool.h",
                      ROOT / "scripts/windows/inline_save_restore_gpr.py", Path(__file__)]):
             if f.is_file():
                 inputs.update(f.read_bytes())
-        if self.args.direct_calls:
+        if self.args.direct_calls or self.args.native_game_math:
             # The source-derived watch list is part of the prepared module.
             for folder in ("runtime/host/src", "windows/src"):
                 for path in sorted((ROOT / folder).rglob("*")):
@@ -602,6 +603,9 @@ int main(void) {
         o = self.out
         script = ROOT / "scripts/windows/fast_blocks.py"
         cpu_script = ROOT / "scripts/windows/global_guest_cpu.py"
+        if self.args.native_game_math:
+            self.run("native-game-math", [sys.executable, ROOT / "scripts/windows/native_game_math.py",
+                                          o / "composite-src"])
         if self.args.native_j3d:
             self.run("native-j3d", [sys.executable, ROOT / "scripts/mods/prepare_native_j3d.py",
                                      o / "composite-src"])
@@ -643,6 +647,7 @@ int main(void) {
                    "native_vec": self.args.native_vec,
                    "native_math": self.args.native_math,
                    "native_skin": self.args.native_skin,
+                   "native_game_math": self.args.native_game_math,
                    "gather_sha256": {name: sha256_file(ROOT / "cmake/composite" / name)
                                      for name in ("gather_pipe.h", "gather_pipe.c", "gather_pipe_batch.h")},
                    "inline_fp_script_sha256": sha256_file(ROOT / "scripts/windows/chunk_headers.py"),
@@ -679,6 +684,7 @@ int main(void) {
             f"-DBLUEWAKE_FIXED_CPU={'ON' if self.args.fixed_cpu else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_J3D={'ON' if self.args.native_j3d else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_VEC={'ON' if self.args.native_vec else 'OFF'}",
+            f"-DBLUEWAKE_NATIVE_GAME_MATH={'ON' if self.args.native_game_math else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_SKIN={'ON' if self.args.native_skin else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_MATH={'ON' if self.args.native_math else 'OFF'}",
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
@@ -769,6 +775,7 @@ int main(void) {
             "native_vec": self.args.native_vec,
             "native_math": self.args.native_math,
             "native_skin": self.args.native_skin,
+            "native_game_math": self.args.native_game_math,
             "compiler": self.clang_version,
             "module_sha256": sha256_file(app / MODULE),
             "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -904,6 +911,8 @@ def main():
                         help="prepare certified native J3D transforms; off by default, compatible host opt-in required")
     parser.add_argument("--native-vec", action="store_true",
                         help="prepare certified native vector functions; off by default, compatible host opt-in required")
+    parser.add_argument("--native-game-math", action="store_true",
+                        help="certify optional native game-math entry hooks (off by default)")
     parser.add_argument("--native-skin", action="store_true",
                         help="certify and enable optional native skinning preparation (off by default)")
     parser.add_argument("--native-math", action="store_true",

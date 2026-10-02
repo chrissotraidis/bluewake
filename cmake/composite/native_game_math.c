@@ -17,7 +17,33 @@
 
 #include <stdio.h>
 
-int bluewake_native_game_math_enabled;
+#if defined(_WIN32)
+#define BW_GAME_MATH_EXPORT __declspec(dllexport)
+#else
+#define BW_GAME_MATH_EXPORT __attribute__((visibility("default")))
+#endif
+static BluewakeNativeGameMathReady s_ready;
+static void* s_ready_user;
+BW_GAME_MATH_EXPORT int bluewake_composite_native_game_math_v1(
+    bool enabled, BluewakeNativeGameMathReady ready, void* user) {
+    s_ready = enabled ? ready : NULL;
+    s_ready_user = s_ready != NULL ? user : NULL;
+    return s_ready != NULL;
+}
+int bluewake_native_game_math_try(CPUState* cpu, u32 address) {
+    if (cpu == NULL || s_ready == NULL || !s_ready(s_ready_user, cpu, address)) return 0;
+    if (address == 0x8024AE3Cu) {
+        /* The certified box-line prologue calls _savegpr_29. Host diagnostics
+         * name that entry; ask with its fixed return PC before changing state.
+         * The read-only host predicate never reads this not-yet-written frame. */
+        CPUState probe = *cpu;
+        probe.pc = 0x80328F40u; probe.lr = 0x8024AEC8u;
+        probe.gpr[0] = cpu->lr; probe.gpr[1] -= 512u;
+        probe.gpr[11] = probe.gpr[1] + 272u;
+        if (!s_ready(s_ready_user, &probe, probe.pc)) return 0;
+    }
+    return bluewake_native_game_math(cpu, address);
+}
 enum {
     GM_ADD,
     GM_SUB,
@@ -35,7 +61,7 @@ enum {
 };
 static unsigned long long runs[GM_COUNT], declines[GM_COUNT];
 
-void bluewake_native_game_math_report(void) {
+BW_GAME_MATH_EXPORT void bluewake_native_game_math_report(void) {
     static const char* names[] = {"xyz-add",     "xyz-sub",  "xyz-scale", "aab-cyl",
                                   "xrotS",       "yrotS",    "zrotS",     "box-line",
                                   "sphere-clip", "box-clip", "key-s",     "transform-simple"};
@@ -5120,6 +5146,7 @@ label_802F0E00:
 }
 
 int bluewake_native_game_math(CPUState* cpu, u32 address) {
+    if (cpu == NULL) return 0;
     unsigned kind;
     switch (address) {
     case 0x80245674u:
