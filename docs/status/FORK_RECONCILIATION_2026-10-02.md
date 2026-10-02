@@ -90,6 +90,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#28](https://github.com/chrissotraidis/bluewake/pull/28) | `ce31672`, import `60a713d` | Certified J3D module/host selection; 100,000 function cases, three-way intro/saved-game comparisons and 46 native Windows tests pass; optimized/native Windows module measurements open |
 | [#29](https://github.com/chrissotraidis/bluewake/pull/29) | `fc02056`, import `ed994c4` | Nine certified native vector functions; strict function/guard/cache checks, three-way intro/saved-game comparisons and 47 native Windows tests pass; combined optimized qualification open |
 | [#30](https://github.com/chrissotraidis/bluewake/pull/30) | `a294985`, import `a080b16` | Four certified native matrix functions, cached dispatch and optional workers; routed fixtures, four-way intro/saved-game state/image comparisons and all 48 native Windows tests pass; combined performance/gameplay open |
+| [#31](https://github.com/chrissotraidis/bluewake/pull/31) | `4cfd99e`, import `46365c2` | Native skinning with certified entry routing; full-CPU/MEM1 fixtures, three-way startup comparisons and all 49 native Windows tests pass; saved-scene qualification in progress |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -373,8 +374,9 @@ a claim of identical state at every intervening instruction. The existing route 
   These are private developer builds from
   retained translation; combined optimized performance, clean final player builds
   and final gameplay remain open.
-- **Native skinning candidate:** exact four-file Elliott import `46365c2`
-  supplies the weighted-envelope matrix helper and its fixture. BlueWake adds
+- **Native skinning candidate:** #31 preserves exact four-file Elliott import `46365c2`
+  for the weighted-envelope matrix helper and its fixture; adaptation `4cfd99e`
+  credits him as co-author. BlueWake adds
   independent `--native-skin` preparation and a versioned, default-Off host gate.
   The raw pre-transform body is certified only after independent full-function
   comparison; the entry hook supports both ordinary and direct dispatch.
@@ -387,7 +389,28 @@ a claim of identical state at every intervening instruction. The existing route 
   fixed by checking RAM before resolving guest addresses, with a null-CPU guard.
   Synthetic identity, unchanged CPU/RAM fallback and host handshake checks pass
   in Release and ASan/UBSan. Sixteen builder/cache tests and three certificate
-  tests pass. Routed-module, scene and native Windows qualification are pending.
+  tests pass. The independent private O0 module links all 823 units. Its routed
+  fixture passes another 20,000 full CPU/MEM1 comparisons, including selection
+  disabled every 31st call, with 16,184 native calls and 19,354 readiness queries.
+  An older ordinary module stays Off when native skinning is requested. Combined
+  fixed CPU/GPR/block/direct-call/gather preparation and syntax pass. Native
+  Windows builds the app and passes all 49 tests (38.49 s;
+  [run 37000118965](https://github.com/chrissotraidis/bluewake/actions/runs/37000118965)).
+  Baseline/Off/On startup runs match all six checkpoints through 6,000 retraces,
+  1,050 canonical/card records and zero measured timing drift. Enabled skinning
+  executes 1,726 native calls over 8,948 joints, with 144 translated fallbacks.
+  The rendered saved-game comparison is still running; combined optimized
+  performance and final gameplay remain open.
+- **Remaining game-math preflight:** the donor's unchanged native arithmetic
+  passes 130,000 private cases across twelve supported entries and one explicitly
+  unsupported entry: 67,707 native results match and 62,293 decline unchanged.
+  The portable probe follows complete dispatch windows and compares every CPU
+  byte, including the observation suffix. It compares the writable 24 KiB RAM
+  region per case, protects the rest of MEM1 read-only and compares all MEM1
+  after each entry. No microbenchmark result is transferred. Several donor
+  certificates reflect a different preparation stage, so dependency/variant
+  certification and versioned host routing still need adaptation. This source
+  has not been imported or selected in the candidate yet.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
