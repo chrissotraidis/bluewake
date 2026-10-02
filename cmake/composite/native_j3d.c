@@ -21,7 +21,8 @@ void bluewake_native_j3d_report(void) {
 }
 
 static const u8* plain_ram(const CPUState* cpu, u32 address, u32 size) {
-    if (!ppc_dispatch_poll_read_stable((CPUState*)cpu, address, size))
+    if (cpu->ram == NULL ||
+        !ppc_dispatch_poll_read_stable((CPUState*)cpu, address, size))
         return NULL;
     return cpu->ram + (address - GC_RAM_BASE);
 }

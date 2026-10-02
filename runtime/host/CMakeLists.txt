@@ -313,6 +313,24 @@ target_link_libraries(bluewake_gather_dispatch_test PRIVATE gxruntime)
 target_compile_definitions(bluewake_gather_dispatch_test PRIVATE BLUEWAKE_GATHER_PIPE=1)
 add_test(NAME bluewake_gather_dispatch_test COMMAND bluewake_gather_dispatch_test)
 
+# Requires a local player-owned module; built explicitly, never run by public CI.
+add_executable(bluewake_native_j3d_test EXCLUDE_FROM_ALL
+    ${BLUEWAKE_REPO_ROOT}/tests/native_j3d_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_j3d.c)
+target_include_directories(bluewake_native_j3d_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite
+    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_native_j3d_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
+target_compile_options(bluewake_native_j3d_test PRIVATE -ffp-contract=off)
+
+add_executable(bluewake_native_j3d_guard_test
+    ${BLUEWAKE_REPO_ROOT}/tests/native_j3d_guard_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_j3d.c)
+target_include_directories(bluewake_native_j3d_guard_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_native_j3d_guard_test PRIVATE gxruntime)
+target_compile_options(bluewake_native_j3d_guard_test PRIVATE -ffp-contract=off)
+add_test(NAME bluewake_native_j3d_guard_test COMMAND bluewake_native_j3d_guard_test)
+
 add_executable(bluewake_inline_fp_test ${BLUEWAKE_REPO_ROOT}/tests/inline_fp_test.c)
 target_link_libraries(bluewake_inline_fp_test PRIVATE gxruntime)
 target_include_directories(bluewake_inline_fp_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
