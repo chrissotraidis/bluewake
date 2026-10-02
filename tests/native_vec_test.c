@@ -1,14 +1,13 @@
 /* cmake/composite/native_vec.c against the translations it stands in for.
  *
- *   native_vec_test MODULE.dll [CASES]
+ *   native_vec_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]
  *
  * For each vector leaf: random vectors (zeros, denormals, large values,
  * sometimes past the bound), operands that alias the output or overlap it,
  * random registers, FPSCR and cycle state; the leaf through the personal
  * module's translation and through bluewake_native_vec; every byte of the CPU
- * state and of RAM must match - or, where the native declines, nothing may
- * have changed. Windows, built like tests/native_skin_test.c with
- * cmake/composite/native_vec.c. */
+ * state (including its observation suffix) and the 256-byte RAM test area must match - or, where the native declines, nothing may
+ * have changed. Uses BlueWake's declared module storage ABIs on Windows and POSIX. */
 #include "native_vec.h"
 #include "StaticRecompABI.h"
 
@@ -16,7 +15,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "module_cpu_contract.h"
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #define RAM_SIZE GC_MAIN_RAM_SIZE
 #define AREA 0x80100000u
@@ -89,7 +93,7 @@ static CPUState build(u8* ram, u32 leaf, unsigned scenario) {
     c.hid2 = PPC_HID2_LSQE;
     c.gqr[0] = scenario % 5u == 1u ? 0x3F003F00u : 0u;
     if (scenario % 37u == 9u) c.gqr[0] = 0x00070007u;
-    c.fpscr = next() & 0xFFFFF000u;
+    c.fpscr = next(); /* Include rounding modes and exception-enable flags. */
     if (scenario % 3u == 0u) c.fpscr |= 0x4u;
     c.cycle_budget = 16384;
     c.downcount = -(s64)(next() % 64u);
@@ -100,75 +104,93 @@ static CPUState build(u8* ram, u32 leaf, unsigned scenario) {
         c.reserve_valid = true;
         c.reserve_addr = out & ~31u;
     }
+    c.cycle_observation_suffix = next();
+    switch (scenario % 47u) {
+    case 1: c.ram = NULL; break;
+    case 2: c.ram_size = 1; break;
+    case 3: c.exception = 1; break;
+    case 4: c.msr = 0; break;
+    case 5: c.hid2 = 0; break;
+    case 6: c.cycle_budget = 0; break;
+    case 7: c.cycle_budget = 1; c.downcount = 0; break;
+    case 8: c.cycle_deadline_budget = 1; break;
+    default: break;
+    }
     return c;
 }
 
-/* A module built with BW_GUEST_MEM1 (the Windows builder's) runs its
- * translated code on its own MEM1 array, whatever a state's ram says: the
- * translated side's RAM has to be that array. Zeroed and returned, or NULL
- * for a module without one. */
-static u8* module_mem1(HMODULE lib) {
-    u8* (*mem1)(u32*) = (u8* (*)(u32*))(void*)GetProcAddress(lib, "bluewake_composite_guest_mem1");
-    u32 size = 0;
-    u8* ram = mem1 != NULL ? mem1(&size) : NULL;
-    if (ram == NULL)
-        return NULL;
-    if (size < GC_MAIN_RAM_SIZE) {
-        fprintf(stderr, "the module's MEM1 is 0x%X bytes\n", size);
-        exit(1);
+typedef struct Module {
+    const StaticRecompModuleDesc* desc;
+    CPUState fallback;
+    BlueWakeModuleStorage storage;
+    int (*native_vec)(bool, BluewakeNativeVecReady, void*);
+    void (*report)(void);
+} Module;
+
+static int load_module(const char* path, Module* module) {
+#if defined(_WIN32)
+    HMODULE lib = LoadLibraryA(path);
+#define SYMBOL(name) ((void*)GetProcAddress(lib, name))
+#else
+    void* lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#define SYMBOL(name) dlsym(lib, name)
+#endif
+    if (!lib) { fprintf(stderr, "cannot load %s\n", path); return 0; }
+    StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)SYMBOL(STATICRECOMP_GET_MODULE_SYMBOL);
+    if (!get) return 0;
+    module->desc = get();
+    module->native_vec = (int (*)(bool, BluewakeNativeVecReady, void*))SYMBOL("bluewake_composite_native_vec_v1");
+    module->report = (void (*)(void))SYMBOL("bluewake_native_vec_report");
+    const char* error = bw_module_select_storage(module->desc,
+        (BlueWakeModuleCPUFn)SYMBOL("bluewake_composite_guest_cpu"),
+        (BlueWakeModuleMEM1Fn)SYMBOL("bluewake_composite_guest_mem1"),
+        &module->fallback, &module->storage);
+    if (error) { fprintf(stderr, "%s\n", error); return 0; }
+    if (module->storage.mem1 == NULL) {
+        module->storage.mem1 = calloc(1, GC_MAIN_RAM_SIZE);
+        module->storage.mem1_size = GC_MAIN_RAM_SIZE;
     }
-    memset(ram, 0, GC_MAIN_RAM_SIZE);
-    return ram;
+    return module->storage.mem1 != NULL;
+#undef SYMBOL
 }
 
-/* The cycle observation suffix is dead after an access to RAM: since
- * scripts/windows/lean_memory.py the translation stores it only on the way
- * to an MMIO or timebase handler, its only readers. It is not compared. */
+static unsigned routed_queries;
+static bool routed_ready(void* user, const CPUState* cpu, u32 address) {
+    (void)user; (void)cpu; (void)address;
+    ++routed_queries;
+    return true;
+}
+
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: native_vec_test MODULE.dll [CASES]\n");
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "usage: native_vec_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]\n");
         return 2;
     }
     const unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 20000u;
-    HMODULE lib = LoadLibraryA(argv[1]);
-    if (lib == NULL) {
-        fprintf(stderr, "cannot load %s\n", argv[1]);
-        return 1;
+    Module original = {0}, candidate = {0};
+    if (!load_module(argv[1], &original)) return 1;
+    const StaticRecompModuleDesc* mod = original.desc;
+    if (strcmp(mod->game_id, "GZLE01") != 0) return 1;
+    const StaticRecompModuleDesc* routed = NULL;
+    u8* routed_ram = NULL;
+    if (argc > 3) {
+        if (!load_module(argv[3], &candidate)) return 1;
+        if (!candidate.native_vec || !candidate.native_vec(true, routed_ready, NULL)) {
+            fprintf(stderr, "candidate lacks native vector handshake\n"); return 1;
+        }
+        routed = candidate.desc;
+        routed_ram = candidate.storage.mem1;
     }
-    StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)(void*)GetProcAddress(lib, STATICRECOMP_GET_MODULE_SYMBOL);
-    CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))(void*)GetProcAddress(lib, "bluewake_composite_guest_cpu");
-    if (get == NULL || guest_cpu == NULL) {
-        fprintf(stderr, "not a BlueWake Windows module\n");
-        return 1;
-    }
-    const StaticRecompModuleDesc* mod = get();
-    if (mod->cpu_state_size != sizeof(CPUState) || strcmp(mod->game_id, "GZLE01") != 0) {
-        fprintf(stderr, "CPU state size %u, expected %u\n", mod->cpu_state_size, (unsigned)sizeof(CPUState));
-        return 1;
-    }
-    u8* reference_ram = module_mem1(lib);
-    if (reference_ram == NULL) reference_ram = calloc(1, RAM_SIZE);
+    u8* reference_ram = original.storage.mem1;
     u8* native_ram = calloc(1, RAM_SIZE);
     if (!reference_ram || !native_ram) return 1;
-    unsigned ran[LEAF_COUNT] = {0}, declined[LEAF_COUNT] = {0};
+    unsigned ran[LEAF_COUNT] = {0}, declined[LEAF_COUNT] = {0}, routed_ran = 0;
     for (unsigned i = 0; i < cases; ++i) {
         const unsigned which = i % (unsigned)LEAF_COUNT;
         const u32 leaf = LEAVES[which];
         CPUState c = build(native_ram, leaf, i / (unsigned)LEAF_COUNT);
-        memcpy(reference_ram + (AREA - GC_RAM_BASE), native_ram + (AREA - GC_RAM_BASE), 256);
-
-        CPUState* g = guest_cpu();
-        *g = c;
-        g->ram = reference_ram;
-        mod->on_state_loaded(g);
-        if (!mod->dispatch(g, g->pc)) {
-            fprintf(stderr, "case %u: the translation did not run\n", i);
-            return 1;
-        }
-        CPUState reference = *g;
-
+        ppc_fpscr_updated(&c);
         CPUState native = c;
-        ppc_fpscr_updated(&native);
         CPUState untouched = native;
         u8 area_before[256];
         memcpy(area_before, native_ram + (AREA - GC_RAM_BASE), 256);
@@ -182,8 +204,19 @@ int main(int argc, char** argv) {
             continue;
         }
         ran[which]++;
+        memcpy(reference_ram + (AREA - GC_RAM_BASE), area_before, 256);
+
+        CPUState* g = original.storage.cpu;
+        *g = c;
+        g->ram = reference_ram;
+        mod->on_state_loaded(g);
+        if (!mod->dispatch(g, g->pc)) {
+            fprintf(stderr, "case %u: the translation did not run\n", i);
+            return 1;
+        }
+        CPUState reference = *g;
+
         reference.ram = native.ram;
-        reference.cycle_observation_suffix = native.cycle_observation_suffix;
         if (memcmp(&native, &reference, sizeof native) != 0 ||
             memcmp(native_ram + (AREA - GC_RAM_BASE), reference_ram + (AREA - GC_RAM_BASE), 256) != 0) {
             fprintf(stderr, "case %u (%08X, seed %08X): mismatch (fpr at %u, ps1 at %u)\n", i, leaf, seed,
@@ -197,11 +230,30 @@ int main(int argc, char** argv) {
                             reference_ram[AREA - GC_RAM_BASE + k]);
             return 1;
         }
+        if (routed) {
+            memcpy(routed_ram + AREA - GC_RAM_BASE, area_before, 256);
+            CPUState* h = candidate.storage.cpu;
+            *h = c; h->ram = routed_ram; routed->on_state_loaded(h);
+            if (!routed->dispatch(h, leaf)) return 1;
+            CPUState routed_result = *h;
+            routed_result.ram = reference.ram;
+            if (memcmp(&routed_result, &reference, sizeof reference) ||
+                memcmp(routed_ram + AREA - GC_RAM_BASE, reference_ram + AREA - GC_RAM_BASE, 256)) {
+                fprintf(stderr, "case %u (%08X): routed module differs from original\n", i, leaf); return 1;
+            }
+            ++routed_ran;
+        }
     }
     unsigned total = 0;
     for (unsigned k = 0; k < LEAF_COUNT; ++k) {
         printf("%08X: %u identical, %u declined unchanged\n", LEAVES[k], ran[k], declined[k]);
+        if (!ran[k]) return 1;
         total += ran[k];
+    }
+    if (routed) {
+        if (!routed_queries) { fprintf(stderr, "native vector routing was inactive\n"); return 1; }
+        printf("routed module: %u identical calls, %u readiness queries\n", routed_ran, routed_queries);
+        if (candidate.report) candidate.report();
     }
     return total != 0u ? 0 : 1;
 }

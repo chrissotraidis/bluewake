@@ -2,11 +2,9 @@
  * PSVECSquareMag, PSVECDotProduct, PSVECCrossProduct, PSVECSquareDistance,
  * PSVECNormalize, PSVECMag), native.
  *
- * Each is one block of six to fifteen paired-single instructions, and the
- * game calls them from everywhere - collision, actors, the camera: at native
- * 60 Hz on Outset they were 2.5 percent of the game thread, most of it the
- * call itself (the chunk's entry, its block machinery, the return). The
- * direct calls to them (scripts/windows/direct_calls.py) try these first.
+ * Imported from Elliott Tate's windows-release implementation. These leaves
+ * serve collision, actors and cameras. BlueWake performance acceptance is
+ * measured separately; the import itself does not enable native routing.
  *
  * Each runs the leaf's operations in order on the same values with the
  * translation's own arithmetic (inline_fp.h: the interpreter's multiplier and
@@ -22,11 +20,31 @@
  * translation prepays it and refunds nothing).
  *
  * tests/native_vec_test.c compares each against the personal module's
- * translation, every register and byte. No identifier here may be `ctx`. */
+ * translation, every CPU byte and the fixture's RAM test area. No identifier here may be `ctx`. */
 #include "native_vec.h"
 #include "inline_fp.h"
 
 #include <stdio.h>
+
+#if defined(_WIN32)
+#define BW_VEC_EXPORT __declspec(dllexport)
+#else
+#define BW_VEC_EXPORT __attribute__((visibility("default")))
+#endif
+static BluewakeNativeVecReady s_ready;
+static void* s_ready_user;
+
+BW_VEC_EXPORT int bluewake_composite_native_vec_v1(
+    bool enabled, BluewakeNativeVecReady ready, void* user) {
+    s_ready = enabled ? ready : NULL;
+    s_ready_user = s_ready != NULL ? user : NULL;
+    return s_ready != NULL;
+}
+
+int bluewake_native_vec_try(CPUState* cpu, u32 address) {
+    return cpu != NULL && s_ready != NULL && s_ready(s_ready_user, cpu, address) &&
+           bluewake_native_vec(cpu, address);
+}
 
 enum {
     VEC_ADD, VEC_SUBTRACT, VEC_SCALE, VEC_SQUARE_MAG, VEC_DOT, VEC_CROSS, VEC_SQUARE_DISTANCE, VEC_NORMALIZE,
@@ -34,7 +52,7 @@ enum {
 };
 static unsigned long long s_vec_runs[VEC_COUNT], s_vec_declined[VEC_COUNT];
 
-void bluewake_native_vec_report(void) {
+BW_VEC_EXPORT void bluewake_native_vec_report(void) {
     fprintf(stderr,
             "[native-vec] add=%llu/%llu sub=%llu/%llu scale=%llu/%llu sqmag=%llu/%llu dot=%llu/%llu "
             "cross=%llu/%llu sqdist=%llu/%llu normalize=%llu/%llu mag=%llu/%llu (native/declined)\n",
@@ -398,6 +416,8 @@ static int vec_mag(CPUState* cpu) {
 }
 
 int bluewake_native_vec(CPUState* cpu, u32 address) {
+    if (cpu == NULL || cpu->ram == NULL)
+        return 0;
     int which, done;
     switch (address) {
     case BLUEWAKE_PSVEC_ADD: which = VEC_ADD; done = vec_add_sub(cpu, false); break;

@@ -41,6 +41,13 @@ MARK = "bluewake: prepaid block copies"
 
 
 class PreparedBlockSelectionTest(unittest.TestCase):
+    def test_native_vector_certification_survives_block_preparation(self):
+        source = CHUNK.replace('80001000', '8030DEAC').replace('80001004', '8030DEB0')
+        self.assertEqual(fast.transform(source)[1], 1)
+        routed = source.replace('#include "../generated.h"',
+                                '#include "../generated.h"\n#include "native_vec.h"')
+        self.assertEqual(fast.transform(routed), (routed, 0))
+
     def test_retains_pc_and_prepaid_observation_suffix(self):
         source = CHUNK.replace("    ctx->gpr[4] += 1u;",
                                "    ctx->cycle_observation_suffix = cycle_block_prepaid ? 1u : 0u;\n"
@@ -81,7 +88,8 @@ class PreparedCacheTest(unittest.TestCase):
                        "scripts/windows/direct_calls.py", "cmake/composite/direct_calls.c",
                        "cmake/composite/direct_calls.h", "cmake/composite/inline_gpr.h",
                        "scripts/windows/inline_save_restore_gpr.py", "scripts/mods/prepare_native_j3d.py",
-                       "cmake/composite/native_j3d.c", "cmake/composite/native_j3d.h"):
+                       "cmake/composite/native_j3d.c", "cmake/composite/native_j3d.h",
+                       "scripts/mods/prepare_native_vec.py", "cmake/composite/native_vec.c", "cmake/composite/native_vec.h"):
             dst = self.root / script
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / script, dst)
@@ -92,7 +100,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK)
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
@@ -170,6 +178,31 @@ label_80004004:
         self.assertNotIn('bluewake_native_j3d_try', source.read_text())
         self.assertNotIn('BLUEWAKE_NATIVE_J3D_PREPARED', (source.parent.parent / 'generated.h').read_text())
         self.assertFalse((source.parent.parent / 'native_j3d.json').exists())
+
+    def test_native_vec_reuse_and_disable(self):
+        body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'
+        digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+        script = self.root / "scripts/mods/prepare_native_vec.py"
+        text = script.read_text()
+        start = text.index('LEAVES = (')
+        end = text.index('INCLUDE = ', start)
+        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:])
+        (self.base / 'chunks_dol/chunk_8030D6E0.c').write_text(
+            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_8030D6E0:\n')
+        self.digest = bw.tree_digest(self.base)
+        self.args.native_vec = True
+        self.cycle()
+        source = self.out / 'composite-src/chunks_dol/chunk_8030D6E0.c'
+        self.assertIn('bluewake_native_vec_try', source.read_text())
+        self.assertIn('BLUEWAKE_NATIVE_VEC_PREPARED', (source.parent.parent / 'generated.h').read_text())
+        before = source.read_bytes(), source.stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (source.read_bytes(), source.stat().st_mtime_ns))
+        self.args.native_vec = False
+        self.cycle()
+        self.assertNotIn('bluewake_native_vec_try', source.read_text())
+        self.assertNotIn('BLUEWAKE_NATIVE_VEC_PREPARED', (source.parent.parent / 'generated.h').read_text())
+        self.assertFalse((source.parent.parent / 'native_vec.json').exists())
 
     def test_inline_gpr_reuse_and_disable_rebuilds_callers(self):
         source = '''#include "../generated.h"

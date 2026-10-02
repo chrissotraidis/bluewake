@@ -40,6 +40,10 @@ from pathlib import Path
 CERTIFIED = [(0x8030D0C8, 0x8030D0FC), (0x8030D0FC, 0x8030D1C8),
              (0x8030DA44, 0x8030DA98), (0x8030DA98, 0x8030DB24)]
 
+# Keep all blocks inside the nine certified vector leaves unchanged when routed.
+VEC_CERTIFIED = [(0x8030DCE0, 0x8030DD44), (0x8030DE0C, 0x8030DF08),
+                 (0x8030E0B4, 0x8030E0DC)]
+
 MARK = "/* bluewake: prepaid block copies (scripts/windows/fast_blocks.py) */\n"
 INCLUDE = '#include "../generated.h"\n'
 FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* (?:ctx|ctx_param)\) \{$")
@@ -125,7 +129,7 @@ def fast_copy(parts, n):
     return out
 
 
-def transform_function(lines):
+def transform_function(lines, certified=CERTIFIED):
     """One function's lines, header to closing brace, with prepaid copies."""
     close = len(lines) - 1
     sites = []
@@ -151,7 +155,7 @@ def transform_function(lines):
         if n + 1 < len(sites) and limit == sites[n + 1][0]:
             while end > e and (PC.match(lines[end - 1]) or LABEL.match(lines[end - 1]) or not lines[end - 1].strip()):
                 end -= 1
-        if any(start <= address < stop for start, stop in CERTIFIED):
+        if any(start <= address < stop for start, stop in certified):
             continue
         parts = split(lines[e:end])
         copy = fast_copy(parts, n)
@@ -184,13 +188,14 @@ def transform(text):
     heads = [i for i, line in enumerate(lines) if FUNCTION.match(line)]
     if not heads:
         return text, 0
+    certified = CERTIFIED + (VEC_CERTIFIED if '#include "native_vec.h"' in text else [])
     out, blocks = lines[:heads[0]], 0
     for h, start in enumerate(heads):
         stop = heads[h + 1] if h + 1 < len(heads) else len(lines)
         close = stop - 1
         while close > start and lines[close] != "}":
             close -= 1
-        body, count = transform_function(lines[start:close + 1])
+        body, count = transform_function(lines[start:close + 1], certified)
         out.extend(body)
         out.extend(lines[close + 1:stop])
         blocks += count

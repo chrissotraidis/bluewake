@@ -19,6 +19,10 @@
  * blr: nonzero with every register, flag, cycle and byte as the translation
  * leaves them; zero, with nothing changed, where that is not certain or the
  * address is not one of these leaves. No identifier here may be `ctx`. */
+typedef bool (*BluewakeNativeVecReady)(void*, const CPUState*, u32);
+/* An older host cannot enable these replacements. */
+int bluewake_composite_native_vec_v1(bool enabled, BluewakeNativeVecReady ready, void* user);
+int bluewake_native_vec_try(CPUState* cpu, u32 address);
 int bluewake_native_vec(CPUState* cpu, u32 address);
 void bluewake_native_vec_report(void);
 

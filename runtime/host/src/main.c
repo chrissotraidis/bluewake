@@ -7538,6 +7538,14 @@ int main(int argc, char** argv) {
         const bool enabled = native_j3d != NULL && native_j3d(want, host_can_skip_observation, NULL);
         fprintf(stderr, "[chassis] native-j3d=%s\n", enabled ? "on" : "off");
     }
+    {
+        typedef int (*NativeVecFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
+        NativeVecFn native_vec = (NativeVecFn)dlsym(lib, "bluewake_composite_native_vec_v1");
+        const char* native_env = getenv("BLUEWAKE_NATIVE_VEC");
+        const bool want = native_env != NULL && strcmp(native_env, "1") == 0;
+        const bool enabled = native_vec != NULL && native_vec(want, host_can_skip_observation, NULL);
+        fprintf(stderr, "[chassis] native-vec=%s\n", enabled ? "on" : "off");
+    }
     BluewakeSetGatherWord set_gather_word = (BluewakeSetGatherWord)
         dlsym(lib, "bluewake_composite_set_gather_pipe");
     BluewakeSetGatherBytes set_gather_bytes = (BluewakeSetGatherBytes)
@@ -15560,6 +15568,11 @@ int main(int argc, char** argv) {
         void (*report_native_j3d)(void) = (void (*)(void))dlsym(lib, "bluewake_native_j3d_report");
         if (report_native_j3d != NULL)
             report_native_j3d();
+    }
+    {
+        void (*report_native_vec)(void) = (void (*)(void))dlsym(lib, "bluewake_native_vec_report");
+        if (report_native_vec != NULL)
+            report_native_vec();
     }
     if (g_direct_call_trace)
         fprintf(stderr, "[direct-calls] summary queries=%llu allowed=%llu\n",
