@@ -3,7 +3,9 @@
 The current fixed donor baseline and outstanding acceptance checks are in the
 [October 2 reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
 The current cumulative review is [PR #37](https://github.com/chrissotraidis/bluewake/pull/37),
-with executable evidence at `3392854` and maintained runtime `18ba3b64`.
+with the clean player-build baseline at `3392854` / runtime `18ba3b64` and
+the later Pictobox host at `9706637` / runtime `2218107d`. The current runtime
+pin `0568fedd` adds only a Windows test-path correction to that host product code.
 It includes the later Windows preparation/native work, post-texture renderer
 correction and haptics; see the ledger for acceptance and intentional differences.
 The sections below describe the earlier October 1 import and retain their

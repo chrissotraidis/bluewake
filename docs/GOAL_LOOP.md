@@ -1,73 +1,92 @@
 # BlueWake Autonomous Goal-Based Implementation Loop
 
-## Current operating loop — migration acceptance, 2026-10-03
+## Current operating loop — migration acceptance, reoriented October 3, 2026
 
-Make BlueWake the maintained project using Elliott's approved enhancements.
-The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) controls
-scope and acceptance. All v56, v55 and Route B campaigns below are historical
-for this goal. Do not resume them or add optimization families without a
-reproduced migration blocker.
+Make BlueWake the maintained home for the approved consolidation with Elliott.
+The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) owns the
+feature inventory, platform matrix and evidence. Source is substantially
+consolidated; replacement of the donor project is not yet accepted. Finish the
+player paths and gameplay qualification before recommending cutover. Historical
+v56/v55/Route B campaigns below do not control this goal.
 
-The frozen fresh-player baseline is `3392854`, runtime `18ba3b64`, translator
-`b8b5345`. The focused Pictobox host candidate uses runtime `2218107d` with
-the unchanged private module; its exact host hash and evidence are in the ledger. Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
-retains the existing integration history, including 26 Elliott-authored commits
-and the Elliott co-author trailers. Documentation-only follow-ups do not change the
-revision of tested binaries. Continue source work in this cumulative review.
+### Preserve the completed work
 
-### Accepted work to retain
+- Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
+  contains the integration ancestry, including 26 Elliott-authored commits and
+  13 Elliott co-author trailers in BlueWake. Runtime adaptations carry their own
+  attribution. Continue here; do not create another import stack.
+- Current maintained runtime is `0568fedd`; its product code matches
+  `2218107d` (the follow-up only fixes a Windows test output path). Translator
+  stays `b8b5345`. Windows host linking and all 58 source regressions pass.
+- The frozen clean Mac player build is BlueWake `3392854` / runtime `18ba3b64`.
+  Its owned-disc translation, local training, O2 compilation, signed relocatable
+  package, bounded restart/resume, game save/separate reload, settings, states,
+  local upgrade and bounded progression remain accepted within their scope.
+- The personal Pictobox candidate overlays host `9706637` / runtime `2218107d`
+  on that module. Regular/Deluxe photos, repeat/cancel, actual card saves,
+  separate album reload and legacy-state capture pass on Mac. Queued camera
+  pitch and water/wall collision also pass. This overlay is not a new clean build.
 
-The fresh Mac owned-disc route completes translation, local training, compilation,
-relocatable signed packaging and a bounded completed-build interruption/resume
-check. Its app passes actual game save/separate reload, fresh start through
-control, fullscreen/settings persistence, same-module states across processes,
-local app replacement preserving card/settings/SRAM, and bounded ladder, outdoor,
-door and indoor progression. Native Windows host CI at `3574a0c` / runtime `0568fedd` passes 58 tests. The exact
-source iOS app-only shell passes content/provenance audits. These bounded results
-remain accepted unless a relevant change invalidates them.
+Do not rerun these accepted checks without a relevant source change, failure or
+identified coverage gap. Documentation-only changes do not invalidate binaries.
 
-### Remaining work, in execution order
+### Critical path and exit evidence
 
-| Work package | Next action and exit evidence | Availability |
+| Priority / work package | Next action and completion evidence | Current dependency |
 | --- | --- | --- |
-| Pictobox Windows qualification | Runtime `2218107d` and the host boundary pass bounded Mac regular/Deluxe photo content, album acceptance, repeated capture/cancel, actual game Save and separate-launch album reload, plus pre-fix state capture. Six focused regressions and encoder sanitizers pass. Verify Windows separately; do not re-run the accepted Mac route without a relevant change. | Mac gate closed for the copied Windfall fixture; Windows machine availability pending |
-| Mac controls and options | Queued pitch and water/wall collision now pass on the Pictobox host; finish reliable real mouse/physical-controller checks; exercise remaining imported gameplay options on/off. Real wheel zoom, bounded jump/sprint on/off, selected keyboard-menu persistence and live Space jump now pass. The zoom diagnostic works after guaranteed guest input wakes the follow camera; do not remove its readiness guard. | Local controls can proceed; physical controller coordination pending |
-| Mac audio and sustained gameplay | Establish audible narrated intro/scripted music, then a representative 30-minute play session and matched frame times on an idle host. Guest PCM, screenshots and the historical bounded 22.8% Outset gain do not close these gates. | Audio listening and an uncontended measurement window required |
-| Final iOS / PadMint | Resume the existing exact-revision build, inspect module/assembly/provenance, then coordinated signing, device gameplay/save/reload and in-place upgrade with data readback. | Build stopped twice below 5 GiB free; 593 objects and verified profiles retained. Await stable storage headroom; maintainer asked for 30 GiB or external storage. Device availability pending |
-| Windows player acceptance and reports | Complete the clean owned-disc O2 build, native Direct3D gameplay, UI/recovery/save/upgrade, controls, audible music and matched performance. Reproduce Pictobox/startup/music leads on an identified build before claiming fixes. | Windows x64 machine/controller coordination pending; do not substitute host CI or restart Parallels |
-| Maintained source and migration decision | Reconcile runtime into `bluewake-next`, BlueWake through PR #37 into `main`, retaining authorship. Review the single platform matrix, tested instructions, issue mapping and proposed donor notice against all gate results. | Engineering acceptance remains incomplete; no donor redirect or closure |
+| 1. Source consolidation and candidate identity | Keep one cumulative review, verify source/dependency/patch agreement and authorship, and remove stale current-status claims. Plan runtime integration into `bluewake-next` and BlueWake integration through #37 into `main`. Record the exact final package source, host, module and compatibility; distinguish clean-build provenance from a diagnostic host overlay. | Current PRs are mergeable drafts. Source review and documentation can proceed independently of hardware; merging source is not migration acceptance. |
+| 2. Complete the player build paths | Resume the retained `3392854` PadMint workspace without repinning; verify reused objects/profiles, final assembly and provenance. Then qualify the maintained candidate's reproducible app/update path and determine whether changed module inputs require a rebuild. Finish signing, device run/save/reload and in-place data-preserving upgrade. Do not count the older workspace as a clean build of the newer candidate. | Two previous attempts stopped for low disk. Retain 593 objects. Resume only with stable 30 GiB free or a verified suitable external target. Physical-device coordination remains pending. |
+| 3. Finish local Mac gameplay coverage | Use isolated copied saves and the existing identified app for the remaining option/climbing checks. Establish the relevant gameplay action before an off/on comparison. Complete real mouse/controller input, audible intro/scripted music, and a representative 30-minute gameplay route with actual progression, settings, save/reload and scene transitions. | Small functional checks can proceed. Real controller/audio acceptance needs the relevant input/output observation. Sustained performance needs an uncontended host. |
+| 4. Native Windows player acceptance | On confirmed x64 hardware, build the owned-disc O2 module and run native Direct3D. Cover disc import/recovery, fullscreen/restart, settings, controls/haptics, saves/states/upgrade, Pictobox, startup and scripted-music reports. Record app/module/source identities and distinguish reproduction from a claimed fix. | Hardware/controller availability unconfirmed. CI is green but cannot close these checks. Do not restart Parallels or take a shared device. |
+| 5. Performance and migration decision | Use matched original-30-Hz configurations and scenes, compare correctness plus frame-time tails/stalls, and complete sustained play on each claimed target. Review the single platform matrix, tested instructions, issue dispositions and proposed donor notice against those results. | Quiet hardware and completed player candidates required. Historical 22.8% Outset gain is bounded, not final performance parity. No redirect, donor closure or public release. |
 
-Skip unavailable work and continue the next independent required item. The
-frozen `bluewake-cpu-contract` worktree stays clean at `3392854` so the
-interrupted PadMint build can resume with exact provenance. The primary checkout
-is now `codex/fork-consolidated` for focused host/runtime changes and PR #37;
-its nested runtime branch is `codex/bluewake-pe-token`. The reproduced Pictobox defect justifies a focused host/runtime fix and
-incremental host validation with the existing personal module. Preserve the
-exact-revision PadMint workspace and failing baseline; record new identities
-and invalidate affected acceptance when the fix is introduced.
-Do not repeatedly retry the disk-limited build, duplicate artifacts, or
-restart an accepted test just because an earlier process handle expired.
+Select the highest-priority **available** missing result. Unavailable hardware
+or storage is a dependency, not a reason to repeat completed tests or add
+optimization families. Do not fetch new donor features into this fixed campaign
+unless they address an established migration blocker; track later changes apart.
 
 ### Iteration contract
 
-Name one missing acceptance result; use the smallest discriminating check;
-change source only for an established defect; record exact identities, outcome,
-limits and next action; checkpoint validated source-only progress in PR #37.
-After three materially identical failures, change the experiment. Keep automated
-input failures separate from game failures. Current zoom evidence shows effective
-scales of 0.64 and 1.57 after the follow camera activates; the farther screenshot
-is obstructed by a nearby post, so camera collision remains unaccepted. A subsequent real-input run visibly
-zooms to effective scales 0.50 and 2.00 and releases to the settings menu;
-vertical drag remains unverified. No source fix was required for this diagnosis.
+1. Read live repository status and the ledger's current summary. Name one
+   missing acceptance result and the observation that would close it.
+2. Check prerequisites before launching. For gameplay, first prove the action
+   occurs (for example, an actual dialogue for instant text). A clean exit,
+   enabled-option log, idle screenshots or a compiled fixture does not suffice.
+3. Run the smallest discriminating check. If automation misses the action,
+   record a setup failure and correct the route before spending on an A/B pair.
+   After three materially identical failures, change the experiment. Do not
+   extend small input probes indefinitely while a larger gate is actionable.
+4. Change source only for an established defect. Run relevant regressions and
+   affected gameplay checks; preserve failed evidence and original player data.
+5. Record exact identities, result, limits and the next gate. Checkpoint validated
+   source-only progress in #37 and update the private continuation. Summarize
+   closed gates and external dependencies rather than counting probes or PRs.
 
-Report closed gates and remaining dependencies. Elapsed time, PR counts and
-compile-task counts are not migration percentages. Do not rebuild for docs,
-broaden platform claims, or turn optional optimization research into cutover work.
-Preserve private artifacts, player data and worktrees containing unique evidence.
+The October 3 instant-text pair `instant-text-ae5ceqfa` completed but never
+opened dialogue: both cases show idle Link and have identical captured frames.
+The enabled case patches message data, which is implementation evidence only.
+Its gameplay result is **inconclusive due to setup**, not a pass or game defect.
+Do not repeat that unchanged route.
 
-The goal remains active until every required ledger item has current acceptance.
-Public releases require a separate private Clear audit. Publishing personal
-builds, donor notices, redirects, closures or access changes is outside this run.
+Storage is volatile: this reorientation observed 28 GiB free, up from the prior
+sub-2-GiB state, still below the resume threshold. Two unrelated simulator test
+processes each consume approximately 200% CPU. Recheck prerequisites when a
+relevant work package becomes actionable; do not start a large build or present
+this as a quiet performance window. Do not terminate other tasks to create one.
+
+### Retained state and completion boundary
+
+Primary checkout: `codex/fork-consolidated`; nested runtime:
+`codex/bluewake-pe-token`. The `bluewake-cpu-contract` worktree stays clean at
+`3392854`, runtime `18ba3b64`, for exact PadMint resume. Keep the other evidence
+worktrees, failed baseline, personal modules, profiles, captures, saves and
+signing material. Do not clean up unique artifacts to make a build fit.
+
+The goal stays active until required parity, player-build and gameplay checks
+have current evidence. Original 30 Hz simulation, Smooth Motion Off and
+experimental 60 Hz Off remain defaults; preserve explicit preferences.
+Public releases additionally require the private Clear audit and artifact gate.
+Publishing personal builds or donor redirects/closures is outside this goal.
 
 ---
 

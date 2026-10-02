@@ -14,6 +14,35 @@ This is the authoritative current ledger. The
 experiments, failed approaches and exact historical checkpoints. “Integrated”
 below means source is present with bounded evidence, not that parity is accepted.
 
+## Current decision after reorientation, October 3
+
+The source campaign is substantially consolidated in #37. Do not equate that
+with readiness to shut down the donor project. The remaining critical path is
+complete player builds and qualification on the claimed platforms, followed by
+maintained-branch integration and an evidence-backed migration recommendation.
+The current [goal loop](../GOAL_LOOP.md) orders available work and preserves
+accepted results; earlier evidence below is historical unless explicitly current.
+
+At source `a5da7c2`, #37 is an open, mergeable draft; its current repository audits
+and Windows host check are green. The independently recorded `3574a0c` Windows
+run passes all 58 tests; later commits through `a5da7c2` change only documentation.
+Runtime #4 at `0568fedd` is also an open, mergeable draft. This is source readiness
+information, not Windows gameplay or cutover acceptance. BlueWake ancestry from
+main retains 26 Elliott-authored commits and 13 Elliott co-author trailers.
+
+The queued instant-text pair `instant-text-ae5ceqfa` finished both 2,700-retrace
+runs with exit zero and unchanged copied cards/settings. The enabled run logs
+4,426 patched messages and 1,212 removed timed waits. However, the captures show
+idle Link beside the Windfall arch; no dialogue opened, and all seven off/on
+frame pairs are byte-identical. **Gameplay result: inconclusive setup.** Do not
+count it as an option pass or defect. Establish dialogue before repeating an A/B
+check; the private receipt retains both runs and the visual review.
+
+Storage recovered to 28 GiB at this check but remains below the established
+30-GiB stable-headroom threshold for resuming PadMint. Two unrelated simulator
+test processes remain busy. No build was restarted, no performance measurement
+was accepted, and no device or player data was changed during reorientation.
+
 ## Fixed baseline and selected dependencies
 
 Reconcile the fixed donor main **and** windows-release snapshots below. Track
@@ -180,14 +209,16 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#34](https://github.com/chrissotraidis/bluewake/pull/34) | `193870f` import, `558438a` / `9849eb0` adaptations | Controller feedback with preserved preferences, menu/teardown and guest-cancellation fixes; ten Mac checks, 56 Windows tests, bounded Outset and sanitizer checks pass; real controller qualification open |
 | [#35](https://github.com/chrissotraidis/bluewake/pull/35) | `9c205c3` | Relocatable personal Mac builder; fresh shell/translation, packaging/signing and bounded existing-module relocation checks pass; complete player build and gameplay acceptance open |
 | [#36](https://github.com/chrissotraidis/bluewake/pull/36) | `3392854` | Explicit combined Mac player build; fresh owned-disc training/compilation/packaging, bounded restart recovery and actual save/reload pass; remaining gameplay acceptance open |
-| [#37](https://github.com/chrissotraidis/bluewake/pull/37) | `3392854` | Cumulative review against main, preserving all preceding ancestry, 26 Elliott-authored commits and 13 co-author trailers; current qualification and consolidation home |
+| [#37](https://github.com/chrissotraidis/bluewake/pull/37) | host `9706637`, source checks `3574a0c` | Cumulative review against main, preserving all preceding ancestry, 26 Elliott-authored commits and 13 co-author trailers; clean player-build baseline remains `3392854`, current runtime pin `0568fedd` |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
 [PR #2](https://github.com/chrissotraidis/RecompCore/pull/2) at `c2905b7a` fixes
 alias tracking above retail 24 MiB. Runtime [PR #3](https://github.com/chrissotraidis/RecompCore/pull/3)
 at `18ba3b64` imports the later post-texture renderer correction and preserves it
-in save states. All are drafts; all public checkpoints are source only. No source merge or test result implies release readiness.
+in save states. Runtime [PR #4](https://github.com/chrissotraidis/RecompCore/pull/4)
+at `0568fedd` adds PE token/capture readback and the portable test path, stacked
+on #3. All are drafts; all public checkpoints are source only. No source merge or test result implies release readiness.
 
 ## Required parity inventory
 
@@ -196,10 +227,10 @@ in save states. All are drafts; all public checkpoints are source only. No sourc
 | Interpolation, batching, upload staging, worker/cache improvements; Apple/Windows | main `b6f87e0`, `7f4f1a0`, `e5c6ae4`, `b39bd0d`; runtime through `9618e9d` | Integrated in #10 plus newer synchronization fixes in #12 | Integrated; final same-scene images, 60/120 pacing and sustained play open |
 | Swapchain/fullscreen and orderly restart; Windows | `db2944e`, `1ce29ac`; runtime `9618e9d` | Swapchain fix already in maintained runtime; #12 orderly quit/relaunch replaces donor process-exit approach | Integrated; actual Windows F11/Restart/settings/startup recovery open |
 | Disc picker, remembered disc, compressed import and recovery; Windows | `0b463cc`, `61e891e`, `640094e`; shared `disc_import.c`, nodtool | Launcher source integrated in #15; unique import folders retain original/converted/previous files; candidate native 29/29 regressions pass | Integrated; real supported/rejected/missing disc and UI/Unicode interruption/recovery checks open |
-| Disc picker / launcher; Apple Silicon Mac | main `561ddbf`, `7a2ac23`, `5eaa981` | Developer host route exists; donor bundled-game packaging is intentionally excluded | Open; personal clean source build and app-only launcher with player's generated module, save/reload and installation |
-| Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Latest SDL queue timing integrated with window-scoped filtering; prior BlueWake camera/menu code retained | Integrated; SDL queue regression and bounded real Mac capture/orbit/wheel/release pass; vertical/collision, physical controller and other-platform acceptance open |
+| Disc picker / launcher; Apple Silicon Mac | main `561ddbf`, `7a2ac23`, `5eaa981` | Developer host route exists; donor bundled-game packaging is intentionally excluded | Fresh `3392854` personal Mac owned-disc build, signed relocatable package, save/reload and local upgrade pass within the recorded scope; reproducible final-candidate packaging and broader qualification remain open |
+| Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Latest SDL queue timing integrated with window-scoped filtering; prior BlueWake camera/menu code retained | Integrated; SDL queue regression and bounded real Mac capture/orbit/wheel/release pass; queued pitch and water/wall collision also pass; reliable physical vertical input, controller and other-platform acceptance remain open |
 | Jump, sprint, quick doors, transitions; Apple/Windows | main `22fa284`, `d55ce11`, `2c9f16c`, `df62ae0` | Integrated; Apple touch controls use existing editor, new options remain opt-in | Fresh Mac bounded progression and scheduled-input jump/sprint on/off pass; full options, real controls and other platforms remain open |
-| Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Fresh Mac player module exports all 15 option metadata entries matching the manifest; relevant option gameplay and other platforms remain open |
+| Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Fresh Mac player module exports all 15 option metadata entries matching the manifest; relevant option gameplay and other platforms remain open. Instant-text off/on route did not open dialogue and is inconclusive |
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Current Mac module F5/F9 and game save/reload pass across processes; climbing and other claimed platforms remain open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches are now imported separately | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
@@ -211,8 +242,8 @@ in save states. All are drafts; all public checkpoints are source only. No sourc
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
-| Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | Clean owned-disc iOS build/package and bounded resume pass at `95adeed`; final integrated-source build and actual run/save/upgrade still required. Windows training/build path incomplete | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
-| PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; Fresh PadMint iOS translation/training, module compilation, assembly and provenance checks pass at the baseline; player signing/install, final-source selection, device save/reload and matched performance open |
+| Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | Clean owned-disc iOS baseline passes at `95adeed`; fresh Mac `3392854` translation/training/O2/package and bounded save/reload/upgrade pass. Current host overlay is separate. Windows O2 builder has no PGO training stage | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
+| PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; earlier `95adeed` assembly passes. At frozen `3392854` / CLI 0.2.9, source generation and training pass, compilation is stopped with 593 objects retained. Final assembly/provenance, maintained-candidate qualification, signing/install, device save/reload and matched performance remain open |
 | Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Baseline and candidate runtime app-only audits pass. Compatible old-module update vs rebuild and physical acceptance open; no publication |
 | Consecutive non-advancing dispatch bound; desktop modules | Existing BlueWake loop, found during #21 assertion audit | #22 makes the counter per-call and resets after progress; stuck guest still yields on ninth non-advancing successor | Open; Release and ASan/UBSan regression, strict module boot and all 38 native Windows checks pass; optimized/performance/gameplay acceptance open |
 
@@ -937,33 +968,22 @@ No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-Chris reoriented the loop after the initial integration campaign. The next
-iterations prioritize the complete player experience; see the current section
-of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
+The [current goal loop](../GOAL_LOOP.md#critical-path-and-exit-evidence) defines
+execution order: finish source/candidate identity review, complete the retained
+player-build paths when storage permits, close available Mac gameplay checks,
+qualify native Windows on confirmed hardware, then make the migration decision
+using matched performance and the platform matrix. Do not rerun accepted Mac
+Pictobox or queued camera paths without a relevant change. Native Windows
+Pictobox, physical controls/audio, sustained play and device acceptance remain
+open. Source integration and review can proceed while hardware checks await
+availability; neither source merging nor CI closes those gameplay gates.
 
-1. **Pictobox Windows qualification:** bounded Mac regular/Deluxe photos,
-   repeat/cancel, both card-save/reload routes and legacy-state capture pass
-   with runtime `2218107d`. Verify the reporters' Windows path separately;
-   retain the failing baseline and avoid claiming cross-platform acceptance.
-2. **Remaining Mac qualification:** complete real mouse/controller and
-   required gameplay-option checks, audible intro/scripted music and sustained
-   play with matched measurements on an idle host. Queued pitch and water/wall
-   collision now pass. The fresh build, bounded
-   progression, local upgrade, save/reload, settings and current-module states
-   stay accepted unless a relevant change invalidates them.
-3. **Final iOS player path:** resume the existing `3392854` build only after
-   stable disk headroom is available. It is stopped, not running; 593 objects
-   and verified profiles remain intact. Inspect final assembly/provenance, then
-   finish coordinated signing, device save/reload and preserved upgrades.
-4. **Windows player acceptance:** complete clean O2 builds and native
-   gameplay/report checks. Hardware availability remains unconfirmed; continue
-   independent work without seizing devices or counting missing checks as passed.
-5. **Consolidation and migration preparation:** continue through cumulative
-   PR #37. Land maintained runtime in `bluewake-next`, not the unrelated default
-   `codex/galaxypad-integration`, and BlueWake in `main` with authorship retained.
-   Complete one support matrix, tested instructions and report mapping. The
-   [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
-   remains unposted until migration is accepted.
+The retained PadMint build remains stopped at `3392854` with 593 objects and
+verified profiles. Resume it only with stable headroom; retain its exact identity
+and qualify the later maintained candidate separately. The
+[proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
+remains unposted until migration is accepted. Runtime's maintained integration
+target is `bluewake-next`, not the unrelated default `codex/galaxypad-integration`.
 
 Primary checkout now uses `codex/fork-consolidated` for the cumulative source
 changes; branch `codex/fork-reconciliation` at `95adeed` and its completed
