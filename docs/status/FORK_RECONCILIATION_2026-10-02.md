@@ -85,6 +85,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#27](https://github.com/chrissotraidis/bluewake/pull/27) | `8233de9`, import `d176f3e` | Direct/indirect calls and certified register inlining; 30,000 active function cases, three-way headless/Aurora routes and intro frames, and 45 native Windows tests pass; optimized measurements and gameplay remain open |
 | [#28](https://github.com/chrissotraidis/bluewake/pull/28) | `ce31672`, import `60a713d` | Certified J3D module/host selection; 100,000 function cases, three-way intro/saved-game comparisons and 46 native Windows tests pass; optimized/native Windows module measurements open |
 | [#29](https://github.com/chrissotraidis/bluewake/pull/29) | `fc02056`, import `ed994c4` | Nine certified native vector functions; strict function/guard/cache checks, three-way intro/saved-game comparisons and 47 native Windows tests pass; combined optimized qualification open |
+| [#30](https://github.com/chrissotraidis/bluewake/pull/30) | `a294985`, import `a080b16` | Four certified native matrix functions, cached dispatch and optional workers; routed fixtures, four-way intro/saved-game state/image comparisons and all 48 native Windows tests pass; combined performance/gameplay open |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -109,7 +110,7 @@ source only. No source merge or test result implies release readiness.
 | Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
 | Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Imported directly with Elliott's authorship in `d176f3e`; candidate adds versioned host readiness, shared feature predicates and guarded/certified register inlining. Builder options remain independent and off by default | Integrated with bounded checks; all 823 private O0 module units link, 30,000 active function cases and three-way headless/Aurora route/checkpoint/intro-image comparisons pass. All 45 native Windows tests pass. Optimized combined modules, gameplay and matched timing remain required |
 | Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; separate default-off `--gather-pipe` prepares modules. Host direct writer/batching now has separate default-off selection; bounded Mac route/card/intro-image comparisons pass. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures and nine cache tests pass locally; 813 chunks prepare reproducibly and unprepared inputs are rejected. Arm64 O0 function/boot comparisons pass with the host writer disabled; optimized modules, sustained renderer/gameplay qualification and matched timing remain required |
-| Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | J3D rotation/translation functions integrated in #28 with certified builder preparation and versioned host opt-in; recovered-source attribution verified. Nine vector functions are selected independently in #29; other math/skin replacements remain open | Open; J3D and vector function and arm64 O0 intro/saved-game state/image comparisons pass. Remaining native imports, combined optimized/native Windows module checks and matched measurements required |
+| Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | J3D rotation/translation functions integrated in #28 with certified builder preparation and versioned host opt-in; recovered-source attribution verified. Nine vector functions are selected independently in #29; four SDK matrix functions and optional workers are integrated in #30; game-math/skin replacements remain open | Open; J3D, vector and matrix function and arm64 O0 intro/saved-game state/image comparisons pass. Remaining native imports, combined optimized/native Windows module checks and matched measurements required |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers imported and separately qualified in #23/#24 | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
@@ -318,6 +319,48 @@ a claim of identical state at every intervening instruction. The existing route 
   during the fifth run. Four completed measurements and the failed attempt
   are retained locally. They do not establish a speedup or complete the matched
   performance gate; rerun when the full measurement window can stay quiet.
+- **SDK matrix functions and workers:** #30 preserves Elliott's seven-file
+  import `a080b16`; adaptation `a294985` credits him as co-author. Independent
+  `--native-math` certifies four SDK functions and retains cached dispatcher
+  selection. Cached wrappers recheck the versioned host readiness/enable state;
+  `BLUEWAKE_NATIVE_MATH=1` is required. Certified direct calls can use the same
+  helpers. POSIX workers remain opt-in; Windows retains the donor serial path.
+  Both zero-worker and two-worker fixtures pass 12,000 matrix/vector cases,
+  360 arrays and 2,880 integer-helper cases against the private translated
+  baseline. Every CPU byte is compared, plus the 64 KiB matrix/integer or
+  256 KiB array RAM test area; constants are copied separately as read-only
+  inputs. Two workers execute 120 parallel array batches. The integer-helper
+  fixture does not select an additional GPR optimization in player modules.
+  Synthetic identity/unchanged-fallback, Release and ASan/UBSan checks pass.
+  A null-RAM read at address 0x1000 was reproduced and fixed. Fifteen builder/
+  cache tests and three certification methods pass, including native-matrix
+  direct-call removal on disable. Repeated preparation preserves identical
+  header timestamps. Matrix/vector certification survives combined fixed CPU,
+  prepared-block and direct-call rewrites; gather/global-MEM1 syntax passes.
+  Host build, repository/source archive audits and rejection of unprepared
+  modules pass. The fresh private O0 module links all 824 units. Routed serial
+  and two-worker fixtures pass all 12,360 matrix/array cases with repeated
+  cached enable/disable changes and unsupported-input fallback. Each mode
+  executes 9,421 native calls and 11,958 readiness queries; the worker module
+  executes 91 parallel batches and unloads normally. An older ordinary module
+  stays Off when the host requests native math. Native Windows at `a294985`
+  builds the app and passes all 48 tests (33.98 s;
+  [run 36995946064](https://github.com/chrissotraidis/bluewake/actions/runs/36995946064)).
+  Four-way baseline/Off/serial/two-worker runs match all six checkpoints through
+  6,000 intro retraces and all four checkpoints through 2,000 saved-game retraces.
+  Both routes match 1,050 canonical/card records with zero measured delivery or
+  route-clock drift. The saved route also matches 37 sampled player states,
+  scripted movement and both rendered images, preserving the source save.
+  Enabled intro modes execute 426,166 native calls; the saved scene executes
+  5,058,650, including 1,157 array calls. No scene array exceeds eight vectors,
+  so these scenes do not exercise parallel worker batches. The separate function
+  fixtures establish worker execution. A combined O0 candidate links all 829
+  units with all migrated native helpers, prepared blocks, fixed CPU/MEM1,
+  inline FP/GPR, direct calls and gather wrappers. Its 30,000 direct-call function
+  cases match every CPU/RAM byte, and its routed matrix fixture passes. Combined
+  scene qualification is in progress. These are private developer builds from
+  retained translation; combined optimized performance, clean final player builds
+  and final gameplay remain open.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -382,9 +425,9 @@ bugs. No issue is closed or externally commented on by this work.
    to sustained scenes and save/reload acceptance.
    The baseline full PadMint package is complete; player signing and final-source/
    device acceptance remain open.
-2. Directly import the remaining native math/skin enhancements,
+2. Directly import the remaining native game-math/skin enhancements,
    adapting BlueWake hooks and retaining contributor credit. Direct-call/register
-   and certified J3D/vector source and bounded routing checks are now integrated. Complete combined optimized and host FIFO batching
+   and certified J3D/vector/matrix source and bounded routing checks are now integrated. Complete combined optimized and host FIFO batching
    qualification, including scheduling/hooks, gameplay and matched measurements.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
