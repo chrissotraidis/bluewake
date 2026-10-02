@@ -15,6 +15,7 @@
 // aside, so the menu's clicks and keys do not move Link.
 #include "win_settings.h"
 #include "settings_state.h"
+#include "smooth_rate.h"
 #include "controller_face_swap.h"
 #include "restart_request.h"
 #include "launch_marker.h"
@@ -115,6 +116,7 @@ void load_file() {
         else if (k == "render_scale") d.render_scale = std::clamp(std::atoi(v.c_str()), 0, 4);
         else if (k == "anisotropy") d.anisotropy = std::clamp(std::atoi(v.c_str()), 1, 16);
         else if (k == "smooth_motion") d.smooth_motion = parse_bool(v);
+        else if (k == "smooth_motion_fps") d.smooth_steps = v == "display" ? -1 : std::atoi(v.c_str()) >= 120 ? 3 : 1;
         else if (k == "show_fps") d.show_fps = parse_bool(v);
         else if (k == "pause_unfocused") d.pause_unfocused = parse_bool(v);
         else if (k == "mouse_camera") d.mouse_camera = parse_bool(v);
@@ -151,6 +153,7 @@ void save_file() {
         std::fprintf(f, "window_position=%d,%d\n", d.window_x, d.window_y);
     std::fprintf(f, "render_scale=%d\nanisotropy=%d\nsmooth_motion=%d\nshow_fps=%d\npause_unfocused=%d\n",
                  d.render_scale, d.anisotropy, d.smooth_motion, d.show_fps, d.pause_unfocused);
+    std::fprintf(f, "smooth_motion_fps=%s\n", d.smooth_steps == -1 ? "display" : d.smooth_steps >= 3 ? "120" : "60");
     std::fprintf(f, "mouse_camera=%d\nmouse_sensitivity=%.2f\nmouse_invert_y=%d\n", d.mouse_camera,
                  d.mouse_sensitivity, d.mouse_invert_y);
     std::fprintf(f, "controller_swap_ab=%d\ncontroller_swap_xy=%d\n", d.controller_swap_ab, d.controller_swap_xy);
@@ -318,10 +321,22 @@ void apply_controller() {
     g_pad_applied = true;
 }
 
+// Adapted from Elliott Tate's display-rate selection; resolve the current
+// session so a command-line override never changes a saved preference.
+float display_refresh(SDL_Window* window) {
+    const SDL_DisplayMode* mode = window != nullptr ? SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window)) : nullptr;
+    return mode != nullptr ? mode->refresh_rate : 0.f;
+}
+
+void apply_smooth_rate(SDL_Window* window) {
+    aurora_set_frame_interp_steps(bw_smooth_steps(g_session.smooth_steps, display_refresh(window)));
+}
+
 void apply_live() {
     const Settings& d = g_session;
     aurora_set_frame_buffer_scale(static_cast<float>(d.render_scale));
     aurora_set_forced_anisotropy(static_cast<unsigned>(d.anisotropy));
+    apply_smooth_rate(game_window());
     aurora_set_frame_interpolation(d.smooth_motion);
     aurora_set_fps_overlay(d.show_fps);
     aurora_set_pause_on_focus_lost(d.pause_unfocused);
@@ -402,11 +417,22 @@ void tab_display(SDL_Window* w) {
     bool full = w != nullptr && is_fullscreen(w);
     if (ImGui::Checkbox("Fullscreen   (F11 or Alt+Enter)", &full))
         set_fullscreen(w, full);
-    if (ImGui::Checkbox("Smooth Motion: 60 FPS (experimental)   (F10)", &d.smooth_motion)) {
+    if (ImGui::Checkbox("Smooth Motion (experimental)   (F10)", &d.smooth_motion)) {
+        apply_smooth_rate(w);
         aurora_set_frame_interpolation(d.smooth_motion);
         changed();
     }
-    ImGui::TextDisabled("    The renderer draws a blended frame between each of the game's 30.");
+    static const char* const rates[] = {"60 FPS", "120 FPS", "Match the display (up to 240 FPS)"};
+    int rate = d.smooth_steps == -1 ? 2 : d.smooth_steps >= 3 ? 1 : 0;
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 23);
+    if (ImGui::Combo("Smooth Motion rate", &rate, rates, IM_ARRAYSIZE(rates))) {
+        d.smooth_steps = rate == 2 ? -1 : rate == 1 ? 3 : 1;
+        apply_smooth_rate(w);
+        changed();
+    }
+    const float refresh = display_refresh(w);
+    ImGui::TextDisabled("    Target: %d FPS on this %.0f Hz display; pacing may reduce it.",
+                        d.smooth_motion ? (bw_smooth_steps(d.smooth_steps, refresh) + 1) * 30 : 30, refresh);
     ImGui::TextDisabled("    The game itself still runs at 30. Experimental: off by default.");
     if (ImGui::Checkbox("Show the frame rate   (F9)", &d.show_fps)) {
         aurora_set_fps_overlay(d.show_fps);
@@ -766,6 +792,7 @@ void frame(void*) {
     static DolAuroraFrameTiming timing_before;
     const Uint64 now = SDL_GetTicks();
     if (now - fps_logged >= 1000) {
+        apply_smooth_rate(w);
         DolAuroraFrameTiming timing{};
         dol_aurora_frame_timing(&timing);
         if (fps_logged != 0)
@@ -929,6 +956,9 @@ extern "C" void bw_settings_apply_launch(void) {
         aurora_set_frame_interpolation(d.smooth_motion);
     else
         d.smooth_motion = std::getenv("DOL_AURORA_FRAME_INTERP")[0] == '1';
+    if (env_set("DOL_AURORA_FRAME_INTERP_STEPS"))
+        d.smooth_steps = bw_smooth_requested(std::getenv("DOL_AURORA_FRAME_INTERP_STEPS"));
+    apply_smooth_rate(game_window());
     if (!env_set("DOL_AURORA_SHOW_FPS"))
         aurora_set_fps_overlay(d.show_fps);
     else

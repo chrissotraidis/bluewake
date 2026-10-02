@@ -247,3 +247,22 @@ fixtures; its result is pending. Global MEM1 remains opt-in and is not enabled
 for existing modules. This checkpoint does not yet add display-rate settings,
 accept slow-game behavior under matched workloads or establish performance
 parity.
+
+## Desktop display-rate settings batch
+
+Mac and Windows now offer explicit 60/120/display-matched Smooth Motion,
+adapted from donor `f70305c` without importing its default-on or experimental
+simulation behavior. Matching the display uses whole steps of 30 up to 240;
+a slower/unknown display lowers the effective rate while retaining the
+requested preference. Fixed 120 uses 60 below 119 Hz (including 100 Hz, where
+the donor allowed 120); this intentionally avoids outrunning the display.
+Window modes are rechecked once a second. Windows uses the current session
+rather than saved settings, retaining command-line override isolation.
+`--smooth` remains explicit 60 for its session. Original 30 Hz logic and
+interpolation-off defaults remain; no simulation experiment is enabled.
+
+Mac host compilation/link and the updated settings/interpolation regressions
+pass (2/2). Tests cover 59.94/60/90/100/119.88/120/144/165/240/360 Hz, unknown,
+negative/NaN/infinite modes, saved vs session edits and preference retention
+during fallback. Native Windows compilation/execution and real UI/window
+movement/gameplay acceptance remain pending.

@@ -11,6 +11,7 @@ struct Settings {
     int render_scale = 0;  // 0: the window's own pixels; 1-4: x 480 lines
     int anisotropy = 1;    // 1: the game's own filtering; 2-16 forced
     bool smooth_motion = false;  // experimental: off unless the player turns it on
+    int smooth_steps = 1; // 60 FPS; 3: 120; -1: match the display, up to 240.
     bool show_fps = false;
     bool pause_unfocused = false;
     // Controls: apply at once.
@@ -46,6 +47,7 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.render_scale != session.render_scale) saved.render_scale = session.render_scale;
     if (before.anisotropy != session.anisotropy) saved.anisotropy = session.anisotropy;
     if (before.smooth_motion != session.smooth_motion) saved.smooth_motion = session.smooth_motion;
+    if (before.smooth_steps != session.smooth_steps) saved.smooth_steps = session.smooth_steps;
     if (before.show_fps != session.show_fps) saved.show_fps = session.show_fps;
     if (before.pause_unfocused != session.pause_unfocused) saved.pause_unfocused = session.pause_unfocused;
     if (before.mouse_camera != session.mouse_camera) saved.mouse_camera = session.mouse_camera;

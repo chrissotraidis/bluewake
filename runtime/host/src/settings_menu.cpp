@@ -1,6 +1,7 @@
 // The options menu (the Mac host): the settings the host reads from the
 // environment, in a window over the paused game, saved to a settings file.
 #include "settings_menu.h"
+#include "smooth_rate.h"
 #include "controller_face_swap.h"
 #include "atomic_file.h"
 
@@ -238,6 +239,13 @@ bool slider(const char* label, float* value, float low, float high, const char* 
     return changed;
 }
 
+void refresh_smooth_rate() {
+    SDL_Window* window = game_window();
+    const SDL_DisplayMode* mode = window != nullptr ? SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window)) : nullptr;
+    const int requested = bw_smooth_requested(env("DOL_AURORA_FRAME_INTERP_STEPS", "1").c_str());
+    aurora_set_frame_interp_steps(bw_smooth_steps(requested, mode != nullptr ? mode->refresh_rate : 0.f));
+}
+
 void display_tab() {
     static const char* const kAspects[] = {"4:3 (the game's)", "16:10", "16:9"};
     static const char* const kAspectValues[] = {"4:3", "16:10", "16:9"};
@@ -267,20 +275,18 @@ void display_tab() {
         aurora_set_frame_buffer_scale(static_cast<float>(scale));
     }
 
-    // Smooth Motion: the game's 30 frames a second, or in-between frames for
-    // 60 (one each) or 120 (three each, for a 120 Hz display such as a
-    // MacBook Pro's).
     static const char* const kSmooth[] = {"Off (30, the game's)", "60 frames a second",
-                                          "120 frames a second (120 Hz displays)"};
-    int smooth = !env_on("DOL_AURORA_FRAME_INTERP", false)                      ? 0
-                 : std::atoi(env("DOL_AURORA_FRAME_INTERP_STEPS", "1").c_str()) >= 3 ? 2
-                                                                                    : 1;
-    if (combo("Smooth Motion (experimental)", &smooth, kSmooth, 3)) {
+        "120 frames a second (120 Hz displays)", "Match the display (up to 240)"};
+    const int requested = bw_smooth_requested(env("DOL_AURORA_FRAME_INTERP_STEPS", "1").c_str());
+    int smooth = !env_on("DOL_AURORA_FRAME_INTERP", false) ? 0 : requested == -1 ? 3 : requested >= 3 ? 2 : 1;
+    if (combo("Smooth Motion (experimental)", &smooth, kSmooth, 4)) {
         set_env("DOL_AURORA_FRAME_INTERP", smooth != 0 ? "1" : "0");
-        set_env("DOL_AURORA_FRAME_INTERP_STEPS", smooth == 2 ? "3" : "1");
-        aurora_set_frame_interp_steps(smooth == 2 ? 3 : 1);
+        if (smooth != 0)
+            set_env("DOL_AURORA_FRAME_INTERP_STEPS", smooth == 3 ? "display" : smooth == 2 ? "3" : "1");
+        refresh_smooth_rate();
         aurora_set_frame_interpolation(smooth != 0);
     }
+    ImGui::TextDisabled("The game runs at 30; display changes and overloads can lower the presentation rate.");
 
     bool fps = env_on("DOL_AURORA_SHOW_FPS", false);
     if (ImGui::Checkbox("Show the frame rate", &fps)) {
@@ -568,6 +574,9 @@ void load_mac_font() {
 }
 
 void draw(void*) {
+    static Uint64 checked;
+    const Uint64 now = SDL_GetTicks();
+    if (checked == 0 || now - checked >= 1000) { refresh_smooth_rate(); checked = now; }
     apply_controller_swaps();
     if (!g_font_ready) {
         load_mac_font();

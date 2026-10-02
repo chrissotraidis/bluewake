@@ -204,3 +204,12 @@ Native source-only CI builds the launcher and a Win32 filesystem/process
 regression with synthetic importer results. Real owned-disc picking/conversion,
 Unicode paths, interruption, gameplay and physical Windows save/reload remain
 acceptance gates until recorded against this candidate.
+
+The Display tab offers 60 FPS, 120 FPS and Match the display (up to 240 FPS)
+for experimental Smooth Motion. Game logic stays at 30 Hz; Smooth Motion stays
+off until explicitly enabled. A slower or unknown display temporarily uses
+60 FPS and keeps a saved 120/display preference. Moving the window rechecks
+the display within a second. Overload pacing may reduce the displayed rate.
+`--smooth` explicitly selects 60 for that session without replacing a stored
+rate unless the player edits it. These settings are source-integrated; actual
+window movement and gameplay acceptance remain pending.

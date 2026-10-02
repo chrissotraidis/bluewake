@@ -627,6 +627,7 @@ target_include_directories(bluewake_launch_marker_test PRIVATE ${CMAKE_CURRENT_S
 add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)
 
 add_executable(bluewake_settings_state_test ../../tests/settings_state_test.cpp)
+target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
 if(UNIX)
     add_executable(bluewake_process_close_test ../../tests/process_close_test.c)

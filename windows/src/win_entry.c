@@ -499,6 +499,8 @@ int main(int argc, char** argv) {
             // Aurora reads DOL_AURORA_FRAME_INTERP and DOL_AURORA_SHOW_FPS in
             // static initializers, before main: set them through its API.
             _putenv_s("DOL_AURORA_FRAME_INTERP", "1");
+            _putenv_s("DOL_AURORA_FRAME_INTERP_STEPS", "1");
+            aurora_set_frame_interp_steps(1);
             aurora_set_frame_interpolation(true);
         } else if (strcmp(a, "--no-smooth") == 0) {
             _putenv_s("DOL_AURORA_FRAME_INTERP", "0");
