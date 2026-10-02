@@ -669,6 +669,7 @@ add_test(NAME bluewake_render_worker_identity_test COMMAND bluewake_render_worke
 set_tests_properties(bluewake_render_worker_identity_test PROPERTIES TIMEOUT 30)
 
 include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/mouse_motion_test.cmake")
 
 add_executable(bluewake_renderer_shared_flags_test ../../tests/renderer_shared_flags_test.cpp)
 target_compile_definitions(bluewake_renderer_shared_flags_test PRIVATE GXRUNTIME_HAS_AURORA_RECOMP=1)

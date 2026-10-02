@@ -43,7 +43,7 @@ translation belongs in each player's private workspace.
 | Swapchain/fullscreen and orderly restart; Windows | `db2944e`, `1ce29ac`; runtime `9618e9d` | Swapchain fix already in maintained runtime; #12 orderly quit/relaunch replaces donor process-exit approach | Integrated; actual Windows F11/Restart/settings/startup recovery open |
 | Disc picker, remembered disc, compressed import and recovery; Windows | `0b463cc`, `61e891e`, `640094e`; shared `disc_import.c`, nodtool | Missing Windows launcher flow; builder supports ISO/compressed input. Donor deletes converted images after rejection and can overwrite the prior converted disc; preserve input/recovery instead | Open; supported/rejected/missing disc, interruption/resume, Unicode paths and preserved prior files |
 | Disc picker / launcher; Apple Silicon Mac | main `561ddbf`, `7a2ac23`, `5eaa981` | Developer host route exists; donor bundled-game packaging is intentionally excluded | Open; personal clean source build and app-only launcher with player's generated module, save/reload and installation |
-| Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Initial camera integrated; latest SDL queue timing absent | Open; selective import retaining menu/input isolation, queued-event regression, real mouse/controller check |
+| Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Latest SDL queue timing integrated with window-scoped filtering; prior BlueWake camera/menu code retained | Integrated; actual SDL queue regression passes; real mouse/controller/camera timing acceptance open |
 | Jump, sprint, quick doors, transitions; Apple/Windows | main `22fa284`, `d55ce11`, `2c9f16c`, `df62ae0` | Integrated; Apple touch controls use existing editor, new options remain opt-in | Integrated; final new-module progression and controls on/off open |
 | Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Integrated; clean player-generated module, all exports/options and relevant gameplay open |
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
@@ -100,3 +100,21 @@ No external issue comments or messages were sent during this inventory.
 
 No gameplay, performance parity, complete player-build acceptance, migration
 acceptance or public release readiness is claimed by this inventory.
+
+## Desktop mouse input batch
+
+Imported `9511241868095a609202d00ccf504da3a90f6135` with Elliott Tate's
+authorship. Camera updates pump fresh pointer motion only while captured and
+unblocked. BlueWake filters only motion for the captured game window, retaining
+other-window motion and key/wheel/quit events in queue order. This avoids the
+donor's all-window drain. `BLUEWAKE_MOUSE_FRESH=0` retains the prior timing;
+test-queue/latency switches are opt-in and do not change stored preferences.
+Apple touch behavior remains guarded out.
+
+M3 Max: native Mac host and iOS app compile/link. The real SDL event-queue test
+covers 81 game-window motion events, another window's motion, key/wheel/quit
+order, no double consumption, disabled/uncaptured/blocked/zero-window states.
+The mouse-motion, virtual-controller and face-layout CTests all pass (3/3).
+Native Windows compilation/test is registered in source-only CI and pending.
+This does not establish a measured latency improvement, rendered aiming or
+physical controller/mouse acceptance.

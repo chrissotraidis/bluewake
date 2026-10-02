@@ -1,0 +1,5 @@
+add_executable(bluewake_mouse_motion_test "${BLUEWAKE_REPO_ROOT}/tests/mouse_motion_test.c")
+target_include_directories(bluewake_mouse_motion_test PRIVATE "${BLUEWAKE_REPO_ROOT}/runtime/host/src")
+target_link_libraries(bluewake_mouse_motion_test PRIVATE SDL3::SDL3)
+add_test(NAME bluewake_mouse_motion_test COMMAND bluewake_mouse_motion_test)
+set_tests_properties(bluewake_mouse_motion_test PROPERTIES TIMEOUT 15)

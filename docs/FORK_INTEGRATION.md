@@ -1,5 +1,9 @@
 # Source-fork integration
 
+The current fixed donor baseline and outstanding acceptance checks are in the
+[October 2 reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
+Earlier measurements below retain their original source/platform limits.
+
 BlueWake integrates GPL-covered source changes from
 [elliotttate/Wind-Waker-Recomp](https://github.com/elliotttate/Wind-Waker-Recomp), whose source is
 public as checked on October 1, 2026. The imported commits retain elliotttate's authorship. BlueWake's

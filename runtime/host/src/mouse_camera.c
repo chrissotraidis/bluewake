@@ -2,6 +2,7 @@
 #include "jump_button.h"
 #include "settings_menu.h"
 #include "save_state.h"
+#include "mouse_motion.h"
 
 #include "gxruntime/aurora_backend.h"
 
@@ -9,6 +10,7 @@
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
 
 #include <math.h>
@@ -130,6 +132,12 @@ static unsigned g_aim_wait;   // frames the game has been steering the aim (a lo
 static double g_aim_yaw_rest; // fraction of an angle unit not turned yet
 static bool g_trace;
 static unsigned long long g_retrace;
+// The pointer's newest motion at the camera's update (take_fresh_motion):
+// BLUEWAKE_MOUSE_FRESH=0 turns it off; BLUEWAKE_MOUSE_LATENCY=1 logs when the
+// camera takes the motion and how much came fresh.
+static bool g_fresh = true;
+static bool g_latency_log;
+static void take_fresh_motion(void);
 
 // BLUEWAKE_MOUSE_TEST=retrace:dx:dy:length[:wheel],...: pointer motion (and
 // wheel notches) per retrace, for testing without a mouse.
@@ -139,6 +147,9 @@ typedef struct {
 } TestMove;
 static TestMove g_test[16];
 static unsigned g_test_count;
+// BLUEWAKE_MOUSE_TEST_QUEUE=1: the test's motion goes through SDL's event queue
+// as a mouse's would (for take_fresh_motion), instead of straight to the sums.
+static bool g_test_queue;
 // BLUEWAKE_MOUSE_TEST_ITEM=item[@retrace] (testing only): puts that item
 // (dItemNo, e.g. 0x27 the bow) in its inventory slot and on X, with arrows,
 // at the player's first update from that retrace (default 900), so the aiming
@@ -280,6 +291,10 @@ void bluewake_mouse_camera_install(void) {
     // jump key read the same events.
     const char* on = getenv("BLUEWAKE_MOUSE_CAMERA");
     g_enabled = on == NULL || on[0] != '0';
+    const char* fresh = getenv("BLUEWAKE_MOUSE_FRESH");
+    g_fresh = fresh == NULL || fresh[0] != '0';
+    const char* latency = getenv("BLUEWAKE_MOUSE_LATENCY");
+    g_latency_log = latency != NULL && latency[0] == '1';
     dol_aurora_set_event_observer(observe, NULL);
     if (g_enabled)
         fprintf(stderr, "[mouse] click the game to turn the camera with the mouse\n");
@@ -381,6 +396,8 @@ void bluewake_mouse_camera_attach(CPUState* cpu) {
     }
     const char* trace = getenv("BLUEWAKE_MOUSE_TRACE");
     g_trace = trace != NULL && trace[0] == '1';
+    const char* test_queue = getenv("BLUEWAKE_MOUSE_TEST_QUEUE");
+    g_test_queue = test_queue != NULL && test_queue[0] == '1';
     const char* test = getenv("BLUEWAKE_MOUSE_TEST");
     for (const char* p = test; p != NULL && *p != '\0' && g_test_count < 16u;) {
         TestMove move = {0};
@@ -650,6 +667,7 @@ static void aim_frame(CPUState* cpu, u32 player) {
         g_sum_x = g_sum_y = g_wheel = 0.0;
         return;
     }
+    take_fresh_motion();
     // The fast stick camera's right stick aims as the mouse does (at its own
     // speed, a game frame's worth each update), and the D-pad zooms.
     double stick_yaw = 0.0, stick_pitch = 0.0, pad_zoom = 0.0;
@@ -810,6 +828,23 @@ static void zoom_frame(CPUState* cpu, u32 camera, bool player_camera) {
     write_f32(cpu, camera + kFollowMaxRadius, (float)(far * before_ease));
 }
 
+// The pointer's newest motion, taken when the camera uses it. Events reach
+// observe() only when the game presents a frame (Aurora pumps them there, once
+// a game frame), so a move made just after a present waited for the next one,
+// up to a game frame (33 ms), before the camera turned: much of what made the
+// mouse feel late, at 30 FPS most of all. Here the window's messages are
+// pumped and the motion SDL has queued is taken off the queue, so the same
+// deltas count, sooner, and never twice. Only while the mouse is the camera:
+// otherwise the motion is the menu's or the pointer's.
+static void take_fresh_motion(void) {
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
+    const double fresh = bluewake_take_camera_motion(g_fresh, g_captured, g_blocked,
+                                                     g_window, &g_sum_x, &g_sum_y);
+    if (g_latency_log)
+        fprintf(stderr, "[mouse-latency] camera t=%.2f fresh=%.1f\n", SDL_GetTicksNS() / 1e6, fresh);
+#endif
+}
+
 // At bumpCheck's entry, once a frame in dCamera_c::Run: the camera's routine
 // (the follow camera) has eased mViewCache, and bumpCheck is about to make the
 // frame's eye from it, pulling it in along the line from Link where that line
@@ -820,6 +855,7 @@ static void zoom_frame(CPUState* cpu, u32 camera, bool player_camera) {
 static void view_frame(CPUState* cpu, u32 camera) {
     if (aiming_view(cpu, camera) || !camera_free(cpu, camera))
         return; // camera_frame, at the draw, lets go
+    take_fresh_motion();
     double stick_yaw = 0.0, stick_pitch = 0.0;
     if (g_stick_on) {
         double x, y;
@@ -973,6 +1009,16 @@ void bluewake_mouse_camera_retrace(void) {
     ++g_retrace;
     for (unsigned i = 0; i < g_test_count; ++i) {
         if (g_retrace >= g_test[i].start && g_retrace < g_test[i].start + g_test[i].length) {
+            if (g_test_queue && g_test[i].wheel == 0.0) {
+                SDL_Event motion;
+                SDL_zero(motion);
+                motion.type = SDL_EVENT_MOUSE_MOTION;
+                motion.motion.windowID = g_window;
+                motion.motion.xrel = (float)g_test[i].dx;
+                motion.motion.yrel = (float)g_test[i].dy;
+                SDL_PushEvent(&motion);
+                continue;
+            }
             g_sum_x += g_test[i].dx;
             g_sum_y += g_test[i].dy;
             g_wheel += g_test[i].wheel;
