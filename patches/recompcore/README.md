@@ -18,8 +18,8 @@ on Windows), with the same DolRecomp. The Builder fetches it at the commit pinne
 `scripts/builder/profiles/bluewake.sh`; see docs/status/DEVICE_BUILD.md.
 
 Patches 0115-0125 add the ordered save, shutdown and audio fixes, opt-in display
-timing, and a render-worker identity fix reproduced with ThreadSanitizer. The current
-pin is `99e4748002d42c1a86fdcb33a47cd0e97292acff`. Tests and hardware limits are in
+timing, and a render-worker identity fix reproduced with ThreadSanitizer. The stability baseline
+pin was `99e4748002d42c1a86fdcb33a47cd0e97292acff`. Tests and hardware limits are in
 [the local stability ledger](../../docs/status/LOCAL_STABILITY_2026-10-01.md).
 
 Patch 0126 preserves the published in-memory card contents after a directory-sync
