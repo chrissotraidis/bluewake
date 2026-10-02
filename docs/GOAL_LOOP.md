@@ -29,7 +29,7 @@ remain accepted unless a relevant change invalidates them.
 
 | Work package | Next action and exit evidence | Availability |
 | --- | --- | --- |
-| Mac controls and options | Finish actual wheel/vertical camera and physical-controller checks; exercise required imported gameplay options on/off. The zoom diagnostic works after guaranteed guest input wakes the follow camera; do not remove its readiness guard. | Local controls can proceed; physical controller coordination pending |
+| Mac controls and options | Finish vertical camera/collision and physical-controller checks; exercise remaining imported gameplay options on/off. Real wheel zoom now passes; bounded jump/sprint on/off checks pass. The zoom diagnostic works after guaranteed guest input wakes the follow camera; do not remove its readiness guard. | Local controls can proceed; physical controller coordination pending |
 | Mac audio and sustained gameplay | Establish audible narrated intro/scripted music, then a representative 30-minute play session and matched frame times on an idle host. Guest PCM, screenshots and the historical bounded 22.8% Outset gain do not close these gates. | Audio listening and an uncontended measurement window required |
 | Final iOS / PadMint | Resume the existing exact-revision build, inspect module/assembly/provenance, then coordinated signing, device gameplay/save/reload and in-place upgrade with data readback. | Build stopped twice below 5 GiB free; 593 objects and verified profiles retained. Await stable storage headroom; maintainer asked for 30 GiB or external storage. Device availability pending |
 | Windows player acceptance and reports | Complete the clean owned-disc O2 build, native Direct3D gameplay, UI/recovery/save/upgrade, controls, audible music and matched performance. Reproduce Pictobox/startup/music leads on an identified build before claiming fixes. | Windows x64 machine/controller coordination pending; do not substitute host CI or restart Parallels |
@@ -50,8 +50,9 @@ limits and next action; checkpoint validated source-only progress in PR #37.
 After three materially identical failures, change the experiment. Keep automated
 input failures separate from game failures. Current zoom evidence shows effective
 scales of 0.64 and 1.57 after the follow camera activates; the farther screenshot
-is obstructed by a nearby post, so camera collision and complete real-input
-behavior remain unaccepted. No source fix was required for this diagnosis.
+is obstructed by a nearby post, so camera collision remains unaccepted. A subsequent real-input run visibly
+zooms to effective scales 0.50 and 2.00 and releases to the settings menu;
+vertical drag remains unverified. No source fix was required for this diagnosis.
 
 Report closed gates and remaining dependencies. Elapsed time, PR counts and
 compile-task counts are not migration percentages. Do not rebuild for docs,

@@ -195,9 +195,9 @@ in save states. All are drafts; all public checkpoints are source only. No sourc
 | Swapchain/fullscreen and orderly restart; Windows | `db2944e`, `1ce29ac`; runtime `9618e9d` | Swapchain fix already in maintained runtime; #12 orderly quit/relaunch replaces donor process-exit approach | Integrated; actual Windows F11/Restart/settings/startup recovery open |
 | Disc picker, remembered disc, compressed import and recovery; Windows | `0b463cc`, `61e891e`, `640094e`; shared `disc_import.c`, nodtool | Launcher source integrated in #15; unique import folders retain original/converted/previous files; candidate native 29/29 regressions pass | Integrated; real supported/rejected/missing disc and UI/Unicode interruption/recovery checks open |
 | Disc picker / launcher; Apple Silicon Mac | main `561ddbf`, `7a2ac23`, `5eaa981` | Developer host route exists; donor bundled-game packaging is intentionally excluded | Open; personal clean source build and app-only launcher with player's generated module, save/reload and installation |
-| Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Latest SDL queue timing integrated with window-scoped filtering; prior BlueWake camera/menu code retained | Integrated; actual SDL queue regression passes; real mouse/controller/camera timing acceptance open |
-| Jump, sprint, quick doors, transitions; Apple/Windows | main `22fa284`, `d55ce11`, `2c9f16c`, `df62ae0` | Integrated; Apple touch controls use existing editor, new options remain opt-in | Integrated; final new-module progression and controls on/off open |
-| Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Integrated; clean player-generated module, all exports/options and relevant gameplay open |
+| Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Latest SDL queue timing integrated with window-scoped filtering; prior BlueWake camera/menu code retained | Integrated; SDL queue regression and bounded real Mac capture/orbit/wheel/release pass; vertical/collision, physical controller and other-platform acceptance open |
+| Jump, sprint, quick doors, transitions; Apple/Windows | main `22fa284`, `d55ce11`, `2c9f16c`, `df62ae0` | Integrated; Apple touch controls use existing editor, new options remain opt-in | Fresh Mac bounded progression and scheduled-input jump/sprint on/off pass; full options, real controls and other platforms remain open |
+| Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Fresh Mac player module exports all 15 option metadata entries matching the manifest; relevant option gameplay and other platforms remain open |
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Current Mac module F5/F9 and game save/reload pass across processes; climbing and other claimed platforms remain open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches are now imported separately | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
@@ -767,6 +767,37 @@ camera reliably. The evidence resolves the suspected stuck-zoom diagnosis as a
 dormant-camera test precondition; no guard removal or source fix is justified.
 Complete real wheel/vertical input, camera collision and physical-controller
 acceptance remain open. This diagnostic is not a performance result.
+
+
+### Subsequent real wheel and movement-option acceptance
+
+With the same fresh app and copied save, guaranteed guest movement/A first
+activates the follow camera, followed by real SDL mouse input without scripted
+mouse events. Wheel input visibly produces closer and farther Outset views;
+the trace reaches effective/requested zoom 0.50/0.50 and 2.00/2.00. Escape
+releases capture and F1 opens the paused settings menu. Normal quit returns 0;
+copied and original cards are unchanged. Two vertical-drag automation attempts
+produce no further pitch change, without independently established relative
+motion delivery. Vertical input remains unverified; no source defect is inferred.
+
+Two further runs use the fresh app and identical copied saves with jump/sprint
+explicitly off and on. Scheduled jump at 1500 is ignored when off. When on,
+the guest enters auto-jump at 1501, rises airborne, lands and returns to grounded
+idle by 1534. Scheduled sprint changes the top-speed/animation parameters from
+17/2.3 to 25.5/3.45, then restores top speed 17 on release at 1880; the disabled
+run retains 17/2.3. Six rendered frames were inspected. Both runs exit normally
+and preserve their copied cards/settings. The enabled run reaches the ordinary
+ladder before the later targeting check, so its rejected jump establishes no
+isolated targeting result. The different positions after jumping also prevent
+using these runs as a matched sprint-distance or performance comparison.
+Physical controls, UI toggles and optional plain-wall climbing remain open.
+
+A read-only metadata check loads the final packaged personal module, verifies
+its recorded hash and calls its option accessors: all 15 names, indices, defaults
+and titles match the tracked manifest, and the flags/native-hook/write exports
+are present. This closes export/metadata availability for that module, not the
+15 options' gameplay behavior. No translated code or private test artifacts
+are included in this source-only record.
 
 ## Report reconciliation
 
