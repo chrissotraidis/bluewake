@@ -296,6 +296,10 @@ static int choose(const char* why, char* out, size_t size) {
         snprintf(out, size, "%s", testing);
         return testing[0] != '\0';
     }
+    // Windows removes an environment variable when _putenv_s sets it empty.
+    // A no-dialog launch with no scripted choice means cancel, never a modal.
+    if (getenv("BLUEWAKE_NO_DIALOG") != NULL)
+        return 0;
     char folder[MAX_PATH * 4];
     snprintf(folder, sizeof folder, "%s", g_data);
     const size_t length = strlen(folder);

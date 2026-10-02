@@ -142,3 +142,10 @@ retry, incomplete REL cache, and a real child converter whose rejected synthetic
 output cannot replace/delete the previous converted disc or original input.
 The source audit and whitespace checks pass; native compilation/execution is
 pending CI. This does not accept the real importer/UI/gameplay or Unicode paths.
+
+The first native Windows run compiled/linked the complete app but the disc
+fixture timed out at cancellation (28 other regressions passed). Windows
+`_putenv_s(name, "")` removes the variable, so an empty picker override reached
+a modal despite the no-dialog flag. The picker now treats no-dialog/no-choice
+as cancellation. The same regression remains enabled with its 30-second limit;
+the timeout was not extended. Follow-up native execution is pending.
