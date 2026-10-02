@@ -58,6 +58,10 @@ this later-change list before recommending cutover; donor commit descriptions
 are not BlueWake validation. Do not silently repin the active qualification
 builds or treat the fixed baseline as the donor's current head.
 
+Preflight against maintained runtime `c2905b7a` confirms the donor's later
+dual-texture patch applies cleanly (`git apply --check` only). It has not been
+applied, built or gameplay-qualified in BlueWake.
+
 ## Source checkpoints and integration order
 
 All listed BlueWake PRs remain drafts. Source checkpoints are evidence identities;
@@ -358,7 +362,13 @@ a claim of identical state at every intervening instruction. The existing route 
   units with all migrated native helpers, prepared blocks, fixed CPU/MEM1,
   inline FP/GPR, direct calls and gather wrappers. Its 30,000 direct-call function
   cases match every CPU/RAM byte, and its routed matrix fixture passes. Combined
-  scene qualification is in progress. These are private developer builds from
+  baseline/Off/On intro runs match all six checkpoints and 1,050 canonical/card
+  records with zero measured timing drift. Enabled native helpers and direct
+  calls are confirmed active. The initial test-driver assertion incorrectly
+  expected renderer batching in headless mode; the correct direct-writer mode
+  was verified against the complete retained runs. The Aurora saved-game
+  comparison, which requires actual batch selection, is still running.
+  These are private developer builds from
   retained translation; combined optimized performance, clean final player builds
   and final gameplay remain open.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
@@ -429,6 +439,11 @@ bugs. No issue is closed or externally commented on by this work.
    adapting BlueWake hooks and retaining contributor credit. Direct-call/register
    and certified J3D/vector/matrix source and bounded routing checks are now integrated. Complete combined optimized and host FIFO batching
    qualification, including scheduling/hooks, gameplay and matched measurements.
+   Skin preflight reproduces a null-RAM sanitizer failure in the unmodified
+   donor helper; a minimal null-CPU/RAM guard passes the private probe but is
+   not yet integrated. Its donor body certificate also does not match our
+   current preparation order; establish the independent differential evidence
+   before adapting certification, rather than bypassing it.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
    fullscreen/restart, real controllers, save/reload, upgrades and sustained play.
