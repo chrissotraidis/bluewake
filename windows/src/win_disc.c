@@ -75,6 +75,10 @@ static int read_line(const char* path, char* out, size_t size) {
 static int write_line(const char* path, const char* line) {
     char* pending = bw_atomic_path(path);
     FILE* f = pending != NULL ? fopen(pending, "wb") : NULL;
+    if (f == NULL) {
+        free(pending);
+        return 0;
+    }
     const int written = f != NULL && fprintf(f, "%s\n", line) > 0;
     const int ok = pending != NULL && bw_atomic_finish(f, pending, path, written);
     free(pending);

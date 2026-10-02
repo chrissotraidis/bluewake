@@ -150,6 +150,14 @@ a modal despite the no-dialog flag. The picker now treats no-dialog/no-choice
 as cancellation. The same regression remains enabled with its 30-second limit;
 the timeout was not extended. Follow-up native execution is pending.
 
+The second run reached cached reuse and exposed a fixture configuration gap:
+the app's POSIX compatibility shim provides replace-existing atomic rename,
+but the new fixture had linked the raw Windows CRT. The fixture now uses the
+same forced header/library as production. The record writer also handles a
+failed temporary-file open before calling the shared atomic finisher. No
+existing record is removed to make a write succeed. Native execution remains
+pending.
+
 ## Fresh player-source and app-only checks
 
 On the M3 Max, the direct builder generated source from a supported personal
