@@ -200,6 +200,11 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     add_test(NAME bluewake_render_worker_identity_test COMMAND bluewake_render_worker_identity_test)
     set_tests_properties(bluewake_render_worker_identity_test PROPERTIES TIMEOUT 30)
 
+    add_executable(bluewake_gxcore_test ${GXRUNTIME_DIR}/graphics/gxcore/tests/gxcore_wgsl_test.cpp)
+    target_link_libraries(bluewake_gxcore_test PRIVATE GXRuntime::gxcore)
+    add_test(NAME bluewake_gxcore_test COMMAND bluewake_gxcore_test)
+    set_tests_properties(bluewake_gxcore_test PROPERTIES TIMEOUT 30)
+
     include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
 
     add_executable(bluewake_renderer_shared_flags_test ${BLUEWAKE_REPO_ROOT}/tests/renderer_shared_flags_test.cpp)

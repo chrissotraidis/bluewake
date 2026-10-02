@@ -221,6 +221,96 @@ bridge view is not the required busy-area or sustained-session gate. A repeat
 console launch lost its session environment, so it is rejected and a no-console
 launch with prefixed environment variables is the next changed experiment.
 
+## Matched physical Outset comparison after renderer fixes
+
+The no-console, prefixed-environment launch succeeded. Both baseline (six fixes,
+runtime `34dee049`) and candidate (eight fixes, source `ad7f551`, runtime
+`4a4f2907445f88e2dd6f2b470b6d900dc7aed32d`) used the same M2 iPad, private module
+`55e9b802…`, restored state/card, HLE/1x/mods off/HD off/Smooth Motion off,
+warm caches and no active QuickTime capture. Both thermal logs stayed nominal.
+The candidate signed executable hash is
+`29b0bb574bfa79ae9eb8c37b9218e1da6261f5df9f03a800b25027f0f7dcdb2b`.
+Both stop normally at 4600 after **2,733,971 guest blocks at PC 0x80307ef4**.
+
+| Stream / window | Baseline p50/p95/p99 ms | Candidate p50/p95/p99 ms | Rate | Stalls >50/>100 ms |
+| --- | --- | --- | --- | --- |
+| VI, retraces 1300–4500 | 16.74 / 19.51 / 19.95 | 16.73 / 19.57 / 19.91 | Both 59.94/s | Both 0 / 0 |
+| Display, presents 150–1750 | 33.37 / 34.56 / 35.01 | 33.36 / 34.50 / 35.14 | Both 29.94/s | Both 0 / 0 |
+
+Both report 239,896 audio pushes and zero dropped samples. Starvation/stretch
+counts are 107/2828 and 172/3258, respectively, so absence of drops does not prove
+clean audible output. The sampled distributions show no material frame-time
+regression or FPS gain from the correctness changes. Player preferences and the
+canonical migrated card still match their pre-test backups byte-for-byte. This
+is a stationary Outset view for about a minute, not a busy-area or sustained gate.
+
+The iPad was released at 01:29 JST. SpaghettiPad reserved both physical devices
+through 02:00. A subsequent inventory found PID 6761, distinct from candidate
+run PID 6758, without a new session log. Prewarming is a hypothesis for the
+lost launch overrides; it is not yet established. No process was terminated
+after release. Future tests must verify the actual launch PID/environment and
+account for existing/prewarmed instances instead of interpreting a console
+connection failure as app termination.
+
+## Truncated renderer payload overread
+
+A new synthetic fixture reproduced an AddressSanitizer heap-buffer-overflow in
+`GxCoreState::build_draw_plan_into` / `decode_component` at runtime `4a4f2907`.
+A one-byte payload declares a 12-byte direct f32 vertex: the old entry-start
+check admits a multi-byte read beyond its allocation. The fix checks the whole
+`vertex_count * stride` span with 64-bit arithmetic before decoding or allocating
+vertices. It uses the existing overrun/skip counters and leaves valid draws,
+including extra captured bytes, accepted.
+
+The existing runtime conformance test now covers every nonempty truncated span
+for one and two direct-float or u16-indexed vertices (38 cases), requires no
+unresolved-array access or decoded-vertex allocation, and retains its previous
+shader/geometry tests. The full instrumented conformance binary passes ASan/UBSan
+on the M3 Max. Both Mac and iOS hosts compile/link; the Mac conformance CTest
+passes. The complete Mac suite passes **243/243** after rebuilding all 58 binary test
+targets. Runtime `99e4748002d42c1a86fdcb33a47cd0e97292acff` is pushed to the maintainer
+branch and exported as patch 0130 with all pins updated. The Windows source-only
+suite now includes this actual runtime test.
+This proves malformed-input rejection, not that it caused a reported game crash
+or frame drop. Physical candidate acceptance and native Windows results at the
+new pin remain pending.
+
+## Current native validation
+
+At source `ad7f551` / runtime `4a4f2907`, the native Windows source-only build
+and **26/26** registered tests pass in
+[run 36890989308](https://github.com/chrissotraidis/bluewake/actions/runs/36890989308).
+This supersedes the earlier pending Windows notes. It includes both new FIFO
+trace-start and renderer shared-field regressions. The latter also passes TSAN
+on the Mac; Windows tests alone do not prove freedom from renderer races.
+The complete Mac suite is **243/243**, all targets built. Both public repository
+audits at this source pass. These checks contain no disc or personal module and
+cannot accept Windows gameplay, controllers or output-device recovery.
+
+## Build measurement in progress
+
+At 01:22 the new iOS option-module build had completed 209 compile/link entries,
+with 6,177 summed worker seconds and 13.96-second median completed source time.
+A still-running translated movie unit had already spent 13 minutes at one CPU
+core and about 3.2 GB RSS. A three-second stack sample is dominated by LLVM
+RegPressureTracker::bumpDownwardPressure. A separate, private single-unit
+experiment disables the register-pressure scheduling heuristic while keeping
+O2 and the other flags. No player build policy or optimization level has changed;
+compile speed alone cannot establish game speed or semantic acceptance.
+The default unit completed in 945.21 seconds; the separate experiment took
+895.63 seconds (885.71 user seconds, about 4.26 GB maximum RSS). Its text grew
+from 1,030,724 to 1,032,196 bytes. These single, overlapping compilations differ
+in system load and do not establish a repeatable build gain. The experimental
+object is not linked into a player module; the flag is deferred without matched
+repeat/build and runtime/pixel acceptance.
+
+A bounded M3 Max sample of the actual restored-Outset game puts `getenv` in
+`ppc_take_exception` at 17 of 7,884 main-thread samples (about 0.22%). Shader draw
+planning and guest dispatch dominate this sample. It used the same private old
+Mac module and current eight-fix host, HLE/1x/Smooth off; compilation continued
+in the background. This does not establish a major frame-time benefit from a
+broad environment cache, so no cache policy is changed on that evidence.
+
 ## Remaining work
 
 - Matched scene/device frame-time and audio-drop measurements, then supported fixes.

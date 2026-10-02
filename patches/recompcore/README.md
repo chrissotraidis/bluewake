@@ -19,7 +19,7 @@ on Windows), with the same DolRecomp. The Builder fetches it at the commit pinne
 
 Patches 0115-0125 add the ordered save, shutdown and audio fixes, opt-in display
 timing, and a render-worker identity fix reproduced with ThreadSanitizer. The current
-pin is `4a4f2907445f88e2dd6f2b470b6d900dc7aed32d`. Tests and hardware limits are in
+pin is `99e4748002d42c1a86fdcb33a47cd0e97292acff`. Tests and hardware limits are in
 [the local stability ledger](../../docs/status/LOCAL_STABILITY_2026-10-01.md).
 
 Patch 0126 preserves the published in-memory card contents after a directory-sync
@@ -36,3 +36,8 @@ production start decision and preserves normal repeated worker starts/joins.
 Patch 0129 makes the cross-thread frontend failure flag and submitted/rejected
 draw counters relaxed atomics. ThreadSanitizer reproduces all three original
 races with the actual linked globals; the same bounded probe passes afterward.
+
+Patch 0130 rejects truncated declared vertex spans before attribute reads or
+decoded-vertex allocation. ASan reproduces the original direct-float overread;
+38 direct/u16-indexed one/two-vertex truncations and valid trailing bytes pass
+in the existing runtime conformance test after the fix.

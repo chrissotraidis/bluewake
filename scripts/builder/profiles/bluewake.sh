@@ -34,10 +34,10 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 
 # RecompCore: chrissotraidis/RecompCore branch bluewake-next, which is
 # elliotttate/RecompCore's windows-release 9618e9d (chrissotraidis 2d60636 plus
-# patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0127. DolRecomp: elliotttate's copy of
+# patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0130. DolRecomp: elliotttate's copy of
 # chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=4a4f2907445f88e2dd6f2b470b6d900dc7aed32d
+RECOMPCORE_SHA=99e4748002d42c1a86fdcb33a47cd0e97292acff
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
