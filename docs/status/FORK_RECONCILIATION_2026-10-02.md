@@ -1,15 +1,20 @@
 # Fork reconciliation ledger, October 2, 2026
 
-Engineering reconciliation is **in progress**. This ledger owns the remaining
-parity/build/gameplay work; older ledgers retain their exact historical evidence.
-Source integration and synthetic checks are not gameplay acceptance. Releases
-remain paused; personal game code, builds, inputs and captures remain local.
-Do not publish a fork redirect or close the donor while this work is incomplete.
+**In progress.** Source integration is reviewable in stacked draft PRs; required
+performance, player-build and gameplay acceptance remains open. No release,
+fork redirect, issue closure or migration acceptance is authorized. Personal
+modules, generated source, discs, profiles, builds, saves and captures stay local.
+Public app-only candidates still require a Clear private audit and the content gate.
 
-## Fixed baseline
+This is the authoritative current ledger. The
+[evidence appendix](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md) preserves the earlier
+experiments, failed approaches and exact historical checkpoints. “Integrated”
+below means source is present with bounded evidence, not that parity is accepted.
 
-Live refs were checked on October 2 JST with `git ls-remote` and GitHub PR/issue
-reads. Reconcile these snapshots; record later donor updates separately.
+## Fixed baseline and selected dependencies
+
+Reconcile the fixed donor main **and** windows-release snapshots below. Track
+later donor changes separately. Baseline refs were verified October 2 JST.
 
 | Repository / ref | Exact commit / disposition |
 | --- | --- |
@@ -20,24 +25,46 @@ reads. Reconcile these snapshots; record later donor updates separately.
 | Donor `windows-release` | `f960ca344814fa10cb9ad692402822851b3ffeaa` |
 | Donor RecompCore `windows-release` | `634895470af6e61e601f06a351f3a72888215159` |
 | Donor DolRecomp `bluewake` | `b8b534591cba8ca7cd43943a655ee6e2591cf5de` |
-| Maintained RecompCore `bluewake-next` / build-selected pin | `99e4748002d42c1a86fdcb33a47cd0e97292acff`; retains BlueWake safety fixes through patch 0130 |
+| Baseline maintained RecompCore (PR #12) | `99e4748002d42c1a86fdcb33a47cd0e97292acff`; retains BlueWake safety fixes through patch 0130 |
 | Build-selected DolRecomp submodule / profile / lock | `b8b534591cba8ca7cd43943a655ee6e2591cf5de`, matching the donor |
 
-PR #11's two SDK-preflight commits require reconciliation against #12's existing
-preflight behavior; do not duplicate them by assuming they are absent. PRs #3/#5/
-#6/#8 already have integrated source/credit in #10; leave the originals open.
-The existing checkout was used. Its eight unfinished source changes were backed
-up locally, reviewed, checked and checkpointed in #12 without dropping them.
-No additional clone/worktree was created during that initial checkpoint; later
-isolation for the running private build is recorded below. No existing worktree
-was removed.
+
+The current candidate's lock and builder profile both select maintained runtime
+`c2905b7a6b2752611a4e1ccb2ac9e3cda1857462` (runtime PR #2, based on #1 / `70bc9957`).
+Patches through 0135 preserve BlueWake's safety changes. The translator remains
+`b8b534591cba8ca7cd43943a655ee6e2591cf5de`. Ordinary modules use ABI 3;
+fixed-CPU modules declare ABI 4; fixed-CPU plus module-owned RAM declares ABI 5.
+Old hosts reject unsupported ABIs before player storage. Apple shell support for
+the new storage ABIs is not claimed.
+
+## Source checkpoints and integration order
+
+All listed BlueWake PRs remain drafts. Source checkpoints are evidence identities;
+a later documentation-only commit may change the PR head. Preserve the original
+contributor authorship, eight pre-existing edits checkpointed in #12, and other PRs.
+PR #11's SDK preflight is reconciled by #14; do not import it again.
+
+| PR | Source checkpoint | Scope / next gate |
+| --- | --- | --- |
+| [#10](https://github.com/chrissotraidis/bluewake/pull/10) | `22dca5d` | Earlier fork integration; base for #12 |
+| [#12](https://github.com/chrissotraidis/bluewake/pull/12) | `736f178` | Preserved stability work and runtime safety pin |
+| [#14](https://github.com/chrissotraidis/bluewake/pull/14) | `95adeed` | Fresh mouse queue, SDK preflight and source-only PadMint repair; primary player-build baseline |
+| [#15](https://github.com/chrissotraidis/bluewake/pull/15) | `54bbb26` | Windows disc import/recovery foundation; real UI/disc acceptance open |
+| [#16](https://github.com/chrissotraidis/bluewake/pull/16) | `5c8d348` | Maintained runtime/display-rate policy; physical pacing/play open |
+| [#17](https://github.com/chrissotraidis/bluewake/pull/17) | `5208567` (docs `05df605`) | Conservative prepared blocks; O2 pair compiling, measurements open |
+| [#18](https://github.com/chrissotraidis/bluewake/pull/18) | `6532973` (docs `f1c1c7a`) | Fixed CPU / ABI 4; bounded arm64 O0 checks pass |
+| [#19](https://github.com/chrissotraidis/bluewake/pull/19) | `3222b91`, fixture `0e78428` | Module RAM / ABI 5 and extended-alias fix; bounded arm64 O0 checks pass |
+| [#20](https://github.com/chrissotraidis/bluewake/pull/20) | `9d3729a` | Corrected inline FP; native instruction tests and arm64 O0 module/boot pass |
+| [#21](https://github.com/chrissotraidis/bluewake/pull/21) | `7b7e530`, Windows includes `9303569` | Active Release assertions and restored GroundCross observation; bounded host check and native Windows pass |
+| [#22](https://github.com/chrissotraidis/bluewake/pull/22) | `69426b2` | Per-turn consecutive dispatch counter; unit/sanitizer, strict module boot and native Windows checks pass |
+
+Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
+rebases donor global MEM1/display overload work with bounds checks. Runtime
+[PR #2](https://github.com/chrissotraidis/RecompCore/pull/2) at `c2905b7a` fixes
+alias tracking above retail 24 MiB. Both are drafts; all public checkpoints are
+source only. No source merge or test result implies release readiness.
 
 ## Required parity inventory
-
-**Integrated** means code is present with bounded evidence, not fully accepted.
-**Open** means missing implementation or required validation. Native/translated
-optimizations must be audited for source provenance before copying them; game
-translation belongs in each player's private workspace.
 
 | Feature / platform | Donor source / dependency | BlueWake state / difference | Required acceptance / status |
 | --- | --- | --- | --- |
@@ -51,27 +78,102 @@ translation belongs in each player's private workspace.
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches remain open | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
-| Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Mac differential instruction checks pass, full-module/Windows/performance qualification pending |
+| Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
 | Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Absent; needs BlueWake host-hook watch list and edge-service contract review | Open; preserve scheduling, exceptions, hooks and mod dispatch; strict module comparisons and matched timing |
 | Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Absent; separate from adopted MEM1 storage | Open; retain MMIO/alias/reservation/journal semantics and flush at every observable boundary; renderer/state comparisons and timing |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
-| Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
+| Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
-| Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | iOS local training defaults; Windows training/optimization path incomplete; developer artifacts are not clean-build evidence | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
-| PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; full clean PadMint iOS build, selected source/pins/provenance, audit, in-place device save/reload and matched trained performance |
+| Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | Clean owned-disc iOS build/package and bounded resume pass at `95adeed`; final integrated-source build and actual run/save/upgrade still required. Windows training/build path incomplete | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
+| PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; Fresh PadMint iOS translation/training pass, module compilation running; packaging, final-source selection, in-place device save/reload and matched performance open |
 | Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Baseline and candidate runtime app-only audits pass. Compatible old-module update vs rebuild and physical acceptance open; no publication |
+| Consecutive non-advancing dispatch bound; desktop modules | Existing BlueWake loop, found during #21 assertion audit | #22 makes the counter per-call and resets after progress; stuck guest still yields on ninth non-advancing successor | Open; Release and ASan/UBSan regression, strict module boot and all 38 native Windows checks pass; optimized/performance/gameplay acceptance open |
 
-Experimental 60 Hz simulation (`8435ec7`, `4b6b268`) is optional work. If imported,
-it must default off, require explicit selection and reject incompatible modules.
-Linux, broader disc support and broader decompilation are follow-up scope.
-Never infer simulation speed from displayed/interpolated FPS.
+Original 30 Hz game logic, Smooth Motion Off and experimental 60 Hz simulation
+Off remain defaults. Explicit preferences are preserved. New module transforms
+remain independent opt-ins. Displayed FPS is not simulation speed. Experimental
+60 Hz simulation, Linux, broader discs and wider decompilation are separate
+scope unless required by the agreed current parity target.
 
-## Current report reconciliation
+## Current acceptance evidence and limits
 
-Read issue bodies/comments on October 2; these are leads, not diagnoses/fixes.
-No external issue comments or messages were sent during this inventory.
+- **Host/runtime regressions:** all 248 Mac tests pass at `7b7e530` (67.65 s).
+  Eight older assertion-based fixtures were previously disabled by Release's
+  `NDEBUG`; earlier 247-test counts include those ineffective passes. The repaired
+  fixtures are active, and five portable ones now run on Windows. At `9303569`,
+  Windows builds the app and passes all 38 tests (35.49 s;
+  [run 36970389671](https://github.com/chrissotraidis/bluewake/actions/runs/36970389671)).
+- **Prepared blocks:** the donor-style broad transform fails the controlled
+  route despite passing the function fixture; retaining PC stores alone also
+  fails (22/600 guest-state samples differ). The conservative successor preserves
+  PC/suffix observations and leaves refund/unknown prepaid-state blocks alone.
+  It passes 30,000 function cases and 6,000 retraces: 1,050 canonical/card records,
+  600 exact guest states and delivery/clock timing match. This is bounded O0
+  correctness, not full donor optimization/performance parity. Matched O2 builds
+  remain running; preserve the failed candidates and unchanged comparator.
+- **Fixed CPU and module RAM:** each independent O0 candidate passes the same
+  30,000 function cases and strict 6,000-retrace pair. The RAM fixture also checks
+  assigned pointer identity; plain/global alias, reservation, journal, MMIO,
+  endian and bounds checks pass sanitizers. Full storage ABI adoption/cleanup and
+  actual old-host rejection pass. Whole-module optimized x86 and gameplay remain open.
+- **Inline FP:** the strengthened fixture exposed 9,526 native Windows division
+  differences. A zero/subnormal divisor guard fixes the host-DAZ case; deterministic
+  tests fail before and pass after. The corrected helper passes 38 million operation
+  comparisons on arm64, x86-64/Rosetta and native Windows. Corrected arm64 module
+  `9d3729a` passes 30,000 function cases and the strict 6,000-retrace pair with
+  1,050 matching records/cards, 600 exact guest states and zero schedule drift.
+  The host is `3222b915`, both modules use runtime `c2905b7a`. Optimized/performance
+  and gameplay acceptance remains open.
+- **Restored observation:** #21's old/new-host pair uses the same ordinary module.
+  Exactly one canonical record changes: GroundCross visits rise from 0 to 1,974,
+  with valid and sentinel values observed. The strict comparator correctly rejects
+  equality; preserve that result. All other 1,049 records, cards, 600 guest states,
+  1,024 delivery cycles and route clock match. The explicit intended diagnostic
+  difference is recorded without weakening the comparator. This is bounded
+  headless evidence, not gameplay acceptance.
+- **Counter repair:** #22's new test fails on the old loop and passes through both
+  entry points after the repair. It checks alternating progress, interrupted runs,
+  independent turns/CPUs and bounded stuck execution. The candidate module links;
+  all 819 other object hashes match the baseline, with only module-export/dispatch
+  objects changed. The strict 6,000-retrace pair passes with 1,050 matching
+  records/cards, 600 exact guest states and zero scheduling drift. Native Windows
+  passes all 38 tests (31.87 s;
+  [run 36970729454](https://github.com/chrissotraidis/bluewake/actions/runs/36970729454)).
+  The incremental build is not clean player-build evidence.
+- **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
+  fresh Off, select 120, disable while retaining three steps, close/relaunch and
+  visibly remain Off with byte-identical settings. Keyboard selection passes;
+  automated pointer selection was unreliable. Pacing, display hot-plug, controller
+  navigation, sustained play and audible output remain open.
+
+A separate donor gather-wrapper probe overreads an undersized RAM buffer under
+ASan; the maintained ordinary memory path does not. Do not import that unchecked
+range subtraction. The wrappers/direct-call/native batches remain open work.
+All measured wall times under concurrent compilation are excluded from performance
+acceptance. No donor benchmark is transferred.
+
+## Player build and platform gates
+
+| Route / platform | Current evidence | Still required |
+| --- | --- | --- |
+| Owned-disc source / iOS | Fresh `95adeed` / runtime `99e47480`: disc validation, translation, mods, locally generated PGO, full module/app link, personal packaging and signature/provenance checks pass. Controlled interruption/resume preserves prior objects/profile hashes | Repeat final integrated-source selection where changed; physical launch, fresh/existing save/reload and in-place upgrade preserving data |
+| PadMint / iOS | Adapter `018a9f0` (CLI 0.2.8), new workspace, exact `95adeed`, matching audited app-only input: translation/mods and new 23,000-retrace local training pass; iOS module compilation is running | Full assembly/provenance validation, final integrated-source acceptance, device run/save/reload/upgrade and trained performance |
+| App-only / iOS | Fresh matching candidate excludes translated code; PadMint audit and public-assets gate pass locally | Final-source compatible old-module update and device acceptance; no upload/publication |
+| Owned-disc / Mac | Bundled development host, private module correctness and isolated menu checks pass | Complete documented fresh player route, installation/launcher, actual game/save/reload/upgrade and sustained performance |
+| Owned-disc / Windows | Native app/source fixtures pass; disc/recovery and preparation scripts integrated | Full clean module build/training, real disc/Unicode/UI/recovery, Direct3D/fullscreen/restart, controllers/audio/gameplay and save-preserving upgrade |
+| PadMint / Mac, Windows, tvOS | No complete adapter path accepted; Mac remains planned | Do not claim support; implement/test before widening the matrix |
+| Apple TV | Existing preview source and contributor work preserved | Physical hardware/storage acceptance for any claimed feature; no new acceptance inferred |
+
+The baseline personal iOS build cannot establish acceptance for every later
+integrated change. Existing artifacts and private profiles are not prerequisites
+for the clean player route. Exact hashes and private evidence stay local.
+
+## Report reconciliation
+
+Reports from both repositories are investigation leads, not diagnosed or resolved
+bugs. No issue is closed or externally commented on by this work.
 
 | Report | Evidence / disposition | Next discriminating check |
 | --- | --- | --- |
@@ -83,698 +185,28 @@ No external issue comments or messages were sent during this inventory.
 | [Donor #2](https://github.com/elliotttate/Wind-Waker-Recomp/issues/2), [#8](https://github.com/elliotttate/Wind-Waker-Recomp/issues/8), [#14](https://github.com/elliotttate/Wind-Waker-Recomp/issues/14): controllers | Layout swaps cover part of request; unsupported 8BitDo mapping and arbitrary remap are not accepted | Real controllers, per-device layout/hot-plug/navigation/save preference checks |
 | Donor #3/#18 Linux, #7 PAL, #4 HD HUD, #9 Switch, #10/#11 portable | Follow-up platform/UI requests; explicit data-directory override exists in Windows source | Record supported matrix; preserve unsupported-disc rejection, do not broaden claims |
 
-## Evidence and next iteration
 
-- Checkpoint `736f178` selects runtime `99e47480` consistently in profile/lock/
-  device docs; exported patch 0130 is byte-identical to the runtime commit.
-  Actual runtime test includes the 38 truncated-vertex cases. On this M3 Max,
-  all **243/243 Mac CTests passed** (2.78 seconds) and the repository audit passed.
-  This reused built test binaries; the prior overnight ledger records their
-  builds. Native Windows at this checkpoint passed 27/27 (run 36944660446);
-  later checkpoints and their added regressions are recorded below.
-- Earlier physical iPad bridge/bird checks and Mac intro/skip checks are precisely
-  scoped in [overnight](OVERNIGHT_2026-10-02.md) and
-  [local stability](LOCAL_STABILITY_2026-10-01.md). They are not acceptance of
-  the whole current source or the donor Windows optimizations.
-- Next: import the missing desktop input/disc foundation in focused batches,
-  then reconcile the two newer runtime commits with BlueWake safety fixes.
-  Qualify generic module transforms separately from native math and 60 Hz work.
-  Use clean player build directories rather than old developer module caches.
-- Migration preparation stays a proposal: credited unified docs and issue map,
-  then a proposed notice only after every required row has acceptance evidence.
-
-No gameplay, performance parity, complete player-build acceptance, migration
-acceptance or public release readiness is claimed by this inventory.
-
-## Desktop mouse input batch
-
-Imported `9511241868095a609202d00ccf504da3a90f6135` with Elliott Tate's
-authorship. Camera updates pump fresh pointer motion only while captured and
-unblocked. BlueWake filters only motion for the captured game window, retaining
-other-window motion and key/wheel/quit events in queue order. This avoids the
-donor's all-window drain. `BLUEWAKE_MOUSE_FRESH=0` retains the prior timing;
-test-queue/latency switches are opt-in and do not change stored preferences.
-Apple touch behavior remains guarded out.
-
-M3 Max: native Mac host and iOS app compile/link. The real SDL event-queue test
-covers 81 game-window motion events, another window's motion, key/wheel/quit
-order, no double consumption, disabled/uncaptured/blocked/zero-window states.
-The mouse-motion, virtual-controller and face-layout CTests all pass (3/3).
-Native Windows compilation/link and 28/28 tests passed at `491b375`
-(run 36945248680), including the real SDL queue fixture.
-This does not establish a measured latency improvement, rendered aiming or
-physical controller/mouse acceptance.
-
-## Windows disc foundation batch (isolated while the player build runs)
-
-Branch `codex/windows-disc-parity` continues the reconciliation branch in a
-managed `.codex/worktrees/bluewake-disc-parity/bluewake` checkout. It imports
-Elliott Tate's Windows disc UI from donor `0b463cc`/`61e891e`/`640094e`, retaining
-his authorship. The current shared importer and BlueWake startup/crash/safe-mode,
-settings, saves and defaults are retained. No personal or donor binary is copied.
-
-BlueWake adaptations: each conversion/preparation gets a new directory; failed
-converted inputs are retained; previous prepared files survive a failed attempt;
-atomic text records select only a completed preparation. A missing REL retries
-preparation, and explicit compressed disc input reaches the converter. A missing
-player-generated module gets an actionable source-build message before any import.
-The builder includes its existing nodtool only if available. No default experiment
-is enabled.
-
-The native Windows fixture compiles the actual launcher with synthetic importer
-results and uses actual Win32 file/process APIs. It covers cancel/missing/rejected
-input, cached reuse, failed preparation preserving the old selection and files,
-retry, incomplete REL cache, and a real child converter whose rejected synthetic
-output cannot replace/delete the previous converted disc or original input.
-The source audit and whitespace checks pass; native compilation/execution is
-pending CI. This does not accept the real importer/UI/gameplay or Unicode paths.
-
-The first native Windows run compiled/linked the complete app but the disc
-fixture timed out at cancellation (28 other regressions passed). Windows
-`_putenv_s(name, "")` removes the variable, so an empty picker override reached
-a modal despite the no-dialog flag. The picker now treats no-dialog/no-choice
-as cancellation. The same regression remains enabled with its 30-second limit;
-the timeout was not extended. Follow-up native execution is pending.
-
-The second run reached cached reuse and exposed a fixture configuration gap:
-the app's POSIX compatibility shim provides replace-existing atomic rename,
-but the new fixture had linked the raw Windows CRT. The fixture now uses the
-same forced header/library as production. The record writer also handles a
-failed temporary-file open before calling the shared atomic finisher. No
-existing record is removed to make a write succeed. Native execution remains
-pending.
-
-## Fresh player-source and app-only checks
-
-On the M3 Max, the direct builder generated source from a supported personal
-USA rev-0 disc in a new `build/reconciliation/player-source` directory. It
-recompiled the translator/tool outputs, translated 206 DOL chunks and 415 RELs,
-and generated 748 chunks / 417 ranges with the expected `54f54434…770a` digest.
-The canonical old developer disc path was absent; the preserved personal disc
-backup was used read-only. No player save or unpublished profile was an input.
-
-PadMint source `018a9f0fdd2030d2fa9f328617d6541fd83c9af1` (0.2.8) reproduced a
-manifest bug at BlueWake `491b375`: source-only passed an empty `--app` and
-failed before dependencies. Moving `--app` to the full mode fixes it. A new
-PadMint workspace completed source generation at BlueWake
-`95adeed0f32a39739341dd9381c50756c5247bf4` in 16.6 seconds; the local record
-says completed/source-only and the expected digest matches. PR #11's SDK
-manifest prerequisites and disk guidance were cherry-picked with authorship;
-no duplicate source preflight implementation was invented.
-
-A new local app-only iOS build at `491b375` / runtime `99e47480` compiled and
-packaged with no game module. Executable SHA-256:
-`b32ed8688cb10232b591c770cf1ce05f3e442e71d985b0b9a2ccd6e605bc7b48`.
-Both `scripts/release/check_public_assets.sh` and PadMint's audit passed.
-The app-only candidate remains local; this is not publication authorization or
-physical gameplay acceptance.
-
-Native Windows source-only app linking and **28/28** regressions pass at
-`95adeed` in [run 36946613444](https://github.com/chrissotraidis/bluewake/actions/runs/36946613444).
-This includes the camera queue regression and runtime patch 0130; it does not
-cover the later disc batch or prove Windows gameplay.
-
-The direct default-training full builder is running separately against fixed
-BlueWake `95adeed` / runtime `99e47480`, with fresh generated mods/training
-module and an isolated new card. No old generated game module or developer game
-profile is reused. Record terminal training/compilation/package outcomes before
-counting the full build, then run PadMint's complete path serially. Partial
-training, an app-only IPA and source generation are not full acceptance.
-
-## Newer runtime foundation in isolation
-
-[RecompCore draft PR #1](https://github.com/chrissotraidis/RecompCore/pull/1)
-rebases donor `460b5b84` (optional global MEM1) and `63489547` (display-rate /
-slow-game interpolation handling) onto maintained `99e47480`, preserving the
-existing safety fixes and Elliott's authorship. Its branch is
-`codex/bluewake-runtime-parity`, current `45364adf`; the primary build/pin is
-unchanged pending validation. The nested runtime worktree is inside the managed
-disc worktree; retain both until their source/evidence is reconciled.
-
-A new actual-header probe reproduced acceptance of an oversized guest memory
-span because unsigned capacity-minus-size underflowed. The fix checks size
-before subtraction in plain/global MEM1 and MEM2. Both plain/global variants
-pass ASan/UBSan and 2/2 CTests against a fresh core build, covering bounds,
-mirrors, aliases and empty banks. This is not a diagnosis of Pictobox/startup
-reports. Full renderer/host compilation and interpolation checks are running
-in the isolated tree; the expanded display behavior and performance still need
-matched gameplay evidence. Existing modules and experiments-off defaults remain.
-
-## Accepted Windows source regression checkpoint
-
-Disc batch `5d769d2a7cc30691e4692984a2445464ada85942` compiled/linked the
-full native Windows app and passed **29/29** regressions in
-[run 36947951742](https://github.com/chrissotraidis/bluewake/actions/runs/36947951742).
-The repository audits also pass. This supersedes the two fixture failures above;
-the real importer, Unicode path handling, picker interaction and Windows
-gameplay remain open. The default full player builder finished its isolated
-local training at fixed `95adeed` / runtime `99e47480`, merged the newly trained
-profile and started optimized iOS module compilation. Packaging/run acceptance
-still requires terminal results.
-
-## Runtime candidate checkpoint
-
-Runtime `70bc9957b89a145a5b457d1a9e5cd482f34e7e61` compiled the complete
-Mac host/renderer and passed **246/246** CTests from the fresh isolated build
-(5.07 seconds). The existing draw/particle/camera regression now exercises
-both three and seven steps, checking every intermediate position and
-consecutive camera transform. The first broad test invocation encountered
-four unbuilt Aurora test targets because that dependency is excluded from
-the default build; explicitly building those targets resolved the test setup.
-No regression was disabled.
-
-Candidate branch `codex/runtime-display-parity` selects this exact public
-runtime in the profile/lock/device documentation and exports byte-identical
-patches 0131-0134. The primary private build remains fixed at `95adeed` /
-`99e47480`. Windows CI now also compiles/runs plain/global memory bounds
-fixtures; its result is pending. Global MEM1 remains opt-in and is not enabled
-for existing modules. This checkpoint does not yet add display-rate settings,
-accept slow-game behavior under matched workloads or establish performance
-parity.
-
-## Desktop display-rate settings batch
-
-Mac and Windows now offer explicit 60/120/display-matched Smooth Motion,
-adapted from donor `f70305c` without importing its default-on or experimental
-simulation behavior. Matching the display uses whole steps of 30 up to 240;
-a slower/unknown display lowers the effective rate while retaining the
-requested preference. Fixed 120 uses 60 below 119 Hz (including 100 Hz, where
-the donor allowed 120); this intentionally avoids outrunning the display.
-Window modes are rechecked once a second. Windows uses the current session
-rather than saved settings, retaining command-line override isolation.
-`--smooth` remains explicit 60 for its session. Original 30 Hz logic and
-interpolation-off defaults remain; no simulation experiment is enabled.
-
-Mac host compilation/link and the updated settings/interpolation regressions
-pass (2/2). Tests cover 59.94/60/90/100/119.88/120/144/165/240/360 Hz, unknown,
-negative/NaN/infinite modes, saved vs session edits and preference retention
-during fallback. Native Windows compilation/execution and real UI/window
-movement/gameplay acceptance remain pending.
-
-The runtime-pin Windows checkpoint `84b7e95` passed **31/31** native
-regressions and app linking (run 36948477930). The display settings follow-up
-compiled the app but its settings fixture had not declared C++17, so
-`std::clamp` failed there. Both Mac and Windows fixture targets now declare
-the standard used by their production headers; the test remains enabled.
-
-For the fixed direct player build, a controlled Ninja interruption stopped
-module compilation at **183/822** with no remaining compiler workers. The
-original stage log is preserved locally. Repeating the documented builder
-command with eight jobs revalidated the disc/source digest and reused
-exactly the same training receipt/profile hashes. Ninja starts the remaining
-**639** build steps; all 183 completed objects were retained. This accepts
-resume at the module-compilation stage only; packaging/install and PadMint
-cancellation still require their separate checks.
-
-## Migration proposal (not published to the donor)
-
-Keep both repositories and existing issue history intact. Direct donor users to BlueWake for future development and support only after
-the required parity, clean builder and gameplay gates above are accepted. Retain Elliott Tate's rendering,
-desktop and gameplay credit and Ian MacFarlane's Apple TV credit alongside the
-existing upstream/runtime, mod and texture-pack authors. Preserve contribution
-commit authors; do not squash away their attribution without carrying it forward.
-
-Proposed donor notice, for maintainer review only after acceptance:
-
-> Future development and support for this project will continue in BlueWake,
-> maintained by Chris Sotraidis, with Elliott Tate's rendering, desktop and
-> gameplay contributions integrated and credited. Build from your own supported
-> disc using BlueWake's tested player instructions. Existing issues and commit
-> history remain here for reference; please check the reconciled issue map
-> before opening a duplicate report.
-
-This text is a proposal, not an instruction to post or redirect. No notice,
-issue closure or access change has been made. At acceptance, reconcile reports
-by exact reproduced app/module identities and link their evidence; do not mark
-startup, scripted music or Pictobox reports fixed solely because source changes
-or CI checks passed. Release/download links remain excluded while the private
-release audit is not Clear.
-
-## Continuation checkpoint
-
-Primary checkout: `codex/fork-reconciliation` at `95adeed`, runtime `99e47480`;
-the resumed private full builder uses `build/reconciliation/player-source`
-and eight jobs. Its terminal outcome must be recorded before full acceptance.
-Keep its source/runtime fixed and run PadMint's full path serially afterward.
-Managed worktree: `.codex/worktrees/bluewake-disc-parity/bluewake`, now
-`codex/runtime-display-parity`; it also contains the nested pushed runtime
-branch `codex/bluewake-runtime-parity`. Retain both while source/build evidence
-is needed; the nested Git worktree prevents safe managed archival until it is
-reconciled and its needed local artifacts preserved.
-
-Next engineering blocker: generic generated-code preparation. The donor's
-prepaid-block transformer imports certified SDK leaf metadata from its native
-math preparer, absent in the maintained tree; its equivalence harness loads
-personal Windows modules and compares deadline/refund states. Integrate generic
-transforms in a separate batch after reproducing those checks locally. Keep
-recovered/native bodies, global registers, inline FP/memory, 60 Hz simulation
-and their certification dependencies separately reviewable. Do not enable the
-whole donor optimization stack solely on its benchmark claims.
-
-## Candidate iOS app-only result
-
-A new app-only build at BlueWake `9ec4ab5f8f341d3db13d712de2b27ed3895f02d3`
-selected runtime `70bc9957` and translator `b8b5345`, fetched the pinned public
-Dawn iOS package and compiled/linked all 736 app build steps. The resulting
-local app-only package passes both `check_public_assets.sh` (including its
-source archive) and PadMint audit, with zero address-named functions.
-Executable SHA-256:
-`76d50773f5a6ee6f7b2ce7029da7a995190a5f46f3c200fa8186e2416035eec7`.
-No output was published or linked. This does not establish physical Apple
-or game-module compatibility/performance acceptance.
-
-A bounded Mac startup probe with the fresh instrumented training module and
-an isolated new card exited normally at the configured retrace budget. The
-native UI tool could not bind that unbundled binary, and no rendered-menu
-observation was obtained; menu interaction/display movement stay unaccepted.
-The probe does not substitute for narrated intro, saves or sustained play.
-
-The display follow-up at `8583be50fdd531adfb42c9fc13b41ed796b289cc` passed
-full native Windows app compile/link and **31/31** regressions in
-[run 36949734759](https://github.com/chrissotraidis/bluewake/actions/runs/36949734759)
-(9.34 seconds of tests). This includes the rate/preference fixture and both
-memory variants, and supersedes the fixture-standard failure above. Real
-window movement, refresh changes, overload/performance and gameplay remain
-open. Later commits only update documentation/evidence until the next batch.
-
-## Generic prepaid-block qualification
-
-Imported donor `f319afa71db14b60b525b7ba95c20134f61d66ce` with Elliott Tate's
-original authorship (`743fe4f`). The transform accepts ordinary pointer-state
-chunks independently of fixed-register/global-memory/native replacements.
-The four SDK leaves reserved by the donor's native-math certification remain
-unchanged. Player build defaults and simulation/interpolation defaults are
-unchanged; this batch first supplies manual qualification tools.
-
-The private-module fixture now loads modules on Mac or Windows, checks module
-and CPU ABI/version/size and game identity, rejects unexpected dispatch misses,
-and compares every byte of CPU state and RAM. It retains deadline observation
-suffix checks. CI builds this manual fixture without any game module; no CTest
-requires game data. Local strict C11 compilation with `-Wall -Wextra -Werror`
-passes, as does the repository audit. A baseline-against-itself smoke exercises
-all 14 entries, establishing harness operation only.
-
-The initial donor-style isolated owned-disc source contains 443,166 prepared
-blocks in 813 chunks. The conservative successor below prepares fewer blocks.
-Both full O0 comparison modules compiled and linked all 822 units, using
-source `95adeed`, runtime `99e47480`, Apple Clang 21 and identical optimization /
-floating-point flags, without profiling instrumentation. **30,000 cases pass**
-with every CPU/RAM byte identical: 264 stop before returning and 12,539 start
-with a nearby deadline. All 14 entries have 2,142 or 2,143 cases. An initial
-comparison against the earlier instrumented baseline also passes. Deliberate
-cycle-suffix and RAM-byte mutations each fail on case 0; invalid inputs,
-incompatible ABI and advertised global-MEM1 modules are rejected. Exact tree /
-module hashes, compiler/build receipts and all generated game code remain local.
-This accepts bounded function equivalence only. Matched timing, optimized x86
-qualification, renderer/scheduling/image checks and actual gameplay remain open.
-
-Windows source builds now accept explicit `--prepared-blocks`; it remains off by
-default. Selection and script contents participate in the source fingerprint;
-preparation runs after mod variants and writes an atomic final-digest/receipt.
-Three synthetic regressions pass (1.44 seconds): enable/reuse/disable retains
-unchanged source timestamps, interrupted preparation is regenerated, and a
-transform revision invalidates the prepared cache. These use invented source
-and the actual Windows builder methods/transformer, not a disc or compiler;
-full Windows owned-disc build and interrupted compile acceptance remain open.
-
-The latest #16 native Windows app build and 31/31 regressions also pass at
-`5c8d348` ([run 36950369976](https://github.com/chrissotraidis/bluewake/actions/runs/36950369976)).
-The direct personal iOS build remains live on the untouched primary checkout;
-PadMint's complete path is next after it terminates, run serially.
-
-Native replacements remain a separate batch. Donor `native_j3d.c` identifies
-recovered J3D formulas from zeldaret/tww revision
-`09de0609ecdb6d30dd012e2258f755afdac1cb56`; that public revision contains a
-[CC0 license](https://github.com/zeldaret/tww/blob/09de0609ecdb6d30dd012e2258f755afdac1cb56/LICENSE)
-and the referenced
-[J3DTransform source](https://github.com/zeldaret/tww/blob/09de0609ecdb6d30dd012e2258f755afdac1cb56/src/JSystem/J3DGraphBase/J3DTransform.cpp).
-Other donor native helpers describe guest-register/stack/cycle behavior derived
-from the translation. None of these replacement bodies were imported in the
-generic batch; provenance, fallback and function-level correctness still need
-separate qualification. This source inventory does not clear the release audit.
-
-### Broader boot-route experiment, still open
-
-At `e2789b7`, native Windows app/manual-fixture linking and 31/31 regressions
-pass ([run 36953040570](https://github.com/chrissotraidis/bluewake/actions/runs/36953040570)).
-The cache regressions pass in repository CI; a fresh tracked-source ZIP also
-passes `check_public_assets.sh`, with zero address-named functions. The ZIP
-stays local and no release is authorized.
-
-The initial two 6,000-retrace headless routes each exit normally. Their 1,050
-canonical route records match, but the card-inclusive digests differ: the
-independently created cards have 14 different header bytes. That experiment did
-not control initial card identity and cannot accept the card comparison.
-The 600 guest-state samples also differ at 217 positions (PC and some cycle /
-interrupt observations), so these results do not establish complete state
-identity. Keep this evidence; do not relax the comparator to claim a pass.
-
-Subsequent experiments use byte-identical seed cards and SRAM in separate
-folders, with the same host/modules/settings and 6,000-retrace ceiling. The
-original O0 baseline and all candidate modules/receipts are retained privately.
-Compilation load excludes wall-clock performance acceptance. These are headless
-boot checks, not rendered or audible gameplay, save/reload or current
-affected-device acceptance.
-
-The controlled-input repeat finishes normally, with byte-identical result
-cards and 1,049 identical canonical summary/delivery records. It still fails
-the existing route comparator: the final-PC record differs (`80324DC0` versus
-`80324D68`), and 22/600 exact guest-state samples differ. The comparator and
-its scheduling bounds are unchanged. This is a failed broader qualification
-of the donor-style transform despite the passing 14-function fixture. Retaining
-every PC store alone subsequently fails with the same final-PC values and
-22/600 differing samples, so PC removal alone does not explain the mismatch.
-The unchanged comparator correctly keeps both candidates unaccepted.
-
-The conservative successor retains all PC stores and leaves any block with
-deadline refunds or unsupported prepaid-state expressions entirely unchanged.
-It prepares **197,459 blocks in 812 chunks**. Both full 822-unit O0 modules link,
-and the successor passes the same 30,000 CPU/RAM comparisons. Its controlled
-6,000-retrace boot route passes the existing comparator: all 1,050 canonical
-records match, output cards are byte-identical, scheduling/clock drift is zero,
-and all 600 exact guest-state samples match. Both hosts exit normally.
-The current transformer reproduces every tested chunk byte-for-byte; exact
-source/module/script identities and inputs remain in private receipts.
-
-Five synthetic regressions pass: the three cache checks plus retention of
-PC/suffix observations and exclusion of refund/unknown prepaid-state forms.
-This accepts bounded Mac O0 function/boot correctness only. Optimized x86
-qualification, matched timing and actual Windows/Apple gameplay remain open.
-Keep the builder option off by default and the PR in draft; no performance
-parity or public-release acceptance is claimed.
-
-
-### Current conservative checkpoint and player-build progress
-
-At `520856766e8bf2f4627a365dd871e8310617a338`, repository CI and native
-Windows app/manual-fixture compilation pass. All **31/31 Windows regressions**
-pass (18.44 seconds; [run 36957741929](https://github.com/chrissotraidis/bluewake/actions/runs/36957741929)).
-Fresh, matched Mac O2 baseline/candidate modules are compiling in separate new
-output directories with identical compiler/runtime/floating-point settings;
-optimization-level correctness and timing are not yet accepted.
-
-The untouched primary source `95adeed0f32a39739341dd9381c50756c5247bf4`, runtime
-`99e47480` direct owned-disc iOS build now completes with exit 0. After the
-controlled interruption it reuses the prior objects and identical training /
-profile hashes, completes the module build, links all 736 app steps, verifies
-ad-hoc signatures and packages the unsigned personal IPA. PadMint 0.2.8's package
-validator passes source/disc provenance, module identity and IPA structure;
-private-input/save/profile/signing-file exclusions also pass. Its linked iOS
-slice has minimum OS 17, SDK 27 and the scene-configuration callback. Runtime
-launch is untested. This is clean build/package and bounded resume evidence,
-not physical-device play, save/reload or in-place upgrade acceptance. All
-personal output and exact private receipts remain local.
-
-A fresh app-only build at the same clean source/pins completes separately,
-without a translated module. PadMint audit and `check_public_assets.sh` both
-pass; no candidate is uploaded or published. Full PadMint iOS acceptance is
-now running serially after the direct build, in a new workspace using the
-owned disc and that matching audited app-only input. It has regenerated source
-and mod variants and reached local training. No private game profile or old
-module cache is supplied. Complete packaging and device acceptance remain open.
-
-The bundled Mac host (`d9a25d0`, runtime `70bc9957`, pointer-state module from
-`95adeed` / runtime `99e47480`) now binds to the native UI tool. With isolated
-settings/card/SRAM/state paths, the menu visibly starts with Smooth Motion off,
-shows all four choices and accepts “Match the display”; closing with Esc saves
-`DOL_AURORA_FRAME_INTERP=1` and `DOL_AURORA_FRAME_INTERP_STEPS=display`. The timed
-menu hook reopens during its interval, so immediate closure snapshots in that
-interval cannot prove persistent closure. Later automated pointer retries do
-not reliably select Off; actual UI off/rate persistence remains unaccepted,
-although its synthetic policy tests pass. The app exits normally on window
-close. This is bounded menu/preference evidence; measured display pacing,
-real display changes, gameplay and speaker/audio acceptance remain open.
-
-
-### Fixed-CPU compatibility candidate
-
-The next isolated source batch imports only `global_guest_cpu.py` and
-`guest_cpu.c` from donor `4b6b2688a21051678f100b83cae57192fbe4a446`, retaining
-Elliott's original authorship in `e1ef8f6`. It does not import native game
-replacements, global MEM1 or default-on optimization settings. The Windows
-builder exposes separate `--fixed-cpu` and `--prepared-blocks` opt-ins and
-records both selections and transformer hashes in its cache/provenance.
-
-Fixed-CPU modules keep the existing descriptor layout but declare BlueWake
-ABI 4 and require their CPU getter; ordinary modules remain ABI 3. The shared
-desktop loader validates ABI, CPU layout, exact game identity and getter before
-initializing graphics or player storage. It rejects undeclared legacy fixed-CPU
-modules, missing/null/misaligned getters and global-MEM1 modules whose storage
-ownership is not yet supported. The selected state is borrowed; the existing
-CPU initializer/free path still owns its allocated RAM. An upstream ABI change
-requires explicit review of this extension. Apple shell support is not claimed.
-
-The contract passes ASan/UBSan and the bundled host's native contract CTest.
-All six source-cache/transform regressions pass, including independent and
-combined opt-ins, unchanged reuse, script changes and disabling either option.
-CMake rejects an unprepared ordinary tree with fixed CPU enabled. An actual
-older `95adeed` host rejects a synthetic ABI-4 module with exit 1 and
-`module ABI mismatch: module=4 host=3`, before creating its isolated card.
-The repository source audit passes.
-
-The fresh bundled Mac host links with the maintained runtime `70bc9957`.
-Use `scripts/builder/training` for this build: its wrapper supplies the direct
-DSP sources and `BLUEWAKE_HAS_DSP_ADAPTER` even though the external-adapter
-cache option is off. An initial standalone `runtime/host` configuration lacked
-that setup and failed to compile; it is retained as diagnostic evidence. This
-is not an audio acceptance result. The separate 823-unit fixed-CPU O0 module
-links against runtime `99e47480`, matching the prior private ordinary baseline.
-The fixed-only module passes all 30,000 CPU/RAM comparisons across the same
-14 SDK/J3D entries (264 partial stops and 12,539 near-deadline cases). This is
-bounded Mac O0 function correctness. Broader boot comparison, optimized x86
-correctness, matched measurements and actual gameplay still require acceptance.
-
-A second managed worktree under `$CODEX_HOME/worktrees` keeps these changes
-separate from the ongoing full PadMint build on primary `95adeed` and the
-matched O2 prepared-block build on `05df605`. Both managed checkouts retain
-unique private qualification artifacts and remain in use; preserve them until
-source integration and artifact retention are reconciled. No release or fork
-redirect is authorized.
-
-
-At `65329732a2536b0a4fa4319220a803e1eaddb6bd`, draft
-[PR #18](https://github.com/chrissotraidis/bluewake/pull/18) stacks on #17.
-Native Windows app/manual-fixture compilation and all **32/32 regressions**
-pass (9.83 seconds; [run 36962008520](https://github.com/chrissotraidis/bluewake/actions/runs/36962008520)).
-All **247 Mac host/runtime regressions** pass after explicitly building the
-four runtime test targets excluded from the default build. The initial suite
-run passed its 58 built tests but could not run those four missing targets;
-the completed suite resolves that coverage gap. A fresh source-only ZIP passes
-`check_public_assets.sh`, with zero address-named functions. Repository CI
-audit jobs subsequently pass on the documentation checkpoint `f1c1c7a`, as
-does native Windows [run 36962696208](https://github.com/chrissotraidis/bluewake/actions/runs/36962696208);
-the local repository audit also passes.
-
-The tested fixed-CPU transformer reproduces all 813 generated chunks exactly,
-leaving the other private composite files unchanged. The controlled 6,000-retrace boot pair now passes with the same new host for
-both modules and byte-identical card/SRAM seeds: all 1,050 canonical records
-and resulting cards match, delivery/clock drift is zero, and all 600 exact
-guest-state samples match. Both hosts exit normally. The recorded host hash
-matches the tested `6532973` binary, runtime `70bc9957`; both modules use the
-same `99e47480` runtime. This establishes bounded Mac O0 correctness only.
-
-Full PadMint's fresh local training completes normally at 23,000 retraces,
-executing 262 translated functions and merging its own new profile. Its
-headless route admits player control; this is not physical gameplay acceptance.
-The 822-unit iOS module build is now running. Full packaging and the matched
-O2 prepared-block comparison remain in progress on their fixed inputs.
-
-
-### Module-owned RAM and extended-alias candidate
-
-The next source batch, based on #18, imports only donor `f70305c`'s MEM1 storage
-helper, retaining Elliott's authorship in `8defb9f`. Windows exposes explicit
-`--fixed-mem1` together with `--fixed-cpu`; both remain off by default. ABI 5
-declares both required getters, preventing a missing memory export from
-silently selecting a different RAM buffer. The host validates an aligned
-32 MiB buffer separate from CPU storage before graphics/player initialization,
-initializes and adopts it, and detaches it before the ordinary CPU cleanup.
-Ordinary ABI 3 and fixed-CPU ABI 4 remain supported. Missing-CPU and unsupported
-runtime configurations are rejected before compilation. Storage selection and
-cleanup pass ASan/UBSan; all seven preparation/cache regressions pass.
-
-A synthetic 32 MiB probe found an existing runtime bug in both RAM modes:
-an alias at `0x81F00000` returns ordinary RAM (`00000000`) instead of registered
-storage (`ABCDEF12`). The alias shortcut tracked only retail 24 MiB, although
-the host expands memory for linked REL data. Maintained runtime
-`c2905b7a6b2752611a4e1ccb2ac9e3cda1857462` conservatively tracks the cached
-MEM1 address region during insertion and registry rebuild after removal. It
-does not change allocation sizes or CPU layout. The fix is separately reviewable
-in [runtime PR #2](https://github.com/chrissotraidis/RecompCore/pull/2), stacked
-on runtime #1, and retained as patch 0135. Lock, public branch and builder pin
-select that same revision.
-
-Both expanded memory fixtures pass ASan/UBSan, covering upper aliases and
-removal, dispatch-poll stability, cached/uncached reads, endian loads/stores,
-reservation invalidation, write journals, MEM2, MMIO and oversized accesses.
-The rebuilt bundled host and all 247 Mac host/runtime regressions pass.
-Actual ABI-3 and ABI-4 hosts reject synthetic ABI-5 modules before creating
-player storage; the new host also rejects a missing MEM1 getter at that point.
-Native Windows compilation and all **32/32 regressions** pass at `3222b915`
-(19.28 seconds; [run 36965014411](https://github.com/chrissotraidis/bluewake/actions/runs/36965014411)); both repository audit jobs pass. The fresh matched ordinary/global
-modules both link and use `c2905b7a` to avoid conflating the optimization with
-a runtime change. Inline-memory preparation, optimized
-x86 measurements, actual gameplay and player-build acceptance remain open.
-No donor performance number or public-release acceptance is transferred.
-
-
-### Module-owned RAM qualification and menu persistence
-
-At `3222b915c21ae65115d355558415a28075bf2d8c`, both full Mac arm64 O0
-modules pass all 30,000 strict CPU/32-MiB-RAM comparisons across 14 entries,
-including 264 partial stops and 12,539 near-deadline cases. The fixture now
-also rejects a dispatch that replaces its assigned RAM pointer before comparing
-CPU state; the strengthened comparison passes the same 30,000 cases.
-
-The controlled 6,000-retrace pair passes with the same host/runtime and
-byte-identical card/SRAM seeds. All 1,050 canonical records and resulting cards
-match, delivery/clock drift is zero, and all 600 exact guest-state samples
-match. Both hosts exit normally. Host and module hashes, the exact compiler
-settings, seeds and receipts remain private. This accepts bounded Mac O0
-function/boot correctness only. Concurrent compilation excludes use of these
-wall times as performance evidence; optimized and actual gameplay checks remain
-open.
-
-With the same `3222b915` / `c2905b7a` bundled Mac host and the ordinary baseline
-module, an isolated native-menu session verifies fresh Smooth Motion Off,
-selection of 120 Hz, then Off while retaining three interpolation steps in
-settings. Closing and relaunching the app shows Off and leaves the settings
-file byte-identical. Both launches exit normally. Keyboard selection is
-verified; automated pointer selection was unreliable and is not accepted.
-This supersedes the earlier unresolved off/rate persistence check, but does
-not establish display pacing, controller navigation, sustained play or audio.
-
-
-### Independent inline floating-point candidate
-
-The next focused batch extracts the generic floating-point header, differential
-fixture and header-placement script from donor `4b6b268`, retaining Elliott's
-authorship in `52eec88`. BlueWake separates floating-point preparation from
-memory wrappers/gather batching and exposes `--inline-fp` off by default.
-CMake rejects unprepared/native-object chunks when explicitly enabled. The
-builder fingerprints the selection, preparation script and helper header,
-records their hashes, and regenerates ordinary calls when disabled. This
-changes neither the module ABI nor game-logic/display defaults.
-
-On Mac arm64, the original donor fixture passes two million iterations of
-19 operations against maintained runtime `c2905b7a`. A strengthened repeat
-also passes all 38 million operation comparisons after applying every sampled
-guest rounding/flush mode to the host and comparing the complete CPU state.
-The maintained fixture retains those stronger checks. Eight synthetic cache /
-preparation regressions pass, including independent/combined selection,
-unchanged reuse, helper edits and disabling. The maintained CMake fixture also
-passes (36.84 seconds); all 813 private chunks prepare, a second preparation
-is byte-identical, and unprepared CMake input is rejected. Native Windows, whole-module
-correctness and matched performance remain pending. No native game bodies,
-private profiles or donor benchmark claims are imported.
-
-
-Before importing the remaining gather/memory helpers, a synthetic boundary
-probe reproduces a donor-wrapper bug: with one byte of ordinary RAM, an
-eight-byte load passes `BW_RAM_FAST` because subtracting the access width
-underflows. ASan reports a stack-buffer-overflow in `bw_mem_read64`. The same
-probe using the maintained runtime's ordinary `mem_read64` exits normally.
-These donor wrappers remain absent from BlueWake. Any later import must retain
-explicit size/buffer validity guards along with the already corrected extended
-alias behavior; test both pointer and fixed-MEM1 forms before module use.
-Private source/hash/compiler receipts are retained. This establishes a synthetic
-boundary failure, not a cause for any reported gameplay crash.
-
-
-### Inline-FP cross-architecture correction
-
-The original candidate `9a831836` links and passes the 30,000-case arm64 module
-comparison and controlled 6,000-retrace route: all 1,050 canonical/card records
-and 600 guest-state samples match, with zero scheduling drift. Both hosts exit
-normally. This remains evidence for that exact pre-correction arm64 module.
-
-Native Windows run 36968127476 reveals 9,526 `fdivs` differences in the
-strengthened two-million-iteration test. Local x86-64/Rosetta reproduces the
-same first mismatches (232 in 50,000 iterations). A deterministic case narrows
-it to `0 / smallest-subnormal` with NI enabled: host DAZ treats the divisor as
-zero, while the optimized fast-path zero comparison does not reliably do so.
-The header now classifies zero/subnormal divisors by their exponent bits and
-uses the interpreter's existing exception/NaN path for those cases. Finite
-normal divisors keep the inline path.
-
-The new explicit regression covers all four rounding modes, NI on/off, and
-divide/invalid exception enables. It fails on the original header and passes
-after correction. Full 38-million-operation comparisons pass on both arm64
-(the maintained CMake fixture, 39.51 seconds) and local x86-64/Rosetta. This is
-not native Windows or whole-module acceptance of the corrected header; those
-checks must be repeated. All earlier private modules/receipts are preserved.
-
-
-### Release-mode assertion audit
-
-The earlier 247-test Mac totals are process outcomes, with an identified
-coverage limitation: eight older C fixtures included `assert.h` without
-undefining Release's `NDEBUG`. Their assertion expressions were omitted.
-The separate module comparisons, memory sanitizers and inline-FP fixture use
-explicit checks or already enabled assertions and are unaffected.
-
-Restoring assertions yields four failures. Three are stale expectations:
-cycle advancement must include the observation and suffix flush, play-only
-digests must exclude pre-play deliveries, and an isolated zero-charge block
-continues to the turn budget. The strengthened fixtures now check those
-contracts explicitly. The fourth exposes a real omitted observation key:
-`0x80328F84` (GroundCross) was retained only in a comment after moving its
-observation into the full edge service, so the generated front-end filter
-dropped it. An explicit non-yielding case restores table membership while
-preserving the intended turn behavior. The regenerated table and all eight
-Release fixtures now pass (0.56 seconds). Five portable scheduler/observation
-fixtures are also added to the Windows source-only workflow; that run is pending.
-A fresh host/controlled route must qualify the restored observation before any
-broader acceptance claim.
-
-
-At `7b7e530eb6c404fbb6cfcc4b7c3149f36b61cb61`, the rebuilt bundled host
-and all **248/248 Mac regressions** pass (67.65 seconds), now with the eight
-restored assertion fixtures active. Repository audit and the source ZIP content
-gate pass. The controlled old/new-host comparison uses the same ordinary
-module/runtime and preserved old host binary; it remains in progress.
-
-A separate synthetic scheduler probe also identifies follow-up work before
-further loop optimization: alternating charged and zero-charge blocks return
-after 18 dispatches / 18 cycles with a 50-cycle budget. The purported run
-counter is static and does not reset after a charged block, so it counts
-nonconsecutive zero-charge blocks. Preserve the current loop inputs while the
-corrected FP module compiles, then repair and qualify consecutive-run/reset
-semantics separately. No timing or gameplay conclusion follows from this probe.
-
-
-The corrected inline-FP candidate `9d3729a` now passes native Windows app /
-fixture compilation and **33/33 tests** (35.84 seconds; inline FP 24.06 seconds;
-[run 36969380169](https://github.com/chrissotraidis/bluewake/actions/runs/36969380169)).
-The corrected 822-unit arm64 module also links; its private A/B qualification
-is in progress.
-
-The `7b7e530` old/new-host route completes normally with both hosts. The unchanged
-strict comparator rejects the pair because exactly **one of 1,050 canonical
-records changes**: the collision-provenance summary goes from zero GroundCross
-observations to 1,974, with valid and sentinel values now seen. This is the
-intended restored observation, not a guest-state mismatch. All other 1,049
-records, result cards and 600 exact guest-state samples match; all 1,024 delivery
-cycles and the route clock match exactly. Preserve the strict failure and the
-explicit one-record analysis; no comparator rule is relaxed. This is bounded
-headless evidence for the observation repair, not gameplay/performance acceptance.
-
-The first Windows assertion-fixture run (36969791283) reaches compilation but
-fails because the new edge fixture lacks the existing compatibility-header
-include path (`dlfcn.h` from `game_options.c`). The shared fixture setup now
-uses that path; native build/regressions are being repeated.
-
-
-### Consecutive non-advancing dispatch repair
-
-The isolated probe is now a maintained regression through both the inline
-and exported loop entry points. It fails on the prior loop and passes after
-making the counter local to each call and resetting it after progress. An
-alternating sequence reaches its 50-cycle budget (49 dispatches); a genuinely
-stuck sequence still yields on its ninth non-advancing successor. Interrupted
-runs and subsequent turns/CPUs receive independent allowances. The existing
-initial-no-progress, exception, budget, host-yield and delivery tests remain.
-The Release CMake fixture and ASan/UBSan run pass. Whole-module and Windows
-qualification remain pending; no speedup is inferred from the synthetic probe.
-The header change was applied only after the preceding FP module finished
-linking, preserving that comparison's source inputs.
+## Next actions and retained work
+
+1. Finish the running prepared-block O2 pair and full PadMint build, then verify
+   their terminal artifacts. Run matched performance measurements on a quiet
+   machine; do not derive performance from current loaded runs.
+2. Integrate/qualify remaining gather, inline-memory, direct-call/register and
+   provenance-reviewed native replacements in dependency order. Correctness,
+   scheduling/hooks and matched measurements are separate gates.
+3. Complete final-source clean player routes and the full gameplay matrix:
+   fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
+   fullscreen/restart, real controllers, save/reload, upgrades and sustained play.
+   Windows gameplay hardware and current physical iPad acceptance remain
+   unconfirmed; continue independent work without counting those checks passed.
+4. Reconcile the draft source stack into the intended maintained branch only with
+   its acceptance evidence; finish unified instructions, credits and issue mapping.
+   The [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
+   remains unposted. Keep the donor and its history intact until acceptance.
+
+Primary `codex/fork-reconciliation` at `95adeed` stays fixed for PadMint. The
+managed `bluewake-disc-parity` worktree at `05df605` stays fixed for the O2 pair.
+The managed `bluewake-cpu-contract` worktree holds the current source stack and
+private qualification artifacts; its nested runtime is `c2905b7a`. Both managed
+worktrees contain needed unique artifacts and remain in use. No checkout is
+removed or reset. Preserve saves, settings, inputs and signing material.
