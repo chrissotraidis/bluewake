@@ -261,7 +261,8 @@ and the BlueWake slot to put it in; your current saves are backed up first. USA 
 - HD texture pack authors, including
   [Hypatia](https://forums.dolphin-emu.org/Thread-hypatia-s-tloz-the-wind-waker-hd-pack-v2-0001a)
 - SunPad, whose touch control overlay BlueWake adapts
-- [elliotttate](https://github.com/elliotttate), for the credited rendering, desktop and gameplay additions
+- [Elliott Tate (@elliotttate)](https://github.com/elliotttate), for the rendering, desktop, gameplay
+  and performance enhancements being consolidated into BlueWake from his Wind Waker fork
 - [Ian MacFarlane (@iannotian)](https://github.com/iannotian), for the controller-first Apple TV contribution
 
 ## License and legal

@@ -1,6 +1,9 @@
 # Fork reconciliation ledger, October 2, 2026
 
-**In progress.** Source integration is reviewable in stacked draft PRs; required
+**In progress.** Chris and Elliott have agreed to consolidate development in
+BlueWake. This migration directly imports Elliott's enhancements, preserves his
+authorship and credits combined implementations with co-author trailers.
+Source integration is reviewable in stacked draft PRs; required
 performance, player-build and gameplay acceptance remains open. No release,
 fork redirect, issue closure or migration acceptance is authorized. Personal
 modules, generated source, discs, profiles, builds, saves and captures stay local.
@@ -58,7 +61,8 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#21](https://github.com/chrissotraidis/bluewake/pull/21) | `7b7e530`, Windows includes `9303569` | Active Release assertions and restored GroundCross observation; bounded host check and native Windows pass |
 | [#22](https://github.com/chrissotraidis/bluewake/pull/22) | `69426b2` | Per-turn consecutive dispatch counter; unit/sanitizer, strict module boot and native Windows checks pass |
 | [#23](https://github.com/chrissotraidis/bluewake/pull/23) | `b85f931` | Gather/inline-memory contract foundation; two reproduced guards, local contracts and all 41 native Windows tests pass; module/renderer/performance qualification open |
-| [#24](https://github.com/chrissotraidis/bluewake/pull/24) | `608edaa` | Independent gather-module preparation; nine cache tests and strict function/boot comparisons pass; host batching not selected |
+| [#24](https://github.com/chrissotraidis/bluewake/pull/24) | `608edaa` | Independent gather-module preparation; nine cache tests, strict function/boot comparisons and 41 native Windows tests pass; host batching not selected |
+| [#25](https://github.com/chrissotraidis/bluewake/pull/25) | `80eb353` | Explicit host writer/batching; 42 native Windows tests and bounded Mac route/card/intro-image comparisons pass; longer player route running |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -82,9 +86,9 @@ source only. No source merge or test result implies release readiness.
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches remain open | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
 | Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Absent; needs BlueWake host-hook watch list and edge-service contract review | Open; preserve scheduling, exceptions, hooks and mod dispatch; strict module comparisons and matched timing |
-| Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; separate default-off `--gather-pipe` prepares modules. Host direct writer/batching now has separate default-off selection; qualification is pending. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures and nine cache tests pass locally; 813 chunks prepare reproducibly and unprepared inputs are rejected. Arm64 O0 function/boot comparisons pass with the host writer disabled; optimized modules, renderer batching and matched timing remain required |
+| Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; separate default-off `--gather-pipe` prepares modules. Host direct writer/batching now has separate default-off selection; bounded Mac route/card/intro-image comparisons pass. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures and nine cache tests pass locally; 813 chunks prepare reproducibly and unprepared inputs are rejected. Arm64 O0 function/boot comparisons pass with the host writer disabled; optimized modules, sustained renderer/gameplay qualification and matched timing remain required |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
-| Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
+| Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers imported and separately qualified in #23/#24 | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
@@ -101,6 +105,16 @@ scope unless required by the agreed current parity target.
 
 ## Current acceptance evidence and limits
 
+**Trace coverage correction:** the legacy 600 `[guest-state]` records all occur
+before retrace 8, ending at cycle 60,001,200. They contain selected startup fields,
+not the full CPU or RAM, and do not cover the full 6,000-retrace route. Earlier
+wording saying "600 exact guest states" overstated this evidence; this correction
+also applies to the historical appendix. Route/card, independently checked timing,
+function-fixture and image results retain their stated scopes. The 30,000-case
+function fixtures do compare full CPU/RAM within those cases. Broader optional
+checkpoint instrumentation is being added; no new full-route state result is
+accepted yet. The existing route comparator remains unchanged.
+
 - **Host/runtime regressions:** all 248 Mac tests pass at `7b7e530` (67.65 s).
   Eight older assertion-based fixtures were previously disabled by Release's
   `NDEBUG`; earlier 247-test counts include those ineffective passes. The repaired
@@ -109,10 +123,10 @@ scope unless required by the agreed current parity target.
   [run 36970389671](https://github.com/chrissotraidis/bluewake/actions/runs/36970389671)).
 - **Prepared blocks:** the donor-style broad transform fails the controlled
   route despite passing the function fixture; retaining PC stores alone also
-  fails (22/600 guest-state samples differ). The conservative successor preserves
+  fails (22/600 selected startup records differ). The conservative successor preserves
   PC/suffix observations and leaves refund/unknown prepaid-state blocks alone.
   It passes 30,000 function cases and 6,000 retraces: 1,050 canonical/card records,
-  600 exact guest states and delivery/clock timing match. This is bounded O0
+  600 matching selected startup records and delivery/clock timing match. This is bounded O0
   correctness, not full donor optimization/performance parity. Matched O2 builds
   remain running; preserve the failed candidates and unchanged comparator.
 - **Fixed CPU and module RAM:** each independent O0 candidate passes the same
@@ -125,13 +139,13 @@ scope unless required by the agreed current parity target.
   tests fail before and pass after. The corrected helper passes 38 million operation
   comparisons on arm64, x86-64/Rosetta and native Windows. Corrected arm64 module
   `9d3729a` passes 30,000 function cases and the strict 6,000-retrace pair with
-  1,050 matching records/cards, 600 exact guest states and zero schedule drift.
+  1,050 matching records/cards, 600 matching selected startup records and zero schedule drift.
   The host is `3222b915`, both modules use runtime `c2905b7a`. Optimized/performance
   and gameplay acceptance remains open.
 - **Restored observation:** #21's old/new-host pair uses the same ordinary module.
   Exactly one canonical record changes: GroundCross visits rise from 0 to 1,974,
   with valid and sentinel values observed. The strict comparator correctly rejects
-  equality; preserve that result. All other 1,049 records, cards, 600 guest states,
+  equality; preserve that result. All other 1,049 records, cards, 600 selected startup records,
   1,024 delivery cycles and route clock match. The explicit intended diagnostic
   difference is recorded without weakening the comparator. This is bounded
   headless evidence, not gameplay acceptance.
@@ -140,17 +154,27 @@ scope unless required by the agreed current parity target.
   independent turns/CPUs and bounded stuck execution. The candidate module links;
   all 819 other object hashes match the baseline, with only module-export/dispatch
   objects changed. The strict 6,000-retrace pair passes with 1,050 matching
-  records/cards, 600 exact guest states and zero scheduling drift. Native Windows
+  records/cards, 600 matching selected startup records and zero scheduling drift. Native Windows
   passes all 38 tests (31.87 s;
   [run 36970729454](https://github.com/chrissotraidis/bluewake/actions/runs/36970729454)).
   The incremental build is not clean player-build evidence.
 - **Inline-memory module:** #24 at `608edaa` builds all 823 O0 units and passes
   30,000 strict function cases against #22, including 264 partial returns and
   12,539 deadline cases. The same `7b7e530` host / `c2905b7a` runtime passes the
-  6,000-retrace pair: 1,050 canonical/card records, 600 exact states and zero
+  6,000-retrace pair: 1,050 canonical/card records, 600 matching selected startup records and zero
   delivery/clock drift. The optional host FIFO writer is **disabled** in both
   runs. This does not qualify GPU batching, optimized performance, gameplay or
-  a clean player build. Native Windows for #24 remains pending.
+  a clean player build. Native Windows at `d0859b3` passes all 41 tests
+  (40.03 s; [run 36974344310](https://github.com/chrissotraidis/bluewake/actions/runs/36974344310)).
+- **Host writer/batching:** #25 at `80eb353` passes all 42 native Windows tests
+  (43.99 s; [run 36975727076](https://github.com/chrissotraidis/bluewake/actions/runs/36975727076)).
+  Same-host/module Mac O0 pairs compare writer Off/direct headless and Off/batch
+  with Aurora over 6,000 retraces. Each passes 1,050 canonical/card records,
+  600 matching selected startup records and zero delivery/clock drift. The
+  renderer pair also has two identical nonblank 1920x1440 intro frames at
+  retraces 2,000/4,000. An older module without writer exports stays Off when
+  batching is requested. A longer player-control route is running; no sustained
+  gameplay or performance acceptance follows from the short intro comparison.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -165,11 +189,11 @@ using the writer. Native Windows at `ab8ff52` builds the app and passes all 41
 tests (43.21 s; [run 36972986519](https://github.com/chrissotraidis/bluewake/actions/runs/36972986519)). Shared maintained memory contracts exercise ordinary/global
 RAM, aliases, reservation, journal, endian and MMIO behavior. Additional tests
 cover byte order, batching thresholds, writer changes, interpreter/MMIO flushes
-and inline/exported dispatch boundaries. Module, renderer and performance
-qualification remains open. Explicit module preparation is now available independently of inline FP;
+and inline/exported dispatch boundaries. Sustained gameplay and optimized performance
+qualification remain open. Explicit module preparation is now available independently of inline FP;
 the host has explicit direct/batch opt-ins, with ordinary MMIO retained by
-default and for diagnostics. Host/renderer comparisons remain pending. Direct-call/native batches also
-remain open work.
+default and for diagnostics. The bounded host/renderer results above are now
+available; direct-call/native batches remain open work.
 All measured wall times under concurrent compilation are excluded from performance
 acceptance. No donor benchmark is transferred.
 
@@ -207,13 +231,13 @@ bugs. No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-1. Finish native Windows for #24, the running prepared-block O2 pair and full
-   PadMint build, then verify
-   their terminal artifacts. Run matched performance measurements on a quiet
+1. Finish the running prepared-block O2 pair, full PadMint build and longer
+   batching route, then verify their terminal artifacts. Complete broader guest
+   checkpoints and correct startup-only trace claims throughout the current evidence. Run matched performance measurements on a quiet
    machine; do not derive performance from current loaded runs.
-2. Qualify explicit host FIFO writer/batching selection, then remaining
-   direct-call/register and
-   provenance-reviewed native replacements in dependency order. Correctness,
+2. Continue directly importing the remaining Elliott direct-call/register and
+   provenance-reviewed native enhancements, adapting BlueWake hooks and retaining
+   contributor credit. Finish host FIFO batching qualification alongside them. Correctness,
    scheduling/hooks and matched measurements are separate gates.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,

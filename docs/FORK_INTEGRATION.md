@@ -6,7 +6,10 @@ Earlier measurements below retain their original source/platform limits.
 
 BlueWake integrates GPL-covered source changes from
 [elliotttate/Wind-Waker-Recomp](https://github.com/elliotttate/Wind-Waker-Recomp), whose source is
-public as checked on October 1, 2026. The imported commits retain elliotttate's authorship. BlueWake's
+public as checked on October 1, 2026. Chris and Elliott have agreed to consolidate
+their work in BlueWake, with Elliott transitioning his development here. The
+reconciliation directly imports his enhancements and adapts them to preserve
+BlueWake's existing platform support. The imported commits retain Elliott's authorship. BlueWake's
 release restrictions, game-module privacy rules, PadMint workflow, bundle identifier and saves remain
 the project's own.
 
@@ -167,6 +170,15 @@ Next priorities from that review:
 | Linux | No Linux build/play acceptance here; validate a source-only native host before claiming support |
 | HD-style UI | BlueWake's desktop shell is restyled; the retail game's HUD is unchanged |
 
-The source integration gives elliotttate credit through Git authorship and the project notices.
-Future changes can be contributed as ordinary pull requests against BlueWake. A source import does
-not grant repository write access or imply the author has agreed to maintain BlueWake.
+BlueWake is the intended maintained home for the combined project. Direct imports
+retain Elliott Tate's original Git author identity. Commits that combine his
+implementation with BlueWake adaptations should include
+`Co-authored-by: Elliott Tate <elliotttate@gmail.com>`, using the identity recorded
+in his source commits. Preserve these credits when merging or squashing the
+integration PRs; separate BlueWake-only fixes and tests retain their own authorship.
+The README also credits his rendering, desktop, gameplay and performance work.
+
+The source stack and remaining acceptance checks are tracked in the current
+reconciliation ledger. The fork stays intact during this migration; any retirement
+notice follows acceptance of the consolidated BlueWake candidate. Repository
+access changes are separate from source integration.
