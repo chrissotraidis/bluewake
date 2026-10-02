@@ -66,6 +66,8 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#26](https://github.com/chrissotraidis/bluewake/pull/26) | `9de9cf2` | Optional complete-coverage checkpoint comparisons; six CPU/RAM/REL hash checkpoints match over 6,000 headless retraces; Aurora checkpoints and two intro frames match; native Windows host build passes |
 | [#27](https://github.com/chrissotraidis/bluewake/pull/27) | `8233de9`, import `d176f3e` | Direct/indirect calls and certified register inlining; 30,000 active function cases, three-way headless/Aurora routes and intro frames, and 45 native Windows tests pass; optimized measurements and gameplay remain open |
 
+| [#28](https://github.com/chrissotraidis/bluewake/pull/28) | `5a9a59a`, import `60a713d` | Recovered J3D matrix functions; 100,000 arm64 differential cases, certification and sanitizer guards pass; builder/module integration and native Windows qualification open |
+
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
 [PR #2](https://github.com/chrissotraidis/RecompCore/pull/2) at `c2905b7a` fixes
@@ -89,7 +91,7 @@ source only. No source merge or test result implies release readiness.
 | Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
 | Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Imported directly with Elliott's authorship in `d176f3e`; candidate adds versioned host readiness, shared feature predicates and guarded/certified register inlining. Builder options remain independent and off by default | Integrated with bounded checks; all 823 private O0 module units link, 30,000 active function cases and three-way headless/Aurora route/checkpoint/intro-image comparisons pass. All 45 native Windows tests pass. Optimized combined modules, gameplay and matched timing remain required |
 | Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; separate default-off `--gather-pipe` prepares modules. Host direct writer/batching now has separate default-off selection; bounded Mac route/card/intro-image comparisons pass. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures and nine cache tests pass locally; 813 chunks prepare reproducibly and unprepared inputs are rejected. Arm64 O0 function/boot comparisons pass with the host writer disabled; optimized modules, sustained renderer/gameplay qualification and matched timing remain required |
-| Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
+| Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | J3D rotation/translation functions imported in #28 from the fixed donor baseline, with recovered-source attribution verified. Other math/skin/vector replacements remain open; donor benchmarks do not transfer | Open; J3D function-level comparisons and guards pass. Builder/module integration, remaining native imports, same-module state/images and matched measurements required |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers imported and separately qualified in #23/#24 | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
@@ -213,9 +215,29 @@ a claim of identical state at every intervening instruction. The existing route 
   [run 36983460501](https://github.com/chrissotraidis/bluewake/actions/runs/36983460501)).
   Eleven cache regressions cover reuse and disabling register inlining while
   direct calls remain enabled. No timing from these traced/loaded runs establishes
-  performance parity. The separate 2,000-retrace existing-card probe reaches file
-  selection but not player control; the copied seed's original hash is unchanged.
-  Active gameplay and combined optimized performance remain open.
+  performance parity. A separate existing-card three-way Aurora route now completes
+  2,000 retraces using scheduled A presses and a 20-retrace stick input: all 37
+  sampled player states, four checkpoints (every 500 retraces), 1,050 route/card
+  records, zero delivery/clock drift and two nonblank Outset frames at retraces
+  1,200/1,600 match. All three runs show position changing with decoded stick input
+  while event/demo mode is clear. The original save backup hash is unchanged.
+  The new-game control marker remains absent because its overlap latch is tied
+  to the new-file route; this check uses observed input and movement directly.
+  This is bounded gameplay evidence; sustained play, save/reload, upgrades and
+  combined optimized performance remain open.
+- **Recovered J3D functions:** #28 preserves Elliott's five-file import
+  `60a713d`; adaptation `5a9a59a` credits him as co-author and records the fixed
+  zeldaret/tww source/license in RIGHTS_AND_LICENSES.md. The portable fixture
+  uses declared module storage ABIs and no longer masks the cycle-observation
+  suffix. Across 100,000 arm64 cases, 67,695 native executions match every CPU
+  byte and the 40 KiB RAM test area; 32,305 unsupported cases decline unchanged.
+  A null-RAM guard failure is reproduced under ASan/UBSan (the optimized
+  unsanitized fixture did not expose it); the corrected guard passes Release
+  and sanitizers, including aliases, journals, MMIO and budget fallbacks. Three
+  certification test methods pass; both actual functions certify in the retained
+  private translation. Repository/source-archive audits pass. Native Windows CI
+  is pending. This imports and qualifies the functions; player-builder selection,
+  routed module comparisons and matched performance remain open.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -276,10 +298,12 @@ bugs. No issue is closed or externally commented on by this work.
 1. Finish the running prepared-block O2 pair and verify terminal artifacts, then
    run matched measurements on a quiet machine. The direct-call three-way
    headless/Aurora comparisons pass; their traced wall times are not benchmarks.
-   Continue the copied-save route beyond file selection to actual player control.
+   The copied-save route now demonstrates matched scripted movement; extend it
+   to sustained scenes and save/reload acceptance.
    The baseline full PadMint package is complete; player signing and final-source/
    device acceptance remain open.
-2. Directly import the remaining provenance-reviewed native enhancements,
+2. Connect the imported J3D functions to certified module/player preparation,
+   then directly import the remaining native math/skin/vector enhancements,
    adapting BlueWake hooks and retaining contributor credit. Direct-call/register
    source is now integrated. Complete combined optimized and host FIFO batching
    qualification, including scheduling/hooks, gameplay and matched measurements.
