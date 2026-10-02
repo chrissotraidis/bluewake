@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
     dol_platform_install(&ops);
     CPUState cpu;
     assert(cpu_init(&cpu));
-    set_env("BLUEWAKE_HAPTICS", ps5 ? "enhanced" : argv[1]);
+    set_env("BLUEWAKE_HAPTICS", strcmp(argv[1], "classic") == 0 ? "classic" : "enhanced");
     set_env("BLUEWAKE_HAPTICS_STRENGTH", "80");
     set_env("BLUEWAKE_HAPTICS_TRIGGERS", "1");
     bluewake_haptics_attach(&cpu);
@@ -78,6 +78,8 @@ int main(int argc, char** argv) {
     } else {
         const u32 base = 0x803CA5A8u;
         mem_write32(&cpu, base + 0x80, 0x8037D460u);
+        mem_write32(&cpu, 0x803F7878u, 0xF0000000u);
+        mem_write32(&cpu, 0x803F7880u, 0xF0000000u);
         mem_write32(&cpu, base + 0x48, (u32)-1); // No shock.
         mem_write32(&cpu, base + 0x60, 1); // Continuous quake.
         mem_write32(&cpu, base + 0x64, 0xFFFFFFFFu);
@@ -109,6 +111,31 @@ int main(int argc, char** argv) {
                 assert(SDL_GetAtomicInt(&effect_on));
             }
         } else assert(left > 0 && right > 0);
+        if (strcmp(argv[1], "cancel") == 0 || strcmp(argv[1], "disabled") == 0) {
+            // A synthetic active shock, then the state the guest uses when
+            // Run cancels patterns or CRumble disables the controller port.
+            mem_write32(&cpu, base + 0x60, (u32)-1);
+            mem_write32(&cpu, base + 0x48, 1);
+            mem_write32(&cpu, base + 0x4C, 0xFFFFFFFFu);
+            mem_write32(&cpu, base + 0x50, 32);
+            mem_write32(&cpu, base + 0x58, 1);
+            mem_write32(&cpu, base + 0x78, 100);
+            bluewake_haptics_retrace();
+            assert(low > 0 && high > 0);
+            if (strcmp(argv[1], "cancel") == 0) {
+                mem_write32(&cpu, base + 0x48, (u32)-1);
+                mem_write32(&cpu, base + 0x58, (u32)-99);
+            } else mem_write32(&cpu, 0x803F7880u, 0x70000000u);
+            mem_write32(&cpu, base + 0x78, 101);
+            bluewake_haptics_retrace();
+            assert(low == 0 && high == 0 && left == 0 && right == 0);
+            mem_write32(&cpu, base + 0x48, (u32)-1);
+            mem_write32(&cpu, base + 0x60, 1);
+            mem_write32(&cpu, 0x803F7880u, 0xF0000000u);
+            mem_write32(&cpu, base + 0x78, 102);
+            bluewake_haptics_retrace();
+            assert(low > 0);
+        }
         // The Mac menu stops retraces. Feedback must stop on opening it.
         bluewake_haptics_block(true);
         assert(low == 0 && high == 0 && left == 0 && right == 0);

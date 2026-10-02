@@ -511,6 +511,8 @@ void bluewake_haptics_retrace(void) {
                 (s32)mem_read32(g_cpu, base + kMotorQuake + kCurrentFrame), mem_read32(g_cpu, 0x803F7878u),
                 mem_read32(g_cpu, 0x803F7880u));
     const bool stalled = now - g_advanced_ns > 150000000ull;
+    const bool motor_allowed =
+        (mem_read32(g_cpu, 0x803F7878u) & mem_read32(g_cpu, 0x803F7880u) & 0x80000000u) != 0u;
 
     // A shock: StartShock sets its frame to 0, and each Run counts it up to
     // its length and clears it. A new one is a shock that appears, another
@@ -536,6 +538,10 @@ void bluewake_haptics_retrace(void) {
     }
     g_shock_idx = shock_idx;
     g_shock_frame = shock_frame;
+    // Run cancels both motor patterns when the game's vibration option is off.
+    // Do not finish a cached shock after the guest has withdrawn it.
+    if (shock_idx < 0 || shock_frame < 0)
+        g_shock.on = false;
 
     // A quake: on from StartQuake until StopQuake (or the game's 900 frames).
     const s32 quake_idx = (s32)mem_read32(g_cpu, base + kMotorQuake + kPatternIdx);
@@ -557,7 +563,7 @@ void bluewake_haptics_retrace(void) {
     g_quake_on = quake;
     g_quake_idx = quake_idx;
 
-    if (paused || stalled || g_blocked || !focused()) {
+    if (paused || stalled || g_blocked || !motor_allowed || !focused() || (!g_shock.on && !quake)) {
         silence(now);
         return;
     }

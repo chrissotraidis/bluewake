@@ -101,12 +101,25 @@ Both are corrected. Explicit shutdown clears output before SDL/CPU teardown;
 DualSense watchdog callbacks validate their current timer under the joystick
 lock, and disconnected slots can be reused. The test virtual controller is
 closed/detached during shutdown. Strength/trigger controls apply to Enhanced.
-The full Mac host and eight focused regressions pass, including Xbox-style
-rumble, DualSense expiry/rearm, ten reconnects, menu silence, shutdown and saved
-preference preservation. Repository audit passes. Native Windows build, actual
-Mac/Windows menu interaction, real controllers, game vibration preference and
-bounded gameplay comparison remain pending; virtual output is not felt-feedback
-acceptance.
+At `558438a`, the full Mac host and eight focused regressions pass, including
+Xbox-style rumble, DualSense expiry/rearm, ten reconnects, menu silence, shutdown
+and saved preference preservation. Native Windows builds the app and passes all
+54 tests ([run 37012303375](https://github.com/chrissotraidis/bluewake/actions/runs/37012303375)).
+Its 2,000-retrace Outset movement route matches the prior `f861eae` host in all
+four full-state checkpoints, 37 sampled player states, two frames and 1,050
+route/card records, with zero measured delivery/clock drift and unchanged seed.
+The iOS/tvOS haptics stubs compile with their SDKs; this is not a complete app build.
+
+A follow-up reproduces feedback continuing after guest pattern cancellation or
+port-zero rumble disabling. The adaptation clears cached shocks when withdrawn,
+silences when no pattern remains and checks the guest's rumble flags. These
+checks follow [the vibration cancellation behavior](https://github.com/zeldaret/tww/blob/main/src/d/d_vibration.cpp)
+and [the controller enable mask](https://github.com/zeldaret/tww/blob/main/include/JSystem/JUtility/JUTGamePad.h);
+they do not copy translated game code. The Mac host and ten focused checks pass.
+The follow-up still needs current Windows and route qualification. Actual
+Mac/Windows menu interaction, real controllers and the game's visible vibration
+option remain pending; synthetic guest state and virtual output are not player
+or felt-feedback acceptance. Repository/source-archive audits pass for `558438a`.
 
 ## Source checkpoints and integration order
 
@@ -139,6 +152,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#31](https://github.com/chrissotraidis/bluewake/pull/31) | `4cfd99e`, import `46365c2` | Native skinning with certified entry routing; full-CPU/MEM1 fixtures, three-way startup comparisons and all 49 native Windows tests pass; saved-game state/image comparisons pass; combined performance open |
 | [#32](https://github.com/chrissotraidis/bluewake/pull/32) | `0ea7ffb`, import `ca8c584`, fixture `459df34` | Twelve certified game-math entries; full-CPU/protected-MEM1 fixtures, three-way intro comparison and all 50 native Windows tests pass; saved-game state/image comparisons pass; combined optimized qualification in progress |
 | [#33](https://github.com/chrissotraidis/bluewake/pull/33) | `f861eae`, runtime `18ba3b64` | Later donor post-texture renderer fix with backward-compatible save-state loading; FIFO/fold/sanitizer checks and Outset state/image comparison pass; 51 native Windows tests pass; visible lava-scene comparison pending |
+| [#34](https://github.com/chrissotraidis/bluewake/pull/34) | `193870f` import, `558438a` adaptation | Elliott's controller feedback in Mac/Windows, preserved preferences, menu/teardown fixes; Mac fixtures, bounded Outset and 54 native Windows tests pass at initial adaptation. Guest cancellation follow-up and real controller qualification tracked above |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
