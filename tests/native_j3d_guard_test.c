@@ -32,11 +32,28 @@ static void decline(CPUState cpu, u32 entry) {
     assert(!memcmp(saved, ram, sizeof ram));
 }
 static void journal(u32 a, u32 n, void* user) { (void)a; (void)n; (void)user; assert(0); }
+static bool ready(void* user, const CPUState* cpu, u32 entry) {
+    assert(cpu != NULL);
+    assert(entry == BLUEWAKE_J3D_TRANSFORM_INFO || entry == BLUEWAKE_J3D_TRANSFORM_ANGLES);
+    return *(bool*)user;
+}
 int main(void) {
     const u32 entries[] = {BLUEWAKE_J3D_TRANSFORM_INFO, BLUEWAKE_J3D_TRANSFORM_ANGLES};
     for (unsigned i = 0; i < 2; ++i) {
         const u32 entry = entries[i];
-        CPUState cpu = state(entry);
+        CPUState cpu = state(entry), before = cpu;
+        assert(!bluewake_native_j3d_try(&cpu, entry));
+        assert(!memcmp(&cpu, &before, sizeof cpu));
+        assert(!bluewake_composite_native_j3d_v1(true, NULL, NULL));
+        bool allowed = false;
+        assert(bluewake_composite_native_j3d_v1(true, ready, &allowed));
+        assert(!bluewake_native_j3d_try(&cpu, entry));
+        assert(!memcmp(&cpu, &before, sizeof cpu));
+        allowed = true;
+        assert(bluewake_native_j3d_try(&cpu, entry));
+        assert(!bluewake_composite_native_j3d_v1(false, ready, &allowed));
+        cpu = state(entry);
+        assert(!bluewake_native_j3d_try(&cpu, entry));
         assert(bluewake_native_j3d_transform(&cpu, entry));
         assert(read_be32(ram + 160) == 0x3F800000u);
         assert(read_be32(ram + 180) == 0x3F800000u);

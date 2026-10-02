@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Certify and route recovered J3D rotation/translation matrix functions.
 
-Run after chunk rewrites and before the simulation/native-math manifests.
+Run after mod variants, before optional CPU/block/direct-call rewrites.
+The manifest records this certification stage; the builder records the final tree.
 Only exact GZLE01 bodies are accepted, including every mod variant. The
 unmodified translation remains available whenever the native guard declines.
 No game source is distributed by this script; it records body hashes only.
@@ -23,11 +24,12 @@ LEAVES = (
 )
 INCLUDE = '#include "native_j3d.h"\n'
 GENERATED_INCLUDE = '#include "../generated.h"\n'
+MARKER = '#define BLUEWAKE_NATIVE_J3D_PREPARED 1\n'
 
 
 def hook(start):
     return (f"    /* bluewake: recovered J3D matrix {start:08X} */\n"
-            f"    if (bluewake_native_j3d_enabled && bluewake_native_j3d_transform(ctx, 0x{start:08X}u))\n"
+            f"    if (bluewake_native_j3d_try(ctx, 0x{start:08X}u))\n"
             "        goto return_dispatch_802D96E0;\n")
 
 
@@ -35,6 +37,9 @@ def prepare(root):
     paths = sorted(root.rglob('*802D96E0*.c'))
     if not paths:
         raise ValueError('missing translated J3D chunk 802D96E0')
+    header = root / 'generated.h'
+    if not header.is_file():
+        raise ValueError('missing generated.h')
     prepared = {}
     for path in paths:
         text = path.read_text()
@@ -49,7 +54,7 @@ def prepare(root):
                 raise ValueError(f'missing J3D function {start:08X} in {path}')
             body = text[begin:finish]
             native = hook(start)
-            if 'bluewake_native_j3d_transform' in body:
+            if 'bluewake_native_j3d_' in body:
                 if body.count(native) != 1:
                     raise ValueError(f'modified J3D hook {start:08X} in {path}')
                 body = body.replace(native, '', 1)
@@ -76,6 +81,8 @@ def prepare(root):
         temporary = manifest.with_suffix('.json.tmp')
         temporary.write_text(data, newline='\n')
         temporary.replace(manifest)
+    if MARKER not in header.read_text():
+        header.write_text(header.read_text() + '\n' + MARKER)
     print(f'native J3D: {len(LEAVES)} recovered matrix functions certified in {len(files)} chunks')
 
 

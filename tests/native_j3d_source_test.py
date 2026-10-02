@@ -15,6 +15,7 @@ class CertificationTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        (self.root / "generated.h").write_text("/* synthetic header */\n")
         self.body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'
         digest = hashlib.sha256(' '.join(self.body.split()).encode()).hexdigest()
         self.old_leaves = prepare.LEAVES

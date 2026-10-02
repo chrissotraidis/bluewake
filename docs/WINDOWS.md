@@ -85,11 +85,17 @@ Options (`--help` lists all):
 | `--inline-fp` | Opt into inline floating-point helpers; off by default, module/gameplay/performance qualification pending |
 | `--gather-pipe` | Prepare experimental gather/inline-memory wrappers; off by default, host batching and module qualification remain separate gates |
 | `--direct-calls` | Prepare direct cross-chunk/indirect calls; off by default, matching host selection and qualification required |
+| `--native-j3d` | Prepare certified J3D matrix functions; off by default, host opt-in and module qualification required |
 | `--inline-gpr` | Also inline certified register saves/restores; requires `--direct-calls` |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
 | `--out DIR` | Build directory (default `build\windows`) |
+
+The independent `--native-j3d` option certifies the original matrix-function
+bodies before other rewrites. `BLUEWAKE_NATIVE_J3D=1` enables a supporting host
+and module through a versioned handshake; absent support, disabled selection,
+unsupported inputs and observed boundaries retain translated execution.
 
 The direct-call options retain the ordinary module ABI and are selected separately
 from fixed CPU/RAM storage. To enable them in a supporting host, set

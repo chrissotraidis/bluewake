@@ -1872,7 +1872,7 @@ static u64 g_direct_call_queries, g_direct_call_allowed;
 /* Read-only handshake for direct calls. Use the same dynamic predicate as
  * ordinary edges, including overlap-phase changes that interrupt flags alone
  * do not describe. Feature ranges and an armed jump must retain their hooks. */
-static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
+static bool host_can_skip_observation(void* user, const CPUState* cpu, u32 address) {
     (void)user;
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
     (void)cpu; (void)address;
@@ -1883,12 +1883,17 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
            !bluewake_feature_observes(address) &&
            !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !host_chassis_requires_full(cpu, address);
+    return allowed;
+#endif
+}
+
+static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
+    const bool allowed = host_can_skip_observation(user, cpu, address);
     if (g_direct_call_trace) {
         g_direct_call_queries++;
         g_direct_call_allowed += allowed;
     }
     return allowed;
-#endif
 }
 
 static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
@@ -7524,6 +7529,14 @@ int main(int argc, char** argv) {
         if (edge_filter != NULL)
             edge_filter(enabled);
         fprintf(stderr, "[chassis] direct-calls=%s\n", enabled ? "on" : "off");
+    }
+    {
+        typedef int (*NativeJ3DFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
+        NativeJ3DFn native_j3d = (NativeJ3DFn)dlsym(lib, "bluewake_composite_native_j3d_v1");
+        const char* native_env = getenv("BLUEWAKE_NATIVE_J3D");
+        const bool want = native_env != NULL && strcmp(native_env, "1") == 0;
+        const bool enabled = native_j3d != NULL && native_j3d(want, host_can_skip_observation, NULL);
+        fprintf(stderr, "[chassis] native-j3d=%s\n", enabled ? "on" : "off");
     }
     BluewakeSetGatherWord set_gather_word = (BluewakeSetGatherWord)
         dlsym(lib, "bluewake_composite_set_gather_pipe");
@@ -15542,6 +15555,11 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[gx-flush-summary] scope=all calls=%llu total_us=%llu max_us=%llu lines=%u from=%llu includes_presents=1\n",
             (unsigned long long)g_gx_flush_calls, (unsigned long long)g_gx_flush_us_total,
             (unsigned long long)g_gx_flush_us_max, g_gx_flush_lines, (unsigned long long)g_gx_flush_min_retrace);
+    }
+    {
+        void (*report_native_j3d)(void) = (void (*)(void))dlsym(lib, "bluewake_native_j3d_report");
+        if (report_native_j3d != NULL)
+            report_native_j3d();
     }
     if (g_direct_call_trace)
         fprintf(stderr, "[direct-calls] summary queries=%llu allowed=%llu\n",

@@ -12,10 +12,28 @@
 
 #include <stdio.h>
 
-int bluewake_native_j3d_enabled;
+#if defined(_WIN32)
+#define BW_J3D_EXPORT __declspec(dllexport)
+#else
+#define BW_J3D_EXPORT __attribute__((visibility("default")))
+#endif
+static BluewakeNativeJ3DReady s_ready;
+static void* s_ready_user;
+
+BW_J3D_EXPORT int bluewake_composite_native_j3d_v1(
+    bool enabled, BluewakeNativeJ3DReady ready, void* user) {
+    s_ready = enabled ? ready : NULL;
+    s_ready_user = s_ready != NULL ? user : NULL;
+    return s_ready != NULL;
+}
+
+int bluewake_native_j3d_try(CPUState* cpu, u32 address) {
+    return cpu != NULL && s_ready != NULL && s_ready(s_ready_user, cpu, address) &&
+           bluewake_native_j3d_transform(cpu, address);
+}
 static unsigned long long runs[2], declined[2];
 
-void bluewake_native_j3d_report(void) {
+BW_J3D_EXPORT void bluewake_native_j3d_report(void) {
     fprintf(stderr, "[native-j3d] transform-info=%llu/%llu transform-angles=%llu/%llu (native/declined)\n",
             runs[0], declined[0], runs[1], declined[1]);
 }

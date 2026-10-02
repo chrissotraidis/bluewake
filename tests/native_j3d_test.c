@@ -130,6 +130,8 @@ typedef struct Module {
     const StaticRecompModuleDesc* desc;
     CPUState fallback;
     BlueWakeModuleStorage storage;
+    int (*native_j3d)(bool, BluewakeNativeJ3DReady, void*);
+    void (*report)(void);
 } Module;
 
 static int load_module(const char* path, Module* module) {
@@ -144,6 +146,8 @@ static int load_module(const char* path, Module* module) {
     StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)SYMBOL(STATICRECOMP_GET_MODULE_SYMBOL);
     if (!get) return 0;
     module->desc = get();
+    module->native_j3d = (int (*)(bool, BluewakeNativeJ3DReady, void*))SYMBOL("bluewake_composite_native_j3d_v1");
+    module->report = (void (*)(void))SYMBOL("bluewake_native_j3d_report");
     const char* error = bw_module_select_storage(module->desc,
         (BlueWakeModuleCPUFn)SYMBOL("bluewake_composite_guest_cpu"),
         (BlueWakeModuleMEM1Fn)SYMBOL("bluewake_composite_guest_mem1"),
@@ -155,6 +159,13 @@ static int load_module(const char* path, Module* module) {
     }
     return module->storage.mem1 != NULL;
 #undef SYMBOL
+}
+
+static unsigned routed_queries;
+static bool routed_ready(void* user, const CPUState* cpu, u32 address) {
+    (void)user; (void)cpu; (void)address;
+    ++routed_queries;
+    return true;
 }
 
 int main(int argc, char** argv) {
@@ -177,6 +188,9 @@ int main(int argc, char** argv) {
     u8* routed_ram = NULL;
     if (argc > 3) {
         if (!load_module(argv[3], &candidate)) return 1;
+        if (!candidate.native_j3d || !candidate.native_j3d(true, routed_ready, NULL)) {
+            fprintf(stderr, "candidate does not support native J3D handshake\n"); return 1;
+        }
         routed = candidate.desc;
         routed_ram = candidate.storage.mem1;
     }
@@ -244,5 +258,10 @@ int main(int argc, char** argv) {
         printf("%08X: %u identical, %u declined unchanged\n", leaves[k], ran[k], declined[k]);
     if (routed) printf("routed module: %u identical calls\n", routed_ran);
     if (!ran[0] || !ran[1]) return 1;
+    if (routed) {
+        if (routed_queries == 0) { fprintf(stderr, "native J3D routing was inactive\n"); return 1; }
+        printf("native J3D routing: %u readiness queries\n", routed_queries);
+        if (candidate.report) candidate.report();
+    }
     return 0;
 }
