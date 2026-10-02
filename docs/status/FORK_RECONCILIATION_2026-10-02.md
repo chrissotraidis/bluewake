@@ -33,8 +33,9 @@ later donor changes separately. Baseline refs were verified October 2 JST.
 
 
 The current candidate's lock and builder profile both select maintained runtime
-`2218107dac0150151b39d736924df57e8dc75104` (runtime PR #4, stacked on #3).
-Patches through 0138 preserve BlueWake's safety changes, the later donor
+`0568feddb332e0d9fe8a3a7cff330263f14af2f1` (runtime PR #4, stacked on #3).
+Its product code is unchanged from `2218107d`; the follow-up makes the runtime
+save-state test path portable to Windows. Patches through 0139 preserve BlueWake's safety changes, the later donor
 post-texture correction, and PE token/capture readback. The previous fresh
 player build and paused PadMint workspace remain fixed at runtime `18ba3b64`. Existing native
 module/scene evidence below remains tied to its stated `c2905b7a` runtime. The translator remains
@@ -883,6 +884,35 @@ This closes the bounded Mac Pictobox checks. Native Windows reproduction and
 the broader gameplay/performance gates remain open. Private receipts and captures
 stay local; neither report is closed and no builds are published.
 
+### Camera qualification and Windows test follow-up, October 3
+
+The same `70168c1e…` Mac host passes queued SDL pitch and collision checks
+on copied Outset and Windfall saves. Mouse capture is active before the measured
+input sequence. Outset pitch moves from the normal view to a low angle, then
+75 degrees high and back to 31.8 degrees; six inspected frames match. At the
+low angle the game corrects requested pitch -35 degrees to about -32.17,
+shortens the eye distance from 249.8 to 174.4 units and keeps eye Y 160.5 above
+water Y 145.9. A Windfall orbit beside the stone arch similarly pulls the camera
+in to 105 units from its 250-unit requested radius, corrects its angle, and
+restores the radius after the obstruction. A focused eight-frame replay shows
+the closer view and return without drawing through the wall. Both directions
+of orbit complete; copied saves remain unchanged. These bounded gameplay checks
+accept the camera's queued-input pitch and collision path, not physical mouse
+feel or controller acceptance. CUA vertical drags remain unreliable as an input
+source; their incomplete run is retained rather than counted as a pass.
+
+Windows run [37062541658](https://github.com/chrissotraidis/bluewake/actions/runs/37062541658)
+exposed an outdated synthetic host-save fixture missing the new interrupt state.
+`b4b0aea` provides the real PE type/state and verifies its serialized bytes; the
+fixture passes locally and on Windows. Run
+[37063695344](https://github.com/chrissotraidis/bluewake/actions/runs/37063695344)
+then links the host and passes 57 of 58 tests, including the new texture encoder.
+The remaining runtime-suite assertion is its hard-coded `/tmp` output path,
+which Windows does not provide. Runtime `0568fedd` uses the working directory,
+as the suite's other file fixtures do; the local runtime suite passes again.
+A new Windows run is required. These fixture-only changes do not alter the
+validated Mac host or require rebuilding its personal module.
+
 ## Report reconciliation
 
 Reports from both repositories are investigation leads. The bounded Mac
@@ -910,9 +940,10 @@ of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
    repeat/cancel, both card-save/reload routes and legacy-state capture pass
    with runtime `2218107d`. Verify the reporters' Windows path separately;
    retain the failing baseline and avoid claiming cross-platform acceptance.
-2. **Remaining Mac qualification:** complete actual camera/controller and
+2. **Remaining Mac qualification:** complete real mouse/controller and
    required gameplay-option checks, audible intro/scripted music and sustained
-   play with matched measurements on an idle host. The fresh build, bounded
+   play with matched measurements on an idle host. Queued pitch and water/wall
+   collision now pass. The fresh build, bounded
    progression, local upgrade, save/reload, settings and current-module states
    stay accepted unless a relevant change invalidates them.
 3. **Final iOS player path:** resume the existing `3392854` build only after
