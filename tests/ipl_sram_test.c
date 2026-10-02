@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 // EXI SRAM device (runtime/host/src/ipl_sram.c) driven by the SDK's own
 // register sequence (ref/tww src/dolphin/os/OSRtc.c, exi/EXIBios.c).
 #include "ipl_sram.h"

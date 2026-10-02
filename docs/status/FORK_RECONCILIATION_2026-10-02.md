@@ -703,3 +703,26 @@ after correction. Full 38-million-operation comparisons pass on both arm64
 (the maintained CMake fixture, 39.51 seconds) and local x86-64/Rosetta. This is
 not native Windows or whole-module acceptance of the corrected header; those
 checks must be repeated. All earlier private modules/receipts are preserved.
+
+
+### Release-mode assertion audit
+
+The earlier 247-test Mac totals are process outcomes, with an identified
+coverage limitation: eight older C fixtures included `assert.h` without
+undefining Release's `NDEBUG`. Their assertion expressions were omitted.
+The separate module comparisons, memory sanitizers and inline-FP fixture use
+explicit checks or already enabled assertions and are unaffected.
+
+Restoring assertions yields four failures. Three are stale expectations:
+cycle advancement must include the observation and suffix flush, play-only
+digests must exclude pre-play deliveries, and an isolated zero-charge block
+continues to the turn budget. The strengthened fixtures now check those
+contracts explicitly. The fourth exposes a real omitted observation key:
+`0x80328F84` (GroundCross) was retained only in a comment after moving its
+observation into the full edge service, so the generated front-end filter
+dropped it. An explicit non-yielding case restores table membership while
+preserving the intended turn behavior. The regenerated table and all eight
+Release fixtures now pass (0.56 seconds). Five portable scheduler/observation
+fixtures are also added to the Windows source-only workflow; that run is pending.
+A fresh host/controlled route must qualify the restored observation before any
+broader acceptance claim.

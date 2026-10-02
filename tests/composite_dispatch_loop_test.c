@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "dispatch_loop.h"
 
 #include <assert.h>
@@ -101,7 +104,8 @@ int main(void) {
     fixture.no_progress_at = 2u;
     assert(bluewake_composite_dispatch_until_boundary(
         &cpu, 0x80001000u, dispatch, edge_service, &fixture));
-    assert(fixture.dispatches == 2u);
+    assert(fixture.dispatches == 5u);
+    assert(cpu.downcount == -8);
 
     cpu = fresh_cpu();
     memset(&fixture, 0, sizeof(fixture));
@@ -111,18 +115,15 @@ int main(void) {
     assert(fixture.dispatches == 1u);
 
     // The shipping chassis does not call the exported entry point: it calls the
-    // inline loop directly, so that the dispatch is a static function the
-    // compiler can fold into the loop instead of a pointer it reloads at every
-    // guest edge (cmake/composite/module_export.c). That is the path the product
-    // runs, so it is checked here rather than assumed to match the wrapper: a
-    // turn that ends because a block charged nothing, and one that ends on the
-    // budget, have to finish the same way through both entry points.
+    // inline loop directly, so check both entry points: an isolated zero-charge
+    // block continues to the budget; a zero-charge initial dispatch still yields.
     cpu = fresh_cpu();
     memset(&fixture, 0, sizeof(fixture));
     fixture.no_progress_at = 2u;
     assert(bluewake_chassis_dispatch_loop(
         &cpu, 0x80001000u, dispatch, edge_service, &fixture));
-    assert(fixture.dispatches == 2u);
+    assert(fixture.dispatches == 5u);
+    assert(cpu.downcount == -8);
 
     cpu = fresh_cpu();
     memset(&fixture, 0, sizeof(fixture));

@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "edge_intercepts.h"
 #include "edge_intercept_table.h"
 
@@ -46,7 +49,7 @@ int main(void) {
         0x81E01B88u, 0x81E01BA4u,
         0x802315A8u, 0x8022F9FCu, 0x802305E0u, 0x80230A14u,
         0x8017E798u, 0x8017E86Cu, 0x80181634u, 0x80182A90u,
-        0x80328F84u, 0x80120188u, 0x800A0B60u,
+        0x80120188u, 0x800A0B60u,
         0x800D8DB8u, 0x8015E3F0u, 0x8015EA5Cu, 0x8015D80Cu,
     };
     for (size_t i = 0u;
@@ -55,6 +58,25 @@ int main(void) {
         assert(bluewake_edge_observation_requires_host(
             observation_addresses[i]));
     assert(!bluewake_edge_observation_requires_host(0x80003140u));
+    // GroundCross is still handed to the full edge service, but does not
+    // unconditionally end the host turn.
+    assert(bluewake_edge_maybe_intercept(0x80328F84u));
+    assert(!bluewake_edge_observation_requires_host(0x80328F84u));
+    assert(!bluewake_edge_requires_host(0x80328F84u, 0x80328F84u, raw_base));
+    // Menu observations are explicitly enabled; counters count only enabled visits.
+    bluewake_edge_set_menu_path_observation(false);
+    const u64 executes = bluewake_edge_menu_execute_calls();
+    const u64 collects = bluewake_edge_menu_collect_calls();
+    assert(!bluewake_edge_observation_requires_host(0x801DD960u));
+    assert(!bluewake_edge_observation_requires_host(0x801DBA58u));
+    assert(bluewake_edge_menu_execute_calls() == executes);
+    assert(bluewake_edge_menu_collect_calls() == collects);
+    bluewake_edge_set_menu_path_observation(true);
+    assert(bluewake_edge_observation_requires_host(0x801DD960u));
+    assert(bluewake_edge_observation_requires_host(0x801DBA58u));
+    assert(bluewake_edge_menu_execute_calls() == executes + 1u);
+    assert(bluewake_edge_menu_collect_calls() == collects + 1u);
+    bluewake_edge_set_menu_path_observation(false);
 
     static const u32 canonical_semantic_addresses[] = {
         0x80303A50u, 0x80240EE8u, 0x80241178u, 0x802411F8u,

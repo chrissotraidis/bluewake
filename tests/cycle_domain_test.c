@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "cycle_domain.h"
 
 #include <assert.h>
@@ -70,8 +73,9 @@ int main(void) {
     assert(bluewake_cycle_domain_flush(&domain, &cpu) == 11u);
     assert(domain.absolute_cycles == 174u);
 
+    assert(fixture.advances == 3u); // flush, observe, remaining suffix
     assert(bluewake_cycle_domain_flush(&domain, &cpu) == 0u);
-    assert(fixture.advances == 1u);
+    assert(fixture.advances == 3u); // an empty flush does not advance devices
 
     fixture.deadline = 0u;
     bluewake_cycle_domain_rebudget(&domain, &cpu);

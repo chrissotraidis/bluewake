@@ -196,6 +196,30 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         ${GXRUNTIME_DIR}/include
         ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
     target_compile_definitions(bluewake_fast_blocks_test PRIVATE _CRT_SECURE_NO_WARNINGS)
+    # Assertion-based scheduler checks also run in Release configurations.
+    add_executable(bluewake_cycle_domain_test
+        ${BLUEWAKE_REPO_ROOT}/tests/cycle_domain_test.c ${BLUEWAKE_HOST_SRC}/cycle_domain.c)
+    add_executable(bluewake_interrupt_sources_test
+        ${BLUEWAKE_REPO_ROOT}/tests/interrupt_sources_test.c
+        ${BLUEWAKE_HOST_SRC}/cycle_domain.c ${BLUEWAKE_HOST_SRC}/interrupt_sources.c)
+    add_executable(bluewake_delivery_digest_test
+        ${BLUEWAKE_REPO_ROOT}/tests/delivery_digest_test.c ${BLUEWAKE_HOST_SRC}/delivery_digest.c)
+    add_executable(bluewake_composite_dispatch_loop_test
+        ${BLUEWAKE_REPO_ROOT}/tests/composite_dispatch_loop_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/dispatch_loop.c)
+    add_executable(bluewake_edge_intercepts_test
+        ${BLUEWAKE_REPO_ROOT}/tests/edge_intercepts_test.c
+        ${BLUEWAKE_HOST_SRC}/edge_intercepts.c ${BLUEWAKE_HOST_SRC}/game_options.c ${BLUEWAKE_HOST_SRC}/card_runtime.c)
+    foreach(TEST_NAME cycle_domain interrupt_sources delivery_digest composite_dispatch_loop edge_intercepts)
+        set(TEST_TARGET bluewake_${TEST_NAME}_test)
+        target_include_directories(${TEST_TARGET} PRIVATE
+            ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+        target_compile_options(${TEST_TARGET} PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+        target_link_libraries(${TEST_TARGET} PRIVATE gxruntime bluewake_posix_compat)
+        set_target_properties(${TEST_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
+        add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+    endforeach()
+
     add_executable(bluewake_inline_fp_test ${BLUEWAKE_REPO_ROOT}/tests/inline_fp_test.c)
     target_link_libraries(bluewake_inline_fp_test PRIVATE gxruntime)
     target_include_directories(bluewake_inline_fp_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)

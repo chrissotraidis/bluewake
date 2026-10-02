@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "interrupt_sources.h"
 
 #include <assert.h>
