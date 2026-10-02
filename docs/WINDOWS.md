@@ -37,9 +37,12 @@ three tests and the full app link also pass natively at `74da8ee` in
 [CI run 36810799124](https://github.com/chrissotraidis/bluewake/actions/runs/36810799124).
 These checks do not imply Windows gameplay or audio acceptance.
 
-The current reconciliation candidate (`3392854`) builds the native Windows host
-and passes all 56 source-only regressions in
-[CI run 37033022272](https://github.com/chrissotraidis/bluewake/actions/runs/37033022272).
+The current source qualification (`3574a0c`, runtime `0568fedd`) builds the native
+Windows host and passes all 58 source-only regressions in
+[CI run 37065036052](https://github.com/chrissotraidis/bluewake/actions/runs/37065036052).
+This includes the new PE/runtime and I8/RGB565 texture-encoding checks, and the
+actual host save-failure fixture. The earlier `3392854` baseline passed 56 tests;
+the newer host adds the Pictobox fix qualified on Mac in the reconciliation ledger.
 This covers app linking and the registered regression suites, not a complete
 player-owned-disc build, Direct3D gameplay, audio or physical controllers.
 

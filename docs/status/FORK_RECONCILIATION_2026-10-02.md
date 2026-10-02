@@ -910,8 +910,13 @@ then links the host and passes 57 of 58 tests, including the new texture encoder
 The remaining runtime-suite assertion is its hard-coded `/tmp` output path,
 which Windows does not provide. Runtime `0568fedd` uses the working directory,
 as the suite's other file fixtures do; the local runtime suite passes again.
-A new Windows run is required. These fixture-only changes do not alter the
-validated Mac host or require rebuilding its personal module.
+The corrected Windows source-only run
+[37065036052](https://github.com/chrissotraidis/bluewake/actions/runs/37065036052)
+at BlueWake `3574a0c` / runtime `0568fedd` links `BlueWake.exe` and passes all
+58 tests (39.42 seconds of tests), including runtime/PE, texture encoding and
+host save-failure preservation. These fixture-only changes do not alter the
+validated Mac host or require rebuilding its personal module. This is not a
+Windows owned-disc module, Direct3D gameplay or physical-controller result.
 
 ## Report reconciliation
 

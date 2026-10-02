@@ -22,7 +22,7 @@ relocatable signed packaging and a bounded completed-build interruption/resume
 check. Its app passes actual game save/separate reload, fresh start through
 control, fullscreen/settings persistence, same-module states across processes,
 local app replacement preserving card/settings/SRAM, and bounded ladder, outdoor,
-door and indoor progression. Native Windows host CI passes 56 tests. The exact
+door and indoor progression. Native Windows host CI at `3574a0c` / runtime `0568fedd` passes 58 tests. The exact
 source iOS app-only shell passes content/provenance audits. These bounded results
 remain accepted unless a relevant change invalidates them.
 
