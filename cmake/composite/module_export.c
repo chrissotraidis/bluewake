@@ -3,6 +3,7 @@
  */
 #include "generated_composite.h"
 #include "StaticRecompABI.h"
+#include "module_cpu_contract.h"
 #include "dispatch_loop.h"
 
 extern void ppc_set_mem_write_journal(PPCMemWriteJournal fn, void* user);
@@ -91,7 +92,11 @@ typedef struct BlueWakeRelLifecycle
 #include "rel_data.inc"
 
 static const StaticRecompModuleDesc s_desc = {
+#ifdef BLUEWAKE_FIXED_CPU
+    BLUEWAKE_FIXED_CPU_ABI_VERSION,
+#else
     STATICRECOMP_ABI_VERSION,
+#endif
     GXRUNTIME_CPU_ABI_VERSION,
     (u32)sizeof(CPUState),
     MODULE_GAME_ID,

@@ -37,8 +37,8 @@ three tests and the full app link also pass natively at `74da8ee` in
 [CI run 36810799124](https://github.com/chrissotraidis/bluewake/actions/runs/36810799124).
 These checks do not imply Windows gameplay or audio acceptance.
 
-The reconciliation candidate includes the generic prepaid-block transform as an
-explicit builder opt-in. Other register/native preparation and experimental
+The reconciliation candidate includes generic prepaid-block and fixed-address
+CPU transforms as separate builder opt-ins. Other register/native preparation and experimental
 60 Hz simulation remain separate work. Windows PGO training, matched Windows
 measurements and full Windows gameplay remain acceptance gates.
 
@@ -79,6 +79,7 @@ Options (`--help` lists all):
 | `--source-only` | Stop after generating the source: checks your tools, disc and translation in a few minutes |
 | `--no-mods` | Skip the mods (widescreen 16:9 and 16:10, Better Wind Waker's options) |
 | `--prepared-blocks` | Opt into generic prepaid-block optimization; off by default, Windows timing/gameplay pending |
+| `--fixed-cpu` | Opt into experimental fixed-address CPU storage; off by default, requires the matching app |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
@@ -200,6 +201,17 @@ The builder records the optimization selection and script hash, rejects stale
 generated-tree reuse, and safely re-prepares after an interrupted stage. Changing
 the selection regenerates the appropriate source; it does not change game logic,
 Smooth Motion preferences, saves or the module ABI.
+
+The separate `--fixed-cpu` experiment puts guest CPU storage in the module and
+requires the host and translated code to use that same state. Its module uses
+BlueWake ABI 4; ordinary modules remain ABI 3. Build the app and module together.
+Older apps reject ABI 4 before starting the game. To return to an older app,
+rebuild without `--fixed-cpu`. The new desktop host still accepts ordinary ABI 3
+modules with the matching CPU layout, but rejects older undeclared fixed-CPU
+modules and unsupported global-MEM1 modules with a rebuild message. This option
+does not enable Smooth Motion or 60 Hz simulation. Windows correctness, matched
+timing and gameplay qualification remain open; donor measurements do not establish
+a BlueWake speedup.
 
 ## Disc recovery in the reconciliation candidate
 

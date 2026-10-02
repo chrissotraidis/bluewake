@@ -7,7 +7,8 @@
 // fields are read through a reload of the pointer first (about 32,000
 // reloads in one chunk). The Windows builder rewrites the chunks to address
 // this object directly (scripts/windows/global_guest_cpu.py), which removes
-// 95 percent of those reloads. The host runs the guest on this object when the
+// those reloads in the donor measurements; BlueWake qualification is separate.
+// The host runs the guest on this object when the
 // module offers it (bluewake_composite_guest_cpu), so there is one state.
 #include "core/cpu.h"
 

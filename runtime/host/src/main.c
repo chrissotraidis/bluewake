@@ -15,6 +15,7 @@
 #include "gxruntime/aram.h"
 #include "core/cpu.h"
 #include "StaticRecompABI.h"
+#include "../../../cmake/composite/module_cpu_contract.h"
 #include <stdatomic.h>
 #include "aram_dma.h"
 #include "actor_search_budget.h"
@@ -6612,16 +6613,16 @@ int main(int argc, char** argv) {
     if (!get_module) { fprintf(stderr, "dlsym: %s\n", dlerror()); return 1; }
 
     const StaticRecompModuleDesc* mod = get_module();
-    if (!mod) { fprintf(stderr, "module desc is NULL\n"); return 1; }
-    if (mod->abi_version != STATICRECOMP_ABI_VERSION ||
-        mod->cpu_abi_version != GXRUNTIME_CPU_ABI_VERSION ||
-        mod->cpu_state_size != sizeof(CPUState)) {
-        fprintf(stderr,
-                "module ABI mismatch: module=%u host=%u cpu_abi=%u/%u "
-                "cpu_state_size=%u/%zu\n",
-                mod->abi_version, STATICRECOMP_ABI_VERSION,
-                mod->cpu_abi_version, GXRUNTIME_CPU_ABI_VERSION,
-                mod->cpu_state_size, sizeof(CPUState));
+    CPUState cpu_storage;
+    CPUState* cpu_state = NULL;
+    BlueWakeModuleCPUFn module_guest_cpu =
+        (BlueWakeModuleCPUFn)dlsym(lib, "bluewake_composite_guest_cpu");
+    const char* module_error = bw_module_select_cpu(
+        mod, module_guest_cpu,
+        dlsym(lib, "bluewake_composite_guest_mem1") != NULL,
+        &cpu_storage, &cpu_state);
+    if (module_error != NULL) {
+        fprintf(stderr, "module incompatible: %s\n", module_error);
         return 1;
     }
     printf("[host] module: game_id=%s abi=%u cpu_abi=%u entry=%#010x ranges=%u chunks=%u rels=%u\n",
@@ -6891,7 +6892,8 @@ int main(int argc, char** argv) {
     }
     atexit(bluewake_card_runtime_close);
 
-    CPUState cpu;
+    /* All host callbacks and translated code use the same borrowed state. */
+#define cpu (*cpu_state)
     if (!cpu_init(&cpu)) { fprintf(stderr, "cpu_init failed\n"); return 1; }
     DolViClock vi_clock;
     dol_vi_clock_init(&vi_clock);
@@ -15404,3 +15406,5 @@ int main(int argc, char** argv) {
     }
     return bw_host_stop_status(stop_reason);
 }
+
+#undef cpu

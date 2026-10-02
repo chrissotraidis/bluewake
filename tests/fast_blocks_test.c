@@ -16,6 +16,7 @@
  * Global-MEM1 modules require a separate fixture bound to their own RAM. */
 #include "core/cpu.h"
 #include "StaticRecompABI.h"
+#include "../cmake/composite/module_cpu_contract.h"
 
 #include <stddef.h>
 #include <errno.h>
@@ -183,14 +184,10 @@ static int open_module(const char* path, Module* out) {
         return 0;
     }
     out->desc = get();
-    out->cpu = guest_cpu != NULL ? guest_cpu() : &out->storage;
-    if (out->desc == NULL || out->cpu == NULL) return 0;
-    if (out->desc->abi_version != STATICRECOMP_ABI_VERSION ||
-        out->desc->cpu_abi_version != GXRUNTIME_CPU_ABI_VERSION ||
-        out->desc->cpu_state_size != sizeof(CPUState) ||
-        memcmp(out->desc->game_id, "GZLE01\0", 7) != 0 ||
-        out->desc->dispatch == NULL) {
-        fprintf(stderr, "%s: incompatible module descriptor\n", path);
+    const char* error = bw_module_select_cpu(out->desc, guest_cpu, 0,
+                                             &out->storage, &out->cpu);
+    if (error != NULL) {
+        fprintf(stderr, "%s: %s\n", path, error);
         return 0;
     }
     return 1;

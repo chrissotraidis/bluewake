@@ -479,9 +479,9 @@ int main(void) {
         # Keep an identical tree in place: rewriting 750 files would make the
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
-        inputs.update(f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n".encode())
+        inputs.update(f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n{int(self.args.fixed_cpu)}\n".encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
-                  + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py", Path(__file__)]):
+                  + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py", ROOT / "scripts/windows/global_guest_cpu.py", Path(__file__)]):
             if f.is_file():
                 inputs.update(f.read_bytes())
         inputs = inputs.hexdigest()
@@ -582,10 +582,15 @@ int main(void) {
         """
         o = self.out
         script = ROOT / "scripts/windows/fast_blocks.py"
+        cpu_script = ROOT / "scripts/windows/global_guest_cpu.py"
+        if self.args.fixed_cpu:
+            self.run("fixed-cpu", [sys.executable, cpu_script, o / "composite-src"])
         if self.args.prepared_blocks:
             self.run("prepared-blocks", [sys.executable, script, o / "composite-src"])
         digest = tree_digest(o / "composite-src")
         receipt = {"enabled": self.args.prepared_blocks,
+                   "fixed_cpu": self.args.fixed_cpu,
+                   "fixed_cpu_script_sha256": sha256_file(cpu_script),
                    "script_sha256": sha256_file(script),
                    "base_digest": (o / "composite-src.digest").read_text().strip(),
                    "final_digest": digest}
@@ -614,6 +619,7 @@ int main(void) {
         self.run("composite-configure", [
             "cmake", "-S", ROOT / "cmake/composite", "-B", build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang",
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_C_FLAGS={flags}", "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
+            f"-DBLUEWAKE_FIXED_CPU={'ON' if self.args.fixed_cpu else 'OFF'}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={self.args.opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
             f"-DGXRUNTIME_DIR={rc / 'GXRuntime'}", f"-DABI_DIR={rc / 'Source/Core/Core/PowerPC/StaticRecomp'}"])
         # -k 0: a chunk that fails does not stop the others. The usual cause is
@@ -687,6 +693,8 @@ int main(void) {
             "composite_digest": (self.out / "composite-src.digest").read_text().strip(),
             "mods": bool(self.mods),
             "march": self.args.march,
+            "prepared_blocks": self.args.prepared_blocks,
+            "fixed_cpu": self.args.fixed_cpu,
             "compiler": self.clang_version,
             "module_sha256": sha256_file(app / MODULE),
             "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -806,6 +814,8 @@ def main():
     parser.add_argument("--no-mods", action="store_true", help="skip the widescreen and Better Wind Waker variants")
     parser.add_argument("--prepared-blocks", action="store_true",
                         help="opt into experimental prepaid-block optimization (off by default; Windows timing pending)")
+    parser.add_argument("--fixed-cpu", action="store_true",
+                        help="opt into experimental fixed-address CPU state; requires a supporting app")
     parser.add_argument("--console", action="store_true", help="build BlueWake.exe as a console program")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")

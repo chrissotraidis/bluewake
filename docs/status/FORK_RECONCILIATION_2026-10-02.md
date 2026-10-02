@@ -50,7 +50,7 @@ translation belongs in each player's private workspace.
 | Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Integrated; clean player-generated module, all exports/options and relevant gameplay open |
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
-| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported for private qualification; explicit Windows builder opt-in, default off. Global/register transforms absent; native batches evaluated separately | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
+| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; global MEM1/native batches remain separate | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16, default off; oversized span guards fixed; plain/global bounds fixtures pass Mac/Windows. Inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
@@ -501,3 +501,49 @@ not reliably select Off; actual UI off/rate persistence remains unaccepted,
 although its synthetic policy tests pass. The app exits normally on window
 close. This is bounded menu/preference evidence; measured display pacing,
 real display changes, gameplay and speaker/audio acceptance remain open.
+
+
+### Fixed-CPU compatibility candidate
+
+The next isolated source batch imports only `global_guest_cpu.py` and
+`guest_cpu.c` from donor `4b6b2688a21051678f100b83cae57192fbe4a446`, retaining
+Elliott's original authorship in `e1ef8f6`. It does not import native game
+replacements, global MEM1 or default-on optimization settings. The Windows
+builder exposes separate `--fixed-cpu` and `--prepared-blocks` opt-ins and
+records both selections and transformer hashes in its cache/provenance.
+
+Fixed-CPU modules keep the existing descriptor layout but declare BlueWake
+ABI 4 and require their CPU getter; ordinary modules remain ABI 3. The shared
+desktop loader validates ABI, CPU layout, exact game identity and getter before
+initializing graphics or player storage. It rejects undeclared legacy fixed-CPU
+modules, missing/null/misaligned getters and global-MEM1 modules whose storage
+ownership is not yet supported. The selected state is borrowed; the existing
+CPU initializer/free path still owns its allocated RAM. An upstream ABI change
+requires explicit review of this extension. Apple shell support is not claimed.
+
+The contract passes ASan/UBSan and the bundled host's native contract CTest.
+All six source-cache/transform regressions pass, including independent and
+combined opt-ins, unchanged reuse, script changes and disabling either option.
+CMake rejects an unprepared ordinary tree with fixed CPU enabled. An actual
+older `95adeed` host rejects a synthetic ABI-4 module with exit 1 and
+`module ABI mismatch: module=4 host=3`, before creating its isolated card.
+The repository source audit passes.
+
+The fresh bundled Mac host links with the maintained runtime `70bc9957`.
+Use `scripts/builder/training` for this build: its wrapper supplies the direct
+DSP sources and `BLUEWAKE_HAS_DSP_ADAPTER` even though the external-adapter
+cache option is off. An initial standalone `runtime/host` configuration lacked
+that setup and failed to compile; it is retained as diagnostic evidence. This
+is not an audio acceptance result. The separate 823-unit fixed-CPU O0 module
+links against runtime `99e47480`, matching the prior private ordinary baseline.
+The fixed-only module passes all 30,000 CPU/RAM comparisons across the same
+14 SDK/J3D entries (264 partial stops and 12,539 near-deadline cases). This is
+bounded Mac O0 function correctness. Broader boot comparison, optimized x86
+correctness, matched measurements and actual gameplay still require acceptance.
+
+A second managed worktree under `$CODEX_HOME/worktrees` keeps these changes
+separate from the ongoing full PadMint build on primary `95adeed` and the
+matched O2 prepared-block build on `05df605`. Both managed checkouts retain
+unique private qualification artifacts and remain in use; preserve them until
+source integration and artifact retention are reconciled. No release or fork
+redirect is authorized.

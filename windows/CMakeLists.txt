@@ -196,6 +196,12 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         ${GXRUNTIME_DIR}/include
         ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
     target_compile_definitions(bluewake_fast_blocks_test PRIVATE _CRT_SECURE_NO_WARNINGS)
+    add_executable(bluewake_module_cpu_contract_test ${BLUEWAKE_REPO_ROOT}/tests/module_cpu_contract_test.c)
+    target_include_directories(bluewake_module_cpu_contract_test PRIVATE
+        ${GXRUNTIME_DIR}/include
+        ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+    add_test(NAME bluewake_module_cpu_contract_test COMMAND bluewake_module_cpu_contract_test)
+
     foreach(_variant IN ITEMS plain global)
         add_executable(bluewake_guest_memory_${_variant}_test ${GXRUNTIME_DIR}/tests/guest_memory_bounds_test.c)
         target_include_directories(bluewake_guest_memory_${_variant}_test PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})

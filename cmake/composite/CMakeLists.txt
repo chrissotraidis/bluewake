@@ -10,6 +10,7 @@ set(GAME_ID "GZLE01" CACHE STRING "Six-character disc ID")
 set(COMPOSITE_DIR "" CACHE PATH "Composite output dir (generated.h, module_tables.inc, rel_modules.inc)")
 set(GXRUNTIME_DIR "" CACHE PATH "GXRuntime checkout")
 set(ABI_DIR "" CACHE PATH "Directory containing StaticRecompABI.h")
+option(BLUEWAKE_FIXED_CPU "Use explicitly prepared fixed-address guest CPU chunks" OFF)
 set(COMPOSITE_OPTIMIZATION_LEVEL "2" CACHE STRING "Generated composite optimization level (0, 1, or 2)")
 set_property(CACHE COMPOSITE_OPTIMIZATION_LEVEL PROPERTY STRINGS 0 1 2)
 if(NOT COMPOSITE_OPTIMIZATION_LEVEL MATCHES "^[012]$")
@@ -67,6 +68,21 @@ add_library(${MODULE_NAME} SHARED
   ${GXRUNTIME_DIR}/src/core/cpu_interpreter_float.c
   ${GXRUNTIME_DIR}/src/core/cpu_interpreter_integer.c
   ${CHUNK_INPUTS})
+
+if(BLUEWAKE_FIXED_CPU)
+  foreach(CHUNK_SOURCE IN LISTS CHUNK_INPUTS)
+    if(NOT CHUNK_SOURCE MATCHES "\\.c$")
+      message(FATAL_ERROR "Fixed CPU needs prepared C chunks, not native objects")
+    endif()
+    file(STRINGS "${CHUNK_SOURCE}" FIXED_CPU_MARKER LIMIT_COUNT 1
+      REGEX "^extern CPUState bw_guest_cpu;$")
+    if(NOT FIXED_CPU_MARKER)
+      message(FATAL_ERROR "Fixed CPU chunk is unprepared: ${CHUNK_SOURCE}")
+    endif()
+  endforeach()
+  target_sources(${MODULE_NAME} PRIVATE guest_cpu.c)
+  target_compile_definitions(${MODULE_NAME} PRIVATE BLUEWAKE_FIXED_CPU=1)
+endif()
 
 set_target_properties(${MODULE_NAME} PROPERTIES PREFIX "" OUTPUT_NAME "${MODULE_NAME}" UNITY_BUILD OFF C_VISIBILITY_PRESET hidden)
 target_compile_definitions(${MODULE_NAME} PRIVATE MODULE_GAME_ID="${GAME_ID}" DOLRECOMP_CPU_HEADER="core/cpu.h")
