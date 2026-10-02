@@ -149,3 +149,59 @@ fixture timed out at cancellation (28 other regressions passed). Windows
 a modal despite the no-dialog flag. The picker now treats no-dialog/no-choice
 as cancellation. The same regression remains enabled with its 30-second limit;
 the timeout was not extended. Follow-up native execution is pending.
+
+## Fresh player-source and app-only checks
+
+On the M3 Max, the direct builder generated source from a supported personal
+USA rev-0 disc in a new `build/reconciliation/player-source` directory. It
+recompiled the translator/tool outputs, translated 206 DOL chunks and 415 RELs,
+and generated 748 chunks / 417 ranges with the expected `54f54434…770a` digest.
+The canonical old developer disc path was absent; the preserved personal disc
+backup was used read-only. No player save or unpublished profile was an input.
+
+PadMint source `018a9f0fdd2030d2fa9f328617d6541fd83c9af1` (0.2.8) reproduced a
+manifest bug at BlueWake `491b375`: source-only passed an empty `--app` and
+failed before dependencies. Moving `--app` to the full mode fixes it. A new
+PadMint workspace completed source generation at BlueWake
+`95adeed0f32a39739341dd9381c50756c5247bf4` in 16.6 seconds; the local record
+says completed/source-only and the expected digest matches. PR #11's SDK
+manifest prerequisites and disk guidance were cherry-picked with authorship;
+no duplicate source preflight implementation was invented.
+
+A new local app-only iOS build at `491b375` / runtime `99e47480` compiled and
+packaged with no game module. Executable SHA-256:
+`b32ed8688cb10232b591c770cf1ce05f3e442e71d985b0b9a2ccd6e605bc7b48`.
+Both `scripts/release/check_public_assets.sh` and PadMint's audit passed.
+The app-only candidate remains local; this is not publication authorization or
+physical gameplay acceptance.
+
+Native Windows source-only app linking and **28/28** regressions pass at
+`95adeed` in [run 36946613444](https://github.com/chrissotraidis/bluewake/actions/runs/36946613444).
+This includes the camera queue regression and runtime patch 0130; it does not
+cover the later disc batch or prove Windows gameplay.
+
+The direct default-training full builder is running separately against fixed
+BlueWake `95adeed` / runtime `99e47480`, with fresh generated mods/training
+module and an isolated new card. No old generated game module or developer game
+profile is reused. Record terminal training/compilation/package outcomes before
+counting the full build, then run PadMint's complete path serially. Partial
+training, an app-only IPA and source generation are not full acceptance.
+
+## Newer runtime foundation in isolation
+
+[RecompCore draft PR #1](https://github.com/chrissotraidis/RecompCore/pull/1)
+rebases donor `460b5b84` (optional global MEM1) and `63489547` (display-rate /
+slow-game interpolation handling) onto maintained `99e47480`, preserving the
+existing safety fixes and Elliott's authorship. Its branch is
+`codex/bluewake-runtime-parity`, current `45364adf`; the primary build/pin is
+unchanged pending validation. The nested runtime worktree is inside the managed
+disc worktree; retain both until their source/evidence is reconciled.
+
+A new actual-header probe reproduced acceptance of an oversized guest memory
+span because unsigned capacity-minus-size underflowed. The fix checks size
+before subtraction in plain/global MEM1 and MEM2. Both plain/global variants
+pass ASan/UBSan and 2/2 CTests against a fresh core build, covering bounds,
+mirrors, aliases and empty banks. This is not a diagnosis of Pictobox/startup
+reports. Full renderer/host compilation and interpolation checks are running
+in the isolated tree; the expanded display behavior and performance still need
+matched gameplay evidence. Existing modules and experiments-off defaults remain.
