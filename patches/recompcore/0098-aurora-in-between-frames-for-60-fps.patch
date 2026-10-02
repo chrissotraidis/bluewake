@@ -1,0 +1,2008 @@
+From b2cda7ca206974fc593eef2790fa1f9daa493260 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Mon, 28 Sep 2026 18:15:50 -0400
+Subject: [PATCH] Aurora: in-between frames for 60 FPS, and an FPS counter
+
+Wind Waker's logic runs at 30 steps a second. With in-between frames on, the
+render worker keeps each finished frame, encodes its passes a second time with
+every draw's transforms blended halfway toward the same draw in the previous
+frame, presents that, and presents the kept frame half a game frame later:
+60 frames a second of real geometry (depth, lighting and the HUD exact) with
+the game's logic unchanged.
+
+- frame_interp.*: draws are keyed by their FIFO payload (or shape and texture
+  for direct positions) and matched occurrence-first; a pair must be plausibly
+  one object a frame apart (skinned draws check the matrix slots they use),
+  and 40 percent implausible is a camera cut. Copies of one model (grass,
+  bushes, trees), culled one by one, are matched by the camera's motion, which
+  the draws with a unique key vote for; a copy that comes into view is blended
+  from where that motion carries it from.
+- Blended blocks go to their own 32 MB uniform area and bind group.
+- aurora_set_frame_interpolation / DOL_AURORA_FRAME_INTERP, debug logging,
+  tracing and dumps (DOL_AURORA_FRAME_INTERP_*); a unit test.
+- aurora_set_fps_overlay / DOL_AURORA_SHOW_FPS: "60 FPS (game 30)" at the top
+  of the window.
+
+BlueWake's patches/recompcore/0098.
+---
+ .../graphics/aurora/cmake/aurora_gx.cmake     |   2 +
+ .../graphics/aurora/include/aurora/aurora.h   |  11 +
+ GXRuntime/graphics/aurora/lib/aurora.cpp      |  45 ++
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 366 ++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  10 +
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 732 ++++++++++++++++++
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  73 ++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  59 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   3 +
+ .../graphics/aurora/lib/gfx/render_worker.cpp |   6 +
+ .../graphics/aurora/lib/gfx/render_worker.hpp |   3 +
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp  |   9 +
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp  |   3 +
+ .../aurora/tests/frame_interp_test.cpp        | 226 ++++++
+ .../include/gxruntime/gxcore/shader.hpp       |  11 +
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |   7 +
+ 16 files changed, 1559 insertions(+), 7 deletions(-)
+ create mode 100644 GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+ create mode 100644 GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+ create mode 100644 GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+
+diff --git a/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake b/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
+index 59f6a44..7402e2c 100644
+--- a/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
++++ b/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
+@@ -61,6 +61,8 @@ endif ()
+ # only when the fork builds inside GXRuntime with the recomp modules on.
+ if (TARGET GXRuntime::gxcore)
+     target_sources(aurora_gx PRIVATE
++        lib/gfx/frame_interp.cpp
++        lib/gfx/frame_interp.hpp
+         lib/gfx/gxcore_draw.cpp
+         lib/gfx/gxcore_draw.hpp
+     )
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 6091706..6e225ce 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -145,6 +145,17 @@ void aurora_set_frame_buffer_scale(float scale);
+    own sampler settings, 2-16 forces that many samples. Takes effect at the
+    next draw. DOL_AURORA_FORCE_ANISO sets the starting value. */
+ void aurora_set_forced_anisotropy(unsigned samples);
++/* In-between frames: each finished frame is drawn a second time with every
++   draw's transforms blended halfway toward the previous frame and shown
++   first, so a 30 FPS game presents 60 frames a second with its own logic
++   unchanged (one extra half frame of display latency). Takes effect at the
++   next frame. DOL_AURORA_FRAME_INTERP=1 sets the starting value. */
++void aurora_set_frame_interpolation(bool enabled);
++/* A frames-a-second counter at the top of the window (with the game's own
++   rate beside it when in-between frames are on). DOL_AURORA_SHOW_FPS=1 sets
++   the starting value. */
++void aurora_set_fps_overlay(bool enabled);
++bool aurora_get_frame_interpolation(void);
+ 
+ AuroraBackend aurora_get_backend();
+ const AuroraBackend* aurora_get_available_backends(size_t* count);
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index 5020103..d6a8d9c 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -5,6 +5,10 @@
+ #include "gfx/render_worker.hpp"
+ #include "gx/fifo.hpp"
+ #include "imgui.hpp"
++#include <imgui.h>
++
++#include <atomic>
++#include <cstdlib>
+ #include "webgpu/gpu.hpp"
+ #include "webgpu/gpu_prof.hpp"
+ #include <webgpu/webgpu_cpp.h>
+@@ -245,11 +249,45 @@ bool begin_frame() noexcept {
+   return true;
+ }
+ 
++#ifdef AURORA_ENABLE_GX
++// Frames a second at the top of the window (DOL_AURORA_SHOW_FPS=1 or
++// aurora_set_fps_overlay): every present, and the game's own frames under it
++// when in-between frames make the two differ.
++static std::atomic_bool g_showFps{[] {
++  const char* env = std::getenv("DOL_AURORA_SHOW_FPS");
++  return env != nullptr && env[0] != '\0' && env[0] != '0';
++}()};
++
++static void draw_fps_overlay() {
++  if (!g_showFps.load(std::memory_order_relaxed)) {
++    return;
++  }
++  const float shown = gfx::calculate_fps();
++  const float game = gfx::calculate_game_fps();
++  // Top center: the corners hold the game's HUD (hearts, buttons, map, rupees).
++  ImGui::SetNextWindowPos(ImVec2{ImGui::GetIO().DisplaySize.x * 0.5f, 12.f}, ImGuiCond_Always, ImVec2{0.5f, 0.f});
++  ImGui::SetNextWindowBgAlpha(0.6f);
++  constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
++                                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
++                                     ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
++  if (ImGui::Begin("##aurora-fps", nullptr, flags)) {
++    ImGui::SetWindowFontScale(1.5f);
++    if (game > 0.f && shown > game + 5.f) {
++      ImGui::Text("%.0f FPS (game %.0f)", shown, game);
++    } else {
++      ImGui::Text("%.0f FPS", shown);
++    }
++  }
++  ImGui::End();
++}
++#endif
++
+ void end_frame() noexcept {
+   ZoneScoped;
+ #ifdef AURORA_ENABLE_GX
+   gx::fifo::drain();
+   gfx::finish();
++  draw_fps_overlay();
+   auto imguiDrawData = imgui::freeze();
+ 
+   const auto& presentSource = webgpu::present_source();
+@@ -428,6 +466,13 @@ AuroraInfo aurora_initialize(int argc, char* argv[], const AuroraConfig* config)
+ void aurora_shutdown() { aurora::shutdown(); }
+ const AuroraEvent* aurora_update() { return aurora::update(); }
+ bool aurora_begin_frame() { return aurora::begin_frame(); }
++void aurora_set_fps_overlay(bool enabled) {
++#ifdef AURORA_ENABLE_GX
++  aurora::g_showFps.store(enabled, std::memory_order_relaxed);
++#else
++  (void)enabled;
++#endif
++}
+ void aurora_end_frame() { aurora::end_frame(); }
+ AuroraBackend aurora_get_backend() { return aurora::g_config.desiredBackend; }
+ const AuroraBackend* aurora_get_available_backends(size_t* count) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index df6cd51..8cc49e7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -3,6 +3,7 @@
+ #include "clear.hpp"
+ #include "depth_peek.hpp"
+ #include "efb_readback.hpp"
++#include "frame_interp.hpp"
+ #include "../internal.hpp"
+ #include "../webgpu/gpu.hpp"
+ #include "../webgpu/gpu_prof.hpp"
+@@ -22,6 +23,7 @@
+ #include "texture.hpp"
+ #include "../window.hpp"
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <chrono>
+ #include <deque>
+@@ -237,9 +239,22 @@ struct FramePacket {
+   size_t stagingBuffer = 0;
+   StagingHighWater copied;
+   AuroraStats stats{};
++  // A later staging segment of a frame: its EFB starts from the previous one.
++  bool continuation = false;
++  // Ends a game frame (not a staging segment), so its callback presents.
++  bool presents = false;
++  // Gets an in-between frame (frame_interp.hpp), and its game frame number.
++  bool interpolate = false;
++  uint64_t gameFrame = 0;
+ };
+ 
+ static std::array<FramePacket, FrameSlotCount> g_framePackets;
++// In-between frame uniforms, per frame slot (see push_interp_uniform).
++constexpr uint64_t InterpUniformBufferSize = 33554432; // 32mb
++static std::array<std::vector<uint8_t>, FrameSlotCount> g_interpUniformStaging;
++static uint64_t g_interpUniformOverflows = 0; // recording thread
++static wgpu::Buffer g_interpUniformBuffer;
++wgpu::BindGroup g_interpUniformBindGroup;
+ static FramePacket* g_recordingFrame = nullptr;
+ static size_t g_recordingFrameSlot = 0;
+ static uint64_t g_nextFrameId = 1;
+@@ -259,12 +274,32 @@ using PresentClock = std::chrono::steady_clock;
+ static constexpr auto PresentFpsWindow = std::chrono::seconds{1};
+ static std::mutex g_presentStatsMutex;
+ static std::deque<PresentClock::time_point> g_presentTimes;
++static std::deque<PresentClock::time_point> g_gameFrameTimes; // under g_presentStatsMutex
+ static std::atomic_bool g_processEventsQueued = false;
+ static std::atomic_int64_t g_lastPresentNs = 0;
+ static std::atomic_int64_t g_presentPeriodNs = 0;
+ static std::atomic_int64_t g_cpuFrameTimeNs = 0;
+ static PresentClock::time_point g_cpuFrameStart;
+ static constexpr auto FrameStartSafetyMargin = std::chrono::milliseconds{2};
++
++// In-between frames (frame_interp.hpp). All render worker state except
++// g_segmentEnding, which the recording thread sets while segment_frame ends
++// its packet.
++static bool g_segmentEnding = false;
++static webgpu::TextureWithSampler g_heldFrame; // the real frame, kept for its later present
++struct DeferredPresent {
++  bool active = false;
++  PresentClock::time_point due;
++  EndFrameCallback callback;
++};
++static DeferredPresent g_deferredPresent;
++static PresentClock::time_point g_lastGameFrameEnd;
++static int64_t g_gameFramePeriodNs = 0;
++static void run_deferred_present();
++static void deferred_present_tick();
++static bool note_game_frame_end();
++static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
++                                    const EndFrameCallback& callback);
+ static constexpr auto MaxPacingSample = std::chrono::milliseconds{250};
+ static constexpr uint32_t PacingEmaWeight = 8;
+ 
+@@ -290,6 +325,22 @@ static void update_ema(std::atomic_int64_t& value, int64_t sample) {
+   }
+ }
+ 
++static float fps_over(std::deque<PresentClock::time_point>& times, PresentClock::time_point now) {
++  while (!times.empty() && times.front() + PresentFpsWindow < now) {
++    times.pop_front();
++  }
++  if (times.size() < 2) {
++    return 0.f;
++  }
++  const auto elapsed = std::chrono::duration<float>(times.back() - times.front()).count();
++  return elapsed > 0.f ? static_cast<float>(times.size() - 1) / elapsed : 0.f;
++}
++
++float calculate_game_fps() noexcept {
++  std::lock_guard lock{g_presentStatsMutex};
++  return fps_over(g_gameFrameTimes, PresentClock::now());
++}
++
+ static void prune_present_times(PresentClock::time_point now) {
+   while (!g_presentTimes.empty() && g_presentTimes.front() + PresentFpsWindow < now) {
+     g_presentTimes.pop_front();
+@@ -945,6 +996,7 @@ void initialize() {
+     std::lock_guard lock{g_presentStatsMutex};
+     g_presentTimes.clear();
+   }
++  render_worker::set_idle_hook(deferred_present_tick);
+   render_worker::initialize();
+   // This appears to take a while and blocks the render thread for periods of time
+   // render_worker::set_event_pump([] {
+@@ -1082,6 +1134,15 @@ void initialize() {
+ void shutdown() {
+   render_worker::synchronize();
+   render_worker::shutdown();
++  g_deferredPresent = {};
++  g_heldFrame = {};
++  g_interpUniformBindGroup = {};
++  g_interpUniformBuffer = {};
++  for (auto& staging : g_interpUniformStaging) {
++    staging = {};
++  }
++  g_lastGameFrameEnd = {};
++  g_gameFramePeriodNs = 0;
+   g_processEventsQueued.store(false, std::memory_order_release);
+   g_lastPresentNs.store(0, std::memory_order_release);
+   g_presentPeriodNs.store(0, std::memory_order_release);
+@@ -1193,6 +1254,8 @@ bool begin_frame(bool preserveEfb) {
+   frame.frameId = g_nextFrameId++;
+   frame.frameIndex = g_frameIndex;
+   frame.stagingBuffer = *stagingSlot;
++  frame.continuation = preserveEfb;
++  g_interpUniformStaging[frameSlot].clear();
+   g_recordingFrame = &frame;
+   g_recordingFrameSlot = frameSlot;
+ 
+@@ -1251,6 +1314,7 @@ bool segment_frame() {
+            frame.frameId, frame.verts.size(), frame.uniforms.size(),
+            frame.indices.size(), frame.storage.size());
+   finish();
++  g_segmentEnding = true;
+   end_frame([](wgpu::CommandEncoder& encoder) {
+     webgpu::gpu_prof::frame_end(encoder);
+     const wgpu::CommandBufferDescriptor descriptor{
+@@ -1260,6 +1324,7 @@ bool segment_frame() {
+     webgpu::gpu_prof::after_submit();
+     after_submit();
+   });
++  g_segmentEnding = false;
+   return begin_frame(true);
+ }
+ 
+@@ -1326,6 +1391,34 @@ void end_frame(EndFrameCallback callback) {
+   frame.stats.lastIndexSize = frame.indices.size();
+   frame.stats.lastStorageSize = frame.storage.size();
+   frame.stats.lastTextureUploadSize = frame.textureUpload.size();
++  frame.presents = !g_segmentEnding;
++  frame.interpolate = frame.presents && !frame.continuation && frame_interp::frame_verdict();
++  if (frame_interp::tracing() || (frame.interpolate && frame_interp::dump_frame(frame_interp::game_frame_number()))) {
++    Log.info("In-between uniforms for game frame {}: {} bytes, {} blocks did not fit; frame uniforms {} bytes",
++             frame_interp::game_frame_number(), g_interpUniformStaging[g_recordingFrameSlot].size(),
++             g_interpUniformOverflows, frame.uniforms.size());
++  }
++  g_interpUniformOverflows = 0;
++  if (frame_interp::tracing()) {
++    for (size_t i = 0; i < frame.renderPasses.size(); ++i) {
++      const auto& pass = frame.renderPasses[i];
++      size_t draws = 0, blended = 0;
++#ifdef AURORA_ENABLE_GXCORE
++      for (const auto& cmd : pass.commands) {
++        if (cmd.type == CommandType::Draw && cmd.data.draw.type == ShaderType::GXCore) {
++          ++draws;
++          blended += cmd.data.draw.gxcore.interpUniformRange.size != 0 ? 1 : 0;
++        }
++      }
++#endif
++      Log.info("  pass {} '{}': commands={} gxcore_draws={} blended={} observable={} offscreen={} resolve={} "
++               "clear={} load={}",
++               i, pass.label, pass.commands.size(), draws, blended, pass.observable, pass.offscreen,
++               pass.resolveTarget ? 1 : 0, pass.clearColor, static_cast<int>(pass.colorLoadOp));
++    }
++    Log.info("  ops={} texture_copies={}", frame.ops.size(), frame.textureCopies.size());
++  }
++  frame.gameFrame = frame_interp::game_frame_number();
+ 
+   const size_t frameSlot = g_recordingFrameSlot;
+   const uint64_t frameId = frame.frameId;
+@@ -1357,7 +1450,17 @@ void end_frame(EndFrameCallback callback) {
+     s_mappingStates[stagingSlot].store(BufferMapState::Unmapped, std::memory_order_release);
+     auto encoder = std::move(packet.encoder);
+     const auto stats = packet.stats;
+-    packet = {};
++    // A real frame still waiting behind its in-between frame is shown first:
++    // presents stay in order, and this frame may overwrite the held copy.
++    run_deferred_present();
++    bool interpolate = false;
++    if (packet.presents) {
++      const bool periodKnown = note_game_frame_end();
++      interpolate = packet.interpolate && callback && periodKnown;
++    }
++    if (!interpolate) {
++      packet = {};
++    }
+     g_stats.drawCallCount = stats.drawCallCount;
+     g_stats.mergedDrawCallCount = stats.mergedDrawCallCount;
+     g_stats.lastVertSize = stats.lastVertSize;
+@@ -1365,7 +1468,10 @@ void end_frame(EndFrameCallback callback) {
+     g_stats.lastIndexSize = stats.lastIndexSize;
+     g_stats.lastStorageSize = stats.lastStorageSize;
+     g_stats.lastTextureUploadSize = stats.lastTextureUploadSize;
+-    if (callback) {
++    if (interpolate) {
++      present_with_in_between(packet, frameSlot, encoder, callback);
++      packet = {};
++    } else if (callback) {
+       callback(encoder);
+     }
+     g_frameSlots.release(frameSlot);
+@@ -1535,7 +1641,7 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+   render_pass(pass, frame, passInfo);
+   pass.End();
+ 
+-  if (passInfo.captureDepthSnapshot) {
++  if (passInfo.captureDepthSnapshot && !frame_interp::encoding_interpolated()) {
+     depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, passInfo.targetSize, passInfo.msaaSamples);
+   }
+ 
+@@ -1582,6 +1688,247 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+   }
+ }
+ 
++// --- In-between frames (frame_interp.hpp) -------------------------------------
++
++// The game frame's period, measured at its end on the render worker. Also the
++// gate: the in-between frame only helps a game slower than about 40 FPS, and
++// the first frames after a start or a stall have no period yet.
++static bool note_game_frame_end() {
++  const auto now = PresentClock::now();
++  {
++    std::lock_guard lock{g_presentStatsMutex};
++    g_gameFrameTimes.push_back(now);
++    while (!g_gameFrameTimes.empty() && g_gameFrameTimes.front() + PresentFpsWindow < now) {
++      g_gameFrameTimes.pop_front();
++    }
++  }
++  bool usable = false;
++  if (g_lastGameFrameEnd.time_since_epoch().count() != 0) {
++    const int64_t interval = duration_ns(now - g_lastGameFrameEnd);
++    if (interval > 0 && interval < 100'000'000) {
++      g_gameFramePeriodNs = g_gameFramePeriodNs == 0 ? interval : (g_gameFramePeriodNs * 7 + interval) / 8;
++    }
++    usable = g_gameFramePeriodNs > 25'000'000;
++  }
++  g_lastGameFrameEnd = now;
++  return usable;
++}
++
++static void ensure_held_frame(const webgpu::TextureWithSampler& source) {
++  if (g_heldFrame.texture && g_heldFrame.size.width == source.size.width &&
++      g_heldFrame.size.height == source.size.height && g_heldFrame.format == source.format) {
++    return;
++  }
++  const wgpu::TextureDescriptor textureDescriptor{
++      .label = "Held frame",
++      .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
++               wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::CopyDst,
++      .dimension = wgpu::TextureDimension::e2D,
++      .size = wgpu::Extent3D{source.size.width, source.size.height, 1},
++      .format = source.format,
++      .mipLevelCount = 1,
++      .sampleCount = 1,
++  };
++  g_heldFrame.texture = g_device.CreateTexture(&textureDescriptor);
++  g_heldFrame.view = g_heldFrame.texture.CreateView();
++  g_heldFrame.size = source.size;
++  g_heldFrame.format = source.format;
++  g_heldFrame.sampler = source.sampler;
++}
++
++// Debug: write a texture as a binary PPM (blocking readback on the worker).
++static void dump_texture(const webgpu::TextureWithSampler& texture, const char* kind, uint64_t gameFrame) {
++  const char* directory = frame_interp::dump_directory();
++  if (directory == nullptr || !texture.texture) {
++    return;
++  }
++  const uint32_t width = texture.size.width;
++  const uint32_t height = texture.size.height;
++  const uint32_t bytesPerRow = AURORA_ALIGN(width * 4, 256);
++  const wgpu::BufferDescriptor bufferDescriptor{
++      .label = "Frame dump",
++      .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead,
++      .size = static_cast<uint64_t>(bytesPerRow) * height,
++  };
++  auto buffer = g_device.CreateBuffer(&bufferDescriptor);
++  static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "Frame dump encoder"};
++  auto encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
++  const wgpu::TexelCopyTextureInfo src{.texture = texture.texture};
++  const wgpu::TexelCopyBufferInfo dst{
++      .layout = wgpu::TexelCopyBufferLayout{.offset = 0, .bytesPerRow = bytesPerRow, .rowsPerImage = height},
++      .buffer = buffer,
++  };
++  const wgpu::Extent3D extent{width, height, 1};
++  encoder.CopyTextureToBuffer(&src, &dst, &extent);
++  const auto commands = encoder.Finish();
++  g_queue.Submit(1, &commands);
++  std::atomic_bool done{false};
++  bool ok = false;
++  buffer.MapAsync(wgpu::MapMode::Read, 0, bufferDescriptor.size, wgpu::CallbackMode::AllowSpontaneous,
++                  [&](wgpu::MapAsyncStatus status, wgpu::StringView) {
++                    ok = status == wgpu::MapAsyncStatus::Success;
++                    done.store(true, std::memory_order_release);
++                  });
++  while (!done.load(std::memory_order_acquire)) {
++    process_events();
++    std::this_thread::sleep_for(std::chrono::microseconds{200});
++  }
++  if (!ok) {
++    return;
++  }
++  const auto* bytes = static_cast<const uint8_t*>(buffer.GetConstMappedRange(0, bufferDescriptor.size));
++  const bool bgra = texture.format == wgpu::TextureFormat::BGRA8Unorm ||
++                    texture.format == wgpu::TextureFormat::BGRA8UnormSrgb;
++  const auto path = fmt::format("{}/frame{:06}-{}.ppm", directory, gameFrame, kind);
++  if (FILE* file = std::fopen(path.c_str(), "wb")) {
++    std::fprintf(file, "P6\n%u %u\n255\n", width, height);
++    std::vector<uint8_t> row(static_cast<size_t>(width) * 3);
++    for (uint32_t y = 0; y < height; ++y) {
++      const uint8_t* in = bytes + static_cast<size_t>(y) * bytesPerRow;
++      for (uint32_t x = 0; x < width; ++x) {
++        row[x * 3 + 0] = in[x * 4 + (bgra ? 2 : 0)];
++        row[x * 3 + 1] = in[x * 4 + 1];
++        row[x * 3 + 2] = in[x * 4 + (bgra ? 0 : 2)];
++      }
++      std::fwrite(row.data(), 1, row.size(), file);
++    }
++    std::fclose(file);
++  }
++  buffer.Unmap();
++}
++
++// The frame's passes once more, with each gxcore draw's blended constants.
++// Staging copies and texture uploads already ran with the real frame, which
++// was submitted first; EFB copies and conversions run again so the in-between
++// frame samples its own copies.
++static void replay_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const FrameOp& op) {
++  switch (op.type) {
++  case FrameOpType::RenderPass:
++    if (op.renderPass != nullptr) {
++      render(cmd, frame, *op.renderPass, op.index);
++    }
++    break;
++  case FrameOpType::TextureCopy:
++    if (op.textureCopy != nullptr) {
++      cmd.CopyTextureToTexture(&op.textureCopy->src, &op.textureCopy->dst, &op.textureCopy->size);
++    }
++    break;
++  }
++}
++
++// Render worker: the frame's blended blocks into their GPU buffer, created at
++// first use.
++static void upload_interp_uniforms(size_t frameSlot) {
++  if (!g_interpUniformBuffer) {
++    const wgpu::BufferDescriptor descriptor{
++        .label = "In-between frame uniform buffer",
++        .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
++        .size = InterpUniformBufferSize,
++    };
++    g_interpUniformBuffer = g_device.CreateBuffer(&descriptor);
++    const std::array entries{
++        wgpu::BindGroupEntry{
++            .binding = 0,
++            .buffer = g_interpUniformBuffer,
++            .size = gx::MaxUniformSize,
++        },
++    };
++    const wgpu::BindGroupDescriptor bindGroupDescriptor{
++        .label = "In-between frame uniform bind group",
++        .layout = g_uniformBindGroupLayout,
++        .entryCount = entries.size(),
++        .entries = entries.data(),
++    };
++    g_interpUniformBindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
++  }
++  const auto& staging = g_interpUniformStaging[frameSlot];
++  if (!staging.empty()) {
++    g_queue.WriteBuffer(g_interpUniformBuffer, 0, staging.data(), AURORA_ALIGN(staging.size(), 4));
++  }
++}
++
++static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
++                                    const EndFrameCallback& callback) {
++  ZoneScopedN("Present with in-between frame");
++  // 1. The real frame: rendered as usual, then kept aside, not yet presented.
++  const auto& source = webgpu::present_source();
++  ensure_held_frame(source);
++  {
++    const wgpu::TexelCopyTextureInfo src{.texture = source.texture};
++    const wgpu::TexelCopyTextureInfo dst{.texture = g_heldFrame.texture};
++    const wgpu::Extent3D extent{source.size.width, source.size.height, 1};
++    encoder.CopyTextureToTexture(&src, &dst, &extent);
++  }
++  webgpu::gpu_prof::frame_end(encoder);
++  {
++    const wgpu::CommandBufferDescriptor descriptor{.label = "Real frame command buffer"};
++    const auto buffer = encoder.Finish(&descriptor);
++    g_queue.Submit(1, &buffer);
++  }
++  webgpu::gpu_prof::after_submit();
++  after_submit();
++  const bool dump = frame_interp::dump_frame(frame.gameFrame);
++  if (dump) {
++    dump_texture(g_heldFrame, "real", frame.gameFrame);
++  }
++
++  // 2. The in-between frame: the same passes with blended transforms, into
++  // the EFB, and presented now.
++  upload_interp_uniforms(frameSlot);
++  static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "In-between frame encoder"};
++  auto between = g_device.CreateCommandEncoder(&EncoderDescriptor);
++  frame_interp::set_encoding_interpolated(true);
++  static const bool dumpPasses = std::getenv("DOL_AURORA_FRAME_INTERP_DUMP_PASSES") != nullptr;
++  for (size_t i = 0; i < frame.ops.size(); ++i) {
++    replay_op(between, frame, frame.ops[i]);
++    if (dump && dumpPasses) {
++      const auto commands = between.Finish();
++      g_queue.Submit(1, &commands);
++      dump_texture(webgpu::present_source(), fmt::format("between-op{}", i).c_str(), frame.gameFrame);
++      if (frame.ops[i].renderPass != nullptr && frame.ops[i].renderPass->resolveTarget) {
++        const auto& target = *frame.ops[i].renderPass->resolveTarget;
++        webgpu::TextureWithSampler copy{.texture = target.texture, .size = target.size, .format = target.format};
++        if (target.format == wgpu::TextureFormat::RGBA8Unorm || target.format == wgpu::TextureFormat::BGRA8Unorm)
++          dump_texture(copy, fmt::format("between-op{}-copy", i).c_str(), frame.gameFrame);
++      }
++      between = g_device.CreateCommandEncoder(&EncoderDescriptor);
++    }
++  }
++  frame_interp::set_encoding_interpolated(false);
++  callback(between);
++  if (dump) {
++    dump_texture(webgpu::present_source(), "between", frame.gameFrame);
++  }
++
++  // 3. The real frame half a game frame later (deferred_present_tick).
++  const int64_t halfNs = std::clamp<int64_t>(g_gameFramePeriodNs / 2, 6'000'000, 40'000'000);
++  g_deferredPresent = DeferredPresent{
++      .active = true,
++      .due = PresentClock::now() + std::chrono::nanoseconds{halfNs},
++      .callback = callback,
++  };
++}
++
++static void run_deferred_present() {
++  if (!g_deferredPresent.active) {
++    return;
++  }
++  ZoneScopedN("Deferred real frame present");
++  auto callback = std::move(g_deferredPresent.callback);
++  g_deferredPresent = {};
++  webgpu::set_present_source_override(&g_heldFrame);
++  static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "Held frame present encoder"};
++  auto encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
++  callback(encoder);
++  webgpu::set_present_source_override(nullptr);
++}
++
++static void deferred_present_tick() {
++  if (g_deferredPresent.active && PresentClock::now() >= g_deferredPresent.due) {
++    run_deferred_present();
++  }
++}
++
+ void after_submit() noexcept {
+   depth_peek::after_submit();
+   efb_readback::after_submit();
+@@ -1759,6 +2106,19 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
+   return push(current_frame_packet().indices, data, length, alignment);
+ }
+ 
++Range push_interp_uniform(const uint8_t* data, size_t length) {
++  auto& staging = g_interpUniformStaging[g_recordingFrameSlot];
++  const size_t offset = AURORA_ALIGN(staging.size(), g_cachedLimits.minUniformBufferOffsetAlignment);
++  // The bind group reads MaxUniformSize from the offset.
++  if (offset + std::max<size_t>(length, gx::MaxUniformSize) > InterpUniformBufferSize) {
++    ++g_interpUniformOverflows;
++    return {};
++  }
++  staging.resize(offset + length);
++  std::memcpy(staging.data() + offset, data, length);
++  return {static_cast<uint32_t>(offset), static_cast<uint32_t>(length)};
++}
++
+ Range push_uniform(const uint8_t* data, size_t length) {
+   ZoneScoped;
+   return push(current_frame_packet().uniforms, data, length, g_cachedLimits.minUniformBufferOffsetAlignment);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 27279bc..3c8a615 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -195,6 +195,10 @@ extern wgpu::BindGroupLayout g_staticBindGroupLayout;
+ extern wgpu::BindGroup g_staticBindGroup;
+ extern wgpu::BindGroupLayout g_uniformBindGroupLayout;
+ extern wgpu::BindGroup g_uniformBindGroup;
++// In-between frames (frame_interp.hpp): blended vertex constants live in their
++// own area, filled while the frame records and uploaded once when it ends, so
++// they never take room from (or split) the frame's staging.
++extern wgpu::BindGroup g_interpUniformBindGroup;
+ 
+ using BindGroupRef = HashType;
+ using PipelineRef = HashType;
+@@ -247,6 +251,9 @@ void after_submit() noexcept;
+ void gpu_synchronize();
+ void after_present() noexcept;
+ float calculate_fps() noexcept;
++// Game frames finished a second (each one presents once, or twice with an
++// in-between frame); calculate_fps() counts every present.
++float calculate_game_fps() noexcept;
+ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
+                   Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat = GX_TF_RGBA8);
+ 
+@@ -297,6 +304,9 @@ static Range push_indices(ArrayRef<T> data, size_t alignment) {
+   return push_indices(reinterpret_cast<const uint8_t*>(data.data()), data.size() * sizeof(T), alignment);
+ }
+ Range push_uniform(const uint8_t* data, size_t length);
++// A block for the in-between frame; an empty range when the area is full
++// (the draw then keeps its own constants there).
++Range push_interp_uniform(const uint8_t* data, size_t length);
+ // Identifies the frame packet (a new one per frame and per staging segment)
+ // that staging ranges belong to; 0 when no frame is recording.
+ uint64_t current_frame_id();
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+new file mode 100644
+index 0000000..d360438
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -0,0 +1,732 @@
++#include "frame_interp.hpp"
++
++#include <algorithm>
++#include <atomic>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <utility>
++#include <vector>
++
++#include <absl/container/flat_hash_map.h>
++
++#include <aurora/aurora.h>
++
++namespace aurora::gfx::frame_interp {
++namespace gxc = gxruntime::gxcore;
++namespace {
++
++bool env_flag(const char* name, bool fallback) {
++  const char* value = std::getenv(name);
++  if (value == nullptr || value[0] == '\0')
++    return fallback;
++  return value[0] != '0';
++}
++
++uint64_t env_u64(const char* name, uint64_t fallback) {
++  const char* value = std::getenv(name);
++  return value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10) : fallback;
++}
++
++std::atomic_bool g_enabled{env_flag("DOL_AURORA_FRAME_INTERP", false)};
++std::atomic_bool g_encodingInterpolated{false};
++std::atomic<uint64_t> g_gameFrame{1};
++
++// One game frame's draws: their constants (a consecutive run of identical
++// blocks is stored once) and, per draw, its key and block, where its position
++// matrix put it, and whether it stood still (the camera's motion carried a
++// copy from the frame before onto it; see blend_draw).
++struct Record {
++  uint64_t key;
++  uint32_t constants;
++  bool still;
++  float position[3];
++};
++struct FrameRecords {
++  std::vector<gxc::VertexShaderConstants> pool;
++  std::vector<Record> records;
++  void clear() {
++    pool.clear();
++    records.clear();
++  }
++};
++
++FrameRecords g_frames[2];
++unsigned g_current = 0;
++bool g_havePrevious = false;
++// The previous frame's records by key, in draw order within a key.
++std::vector<Record> g_previousIndex;
++// Per key in this frame: how many draws had it, and the previous frame's copy
++// after the last one a motion carried here.
++struct KeyState {
++  uint32_t occurrence = 0;
++  uint32_t next = 0;
++};
++absl::flat_hash_map<uint64_t, KeyState> g_keys;
++gxc::VertexShaderConstants g_blended;
++
++// Motions seen this frame (see vote_motion()): M_now * M_before^-1 of the
++// draws matched without ambiguity, and how many draws agree with each.
++struct Motion {
++  double m[3][4];
++  uint32_t votes;
++};
++constexpr int kMaxMotions = 6;
++constexpr uint32_t kMinMotionVotes = 4;
++Motion g_motions[kMaxMotions];
++int g_motionCount = 0;
++int g_leadingMotion = -1;
++// Copies searched this frame for one a motion carries onto a draw, and a bound
++// on it: a frame whose motions fit nothing must not search every copy for
++// every draw.
++constexpr uint32_t kSearchBudget = 1u << 16;
++uint32_t g_searchBudget = kSearchBudget;
++// The constants of the last draw found new in view: the other parts of that
++// copy (grass is nine draws with one matrix) are new too.
++uint32_t g_newInView = UINT32_MAX;
++
++struct Counts {
++  uint64_t draws = 0;
++  uint64_t matched = 0;   // a plausible counterpart in the previous frame
++  uint64_t identical = 0; // matched, and nothing changed
++  uint64_t blended = 0;   // matched and blended
++  uint64_t rejected = 0;  // counterparts exist, none plausible
++  uint64_t unmatched = 0; // no counterpart
++};
++Counts g_frameCounts;
++Counts g_totalCounts;
++uint64_t g_framesSeen = 0;
++uint64_t g_framesInterpolated = 0;
++bool g_lastVerdict = false;
++
++const bool g_log = env_flag("DOL_AURORA_FRAME_INTERP_LOG", false);
++const uint64_t g_traceFrame = env_u64("DOL_AURORA_FRAME_INTERP_TRACE", 0);
++const char* g_outcome = "";
++const char* g_rejectReason = "";
++
++// --- Matching -----------------------------------------------------------------
++
++double translation_length(const float rows[][4]) {
++  return std::sqrt(double(rows[0][3]) * rows[0][3] + double(rows[1][3]) * rows[1][3] +
++                   double(rows[2][3]) * rows[2][3]);
++}
++
++// Whether two 3x4 matrices can be one object's transform a frame apart. A
++// camera cut or a reused draw for another object fails at least one bound:
++// scale within 1.5x, the linear part within about 40 degrees of rotation, and
++// the translation within a fifth of its distance from the camera plus 100
++// units (a camera turning 10 degrees a frame moves a point about 0.17 of its
++// distance; the boat at full sail covers about 60 units a frame).
++bool plausible_matrix(const float current[][4], const float previous[][4]) {
++  if (std::memcmp(current, previous, sizeof(float) * 12) == 0)
++    return true;
++  double currentScale = 0.0, previousScale = 0.0, difference = 0.0;
++  for (int r = 0; r < 3; ++r) {
++    for (int c = 0; c < 3; ++c) {
++      const double a = current[r][c];
++      const double b = previous[r][c];
++      currentScale += a * a;
++      previousScale += b * b;
++      difference += (a - b) * (a - b);
++    }
++  }
++  if (currentScale < 1e-12 || previousScale < 1e-12) {
++    g_rejectReason = "collapsed";
++    return false; // a collapsed matrix hides the object; do not grow it halfway
++  }
++  const double ratio = currentScale / previousScale;
++  if (ratio > 2.25 || ratio < 1.0 / 2.25) {
++    g_rejectReason = "scale";
++    return false;
++  }
++  // For a rotation by t at scale k, |A-B|^2 = 4 k^2 (1 - cos t): 1.0 is 41 deg.
++  const double axisScale = std::max(currentScale, previousScale) / 3.0;
++  if (difference / axisScale > 1.0) {
++    g_rejectReason = "rotation";
++    return false;
++  }
++  double moved = 0.0;
++  for (int r = 0; r < 3; ++r) {
++    const double d = double(current[r][3]) - previous[r][3];
++    moved += d * d;
++  }
++  moved = std::sqrt(moved);
++  const double distance = std::max(translation_length(current), translation_length(previous));
++  if (moved > 0.2 * distance + 100.0) {
++    g_rejectReason = "translation";
++    return false;
++  }
++  return true;
++}
++
++// Projection: the same kind (perspective or orthographic), and the scale terms
++// within 25 percent (a zoom, not a different camera).
++bool plausible_projection(const float current[4][4], const float previous[4][4]) {
++  if (std::memcmp(current, previous, sizeof(float) * 16) == 0)
++    return true;
++  const bool currentPerspective = current[3][2] != 0.f;
++  const bool previousPerspective = previous[3][2] != 0.f;
++  if (currentPerspective != previousPerspective) {
++    g_rejectReason = "projection kind";
++    return false;
++  }
++  for (int i = 0; i < 2; ++i) {
++    const float a = current[i][i];
++    const float b = previous[i][i];
++    if (a == 0.f || b == 0.f) {
++      g_rejectReason = "projection zero";
++      return a == b;
++    }
++    const float ratio = a / b;
++    if (ratio > 1.25f || ratio < 0.8f) {
++      g_rejectReason = "projection scale";
++      return false;
++    }
++  }
++  return true;
++}
++
++bool plausible(const gxc::VertexShaderConstants& current, const gxc::VertexShaderConstants& previous,
++               uint64_t usedMatrixRows) {
++  if (!plausible_projection(current.projection, previous.projection))
++    return false;
++  if (usedMatrixRows == 0)
++    return plausible_matrix(current.posnormalmatrix, previous.posnormalmatrix);
++  // Per-vertex matrices (skinned models): the bank slots this draw's vertices
++  // use. The other slots hold whatever other models loaded last.
++  for (uint64_t rows = usedMatrixRows; rows != 0; rows &= rows - 1) {
++    const int row = __builtin_ctzll(rows);
++    if (!plausible_matrix(&current.transformmatrices[row], &previous.transformmatrices[row]))
++      return false;
++  }
++  return true;
++}
++
++// The matrix that places a draw: the current position matrix, or for
++// per-vertex matrices (skinned models) the first bank slot.
++const float (*position_signature(const gxc::VertexShaderConstants& constants, uint64_t usedMatrixRows))[4] {
++  return usedMatrixRows != 0 ? &constants.transformmatrices[__builtin_ctzll(usedMatrixRows)]
++                             : constants.posnormalmatrix;
++}
++
++double translation_distance2(const float a[][4], const float b[3]) {
++  double d = 0.0;
++  for (int r = 0; r < 3; ++r) {
++    const double delta = double(a[r][3]) - b[r];
++    d += delta * delta;
++  }
++  return d;
++}
++
++// --- Camera motion ------------------------------------------------------------
++//
++// A draw's matrix is the view matrix times the object's own, so everything
++// that stands still (the rooms, grass, bushes, trees, ropes) moves from one
++// frame to the next by one transform, the camera's: D = V_now * V_before^-1 =
++// M_now * M_before^-1 for any of them. Each draw whose key is unique is a vote
++// for its M_now * M_before^-1. The rooms cast hundreds of votes for the
++// camera's motion; the sky, drawn around the camera, and each moving actor
++// cast a few for their own.
++//
++// Copies of one model are then matched by where such a motion carries each
++// previous copy. Neither the draw order nor the nearest copy is enough for a
++// list of copies: the game culls grass, bushes and trees one by one, so a copy
++// leaving the view at the start of the list shifts every copy after it onto
++// its neighbour, and a turning camera moves a distant copy farther than the
++// spacing between copies. Either pairs a clump with the next clump, which is
++// close enough to look plausible, and the in-between frame draws it halfway
++// there: the foliage flickers at 60 FPS.
++
++// out = a * b for 3x4 affine matrices.
++void affine_multiply(const double a[3][4], const float b[][4], double out[3][4]) {
++  for (int r = 0; r < 3; ++r) {
++    for (int c = 0; c < 4; ++c)
++      out[r][c] = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c];
++    out[r][3] += a[r][3];
++  }
++}
++
++template <typename T>
++bool affine_inverse(const T m[][4], double out[3][4]) {
++  const double a = m[0][0], b = m[0][1], c = m[0][2];
++  const double d = m[1][0], e = m[1][1], f = m[1][2];
++  const double g = m[2][0], h = m[2][1], i = m[2][2];
++  const double det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
++  if (std::fabs(det) < 1e-12)
++    return false;
++  const double linear[3][3] = {
++      {(e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det},
++      {(f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det},
++      {(d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det},
++  };
++  for (int r = 0; r < 3; ++r) {
++    for (int k = 0; k < 3; ++k)
++      out[r][k] = linear[r][k];
++    out[r][3] = -(linear[r][0] * m[0][3] + linear[r][1] * m[1][3] + linear[r][2] * m[2][3]);
++  }
++  return true;
++}
++
++// Whether `motion` carries `previous` onto `current`: the linear part within
++// 0.1 percent, the translation within float rounding at that distance.
++bool motion_agrees(const double motion[3][4], const float current[][4], const float previous[][4]) {
++  double carried[3][4];
++  affine_multiply(motion, previous, carried);
++  double linear = 0.0, scale = 0.0, moved = 0.0;
++  for (int r = 0; r < 3; ++r) {
++    for (int c = 0; c < 3; ++c) {
++      const double delta = carried[r][c] - current[r][c];
++      linear += delta * delta;
++      scale += double(current[r][c]) * current[r][c];
++    }
++    const double delta = carried[r][3] - current[r][3];
++    moved += delta * delta;
++  }
++  const double tolerance = 0.5 + 1e-5 * translation_length(current);
++  return linear <= 1e-6 * scale && moved <= tolerance * tolerance;
++}
++
++void vote_motion(const float current[][4], const float previous[][4]) {
++  int agreed = -1;
++  if (g_leadingMotion >= 0 && motion_agrees(g_motions[g_leadingMotion].m, current, previous))
++    agreed = g_leadingMotion;
++  for (int i = 0; agreed < 0 && i < g_motionCount; ++i) {
++    if (i != g_leadingMotion && motion_agrees(g_motions[i].m, current, previous))
++      agreed = i;
++  }
++  if (agreed >= 0) {
++    ++g_motions[agreed].votes;
++  } else {
++    double inverse[3][4];
++    if (!affine_inverse(previous, inverse))
++      return;
++    // A new motion, in place of the one fewest draws agreed with.
++    agreed = 0;
++    if (g_motionCount < kMaxMotions) {
++      agreed = g_motionCount++;
++    } else {
++      for (int i = 1; i < kMaxMotions; ++i) {
++        if (g_motions[i].votes < g_motions[agreed].votes)
++          agreed = i;
++      }
++      if (agreed == g_leadingMotion)
++        g_leadingMotion = -1;
++    }
++    double(*m)[4] = g_motions[agreed].m;
++    for (int r = 0; r < 3; ++r) {
++      for (int c = 0; c < 4; ++c)
++        m[r][c] = double(current[r][0]) * inverse[0][c] + double(current[r][1]) * inverse[1][c] +
++                  double(current[r][2]) * inverse[2][c];
++      m[r][3] += current[r][3];
++    }
++    g_motions[agreed].votes = 1;
++  }
++  // The motion most draws agree with is the camera's.
++  if (g_leadingMotion < 0 || g_motions[agreed].votes > g_motions[g_leadingMotion].votes)
++    g_leadingMotion = agreed;
++}
++
++// How far from `current` the motion carries a previous position.
++double motion_error(const Motion& motion, const float current[][4], const float previous[3]) {
++  double error = 0.0;
++  for (int r = 0; r < 3; ++r) {
++    const double carried = motion.m[r][0] * previous[0] + motion.m[r][1] * previous[1] +
++                           motion.m[r][2] * previous[2] + motion.m[r][3];
++    error += (carried - current[r][3]) * (carried - current[r][3]);
++  }
++  return std::sqrt(error);
++}
++
++// Where a draw that stands still was the frame before: M_before = D^-1 * M_now
++// for the camera's motion D, and its normal matrix turned back by D's
++// rotation (D is rigid, so that is its inverse transpose too). The rest
++// (lights, texture matrices) stays as now.
++bool stood_before(const Motion& camera, const gxc::VertexShaderConstants& current,
++                  gxc::VertexShaderConstants& out) {
++  double inverse[3][4];
++  if (!affine_inverse(camera.m, inverse))
++    return false;
++  std::memcpy(&out, &current, sizeof(out));
++  double placed[3][4];
++  affine_multiply(inverse, current.posnormalmatrix, placed);
++  for (int r = 0; r < 3; ++r) {
++    for (int c = 0; c < 4; ++c)
++      out.posnormalmatrix[r][c] = static_cast<float>(placed[r][c]);
++    for (int c = 0; c < 3; ++c)
++      out.posnormalmatrix[3 + r][c] = static_cast<float>(inverse[r][0] * current.posnormalmatrix[3][c] +
++                                                         inverse[r][1] * current.posnormalmatrix[4][c] +
++                                                         inverse[r][2] * current.posnormalmatrix[5][c]);
++  }
++  return true;
++}
++gxc::VertexShaderConstants g_stoodBefore;
++
++// --- Blending -----------------------------------------------------------------
++
++inline void lerp_rows(float out[][4], const float from[][4], const float to[][4], int rows, float t) {
++  for (int r = 0; r < rows; ++r)
++    for (int c = 0; c < 4; ++c)
++      out[r][c] = from[r][c] + (to[r][c] - from[r][c]) * t;
++}
++
++// A texture matrix whose offset jumped by more than half the texture wrapped
++// (a scrolling texture going from 0.98 to 0.02); blending would run it
++// backwards across the whole texture, so it keeps the current value.
++inline void lerp_texture_rows(float out[][4], const float from[][4], const float to[][4], float t) {
++  for (int r = 0; r < 3; ++r) {
++    if (std::fabs(to[r][3] - from[r][3]) > 0.5f)
++      return; // `out` already holds the current matrix
++  }
++  lerp_rows(out, from, to, 3, t);
++}
++
++// DOL_AURORA_FRAME_INTERP_T: the blend weight toward this frame (debug; 0.5).
++float blend_weight() {
++  static const float weight = [] {
++    const char* env = std::getenv("DOL_AURORA_FRAME_INTERP_T");
++    return env != nullptr && env[0] != '\0' ? std::strtof(env, nullptr) : 0.5f;
++  }();
++  return weight;
++}
++
++void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderConstants& current, float t,
++           gxc::VertexShaderConstants& out) {
++  std::memcpy(&out, &current, sizeof(out));
++  lerp_rows(out.posnormalmatrix, previous.posnormalmatrix, current.posnormalmatrix, 6, t);
++  lerp_rows(out.projection, previous.projection, current.projection, 4, t);
++  for (int m = 0; m < 8; ++m)
++    lerp_texture_rows(&out.texmatrices[m * 3], &previous.texmatrices[m * 3], &current.texmatrices[m * 3], t);
++  // XF matrix memory: position matrices in rows 0-29, texture matrices in
++  // 30-59, and the identity rows after them.
++  lerp_rows(out.transformmatrices, previous.transformmatrices, current.transformmatrices, 30, t);
++  for (int m = 0; m < 10; ++m) {
++    const int row = 30 + m * 3;
++    lerp_texture_rows(&out.transformmatrices[row], &previous.transformmatrices[row],
++                      &current.transformmatrices[row], t);
++  }
++  lerp_rows(&out.transformmatrices[60], &previous.transformmatrices[60], &current.transformmatrices[60], 4, t);
++  lerp_rows(out.normalmatrices, previous.normalmatrices, current.normalmatrices, 32, t);
++  // Lights are in view space and move with the camera.
++  for (int l = 0; l < 8; ++l) {
++    for (int c = 0; c < 4; ++c) {
++      out.lights[l].pos[c] = previous.lights[l].pos[c] + (current.lights[l].pos[c] - previous.lights[l].pos[c]) * t;
++      out.lights[l].dir[c] = previous.lights[l].dir[c] + (current.lights[l].dir[c] - previous.lights[l].dir[c]) * t;
++    }
++  }
++}
++
++inline uint64_t mix64(uint64_t h) {
++  h ^= h >> 33;
++  h *= 0xFF51AFD7ED558CCDull;
++  h ^= h >> 33;
++  h *= 0xC4CEB9FE1A85EC53ull;
++  h ^= h >> 33;
++  return h;
++}
++
++void log_counts() {
++  const auto& c = g_totalCounts;
++  std::fprintf(stderr,
++               "[frame-interp] frames=%llu interpolated=%llu draws=%llu matched=%llu "
++               "blended=%llu identical=%llu rejected=%llu unmatched=%llu\n",
++               static_cast<unsigned long long>(g_framesSeen),
++               static_cast<unsigned long long>(g_framesInterpolated), static_cast<unsigned long long>(c.draws),
++               static_cast<unsigned long long>(c.matched), static_cast<unsigned long long>(c.blended),
++               static_cast<unsigned long long>(c.identical), static_cast<unsigned long long>(c.rejected),
++               static_cast<unsigned long long>(c.unmatched));
++}
++
++} // namespace
++
++bool enabled() noexcept { return g_enabled.load(std::memory_order_relaxed); }
++void set_enabled(bool enabled) noexcept { g_enabled.store(enabled, std::memory_order_relaxed); }
++
++uint64_t draw_key(const gxc::DrawPlan& plan) noexcept {
++  if (plan.match_payload == nullptr || plan.match_payload_size == 0)
++    return 0;
++  uint64_t h = mix64((uint64_t(plan.match_primitive) << 40) ^ (uint64_t(plan.match_vtx_fmt) << 32) ^
++                     plan.vertex_count ^ (uint64_t(plan.match_payload_size) << 48));
++  if (plan.match_direct_position) {
++    // New positions every frame: the same shape with the same texture. Its
++    // matrices (usually the camera's) are blended, its vertices are not.
++    h = mix64(h ^ 0xD1u ^ (uint64_t(plan.tex_address) << 8) ^ (uint64_t(plan.texmap_mask) << 40));
++    return h == 0 ? 1 : h;
++  }
++  const uint8_t* bytes = plan.match_payload;
++  size_t size = plan.match_payload_size;
++  while (size >= 8) {
++    uint64_t word;
++    std::memcpy(&word, bytes, 8);
++    h = (h ^ mix64(word)) * 0x9E3779B97F4A7C15ull;
++    bytes += 8;
++    size -= 8;
++  }
++  uint64_t tail = 0;
++  std::memcpy(&tail, bytes, size);
++  h = mix64(h ^ tail ^ size);
++  return h == 0 ? 1 : h;
++}
++
++uint64_t used_matrix_rows(const gxc::DrawPlan& plan) noexcept {
++  if (!plan.pipeline.shader.has_pos_mtx_idx || plan.match_payload == nullptr || plan.match_vertex_stride == 0)
++    return 0;
++  // PNMTXIDX is the first byte of each vertex; it holds the matrix's XF row.
++  uint64_t rows = 0;
++  for (uint32_t offset = 0; offset < plan.match_payload_size; offset += plan.match_vertex_stride) {
++    const uint8_t row = plan.match_payload[offset];
++    if (row <= 61)
++      rows |= 1ull << row;
++  }
++  return rows;
++}
++
++const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRows,
++                                             const gxc::VertexShaderConstants& current) {
++  g_outcome = "no key";
++  if (!enabled() || key == 0)
++    return nullptr;
++  const float (*here)[4] = position_signature(current, usedMatrixRows);
++  FrameRecords& frame = g_frames[g_current];
++  if (frame.pool.empty() || std::memcmp(&frame.pool.back(), &current, sizeof(current)) != 0)
++    frame.pool.push_back(current);
++  const auto constantsIndex = static_cast<uint32_t>(frame.pool.size() - 1);
++  frame.records.push_back({key, constantsIndex, false, {here[0][3], here[1][3], here[2][3]}});
++  ++g_frameCounts.draws;
++  KeyState& state = g_keys[key];
++  const uint32_t occurrence = state.occurrence++;
++  if (!g_havePrevious) {
++    ++g_frameCounts.unmatched;
++    g_outcome = "no previous frame";
++    return nullptr;
++  }
++
++  const auto range = std::equal_range(g_previousIndex.begin(), g_previousIndex.end(), Record{key, 0, false, {}},
++                                      [](const Record& a, const Record& b) { return a.key < b.key; });
++  if (range.first == range.second) {
++    ++g_frameCounts.unmatched;
++    g_outcome = "unmatched";
++    return nullptr;
++  }
++  g_rejectReason = "";
++  const FrameRecords& previousFrame = g_frames[g_current ^ 1u];
++  const Record* copies = &*range.first;
++  const auto constantsOf = [&](size_t copy) -> const gxc::VertexShaderConstants& {
++    return previousFrame.pool[copies[copy].constants];
++  };
++  const size_t candidates = static_cast<size_t>(range.second - range.first);
++  const bool perspective = current.projection[3][2] != 0.f;
++  const gxc::VertexShaderConstants* previous = nullptr;
++
++  // Copies of one model (grass, bushes, trees): the copy that a motion several
++  // draws share (the camera's, for anything standing still) carries onto
++  // this one, within float rounding. The same place in the list, or the copy
++  // after the last one carried (when copies before it left the view), usually
++  // is; otherwise the closest.
++  const Motion* motions[kMaxMotions];
++  int motionCount = 0;
++  const Motion* camera = nullptr;
++  if (perspective && candidates > 1 && g_leadingMotion >= 0 && g_motions[g_leadingMotion].votes >= kMinMotionVotes) {
++    camera = &g_motions[g_leadingMotion];
++    motions[motionCount++] = camera;
++    for (int i = 0; i < g_motionCount; ++i) {
++      if (i != g_leadingMotion && g_motions[i].votes >= kMinMotionVotes)
++        motions[motionCount++] = &g_motions[i];
++    }
++  }
++  const double tolerance = 1.0 + 2e-5 * translation_length(here);
++  const auto carried = [&](size_t copy) {
++    for (int m = 0; m < motionCount; ++m) {
++      if (motion_error(*motions[m], here, copies[copy].position) <= tolerance)
++        return true;
++    }
++    return false;
++  };
++  size_t pick = candidates;
++  // How far the camera's motion puts the nearest copy that stood still.
++  double nearestStill = HUGE_VAL;
++  if (camera != nullptr) {
++    if (occurrence < candidates && carried(occurrence))
++      pick = occurrence;
++    else if (state.next < candidates && carried(state.next))
++      pick = state.next;
++    else if (constantsIndex == g_newInView)
++      nearestStill = 0.0; // another part of a copy just found new in view
++    else if (g_searchBudget >= candidates) {
++      g_searchBudget -= static_cast<uint32_t>(candidates);
++      double best = tolerance;
++      for (size_t i = 0; i < candidates; ++i) {
++        const double e = motion_error(*camera, here, copies[i].position);
++        if (e <= best) {
++          best = e;
++          pick = i;
++        }
++        if (copies[i].still)
++          nearestStill = std::min(nearestStill, e);
++      }
++    }
++  }
++  const bool placed = pick < candidates;
++  if (placed) {
++    state.next = static_cast<uint32_t>(pick + 1);
++    frame.records.back().still = motion_error(*camera, here, copies[pick].position) <= tolerance;
++    const auto& candidate = constantsOf(pick);
++    if (plausible(current, candidate, usedMatrixRows))
++      previous = &candidate;
++  } else {
++    // Without such a copy, a copy that stood still would have been carried
++    // here had it been this one, unless it has just started to move (an idle
++    // character swaying past the tolerance). Among copies that stood still
++    // (grass, pots), one that moved is this draw only if it moved at an
++    // actor's pace (a pot Link carries) and no copy that stood still is
++    // nearer; otherwise this draw is a copy that has just come into view.
++    const auto usable = [&](size_t copy) {
++      if (camera == nullptr)
++        return true;
++      const double moved = motion_error(*camera, here, copies[copy].position);
++      if (copies[copy].still)
++        return moved <= 4.0 * tolerance;
++      return nearestStill == HUGE_VAL ||
++             (moved < nearestStill && moved <= 40.0 + 0.01 * translation_length(here));
++    };
++    bool anyUsable = false;
++    // The same occurrence of the key: a model drawn from a fixed list (a
++    // model's materials, moving copies) keeps its order.
++    if (occurrence < candidates && usable(occurrence)) {
++      anyUsable = true;
++      const auto& candidate = constantsOf(occurrence);
++      if (plausible(current, candidate, usedMatrixRows))
++        previous = &candidate;
++    }
++    if (previous == nullptr && candidates > 1) {
++      // Copies that changed places (a depth-sorted list): the nearest plausible.
++      const size_t limit = std::min<size_t>(candidates, 256);
++      double bestDistance = 0.0;
++      for (size_t i = 0; i < limit; ++i) {
++        if (!usable(i))
++          continue;
++        anyUsable = true;
++        const double d = translation_distance2(here, copies[i].position);
++        if ((previous == nullptr || d < bestDistance) && plausible(current, constantsOf(i), usedMatrixRows)) {
++          previous = &constantsOf(i);
++          bestDistance = d;
++        }
++      }
++    }
++    if (camera != nullptr && !anyUsable) {
++      // Counted with the rejected draws: after a camera cut, copies end here
++      // instead of failing the plausibility test.
++      g_newInView = constantsIndex;
++      ++g_frameCounts.rejected;
++      g_outcome = "new in view";
++      // Drawn as it is now, it would sit half a camera step ahead of the
++      // copies beside it (a pop along the screen's edge while the camera
++      // turns). It stood where the camera's motion carries it from, so it is
++      // blended from there.
++      if (usedMatrixRows != 0 || !stood_before(*camera, current, g_stoodBefore) ||
++          !plausible(current, g_stoodBefore, 0))
++        return nullptr;
++      blend(g_stoodBefore, current, blend_weight(), g_blended);
++      return &g_blended;
++    }
++  }
++  if (previous == nullptr) {
++    ++g_frameCounts.rejected;
++    g_outcome = g_rejectReason;
++    return nullptr;
++  }
++  ++g_frameCounts.matched;
++  // A draw matched without ambiguity votes for the camera's motion.
++  if (candidates == 1 && occurrence == 0 && usedMatrixRows == 0 && perspective)
++    vote_motion(current.posnormalmatrix, previous->posnormalmatrix);
++  if (std::memcmp(previous, &current, sizeof(current)) == 0) {
++    ++g_frameCounts.identical;
++    g_outcome = "identical";
++    return nullptr;
++  }
++  blend(*previous, current, blend_weight(), g_blended);
++  ++g_frameCounts.blended;
++  g_outcome = "blended";
++  return &g_blended;
++}
++
++bool frame_verdict() noexcept {
++  g_lastVerdict = false;
++  if (!enabled() || !g_havePrevious || g_frameCounts.blended == 0)
++    return false;
++  // A cut: most draws have a counterpart that is not plausibly the same thing.
++  const uint64_t considered = g_frameCounts.matched + g_frameCounts.rejected;
++  if (considered >= 16 && g_frameCounts.rejected * 10 > considered * 4)
++    return false;
++  g_lastVerdict = true;
++  return true;
++}
++
++void end_game_frame() noexcept {
++  g_gameFrame.fetch_add(1, std::memory_order_relaxed);
++  if (!enabled()) {
++    if (g_havePrevious) {
++      g_frames[0].clear();
++      g_frames[1].clear();
++      g_previousIndex.clear();
++      g_keys.clear();
++      g_motionCount = 0;
++      g_leadingMotion = -1;
++      g_havePrevious = false;
++    }
++    g_frameCounts = {};
++    return;
++  }
++  ++g_framesSeen;
++  if (g_lastVerdict)
++    ++g_framesInterpolated;
++  g_lastVerdict = false;
++  g_totalCounts.draws += g_frameCounts.draws;
++  g_totalCounts.matched += g_frameCounts.matched;
++  g_totalCounts.identical += g_frameCounts.identical;
++  g_totalCounts.blended += g_frameCounts.blended;
++  g_totalCounts.rejected += g_frameCounts.rejected;
++  g_totalCounts.unmatched += g_frameCounts.unmatched;
++  if (g_log && g_framesSeen % 60 == 0)
++    log_counts();
++  g_frameCounts = {};
++
++  const FrameRecords& finished = g_frames[g_current];
++  g_previousIndex.assign(finished.records.begin(), finished.records.end());
++  std::stable_sort(g_previousIndex.begin(), g_previousIndex.end(),
++                   [](const Record& a, const Record& b) { return a.key < b.key; });
++  g_havePrevious = !finished.records.empty();
++  g_current ^= 1u;
++  g_frames[g_current].clear();
++  g_keys.clear();
++  g_motionCount = 0;
++  g_leadingMotion = -1;
++  g_searchBudget = kSearchBudget;
++  g_newInView = UINT32_MAX;
++}
++
++bool encoding_interpolated() noexcept { return g_encodingInterpolated.load(std::memory_order_relaxed); }
++void set_encoding_interpolated(bool value) noexcept {
++  g_encodingInterpolated.store(value, std::memory_order_relaxed);
++}
++
++const char* dump_directory() noexcept {
++  static const char* directory = std::getenv("DOL_AURORA_FRAME_INTERP_DUMP");
++  return directory != nullptr && directory[0] != '\0' ? directory : nullptr;
++}
++
++bool dump_frame(uint64_t frame) noexcept {
++  static const uint64_t from = env_u64("DOL_AURORA_FRAME_INTERP_DUMP_FROM", 0);
++  static const uint64_t to = env_u64("DOL_AURORA_FRAME_INTERP_DUMP_TO", 0);
++  return dump_directory() != nullptr && frame >= from && frame <= to;
++}
++
++const char* last_outcome() noexcept { return g_outcome; }
++bool tracing() noexcept { return g_traceFrame != 0 && g_gameFrame.load(std::memory_order_relaxed) == g_traceFrame; }
++
++uint64_t game_frame_number() noexcept { return g_gameFrame.load(std::memory_order_relaxed); }
++
++} // namespace aurora::gfx::frame_interp
++
++void aurora_set_frame_interpolation(bool enabled) { aurora::gfx::frame_interp::set_enabled(enabled); }
++bool aurora_get_frame_interpolation() { return aurora::gfx::frame_interp::enabled(); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+new file mode 100644
+index 0000000..6fbd062
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -0,0 +1,73 @@
++#pragma once
++
++// In-between frames for a 30 FPS game on a 60 Hz display.
++//
++// The game keeps its own 30 steps a second; only the renderer changes. Every
++// gxcore draw carries its complete transform state (VertexShaderConstants:
++// position, normal, projection and texture matrices, lights), and its vertices
++// stay in object space. So an in-between frame is the finished frame drawn a
++// second time with each draw's constants blended halfway toward the same draw
++// in the previous frame, and nothing else recorded again.
++//
++// Recording (the GX translation thread): each draw is keyed by its raw vertex
++// stream (the indices or direct attributes of the FIFO payload, which a model
++// sends identically every frame) and its occurrence of that key in the frame.
++// blend_draw() matches it to the previous frame, rejects a pair that is not
++// plausibly the same object a frame apart, and returns the blended constants,
++// which the draw pushes as a second uniform block. A frame where too many
++// matches are rejected is a camera cut and is not interpolated. Copies of one
++// model (grass, bushes, trees) share a key and are culled one by one, so
++// their order shifts: they are matched by where the camera's motion, which
++// the draws with a unique key vote for, carries each copy of the frame before.
++//
++// Presenting (the render worker): the finished frame is copied aside, its
++// passes are encoded once more with the blended blocks and presented at once,
++// and the real frame follows half a game frame later.
++
++#include <cstdint>
++
++#include <gxruntime/gxcore/shader.hpp>
++
++namespace aurora::gfx::frame_interp {
++
++bool enabled() noexcept;
++void set_enabled(bool enabled) noexcept;
++
++// The key for a draw's vertex stream; 0 when the plan carries no payload.
++uint64_t draw_key(const gxruntime::gxcore::DrawPlan& plan) noexcept;
++
++// For a draw with per-vertex matrix indices (a skinned model): bit r set when
++// a vertex uses the position matrix starting at XF row r. 0 otherwise.
++uint64_t used_matrix_rows(const gxruntime::gxcore::DrawPlan& plan) noexcept;
++
++// Recording thread, once per submitted gxcore draw. Returns the constants the
++// draw uses in the in-between frame, or nullptr when they are its own (no
++// match, an implausible match, or nothing moved). The pointer is valid until
++// the next call.
++const gxruntime::gxcore::VertexShaderConstants* blend_draw(
++    uint64_t key, uint64_t used_matrix_rows,
++    const gxruntime::gxcore::VertexShaderConstants& current);
++
++// Why the last blend_draw() returned what it did, for the per-draw trace
++// (DOL_AURORA_FRAME_INTERP_TRACE=game frame number).
++const char* last_outcome() noexcept;
++bool tracing() noexcept;
++
++// Recording thread, when a presenting frame ends: whether it gets an
++// in-between frame.
++bool frame_verdict() noexcept;
++
++// At every present (a game frame boundary), with recording stopped.
++void end_game_frame() noexcept;
++
++// Render worker: set while the in-between frame's passes are encoded.
++bool encoding_interpolated() noexcept;
++void set_encoding_interpolated(bool value) noexcept;
++
++// Debug dumps (DOL_AURORA_FRAME_INTERP_DUMP=dir, _FROM/_TO = game frame
++// numbers): the render worker writes the real and in-between images there.
++const char* dump_directory() noexcept;
++bool dump_frame(uint64_t frame) noexcept;
++uint64_t game_frame_number() noexcept;
++
++} // namespace aurora::gfx::frame_interp
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index d7732a8..7f27f91 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "../webgpu/gpu.hpp"
+ #include "../gx/gx.hpp" // UseReversedZ + set_logical_viewport (substrate glue)
++#include "frame_interp.hpp"
+ #include "texture.hpp"
+ #include "tex_copy_conv.hpp" // EFB-copy format conversion (63/S16)
+ #include "texture_replacement.hpp" // Dolphin-format HD texture packs
+@@ -634,8 +635,12 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+   }
+   if (data.depthPipeline != 0 && !bind_pipeline(data.depthPipeline, pass))
+     return;
+-  const std::array vsOffsets{data.uniformRange.offset};
+-  pass.SetBindGroup(1, g_uniformBindGroup, vsOffsets.size(), vsOffsets.data());
++  // The in-between frame reads a moved draw's blended constants from their
++  // own area; every other draw keeps its own.
++  const bool blended = frame_interp::encoding_interpolated() && data.interpUniformRange.size != 0;
++  const auto& vsGroup = blended ? g_interpUniformBindGroup : g_uniformBindGroup;
++  const std::array vsOffsets{blended ? data.interpUniformRange.offset : data.uniformRange.offset};
++  pass.SetBindGroup(1, vsGroup, vsOffsets.size(), vsOffsets.data());
+   pass.SetVertexBuffer(0, g_vertexBuffer, data.vertRange.offset,
+                        data.vertRange.size);
+   pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16,
+@@ -644,8 +649,7 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+     pass.DrawIndexed(data.indexCount);
+     if (!bind_pipeline(data.pipeline, pass))
+       return;
+-    pass.SetBindGroup(1, g_uniformBindGroup, vsOffsets.size(),
+-                      vsOffsets.data());
++    pass.SetBindGroup(1, vsGroup, vsOffsets.size(), vsOffsets.data());
+   }
+   if (data.tev) {
+     // group 2 = PS uniform (same dynamic-uniform bind group, its own offset);
+@@ -664,6 +668,7 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+ 
+ void note_frame_presented() {
+   g_textureVerifyFrame.fetch_add(1u, std::memory_order_relaxed);
++  frame_interp::end_game_frame();
+ }
+ 
+ void reset_texture_cache() {
+@@ -794,8 +799,25 @@ struct UniformCache {
+   uint64_t pushes = 0;
+ };
+ static UniformCache g_vertexUniformCache;
++static UniformCache g_interpUniformCache;
+ static UniformCache g_pixelUniformCache;
+ 
++// The in-between frame's blocks, de-duplicated the same way.
++static Range push_interp_uniform_dedup(const uint8_t* data, size_t length) {
++  UniformCache& cache = g_interpUniformCache;
++  const uint64_t frameId = current_frame_id();
++  if (frameId != 0 && cache.frameId == frameId && cache.range.size != 0 && cache.bytes.size() == length &&
++      std::memcmp(cache.bytes.data(), data, length) == 0) {
++    ++cache.hits;
++    return cache.range;
++  }
++  ++cache.pushes;
++  cache.range = push_interp_uniform(data, length);
++  cache.bytes.assign(data, data + length);
++  cache.frameId = frameId;
++  return cache.range;
++}
++
+ static Range push_uniform_dedup(UniformCache& cache, const uint8_t* data,
+                                 size_t length) {
+   static const bool enabled = [] {
+@@ -1178,6 +1200,30 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   const size_t vertBytes = plan.vertices.size() * sizeof(float);
+   const size_t indexBytes = plan.indices.size() * sizeof(uint16_t);
+   const size_t pixelUniformBytes = tev ? sizeof(plan.pixel_constants) : 0;
++  // Matched before a staging segment can split the frame; a split frame is
++  // not interpolated.
++  const gxc::VertexShaderConstants* interpConstants =
++      frame_interp::enabled()
++          ? frame_interp::blend_draw(frame_interp::draw_key(plan), frame_interp::used_matrix_rows(plan),
++                                     plan.constants)
++          : nullptr;
++  if (frame_interp::tracing()) {
++    const auto& m = plan.constants.posnormalmatrix;
++    std::fprintf(stderr,
++                 "[frame-interp-trace] %s key=%016llx prim=0x%02X fmt=%u verts=%u payload=%u idx=%d "
++                 "t=(%.1f,%.1f,%.1f) s=%.3f proj00=%.3f proj32=%.1f tex=%08X bt=(%.1f,%.1f,%.1f) bt0=(%.1f,%.1f,%.1f)\n",
++                 frame_interp::last_outcome(), static_cast<unsigned long long>(frame_interp::draw_key(plan)),
++                 plan.match_primitive, plan.match_vtx_fmt, plan.vertex_count, plan.match_payload_size,
++                 plan.pipeline.shader.has_pos_mtx_idx, m[0][3], m[1][3], m[2][3],
++                 std::sqrt(m[0][0] * m[0][0] + m[1][0] * m[1][0] + m[2][0] * m[2][0]), plan.constants.projection[0][0],
++                 plan.constants.projection[3][2], plan.tex_address,
++                 interpConstants ? interpConstants->posnormalmatrix[0][3] : 0.f,
++                 interpConstants ? interpConstants->posnormalmatrix[1][3] : 0.f,
++                 interpConstants ? interpConstants->posnormalmatrix[2][3] : 0.f,
++                 interpConstants ? interpConstants->transformmatrices[0][3] - plan.constants.transformmatrices[0][3] : 0.f,
++                 interpConstants ? interpConstants->transformmatrices[1][3] - plan.constants.transformmatrices[1][3] : 0.f,
++                 interpConstants ? interpConstants->transformmatrices[2][3] - plan.constants.transformmatrices[2][3] : 0.f);
++  }
+   if (!staging_has_capacity(vertBytes, indexBytes, sizeof(plan.constants),
+                             pixelUniformBytes)) {
+     if (!segment_frame() ||
+@@ -1197,6 +1243,10 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   const auto uniformRange = push_uniform_dedup(
+       g_vertexUniformCache, reinterpret_cast<const uint8_t*>(&plan.constants),
+       sizeof(plan.constants));
++  const auto interpUniformRange =
++      interpConstants != nullptr
++          ? push_interp_uniform_dedup(reinterpret_cast<const uint8_t*>(interpConstants), sizeof(*interpConstants))
++          : Range{};
+   Range pixelUniformRange{};
+   if (tev) {
+     pixelUniformRange = push_uniform_dedup(
+@@ -1222,6 +1272,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       .vertRange = vertRange,
+       .idxRange = idxRange,
+       .uniformRange = uniformRange,
++      .interpUniformRange = interpUniformRange,
+       .pixelUniformRange = pixelUniformRange,
+       .indexCount = static_cast<uint32_t>(plan.indices.size()),
+       .textureBindGroup = textureBindGroup,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 43fabdd..64015d0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -19,6 +19,9 @@ struct DrawData {
+   Range vertRange;
+   Range idxRange;
+   Range uniformRange;       // VertexShaderConstants (group 1)
++  // The constants blended toward the previous frame, used while the
++  // in-between frame is encoded (frame_interp.hpp); uniformRange otherwise.
++  Range interpUniformRange;
+   Range pixelUniformRange;  // PixelShaderConstants (group 2), TEV path only
+   uint32_t indexCount;
+   BindGroupRef textureBindGroup; // 0 when untextured
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+index 1484076..c8c94c6 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+@@ -16,6 +16,7 @@ std::thread g_thread;
+ std::atomic_bool g_running = false;
+ std::atomic_size_t g_pendingItems = 0;
+ std::thread::id g_workerThreadId;
++WorkCallback g_idleHook;
+ 
+ void complete_sync(const std::shared_ptr<SyncState>& sync) {
+   if (!sync) {
+@@ -36,6 +37,9 @@ void worker_main() {
+   g_workerThreadId = std::this_thread::get_id();
+ 
+   while (true) {
++    if (g_idleHook) {
++      g_idleHook();
++    }
+     bool closed = false;
+     auto item = g_queue.pop_for(IdlePumpInterval, closed);
+     if (!item) {
+@@ -265,6 +269,8 @@ void synchronize() {
+ 
+ bool is_worker_thread() noexcept { return g_workerThreadId == std::this_thread::get_id(); }
+ 
++void set_idle_hook(WorkCallback hook) { g_idleHook = std::move(hook); }
++
+ bool is_idle() noexcept { return g_pendingItems.load(std::memory_order_acquire) == 0; }
+ 
+ } // namespace aurora::gfx::render_worker
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+index 7d652ca..1322d23 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+@@ -83,6 +83,9 @@ void enqueue_work(WorkCallback work);
+ void synchronize();
+ 
+ bool is_worker_thread() noexcept;
++// Runs on the worker between queue items and at least every millisecond while
++// it waits: timed work such as a deferred present. Set before initialize().
++void set_idle_hook(WorkCallback hook);
+ bool is_idle() noexcept;
+ 
+ } // namespace aurora::gfx::render_worker
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+index e388696..91f4930 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+@@ -1,6 +1,7 @@
+ #include "gpu.hpp"
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <array>
+ #include <cmath>
+ #include <cstdint>
+@@ -308,10 +309,18 @@ TextureWithSampler create_render_texture(uint32_t width, uint32_t height, bool m
+   };
+ }
+ 
++static std::atomic<const TextureWithSampler*> g_presentSourceOverride{nullptr};
++
+ const TextureWithSampler& present_source() noexcept {
++  if (const auto* source = g_presentSourceOverride.load(std::memory_order_acquire))
++    return *source;
+   return g_graphicsConfig.msaaSamples > 1 ? g_frameBufferResolved : g_frameBuffer;
+ }
+ 
++void set_present_source_override(const TextureWithSampler* source) noexcept {
++  g_presentSourceOverride.store(source, std::memory_order_release);
++}
++
+ void set_resampler(AuroraSampler sampler) noexcept {
+   switch (sampler) {
+   case SAMPLER_AREA:
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
+index 1375e11..e0102e7 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
+@@ -65,6 +65,9 @@ bool refresh_surface(bool recreate = true);
+ void resize_swapchain(uint32_t width, uint32_t height, uint32_t nativeWidth, uint32_t nativeHeight, bool force = false);
+ TextureWithSampler create_render_texture(uint32_t width, uint32_t height, bool multisampled);
+ const TextureWithSampler& present_source() noexcept;
++// Render worker: presents `source` in place of the frame buffer while set
++// (the real frame kept aside while an in-between frame took the EFB).
++void set_present_source_override(const TextureWithSampler* source) noexcept;
+ wgpu::BindGroup create_copy_bind_group(const TextureWithSampler& source);
+ void set_resampler(AuroraSampler sampler) noexcept;
+ AuroraSampler get_resampler() noexcept;
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+new file mode 100644
+index 0000000..a2098af
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -0,0 +1,226 @@
++// Standalone checks for lib/gfx/frame_interp.cpp: draw matching across
++// frames, plausibility rejection, the halfway blend and the cut verdict.
++#include "../lib/gfx/frame_interp.hpp"
++
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++
++namespace fi = aurora::gfx::frame_interp;
++namespace gxc = gxruntime::gxcore;
++
++static int g_failures = 0;
++#define CHECK(cond)                                                                                                    \
++  do {                                                                                                                 \
++    if (!(cond)) {                                                                                                     \
++      std::fprintf(stderr, "FAIL %s:%d %s\n", __FILE__, __LINE__, #cond);                                             \
++      ++g_failures;                                                                                                    \
++    }                                                                                                                  \
++  } while (0)
++
++static bool near(float a, float b) { return std::fabs(a - b) < 1e-4f; }
++
++// A perspective draw at view-space (x, y, z), rotated by `yaw` degrees.
++static gxc::VertexShaderConstants draw_at(float x, float y, float z, float yaw = 0.f) {
++  gxc::VertexShaderConstants c{};
++  const float r = yaw * 3.14159265f / 180.f;
++  const float cs = std::cos(r), sn = std::sin(r);
++  const float m[3][4] = {{cs, 0, sn, x}, {0, 1, 0, y}, {-sn, 0, cs, z}};
++  std::memcpy(c.posnormalmatrix, m, sizeof(m));
++  const float p[4][4] = {{1.5f, 0, 0, 0}, {0, 2.f, 0, 0}, {0, 0, -1.f, -10.f}, {0, 0, -1.f, 0}};
++  std::memcpy(c.projection, p, sizeof(p));
++  for (int i = 0; i + 2 < 64; i += 3) {
++    c.transformmatrices[i][0] = c.transformmatrices[i + 1][1] = c.transformmatrices[i + 2][2] = 1.f;
++  }
++  return c;
++}
++
++// A world-space model at (x, y, z) seen by a camera at (cx, 0, cz) turned
++// `yaw` degrees: the draw's matrix is the view matrix times the model's.
++static gxc::VertexShaderConstants seen(float yaw, float cx, float cz, float x, float y, float z) {
++  const float r = yaw * 3.14159265f / 180.f;
++  const float cs = std::cos(r), sn = std::sin(r);
++  const float dx = x - cx, dz = z - cz;
++  return draw_at(cs * dx + sn * dz, y, -sn * dx + cs * dz, yaw);
++}
++
++struct Camera {
++  float yaw, x, z;
++};
++
++// Rooms (a key each) that vote for the camera's motion, then a list of grass
++// clumps (one key) at the given world x positions, the one at `liftedX` raised
++// by `lift`. Each clump's blended constants, if it was blended, go to `out`
++// (blend_draw's result is only valid until its next call).
++struct Result {
++  bool blended = false;
++  gxc::VertexShaderConstants constants;
++};
++static void draw_scene(const Camera& c, const float* clumps, int count, Result* out, float liftedX = 0.f,
++                       float lift = 0.f) {
++  for (int room = 0; room < 6; ++room)
++    fi::blend_draw(200 + room, 0, seen(c.yaw, c.x, c.z, room * 300.f - 750.f, -50.f, -900.f - room * 40.f));
++  for (int i = 0; i < count; ++i) {
++    const float y = clumps[i] == liftedX ? lift : 0.f;
++    const auto* result = fi::blend_draw(500, 0, seen(c.yaw, c.x, c.z, clumps[i], y, -800.f));
++    out[i].blended = result != nullptr;
++    if (result != nullptr)
++      out[i].constants = *result;
++  }
++}
++
++// Whether a clump at world x was drawn halfway between its own two places
++// (raised by yBefore and y).
++static bool halfway(const Result& result, const Camera& before, const Camera& now, float x, float yBefore = 0.f,
++                    float y = 0.f) {
++  if (!result.blended)
++    return false;
++  const auto a = seen(before.yaw, before.x, before.z, x, yBefore, -800.f);
++  const auto b = seen(now.yaw, now.x, now.z, x, y, -800.f);
++  for (int r = 0; r < 3; ++r) {
++    const float expected = (a.posnormalmatrix[r][3] + b.posnormalmatrix[r][3]) / 2.f;
++    if (std::fabs(result.constants.posnormalmatrix[r][3] - expected) > 0.01f)
++      return false;
++  }
++  return true;
++}
++
++int main() {
++  fi::set_enabled(true);
++  const uint64_t kShip = 11, kTree = 22, kHud = 33;
++
++  // Frame 1: the ship, two trees, the HUD.
++  CHECK(fi::blend_draw(kShip, 0, draw_at(0, 0, -500)) == nullptr); // no previous frame yet
++  fi::blend_draw(kTree, 0, draw_at(-200, 0, -800));
++  fi::blend_draw(kTree, 0, draw_at(300, 0, -900));
++  fi::blend_draw(kHud, 0, draw_at(10, 10, -1));
++  CHECK(!fi::frame_verdict());
++  fi::end_game_frame();
++
++  // Frame 2: the ship moved 20 units and turned 10 degrees; the trees are in
++  // the other order; the HUD did not move.
++  const auto* ship = fi::blend_draw(kShip, 0, draw_at(20, 0, -500, 10.f));
++  CHECK(ship != nullptr);
++  if (ship != nullptr) {
++    CHECK(near(ship->posnormalmatrix[0][3], 10.f));
++    CHECK(near(ship->posnormalmatrix[2][3], -500.f));
++    CHECK(near(ship->posnormalmatrix[0][0], (1.f + std::cos(10.f * 3.14159265f / 180.f)) / 2.f));
++  }
++  const auto* treeA = fi::blend_draw(kTree, 0, draw_at(305, 0, -900));
++  CHECK(treeA != nullptr);
++  if (treeA != nullptr) // occurrence 0 was the tree at -200, 505 away: implausible, so the nearest
++    CHECK(near(treeA->posnormalmatrix[0][3], 302.5f));
++  const auto* treeB = fi::blend_draw(kTree, 0, draw_at(-195, 0, -800));
++  CHECK(treeB != nullptr);
++  if (treeB != nullptr)
++    CHECK(near(treeB->posnormalmatrix[0][3], -197.5f));
++  CHECK(fi::blend_draw(kHud, 0, draw_at(10, 10, -1)) == nullptr); // identical: its own constants
++  CHECK(fi::frame_verdict());
++  fi::end_game_frame();
++
++  // Frame 3: a camera cut. Everything turns 120 degrees and jumps.
++  const float cutX[] = {900, -700, 400, -300, 800, -600, 500, -400, 700, -500, 600, -800, 300, -900, 200, -100};
++  fi::blend_draw(kShip, 0, draw_at(cutX[0], 0, 200, 130.f));
++  for (int i = 0; i < 20; ++i)
++    fi::blend_draw(kTree, 0, draw_at(cutX[i % 16], 50, 300, 120.f));
++  CHECK(!fi::frame_verdict());
++  fi::end_game_frame();
++
++  // Frame 4: a scrolling texture wraps (0.98 -> 0.02) and keeps its value;
++  // one that moves a little is blended.
++  {
++    auto a = draw_at(0, 0, -300);
++    a.texmatrices[0][0] = a.texmatrices[1][1] = 1.f;
++    a.texmatrices[0][3] = 0.98f;
++    a.texmatrices[3][0] = a.texmatrices[4][1] = 1.f;
++    a.texmatrices[3][3] = 0.10f;
++    fi::blend_draw(99, 0, a);
++    fi::end_game_frame();
++    auto b = a;
++    b.texmatrices[0][3] = 0.02f;
++    b.texmatrices[3][3] = 0.20f;
++    b.posnormalmatrix[0][3] = 4.f;
++    const auto* blended = fi::blend_draw(99, 0, b);
++    CHECK(blended != nullptr);
++    if (blended != nullptr) {
++      CHECK(near(blended->texmatrices[0][3], 0.02f));
++      CHECK(near(blended->texmatrices[3][3], 0.15f));
++      CHECK(near(blended->posnormalmatrix[0][3], 2.f));
++    }
++    fi::end_game_frame();
++  }
++
++  // A collapsed (hidden) object is not grown halfway.
++  {
++    auto shown = draw_at(0, 0, -300);
++    fi::blend_draw(77, 0, shown);
++    fi::end_game_frame();
++    auto hidden = shown;
++    std::memset(hidden.posnormalmatrix, 0, sizeof(float) * 12);
++    CHECK(fi::blend_draw(77, 0, hidden) == nullptr);
++    fi::end_game_frame();
++  }
++
++  // Grass clumps (copies of one draw) under a turning camera. The camera's
++  // motion, voted for by the rooms, carries each clump to its own place in
++  // the frame before, whatever the list order: a clump culled at the front
++  // shifts every later one onto its neighbour, 40 units away (well inside the
++  // plausibility bound), and the turn moves distant clumps farther than that.
++  {
++    const Camera a{0.f, 0.f, 0.f}, b{6.f, 10.f, -20.f}, c{12.f, 15.f, -45.f}, d{18.f, 20.f, -70.f},
++        e{24.f, 25.f, -95.f}, f{30.f, 30.f, -120.f};
++    Result r[6];
++    const float first[] = {-100, -60, -20, 20, 60, 100};
++    draw_scene(a, first, 6, r);
++    fi::end_game_frame();
++
++    // The first clump left the view; the others still pair with themselves.
++    const float second[] = {-60, -20, 20, 60, 100};
++    draw_scene(b, second, 5, r);
++    for (int i = 0; i < 5; ++i)
++      CHECK(halfway(r[i], a, b, second[i]));
++    CHECK(fi::frame_verdict());
++    fi::end_game_frame();
++
++    // A clump comes into view at the end of the list: nothing stood where it
++    // is, so it is drawn where the in-between camera sees it (blended from
++    // where the camera's motion carries it from), not slid from a neighbour.
++    const float third[] = {-60, -20, 20, 60, 100, 140};
++    draw_scene(c, third, 6, r);
++    CHECK(halfway(r[5], b, c, 140));
++    fi::end_game_frame();
++    draw_scene(d, third, 6, r);
++    CHECK(halfway(r[5], c, d, 140));
++    fi::end_game_frame();
++
++    // A clump that starts to move at an actor's pace (a bush Link lifts) is
++    // taken for one that stood at its new place for a frame, then pairs with
++    // itself.
++    draw_scene(e, third, 6, r, 60.f, 15.f);
++    CHECK(halfway(r[3], d, e, 60, 15.f, 15.f) && halfway(r[4], d, e, 100));
++    fi::end_game_frame();
++    draw_scene(f, third, 6, r, 60.f, 30.f);
++    CHECK(halfway(r[3], e, f, 60, 15.f, 30.f));
++    fi::end_game_frame();
++  }
++
++  // Draw keys: the same payload gives the same key; another primitive does not.
++  {
++    const uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
++    gxc::DrawPlan plan;
++    plan.match_payload = payload;
++    plan.match_payload_size = sizeof(payload);
++    plan.match_primitive = 0x90;
++    plan.vertex_count = 3;
++    const uint64_t k1 = fi::draw_key(plan);
++    CHECK(k1 != 0 && k1 == fi::draw_key(plan));
++    plan.match_primitive = 0x98;
++    CHECK(fi::draw_key(plan) != k1);
++    plan.match_payload = nullptr;
++    CHECK(fi::draw_key(plan) == 0);
++  }
++
++  if (g_failures == 0)
++    std::puts("frame_interp_test: all checks passed");
++  return g_failures == 0 ? 0 : 1;
++}
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index a644625..75711b1 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -464,6 +464,17 @@ struct DrawPlan {
+   std::vector<float> vertices; // kVertexFloats per vertex
+   std::vector<std::uint16_t> indices;
+   std::uint32_t vertex_count = 0;
++  // The draw's raw FIFO vertex payload (per-vertex indices and direct
++  // attributes) and its command, for matching one model's draw across frames.
++  // Borrowed from the consumed draw: valid only while the plan is submitted.
++  const std::uint8_t* match_payload = nullptr;
++  std::uint32_t match_payload_size = 0;
++  std::uint32_t match_primitive = 0;
++  std::uint32_t match_vtx_fmt = 0;
++  // Positions sent in the payload itself (particles, wave crests, 2D): the
++  // payload differs every frame, so such a draw is matched by its shape.
++  bool match_direct_position = false;
++  std::uint32_t match_vertex_stride = 0; // payload bytes per vertex
+   // Viewport, raw XF values (wd/2, -ht/2, zmax*2^24, xorig+342, yorig+342,
+   // farz*2^24) — the submission layer maps these through the substrate's
+   // logical-viewport scaling.
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 42c084f..e839d3c 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -587,6 +587,11 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+     plan.vertices = std::move(vertices);
+     plan.indices = std::move(indices);
+   }
++  plan.match_payload = draw.vertex_payload.data();
++  plan.match_payload_size = static_cast<std::uint32_t>(draw.vertex_payload.size());
++  plan.match_primitive = draw.primitive;
++  plan.match_vtx_fmt = draw.vtx_fmt;
++  plan.match_vertex_stride = draw.vertex_size;
+   auto skip = [&](const char* reason) {
+     plan.ok = false;
+     plan.skip_reason = reason;
+@@ -619,6 +624,8 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+     return skip("draw carried no payload");
+   }
+ 
++  plan.match_direct_position = bits(vcd_lo_, 2, 9) == 1u; // VCD position: direct
++
+   // BP-derived pipeline state.
+   const std::uint32_t gen_mode = bp_valid_[0x00] ? bp_regs_[0x00] : 0u;
+   const std::uint32_t cull = bits(gen_mode, 2, 14);
+-- 
+2.55.0
+

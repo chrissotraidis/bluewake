@@ -1,0 +1,432 @@
+From b4af1443578b0a34dc89a419f3c1a298ef553950 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 00:39:30 -0400
+Subject: [PATCH 102/102] Aurora: in-between frames through draw-heavy scenes
+
+The Forsaken Fortress draws 17,500 times a frame, and the translation worker
+needed about 40 ms of each 33 ms game frame, 31 percent of it in the
+in-between frame's blending. Most draws there (96 percent) repeat the vertex
+constants of the draw before them. Those are now compared once, in
+submit_draw_plan, instead of in the vertex uniform de-duplication, the
+in-between pool and the in-between block's de-duplication; a draw that repeats
+the one before and is matched the same way reuses its in-between block; and
+the indexed position and normal matrices are blended only for draws that read
+them (the others read only the current matrix). A Fortress-shaped load:
+10.0 ms of blending a frame before, 1.8 ms after, with the same blended
+values. frame_interp_test covers the reuse and the indexed matrices.
+---
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 141 +++++++++++++++---
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |   9 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  34 ++++-
+ .../aurora/tests/frame_interp_test.cpp        |  37 +++++
+ 4 files changed, 192 insertions(+), 29 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 5541301..f5feb37 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -68,6 +68,27 @@ struct KeyState {
+ absl::flat_hash_map<uint64_t, KeyState> g_keys;
+ gxc::VertexShaderConstants g_blended;
+ 
++// Most draws repeat the constants of the draw before them (a model's parts,
++// copies drawn with one matrix): 96 percent in the Forsaken Fortress, where a
++// frame has 17,500 draws. For those the caller's comparison is enough: the
++// pool entry is not compared again, and an in-between block made from the same
++// match the same way is the one g_blended already holds.
++uint64_t g_drawSerial = 0;
++uint64_t g_pooledSerial = 0; // the draw whose constants are the current pool's last
++uint64_t g_motionGeneration = 0; // bumped when any motion's values change
++enum class BlendPath { Main, OwnMotion, StoodBefore };
++struct LastBlend {
++  uint64_t serial = 0; // 0: none
++  BlendPath path = BlendPath::Main;
++  const void* previous = nullptr;
++  const void* motion = nullptr;
++  uint64_t motionGeneration = 0;
++  uint64_t rows = 0;
++  bool identical = false;
++};
++LastBlend g_lastBlend;
++bool g_blendRepeated = false;
++
+ // Motions seen this frame (see vote_motion()): M_now * M_before^-1 of the
+ // draws matched without ambiguity, and how many draws agree with each.
+ struct Motion {
+@@ -348,6 +369,7 @@ void vote_motion(const float current[][4], const float previous[][4]) {
+     }
+     g_motions[agreed].votes = 1;
+     g_motions[agreed].derived = false;
++    ++g_motionGeneration;
+   }
+   // The motion most draws agree with is the camera's.
+   if (g_leadingMotion < 0 || g_motions[agreed].votes > g_motions[g_leadingMotion].votes)
+@@ -433,6 +455,7 @@ float blend_weight();
+ bool derive(Motion& motion) {
+   if (motion.derived)
+     return motion.bounded;
++  ++g_motionGeneration;
+   motion.derived = true;
+   motion.bounded = false;
+   const double(*m)[4] = motion.m;
+@@ -633,8 +656,24 @@ float blend_weight() {
+   return weight;
+ }
+ 
++// Which of the ten indexed position matrices (XF rows 0-29, and their normal
++// matrices) a draw reads, from used_matrix_rows(): none for a draw without
++// per-vertex matrix indices, which reads only the current matrix; all of them
++// for one that indexes rows past them. The rest of the out block keeps the
++// current frame's values, which the draw does not read.
++inline unsigned used_matrices(uint64_t rows) {
++  if ((rows >> 30) != 0)
++    return 0x3FFu;
++  unsigned matrices = 0;
++  for (int m = 0; m < 10; ++m) {
++    if (((rows >> (m * 3)) & 7u) != 0)
++      matrices |= 1u << m;
++  }
++  return matrices;
++}
++
+ void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderConstants& current, float t,
+-           gxc::VertexShaderConstants& out) {
++           gxc::VertexShaderConstants& out, uint64_t rows) {
+   std::memcpy(&out, &current, sizeof(out));
+   lerp_rows(out.posnormalmatrix, previous.posnormalmatrix, current.posnormalmatrix, 6, t);
+   lerp_rows(out.projection, previous.projection, current.projection, 4, t);
+@@ -642,14 +681,22 @@ void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderCo
+     lerp_texture_rows(&out.texmatrices[m * 3], &previous.texmatrices[m * 3], &current.texmatrices[m * 3], t);
+   // XF matrix memory: position matrices in rows 0-29, texture matrices in
+   // 30-59, and the identity rows after them.
+-  lerp_rows(out.transformmatrices, previous.transformmatrices, current.transformmatrices, 30, t);
++  const unsigned matrices = used_matrices(rows);
++  for (int m = 0; m < 10; ++m) {
++    if ((matrices >> m) & 1u) {
++      lerp_rows(&out.transformmatrices[m * 3], &previous.transformmatrices[m * 3],
++                &current.transformmatrices[m * 3], 3, t);
++      lerp_rows(&out.normalmatrices[m * 3], &previous.normalmatrices[m * 3], &current.normalmatrices[m * 3], 3, t);
++    }
++  }
+   for (int m = 0; m < 10; ++m) {
+     const int row = 30 + m * 3;
+     lerp_texture_rows(&out.transformmatrices[row], &previous.transformmatrices[row],
+                       &current.transformmatrices[row], t);
+   }
+   lerp_rows(&out.transformmatrices[60], &previous.transformmatrices[60], &current.transformmatrices[60], 4, t);
+-  lerp_rows(out.normalmatrices, previous.normalmatrices, current.normalmatrices, 32, t);
++  if ((rows >> 30) != 0)
++    lerp_rows(&out.normalmatrices[30], &previous.normalmatrices[30], &current.normalmatrices[30], 2, t);
+   // Lights are in view space and move with the camera.
+   for (int l = 0; l < 8; ++l) {
+     for (int c = 0; c < 4; ++c) {
+@@ -666,8 +713,9 @@ void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderCo
+ // two views turned far apart shrinks them), and what moves keeps its place
+ // against it.
+ void blend_relative(const Motion& camera, const gxc::VertexShaderConstants& previous,
+-                    const gxc::VertexShaderConstants& current, float t, gxc::VertexShaderConstants& out) {
+-  blend(previous, current, t, out);
++                    const gxc::VertexShaderConstants& current, float t, gxc::VertexShaderConstants& out,
++                    uint64_t rows) {
++  blend(previous, current, t, out, rows);
+   const auto place = [&](const float from[][4], const float to[][4], float result[][4], bool affine) {
+     double seen[3][4];
+     affine_multiply(camera.inverse, to, seen);
+@@ -691,10 +739,14 @@ void blend_relative(const Motion& camera, const gxc::VertexShaderConstants& prev
+   place(previous.posnormalmatrix, current.posnormalmatrix, out.posnormalmatrix, true);
+   // Normal matrices turn with the camera's rotation only (it is rigid).
+   place(&previous.posnormalmatrix[3], &current.posnormalmatrix[3], &out.posnormalmatrix[3], false);
+-  for (int m = 0; m < 10; ++m)
+-    place(&previous.transformmatrices[m * 3], &current.transformmatrices[m * 3], &out.transformmatrices[m * 3], true);
+-  for (int m = 0; m < 10; ++m)
+-    place(&previous.normalmatrices[m * 3], &current.normalmatrices[m * 3], &out.normalmatrices[m * 3], false);
++  const unsigned matrices = used_matrices(rows);
++  for (int m = 0; m < 10; ++m) {
++    if ((matrices >> m) & 1u) {
++      place(&previous.transformmatrices[m * 3], &current.transformmatrices[m * 3], &out.transformmatrices[m * 3],
++            true);
++      place(&previous.normalmatrices[m * 3], &current.normalmatrices[m * 3], &out.normalmatrices[m * 3], false);
++    }
++  }
+   // Lights in view space: positions carried, directions turned.
+   for (int l = 0; l < 8; ++l) {
+     double pos[3], dir[3];
+@@ -784,14 +836,38 @@ uint64_t used_matrix_rows(const gxc::DrawPlan& plan) noexcept {
+ }
+ 
+ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRows,
+-                                             const gxc::VertexShaderConstants& current) {
++                                             const gxc::VertexShaderConstants& current, bool repeatsLastDraw) {
+   g_outcome = "no key";
++  g_blendRepeated = false;
++  const uint64_t serial = ++g_drawSerial;
+   if (!enabled() || key == 0)
+     return nullptr;
+   const float (*here)[4] = position_signature(current, usedMatrixRows);
+   FrameRecords& frame = g_frames[g_current];
+-  if (frame.pool.empty() || std::memcmp(&frame.pool.back(), &current, sizeof(current)) != 0)
++  // The pool keeps a run of identical blocks once. When the draw before this
++  // one put its block there, the caller's comparison says whether this is it.
++  const bool lastPooled = !frame.pool.empty() && g_pooledSerial + 1 == serial;
++  if (frame.pool.empty() ||
++      (lastPooled ? !repeatsLastDraw : std::memcmp(&frame.pool.back(), &current, sizeof(current)) != 0))
+     frame.pool.push_back(current);
++  g_pooledSerial = serial;
++  // An in-between block made the way the draw before this one's was (same
++  // path, same previous block, same motion, same matrices) from the same
++  // constants is the one g_blended holds.
++  const auto repeat = [&](BlendPath path, const void* previousBlock, const void* motion) {
++    const bool same = repeatsLastDraw && g_lastBlend.serial + 1 == serial && g_lastBlend.path == path &&
++                      g_lastBlend.previous == previousBlock && g_lastBlend.motion == motion &&
++                      g_lastBlend.motionGeneration == g_motionGeneration && g_lastBlend.rows == usedMatrixRows;
++    g_lastBlend.serial = serial;
++    if (same)
++      return true;
++    g_lastBlend.path = path;
++    g_lastBlend.previous = previousBlock;
++    g_lastBlend.motion = motion;
++    g_lastBlend.motionGeneration = g_motionGeneration;
++    g_lastBlend.rows = usedMatrixRows;
++    return false;
++  };
+   const auto constantsIndex = static_cast<uint32_t>(frame.pool.size() - 1);
+   frame.records.push_back({key, constantsIndex, false, {here[0][3], here[1][3], here[2][3]}});
+   ++g_frameCounts.draws;
+@@ -931,10 +1007,14 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+       if (usedMatrixRows != 0 || !stood_before(*camera, current, g_stoodBefore) ||
+           !plausible_relative(view, current, g_stoodBefore, 0))
+         return nullptr;
++      if (repeat(BlendPath::StoodBefore, camera, view)) {
++        g_blendRepeated = true;
++        return &g_blended;
++      }
+       if (view != nullptr)
+-        blend_relative(*view, g_stoodBefore, current, blend_weight(), g_blended);
++        blend_relative(*view, g_stoodBefore, current, blend_weight(), g_blended, 0);
+       else
+-        blend(g_stoodBefore, current, blend_weight(), g_blended);
++        blend(g_stoodBefore, current, blend_weight(), g_blended, 0);
+       return &g_blended;
+     }
+   }
+@@ -946,14 +1026,22 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     // sky, the first rooms of a fast turn), one whose change is rigid and a
+     // turn rather than a cut is blended by half of its own motion, which for
+     // scenery is the camera's.
++    ++g_frameCounts.matched;
++    if (repeat(BlendPath::OwnMotion, &constantsOf(0), nullptr)) {
++      ++g_frameCounts.blended;
++      g_outcome = "blended by its own motion";
++      g_blendRepeated = true;
++      return &g_blended;
++    }
+     Motion own{};
+     if (own_motion(constantsOf(0).posnormalmatrix, current.posnormalmatrix, own) && derive(own)) {
+-      ++g_frameCounts.matched;
+-      blend_relative(own, constantsOf(0), current, blend_weight(), g_blended);
++      blend_relative(own, constantsOf(0), current, blend_weight(), g_blended, usedMatrixRows);
+       ++g_frameCounts.blended;
+       g_outcome = "blended by its own motion";
+       return &g_blended;
+     }
++    --g_frameCounts.matched;
++    g_lastBlend.serial = 0;
+   }
+   if (previous == nullptr) {
+     ++g_frameCounts.rejected;
+@@ -961,20 +1049,35 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     return nullptr;
+   }
+   ++g_frameCounts.matched;
+-  if (std::memcmp(previous, &current, sizeof(current)) == 0) {
++  const bool relative = view != nullptr && previous->projection[3][2] != 0.f;
++  if (repeat(BlendPath::Main, previous, relative ? view : nullptr)) {
++    if (g_lastBlend.identical) {
++      ++g_frameCounts.identical;
++      g_outcome = "identical";
++      return nullptr;
++    }
++    ++g_frameCounts.blended;
++    g_outcome = "blended";
++    g_blendRepeated = true;
++    return &g_blended;
++  }
++  g_lastBlend.identical = std::memcmp(previous, &current, sizeof(current)) == 0;
++  if (g_lastBlend.identical) {
+     ++g_frameCounts.identical;
+     g_outcome = "identical";
+     return nullptr;
+   }
+-  if (view != nullptr && previous->projection[3][2] != 0.f)
+-    blend_relative(*view, *previous, current, blend_weight(), g_blended);
++  if (relative)
++    blend_relative(*view, *previous, current, blend_weight(), g_blended, usedMatrixRows);
+   else
+-    blend(*previous, current, blend_weight(), g_blended);
++    blend(*previous, current, blend_weight(), g_blended, usedMatrixRows);
+   ++g_frameCounts.blended;
+   g_outcome = "blended";
+   return &g_blended;
+ }
+ 
++bool last_blend_repeated() noexcept { return g_blendRepeated; }
++
+ bool frame_verdict() noexcept {
+   g_lastVerdict = false;
+   if (!enabled() || !g_havePrevious || g_frameCounts.blended == 0)
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index 6fbd062..a5dc4f7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -43,10 +43,15 @@ uint64_t used_matrix_rows(const gxruntime::gxcore::DrawPlan& plan) noexcept;
+ // Recording thread, once per submitted gxcore draw. Returns the constants the
+ // draw uses in the in-between frame, or nullptr when they are its own (no
+ // match, an implausible match, or nothing moved). The pointer is valid until
+-// the next call.
++// the next call. repeats_last_draw: `current` is the constants of the draw
++// before this one (the caller already compared them), so they are not
++// compared again, and an in-between block made from the same match is reused.
+ const gxruntime::gxcore::VertexShaderConstants* blend_draw(
+     uint64_t key, uint64_t used_matrix_rows,
+-    const gxruntime::gxcore::VertexShaderConstants& current);
++    const gxruntime::gxcore::VertexShaderConstants& current, bool repeats_last_draw = false);
++// Whether the last blend_draw() returned the same in-between block as the call
++// before it (its bytes unchanged), so the caller need not compare them.
++bool last_blend_repeated() noexcept;
+ 
+ // Why the last blend_draw() returned what it did, for the per-draw trace
+ // (DOL_AURORA_FRAME_INTERP_TRACE=game frame number).
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 7f27f91..40954c9 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -802,12 +802,21 @@ static UniformCache g_vertexUniformCache;
+ static UniformCache g_interpUniformCache;
+ static UniformCache g_pixelUniformCache;
+ 
+-// The in-between frame's blocks, de-duplicated the same way.
+-static Range push_interp_uniform_dedup(const uint8_t* data, size_t length) {
++// Whether `data` is the block the cache last took, in this frame packet.
++static bool repeats_cached(const UniformCache& cache, const uint8_t* data, size_t length) {
++  const uint64_t frameId = current_frame_id();
++  return frameId != 0 && cache.frameId == frameId && cache.bytes.size() == length &&
++         std::memcmp(cache.bytes.data(), data, length) == 0;
++}
++
++// The in-between frame's blocks, de-duplicated the same way. repeated: the
++// in-between frame made this block the way it made the last one, from the same
++// constants (frame_interp::last_blend_repeated), so its bytes are the same.
++static Range push_interp_uniform_dedup(const uint8_t* data, size_t length, bool repeated) {
+   UniformCache& cache = g_interpUniformCache;
+   const uint64_t frameId = current_frame_id();
+   if (frameId != 0 && cache.frameId == frameId && cache.range.size != 0 && cache.bytes.size() == length &&
+-      std::memcmp(cache.bytes.data(), data, length) == 0) {
++      (repeated || std::memcmp(cache.bytes.data(), data, length) == 0)) {
+     ++cache.hits;
+     return cache.range;
+   }
+@@ -818,15 +827,17 @@ static Range push_interp_uniform_dedup(const uint8_t* data, size_t length) {
+   return cache.range;
+ }
+ 
++// known: 1 or 0 when the caller has already compared `data` with the cache's
++// block (repeats_cached), -1 to compare here.
+ static Range push_uniform_dedup(UniformCache& cache, const uint8_t* data,
+-                                size_t length) {
++                                size_t length, int known = -1) {
+   static const bool enabled = [] {
+     const char* env = std::getenv("DOL_AURORA_UNIFORM_DEDUP");
+     return env == nullptr || env[0] != '0';
+   }();
+   const uint64_t frameId = current_frame_id();
+   if (enabled && frameId != 0 && cache.frameId == frameId && cache.bytes.size() == length &&
+-      std::memcmp(cache.bytes.data(), data, length) == 0) {
++      (known >= 0 ? known == 1 : std::memcmp(cache.bytes.data(), data, length) == 0)) {
+     ++cache.hits;
+     return cache.range;
+   }
+@@ -1200,12 +1211,18 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   const size_t vertBytes = plan.vertices.size() * sizeof(float);
+   const size_t indexBytes = plan.indices.size() * sizeof(uint16_t);
+   const size_t pixelUniformBytes = tev ? sizeof(plan.pixel_constants) : 0;
++  // One comparison for the three de-duplications below (the vertex block, the
++  // in-between frame's pool and its block): most draws repeat the constants of
++  // the draw before them, 96 percent of the Forsaken Fortress's 17,500 a frame,
++  // and each comparison of equal blocks reads all 2.8 KB of both.
++  const bool repeatsLast = repeats_cached(g_vertexUniformCache, reinterpret_cast<const uint8_t*>(&plan.constants),
++                                          sizeof(plan.constants));
+   // Matched before a staging segment can split the frame; a split frame is
+   // not interpolated.
+   const gxc::VertexShaderConstants* interpConstants =
+       frame_interp::enabled()
+           ? frame_interp::blend_draw(frame_interp::draw_key(plan), frame_interp::used_matrix_rows(plan),
+-                                     plan.constants)
++                                     plan.constants, repeatsLast)
+           : nullptr;
+   if (frame_interp::tracing()) {
+     const auto& m = plan.constants.posnormalmatrix;
+@@ -1242,10 +1259,11 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       indexBytes, 4);
+   const auto uniformRange = push_uniform_dedup(
+       g_vertexUniformCache, reinterpret_cast<const uint8_t*>(&plan.constants),
+-      sizeof(plan.constants));
++      sizeof(plan.constants), repeatsLast ? 1 : 0);
+   const auto interpUniformRange =
+       interpConstants != nullptr
+-          ? push_interp_uniform_dedup(reinterpret_cast<const uint8_t*>(interpConstants), sizeof(*interpConstants))
++          ? push_interp_uniform_dedup(reinterpret_cast<const uint8_t*>(interpConstants), sizeof(*interpConstants),
++                                      frame_interp::last_blend_repeated())
+           : Range{};
+   Range pixelUniformRange{};
+   if (tev) {
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 7e93417..92b9c2e 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -275,6 +275,43 @@ int main() {
+     fi::end_game_frame();
+   }
+ 
++  // A model's parts repeat the constants of the part before them, and the
++  // caller says so: the in-between block is reused, and it is the one blending
++  // them again gives. A draw with per-vertex matrix indices has the matrices it
++  // reads blended and the others left as they are now.
++  {
++    fi::end_game_frame();
++    const auto part = draw_at(0, 0, -400);
++    auto indexed = draw_at(0, 0, -400);
++    fi::blend_draw(7001, 0, part, false);
++    fi::blend_draw(7002, 0, part, true);
++    fi::blend_draw(7003, 0, part, true);
++    fi::blend_draw(7004, 1ull << 3, indexed, false);
++    fi::end_game_frame();
++
++    const auto moved = draw_at(10, 0, -400, 5.f);
++    const auto* first = fi::blend_draw(7001, 0, moved, false);
++    CHECK(first != nullptr && !fi::last_blend_repeated());
++    const gxc::VertexShaderConstants fresh = first != nullptr ? *first : gxc::VertexShaderConstants{};
++    const auto* second = fi::blend_draw(7002, 0, moved, true);
++    CHECK(second != nullptr && fi::last_blend_repeated());
++    CHECK(second != nullptr && std::memcmp(second, &fresh, sizeof(fresh)) == 0);
++    const auto* third = fi::blend_draw(7003, 0, moved, false); // not told: blended again, the same
++    CHECK(third != nullptr && !fi::last_blend_repeated());
++    CHECK(third != nullptr && std::memcmp(third, &fresh, sizeof(fresh)) == 0);
++    CHECK(near(fresh.posnormalmatrix[0][3], 5.f));
++
++    indexed.transformmatrices[3][3] = 20.f; // the matrix at row 3, which it reads
++    indexed.transformmatrices[6][3] = 40.f; // the one at row 6, which it does not
++    const auto* blendedIndexed = fi::blend_draw(7004, 1ull << 3, indexed, false);
++    CHECK(blendedIndexed != nullptr);
++    if (blendedIndexed != nullptr) {
++      CHECK(near(blendedIndexed->transformmatrices[3][3], 10.f));
++      CHECK(near(blendedIndexed->transformmatrices[6][3], 40.f));
++    }
++    fi::end_game_frame();
++  }
++
+   // Draw keys: the same payload gives the same key; another primitive does not.
+   {
+     const uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+-- 
+2.55.0
+

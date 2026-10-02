@@ -1,0 +1,25 @@
+From 0568feddb332e0d9fe8a3a7cff330263f14af2f1 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 06:06:12 +0900
+Subject: [PATCH] Use the test directory for the save-state fixture on all
+ platforms
+
+---
+ GXRuntime/tests/runtime_tests.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index ecb42bcf..a82ed173 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -2557,7 +2557,7 @@ static void test_savestate_roundtrip(void) {
+     PPCHostCall saved_host_call = cpu.host_call;
+     u8* saved_ram = cpu.ram;
+ 
+-    const char* path = "/tmp/gxruntime_savestate_test.dols";
++    const char* path = "gxruntime_savestate_test.dols";
+     DolSaveRegion regions[1] = {{"MEM1", cpu.ram, cpu.ram_size}};
+     assert(dol_savestate_write(path, &cpu, regions, 1));
+ 
+-- 
+2.46.0

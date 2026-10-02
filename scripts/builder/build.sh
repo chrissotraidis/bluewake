@@ -24,11 +24,13 @@
 #                             code translated from YOUR disc: it is for you only,
 #                             never share or upload it
 #   --no-mods                 skip the Widescreen and Better Wind Waker variants
-#   --out DIR                 build directory (default build/device)
+#   --out DIR                 build directory (default build/device, or build/macos)
 #   --jobs N                  parallel compile jobs (default: all cores)
 #   --game NAME               profile to use (default bluewake)
+#   --platform ios|tvos|macos Apple target (default ios)
+#   --combined-optimizations opt into the measured Mac optimization candidate
 #   --identity NAME           codesign identity, e.g. "Apple Development: You (TEAMID)"
-#   --profile FILE            provisioning profile for the app (with --identity)
+#   --profile FILE            device provisioning profile (with --identity)
 #   --install DEVICE          install with devicectl after signing (needs --identity)
 #   --no-train                skip local optimization training: about 20 minutes of
 #                             training and a Mac test build saved, but slower in game
@@ -51,10 +53,11 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 
-iso="" game=bluewake out="" ipa="" published_app="" app_only=0
+iso="" game=bluewake platform=ios out="" ipa="" published_app="" app_only=0
 jobs=$(sysctl -n hw.ncpu)
 identity="" profile="" install_device="" host_pgo=""
 train_pgo=auto training_save=""
+module_optimizations=none
 composite_pgo=()
 # -O2 always: -O1 compiled in 47 min instead of 80 but held only 26 FPS
 # on an iPad Pro (M2) at Outset (docs/BUILDER.md), so there is no quick option.
@@ -65,7 +68,7 @@ step() { echo; echo "==> $*"; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --app|--ipa|--out|--jobs|--game|--identity|--profile|--install|--composite-pgo|--host-pgo|--device-cpu|--training-save)
+        --app|--ipa|--out|--jobs|--game|--platform|--identity|--profile|--install|--composite-pgo|--host-pgo|--device-cpu|--training-save)
             [ $# -ge 2 ] && [ -n "$2" ] && [[ "$2" != --* ]] || die "$1 needs a value" ;;
     esac
     case "$1" in
@@ -76,6 +79,8 @@ while [ $# -gt 0 ]; do
         --out) out=$2; shift 2 ;;
         --jobs) jobs=$2; shift 2 ;;
         --game) game=$2; shift 2 ;;
+        --platform) platform=$2; shift 2 ;;
+        --combined-optimizations) module_optimizations=combined-v1; shift ;;
         --identity) identity=$2; shift 2 ;;
         --profile) profile=$2; shift 2 ;;
         --install) install_device=$2; shift 2 ;;
@@ -95,6 +100,13 @@ while [ $# -gt 0 ]; do
 done
 
 [[ "$game" =~ ^[a-z][a-z0-9_-]*$ ]] || die "invalid game profile name: $game"
+[[ "$platform" = ios || "$platform" = tvos || "$platform" = macos ]] || die "--platform must be ios, tvos or macos"
+if [ "$module_optimizations" != none ]; then
+    [ "$platform" = macos ] && [ "$app_only" -eq 0 ] || die "--combined-optimizations needs a personal --platform macos build"
+fi
+if [ "$platform" = macos ]; then
+    [ -z "$ipa$published_app$profile$install_device" ] || die "macOS produces a local .app; --ipa, --app, --profile and --install are device-only"
+fi
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "--jobs must be a positive integer"
 [[ "$device_cpu" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid --device-cpu"
 [ "$train_pgo" != 1 ] || [ "$use_pgo" -eq 1 ] || die "--train-pgo conflicts with --no-pgo"
@@ -120,13 +132,14 @@ fi
 
 if [ "$app_only" -eq 1 ]; then
     [ -z "$iso" ] && [ -z "$published_app" ] || die "--app-only takes no disc and no --app"
-    [ -n "$ipa" ] || die "--app-only needs --ipa OUT.ipa"
+    [ "$platform" = macos ] || [ -n "$ipa" ] || die "--app-only needs --ipa OUT.ipa"
     [ -z "$identity" ] || die "--app-only makes the unsigned published IPA; remove --identity"
 else
     [ -n "$iso" ] || die "usage: scripts/builder/build.sh DISC.iso [--ipa OUT.ipa] [options] (--help)"
     [ -f "$iso" ] || die "disc image not found: $iso"
     iso=$(cd "$(dirname "$iso")" && pwd)/$(basename "$iso")
 fi
+if [ "$platform" = macos ]; then out=${out:-$root/build/macos}; fi
 out=${out:-$root/$PROFILE_DEFAULT_OUT}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
@@ -135,7 +148,7 @@ case "$out" in
     "$root"/*) git check-ignore -q "$out/" || die "--out inside this checkout must be git-ignored; use build/device" ;;
     *) echo "builder: using external private build directory $out" ;;
 esac
-if [ -n "$identity" ] && [ -z "$profile" ]; then die "--identity needs --profile"; fi
+if [ "$platform" != macos ] && [ -n "$identity" ] && [ -z "$profile" ]; then die "--identity needs --profile"; fi
 if [ -n "$install_device" ] && [ -z "$identity" ]; then die "--install needs --identity and --profile"; fi
 for f in ${composite_pgo[@]+"${composite_pgo[@]}"} "$host_pgo" "$profile" "$training_save" "$published_app"; do
     [ -z "$f" ] || [ -f "$f" ] || die "file not found: $f"
@@ -156,7 +169,8 @@ pgo_flags() {
     python3 - "$1" <<'PY_FLAGS'
 import shlex, sys
 print(shlex.quote('-fprofile-instr-use=' + sys.argv[1]),
-      '-Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date -Wno-backend-plugin')
+      '-Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date -Wno-backend-plugin '
+      '-mllvm -enable-machine-outliner=never')
 PY_FLAGS
 }
 logs=$out/logs
@@ -181,7 +195,8 @@ step "1/9 tools"
 for tool in xcrun cmake ninja python3 git curl shasum clang codesign ditto; do
     command -v "$tool" >/dev/null || die "missing $tool (Xcode, CMake 3.25+ and Ninja are required; brew install cmake ninja)"
 done
-xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1 || die "the iOS SDK is missing: install Xcode and run sudo xcode-select -s /Applications/Xcode.app"
+case "$platform" in macos) sdk=macosx ;; tvos) sdk=appletvos ;; *) sdk=iphoneos ;; esac
+xcrun --sdk "$sdk" --show-sdk-path >/dev/null 2>&1 || die "the $sdk SDK is missing: install Xcode and run sudo xcode-select -s /Applications/Xcode.app"
 cmake_version=$(cmake --version | awk 'NR == 1 { print $3 }')
 python3 - "$cmake_version" <<'EOF' || die "CMake 3.25 or newer is required"
 import sys
@@ -189,7 +204,7 @@ v = tuple(int(x) for x in sys.argv[1].split('.')[:2])
 sys.exit(0 if v >= (3, 25) else 1)
 EOF
 profile_check_tools
-echo "xcode $(xcodebuild -version | awk 'NR == 1 { print $2 }'), cmake $cmake_version, $jobs jobs"
+echo "xcode $(xcodebuild -version | awk 'NR == 1 { print $2 }'), $sdk SDK, cmake $cmake_version, $jobs jobs"
 
 step "2/9 dependencies"
 profile_dependencies
@@ -201,6 +216,10 @@ profile_build_app
 [ -d "$app" ] || die "the app was not produced"
 [ ! -e "$app/Frameworks/$PROFILE_MODULE" ] || die "the published app must not contain $PROFILE_MODULE"
 signed="later by the player's sideloading tool"
+if [ "$platform" = macos ]; then
+    profile_package_mac
+    signed="ad hoc"
+fi
 else
 step "3/9 extract the game from the disc"
 profile_extract
@@ -218,6 +237,9 @@ fi
 
 step "6/9 mods"
 if [ "$mods" -eq 1 ]; then profile_mods; else echo "skipped"; fi
+if [ "$module_optimizations" != none ]; then
+    run module-prepare python3 "$root/scripts/builder/module_optimizations.py" prepare "$module_optimizations" --out "$out"
+fi
 
 if [ "$train_pgo" -eq 1 ]; then
     step "local optimization training (first run adds a Mac test build and about 20 minutes of playback)"
@@ -225,7 +247,7 @@ if [ "$train_pgo" -eq 1 ]; then
     profile_train
 else
     step "local optimization training"
-    echo "skipped: this build will run slower in game (about 27.5 instead of 30 FPS on an iPad Pro M2)"
+    echo "skipped: performance must be checked for this untrained build"
 fi
 
 step "7/9 compile the game module (-O$opt_level, $device_cpu; this is the long step)"
@@ -250,16 +272,22 @@ else
     profile_build_app
 fi
 [ -d "$app" ] || die "the app was not produced"
+if [ "$platform" = macos ]; then
+    profile_package_mac
+    signed="${identity:-ad hoc}"
+else
 mkdir -p "$app/Frameworks"
 cp "$module" "$app/Frameworks/$PROFILE_MODULE"
 if [ -n "$identity" ]; then
     cp "$profile" "$app/embedded.mobileprovision"
     security cms -D -i "$profile" > "$out/profile.plist"
-    /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' "$out/profile.plist" > "$out/entitlements.plist"
-    app_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$out/profile.plist")
-    case "$app_id" in *".$PROFILE_BUNDLE_ID"|*".*") ;; *) die "the profile is for $app_id, not $PROFILE_BUNDLE_ID" ;; esac
+    if ! python3 "$root/scripts/builder/signing_entitlements.py" \
+        "$out/profile.plist" "$out/entitlements.plist" "$PROFILE_BUNDLE_ID" "$platform"; then
+        die "the provisioning profile does not authorize $PROFILE_BUNDLE_ID"
+    fi
     run sign-module codesign -f -s "$identity" "$app/Frameworks/$PROFILE_MODULE"
-    run sign-app codesign -f -s "$identity" --entitlements "$out/entitlements.plist" "$app"
+    run sign-app codesign -f -s "$identity" --entitlements "$out/entitlements.plist" \
+        --generate-entitlement-der "$app"
     signed="with $identity"
 else
     rm -f "$app/embedded.mobileprovision"
@@ -268,6 +296,7 @@ else
     signed="ad hoc"
 fi
 run sign-verify codesign -v --strict "$app"
+fi # device signing
 fi
 
 step "9/9 package"
@@ -329,11 +358,31 @@ fi
 if [ -n "$install_device" ]; then
     run install xcrun devicectl device install app --device "$install_device" "$app"
     echo "installed on $install_device"
+    if [ "$platform" = tvos ]; then
+        run tvos-disc-transfer xcrun devicectl device copy to --device "$install_device" \
+            --domain-type appDataContainer --domain-identifier "$PROFILE_BUNDLE_ID" \
+            --source "$iso" --destination "Library/Caches/BlueWake/GZLE01.iso"
+        echo "disc image copied into $PROFILE_BUNDLE_ID/Library/Caches/BlueWake/GZLE01.iso"
+        run tvos-first-launch xcrun devicectl device process launch --device "$install_device" "$PROFILE_BUNDLE_ID"
+    fi
 fi
 
 echo
 echo "$PROFILE_APP_NAME.app: $app ($(du -sh "$app" | awk '{print $1}'), signed $signed)"
 if [ "$app_only" -eq 0 ]; then
+    if [ "$platform" = macos ]; then
+        echo "Open $app or copy it to Applications. Saves and preferences stay in your Library/Application Support/BlueWake."
+        echo "This personal app contains your disc and translated game code. Never share or upload it."
+        exit 0
+    fi
     echo "game module: $(shasum -a 256 "$app/Frameworks/$PROFILE_MODULE" | awk '{print $1}')"
-    echo "On first launch the app asks for the disc image; copy it to the device with Finder or the Files app."
+    if [ "$platform" = tvos ]; then
+        if [ -n "$install_device" ]; then
+            echo "The app prepares the copied disc image automatically."
+        else
+            echo "Copy GZLE01.iso into Library/Caches/BlueWake with devicectl; the app prepares it automatically."
+        fi
+    else
+        echo "On first launch the app asks for the disc image; copy it to the device with Finder or the Files app."
+    fi
 fi

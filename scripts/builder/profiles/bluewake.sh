@@ -32,9 +32,13 @@ PROFILE_HAS_MODS=1
 PROFILE_COMPOSITE_PGO=scripts/builder/profiles/bluewake/composite-rt.profdata
 PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 
+# RecompCore: chrissotraidis/RecompCore candidate branch codex/bluewake-mem1-alias-parity, which is
+# elliotttate/RecompCore's windows-release 9618e9d (chrissotraidis 2d60636 plus
+# patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0130 and reconciliation patches 0131-0137. DolRecomp: elliotttate's copy of
+# chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=2d6063614a9bc899f6b4d11c7e7b3cd66e4d96f3
-DOLRECOMP_SHA=5c91d6ed1ac7ac2f1aa6535b893eabb70f0f0d8f
+RECOMPCORE_SHA=0568feddb332e0d9fe8a3a7cff330263f14af2f1
+DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
 # Digest of the generated composite source (scripts/ios/composite_manifest.py)
@@ -43,17 +47,10 @@ DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
 COMPOSITE_DIGEST=54f54434c3f9c899d43a96373dc0b4c1aed0e50db8b820b9698dfa76571a770a
 
 profile_check_tools() {
-    # The mods need PyYAML and Pillow. When the Mac's python3 lacks them, use a
-    # private environment in build/ (pip may not install into Homebrew's Python).
-    if [ "$mods" -eq 1 ] && ! python3 -c 'import yaml, PIL' 2>/dev/null; then
-        local venv=$root/build/python
-        if ! "$venv/bin/python3" -c 'import yaml, PIL' 2>/dev/null; then
-            echo "installing PyYAML and Pillow into build/python for the mods"
-            run python-venv python3 -m venv "$venv"
-            run python-packages "$venv/bin/python3" -m pip install --quiet pyyaml pillow
-        fi
-        export PATH="$venv/bin:$PATH"
-    fi
+    # The mods need only python3's standard library: Better Wind Waker's
+    # settings are game options built from mods/betterww/options.txt, not its
+    # patcher (which needed PyYAML and Pillow).
+    :
 }
 
 profile_dependencies() {
@@ -75,9 +72,9 @@ profile_dependencies() {
         git -C "$recompcore" remote remove bluewake >/dev/null 2>&1 || true
         git -C "$recompcore" remote add bluewake "$RECOMPCORE_URL"
         if [ "$fresh_clone" -eq 1 ]; then
-            run recompcore-fetch git -C "$recompcore" fetch --depth 1 bluewake "$RECOMPCORE_SHA"
+            run recompcore-fetch git -C "$recompcore" fetch --recurse-submodules=no --depth 1 bluewake "$RECOMPCORE_SHA"
         else
-            run recompcore-fetch git -C "$recompcore" fetch bluewake "$RECOMPCORE_SHA"
+            run recompcore-fetch git -C "$recompcore" fetch --recurse-submodules=no bluewake "$RECOMPCORE_SHA"
         fi
         git -C "$recompcore" checkout -q --detach FETCH_HEAD
     fi
@@ -95,6 +92,8 @@ profile_dependencies() {
 
     deps=$root/build/deps
     mkdir -p "$deps"
+    # Desktop Aurora resolves its pinned macOS Dawn package itself.
+    [ "$platform" != macos ] || return 0
     local dawn_tar=$deps/dawn-ios-arm64.tar.gz
     if [ ! -f "$dawn_tar" ] || [ "$(shasum -a 256 "$dawn_tar" | awk '{print $1}')" != "$DAWN_SHA256" ]; then
         run dawn-download curl -fL -o "$dawn_tar" "$DAWN_URL"
@@ -105,6 +104,19 @@ profile_dependencies() {
         tar xzf "$dawn_tar" -C "$deps/dawn-ios"
     fi
     echo "Dawn iOS package $DAWN_SHA256"
+    if [ "$platform" = tvos ]; then
+        local dawn_tvos=$deps/dawn-tvos
+        if [ ! -f "$dawn_tvos/lib/cmake/Dawn/DawnConfig.cmake" ] ||
+           [ "$(cat "$dawn_tvos/retagged-from" 2>/dev/null || true)" != "$DAWN_SHA256" ]; then
+            [ ! -e "$dawn_tvos" ] || die "existing Dawn tvOS cache does not match the pin; move it aside and rerun"
+            ditto "$deps/dawn-ios" "$dawn_tvos"
+            python3 "$root/scripts/ios/retag_macho_platform.py" --platform tvos \
+                "$dawn_tvos/lib/libwebgpu_dawn.a" "$dawn_tvos/lib/libwebgpu_dawn.a"
+            ranlib "$dawn_tvos/lib/libwebgpu_dawn.a"
+            printf '%s\n' "$DAWN_SHA256" > "$dawn_tvos/retagged-from"
+        fi
+        echo "Dawn arm64 archive prepared for tvOS from the pinned iOS package"
+    fi
 }
 
 profile_extract() {
@@ -148,10 +160,11 @@ profile_generate() {
     fi
     # Reuse only a verified tree made by the same generators and mod selection.
     # Checking the base digest alone used to retain mod variants after --no-mods.
-    local inputs current saved
-    inputs=$( { printf '%s\n' "$digest" "$mods"; shasum -a 256 \
+    local inputs current saved optimization_recipe
+    optimization_recipe=$(python3 "$root/scripts/builder/module_optimizations.py" fingerprint "$module_optimizations")
+    inputs=$( { printf '%s\n' "$digest" "$mods" "$optimization_recipe"; shasum -a 256 \
         "$root/scripts/mods/"*.py "$root/scripts/mods/"*.sh \
-        "$root/mods/widescreen/GZLE01.gecko"; } | shasum -a 256 | awk '{print $1}')
+        "$root/mods/widescreen/"*.gecko "$root/mods/betterww/options.txt"; } | shasum -a 256 | awk '{print $1}')
     current=""
     if [ -d "$out/composite-src" ]; then
         current=$(python3 scripts/ios/composite_manifest.py "$out/composite-src" | awk '{print $1}')
@@ -176,21 +189,20 @@ profile_generate() {
 }
 
 profile_mods() {
-    # Widescreen, Better Wind Waker and both together, as variants compiled
-    # into the same module (docs/MODS.md). Done once per composite source.
-    if [ "$(cat "$out/mods.done" 2>/dev/null || true)" = complete ] && \
-       [ -f "$out/mods/betterww.iso" ]; then
+    # Widescreen, Better Wind Waker's options and both together, as variants
+    # compiled into the same module (docs/MODS.md). Done once per composite source.
+    if [ "$(cat "$out/mods.done" 2>/dev/null || true)" = complete ]; then
         echo "mods already in $out/composite-src"
         return
     fi
     run mods scripts/mods/build_mods.sh "$out" "$iso"
     python3 scripts/ios/composite_manifest.py "$out/composite-src" | awk '{print $1}' > "$out/composite-final.digest"
     printf '%s\n' complete > "$out/mods.done"
-    echo "widescreen and Better Wind Waker variants added; the patched disc for the device is $out/mods/betterww.iso"
+    echo "widescreen and Better Wind Waker variants added"
 }
 
 profile_train() {
-    local args=(--disc "$iso" --out "$out" --jobs "$jobs")
+    local args=(--disc "$iso" --out "$out" --jobs "$jobs" --module-optimizations "$module_optimizations")
     [ -z "$training_save" ] || args+=(--save "$training_save")
     run local-training python3 "$root/scripts/builder/train_local_pgo.py" "${args[@]}"
     [ -s "$out/pgo-local/composite.profdata" ] || die "local training produced no game profile"
@@ -200,7 +212,17 @@ profile_train() {
 }
 
 profile_compile() {
-    local flags="-mcpu=$device_cpu"
+    local cmake_system=iOS sdk=iphoneos build_dir="$out/composite-ios" deployment=17.0
+    if [ "$platform" = macos ]; then
+        cmake_system=Darwin sdk=macosx build_dir="$out/composite-macos" deployment=14.0
+    fi
+    if [ "$platform" = tvos ]; then
+        cmake_system=tvOS sdk=appletvos build_dir="$out/composite-tvos"
+    fi
+    local flags="-mcpu=$device_cpu" feature_flags feature
+    local optimization_flags=()
+    feature_flags=$(python3 "$root/scripts/builder/module_optimizations.py" flags "$module_optimizations")
+    while IFS= read -r feature; do optimization_flags+=("$feature"); done <<< "$feature_flags"
     if [ ${#composite_pgo[@]} -gt 0 ]; then
         run composite-pgo-merge xcrun llvm-profdata merge -o "$out/composite.profdata" "${composite_pgo[@]}"
         # The profile is a compiler input but not a C header dependency. Put
@@ -213,17 +235,24 @@ profile_compile() {
         flags="$flags $(pgo_flags "$profile_path")"
         echo "with the composite profile(s): ${composite_pgo[*]}"
     fi
-    run composite-configure cmake -S cmake/composite -B "$out/composite-ios" -G Ninja \
-        -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_FLAGS=$flags" \
-        -DCOMPOSITE_OPTIMIZATION_LEVEL="$opt_level" \
+    run "composite-configure-$platform" cmake -S cmake/composite -B "$build_dir" -G Ninja \
+        "-DCMAKE_SYSTEM_NAME=$cmake_system" "-DCMAKE_OSX_SYSROOT=$sdk" -DCMAKE_OSX_ARCHITECTURES=arm64 \
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=$deployment" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_FLAGS=$flags" \
+        -DCOMPOSITE_OPTIMIZATION_LEVEL="$opt_level" "${optimization_flags[@]}" \
         -DCOMPOSITE_DIR="$out/composite-src" -DGXRUNTIME_DIR="$recompcore/GXRuntime" \
         -DABI_DIR="$recompcore/Source/Core/Core/PowerPC/StaticRecomp"
-    run composite-build cmake --build "$out/composite-ios" -j "$jobs"
-    module=$out/composite-ios/$PROFILE_MODULE
+    run "composite-build-$platform" cmake --build "$build_dir" -j "$jobs"
+    module=$build_dir/$PROFILE_MODULE
 }
 
 profile_build_app() {
+    local cmake_system=iOS sdk=iphoneos app_build="$out/app" dawn_dir="$deps/dawn-ios"
+    local tvos_flag=OFF
+    if [ "$platform" = tvos ]; then
+        cmake_system=tvOS sdk=appletvos app_build="$out/app-tvos"
+        dawn_dir="$deps/dawn-tvos"
+        tvos_flag=ON
+    fi
     local host_flags=""
     if [ -n "$host_pgo" ]; then
         local profile_hash profile_path
@@ -234,14 +263,44 @@ profile_build_app() {
         host_flags=$(pgo_flags "$profile_path")
         echo "with the host profile $host_pgo"
     fi
-    run app-configure cmake -S apple/ios -B "$out/app" -G Ninja \
-        -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos \
+    if [ "$platform" = macos ]; then
+        app_build="$out/app-macos"
+        run app-configure-macos cmake -S scripts/builder/training -B "$app_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF \
+            -DAURORA_DAWN_PROVIDER=package -DAURORA_DAWN_LINKAGE=static \
+            -DAURORA_SDL3_PROVIDER=vendor -DAURORA_SDL3_LINKAGE=static \
+            '-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local' -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON \
+            "-DCMAKE_C_FLAGS=$host_flags" "-DCMAKE_CXX_FLAGS=$host_flags"
+        run app-build-macos cmake --build "$app_build" --target bluewake_host -j "$jobs"
+        app=$app_build/host/BlueWake.app
+        return
+    fi
+    run "app-configure-$platform" cmake -S apple/ios -B "$app_build" -G Ninja \
+        "-DCMAKE_SYSTEM_NAME=$cmake_system" "-DCMAKE_OSX_SYSROOT=$sdk" \
         -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
         -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DPNG_SHARED=OFF \
-        -DAURORA_DAWN_PROVIDER=system -DDawn_DIR="$deps/dawn-ios/lib/cmake/Dawn" \
+        "-DBLUEWAKE_TVOS=$tvos_flag" \
+        -DAURORA_DAWN_PROVIDER=system -DDawn_DIR="$dawn_dir/lib/cmake/Dawn" \
         -DAURORA_SDL3_PROVIDER=vendor -DAURORA_SDL3_LINKAGE=static -DAURORA_DAWN_LINKAGE=static \
         "-DCMAKE_C_FLAGS=$host_flags" "-DCMAKE_CXX_FLAGS=$host_flags" \
         '-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local' -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON
-    run app-build cmake --build "$out/app" --target BlueWake -j "$jobs"
-    app=$out/app/BlueWake.app
+    run "app-build-$platform" cmake --build "$app_build" --target BlueWake -j "$jobs"
+    app=$app_build/BlueWake.app
+}
+
+# Assemble a movable personal desktop app; never install over player data.
+profile_package_mac() {
+    local args=(--app "$app" --output "$out/packaged/BlueWake.app"
+        --runtime "$recompcore" --source-commit "$source_commit"
+        --identity "${identity:--}" --module-optimizations "$module_optimizations")
+    if [ "$app_only" -eq 0 ]; then
+        args+=(--module "$module" --game "$out/game" --disc "$iso")
+    fi
+    if [ "$source_modified" != false ] || [ "$source_commit" != "$(git rev-parse HEAD)" ] ||
+       [ -n "$(git status --porcelain)" ]; then
+        args+=(--source-modified)
+    fi
+    run package-macos python3 "$root/scripts/builder/package_macos.py" "${args[@]}"
+    app=$out/packaged/BlueWake.app
 }

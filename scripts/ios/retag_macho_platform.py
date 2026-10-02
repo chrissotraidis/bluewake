@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Retag arm64 Mach-O objects, static archives and dylibs to another Apple platform.
 
-Apple arm64 code is ABI-identical across macOS, iOS and the iOS simulator on
-Apple Silicon; the linker and dyld refuse to mix them only because of the
-platform recorded in LC_BUILD_VERSION. This rewrites that one field in place
-(no load commands are added or resized). It is a development bridge for the
-simulator: device builds should come from real platform toolchains.
+Apple arm64 code is ABI-compatible across several Apple platforms; the linker
+and dyld refuse to mix them because of the platform recorded in
+LC_BUILD_VERSION. This rewrites that one field in place (no load commands are
+added or resized). It is a development bridge for platform packages whose
+symbols and APIs are already compatible; it does not make an incompatible
+library safe to use.
 
-usage: retag_macho_platform.py --platform iossim|ios|macos IN OUT
+usage: retag_macho_platform.py --platform iossim|ios|tvos|macos IN OUT
 """
 import argparse
 import shutil
 import struct
 import sys
 
-PLATFORMS = {"macos": 1, "ios": 2, "iossim": 7}
+PLATFORMS = {"macos": 1, "ios": 2, "tvos": 3, "iossim": 7}
 MH_MAGIC_64 = 0xFEEDFACF
 LC_BUILD_VERSION = 0x32
 LC_VERSION_MIN_MACOSX = 0x24

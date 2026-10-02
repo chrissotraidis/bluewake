@@ -1,0 +1,1185 @@
+From d389b4bb1c2e4bc90f8b9ec6df1dec5b051c9538 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 12:57:05 -0400
+Subject: [PATCH 108/109] Aurora: 120 FPS in-between frames, on a steady
+ present clock
+
+aurora_set_frame_interp_steps(3) (DOL_AURORA_FRAME_INTERP_STEPS=3): three
+in-between frames each game frame, at a quarter, half and three quarters of
+the way, for a 120 Hz display. A matched draw is blended once per step: the
+camera's part motion is the screw motion's power at t (exactly half at 0.5,
+so four quarter steps make the whole), the helper thread stages a block and
+a particle's vertices per step, and the in-between frame being encoded reads
+its step's. frame_interp_test covers even steps for a camera that turns and
+moves, a moving draw and a particle.
+
+Presents are held aside and shown on one clock: an in-between frame every
+quarter (or half) of a game frame, continuing from the frame before's last,
+from two alternating sets of held frames so a new game frame never forces
+the one before's out early, with what is due presented between replays and
+every 512 commands of a pass. Presenting the first in-between frame at once
+and the rest after it put them in bursts at 120 Hz (the sea shimmered), and
+60 Hz alternated 22 and 12 ms between presents; now 8.4 and 16.5 ms apart.
+DOL_AURORA_PRESENT_CLOCK=0 keeps the old 60 Hz timing; DOL_AURORA_PRESENT_LOG=1
+logs each present.
+
+The in-between uniform area has 32 MB per step: at 120 Hz a beach needed
+about 55 MB, the blocks past 32 did not fit, and those draws kept the next
+frame's transforms in two of the three in-between frames (the sea blinked
+out on the shore).
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   5 +
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 288 +++++++++++++++---
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  17 +-
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 220 ++++++++-----
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  16 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  49 ++-
+ .../aurora/tests/frame_interp_test.cpp        | 112 +++++++
+ 7 files changed, 551 insertions(+), 156 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index acab312..23613f2 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -159,6 +159,11 @@ void aurora_set_frame_interpolation(bool enabled);
+    the starting value. */
+ void aurora_set_fps_overlay(bool enabled);
+ bool aurora_get_frame_interpolation(void);
++/* In-between frames per game frame: 1 (60 FPS from the game's 30) or 3
++   (120 FPS, for a 120 Hz display). DOL_AURORA_FRAME_INTERP_STEPS sets the
++   starting value; a change takes effect at the next game frame. */
++void aurora_set_frame_interp_steps(int steps);
++int aurora_get_frame_interp_steps(void);
+ /* Frames presented to the window so far, in-between frames included (what
+    the frames-a-second counter counts). */
+ unsigned long long aurora_get_shown_frames(void);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index d149a6c..0415d8e 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -243,14 +243,23 @@ struct FramePacket {
+   bool continuation = false;
+   // Ends a game frame (not a staging segment), so its callback presents.
+   bool presents = false;
+-  // Gets an in-between frame (frame_interp.hpp), and its game frame number.
++  // Gets in-between frames (frame_interp.hpp), how many (one per step), and
++  // its game frame number.
+   bool interpolate = false;
++  int interpSteps = 1;
+   uint64_t gameFrame = 0;
+ };
+ 
+ static std::array<FramePacket, FrameSlotCount> g_framePackets;
+ // In-between frame uniforms, per frame slot (see push_interp_uniform).
+-constexpr uint64_t InterpUniformBufferSize = 33554432; // 32mb
++// 32 MB for each in-between frame of a game frame: at 120 Hz (three) the
++// blocks of a busy scene came to about 55 MB, and past 32 the rest did not
++// fit, so those draws kept the next frame's transforms in two of the three in-
++// between frames (the sea on a beach blinked out and back). The GPU buffer
++// grows to what a frame uses (upload_interp_uniforms).
++constexpr uint64_t InterpUniformStepSize = 33554432; // 32mb
++constexpr uint64_t InterpUniformBufferSize = InterpUniformStepSize * 3;
++static uint64_t g_interpUniformBufferSize = 0; // the GPU buffer's size (render worker)
+ static std::array<std::vector<uint8_t>, FrameSlotCount> g_interpUniformStaging;
+ // Per frame slot, the range each in-between job resolved to, in job order
+ // (gxcore_draw.cpp's helper writes them; end_frame waits for it).
+@@ -260,6 +269,7 @@ constexpr uint64_t InterpVertexBufferSize = 8388608; // 8mb
+ static std::array<std::vector<uint8_t>, FrameSlotCount> g_interpVertexStaging;
+ wgpu::Buffer g_interpVertexBuffer;
+ static size_t g_replayFrameSlot = 0; // render worker: the frame whose in-between frame is encoded
++static int g_replayStep = 0;          // render worker: which of its in-between frames
+ static uint64_t g_interpUniformOverflows = 0; // recording thread
+ static wgpu::Buffer g_interpUniformBuffer;
+ wgpu::BindGroup g_interpUniformBindGroup;
+@@ -295,13 +305,42 @@ static constexpr auto FrameStartSafetyMargin = std::chrono::milliseconds{2};
+ // its packet.
+ static bool g_segmentEnding = false;
+ static webgpu::TextureWithSampler g_heldFrame; // the real frame, kept for its later present
++// 120 Hz (three in-between frames a game frame, present_steps): each game
++// frame's in-between frames (0-2) and its real frame (3), kept until their
++// presents, in two sets that alternate between game frames so a new frame
++// never has to show the one before's early; and the time the last present
++// was scheduled for, the clock the next frame's continue.
++static webgpu::TextureWithSampler g_heldSteps[2][4];
++static int g_heldSet = 0;
++static PresentClock::time_point g_lastDue{};
+ static bool g_heldShown = false;                 // the screen shows g_heldFrame (render worker)
++// Presents waiting for their time, in time order (render worker): the real
++// frame after its in-between frames, and at 120 Hz the later in-between
++// frames.
+ struct DeferredPresent {
+-  bool active = false;
+   PresentClock::time_point due;
++  const webgpu::TextureWithSampler* source = nullptr;
+   EndFrameCallback callback;
++  uint64_t gameFrame = 0; // for DOL_AURORA_PRESENT_LOG
++  int step = 0;           // the in-between frame's step, or -1 for the real frame
+ };
+-static DeferredPresent g_deferredPresent;
++// DOL_AURORA_PRESENT_LOG=1: a line per present (debug), what and when.
++static const bool g_presentLog = [] {
++  const char* env = std::getenv("DOL_AURORA_PRESENT_LOG");
++  return env != nullptr && env[0] == '1';
++}();
++static void log_present(const char* kind, uint64_t gameFrame, int step, PresentClock::time_point due) {
++  if (!g_presentLog)
++    return;
++  const auto now = PresentClock::now();
++  const auto ms = [](PresentClock::duration d) {
++    return std::chrono::duration<double, std::milli>(d).count();
++  };
++  std::fprintf(stderr, "[present] %s frame=%llu step=%d t=%.2f late=%.2f\n", kind,
++               static_cast<unsigned long long>(gameFrame), step, ms(now.time_since_epoch()),
++               due.time_since_epoch().count() == 0 ? 0.0 : ms(now - due));
++}
++static std::deque<DeferredPresent> g_deferredPresents;
+ static PresentClock::time_point g_lastGameFrameEnd;
+ static int64_t g_gameFramePeriodNs = 0;
+ static void run_deferred_present();
+@@ -309,7 +348,10 @@ static void deferred_present_tick();
+ static bool note_game_frame_end();
+ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
+                                     const EndFrameCallback& callback);
+-static void present_held(wgpu::CommandEncoder& encoder, const EndFrameCallback& callback);
++static void present_held(wgpu::CommandEncoder& encoder, const EndFrameCallback& callback, int steps);
++static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
++                          const EndFrameCallback& callback, int steps);
++static void flush_presents_from(const webgpu::TextureWithSampler* first, const webgpu::TextureWithSampler* last);
+ static constexpr auto MaxPacingSample = std::chrono::milliseconds{250};
+ static constexpr uint32_t PacingEmaWeight = 8;
+ 
+@@ -1147,10 +1189,15 @@ void shutdown() {
+ #endif
+   render_worker::synchronize();
+   render_worker::shutdown();
+-  g_deferredPresent = {};
++  g_deferredPresents.clear();
+   g_heldFrame = {};
++  for (auto& set : g_heldSteps)
++    for (auto& held : set)
++      held = {};
++  g_lastDue = {};
+   g_interpUniformBindGroup = {};
+   g_interpUniformBuffer = {};
++  g_interpUniformBufferSize = 0;
+   g_interpVertexBuffer = {};
+   for (auto& staging : g_interpUniformStaging) {
+     staging = {};
+@@ -1414,6 +1461,7 @@ void end_frame(EndFrameCallback callback) {
+   frame.stats.lastTextureUploadSize = frame.textureUpload.size();
+   frame.presents = !g_segmentEnding;
+   frame.interpolate = frame.presents && !frame.continuation && frame_interp::frame_verdict();
++  frame.interpSteps = frame_interp::frame_steps();
+   if (frame_interp::tracing() || (frame.interpolate && frame_interp::dump_frame(frame_interp::game_frame_number()))) {
+     Log.info("In-between uniforms for game frame {}: {} bytes, {} blocks did not fit; frame uniforms {} bytes",
+              frame_interp::game_frame_number(), g_interpUniformStaging[g_recordingFrameSlot].size(),
+@@ -1471,10 +1519,8 @@ void end_frame(EndFrameCallback callback) {
+     s_mappingStates[stagingSlot].store(BufferMapState::Unmapped, std::memory_order_release);
+     auto encoder = std::move(packet.encoder);
+     const auto stats = packet.stats;
+-    // A real frame still waiting behind its in-between frame is shown first:
+-    // presents stay in order, and this frame may overwrite the held copy.
+-    run_deferred_present();
+     const bool presents = packet.presents;
++    const int steps = packet.interpSteps;
+     bool interpolate = false;
+     bool hold = false;
+     if (presents) {
+@@ -1494,11 +1540,25 @@ void end_frame(EndFrameCallback callback) {
+     g_stats.lastIndexSize = stats.lastIndexSize;
+     g_stats.lastStorageSize = stats.lastStorageSize;
+     g_stats.lastTextureUploadSize = stats.lastTextureUploadSize;
+-    if (interpolate) {
++    // At 120 Hz the frame before's presents keep their times (present_steps).
++    // Otherwise a real frame still waiting behind its in-between frames is
++    // shown first: presents stay in order, and this frame may overwrite the
++    // held copy.
++    static const bool steadyClock = [] {
++      const char* env = std::getenv("DOL_AURORA_PRESENT_CLOCK");
++      return env == nullptr || env[0] != '0';
++    }();
++    const bool clocked = interpolate && (steps > 1 || steadyClock);
++    if (!clocked)
++      run_deferred_present();
++    if (clocked) {
++      present_steps(packet, frameSlot, encoder, callback, steps);
++      packet = {};
++    } else if (interpolate) {
+       present_with_in_between(packet, frameSlot, encoder, callback);
+       packet = {};
+     } else if (hold) {
+-      present_held(encoder, callback);
++      present_held(encoder, callback, steps);
+     } else if (callback) {
+       if (presents)
+         g_heldShown = false;
+@@ -1744,9 +1804,9 @@ static bool note_game_frame_end() {
+   return usable;
+ }
+ 
+-static void ensure_held_frame(const webgpu::TextureWithSampler& source) {
+-  if (g_heldFrame.texture && g_heldFrame.size.width == source.size.width &&
+-      g_heldFrame.size.height == source.size.height && g_heldFrame.format == source.format) {
++static void ensure_held_texture(webgpu::TextureWithSampler& held, const webgpu::TextureWithSampler& source) {
++  if (held.texture && held.size.width == source.size.width && held.size.height == source.size.height &&
++      held.format == source.format) {
+     return;
+   }
+   const wgpu::TextureDescriptor textureDescriptor{
+@@ -1759,11 +1819,26 @@ static void ensure_held_frame(const webgpu::TextureWithSampler& source) {
+       .mipLevelCount = 1,
+       .sampleCount = 1,
+   };
+-  g_heldFrame.texture = g_device.CreateTexture(&textureDescriptor);
+-  g_heldFrame.view = g_heldFrame.texture.CreateView();
+-  g_heldFrame.size = source.size;
+-  g_heldFrame.format = source.format;
+-  g_heldFrame.sampler = source.sampler;
++  held.texture = g_device.CreateTexture(&textureDescriptor);
++  held.view = held.texture.CreateView();
++  held.size = source.size;
++  held.format = source.format;
++  held.sampler = source.sampler;
++}
++
++static void ensure_held_frame(const webgpu::TextureWithSampler& source) { ensure_held_texture(g_heldFrame, source); }
++
++// Where step k of a game frame's presents goes, after the first: k / (steps +
++// 1) of the game frame's period (half of it for one in-between frame).
++static std::chrono::nanoseconds step_offset(int k, int steps) {
++  const int64_t ns = g_gameFramePeriodNs * k / (steps + 1);
++  return std::chrono::nanoseconds{std::clamp<int64_t>(ns, 3'000'000ll * k, 40'000'000)};
++}
++
++static void defer_present(PresentClock::time_point due, const webgpu::TextureWithSampler* source,
++                          const EndFrameCallback& callback, uint64_t gameFrame = 0, int step = -1) {
++  g_deferredPresents.push_back(
++      DeferredPresent{.due = due, .source = source, .callback = callback, .gameFrame = gameFrame, .step = step});
+ }
+ 
+ // Debug: write a texture as a binary PPM (blocking readback on the worker).
+@@ -1849,11 +1924,15 @@ static void replay_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const Frame
+ // Render worker: the frame's blended blocks into their GPU buffer, created at
+ // first use.
+ static void upload_interp_uniforms(size_t frameSlot) {
+-  if (!g_interpUniformBuffer) {
++  const uint64_t needed =
++      AURORA_ALIGN(g_interpUniformStaging[frameSlot].size(), 4) + gx::MaxUniformSize;
++  if (!g_interpUniformBuffer || g_interpUniformBufferSize < needed) {
++    g_interpUniformBufferSize =
++        std::min(InterpUniformBufferSize, AURORA_ALIGN(std::max(needed, InterpUniformStepSize), InterpUniformStepSize));
+     const wgpu::BufferDescriptor descriptor{
+         .label = "In-between frame uniform buffer",
+         .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+-        .size = InterpUniformBufferSize,
++        .size = g_interpUniformBufferSize,
+     };
+     g_interpUniformBuffer = g_device.CreateBuffer(&descriptor);
+     const std::array entries{
+@@ -1914,12 +1993,14 @@ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::
+     dump_texture(g_heldFrame, "real", frame.gameFrame);
+   }
+ 
+-  // 2. The in-between frame: the same passes with blended transforms, into
+-  // the EFB, and presented now.
++  // 2. The in-between frames: the same passes with each step's blended
++  // transforms, into the EFB. The first is presented now; at 120 Hz the
++  // others are kept aside and presented a quarter of a game frame apart.
+   upload_interp_uniforms(frameSlot);
+   static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "In-between frame encoder"};
+   auto between = g_device.CreateCommandEncoder(&EncoderDescriptor);
+   g_replayFrameSlot = frameSlot;
++  g_replayStep = 0;
+   frame_interp::set_encoding_interpolated(true);
+   static const bool dumpPasses = std::getenv("DOL_AURORA_FRAME_INTERP_DUMP_PASSES") != nullptr;
+   for (size_t i = 0; i < frame.ops.size(); ++i) {
+@@ -1938,18 +2019,94 @@ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::
+     }
+   }
+   frame_interp::set_encoding_interpolated(false);
++  log_present("in-between", frame.gameFrame, 0, {});
+   callback(between);
++  const auto shown = PresentClock::now();
+   if (dump) {
+     dump_texture(webgpu::present_source(), "between", frame.gameFrame);
+   }
+ 
+   // 3. The real frame half a game frame later (deferred_present_tick).
+-  const int64_t halfNs = std::clamp<int64_t>(g_gameFramePeriodNs / 2, 6'000'000, 40'000'000);
+-  g_deferredPresent = DeferredPresent{
+-      .active = true,
+-      .due = PresentClock::now() + std::chrono::nanoseconds{halfNs},
+-      .callback = callback,
++  defer_present(shown + step_offset(1, 1), &g_heldFrame, callback, frame.gameFrame, -1);
++  g_lastDue = {};
++}
++
++// 120 Hz: three in-between frames a game frame, each a full replay of its
++// passes (about 6 ms to encode in a busy scene). Presenting the first at once
++// and the others a quarter of a game frame after it put the second late (the
++// third was still encoding) and the third and the real frame back to back,
++// flushed when the next game frame came: the frames came in bursts, and the
++// sea shimmered. Every frame is kept aside instead (g_heldSteps) and presented
++// on one clock, a quarter of a game frame apart and continuing from the frame
++// before's last, with what is due presented between the replays.
++static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
++                          const EndFrameCallback& callback, int steps) {
++  ZoneScopedN("Present with in-between frames");
++  steps = std::clamp(steps, 1, 3);
++  g_heldSet ^= 1;
++  auto& held = g_heldSteps[g_heldSet];
++  // The set this frame takes was the one two frames ago: anything of it still
++  // waiting is shown now.
++  flush_presents_from(&held[0], &held[3]);
++  const auto keep = [](wgpu::CommandEncoder& commands, webgpu::TextureWithSampler& copy) {
++    const auto& source = webgpu::present_source();
++    ensure_held_texture(copy, source);
++    const wgpu::TexelCopyTextureInfo src{.texture = source.texture};
++    const wgpu::TexelCopyTextureInfo dst{.texture = copy.texture};
++    const wgpu::Extent3D extent{source.size.width, source.size.height, 1};
++    commands.CopyTextureToTexture(&src, &dst, &extent);
+   };
++  // 1. The real frame, kept aside.
++  keep(encoder, held[3]);
++  webgpu::gpu_prof::frame_end(encoder);
++  {
++    const wgpu::CommandBufferDescriptor descriptor{.label = "Real frame command buffer"};
++    const auto buffer = encoder.Finish(&descriptor);
++    g_queue.Submit(1, &buffer);
++  }
++  webgpu::gpu_prof::after_submit();
++  after_submit();
++  const bool dump = frame_interp::dump_frame(frame.gameFrame);
++  if (dump) {
++    dump_texture(held[3], "real", frame.gameFrame);
++  }
++  deferred_present_tick();
++
++  // 2. The in-between frames, each kept aside and scheduled.
++  upload_interp_uniforms(frameSlot);
++  g_replayFrameSlot = frameSlot;
++  const auto interval = step_offset(1, steps);
++  PresentClock::time_point base{};
++  static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "In-between frame encoder"};
++  static const char* const kDumpNames[] = {"between", "between2", "between3"};
++  for (int step = 0; step < steps; ++step) {
++    auto between = g_device.CreateCommandEncoder(&EncoderDescriptor);
++    g_replayStep = step;
++    frame_interp::set_encoding_interpolated(true);
++    for (const auto& op : frame.ops)
++      replay_op(between, frame, op);
++    frame_interp::set_encoding_interpolated(false);
++    keep(between, held[step]);
++    const auto buffer = between.Finish();
++    g_queue.Submit(1, &buffer);
++    if (dump) {
++      dump_texture(held[step], kDumpNames[step], frame.gameFrame);
++    }
++    if (step == 0) {
++      // On from the frame before's last present; now if that is past, and
++      // never more than a step ahead of now (the clock would drift late).
++      const auto now = PresentClock::now();
++      base = g_lastDue.time_since_epoch().count() != 0 ? g_lastDue + interval : now;
++      base = std::clamp(base, now, now + interval);
++    }
++    defer_present(base + interval * step, &held[step], callback, frame.gameFrame, step);
++    deferred_present_tick();
++  }
++  g_replayStep = 0;
++  // 3. The real frame after them.
++  g_lastDue = base + interval * steps;
++  defer_present(g_lastDue, &held[3], callback, frame.gameFrame, -1);
++  deferred_present_tick();
+ }
+ 
+ // A frame with nothing to blend while in-between frames are on (a still scene,
+@@ -1959,7 +2116,7 @@ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::
+ // Presenting it at once instead put it on screen half a frame early at every
+ // cut (a judder where the blended frames stop and start), and the frame rate
+ // read 30 in every menu.
+-static void present_held(wgpu::CommandEncoder& encoder, const EndFrameCallback& callback) {
++static void present_held(wgpu::CommandEncoder& encoder, const EndFrameCallback& callback, int steps) {
+   ZoneScopedN("Present held frame");
+   if (g_heldShown) {
+     webgpu::set_present_source_override(&g_heldFrame);
+@@ -1984,32 +2141,53 @@ static void present_held(wgpu::CommandEncoder& encoder, const EndFrameCallback&
+   }
+   webgpu::gpu_prof::after_submit();
+   after_submit();
+-  const int64_t halfNs = std::clamp<int64_t>(g_gameFramePeriodNs / 2, 6'000'000, 40'000'000);
+-  g_deferredPresent = DeferredPresent{
+-      .active = true,
+-      .due = PresentClock::now() + std::chrono::nanoseconds{halfNs},
+-      .callback = callback,
+-  };
++  steps = std::clamp(steps, 1, 3);
++  defer_present(PresentClock::now() + step_offset(steps, steps), &g_heldFrame, callback);
++  g_lastDue = {};
+ }
+ 
+-static void run_deferred_present() {
+-  if (!g_deferredPresent.active) {
+-    return;
+-  }
+-  ZoneScopedN("Deferred real frame present");
+-  auto callback = std::move(g_deferredPresent.callback);
+-  g_deferredPresent = {};
+-  webgpu::set_present_source_override(&g_heldFrame);
++static void present_deferred(DeferredPresent& present, const char* kind) {
++  ZoneScopedN("Deferred present");
++  log_present(kind, present.gameFrame, present.step, present.due);
++  webgpu::set_present_source_override(present.source);
+   static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "Held frame present encoder"};
+   auto encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
+-  callback(encoder);
++  present.callback(encoder);
+   webgpu::set_present_source_override(nullptr);
+-  g_heldShown = true;
++  g_heldShown = present.source == &g_heldFrame;
++}
++
++// Every present still waiting, in order (a new game frame is ready).
++static void run_deferred_present() {
++  while (!g_deferredPresents.empty()) {
++    DeferredPresent present = std::move(g_deferredPresents.front());
++    g_deferredPresents.pop_front();
++    present_deferred(present, "flushed");
++  }
+ }
+ 
+ static void deferred_present_tick() {
+-  if (g_deferredPresent.active && PresentClock::now() >= g_deferredPresent.due) {
+-    run_deferred_present();
++  while (!g_deferredPresents.empty() && PresentClock::now() >= g_deferredPresents.front().due) {
++    DeferredPresent present = std::move(g_deferredPresents.front());
++    g_deferredPresents.pop_front();
++    present_deferred(present, "due");
++  }
++}
++
++// The presents waiting on textures first..last (and everything before them,
++// to keep the order): now.
++static void flush_presents_from(const webgpu::TextureWithSampler* first, const webgpu::TextureWithSampler* last) {
++  size_t through = 0;
++  for (size_t i = 0; i < g_deferredPresents.size(); ++i) {
++    const auto* source = g_deferredPresents[i].source;
++    for (const auto* held = first; held <= last; ++held)
++      if (source == held)
++        through = i + 1;
++  }
++  for (size_t i = 0; i < through; ++i) {
++    DeferredPresent present = std::move(g_deferredPresents.front());
++    g_deferredPresents.pop_front();
++    present_deferred(present, "flushed");
+   }
+ }
+ 
+@@ -2064,7 +2242,14 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+   pass.SetBindGroup(0, g_staticBindGroup);
+   pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
+ 
++  size_t encoded = 0;
+   for (const auto& cmd : passInfo.commands) {
++    // A busy pass takes milliseconds to encode: a present that falls due
++    // meanwhile (at 120 Hz, the frame before's real frame) goes out on time,
++    // from its own encoder.
++    if ((++encoded & 511u) == 0 && !g_deferredPresents.empty() &&
++        PresentClock::now() >= g_deferredPresents.front().due)
++      deferred_present_tick();
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+     {
+       size_t firstDiff = lastDebugGroupStack.size();
+@@ -2224,13 +2409,16 @@ Range push_interp_vertices(size_t slot, const uint8_t* data, size_t length) {
+   return {static_cast<uint32_t>(offset), static_cast<uint32_t>(length)};
+ }
+ 
+-void resolve_interp_job(size_t slot, InterpRanges ranges) { g_interpJobRanges[slot].push_back(ranges); }
++void resolve_interp_job(size_t slot, const InterpRanges& ranges) { g_interpJobRanges[slot].push_back(ranges); }
+ 
+-InterpRanges interp_job_ranges(uint32_t job) {
++const InterpRanges& interp_job_ranges(uint32_t job) {
++  static const InterpRanges none{};
+   const auto& ranges = g_interpJobRanges[g_replayFrameSlot];
+-  return job < ranges.size() ? ranges[job] : InterpRanges{};
++  return job < ranges.size() ? ranges[job] : none;
+ }
+ 
++int interp_replay_step() { return g_replayStep; }
++
+ Range push_uniform(const uint8_t* data, size_t length) {
+   ZoneScoped;
+   return push(current_frame_packet().uniforms, data, length, g_cachedLimits.minUniformBufferOffsetAlignment);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 4af08a0..0cb07ac 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -318,15 +318,18 @@ const uint8_t* interp_uniform_bytes(size_t slot, Range range);
+ // A particle's blended vertices for the in-between frame, in their own area
+ // (g_interpVertexBuffer); an empty range when it is full.
+ Range push_interp_vertices(size_t slot, const uint8_t* data, size_t length);
+-// A job's in-between block and vertices (either empty when the draw keeps
+-// its own).
++// A job's in-between blocks and vertices, one per in-between frame of the
++// game frame (frame_interp::frame_steps; either empty when the draw keeps its
++// own).
+ struct InterpRanges {
+-  Range uniform;
+-  Range verts;
++  Range uniform[3];
++  Range verts[3];
+ };
+-void resolve_interp_job(size_t slot, InterpRanges ranges);
+-// Render worker, while the in-between frame is encoded: a job's ranges.
+-InterpRanges interp_job_ranges(uint32_t job);
++void resolve_interp_job(size_t slot, const InterpRanges& ranges);
++// Render worker, while an in-between frame is encoded: a job's ranges, and
++// which of the game frame's in-between frames it is.
++const InterpRanges& interp_job_ranges(uint32_t job);
++int interp_replay_step();
+ extern wgpu::Buffer g_interpVertexBuffer;
+ template <typename T>
+ static Range push_uniform(const T& data) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 16bcfe6..ac2e3e2 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -32,6 +32,10 @@ uint64_t env_u64(const char* name, uint64_t fallback) {
+ }
+ 
+ std::atomic_bool g_enabled{env_flag("DOL_AURORA_FRAME_INTERP", false)};
++// In-between frames per game frame (1: 60 Hz, 3: 120 Hz; DOL_AURORA_FRAME_INTERP_STEPS),
++// asked for at any time and taken at a game frame's start (g_frameSteps).
++std::atomic<int> g_steps{static_cast<int>(std::clamp<uint64_t>(env_u64("DOL_AURORA_FRAME_INTERP_STEPS", 1), 1, 3))};
++int g_frameSteps = g_steps.load(std::memory_order_relaxed);
+ std::atomic_bool g_encodingInterpolated{false};
+ std::atomic<uint64_t> g_gameFrame{1};
+ 
+@@ -70,8 +74,8 @@ struct FrameRecords {
+ 
+ // At most this many vertices per draw are kept and blended.
+ constexpr uint32_t kMaxBlendedVertices = 1024;
+-// blend_draw()'s in-between positions for its draw (x, y, z per vertex).
+-std::vector<float> g_blendedPositions;
++// blend_draw()'s in-between positions for its draw (x, y, z per vertex), per step.
++std::vector<float> g_blendedPositions[kMaxSteps];
+ bool g_haveBlendedPositions = false;
+ 
+ FrameRecords g_frames[2];
+@@ -86,7 +90,8 @@ struct KeyState {
+   uint32_t next = 0;
+ };
+ absl::flat_hash_map<uint64_t, KeyState> g_keys;
+-gxc::VertexShaderConstants g_blended;
++// The in-between blocks blend_draw() made, one per step.
++gxc::VertexShaderConstants g_blended[kMaxSteps];
+ 
+ // Most draws repeat the constants of the draw before them (a model's parts,
+ // copies drawn with one matrix): 96 percent in the Forsaken Fortress, where a
+@@ -117,12 +122,12 @@ struct Motion {
+   uint32_t votes;
+   double weight;
+   // For the camera's motion (see camera_motion()): its inverse, and the part
+-  // of it the in-between frame is at (D^t: the rotation turned by t of its
+-  // angle, and exactly half of D at t = 0.5, so D^0.5 * D^0.5 = D).
++  // of it each in-between frame is at (D^t: the rotation turned by t of its
++  // angle about the same screw axis, so D^0.5 * D^0.5 = D).
+   bool derived;
+   bool bounded;
+   double inverse[3][4];
+-  double part[3][4];
++  double part[kMaxSteps][3][4];
+ };
+ constexpr int kMaxMotions = 6;
+ constexpr uint32_t kMinMotionVotes = 4;
+@@ -514,7 +519,7 @@ size_t find_carried(uint64_t key, const float here[][4], size_t first, size_t co
+   return pick;
+ }
+ 
+-float blend_weight();
++double step_weight(int step);
+ 
+ // The inverse of a camera motion and its part at the blend weight, once; a
+ // motion that turns or shifts too far to be a turn is not used (a cut).
+@@ -573,40 +578,57 @@ bool derive(Motion& motion) {
+   const double shift = std::sqrt(m[0][3] * m[0][3] + m[1][3] * m[1][3] + m[2][3] * m[2][3]);
+   if (angle > kMaxCameraTurn || shift > kMaxCameraShift)
+     return false;
+-  // The rotation by t of the angle about the same axis.
+-  const double t = blend_weight();
+   const double axis = std::sqrt(x * x + y * y + z * z);
+-  double pw = 1.0, px = 0.0, py = 0.0, pz = 0.0;
+-  if (axis > 1e-12) {
+-    const double half = 0.5 * angle * t;
+-    pw = std::cos(half);
+-    const double k = std::sin(half) / axis;
+-    px = x * k, py = y * k, pz = z * k;
+-  }
+-  double r[3][3] = {
+-      {1 - 2 * (py * py + pz * pz), 2 * (px * py - pz * pw), 2 * (px * pz + py * pw)},
+-      {2 * (px * py + pz * pw), 1 - 2 * (px * px + pz * pz), 2 * (py * pz - px * pw)},
+-      {2 * (px * pz - py * pw), 2 * (py * pz + px * pw), 1 - 2 * (px * px + py * py)},
+-  };
+-  // The translation: at t = 0.5 exactly half of D, (R_h + I) t_h = t, so
+-  // that the half applied twice is D; otherwise t of it.
+-  double shiftPart[3] = {m[0][3] * t, m[1][3] * t, m[2][3] * t};
+-  if (t == 0.5f) {
+-    const float sum[3][4] = {
+-        {float(r[0][0] + 1.0), float(r[0][1]), float(r[0][2]), 0.f},
+-        {float(r[1][0]), float(r[1][1] + 1.0), float(r[1][2]), 0.f},
+-        {float(r[2][0]), float(r[2][1]), float(r[2][2] + 1.0), 0.f},
++  for (int step = 0; step < g_frameSteps; ++step) {
++    // The rotation by t of the angle about the same axis.
++    const double t = step_weight(step);
++    double pw = 1.0, px = 0.0, py = 0.0, pz = 0.0;
++    if (axis > 1e-12) {
++      const double half = 0.5 * angle * t;
++      pw = std::cos(half);
++      const double k = std::sin(half) / axis;
++      px = x * k, py = y * k, pz = z * k;
++    }
++    double r[3][3] = {
++        {1 - 2 * (py * py + pz * pz), 2 * (px * py - pz * pw), 2 * (px * pz + py * pw)},
++        {2 * (px * py + pz * pw), 1 - 2 * (px * px + pz * pz), 2 * (py * pz - px * pw)},
++        {2 * (px * pz - py * pw), 2 * (py * pz + px * pw), 1 - 2 * (px * px + py * py)},
+     };
+-    double solve[3][4];
+-    if (affine_inverse(sum, solve)) {
++    // The translation: at t = 0.5 exactly half of D, (R_h + I) t_h = t, so
++    // that the half applied twice is D. At another t, the screw motion's: D
++    // turns about an axis through c (with c = (v + cot(angle/2) u x v) / 2
++    // for the part v of its shift across the axis u) and slides along it, so
++    // D^t = R^t (x - c) + c + t (the slide).
++    double shiftPart[3] = {m[0][3] * t, m[1][3] * t, m[2][3] * t};
++    if (t == 0.5) {
++      const float sum[3][4] = {
++          {float(r[0][0] + 1.0), float(r[0][1]), float(r[0][2]), 0.f},
++          {float(r[1][0]), float(r[1][1] + 1.0), float(r[1][2]), 0.f},
++          {float(r[2][0]), float(r[2][1]), float(r[2][2] + 1.0), 0.f},
++      };
++      double solve[3][4];
++      if (affine_inverse(sum, solve)) {
++        for (int i = 0; i < 3; ++i)
++          shiftPart[i] = solve[i][0] * m[0][3] + solve[i][1] * m[1][3] + solve[i][2] * m[2][3];
++      }
++    } else if (axis > 1e-12 && angle > 1e-6) {
++      const double u[3] = {x / axis, y / axis, z / axis};
++      const double v[3] = {m[0][3], m[1][3], m[2][3]};
++      const double along = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
++      const double across[3] = {v[0] - along * u[0], v[1] - along * u[1], v[2] - along * u[2]};
++      const double cross[3] = {u[1] * across[2] - u[2] * across[1], u[2] * across[0] - u[0] * across[2],
++                               u[0] * across[1] - u[1] * across[0]};
++      const double cot = 1.0 / std::tan(0.5 * angle);
++      const double c[3] = {0.5 * (across[0] + cot * cross[0]), 0.5 * (across[1] + cot * cross[1]),
++                           0.5 * (across[2] + cot * cross[2])};
+       for (int i = 0; i < 3; ++i)
+-        shiftPart[i] = solve[i][0] * m[0][3] + solve[i][1] * m[1][3] + solve[i][2] * m[2][3];
++        shiftPart[i] = c[i] - (r[i][0] * c[0] + r[i][1] * c[1] + r[i][2] * c[2]) + t * along * u[i];
++    }
++    for (int i = 0; i < 3; ++i) {
++      for (int k = 0; k < 3; ++k)
++        motion.part[step][i][k] = r[i][k];
++      motion.part[step][i][3] = shiftPart[i];
+     }
+-  }
+-  for (int i = 0; i < 3; ++i) {
+-    for (int k = 0; k < 3; ++k)
+-      motion.part[i][k] = r[i][k];
+-    motion.part[i][3] = shiftPart[i];
+   }
+   motion.bounded = true;
+   return true;
+@@ -851,13 +873,15 @@ inline void lerp_texture_rows(float out[][4], const float from[][4], const float
+   lerp_rows(out, from, to, 3, t);
+ }
+ 
+-// DOL_AURORA_FRAME_INTERP_T: the blend weight toward this frame (debug; 0.5).
+-float blend_weight() {
+-  static const float weight = [] {
++// Each in-between frame's blend weight toward this frame: step / (steps + 1)
++// from the frame before (0.5 for one; 0.25, 0.5 and 0.75 for three).
++// DOL_AURORA_FRAME_INTERP_T sets the one step's (debug).
++double step_weight(int step) {
++  static const double weight = [] {
+     const char* env = std::getenv("DOL_AURORA_FRAME_INTERP_T");
+-    return env != nullptr && env[0] != '\0' ? std::strtof(env, nullptr) : 0.5f;
++    return env != nullptr && env[0] != '\0' ? std::strtod(env, nullptr) : 0.5;
+   }();
+-  return weight;
++  return g_frameSteps == 1 ? weight : double(step + 1) / double(g_frameSteps + 1);
+ }
+ 
+ // Which of the ten indexed position matrices (XF rows 0-29, and their normal
+@@ -1045,9 +1069,11 @@ void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderCo
+ // two views turned far apart shrinks them), and what moves keeps its place
+ // against it.
+ void blend_relative(const Motion& camera, const gxc::VertexShaderConstants& previous,
+-                    const gxc::VertexShaderConstants& current, float t, gxc::VertexShaderConstants& out,
++                    const gxc::VertexShaderConstants& current, int step, gxc::VertexShaderConstants& out,
+                     uint64_t rows) {
+-  blend(previous, current, t, out, rows);
++  const double t = step_weight(step);
++  const double(*part)[4] = camera.part[step];
++  blend(previous, current, float(t), out, rows);
+   const auto place = [&](const float from[][4], const float to[][4], float result[][4], bool affine) {
+     double seen[3][4];
+     affine_multiply(camera.inverse, to, seen);
+@@ -1061,11 +1087,11 @@ void blend_relative(const Motion& camera, const gxc::VertexShaderConstants& prev
+     blend_linear(from, seen, t, mid);
+     for (int r = 0; r < 3; ++r) {
+       for (int c = 0; c < 3; ++c)
+-        result[r][c] = static_cast<float>(camera.part[r][0] * mid[0][c] + camera.part[r][1] * mid[1][c] +
+-                                          camera.part[r][2] * mid[2][c]);
++        result[r][c] = static_cast<float>(part[r][0] * mid[0][c] + part[r][1] * mid[1][c] +
++                                          part[r][2] * mid[2][c]);
+       result[r][3] = static_cast<float>(
+-          affine ? camera.part[r][0] * mid[0][3] + camera.part[r][1] * mid[1][3] + camera.part[r][2] * mid[2][3] +
+-                       camera.part[r][3]
++          affine ? part[r][0] * mid[0][3] + part[r][1] * mid[1][3] + part[r][2] * mid[2][3] +
++                       part[r][3]
+                  : mid[r][3]);
+     }
+   };
+@@ -1095,10 +1121,10 @@ void blend_relative(const Motion& camera, const gxc::VertexShaderConstants& prev
+       midDir[r] = previous.lights[l].dir[r] + (dir[r] - previous.lights[l].dir[r]) * t;
+     }
+     for (int r = 0; r < 3; ++r) {
+-      out.lights[l].pos[r] = static_cast<float>(camera.part[r][0] * midPos[0] + camera.part[r][1] * midPos[1] +
+-                                                camera.part[r][2] * midPos[2] + camera.part[r][3]);
+-      out.lights[l].dir[r] = static_cast<float>(camera.part[r][0] * midDir[0] + camera.part[r][1] * midDir[1] +
+-                                                camera.part[r][2] * midDir[2]);
++      out.lights[l].pos[r] = static_cast<float>(part[r][0] * midPos[0] + part[r][1] * midPos[1] +
++                                                part[r][2] * midPos[2] + part[r][3]);
++      out.lights[l].dir[r] = static_cast<float>(part[r][0] * midDir[0] + part[r][1] * midDir[1] +
++                                                part[r][2] * midDir[2]);
+     }
+   }
+ }
+@@ -1139,8 +1165,8 @@ uint32_t g_currentAge = 0;
+ // moves from where it is drawn now, or one moved implausibly far for a frame
+ // (a pair that is not the same thing).
+ bool blend_positions(const float* before, const float* now, uint32_t count, const float previousMatrix[][4],
+-                     const float currentMatrix[][4], const Motion* motion, const float inBetween[][4], double t,
+-                     bool tagged, std::vector<float>& out) {
++                     const float currentMatrix[][4], const Motion* motion, int step, const float inBetween[][4],
++                     double t, bool tagged, std::vector<float>& out) {
+   double back[3][4];
+   if (!affine_inverse(inBetween, back))
+     return false;
+@@ -1158,9 +1184,9 @@ bool blend_positions(const float* before, const float* now, uint32_t count, cons
+   double b0[3][4], b1[3][4];
+   if (motion != nullptr) {
+     double placed[3][4];
+-    affine_multiply(motion->part, a0, placed);
++    affine_multiply(motion->part[step], a0, placed);
+     affine_multiply(back, placed, b0);
+-    affine_multiply(motion->part, a1, placed);
++    affine_multiply(motion->part[step], a1, placed);
+     affine_multiply(back, placed, b1);
+   } else {
+     affine_multiply(back, a0, b0);
+@@ -1183,8 +1209,10 @@ bool blend_positions(const float* before, const float* now, uint32_t count, cons
+     const double moved = std::sqrt((u1[0] - u0[0]) * (u1[0] - u0[0]) + (u1[1] - u0[1]) * (u1[1] - u0[1]) +
+                                    (u1[2] - u0[2]) * (u1[2] - u0[2]));
+     const double distance = std::sqrt(u0[0] * u0[0] + u0[1] * u0[1] + u0[2] * u0[2]);
+-    if (moved > (tagged ? 0.5 * distance + 300.0 : 0.2 * distance + 100.0))
++    if (moved > (tagged ? 0.5 * distance + 300.0 : 0.2 * distance + 100.0)) {
++      out.clear(); // implausible, not merely still
+       return false;
++    }
+     double q0[3], q1[3];
+     apply(b0, p0, q0);
+     apply(b1, p1, q1);
+@@ -1405,15 +1433,16 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+     if (repeat(BlendPath::Unmatched, view, nullptr)) {
+       g_outcome = "unmatched, stood still";
+       g_blendRepeated = true;
+-      return &g_blended;
++      return &g_blended[0];
+     }
+     if (!stood_before(*view, current, g_stoodBefore)) {
+       g_lastBlend.serial = 0;
+       return nullptr;
+     }
+-    blend_relative(*view, g_stoodBefore, current, blend_weight(), g_blended, 0);
++    for (int step = 0; step < g_frameSteps; ++step)
++      blend_relative(*view, g_stoodBefore, current, step, g_blended[step], 0);
+     g_outcome = "unmatched, stood still";
+-    return &g_blended;
++    return &g_blended[0];
+   }
+   g_rejectReason = "";
+   const FrameRecords& previousFrame = g_frames[g_current ^ 1u];
+@@ -1612,13 +1641,15 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+         return nullptr;
+       if (repeat(BlendPath::StoodBefore, camera, view)) {
+         g_blendRepeated = true;
+-        return &g_blended;
++        return &g_blended[0];
++      }
++      for (int step = 0; step < g_frameSteps; ++step) {
++        if (view != nullptr)
++          blend_relative(*view, g_stoodBefore, current, step, g_blended[step], 0);
++        else
++          blend(g_stoodBefore, current, float(step_weight(step)), g_blended[step], 0);
+       }
+-      if (view != nullptr)
+-        blend_relative(*view, g_stoodBefore, current, blend_weight(), g_blended, 0);
+-      else
+-        blend(g_stoodBefore, current, blend_weight(), g_blended, 0);
+-      return &g_blended;
++      return &g_blended[0];
+     }
+   }
+   if (previous == nullptr && candidates == 1 && occurrence == 0 && usedMatrixRows == 0 && perspective &&
+@@ -1635,16 +1666,17 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+       g_outcome = "blended by its own motion";
+       g_blendRepeated = true;
+       g_match = {&copies[0], &constantsOf(0), &g_ownMotion}; // made for the same draw before this one
+-      return &g_blended;
++      return &g_blended[0];
+     }
+     Motion& own = g_ownMotion;
+     own = Motion{};
+     if (own_motion(constantsOf(0).posnormalmatrix, current.posnormalmatrix, own) && derive(own)) {
+       g_match = {&copies[0], &constantsOf(0), &g_ownMotion};
+-      blend_relative(own, constantsOf(0), current, blend_weight(), g_blended, usedMatrixRows);
++      for (int step = 0; step < g_frameSteps; ++step)
++        blend_relative(own, constantsOf(0), current, step, g_blended[step], usedMatrixRows);
+       ++g_frameCounts.blended;
+       g_outcome = "blended by its own motion";
+-      return &g_blended;
++      return &g_blended[0];
+     }
+     --g_frameCounts.matched;
+     g_lastBlend.serial = 0;
+@@ -1666,7 +1698,7 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+     ++g_frameCounts.blended;
+     g_outcome = "blended";
+     g_blendRepeated = true;
+-    return &g_blended;
++    return &g_blended[0];
+   }
+   g_lastBlend.identical = std::memcmp(previous, &current, sizeof(current)) == 0;
+   if (g_lastBlend.identical) {
+@@ -1674,13 +1706,15 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+     g_outcome = "identical";
+     return nullptr;
+   }
+-  if (relative)
+-    blend_relative(*view, *previous, current, blend_weight(), g_blended, usedMatrixRows);
+-  else
+-    blend(*previous, current, blend_weight(), g_blended, usedMatrixRows);
++  for (int step = 0; step < g_frameSteps; ++step) {
++    if (relative)
++      blend_relative(*view, *previous, current, step, g_blended[step], usedMatrixRows);
++    else
++      blend(*previous, current, float(step_weight(step)), g_blended[step], usedMatrixRows);
++  }
+   ++g_frameCounts.blended;
+   g_outcome = "blended";
+-  return &g_blended;
++  return &g_blended[0];
+ }
+ 
+ const gxc::VertexShaderConstants* blend_draw(const DrawInput& input, const gxc::VertexShaderConstants& current,
+@@ -1712,10 +1746,19 @@ const gxc::VertexShaderConstants* blend_draw(const DrawInput& input, const gxc::
+   const FrameRecords& previousFrame = g_frames[g_current ^ 1u];
+   const float* now = frame.positions.data() + static_cast<size_t>(record.positions) * 3u;
+   const float* then = previousFrame.positions.data() + static_cast<size_t>(before->positions) * 3u;
+-  const float(*inBetween)[4] = result != nullptr ? result->posnormalmatrix : current.posnormalmatrix;
+-  g_haveBlendedPositions =
+-      blend_positions(then, now, count, g_match.block->posnormalmatrix, current.posnormalmatrix, g_match.motion,
+-                      inBetween, blend_weight(), true, g_blendedPositions);
++  // Each step's, through that step's in-between matrix; none unless every
++  // step's is plausible and one moves.
++  bool moves = false;
++  for (int step = 0; step < g_frameSteps; ++step) {
++    const float(*inBetween)[4] = result != nullptr ? g_blended[step].posnormalmatrix : current.posnormalmatrix;
++    const bool moved = blend_positions(then, now, count, g_match.block->posnormalmatrix, current.posnormalmatrix,
++                                       g_match.motion, step, inBetween, step_weight(step), true,
++                                       g_blendedPositions[step]);
++    if (!moved && g_blendedPositions[step].size() != static_cast<size_t>(count) * 3u)
++      return result; // implausible
++    moves = moves || moved;
++  }
++  g_haveBlendedPositions = moves;
+   if (g_haveBlendedPositions)
+     ++g_frameCounts.positions;
+   return result;
+@@ -1729,7 +1772,17 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+   return blend_draw(input, current, repeatsLastDraw);
+ }
+ 
+-const float* blended_positions() noexcept { return g_haveBlendedPositions ? g_blendedPositions.data() : nullptr; }
++const float* blended_positions(int step) noexcept {
++  return g_haveBlendedPositions && step < g_frameSteps ? g_blendedPositions[step].data() : nullptr;
++}
++
++const gxc::VertexShaderConstants* blended_step(int step) noexcept {
++  return &g_blended[std::clamp(step, 0, kMaxSteps - 1)];
++}
++
++int frame_steps() noexcept { return g_frameSteps; }
++void set_steps(int steps) noexcept { g_steps.store(std::clamp(steps, 1, kMaxSteps), std::memory_order_relaxed); }
++int steps() noexcept { return g_steps.load(std::memory_order_relaxed); }
+ 
+ bool last_blend_repeated() noexcept { return g_blendRepeated; }
+ 
+@@ -1815,8 +1868,11 @@ void end_game_frame() noexcept {
+   g_cellHead.clear();
+   g_griddedKeys.clear();
+   g_havePredicted = g_leadingMotion >= 0 && g_motions[g_leadingMotion].votes >= kMinMotionVotes;
+-  if (g_havePredicted)
++  if (g_havePredicted) {
+     g_predicted = g_motions[g_leadingMotion];
++    g_predicted.derived = false; // its parts again, for the next frame's steps
++  }
++  g_frameSteps = g_steps.load(std::memory_order_relaxed);
+   g_motionCount = 0;
+   g_leadingMotion = -1;
+   g_newInView = UINT32_MAX;
+@@ -1859,3 +1915,5 @@ void aurora_get_frame_interp_totals(AuroraFrameInterpTotals* out) {
+   out->unmatched = g_totalCounts.unmatched;
+ }
+ bool aurora_get_frame_interpolation() { return aurora::gfx::frame_interp::enabled(); }
++void aurora_set_frame_interp_steps(int steps) { aurora::gfx::frame_interp::set_steps(steps); }
++int aurora_get_frame_interp_steps() { return aurora::gfx::frame_interp::steps(); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index 1b6eca1..aa8e0e3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -35,6 +35,14 @@ namespace aurora::gfx::frame_interp {
+ bool enabled() noexcept;
+ void set_enabled(bool enabled) noexcept;
+ 
++// In-between frames per game frame: 1 (60 Hz from 30) or 3 (120 Hz), at
++// t = step / (steps + 1). A change takes effect at the next game frame;
++// frame_steps() is the recording frame's.
++constexpr int kMaxSteps = 3;
++void set_steps(int steps) noexcept;
++int steps() noexcept;
++int frame_steps() noexcept;
++
+ // The key for a draw's vertex stream; 0 when the plan carries no payload.
+ uint64_t draw_key(const gxruntime::gxcore::DrawPlan& plan) noexcept;
+ 
+@@ -71,10 +79,14 @@ const gxruntime::gxcore::VertexShaderConstants* blend_draw(const DrawInput& inpu
+ const gxruntime::gxcore::VertexShaderConstants* blend_draw(
+     uint64_t key, uint64_t used_matrix_rows,
+     const gxruntime::gxcore::VertexShaderConstants& current, bool repeats_last_draw = false);
++// After a blend_draw() that returned a block: each step's (the returned
++// pointer is step 0's), valid until the next call.
++const gxruntime::gxcore::VertexShaderConstants* blended_step(int step) noexcept;
++
+ // For a draw whose positions came in its payload (particles, the sword's
+-// trail): after blend_draw(), the in-between frame's positions (x, y, z per
++// trail): after blend_draw(), a step's in-between positions (x, y, z per
+ // decoded vertex), valid until the next call, or nullptr when it draws its own.
+-const float* blended_positions() noexcept;
++const float* blended_positions(int step = 0) noexcept;
+ 
+ // Whether the last blend_draw() returned the same in-between block as the call
+ // before it (its bytes unchanged), so the caller need not compare them.
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 2e15d25..4670dac 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -645,17 +645,27 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+     return;
+   // The in-between frame reads a moved draw's blended constants from their
+   // own area; every other draw keeps its own.
+-  const bool interpolated = frame_interp::encoding_interpolated();
+-  const InterpRanges interp = !interpolated                    ? InterpRanges{}
+-                              : data.interpJob != UINT32_MAX ? interp_job_ranges(data.interpJob)
+-                                                               : InterpRanges{data.interpUniformRange, data.interpVertRange};
+-  const bool blended = interp.uniform.size != 0;
++  // The in-between frame being encoded: its step's block and vertices (a
++  // traced frame's own, matched while recording, are one step's).
++  Range interpUniform{}, interpVerts{};
++  if (frame_interp::encoding_interpolated()) {
++    const int step = interp_replay_step();
++    if (data.interpJob != UINT32_MAX) {
++      const InterpRanges& job = interp_job_ranges(data.interpJob);
++      interpUniform = job.uniform[step];
++      interpVerts = job.verts[step];
++    } else if (step == 0) {
++      interpUniform = data.interpUniformRange;
++      interpVerts = data.interpVertRange;
++    }
++  }
++  const bool blended = interpUniform.size != 0;
+   const auto& vsGroup = blended ? g_interpUniformBindGroup : g_uniformBindGroup;
+-  const std::array vsOffsets{blended ? interp.uniform.offset : data.uniformRange.offset};
++  const std::array vsOffsets{blended ? interpUniform.offset : data.uniformRange.offset};
+   pass.SetBindGroup(1, vsGroup, vsOffsets.size(), vsOffsets.data());
+   // A particle's vertices, blended, from the in-between vertex area.
+-  if (interp.verts.size != 0)
+-    pass.SetVertexBuffer(0, g_interpVertexBuffer, interp.verts.offset, interp.verts.size);
++  if (interpVerts.size != 0)
++    pass.SetVertexBuffer(0, g_interpVertexBuffer, interpVerts.offset, interpVerts.size);
+   else
+     pass.SetVertexBuffer(0, g_vertexBuffer, data.vertRange.offset, data.vertRange.size);
+   pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16,
+@@ -887,8 +897,8 @@ struct InterpHelper {
+   // Recording thread: the frame packet being queued and its job count.
+   uint64_t packet = 0;
+   uint32_t jobs = 0;
+-  // Helper thread: the last block it staged, and a particle's vertices.
+-  UniformCache cache;
++  // Helper thread: the last block it staged per step, and a particle's vertices.
++  UniformCache cache[frame_interp::kMaxSteps];
+   std::vector<float> vertices;
+ };
+ 
+@@ -925,12 +935,19 @@ void interp_helper_main(InterpHelper* h) {
+     }
+     const InterpJob& job = h->ring[tail % InterpHelper::Capacity];
+     InterpRanges ranges{};
+-    if (const auto* blended = frame_interp::blend_draw(job.input, job.constants, job.repeatsLastDraw))
+-      ranges.uniform = push_interp_uniform_dedup(h->cache, job.frameId, job.slot,
+-                                                 reinterpret_cast<const uint8_t*>(blended), sizeof(*blended),
+-                                                 frame_interp::last_blend_repeated());
+-    if (const float* positions = frame_interp::blended_positions())
+-      ranges.verts = push_blended_vertices(job.slot, job.vertices, positions, h->vertices);
++    const int steps = frame_interp::frame_steps();
++    if (frame_interp::blend_draw(job.input, job.constants, job.repeatsLastDraw) != nullptr) {
++      const bool repeated = frame_interp::last_blend_repeated();
++      for (int step = 0; step < steps; ++step)
++        ranges.uniform[step] =
++            push_interp_uniform_dedup(h->cache[step], job.frameId, job.slot,
++                                      reinterpret_cast<const uint8_t*>(frame_interp::blended_step(step)),
++                                      sizeof(gxc::VertexShaderConstants), repeated);
++    }
++    for (int step = 0; step < steps; ++step) {
++      if (const float* positions = frame_interp::blended_positions(step))
++        ranges.verts[step] = push_blended_vertices(job.slot, job.vertices, positions, h->vertices);
++    }
+     resolve_interp_job(job.slot, ranges);
+     h->consumed.store(tail + 1, std::memory_order_release);
+   }
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 635fb82..7bebda1 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -846,6 +846,118 @@ int main() {
+     CHECK(front != nullptr && near(front[2], -30.f) && near(front[3 * 3 + 2], 30.f));
+   }
+ 
++  // 120 Hz: three in-between frames at a quarter, half and three quarters of
++  // the way. A draw moving at 40 units a frame is at 10, 20 and 30; a turn of
++  // the camera by 24 degrees puts what stands still at 6, 12 and 18 degrees
++  // of it; a particle's corners move in quarters too.
++  {
++    fi::set_steps(3);
++    fi::end_game_frame();
++    fi::end_game_frame();
++    CHECK(fi::frame_steps() == 3);
++    const auto rooms = [](float yaw, int skip) {
++      for (int room = 0; room < 8; ++room)
++        if (room != skip)
++          fi::blend_draw(1100 + room, 0, seen(yaw, 0, 0, room * 300.f - 1000.f, -50.f, -900.f - room * 40.f));
++    };
++    static const uint8_t payload[48] = {4};
++    const auto spark = [](float x) {
++      gxc::DrawPlan plan;
++      plan.match_payload = payload;
++      plan.match_payload_size = sizeof(payload);
++      plan.match_primitive = 0x80;
++      plan.match_direct_position = true;
++      plan.vertex_count = 4;
++      plan.draw_tag = 0x777;
++      plan.vertices.assign(4 * gxc::kVertexFloats, 0.f);
++      for (int i = 0; i < 4; ++i) {
++        plan.vertices[i * gxc::kVertexFloats] = x + (i & 1) * 5.f;
++        plan.vertices[i * gxc::kVertexFloats + 2] = -400.f;
++      }
++      return plan;
++    };
++    // A moving draw and a spark, the camera still.
++    fi::blend_draw(1150, 0, draw_at(0, 0, -400));
++    auto p0 = spark(0.f);
++    blend_plan(p0, draw_at(0, 0, 0));
++    fi::end_game_frame();
++    const auto* moving = fi::blend_draw(1150, 0, draw_at(40, 0, -400));
++    CHECK(moving != nullptr);
++    if (moving != nullptr) {
++      for (int step = 0; step < 3; ++step)
++        CHECK(near(fi::blended_step(step)->posnormalmatrix[0][3], 10.f * (step + 1)));
++    }
++    auto p1 = spark(40.f);
++    p1.draw_tag_age = 1;
++    blend_plan(p1, draw_at(0, 0, 0));
++    for (int step = 0; step < 3; ++step) {
++      const float* corners = fi::blended_positions(step);
++      CHECK(corners != nullptr && near(corners[0], 10.f * (step + 1)));
++    }
++    // The camera turns 24 degrees; the rooms stand still.
++    fi::end_game_frame();
++    fi::end_game_frame();
++    rooms(0.f, -1);
++    fi::end_game_frame();
++    rooms(24.f, 3);
++    const auto* room = fi::blend_draw(1100 + 3, 0, seen(24.f, 0, 0, 3 * 300.f - 1000.f, -50.f, -900.f - 3 * 40.f));
++    CHECK(room != nullptr);
++    if (room != nullptr) {
++      for (int step = 0; step < 3; ++step) {
++        const float yaw = 6.f * (step + 1);
++        const auto expected = seen(yaw, 0, 0, 3 * 300.f - 1000.f, -50.f, -900.f - 3 * 40.f);
++        const auto* got = fi::blended_step(step);
++        CHECK(std::fabs(got->posnormalmatrix[0][0] - expected.posnormalmatrix[0][0]) < 1e-3f);
++        CHECK(std::fabs(got->posnormalmatrix[0][3] - expected.posnormalmatrix[0][3]) < 0.5f &&
++              std::fabs(got->posnormalmatrix[2][3] - expected.posnormalmatrix[2][3]) < 0.5f);
++      }
++    }
++    // The camera turns 24 degrees and moves: each quarter step is the same
++    // motion (the screw motion's power), so the frames advance evenly.
++    fi::end_game_frame();
++    fi::end_game_frame();
++    const auto moved_rooms = [](float yaw, float cx, float cz, int skip) {
++      for (int room = 0; room < 8; ++room)
++        if (room != skip)
++          fi::blend_draw(1200 + room, 0, seen(yaw, cx, cz, room * 300.f - 1000.f, -50.f, -900.f - room * 40.f));
++    };
++    moved_rooms(0.f, 0.f, 0.f, -1);
++    fi::end_game_frame();
++    moved_rooms(24.f, 60.f, -40.f, 5);
++    const auto* far = fi::blend_draw(1205, 0, seen(24.f, 60.f, -40.f, 5 * 300.f - 1000.f, -50.f, -900.f - 5 * 40.f));
++    CHECK(far != nullptr);
++    if (far != nullptr) {
++      // The step-to-step motion S = M_{k+1} M_k^-1, for rows of 3x4.
++      const auto inverse = [](const float m[][4], double out[3][4]) {
++        // Rigid with unit scale here: the inverse is the transpose.
++        for (int r = 0; r < 3; ++r) {
++          for (int c = 0; c < 3; ++c)
++            out[r][c] = m[c][r];
++          out[r][3] = -(m[0][r] * m[0][3] + m[1][r] * m[1][3] + m[2][r] * m[2][3]);
++        }
++      };
++      const auto step_motion = [&](int k, double out[3][4]) {
++        double inv[3][4];
++        inverse(fi::blended_step(k)->posnormalmatrix, inv);
++        const auto& next = fi::blended_step(k + 1)->posnormalmatrix;
++        for (int r = 0; r < 3; ++r) {
++          for (int c = 0; c < 4; ++c)
++            out[r][c] = next[r][0] * inv[0][c] + next[r][1] * inv[1][c] + next[r][2] * inv[2][c];
++          out[r][3] += next[r][3];
++        }
++      };
++      double first[3][4], second[3][4];
++      step_motion(0, first);
++      step_motion(1, second);
++      for (int r = 0; r < 3; ++r)
++        for (int c = 0; c < 4; ++c)
++          CHECK(std::fabs(first[r][c] - second[r][c]) < (c == 3 ? 0.05 : 1e-4));
++    }
++    fi::set_steps(1);
++    fi::end_game_frame();
++    CHECK(fi::frame_steps() == 1);
++  }
++
+   // Draw keys: the same payload gives the same key; another primitive does not.
+   {
+     const uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+-- 
+2.55.0
+

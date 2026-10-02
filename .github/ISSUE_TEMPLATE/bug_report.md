@@ -10,7 +10,9 @@ Describe what you expected and what happened. Include steps to reproduce it.
 ## Your setup
 
 - BlueWake source revision or app build:
-- Device and iOS/iPadOS version (or Mac and Xcode version for build failures):
+- Device and operating system/version (iOS/iPadOS, macOS, Windows or experimental tvOS):
+- For desktop performance/crashes: CPU, GPU and graphics driver version:
+- For Apple build failures: Mac model, Xcode version and target SDK:
 - Build: default (local training) or `--no-train`:
 
 ## If this happened while playing
@@ -19,9 +21,21 @@ Describe what you expected and what happened. Include steps to reproduce it.
 - FPS and game speed shown in the overlay:
 - Render resolution, aspect ratio and enabled mods:
 - Touch controls or controller:
+- Audio mode (HLE/default or LLE), Smooth Motion setting and enabled gameplay extras:
+- Fresh installation/new game or updated app/existing save:
 
-The in-app **Help & Feedback › Report a Problem on GitHub** fills in device
+## If this happened after changing settings
+
+- Which settings changed, and did you restart afterward?
+- Does it happen on every launch or only in a specific scene?
+- Last relevant log lines/error, if available:
+
+Do not delete the app, memory card or settings to troubleshoot. Back up saves before an
+update; include reproduction steps using a separate test configuration if you have one.
+
+On iPhone/iPad, **Help & Feedback › Report a Problem on GitHub** fills in device
 information. **Share Session Log**, in the same menu, exports the session log.
+On Windows, session logs are in `%APPDATA%\BlueWake\logs`.
 
 ## If the build failed
 

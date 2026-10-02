@@ -3,6 +3,7 @@
  */
 #include "generated_composite.h"
 #include "StaticRecompABI.h"
+#include "module_cpu_contract.h"
 #include "dispatch_loop.h"
 
 extern void ppc_set_mem_write_journal(PPCMemWriteJournal fn, void* user);
@@ -10,10 +11,66 @@ extern void ppc_set_mem_write_journal(PPCMemWriteJournal fn, void* user);
 unsigned dolrecomp_call_depth = 0;
 static BluewakeEdgeServiceFn s_edge_service;
 static void* s_edge_service_user;
+#if defined(BLUEWAKE_DIRECT_CALLS)
+/* Use the same selected chunk table and lookup as ordinary dispatch, including
+ * mod variants. The donor's direct calls must not bypass player options. */
+void (**const bw_chunk_fns)(CPUState*) = s_dolrecomp_chunk_fns;
+DolRecompFunction bw_find_chunk(u32 address) {
+    return dolrecomp_find_original(address);
+}
+#endif
 
+#ifdef BLUEWAKE_NATIVE_MATH_CACHED
+#include "native_math.h"
+static void native_matrix_copy(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030D0C8u)) func_803096E0(cpu);
+}
+static void native_matrix_concat(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030D0FCu)) func_803096E0(cpu);
+}
+static void native_matrix_vec(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030DA44u)) func_8030D6E0(cpu);
+}
+static void native_matrix_array(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030DA98u)) func_8030D6E0(cpu);
+}
+static DolRecompFunction bluewake_native_math_find(u32 address) {
+    /* Cached wrappers always recheck the host handshake, including after disable. */
+    switch (address) {
+    case 0x8030D0C8u: return native_matrix_copy;
+    case 0x8030D0FCu: return native_matrix_concat;
+    case 0x8030DA44u: return native_matrix_vec;
+    case 0x8030DA98u: return native_matrix_array;
+    default: return NULL;
+    }
+}
+#endif
+
+#if defined(BLUEWAKE_DIRECT_CALLS)
+int bw_native_call(CPUState* cpu, u32 address) {
+#ifdef BLUEWAKE_NATIVE_MATH_CACHED
+    return bluewake_native_math_try(cpu, address);
+#else
+    (void)cpu; (void)address;
+    return 0;
+#endif
+}
+#endif
+
+/* The x86-64-v3 dispatch clones come only from DolRecomp's LLVM object
+ * backend; the C backend the Builder uses emits none, so an x86-64 build (the
+ * Windows port) dispatches through dolrecomp_call unless the source says it
+ * carries them. */
+#if defined(__x86_64__) && defined(DOLRECOMP_HAS_X86_64_V3_DISPATCH)
+#define BLUEWAKE_X86_64_V3_DISPATCH 1
+#else
+#define BLUEWAKE_X86_64_V3_DISPATCH 0
+#endif
+
+#if BLUEWAKE_X86_64_V3_DISPATCH
 static int host_has_x86_64_v3(void)
 {
-#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#if defined(__GNUC__) || defined(__clang__)
     static int supported = -1;
     if (supported < 0)
     {
@@ -31,10 +88,11 @@ static int host_has_x86_64_v3(void)
     return 0;
 #endif
 }
+#endif
 
 static int selected_dispatch(CPUState* ctx, u32 address)
 {
-#if defined(__x86_64__)
+#if BLUEWAKE_X86_64_V3_DISPATCH
     if (host_has_x86_64_v3())
         return dolrecomp_call__x86_64_v3(ctx, address);
 #endif
@@ -79,7 +137,13 @@ typedef struct BlueWakeRelLifecycle
 #include "rel_data.inc"
 
 static const StaticRecompModuleDesc s_desc = {
+#if defined(BW_GUEST_MEM1)
+    BLUEWAKE_FIXED_MEM1_ABI_VERSION,
+#elif defined(BLUEWAKE_FIXED_CPU)
+    BLUEWAKE_FIXED_CPU_ABI_VERSION,
+#else
     STATICRECOMP_ABI_VERSION,
+#endif
     GXRUNTIME_CPU_ABI_VERSION,
     (u32)sizeof(CPUState),
     MODULE_GAME_ID,

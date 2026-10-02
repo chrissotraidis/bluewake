@@ -2,12 +2,10 @@
 """Owner shares from a `sample` capture of the play window.
 
 `scripts/bench.sh` runs headless and never executes the Aurora configuration
-path, so renderer-side changes are invisible to it; and the rendered tier's
-wall-clock fps varies more between runs (33.6% to 41.0% of authentic) than most
-renderer effects are worth. A sampled *share* is a ratio of samples inside one
-process, so machine load moves numerator and denominator together and largely
-cancels. That makes it the instrument for renderer work until a better one
-exists (docs/status/PLAN_2026-09-18.md, M6).
+path, so renderer-side changes are invisible to it. Sampled shares help locate
+work, but scheduling, pacing and workload changes can bias them. They are not
+retired-instruction counts or proof of an FPS improvement. Compare matched
+workloads and retain normal-stop and work-count checks.
 
 Usage: scripts/sample_owners.py SAMPLE.txt [--depth N] [--top N]
 
@@ -33,7 +31,8 @@ THREAD = re.compile(r"^\s*\d+\s+Thread_")
 
 
 def parse(path):
-    text = open(path, errors="replace").read().splitlines()
+    with open(path, errors="replace") as capture:
+        text = capture.read().splitlines()
     start = next((i for i, l in enumerate(text) if "Call graph:" in l), None)
     if start is None:
         sys.exit("no call graph in %s" % path)
@@ -41,7 +40,8 @@ def parse(path):
                 if text[i].startswith("Total number in stack")), len(text))
     body = text[start + 1:end]
     mt = next((i for i, l in enumerate(body)
-               if "com.apple.main-thread" in l), None)
+               if THREAD.match(l) and
+               ("com.apple.main-thread" in l or re.search(r": Main Thread\b", l))), None)
     if mt is None:
         sys.exit("no main thread in %s" % path)
     # The main thread's tree ends where the next thread's summary begins; every
@@ -77,7 +77,7 @@ def main():
     print("top owners at depth <= %d (share of main thread):" % args.depth)
     seen = {}
     for depth, count, name, binary in rows:
-        if depth == 0:
+        if depth == 0 or depth > args.depth:
             continue
         key = (name, binary)
         if key not in seen:

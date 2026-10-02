@@ -1,5 +1,7 @@
 #include "dsp_adapter_c.h"
 
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -166,4 +168,30 @@ extern "C" uint16_t bluewake_dsp_adapter_read_ifx(
     BluewakeDspAdapter* adapter, uint16_t address)
 {
   return adapter == nullptr || adapter->hle ? 0 : adapter->impl.read_ifx(address);
+}
+
+extern "C" size_t bluewake_dsp_adapter_save_state(BluewakeDspAdapter* adapter,
+                                                  uint8_t** out)
+{
+  if (out == nullptr)
+    return 0;
+  *out = nullptr;
+  if (adapter == nullptr || !adapter->hle)
+    return 0;
+  const std::vector<std::uint8_t> state = adapter->hle->save_state();
+  if (state.empty())
+    return 0;
+  *out = static_cast<uint8_t*>(std::malloc(state.size()));
+  if (*out == nullptr)
+    return 0;
+  std::memcpy(*out, state.data(), state.size());
+  return state.size();
+}
+
+extern "C" int bluewake_dsp_adapter_load_state(BluewakeDspAdapter* adapter,
+                                               const uint8_t* data, size_t size)
+{
+  if (adapter == nullptr || !adapter->hle || data == nullptr)
+    return 0;
+  return adapter->hle->load_state(data, size) ? 1 : 0;
 }

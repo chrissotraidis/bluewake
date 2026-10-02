@@ -1,0 +1,231 @@
+From 792706e53884ef70e388303551529e738014786a Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:32:30 +0900
+Subject: [PATCH] audio: count drops and capture exactly submitted sink PCM
+
+---
+ GXRuntime/backends/aurora/aurora_audio.cpp    | 53 +++++++++++++++++--
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 10 ++--
+ .../backends/aurora/aurora_backend_private.h  |  2 +
+ .../graphics/aurora/tests/audio_sink_test.cpp | 36 +++++++++++++
+ 4 files changed, 94 insertions(+), 7 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_audio.cpp b/GXRuntime/backends/aurora/aurora_audio.cpp
+index 671541b2..591f3df8 100644
+--- a/GXRuntime/backends/aurora/aurora_audio.cpp
++++ b/GXRuntime/backends/aurora/aurora_audio.cpp
+@@ -18,6 +18,31 @@ constexpr double kStretchMax = 2.0;
+ gx_aurora::AudioStretcher g_stretcher;
+ std::vector<int16_t> g_stretch_out;
+ double g_stretch = 1.0;
++FILE* g_sink_capture;
++bool g_sink_capture_checked;
++u64 g_sink_capture_bytes;
++u32 g_sink_capture_rate;
++void capture_sink(const s16* samples, int bytes) {
++    if (!g_sink_capture_checked) {
++        g_sink_capture_checked = true;
++        const char* path = std::getenv("DOL_AUDIO_SINK_CAPTURE");
++        if (path && path[0]) {
++            // Never overwrite an earlier diagnostic capture.
++            g_sink_capture = std::fopen(path, "wbx");
++            std::fprintf(stderr, "[audio-sink] capture=%s opened=%u format=S16-native channels=L,R\n", path, g_sink_capture ? 1u : 0u);
++        }
++    }
++    if (!g_sink_capture || bytes <= 0) return;
++    if (g_sink_capture_rate != gx_aurora::g_audio_sample_rate) {
++        g_sink_capture_rate = gx_aurora::g_audio_sample_rate;
++        std::fprintf(stderr, "[audio-sink] offset_bytes=%llu sample_rate=%u\n",
++            (unsigned long long)g_sink_capture_bytes, g_sink_capture_rate);
++    }
++    if (std::fwrite(samples, 1, bytes, g_sink_capture) != static_cast<size_t>(bytes)) {
++        std::fprintf(stderr, "[audio-sink] capture write failed\n");
++        std::fclose(g_sink_capture); g_sink_capture = nullptr;
++    } else g_sink_capture_bytes += bytes;
++}
+ bool stretch_enabled() {
+     static const bool enabled = [] {
+         const char* env = std::getenv("DOL_AUDIO_STRETCH");
+@@ -28,6 +53,14 @@ bool stretch_enabled() {
+ }  // namespace
+ 
+ namespace gx_aurora {
++void close_audio_capture() {
++    if (g_sink_capture && std::fclose(g_sink_capture) != 0)
++        std::fprintf(stderr, "[audio-sink] capture close failed\n");
++    g_sink_capture = nullptr;
++    g_sink_capture_checked = false;
++    g_sink_capture_bytes = 0;
++    g_sink_capture_rate = 0;
++}
+ bool retry_audio_open(bool force) {
+     if (g_audio_stream != nullptr) return true;
+     static Uint64 next_attempt;
+@@ -77,13 +110,17 @@ void aurora_backend_audio_set_sample_rate(u32 sample_rate) {
+ 
+ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+     if (samples == nullptr || frames == 0) return;
+-    if (!gx_aurora::retry_audio_open(false)) return;
++    gx_aurora::g_audio_push_count++;
++    if (!gx_aurora::retry_audio_open(false)) {
++        gx_aurora::g_audio_dropped_count++;
++        gx_aurora::g_audio_dropped_frames += frames;
++        return;
++    }
+     const int bytes_per_second =
+         static_cast<int>(gx_aurora::g_audio_sample_rate) * 2 * static_cast<int>(sizeof(s16));
+     const int prebuffer_bytes = bytes_per_second * gx_aurora::g_audio_prebuffer_ms / 1000;
+     const int max_queued_bytes = bytes_per_second * gx_aurora::g_audio_max_queue_ms / 1000;
+     const int bytes = static_cast<int>(frames * 2u * sizeof(s16));
+-    gx_aurora::g_audio_push_count++;
+     u32 nonzero_samples = 0;
+     s32 peak_sample = 0;
+     u32 sample_hash = 2166136261u;
+@@ -105,6 +142,7 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+     if (gx_aurora::g_audio_discard.load(std::memory_order_relaxed) &&
+         queued >= bytes_per_second * static_cast<int>(kStretchTargetMs) / 1000) {
+         gx_aurora::g_audio_dropped_count++;
++        gx_aurora::g_audio_dropped_frames += frames;
+         return;
+     }
+     // With the host pacing retraces by the wall clock (BlueWake's
+@@ -118,6 +156,7 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+     }();
+     if (no_throttle && queued > max_queued_bytes) {
+         gx_aurora::g_audio_dropped_count++;
++        gx_aurora::g_audio_dropped_frames += frames;
+         return;
+     }
+     unsigned waited_ms = 0;
+@@ -175,9 +214,15 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+                 gx_aurora::g_audio_stretched_count++;
+         }
+     }
+-    if (out_bytes > 0 && !SDL_PutAudioStreamData(gx_aurora::g_audio_stream, out_samples, out_bytes))
++    if (out_bytes > 0 && !SDL_PutAudioStreamData(gx_aurora::g_audio_stream, out_samples, out_bytes)) {
++        gx_aurora::g_audio_dropped_count++;
++        gx_aurora::g_audio_dropped_frames += static_cast<u32>(out_bytes / (2 * sizeof(s16)));
+         std::fprintf(stderr, "[audio] failed to queue samples: %s\n", SDL_GetError());
+-    else if (!gx_aurora::g_audio_playing && queued + out_bytes >= prebuffer_bytes) {
++        return;
++    }
++    // Exactly the post-discard, post-stretch bytes successfully submitted to SDL.
++    capture_sink(out_samples, out_bytes);
++    if (!gx_aurora::g_audio_playing && queued + out_bytes >= prebuffer_bytes) {
+         if (SDL_ResumeAudioStreamDevice(gx_aurora::g_audio_stream))
+         {
+             gx_aurora::g_audio_playing = true;
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 41cdcc06..3d5785d5 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -42,6 +42,7 @@ unsigned long long g_fifo_bytes = 0;
+ unsigned long long g_audio_push_count = 0;
+ unsigned long long g_audio_throttle_count = 0;
+ unsigned long long g_audio_dropped_count = 0;
++unsigned long long g_audio_dropped_frames = 0;
+ std::atomic_bool g_audio_discard{false};
+ unsigned long long g_audio_low_log_push = 0;
+ u32 g_audio_sample_rate = 32000;
+@@ -511,6 +512,8 @@ bool dol_aurora_initialize(int argc, char** argv,
+     gx_aurora::g_audio_max_queue_ms =
+         gx_aurora::audio_ms_env("DOL_AUDIO_MAX_QUEUE_MS", 250, gx_aurora::g_audio_prebuffer_ms, 1000);
+     gx_aurora::g_audio_push_count = 0;
++    gx_aurora::g_audio_dropped_count = 0;
++    gx_aurora::g_audio_dropped_frames = 0;
+     gx_aurora::g_audio_throttle_count = 0;
+     gx_aurora::g_audio_starved_count = 0;
+     gx_aurora::g_audio_stretched_count = 0;
+@@ -669,10 +672,11 @@ void dol_aurora_shutdown(void) {
+                      texture_stats.generation_fallbacks);
+     }
+ #endif
++    std::fprintf(stderr, "[audio] summary pushes=%llu dropped=%llu dropped_frames=%llu starved=%llu stretched=%llu throttles=%llu\n",
++        gx_aurora::g_audio_push_count, gx_aurora::g_audio_dropped_count, gx_aurora::g_audio_dropped_frames,
++        gx_aurora::g_audio_starved_count, gx_aurora::g_audio_stretched_count, gx_aurora::g_audio_throttle_count);
++    gx_aurora::close_audio_capture();
+     if (gx_aurora::g_audio_stream != nullptr) {
+-        std::fprintf(stderr, "[audio] summary pushes=%llu starved=%llu stretched=%llu throttles=%llu\n",
+-                     gx_aurora::g_audio_push_count, gx_aurora::g_audio_starved_count,
+-                     gx_aurora::g_audio_stretched_count, gx_aurora::g_audio_throttle_count);
+         SDL_DestroyAudioStream(gx_aurora::g_audio_stream);
+         gx_aurora::g_audio_stream = nullptr;
+         gx_aurora::g_audio_playing = false;
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index d7d5f1d1..d688f8e2 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -44,6 +44,7 @@ extern unsigned long long g_fifo_bytes;
+ extern unsigned long long g_audio_push_count;
+ extern unsigned long long g_audio_throttle_count;
+ extern unsigned long long g_audio_dropped_count;
++extern unsigned long long g_audio_dropped_frames;
+ extern unsigned long long g_audio_starved_count;
+ extern unsigned long long g_audio_stretched_count;
+ extern unsigned long long g_audio_low_log_push;
+@@ -172,6 +173,7 @@ unsigned long long ull_env(const char* name, unsigned long long fallback);
+ long long_env(const char* name, long fallback);
+ void log_callback(AuroraLogLevel level, const char* module, const char* message, unsigned int);
+ bool retry_audio_open(bool force);
++void close_audio_capture();
+ void poll_events();
+ void write_aurora_command(u16 command);
+ void flush_pending_resource_metadata();
+diff --git a/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+index ddd2748e..09bf7ec5 100644
+--- a/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+@@ -5,7 +5,20 @@
+ #include "../../../backends/aurora/aurora_backend_private.h"
+ #include <SDL3/SDL.h>
+ #include <cassert>
++#include <cmath>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++static void environment(const char* key, const char* value) {
++#ifdef _WIN32
++    assert(_putenv_s(key, value) == 0);
++#else
++    assert(setenv(key, value, 1) == 0);
++#endif
++}
+ int main() {
++    environment("DOL_AUDIO_NO_THROTTLE", "1");
++    environment("DOL_AUDIO_STRETCH", "0");
+     assert(SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "bluewake-nonexistent-driver"));
+     assert(!gx_aurora::retry_audio_open(true));
+     assert(!gx_aurora::retry_audio_open(false)); // timer backs off
+@@ -14,6 +27,29 @@ int main() {
+     assert(gx_aurora::g_audio_stream != nullptr && !gx_aurora::g_audio_playing);
+     auto* stream = gx_aurora::g_audio_stream;
+     assert(gx_aurora::retry_audio_open(true) && stream == gx_aurora::g_audio_stream);
++    auto capture = std::filesystem::temp_directory_path() / ("bluewake-sink-" + std::to_string(SDL_GetTicksNS()) + ".pcm");
++    environment("DOL_AUDIO_SINK_CAPTURE", capture.string().c_str());
++    gx_aurora::g_audio_prebuffer_ms = 10000; // dummy stays paused; queue deterministic
++    gx_aurora::g_audio_max_queue_ms = 250;
++    s16 samples[512];
++    for (unsigned i = 0; i < 256; ++i) samples[i * 2] = samples[i * 2 + 1] = static_cast<s16>(10000 * std::sin(i * 0.1));
++    aurora_backend_audio_push(samples, 256);
++    gx_aurora::g_audio_discard = true;
++    assert(SDL_PutAudioStreamData(stream, samples, sizeof samples));
++    // Fill beyond 100ms for fast-forward discard, then beyond max queue.
++    for (unsigned i = 0; i < 40; ++i) assert(SDL_PutAudioStreamData(stream, samples, sizeof samples));
++    auto dropped = gx_aurora::g_audio_dropped_count;
++    aurora_backend_audio_push(samples, 256);
++    assert(gx_aurora::g_audio_dropped_count == dropped + 1 && gx_aurora::g_audio_dropped_frames == 256);
++    gx_aurora::g_audio_discard = false;
++    aurora_backend_audio_push(samples, 256);
++    assert(gx_aurora::g_audio_dropped_count == dropped + 2 && gx_aurora::g_audio_dropped_frames == 512);
++    gx_aurora::close_audio_capture();
++    std::ifstream input(capture, std::ios::binary);
++    s16 actual[512]; input.read(reinterpret_cast<char*>(actual), sizeof actual);
++    assert(input.gcount() == sizeof actual && std::memcmp(actual, samples, sizeof actual) == 0);
++    assert(input.peek() == std::ifstream::traits_type::eof());
++    input.close(); std::filesystem::remove(capture);
+     SDL_DestroyAudioStream(stream); gx_aurora::g_audio_stream = nullptr;
+     SDL_QuitSubSystem(SDL_INIT_AUDIO);
+ }
+-- 
+2.46.0
+

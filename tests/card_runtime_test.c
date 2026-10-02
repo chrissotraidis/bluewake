@@ -38,6 +38,12 @@ int main(void) {
     assert(bluewake_card_runtime_open(path));
     assert(strcmp(bluewake_card_runtime_path(), path) == 0);
 
+    bluewake_card_runtime_suspend_writes(true);
+    cpu.gpr[3] = 0u;
+    call_card(&cpu, CARD_MOUNT);
+    assert((s32)cpu.gpr[3] == DOL_CARD_RESULT_BUSY);
+    bluewake_card_runtime_suspend_writes(false);
+
     const u32 size_address = 0x80002000u;
     const u32 sector_address = 0x80002004u;
     cpu.gpr[3] = 0u;

@@ -1,0 +1,286 @@
+From 4a4f2907445f88e2dd6f2b470b6d900dc7aed32d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 01:12:33 +0900
+Subject: [PATCH] Make cross-thread renderer failure and counters atomic
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 16 +++----
+ .../backends/aurora/aurora_backend_private.h  |  6 +--
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 46 +++++++++----------
+ 3 files changed, 34 insertions(+), 34 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 2f84b7ba..87990c4e 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -62,10 +62,10 @@ std::array<PendingTlutMetadata, 20> g_pending_tluts{};
+ gxruntime::aurora_recomp::RetailGxFrontend g_shadow_frontend;
+ gxruntime::aurora_recomp::ConsumingAuroraRenderSink g_shadow_packet_sink;
+ bool g_shadow_frontend_enabled = false;
+-bool g_shadow_frontend_failed = false;
++std::atomic<bool> g_shadow_frontend_failed{false};
+ gxruntime::gxcore::GxCoreSink g_core_sink;
+-unsigned long long g_core_submitted = 0;
+-unsigned long long g_core_rejected = 0;
++std::atomic<unsigned long long> g_core_submitted{0};
++std::atomic<unsigned long long> g_core_rejected{0};
+ std::atomic<bool> g_display_copy_pending{false};
+ 
+ unsigned long long g_shadow_last_draw_total = 0;
+@@ -456,8 +456,8 @@ bool dol_aurora_initialize(int argc, char** argv,
+             gx_aurora::core_texture_dirty_epoch);
+         gx_aurora::g_core_sink.set_plan_observer(gx_aurora::core_plan_observer, nullptr);
+         gx_aurora::g_core_sink.set_copy_observer(gx_aurora::core_copy_observer, nullptr);
+-        gx_aurora::g_core_submitted = 0;
+-        gx_aurora::g_core_rejected = 0;
++        gx_aurora::g_core_submitted.store(0, std::memory_order_relaxed);
++        gx_aurora::g_core_rejected.store(0, std::memory_order_relaxed);
+         aurora::gfx::gxcore::reset_texture_cache();
+         std::fprintf(stderr,
+                      "[gx-core] renderer = gxcore (default): draws route "
+@@ -467,7 +467,7 @@ bool dol_aurora_initialize(int argc, char** argv,
+     // The FIFO translation runs on a worker now, so the reset has to wait for
+     // it to be idle before the front end's state is cleared.
+     gx_aurora::shadow_frontend_flush_pending();
+-    gx_aurora::g_shadow_frontend_failed = false;
++    gx_aurora::g_shadow_frontend_failed.store(false, std::memory_order_relaxed);
+     gx_aurora::g_shadow_frontend.reset(nullptr);
+     gx_aurora::g_shadow_frontend.set_packet_drain_enabled(gx_aurora::g_shadow_frontend_enabled);
+     // The frame ends at the display copy: stop each parse there so the draws
+@@ -605,8 +605,8 @@ void dol_aurora_shutdown(void) {
+                      "logic_op_ignored=%llu dst_alpha_active=%llu "
+                      "early_depth_active=%llu ztexture_active=%llu "
+                      "ztexture_ignored=%llu\n",
+-                     gx_aurora::g_core_submitted, gx_aurora::g_core_rejected,
+-                     gx_aurora::g_shadow_frontend_failed ? 1 : 0,
++                     gx_aurora::g_core_submitted.load(std::memory_order_relaxed), gx_aurora::g_core_rejected.load(std::memory_order_relaxed),
++                     gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed) ? 1 : 0,
+                      gaps.draws_planned, gaps.draws_skipped,
+                      gaps.draws_noop, gaps.cull_all_draws, gaps.missing_vcd,
+                      gaps.vertex_decode_failures,
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 1710e49c..d4c59356 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -86,10 +86,10 @@ extern std::array<PendingTlutMetadata, 20> g_pending_tluts;
+ extern gxruntime::aurora_recomp::RetailGxFrontend g_shadow_frontend;
+ extern gxruntime::aurora_recomp::ConsumingAuroraRenderSink g_shadow_packet_sink;
+ extern bool g_shadow_frontend_enabled;
+-extern bool g_shadow_frontend_failed;
++extern std::atomic<bool> g_shadow_frontend_failed;
+ extern gxruntime::gxcore::GxCoreSink g_core_sink;
+-extern unsigned long long g_core_submitted;
+-extern unsigned long long g_core_rejected;
++extern std::atomic<unsigned long long> g_core_submitted;
++extern std::atomic<unsigned long long> g_core_rejected;
+ // Set by the copy observer (the FIFO worker's thread in worker mode) when a
+ // display copy ends a frame; the main thread presents and clears it.
+ extern std::atomic<bool> g_display_copy_pending;
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 40a80a4d..194d1919 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -126,9 +126,9 @@ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*) {
+                      c.kcolors[1][0], c.kcolors[1][1], c.kcolors[1][2], c.kcolors[1][3]);
+     }
+     if (aurora::gfx::gxcore::submit_draw_plan(plan))
+-        ++g_core_submitted;
++        g_core_submitted.fetch_add(1, std::memory_order_relaxed);
+     else
+-        ++g_core_rejected;
++        g_core_rejected.fetch_add(1, std::memory_order_relaxed);
+ }
+ 
+ void core_copy_observer(const gxruntime::gxcore::EfbCopyCommand& cmd, void*) {
+@@ -239,7 +239,7 @@ bool aurora_guest_address_resolver_bridge(
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+ void shadow_frontend_fail_metadata(const char* reason, u32 attr,
+                                    u32 guest_address, u32 value) {
+-    g_shadow_frontend_failed = true;
++    g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+     std::fprintf(stderr,
+                  "[aurora-recomp] shadow RetailGxFrontend rejected metadata; "
+                  "reason=%s attr=%u guest=0x%08X value=%u; "
+@@ -460,7 +460,7 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     }
+     if (!flushed) {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+-        if (!g_shadow_frontend_failed) {
++        if (!g_shadow_frontend_failed.load(std::memory_order_relaxed)) {
+             // The single-threaded path names its failure; the worker has to as
+             // well, because a failed front end stops every later present.
+             std::fprintf(stderr,
+@@ -488,7 +488,7 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+                          record_into_aurora ? 1 : 0, batch.size(),
+                          static_cast<unsigned long long>(g_present_count));
+         }
+-        g_shadow_frontend_failed = true;
++        g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+     }
+ }
+ 
+@@ -807,7 +807,7 @@ static void g_fifo_drain_impl() {
+ }  // namespace
+ 
+ void shadow_frontend_set_array(u32 attr, u32 guest_address, u8 stride) {
+-    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
++    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed.load(std::memory_order_relaxed))
+         return;
+     // The mirror must not run ahead of bytes the parser has not seen, or a
+     // draw already in the FIFO would be decoded with this array's successor.
+@@ -851,7 +851,7 @@ bool frontend_guest_address_resolver_bridge(
+ }
+ 
+ void shadow_frontend_call_display_list(const void* data, u32 size) {
+-    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
++    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed.load(std::memory_order_relaxed))
+         return;
+     // Same ordering rule as the array mirror: the HLE path parses the list
+     // immediately, so anything already in the FIFO has to be parsed first.
+@@ -860,7 +860,7 @@ void shadow_frontend_call_display_list(const void* data, u32 size) {
+         static_cast<const std::uint8_t*>(data), size);
+     if (g_gx_core_enabled) {
+         if (!g_shadow_frontend.write_display_list(bytes, &g_core_sink)) {
+-            g_shadow_frontend_failed = true;
++            g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+             std::fprintf(stderr,
+                          "[gx-core] frontend rejected HLE display list "
+                          "(%u bytes): %s (opcode=0x%02X)\n",
+@@ -874,7 +874,7 @@ void shadow_frontend_call_display_list(const void* data, u32 size) {
+         return;
+     }
+     if (!g_shadow_frontend.write_display_list(bytes, &g_shadow_packet_sink)) {
+-        g_shadow_frontend_failed = true;
++        g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+         std::fprintf(stderr,
+                      "[aurora-recomp] shadow RetailGxFrontend rejected HLE "
+                      "display list (%u bytes): parse_error=%s opcode=0x%02X "
+@@ -971,7 +971,7 @@ static inline void shadow_frontend_enqueue_bytes(const std::uint8_t* bytes, std:
+ }
+ 
+ void shadow_frontend_write(u64 value, u8 size) {
+-    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
++    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed.load(std::memory_order_relaxed))
+         return;
+     if (!g_fifo_worker_started)
+         g_fifo_worker_start();
+@@ -1007,7 +1007,7 @@ void shadow_frontend_write(u64 value, u8 size) {
+         return;
+     }
+     if (!g_shadow_frontend.write_fifo(fragment)) {
+-        g_shadow_frontend_failed = true;
++        g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+         std::fprintf(stderr,
+                      "[gx] shadow RetailGxFrontend refused a %u-byte FIFO "
+                      "fragment\n",
+@@ -1019,7 +1019,7 @@ void shadow_frontend_write(u64 value, u8 size) {
+ }
+ 
+ static void shadow_frontend_flush(void) {
+-    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
++    if (!g_shadow_frontend_enabled || g_shadow_frontend_failed.load(std::memory_order_relaxed))
+         return;
+     if (g_fifo_worker_started) {
+         g_fifo_drain();
+@@ -1030,7 +1030,7 @@ static void shadow_frontend_flush(void) {
+     const u8 size = g_shadow_frontend_last_write_size;
+     if (g_gx_core_enabled) {
+         if (!g_shadow_frontend.flush(&g_core_sink)) {
+-            g_shadow_frontend_failed = true;
++            g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+             std::fprintf(stderr,
+                          "[gx-core] frontend rejected FIFO after %llu byte(s): "
+                          "%s (opcode=0x%02X offset=%llu a=0x%08X b=0x%08X "
+@@ -1054,7 +1054,7 @@ static void shadow_frontend_flush(void) {
+         return;
+     }
+     if (!g_shadow_frontend.flush(&g_shadow_packet_sink)) {
+-        g_shadow_frontend_failed = true;
++        g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+         const auto& failed = g_shadow_packet_sink.failed_packet();
+         std::fprintf(stderr,
+                      "[aurora-recomp] shadow RetailGxFrontend rejected FIFO "
+@@ -1391,7 +1391,7 @@ static void aurora_backend_present_impl(void) {
+     gx_aurora::g_aurora_recording_open = false;
+     gx_aurora::g_aurora_recording_in_transition = true;
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+-    if (gx_aurora::g_gx_core_enabled && !gx_aurora::g_shadow_frontend_failed)
++    if (gx_aurora::g_gx_core_enabled && !gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed))
+         gx_aurora::g_core_sink.flush_frame();
+     if (gx_aurora::g_gx_core_enabled) {
+         static int s_cutscene_diag = -1;
+@@ -1479,7 +1479,7 @@ static void aurora_backend_present_impl(void) {
+         const bool have_prev = gx_aurora::g_shadow_prev_frame_valid;
+         const bool draw_match =
+             !have_prev ||
+-            (!gx_aurora::g_shadow_frontend_failed &&
++            (!gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed) &&
+              gx_aurora::g_shadow_prev_draws + gx_aurora::g_shadow_prev_zero_draws ==
+                  astats->drawCallCount);
+         if (!draw_match)
+@@ -1488,7 +1488,7 @@ static void aurora_backend_present_impl(void) {
+             4ull * gx_aurora::g_shadow_prev_draws + 4ull;
+         const bool vert_extent_match =
+             !have_prev ||
+-            (!gx_aurora::g_shadow_frontend_failed &&
++            (!gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed) &&
+              astats->lastVertSize >= gx_aurora::g_shadow_prev_rawvert &&
+              (astats->lastVertSize - gx_aurora::g_shadow_prev_rawvert) <=
+                  vert_align_slack);
+@@ -1502,7 +1502,7 @@ static void aurora_backend_present_impl(void) {
+                          "draws=%llu textures=%llu copies=%llu spans=%llu "
+                          "array-inputs=%llu/%llu (resolved/unresolved) "
+                          "assembled=%llu/%llu elems=%llu (ok/fail)\n",
+-                         gx_aurora::g_shadow_frontend_failed ? 1 : 0,
++                         gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed) ? 1 : 0,
+                          gx_aurora::g_shadow_packet_sink.packets(),
+                          fe_draw_total,
+                          gx_aurora::g_shadow_packet_sink.texture_count(),
+@@ -1743,7 +1743,7 @@ void aurora_backend_gx_write_bytes(const u8* bytes, u32 size) {
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+     if (gx_aurora::g_initialized && gx_aurora::g_gx_core_enabled && gx_aurora::g_frame_open &&
+         !gx_aurora::g_trace_armed && gx_aurora::g_fifo_worker_started &&
+-        gx_aurora::g_shadow_frontend_enabled && !gx_aurora::g_shadow_frontend_failed &&
++        gx_aurora::g_shadow_frontend_enabled && !gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed) &&
+         !gx_aurora::g_display_copy_pending.load(std::memory_order_relaxed)) {
+         gx_aurora::g_fifo_bytes += size;
+         gx_aurora::shadow_frontend_enqueue_bytes(bytes, size);
+@@ -1763,7 +1763,7 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+     // copy, about 3 percent of the game thread at native 60 Hz.
+     if (gx_aurora::g_initialized && gx_aurora::g_gx_core_enabled && gx_aurora::g_frame_open &&
+         !gx_aurora::g_trace_armed && gx_aurora::g_fifo_worker_started &&
+-        gx_aurora::g_shadow_frontend_enabled && !gx_aurora::g_shadow_frontend_failed &&
++        gx_aurora::g_shadow_frontend_enabled && !gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed) &&
+         (size == 1u || size == 2u || size == 4u || size == 8u) &&
+         !gx_aurora::g_display_copy_pending.load(std::memory_order_relaxed)) {
+         gx_aurora::g_fifo_bytes += size;
+@@ -1976,7 +1976,7 @@ void aurora_backend_set_guest_address_resolver(
+             &gx_aurora::g_shadow_frontend.state().resolver);
+         if (gx_aurora::g_gx_core_enabled)
+             gx_aurora::g_core_sink.set_guest_resolver(&gx_aurora::g_shadow_frontend.state().resolver);
+-        gx_aurora::g_shadow_frontend_failed = false;
++        gx_aurora::g_shadow_frontend_failed.store(false, std::memory_order_relaxed);
+     } else {
+         gx_aurora::g_shadow_frontend.reset(nullptr);
+         gx_aurora::g_shadow_frontend.set_packet_drain_enabled(gx_aurora::g_shadow_frontend_enabled);
+@@ -2008,7 +2008,7 @@ size_t dol_aurora_gx_save_state(void** out) {
+     if (!gx_aurora::g_initialized || !gx_aurora::g_shadow_frontend_enabled)
+         return 0;
+     gx_aurora::shadow_frontend_flush_pending();
+-    if (gx_aurora::g_shadow_frontend_failed)
++    if (gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed))
+         return 0;
+     const std::vector<std::uint8_t> front = gx_aurora::g_shadow_frontend.save_state();
+     const std::vector<std::uint8_t> sink = gx_aurora::g_core_sink.save_state();
+@@ -2058,7 +2058,7 @@ bool dol_aurora_gx_load_state(const void* data, size_t size) {
+     // frame before the next is not the one it follows (no in-between frame).
+     aurora::gfx::gxcore::reset_texture_cache();
+     aurora::gfx::frame_interp::request_cut();
+-    gx_aurora::g_shadow_frontend_failed = false;
++    gx_aurora::g_shadow_frontend_failed.store(false, std::memory_order_relaxed);
+     return true;
+ #else
+     (void)data;
+-- 
+2.46.0
+

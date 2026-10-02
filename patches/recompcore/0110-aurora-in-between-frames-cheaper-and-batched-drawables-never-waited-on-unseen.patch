@@ -1,0 +1,1726 @@
+From 68929476fcc6be8539007583aa62a89c08fa63d0 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 18:31:11 -0400
+Subject: [PATCH 110/110] Aurora: in-between frames cheaper and batched,
+ drawables never waited on unseen
+
+Encoding. gxcore render() binds the whole vertex and index buffers once per
+pass (a draw is its base vertex and first index) and sets a bind group only
+when it or its offset changed: the render worker's encoding of a busy scene
+went from about 4.4 ms a replay to 1.6.
+
+Batching. A draw of the pass's last command's state (pipeline, constants,
+pixel constants, textures) whose vertices and indices follow on extends it,
+its indices counted from the batch's first vertex. In-between frames draw a
+batch as one where its draws' blended blocks (and a particle's blended
+vertices) came out the same, and one by one where they differ. Adanmae went
+from about 6,400 draws a frame to 3,600, and the sea from 11,800 to 4,600.
+DOL_AURORA_GXCORE_BATCH=0 turns it off.
+
+In-between data. The blended blocks (about 41 MB a frame in a busy scene at
+120 Hz) and particle vertices are written straight into one of three staging
+buffers mapped for the frame and copied on the GPU. queue.WriteBuffer made
+and cleared an upload buffer that size every frame: a fifth of the render
+worker's time, and the GPU's memory swung by 350 MB. A frame that finds none
+back from the GPU after 4 ms shows no in-between frames; one that does not fit
+shows none and the next buffers are made bigger. The uniform de-duplication
+compares against the staged block instead of a copy kept aside.
+
+Pacing. Overloads (the GPU a game frame behind, the game waiting on the render
+worker or the GPU, a late drawable) in 3 of 8 game frames take 60 Hz to none
+and back after 3 s calm, with a longer wait after a quick relapse. 120 Hz is
+not lowered unless DOL_AURORA_FRAME_INTERP_PACING=1 (a drop to 60 for a stall
+already over was felt more than the stall).
+
+The helper thread spins 256 times instead of 4,096 before sleeping, and a
+sleeping helper is woken for 32 jobs at once or at the frame's end.
+
+macOS: a window out of sight (another full-screen space, or ours sliding in
+or out) asks for no drawable, and its surface is kept: nextDrawable blocked
+the game for half a second at every switch, and the Error status of the
+texture never asked for dropped a working surface.
+
+From the PC branch: a gather-pipe word straight to the translation worker's
+batch, the worker's batch buffer kept, a reused draw plan re-constructed in
+place, and the texture layout cache locked for the pipeline compiler.
+
+Diagnostics: DOL_GXCORE_DRAW_DUMP=<game frame> lists every draw of that frame
+(TEV and indirect stages, texgens with their matrix rows, textures, registers);
+DOL_AURORA_PRESENT_LOG adds encode and present times and the in-between data
+sizes. frame_interp_test covers the pacing.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp |  55 ++-
+ GXRuntime/graphics/aurora/lib/aurora.cpp      |  18 +-
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 329 +++++++++++---
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  20 +
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  |  89 +++-
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |   5 +
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 406 +++++++++++++++---
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  15 +
+ GXRuntime/graphics/aurora/lib/window.cpp      |  29 ++
+ GXRuntime/graphics/aurora/lib/window.hpp      |   3 +
+ .../aurora/tests/frame_interp_test.cpp        |  59 ++-
+ .../include/gxruntime/gxcore/shader.hpp       |   3 +
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  10 +-
+ 13 files changed, 919 insertions(+), 122 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 7d62761fb3..4fb32f658f 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -545,8 +545,12 @@ void start_stall_watchdog() {
+ void g_fifo_worker_main() {
+     g_fifo_pthread.store(pthread_self(), std::memory_order_release);
+     start_stall_watchdog();
++    // Kept across batches: the swap below hands its capacity back to the
++    // handoff, so the game thread's appends reuse it instead of growing a new
++    // vector (and this thread freeing the old one) every batch.
++    std::vector<std::uint8_t> batch;
+     for (;;) {
+-        std::vector<std::uint8_t> batch;
++        batch.clear();
+         std::uint64_t parsed = 0;
+         {
+             std::unique_lock<std::mutex> lock(g_fifo_worker_mutex);
+@@ -892,6 +896,39 @@ static u8 g_shadow_frontend_last_write_size;
+ 
+ static void shadow_frontend_flush(void);
+ 
++// shadow_frontend_write for a word the running translation worker takes (the
++// front end live, a 1, 2, 4 or 8-byte write): the same bookkeeping, and the
++// word's bytes appended to the worker's batch in guest order directly.
++static inline void shadow_frontend_enqueue_word(u64 value, u8 size) {
++    g_shadow_frontend_last_write_value = value;
++    g_shadow_frontend_last_write_size = size;
++    g_shadow_frontend_pending_bytes += size;
++    std::uint8_t* const out = g_fifo_local + g_fifo_local_size;
++    switch (size) {
++    case 1:
++        out[0] = static_cast<std::uint8_t>(value);
++        break;
++    case 2: {
++        const std::uint16_t word = __builtin_bswap16(static_cast<std::uint16_t>(value));
++        std::memcpy(out, &word, 2);
++        break;
++    }
++    case 4: {
++        const std::uint32_t word = __builtin_bswap32(static_cast<std::uint32_t>(value));
++        std::memcpy(out, &word, 4);
++        break;
++    }
++    default: {
++        const std::uint64_t word = __builtin_bswap64(value);
++        std::memcpy(out, &word, 8);
++        break;
++    }
++    }
++    g_fifo_local_size += size;
++    if (g_fifo_local_size >= fifo_local_batch_limit())
++        g_fifo_publish_local();
++}
++
+ void shadow_frontend_write(u64 value, u8 size) {
+     if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
+         return;
+@@ -1633,6 +1670,22 @@ void aurora_backend_gx_flush(void) {
+ }
+ 
+ void aurora_backend_gx_write(u64 value, u8 size) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    // Every gather-pipe word in play: the recorder open, the translation
++    // worker running, nothing traced and no present waiting on this write.
++    // The path below does just this for such a word - counts it and hands its
++    // bytes to the worker's batch - through three calls and a byte-by-byte
++    // copy, about 3 percent of the game thread at native 60 Hz.
++    if (gx_aurora::g_initialized && gx_aurora::g_gx_core_enabled && gx_aurora::g_frame_open &&
++        !gx_aurora::g_trace_armed && gx_aurora::g_fifo_worker_started &&
++        gx_aurora::g_shadow_frontend_enabled && !gx_aurora::g_shadow_frontend_failed &&
++        (size == 1u || size == 2u || size == 4u || size == 8u) &&
++        !gx_aurora::g_display_copy_pending.load(std::memory_order_relaxed)) {
++        gx_aurora::g_fifo_bytes += size;
++        gx_aurora::shadow_frontend_enqueue_word(value, size);
++        return;
++    }
++#endif
+     if (!gx_aurora::g_initialized)
+         return;
+     gx_aurora::g_fifo_bytes += size;
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index 416e725f83..a4399c6107 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -315,9 +315,11 @@ void end_frame() noexcept {
+     // Read once: a suppressed present takes no texture, and its status (left
+     // at Error) must not be taken for the surface's.
+     const bool suppressed = g_presentSuppressed.load(std::memory_order_relaxed);
++    // Out of sight, no texture is asked for either (window::is_occluded).
++    const bool occluded = window::is_occluded();
+     {
+       window::SurfaceLock surfaceLock;
+-      if (!suppressed && window::is_presentable() && g_surface) {
++      if (!suppressed && !occluded && window::is_presentable() && g_surface) {
+         ZoneScopedN("Acquire texture");
+         wgpu::SurfaceTexture surfaceTexture;
+         const auto acquireStart = std::chrono::steady_clock::now();
+@@ -327,6 +329,9 @@ void end_frame() noexcept {
+                                    .count();
+         if (acquireMs >= 30)
+           std::fprintf(stderr, "[render-slow] acquire-drawable ms=%lld\n", static_cast<long long>(acquireMs));
++        // Every drawable still queued behind the GPU's work: fewer in-between frames.
++        if (acquireMs >= 20)
++          gfx::note_render_overload();
+         surfaceStatus = surfaceTexture.status;
+         if (surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal) {
+           currentTexture = std::move(surfaceTexture.texture);
+@@ -425,11 +430,12 @@ void end_frame() noexcept {
+         Log.warn("Surface present failed");
+         webgpu::release_surface();
+       }
+-    } else if (g_surface && !suppressed) {
+-      // With the present suppressed the status is not the surface's: taking it
+-      // for Error dropped a working surface, and on Direct3D 12 the swapchain
+-      // made in its place for the same window failed (E_ACCESSDENIED) and lost
+-      // the device at the first fast-forwarded scene change.
++    } else if (g_surface && !suppressed && !occluded) {
++      // With the present suppressed (or the window out of sight) the status is
++      // not the surface's: taking it for Error dropped a working surface, and
++      // on Direct3D 12 the swapchain made in its place for the same window
++      // failed (E_ACCESSDENIED) and lost the device at the first fast-forwarded
++      // scene change.
+       switch (surfaceStatus) {
+       case wgpu::SurfaceGetCurrentTextureStatus::Timeout:
+         Log.warn("Surface texture acquisition timed out");
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 0415d8e4a9..1bdb2721b1 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -256,18 +256,58 @@ static std::array<FramePacket, FrameSlotCount> g_framePackets;
+ // blocks of a busy scene came to about 55 MB, and past 32 the rest did not
+ // fit, so those draws kept the next frame's transforms in two of the three in-
+ // between frames (the sea on a beach blinked out and back). The GPU buffer
+-// grows to what a frame uses (upload_interp_uniforms).
++// grows to what a frame uses (upload_interp_data).
+ constexpr uint64_t InterpUniformStepSize = 33554432; // 32mb
+ constexpr uint64_t InterpUniformBufferSize = InterpUniformStepSize * 3;
+ static uint64_t g_interpUniformBufferSize = 0; // the GPU buffer's size (render worker)
+-static std::array<std::vector<uint8_t>, FrameSlotCount> g_interpUniformStaging;
+ // Per frame slot, the range each in-between job resolved to, in job order
+ // (gxcore_draw.cpp's helper writes them; end_frame waits for it).
+ static std::array<std::vector<InterpRanges>, FrameSlotCount> g_interpJobRanges;
++// Per frame slot, the parts of its batched GXCore draws (push_batch_draw).
++static std::array<std::vector<BatchDraw>, FrameSlotCount> g_batchDraws;
+ // A particle's blended vertices, per frame slot (see push_interp_vertices).
+ constexpr uint64_t InterpVertexBufferSize = 8388608; // 8mb
+-static std::array<std::vector<uint8_t>, FrameSlotCount> g_interpVertexStaging;
+ wgpu::Buffer g_interpVertexBuffer;
++// Both are written, while a frame records, straight into a staging buffer
++// mapped for it, and copied to their GPU buffers on the GPU when the frame is
++// rendered (upload_interp_data). Staged in memory and sent with
++// queue.WriteBuffer before, a busy scene's 55 MB went past Dawn's 4 MB upload
++// ring, and every frame made and cleared an upload buffer that size: a fifth
++// of the render worker's time, and the GPU's memory swung by 350 MB. Three,
++// taken in turn: one recording, the others on their way through the GPU. A
++// frame that finds none back is more than a game frame ahead of the GPU; it
++// gets no in-between frames (frame_interp::note_overload), so they never make
++// the game wait.
++constexpr size_t InterpStagingCount = 3;
++enum class InterpStagingState : uint8_t {
++  Free,      // mapped, for the next frame
++  Recording, // a frame records into it
++  Mapping,   // copied from on the GPU; mapped again when that is done
++};
++struct InterpStaging {
++  wgpu::Buffer buffer;
++  uint64_t uniformCapacity = 0; // the constants' bytes, from 0; the vertices' follow
++  uint64_t vertexCapacity = 0;
++  uint8_t* data = nullptr;      // its mapping, while a frame records
++  std::atomic<InterpStagingState> state{InterpStagingState::Free};
++};
++static std::array<InterpStaging, InterpStagingCount> g_interpStaging;
++// Per frame slot: the staging its frame records into (none: no in-between
++// frames for it) and what it has used.
++struct InterpSlot {
++  InterpStaging* staging = nullptr;
++  uint64_t uniformUsed = 0;
++  uint64_t vertexUsed = 0;
++  bool overflowed = false; // some did not fit: this frame shows none
++};
++static std::array<InterpSlot, FrameSlotCount> g_interpSlots;
++// The capacities a new staging buffer gets: half of the most (32 MB for each
++// in-between frame, 8 MB of vertices) to start, doubled after a frame that
++// did not fit (recording thread). That frame shows no in-between frames:
++// with some of its draws left out of them, those would blink.
++static uint64_t g_interpUniformWant = 0;
++static uint64_t g_interpVertexWant = InterpVertexBufferSize / 2;
++static bool g_interpOverflowed = false; // helper thread, read after wait_interp_jobs
+ static size_t g_replayFrameSlot = 0; // render worker: the frame whose in-between frame is encoded
+ static int g_replayStep = 0;          // render worker: which of its in-between frames
+ static uint64_t g_interpUniformOverflows = 0; // recording thread
+@@ -1018,6 +1058,20 @@ void push_draw_command(gxcore::DrawData data) {
+       ShaderDrawCommand{.type = ShaderType::GXCore, .gxcore = data});
+ }
+ 
++namespace gxcore {
++DrawData* last_recorded_draw() noexcept {
++  if (g_currentRenderPass == UINT32_MAX)
++    return nullptr;
++  auto& pass = current_render_passes()[g_currentRenderPass];
++  if (pass.sealed || pass.commands.empty())
++    return nullptr;
++  auto& command = pass.commands.back();
++  if (command.type != CommandType::Draw || command.data.draw.type != ShaderType::GXCore)
++    return nullptr;
++  return &command.data.draw.gxcore;
++}
++} // namespace gxcore
++
+ template <>
+ PipelineRef pipeline_ref(const gxcore::PipelineConfig& config) {
+   return find_pipeline(ShaderType::GXCore, config,
+@@ -1199,9 +1253,16 @@ void shutdown() {
+   g_interpUniformBuffer = {};
+   g_interpUniformBufferSize = 0;
+   g_interpVertexBuffer = {};
+-  for (auto& staging : g_interpUniformStaging) {
+-    staging = {};
+-  }
++  for (auto& staging : g_interpStaging) {
++    staging.buffer = {};
++    staging.uniformCapacity = staging.vertexCapacity = 0;
++    staging.data = nullptr;
++    staging.state.store(InterpStagingState::Free, std::memory_order_release);
++  }
++  g_interpSlots = {};
++  g_interpUniformWant = 0;
++  g_interpVertexWant = InterpVertexBufferSize / 2;
++  g_interpOverflowed = false;
+   g_lastGameFrameEnd = {};
+   g_gameFramePeriodNs = 0;
+   g_processEventsQueued.store(false, std::memory_order_release);
+@@ -1275,11 +1336,19 @@ static bool wait_for_staging_buffer(size_t slot) {
+ static size_t acquire_frame_slot() {
+   ZoneScopedN("Acquire frame slot");
+   const auto waitStart = PresentClock::now();
++  // Frames coming faster than the game's own rate (a load's fast-forward)
++  // outrun the presents by design; waiting for them is no overload.
++  static PresentClock::time_point lastStart{};
++  const bool fastForward = waitStart - lastStart < std::chrono::milliseconds{20};
++  lastStart = waitStart;
+   while (true) {
+     if (const auto slot = g_frameSlots.try_acquire()) {
+       const auto waitDuration = PresentClock::now() - waitStart;
+       const double waitMs = std::chrono::duration<double, std::milli>{waitDuration}.count();
+       TracyPlot("aurora: frameSlotWaitMs", waitMs);
++      // The game waited for the render worker: fewer in-between frames.
++      if (waitMs >= 3.0 && !fastForward)
++        frame_interp::note_overload("the game waited for the render worker");
+       return *slot;
+     }
+     wait_for_gpu_progress(std::chrono::microseconds{100});
+@@ -1288,9 +1357,14 @@ static size_t acquire_frame_slot() {
+ 
+ static std::optional<size_t> acquire_mapped_staging_buffer() {
+   ZoneScopedN("Acquire mapped staging buffer");
++  const auto waitStart = PresentClock::now();
+   while (true) {
+     if (auto slot = g_stagingSlots.try_acquire()) {
+-      if (wait_for_staging_buffer(*slot)) {
++      const bool mapped = wait_for_staging_buffer(*slot);
++      // The game waited for the GPU.
++      if (PresentClock::now() - waitStart >= std::chrono::milliseconds{3})
++        frame_interp::note_overload("the game waited for the GPU");
++      if (mapped) {
+         return *slot;
+       }
+       g_stagingSlots.release(*slot);
+@@ -1300,6 +1374,96 @@ static std::optional<size_t> acquire_mapped_staging_buffer() {
+   }
+ }
+ 
++// Recording thread: a staging buffer back from the GPU, mapped (made, or made
++// bigger, here), or none.
++static InterpStaging* take_interp_staging() {
++  for (auto& staging : g_interpStaging) {
++    auto expected = InterpStagingState::Free;
++    if (!staging.state.compare_exchange_strong(expected, InterpStagingState::Recording, std::memory_order_acq_rel))
++      continue;
++    if (!staging.buffer || staging.uniformCapacity < g_interpUniformWant ||
++        staging.vertexCapacity < g_interpVertexWant) {
++      if (staging.buffer)
++        staging.buffer.Destroy();
++      staging.uniformCapacity = g_interpUniformWant;
++      staging.vertexCapacity = g_interpVertexWant;
++      const wgpu::BufferDescriptor descriptor{
++          .label = "In-between frame staging buffer",
++          .usage = wgpu::BufferUsage::MapWrite | wgpu::BufferUsage::CopySrc,
++          .size = staging.uniformCapacity + staging.vertexCapacity,
++          .mappedAtCreation = true,
++      };
++      staging.buffer = g_device.CreateBuffer(&descriptor);
++    }
++    staging.data = static_cast<uint8_t*>(
++        staging.buffer.GetMappedRange(0, staging.uniformCapacity + staging.vertexCapacity));
++    if (staging.data == nullptr) {
++      staging.state.store(InterpStagingState::Free, std::memory_order_release);
++      continue;
++    }
++    return &staging;
++  }
++  return nullptr;
++}
++
++// Recording thread, at a frame's start: a staging buffer for its in-between
++// frames' data, if one is back from the GPU.
++static void acquire_interp_staging(size_t frameSlot) {
++  auto& slot = g_interpSlots[frameSlot];
++  slot = {};
++  if (!frame_interp::enabled() || frame_interp::frame_skipped())
++    return;
++  const uint64_t perStep = InterpUniformStepSize / 2;
++  const uint64_t fewest = perStep * static_cast<uint64_t>(frame_interp::frame_steps());
++  if (g_interpOverflowed) {
++    g_interpOverflowed = false;
++    g_interpUniformWant = std::min(InterpUniformBufferSize, std::max(fewest, g_interpUniformWant) * 2);
++    g_interpVertexWant = std::min(InterpVertexBufferSize, g_interpVertexWant * 2);
++  }
++  g_interpUniformWant = std::max(g_interpUniformWant, fewest);
++  // A buffer the GPU is done with is back only once the render worker has
++  // processed its events (once a frame, at the end of each): one that looked
++  // busy for that alone was taken for an overload and dropped 120 Hz to 60.
++  // Up to 4 ms for it, with the worker asked to look.
++  const auto deadline = PresentClock::now() + std::chrono::milliseconds{4};
++  while (true) {
++    if ((slot.staging = take_interp_staging()) != nullptr)
++      return;
++    if (PresentClock::now() >= deadline)
++      break;
++    wait_for_gpu_progress(std::chrono::microseconds{250});
++  }
++  // All still on their way through the GPU: it is more than a game frame
++  // behind. This frame shows none, and the next ones fewer.
++  frame_interp::note_overload("the GPU is a game frame behind");
++}
++
++// Render worker, after a frame's in-between frames are submitted (or it had
++// none): its staging buffer back, mapped again once the GPU has copied from it.
++static void release_interp_staging(size_t frameSlot) {
++  auto& slot = g_interpSlots[frameSlot];
++  InterpStaging* staging = slot.staging;
++  slot = {};
++  if (staging == nullptr)
++    return;
++  if (staging->data != nullptr) {
++    // Not uploaded: still mapped, as it was.
++    staging->state.store(InterpStagingState::Free, std::memory_order_release);
++    return;
++  }
++  staging->state.store(InterpStagingState::Mapping, std::memory_order_release);
++  staging->buffer.MapAsync(wgpu::MapMode::Write, 0, staging->uniformCapacity + staging->vertexCapacity,
++                           wgpu::CallbackMode::AllowSpontaneous,
++                           [staging](wgpu::MapAsyncStatus status, wgpu::StringView message) {
++                             if (status != wgpu::MapAsyncStatus::Success) {
++                               Log.warn("In-between staging map {}: {}", magic_enum::enum_name(status), message);
++                               // Made again at its next use.
++                               staging->uniformCapacity = 0;
++                             }
++                             staging->state.store(InterpStagingState::Free, std::memory_order_release);
++                           });
++}
++
+ bool begin_frame(bool preserveEfb) {
+   ZoneScoped;
+   // pace_frame_start();
+@@ -1316,9 +1480,13 @@ bool begin_frame(bool preserveEfb) {
+   frame.frameIndex = g_frameIndex;
+   frame.stagingBuffer = *stagingSlot;
+   frame.continuation = preserveEfb;
+-  g_interpUniformStaging[frameSlot].clear();
+   g_interpJobRanges[frameSlot].clear();
+-  g_interpVertexStaging[frameSlot].clear();
++  g_batchDraws[frameSlot].clear();
++  if (preserveEfb) {
++    g_interpSlots[frameSlot] = {}; // a continuation has no in-between frames
++  } else {
++    acquire_interp_staging(frameSlot);
++  }
+   g_recordingFrame = &frame;
+   g_recordingFrameSlot = frameSlot;
+ 
+@@ -1460,11 +1628,15 @@ void end_frame(EndFrameCallback callback) {
+   frame.stats.lastStorageSize = frame.storage.size();
+   frame.stats.lastTextureUploadSize = frame.textureUpload.size();
+   frame.presents = !g_segmentEnding;
+-  frame.interpolate = frame.presents && !frame.continuation && frame_interp::frame_verdict();
++  const auto& interpSlot = g_interpSlots[g_recordingFrameSlot];
++  frame.interpolate = frame.presents && !frame.continuation && interpSlot.staging != nullptr &&
++                      !interpSlot.overflowed && frame_interp::frame_verdict();
+   frame.interpSteps = frame_interp::frame_steps();
+-  if (frame_interp::tracing() || (frame.interpolate && frame_interp::dump_frame(frame_interp::game_frame_number()))) {
+-    Log.info("In-between uniforms for game frame {}: {} bytes, {} blocks did not fit; frame uniforms {} bytes",
+-             frame_interp::game_frame_number(), g_interpUniformStaging[g_recordingFrameSlot].size(),
++  if (frame_interp::tracing() || g_presentLog ||
++      (frame.interpolate && frame_interp::dump_frame(frame_interp::game_frame_number()))) {
++    Log.info("In-between data for game frame {}: {} bytes of constants and {} of vertices, {} blocks did not fit; "
++             "frame uniforms {} bytes",
++             frame_interp::game_frame_number(), interpSlot.uniformUsed, interpSlot.vertexUsed,
+              g_interpUniformOverflows, frame.uniforms.size());
+   }
+   g_interpUniformOverflows = 0;
+@@ -1564,6 +1736,7 @@ void end_frame(EndFrameCallback callback) {
+         g_heldShown = false;
+       callback(encoder);
+     }
++    release_interp_staging(frameSlot);
+     g_frameSlots.release(frameSlot);
+     expire_cached_bind_groups();
+     map_staging_buffer(stagingSlot, true);
+@@ -1921,11 +2094,17 @@ static void replay_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const Frame
+   }
+ }
+ 
+-// Render worker: the frame's blended blocks into their GPU buffer, created at
+-// first use.
+-static void upload_interp_uniforms(size_t frameSlot) {
+-  const uint64_t needed =
+-      AURORA_ALIGN(g_interpUniformStaging[frameSlot].size(), 4) + gx::MaxUniformSize;
++// Render worker: the frame's blended blocks and vertices from its staging
++// buffer into their GPU buffers (created at first use), copied on the GPU
++// ahead of its in-between frames.
++static void upload_interp_data(size_t frameSlot) {
++  auto& slot = g_interpSlots[frameSlot];
++  InterpStaging* staging = slot.staging;
++  if (staging == nullptr || staging->data == nullptr)
++    return;
++  const uint64_t uniformBytes = AURORA_ALIGN(slot.uniformUsed, 4);
++  const uint64_t vertexBytes = AURORA_ALIGN(slot.vertexUsed, 4);
++  const uint64_t needed = uniformBytes + gx::MaxUniformSize;
+   if (!g_interpUniformBuffer || g_interpUniformBufferSize < needed) {
+     g_interpUniformBufferSize =
+         std::min(InterpUniformBufferSize, AURORA_ALIGN(std::max(needed, InterpUniformStepSize), InterpUniformStepSize));
+@@ -1950,22 +2129,24 @@ static void upload_interp_uniforms(size_t frameSlot) {
+     };
+     g_interpUniformBindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
+   }
+-  const auto& staging = g_interpUniformStaging[frameSlot];
+-  if (!staging.empty()) {
+-    g_queue.WriteBuffer(g_interpUniformBuffer, 0, staging.data(), AURORA_ALIGN(staging.size(), 4));
+-  }
+-  const auto& vertices = g_interpVertexStaging[frameSlot];
+-  if (!vertices.empty()) {
+-    if (!g_interpVertexBuffer) {
+-      const wgpu::BufferDescriptor descriptor{
+-          .label = "In-between frame vertex buffer",
+-          .usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
+-          .size = InterpVertexBufferSize,
+-      };
+-      g_interpVertexBuffer = g_device.CreateBuffer(&descriptor);
+-    }
+-    g_queue.WriteBuffer(g_interpVertexBuffer, 0, vertices.data(), AURORA_ALIGN(vertices.size(), 4));
++  if (vertexBytes != 0 && !g_interpVertexBuffer) {
++    const wgpu::BufferDescriptor descriptor{
++        .label = "In-between frame vertex buffer",
++        .usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
++        .size = InterpVertexBufferSize,
++    };
++    g_interpVertexBuffer = g_device.CreateBuffer(&descriptor);
+   }
++  staging->buffer.Unmap();
++  staging->data = nullptr;
++  static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "In-between frame data encoder"};
++  auto encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
++  if (uniformBytes != 0)
++    encoder.CopyBufferToBuffer(staging->buffer, 0, g_interpUniformBuffer, 0, uniformBytes);
++  if (vertexBytes != 0)
++    encoder.CopyBufferToBuffer(staging->buffer, staging->uniformCapacity, g_interpVertexBuffer, 0, vertexBytes);
++  const auto commands = encoder.Finish();
++  g_queue.Submit(1, &commands);
+ }
+ 
+ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
+@@ -1996,7 +2177,7 @@ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::
+   // 2. The in-between frames: the same passes with each step's blended
+   // transforms, into the EFB. The first is presented now; at 120 Hz the
+   // others are kept aside and presented a quarter of a game frame apart.
+-  upload_interp_uniforms(frameSlot);
++  upload_interp_data(frameSlot);
+   static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "In-between frame encoder"};
+   auto between = g_device.CreateCommandEncoder(&EncoderDescriptor);
+   g_replayFrameSlot = frameSlot;
+@@ -2073,7 +2254,7 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+   deferred_present_tick();
+ 
+   // 2. The in-between frames, each kept aside and scheduled.
+-  upload_interp_uniforms(frameSlot);
++  upload_interp_data(frameSlot);
+   g_replayFrameSlot = frameSlot;
+   const auto interval = step_offset(1, steps);
+   PresentClock::time_point base{};
+@@ -2082,6 +2263,7 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+   for (int step = 0; step < steps; ++step) {
+     auto between = g_device.CreateCommandEncoder(&EncoderDescriptor);
+     g_replayStep = step;
++    const auto encodeStart = PresentClock::now();
+     frame_interp::set_encoding_interpolated(true);
+     for (const auto& op : frame.ops)
+       replay_op(between, frame, op);
+@@ -2089,6 +2271,9 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+     keep(between, held[step]);
+     const auto buffer = between.Finish();
+     g_queue.Submit(1, &buffer);
++    if (g_presentLog)
++      std::fprintf(stderr, "[encode-took] step=%d %.2f\n", step,
++                   std::chrono::duration<double, std::milli>(PresentClock::now() - encodeStart).count());
+     if (dump) {
+       dump_texture(held[step], kDumpNames[step], frame.gameFrame);
+     }
+@@ -2152,7 +2337,11 @@ static void present_deferred(DeferredPresent& present, const char* kind) {
+   webgpu::set_present_source_override(present.source);
+   static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "Held frame present encoder"};
+   auto encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
++  const auto start = PresentClock::now();
+   present.callback(encoder);
++  if (g_presentLog)
++    std::fprintf(stderr, "[present-took] %.2f\n",
++                 std::chrono::duration<double, std::milli>(PresentClock::now() - start).count());
+   webgpu::set_present_source_override(nullptr);
+   g_heldShown = present.source == &g_heldFrame;
+ }
+@@ -2198,6 +2387,8 @@ void after_submit() noexcept {
+ 
+ void gpu_synchronize() { render_worker::synchronize(); }
+ 
++void note_render_overload() noexcept { frame_interp::note_overload("a drawable came late"); }
++
+ static std::atomic<unsigned long long> g_shownFrames{0};
+ 
+ void after_present() noexcept {
+@@ -2241,6 +2432,9 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+   // Bind static bind group for the whole pass
+   pass.SetBindGroup(0, g_staticBindGroup);
+   pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
++#ifdef AURORA_ENABLE_GXCORE
++  gxcore::reset_pass_state();
++#endif
+ 
+   size_t encoded = 0;
+   for (const auto& cmd : passInfo.commands) {
+@@ -2289,13 +2483,22 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+       switch (draw.type) {
+       case ShaderType::Clear:
+         clear::render(draw.clear, pass, passInfo.targetSize);
++#ifdef AURORA_ENABLE_GXCORE
++        gxcore::reset_pass_state();
++#endif
+         break;
+       case ShaderType::GX:
+         gx::render(draw.gx, pass);
++#ifdef AURORA_ENABLE_GXCORE
++        gxcore::reset_pass_state();
++#endif
+         break;
+ #ifdef AURORA_ENABLE_RMLUI
+       case ShaderType::Rml:
+         rmlui::render(draw.rml, pass);
++#ifdef AURORA_ENABLE_GXCORE
++        gxcore::reset_pass_state();
++#endif
+         break;
+ #endif
+ #ifdef AURORA_ENABLE_GXCORE
+@@ -2368,6 +2571,14 @@ static Range map(ByteBuffer& target, size_t length, size_t alignment) {
+   return {static_cast<uint32_t>(begin), static_cast<uint32_t>(length)};
+ }
+ 
++Range push_verts_strided(const uint8_t* data, size_t length, size_t stride) {
++  auto& target = current_frame_packet().verts;
++  const size_t pad = (stride - target.size() % stride) % stride;
++  if (pad > 0)
++    target.append_zeroes(pad);
++  return push(target, data, length, 0);
++}
++
+ Range push_verts(const uint8_t* data, size_t length, size_t alignment) {
+   ZoneScoped;
+   return push(current_frame_packet().verts, data, length, alignment);
+@@ -2381,36 +2592,56 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
+ size_t recording_frame_slot() { return g_recordingFrameSlot; }
+ 
+ Range push_interp_uniform(size_t slot, const uint8_t* data, size_t length) {
+-  auto& staging = g_interpUniformStaging[slot];
+-  const size_t offset = AURORA_ALIGN(staging.size(), g_cachedLimits.minUniformBufferOffsetAlignment);
++  auto& frame = g_interpSlots[slot];
++  if (frame.staging == nullptr)
++    return {};
++  const size_t offset = AURORA_ALIGN(frame.uniformUsed, g_cachedLimits.minUniformBufferOffsetAlignment);
+   // The bind group reads MaxUniformSize from the offset.
+-  if (offset + std::max<size_t>(length, gx::MaxUniformSize) > InterpUniformBufferSize) {
++  if (offset + std::max<size_t>(length, gx::MaxUniformSize) > frame.staging->uniformCapacity) {
+     ++g_interpUniformOverflows;
++    frame.overflowed = g_interpOverflowed = true;
+     return {};
+   }
+-  // Padded to the offset, then appended: resizing over the block would clear
+-  // it before the copy, a second pass over 2.8 KB for every blended draw.
+-  staging.resize(offset);
+-  staging.insert(staging.end(), data, data + length);
++  std::memcpy(frame.staging->data + offset, data, length);
++  frame.uniformUsed = offset + length;
+   return {static_cast<uint32_t>(offset), static_cast<uint32_t>(length)};
+ }
+ 
+ const uint8_t* interp_uniform_bytes(size_t slot, Range range) {
+-  return g_interpUniformStaging[slot].data() + range.offset;
++  return g_interpSlots[slot].staging->data + range.offset;
+ }
+ 
+ Range push_interp_vertices(size_t slot, const uint8_t* data, size_t length) {
+-  auto& staging = g_interpVertexStaging[slot];
+-  const size_t offset = AURORA_ALIGN(staging.size(), 4);
+-  if (offset + length > InterpVertexBufferSize)
++  auto& frame = g_interpSlots[slot];
++  if (frame.staging == nullptr)
+     return {};
+-  staging.resize(offset);
+-  staging.insert(staging.end(), data, data + length);
++  const size_t offset = AURORA_ALIGN(frame.vertexUsed, 4);
++  if (offset + length > frame.staging->vertexCapacity) {
++    frame.overflowed = g_interpOverflowed = true;
++    return {};
++  }
++  std::memcpy(frame.staging->data + frame.staging->uniformCapacity + offset, data, length);
++  frame.vertexUsed = offset + length;
+   return {static_cast<uint32_t>(offset), static_cast<uint32_t>(length)};
+ }
+ 
+ void resolve_interp_job(size_t slot, const InterpRanges& ranges) { g_interpJobRanges[slot].push_back(ranges); }
+ 
++uint32_t push_batch_draw(const BatchDraw& draw) {
++  auto& draws = g_batchDraws[g_recordingFrameSlot];
++  draws.push_back(draw);
++  return static_cast<uint32_t>(draws.size() - 1);
++}
++
++const BatchDraw& batch_draw(uint32_t index) { return g_batchDraws[g_replayFrameSlot][index]; }
++
++size_t next_vertex_offset(size_t stride) {
++  const size_t size = current_frame_packet().verts.size();
++  return size + (stride - size % stride) % stride; // as push_verts_strided pads
++}
++
++size_t next_index_offset() { return current_frame_packet().indices.size(); }
++
+ const InterpRanges& interp_job_ranges(uint32_t job) {
+   static const InterpRanges none{};
+   const auto& ranges = g_interpJobRanges[g_replayFrameSlot];
+@@ -2424,6 +2655,8 @@ Range push_uniform(const uint8_t* data, size_t length) {
+   return push(current_frame_packet().uniforms, data, length, g_cachedLimits.minUniformBufferOffsetAlignment);
+ }
+ 
++const uint8_t* uniform_bytes(Range range) { return current_frame_packet().uniforms.data() + range.offset; }
++
+ uint64_t current_frame_id() {
+   return g_recordingFrame == nullptr ? 0 : current_frame_packet().frameId;
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 0cb07ac6e1..6197ba0086 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -250,6 +250,8 @@ void render_pass(const wgpu::RenderPassEncoder& pass, uint32_t idx);
+ void after_submit() noexcept;
+ void gpu_synchronize();
+ void after_present() noexcept;
++// Rendering fell behind: fewer in-between frames for a while (frame_interp::note_overload).
++void note_render_overload() noexcept;
+ float calculate_fps() noexcept;
+ // Game frames finished a second (each one presents once, or twice with an
+ // in-between frame); calculate_fps() counts every present.
+@@ -294,6 +296,9 @@ struct ConvRequest;
+ void queue_palette_conv(tex_palette_conv::ConvRequest req);
+ 
+ Range push_verts(const uint8_t* data, size_t length, size_t alignment);
++// Vertices starting on a whole vertex of `stride` bytes (any stride), so a draw
++// can address them as a base vertex in the whole buffer.
++Range push_verts_strided(const uint8_t* data, size_t length, size_t stride);
+ template <typename T>
+ static Range push_verts(ArrayRef<T> data, size_t alignment) {
+   return push_verts(reinterpret_cast<const uint8_t*>(data.data()), data.size() * sizeof(T), alignment);
+@@ -304,6 +309,8 @@ static Range push_indices(ArrayRef<T> data, size_t alignment) {
+   return push_indices(reinterpret_cast<const uint8_t*>(data.data()), data.size() * sizeof(T), alignment);
+ }
+ Range push_uniform(const uint8_t* data, size_t length);
++// The block push_uniform staged at `range` in the recording frame.
++const uint8_t* uniform_bytes(Range range);
+ // Identifies the frame packet (a new one per frame and per staging segment)
+ // that staging ranges belong to; 0 when no frame is recording.
+ uint64_t current_frame_id();
+@@ -326,6 +333,19 @@ struct InterpRanges {
+   Range verts[3];
+ };
+ void resolve_interp_job(size_t slot, const InterpRanges& ranges);
++// One draw of a batch (gxcore_draw.cpp): its indices' count, and its first
++// vertex from the batch's.
++struct BatchDraw {
++  uint32_t indexCount;
++  uint32_t firstVertex;
++};
++// Recording thread: a batch part, for the recording frame; its index.
++uint32_t push_batch_draw(const BatchDraw& draw);
++// Render worker, while an in-between frame is encoded: a batch part.
++const BatchDraw& batch_draw(uint32_t index);
++// Where push_verts_strided and push_indices put what comes next.
++size_t next_vertex_offset(size_t stride);
++size_t next_index_offset();
+ // Render worker, while an in-between frame is encoded: a job's ranges, and
+ // which of the game frame's in-between frames it is.
+ const InterpRanges& interp_job_ranges(uint32_t job);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index ac2e3e2c3e..861e792429 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -1,6 +1,7 @@
+ #include "frame_interp.hpp"
+ 
+ #include <algorithm>
++#include <bit>
+ #include <array>
+ #include <atomic>
+ #include <cmath>
+@@ -36,6 +37,22 @@ std::atomic_bool g_enabled{env_flag("DOL_AURORA_FRAME_INTERP", false)};
+ // asked for at any time and taken at a game frame's start (g_frameSteps).
+ std::atomic<int> g_steps{static_cast<int>(std::clamp<uint64_t>(env_u64("DOL_AURORA_FRAME_INTERP_STEPS", 1), 1, 3))};
+ int g_frameSteps = g_steps.load(std::memory_order_relaxed);
++// In-between frames need not make the game wait (pace_steps): when the GPU
++// or the render worker keeps falling behind (note_overload), 60 Hz drops to
++// none, and comes back after a calm spell (120 Hz to 60 only when asked).
++std::atomic_bool g_overloaded{false};
++std::atomic<const char*> g_overloadWhy{nullptr}; // the latest overload's cause, for the log
++bool g_frameSkipped = false; // the recording frame has none (recording thread)
++struct Pacing {
++  uint64_t frame = 0;
++  uint64_t lastDrop = 0;
++  uint64_t lastRaise = 0;
++  int wanted = 0;  // g_steps when the budget was last set
++  int budget = 0;  // in-between frames allowed now, 0 to wanted
++  int calm = 0;    // game frames since the last overload
++  int calmNeeded = 0;
++  uint32_t recent = 0; // one bit a game frame, newest lowest: an overload reported
++} g_pacing;
+ std::atomic_bool g_encodingInterpolated{false};
+ std::atomic<uint64_t> g_gameFrame{1};
+ 
+@@ -1783,12 +1800,80 @@ const gxc::VertexShaderConstants* blended_step(int step) noexcept {
+ int frame_steps() noexcept { return g_frameSteps; }
+ void set_steps(int steps) noexcept { g_steps.store(std::clamp(steps, 1, kMaxSteps), std::memory_order_relaxed); }
+ int steps() noexcept { return g_steps.load(std::memory_order_relaxed); }
++bool frame_skipped() noexcept { return g_frameSkipped; }
++void note_overload(const char* why) noexcept {
++  g_overloadWhy.store(why, std::memory_order_relaxed);
++  g_overloaded.store(true, std::memory_order_relaxed);
++}
++
++// Recording thread, between game frames: the next frame's in-between frames.
++// Overloads (the GPU a frame behind, or the game waiting on rendering) in 3 of
++// the last 8 game frames take 60 Hz to none (and 120 Hz to 60, when pacing
++// is asked for there); one now and then (a texture loading, a late drawable)
++// is not a scene too heavy, and dropping on each one put 120 Hz at 60 most
++// times it did not need to be. The frames in
++// flight still report the overload a drop answers, so a second drop waits a
++// few frames. Calm for 3 s brings one level back, and a level that overloads
++// again soon after coming back waits twice as long the next time (up to 30 s),
++// so a scene just too heavy for 120 settles at 60 instead of stuttering
++// between them.
++static void pace_steps() {
++  static constexpr int kCalmStart = 90;  // game frames, 3 s
++  static constexpr int kCalmMost = 900;  // 30 s
++  static constexpr uint64_t kSettle = 4; // game frames between drops
++  static constexpr uint64_t kSoon = 300; // an overload within 10 s of coming back
++  // DOL_AURORA_FRAME_INTERP_PACING: 0 never lowers them, 1 lowers 120 Hz's
++  // too. Unset, only 60 Hz's are: 120 Hz stays 120, where a drop to 60 for a
++  // stall of a few frames, over by the time it dropped, was felt more than the
++  // stall.
++  static const int setting = [] {
++    const char* env = std::getenv("DOL_AURORA_FRAME_INTERP_PACING");
++    return env != nullptr && env[0] != '\0' ? (env[0] != '0' ? 1 : 0) : -1;
++  }();
++  auto& p = g_pacing;
++  ++p.frame;
++  const int wanted = g_steps.load(std::memory_order_relaxed);
++  const bool pacing = setting == 1 || (setting < 0 && wanted < kMaxSteps);
++  const bool overloaded = g_overloaded.exchange(false, std::memory_order_relaxed) && pacing;
++  p.recent = (p.recent << 1) | (overloaded ? 1u : 0u);
++  const bool sustained = std::popcount(p.recent & 0xFFu) >= 3;
++  if (wanted != p.wanted) {
++    p = Pacing{.frame = p.frame, .wanted = wanted, .budget = wanted, .calmNeeded = kCalmStart};
++  } else if (sustained) {
++    p.calm = 0;
++    if (p.budget > 0 && p.frame - p.lastDrop >= kSettle) {
++      if (p.lastRaise != 0 && p.frame - p.lastRaise < kSoon)
++        p.calmNeeded = std::min(p.calmNeeded * 2, kCalmMost);
++      const int before = p.budget;
++      p.budget = p.budget > 1 ? 1 : 0;
++      p.lastDrop = p.frame;
++      p.recent = 0;
++      const char* why = g_overloadWhy.load(std::memory_order_relaxed);
++      std::fprintf(stderr, "[interp-pace] in-between frames %d -> %d (%s; back after %.0f s calm)\n", before,
++                   p.budget, why != nullptr ? why : "rendering fell behind", p.calmNeeded / 30.0);
++    }
++  } else if (p.budget < wanted) {
++    if (++p.calm >= p.calmNeeded) {
++      const int before = p.budget;
++      p.budget = p.budget == 0 ? 1 : wanted;
++      p.calm = 0;
++      p.lastRaise = p.frame;
++      std::fprintf(stderr, "[interp-pace] in-between frames %d -> %d\n", before, p.budget);
++    }
++  } else if (p.lastRaise != 0 && p.frame - p.lastRaise >= kSoon) {
++    // Held since coming back: the next overload is a new scene's.
++    p.calmNeeded = kCalmStart;
++    p.lastRaise = 0;
++  }
++  g_frameSteps = std::clamp(std::min(p.budget, wanted), 1, kMaxSteps);
++  g_frameSkipped = p.budget == 0;
++}
+ 
+ bool last_blend_repeated() noexcept { return g_blendRepeated; }
+ 
+ bool frame_verdict() noexcept {
+   g_lastVerdict = false;
+-  if (!enabled() || !g_havePrevious || g_frameCounts.blended == 0)
++  if (!enabled() || g_frameSkipped || !g_havePrevious || g_frameCounts.blended == 0)
+     return false;
+   // A cut: most draws have a counterpart that is not plausibly the same thing.
+   // Copies just come into view count too (after a cut every copy of a model
+@@ -1872,7 +1957,7 @@ void end_game_frame() noexcept {
+     g_predicted = g_motions[g_leadingMotion];
+     g_predicted.derived = false; // its parts again, for the next frame's steps
+   }
+-  g_frameSteps = g_steps.load(std::memory_order_relaxed);
++  pace_steps();
+   g_motionCount = 0;
+   g_leadingMotion = -1;
+   g_newInView = UINT32_MAX;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index aa8e0e3ca1..4e6ad6b275 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -42,6 +42,11 @@ constexpr int kMaxSteps = 3;
+ void set_steps(int steps) noexcept;
+ int steps() noexcept;
+ int frame_steps() noexcept;
++// Rendering fell behind (the GPU a game frame behind, the game waiting on the
++// render worker, a long wait for a drawable): the next game frames get fewer
++// in-between frames, or none (frame_skipped), until it has been calm a while.
++void note_overload(const char* why) noexcept;
++bool frame_skipped() noexcept;
+ 
+ // The key for a draw's vertex stream; 0 when the plan carries no payload.
+ uint64_t draw_key(const gxruntime::gxcore::DrawPlan& plan) noexcept;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 4670daca77..c94aa14195 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -182,7 +182,18 @@ wgpu::SamplerDescriptor sampler_descriptor(const gxc::PlanSampler& sampler) {
+ // t occupies binding 2t (texture) + 2t+1 (sampler), matching the WGSL. Cached per
+ // mask; used_mask=1 (texmap 0 only) reproduces the pre-Mfin single-texmap layout.
+ wgpu::BindGroupLayout texture_bind_group_layout(uint32_t used_mask = 1u) {
++  // Both the pipeline compiler and FIFO submission use this cache. A lookup
++  // concurrent with flat_hash_map growth can read an invalid layout handle.
++  static std::mutex mutex;
++  std::lock_guard lock{mutex};
+   static absl::flat_hash_map<uint32_t, wgpu::BindGroupLayout> cache;
++  // Retaining the owner also prevents pointer reuse from matching a dead
++  // device after renderer reinitialization.
++  static wgpu::Device owner;
++  if (owner.Get() != g_device.Get()) {
++    cache.clear();
++    owner = g_device;
++  }
+   auto it = cache.find(used_mask);
+   if (it != cache.end())
+     return it->second;
+@@ -635,60 +646,190 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
++// What render() last bound in the pass being encoded, so a draw sets only
++// what differs from the draw before it. Every draw set its vertex and index
++// ranges and its bind groups again, six or seven commands a draw, and the
++// in-between frames encode every draw once more each (three times at 120 Hz):
++// the render worker's encoding was most of a game frame in a busy scene. The
++// vertex and index buffers are bound whole once (a draw's range is its base
++// vertex and first index), and a bind group is set again only when it or its
++// offset changed or the pipeline did (a tev pipeline's group 2 is another
++// layout than an untextured one's).
++namespace {
++struct PassState {
++  WGPUBuffer vertexBuffer = nullptr; // bound whole, or a particle's range
++  uint64_t vertexOffset = 0;
++  bool indexBound = false;
++  PipelineRef pipeline = 0;
++  WGPUBindGroup group1 = nullptr;
++  uint32_t offset1 = UINT32_MAX;
++  WGPUBindGroup group2 = nullptr;
++  uint32_t offset2 = UINT32_MAX;
++  WGPUBindGroup group3 = nullptr;
++};
++PassState g_pass;
++} // namespace
++
++void reset_pass_state() { g_pass = PassState{}; }
++
++// What a draw, or one of a batch's (submit_draw_plan) draws, is encoded with:
++// its constants and a particle's in-between vertices (empty: the frame's
++// own), its indices, and its first vertex from the batch's.
++namespace {
++struct DrawPart {
++  Range uniform;
++  Range verts;
++  uint32_t firstIndex;
++  uint32_t indexCount;
++  uint32_t firstVertex;
++};
++} // namespace
++
+ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
++  const auto bind = [&](PipelineRef ref) {
++    if (!bind_pipeline(ref, pass))
++      return false;
++    if (ref != g_pass.pipeline) {
++      g_pass.pipeline = ref;
++      g_pass.group1 = g_pass.group2 = g_pass.group3 = nullptr;
++    }
++    return true;
++  };
+   // Ensure both asynchronous pipelines are ready before the prepass writes any
+   // depth. Binding the color pipeline first is harmless; it is rebound below.
+-  if (!bind_pipeline(data.pipeline, pass)) {
++  if (!bind(data.pipeline)) {
+     return;
+   }
+-  if (data.depthPipeline != 0 && !bind_pipeline(data.depthPipeline, pass))
++  if (data.depthPipeline != 0 && !bind(data.depthPipeline))
+     return;
+-  // The in-between frame reads a moved draw's blended constants from their
+-  // own area; every other draw keeps its own.
+   // The in-between frame being encoded: its step's block and vertices (a
+   // traced frame's own, matched while recording, are one step's).
+-  Range interpUniform{}, interpVerts{};
+-  if (frame_interp::encoding_interpolated()) {
+-    const int step = interp_replay_step();
++  const bool interpolated = frame_interp::encoding_interpolated();
++  const int step = interpolated ? interp_replay_step() : 0;
++  const auto job_ranges = [&](uint32_t job, Range& uniform, Range& verts) {
++    uniform = verts = {};
++    if (!interpolated)
++      return;
+     if (data.interpJob != UINT32_MAX) {
+-      const InterpRanges& job = interp_job_ranges(data.interpJob);
+-      interpUniform = job.uniform[step];
+-      interpVerts = job.verts[step];
++      const InterpRanges& ranges = interp_job_ranges(job);
++      uniform = ranges.uniform[step];
++      verts = ranges.verts[step];
+     } else if (step == 0) {
+-      interpUniform = data.interpUniformRange;
+-      interpVerts = data.interpVertRange;
++      uniform = data.interpUniformRange;
++      verts = data.interpVertRange;
++    }
++  };
++  const uint32_t firstIndex = data.idxRange.offset / sizeof(uint16_t);
++  // One draw, or a batch as one; a batch whose draws' in-between blocks (or a
++  // particle's vertices, laid out apart from the batch's) differ, one by one.
++  static std::vector<DrawPart> parts;
++  parts.clear();
++  DrawPart whole{.firstIndex = firstIndex, .indexCount = data.indexCount, .firstVertex = 0};
++  job_ranges(data.interpJob, whole.uniform, whole.verts);
++  bool asOne = true;
++  if (interpolated && data.batchSize > 1 && data.interpJob != UINT32_MAX) {
++    for (uint32_t i = 1; i < data.batchSize && asOne; ++i) {
++      Range uniform, verts;
++      job_ranges(data.interpJob + i, uniform, verts);
++      const uint32_t first = batch_draw(data.batch + i).firstVertex;
++      asOne = uniform.offset == whole.uniform.offset && uniform.size == whole.uniform.size &&
++              (whole.verts.size == 0 ? verts.size == 0
++                                     : verts.size != 0 && verts.offset == whole.verts.offset +
++                                                                              first * gxc::kVertexStrideBytes);
++    }
++    if (!asOne) {
++      uint32_t index = firstIndex;
++      for (uint32_t i = 0; i < data.batchSize; ++i) {
++        const BatchDraw& part = batch_draw(data.batch + i);
++        DrawPart& draw = parts.emplace_back(
++            DrawPart{.firstIndex = index, .indexCount = part.indexCount, .firstVertex = part.firstVertex});
++        job_ranges(data.interpJob + i, draw.uniform, draw.verts);
++        index += part.indexCount;
++      }
+     }
+   }
+-  const bool blended = interpUniform.size != 0;
+-  const auto& vsGroup = blended ? g_interpUniformBindGroup : g_uniformBindGroup;
+-  const std::array vsOffsets{blended ? interpUniform.offset : data.uniformRange.offset};
+-  pass.SetBindGroup(1, vsGroup, vsOffsets.size(), vsOffsets.data());
+-  // A particle's vertices, blended, from the in-between vertex area.
+-  if (interpVerts.size != 0)
+-    pass.SetVertexBuffer(0, g_interpVertexBuffer, interpVerts.offset, interpVerts.size);
+-  else
++  if (asOne)
++    parts.push_back(whole);
++
++  const auto setGroup1 = [&](const DrawPart& part) {
++    const bool blended = part.uniform.size != 0;
++    const auto& vsGroup = blended ? g_interpUniformBindGroup : g_uniformBindGroup;
++    const uint32_t vsOffset = blended ? part.uniform.offset : data.uniformRange.offset;
++    if (vsGroup.Get() != g_pass.group1 || vsOffset != g_pass.offset1) {
++      pass.SetBindGroup(1, vsGroup, 1, &vsOffset);
++      g_pass.group1 = vsGroup.Get();
++      g_pass.offset1 = vsOffset;
++    }
++  };
++  // The vertices: from the whole buffer at the draw's (or batch's) base
++  // vertex, or a particle's blended ones from the in-between vertex area,
++  // bound where the part's first index (counted from the batch's first
++  // vertex) finds them.
++  const auto setVertices = [&](const DrawPart& part) -> int32_t {
++    const uint64_t back = uint64_t{part.firstVertex} * gxc::kVertexStrideBytes;
++    if (part.verts.size != 0 && part.verts.offset >= back) {
++      const uint64_t offset = part.verts.offset - back;
++      if (g_pass.vertexBuffer != g_interpVertexBuffer.Get() || g_pass.vertexOffset != offset) {
++        pass.SetVertexBuffer(0, g_interpVertexBuffer, offset);
++        g_pass.vertexBuffer = g_interpVertexBuffer.Get();
++        g_pass.vertexOffset = offset;
++      }
++      return 0;
++    }
++    if (data.vertRange.offset % gxc::kVertexStrideBytes == 0) {
++      if (g_pass.vertexBuffer != g_vertexBuffer.Get() || g_pass.vertexOffset != 0) {
++        pass.SetVertexBuffer(0, g_vertexBuffer);
++        g_pass.vertexBuffer = g_vertexBuffer.Get();
++        g_pass.vertexOffset = 0;
++      }
++      return static_cast<int32_t>(data.vertRange.offset / gxc::kVertexStrideBytes);
++    }
+     pass.SetVertexBuffer(0, g_vertexBuffer, data.vertRange.offset, data.vertRange.size);
+-  pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16,
+-                      data.idxRange.offset, data.idxRange.size);
++    g_pass.vertexBuffer = g_vertexBuffer.Get();
++    g_pass.vertexOffset = data.vertRange.offset;
++    return 0;
++  };
++  if (!g_pass.indexBound) {
++    pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16);
++    g_pass.indexBound = true;
++  }
++  const auto draw = [&] {
++    for (const DrawPart& part : parts) {
++      setGroup1(part);
++      const int32_t baseVertex = setVertices(part);
++      pass.DrawIndexed(part.indexCount, 1, part.firstIndex, baseVertex);
++    }
++  };
+   if (data.depthPipeline != 0) {
+-    pass.DrawIndexed(data.indexCount);
+-    if (!bind_pipeline(data.pipeline, pass))
++    draw();
++    if (!bind(data.pipeline))
+       return;
+-    pass.SetBindGroup(1, vsGroup, vsOffsets.size(), vsOffsets.data());
+   }
+   if (data.tev) {
+     // group 2 = PS uniform (same dynamic-uniform bind group, its own offset);
+     // group 3 = texture.
+-    const std::array psOffsets{data.pixelUniformRange.offset};
+-    pass.SetBindGroup(2, g_uniformBindGroup, psOffsets.size(),
+-                      psOffsets.data());
++    const uint32_t psOffset = data.pixelUniformRange.offset;
++    if (g_uniformBindGroup.Get() != g_pass.group2 || psOffset != g_pass.offset2) {
++      pass.SetBindGroup(2, g_uniformBindGroup, 1, &psOffset);
++      g_pass.group2 = g_uniformBindGroup.Get();
++      g_pass.offset2 = psOffset;
++    }
+     if (data.textureBindGroup != 0) {
+-      pass.SetBindGroup(3, find_bind_group(data.textureBindGroup));
++      const auto& group = find_bind_group(data.textureBindGroup);
++      if (group.Get() != g_pass.group3) {
++        pass.SetBindGroup(3, group);
++        g_pass.group3 = group.Get();
++      }
+     }
+   } else if (data.textureBindGroup != 0) {
+-    pass.SetBindGroup(2, find_bind_group(data.textureBindGroup));
++    const auto& group = find_bind_group(data.textureBindGroup);
++    if (group.Get() != g_pass.group2 || g_pass.offset2 != UINT32_MAX) {
++      pass.SetBindGroup(2, group);
++      g_pass.group2 = group.Get();
++      g_pass.offset2 = UINT32_MAX;
++    }
+   }
+-  pass.DrawIndexed(data.indexCount);
++  draw();
+ }
+ 
+ void note_frame_presented() {
+@@ -816,8 +957,10 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+ // filled Aurora's 24 MB uniform staging area in the middle of Wind Waker's
+ // Outset frames, and each split waited on the GPU. A draw whose block matches
+ // the previous draw's, within the same frame packet, reuses that range.
++// The block a cache last took is compared where it was staged (uniform_bytes,
++// or interp_uniform_bytes for the in-between frames'): a copy of each block
++// kept aside for the comparison was a tenth of the FIFO worker's copying.
+ struct UniformCache {
+-  std::vector<uint8_t> bytes;
+   Range range{};
+   uint64_t frameId = 0;
+   uint64_t hits = 0;
+@@ -830,13 +973,12 @@ static UniformCache g_pixelUniformCache;
+ // Whether `data` is the block the cache last took, in this frame packet.
+ static bool repeats_cached(const UniformCache& cache, const uint8_t* data, size_t length) {
+   const uint64_t frameId = current_frame_id();
+-  return frameId != 0 && cache.frameId == frameId && cache.bytes.size() == length &&
+-         std::memcmp(cache.bytes.data(), data, length) == 0;
++  return frameId != 0 && cache.frameId == frameId && cache.range.size == length &&
++         std::memcmp(uniform_bytes(cache.range), data, length) == 0;
+ }
+ 
+-// The in-between frame's blocks, de-duplicated the same way. Their staging is
+-// plain memory, so the last block is compared where it was staged rather than
+-// copied aside as well. repeated: the in-between frame made this block the way
++// The in-between frame's blocks, de-duplicated the same way. repeated: the
++// in-between frame made this block the way
+ // it made the last one, from the same constants (frame_interp::last_blend_repeated),
+ // so its bytes are the same.
+ static Range push_interp_uniform_dedup(UniformCache& cache, uint64_t frameId, size_t slot, const uint8_t* data,
+@@ -887,6 +1029,9 @@ Range push_blended_vertices(size_t slot, const std::vector<float>& vertices, con
+ 
+ struct InterpHelper {
+   static constexpr uint64_t Capacity = 1024;
++  // A sleeping helper is woken for this many jobs at once (or by
++  // wait_interp_jobs at the frame's end), not for every draw.
++  static constexpr uint64_t WakeBatch = 32;
+   std::unique_ptr<InterpJob[]> ring{new InterpJob[Capacity]};
+   std::atomic<uint64_t> produced{0};
+   std::atomic<uint64_t> consumed{0};
+@@ -911,10 +1056,12 @@ void interp_helper_main(InterpHelper* h) {
+     const uint64_t tail = h->consumed.load(std::memory_order_relaxed);
+     if (tail == h->produced.load(std::memory_order_seq_cst)) {
+       // Draws come microseconds apart while a frame records: wait a little
+-      // before sleeping, or the helper sleeps and is woken for every draw
+-      // (300,000 wake-ups a second, measured; more CPU than the work).
++      // before sleeping. Woken for every draw it was 300,000 wake-ups a second
++      // (more CPU than the work); spinning 4,096 times before each sleep
++      // instead was an eighth of its time. It spins briefly, and a sleeping
++      // helper is woken for a batch of jobs (WakeBatch).
+       bool arrived = false;
+-      for (int spin = 0; spin < 4096 && !arrived; ++spin) {
++      for (int spin = 0; spin < 256 && !arrived; ++spin) {
+ #if defined(__x86_64__) || defined(_M_X64)
+         __builtin_ia32_pause();
+ #elif defined(__aarch64__)
+@@ -979,12 +1126,20 @@ uint32_t queue_interp_job(const gxc::DrawPlan& plan, bool repeatsLastDraw) {
+   job.repeatsLastDraw = repeatsLastDraw;
+   std::memcpy(&job.constants, &plan.constants, sizeof(plan.constants));
+   h->produced.store(head + 1, std::memory_order_seq_cst);
+-  if (h->sleeping.load(std::memory_order_seq_cst)) {
++  // Asleep, it consumes nothing: the jobs waiting reach WakeBatch exactly once.
++  if (h->sleeping.load(std::memory_order_seq_cst) &&
++      head + 1 - h->consumed.load(std::memory_order_acquire) >= InterpHelper::WakeBatch) {
+     std::lock_guard lock{h->mutex};
+     h->work.notify_one();
+   }
+   return h->jobs++;
+ }
++
++// The job queue_interp_job gives the recording frame's next draw.
++uint32_t next_interp_job() {
++  const InterpHelper* h = g_interpHelper.load(std::memory_order_acquire);
++  return h == nullptr || h->packet != current_frame_id() ? 0u : h->jobs;
++}
+ } // namespace
+ 
+ void wait_interp_jobs() {
+@@ -993,6 +1148,8 @@ void wait_interp_jobs() {
+       h->consumed.load(std::memory_order_acquire) == h->produced.load(std::memory_order_acquire))
+     return;
+   std::unique_lock lock{h->mutex};
++  // The last jobs, fewer than a batch, are waiting on this.
++  h->work.notify_one();
+   h->idle.wait(lock, [h] {
+     return h->consumed.load(std::memory_order_acquire) == h->produced.load(std::memory_order_acquire);
+   });
+@@ -1007,8 +1164,8 @@ static Range push_uniform_dedup(UniformCache& cache, const uint8_t* data,
+     return env == nullptr || env[0] != '0';
+   }();
+   const uint64_t frameId = current_frame_id();
+-  if (enabled && frameId != 0 && cache.frameId == frameId && cache.bytes.size() == length &&
+-      (known >= 0 ? known == 1 : std::memcmp(cache.bytes.data(), data, length) == 0)) {
++  if (enabled && frameId != 0 && cache.frameId == frameId && cache.range.size == length &&
++      (known >= 0 ? known == 1 : std::memcmp(uniform_bytes(cache.range), data, length) == 0)) {
+     ++cache.hits;
+     return cache.range;
+   }
+@@ -1017,15 +1174,80 @@ static Range push_uniform_dedup(UniformCache& cache, const uint8_t* data,
+     Log.info("GXCore uniform reuse: {} of {} blocks reused",
+              cache.hits, cache.hits + cache.pushes);
+   cache.range = push_uniform(data, length);
+-  cache.bytes.assign(data, data + length);
+   cache.frameId = frameId;
+   return cache.range;
+ }
+ 
++// DOL_GXCORE_DRAW_DUMP=<game frame>: every draw of that frame, its TEV and
++// indirect stages, texgens, textures and blending, on stderr (debug).
++static void dump_draw(const gxc::DrawPlan& plan) {
++  static const uint64_t frame = [] {
++    const char* env = std::getenv("DOL_GXCORE_DRAW_DUMP");
++    return env != nullptr ? std::strtoull(env, nullptr, 10) : 0ull;
++  }();
++  if (frame == 0 || frame_interp::game_frame_number() != frame)
++    return;
++  static uint32_t index = 0;
++  const auto& key = plan.pipeline;
++  const auto& sh = key.shader;
++  const auto& m = plan.constants.posnormalmatrix;
++  std::fprintf(stderr,
++               "[draw-dump] #%u verts=%u prim=0x%02X t=(%.0f,%.0f,%.0f) blend=%u src=%u dst=%u z=%u/%u/%u tev=%u "
++               "stages=%u ind=%u texgens=%u chans=%u lit=%u alpha=%u/%u/%u fog=%u tag=%06X\n",
++               index++, plan.vertex_count, plan.match_primitive, m[0][3], m[1][3], m[2][3], key.blend_enable,
++               key.src_factor, key.dst_factor, key.depth_test, key.depth_func, key.depth_update, sh.tev_valid,
++               sh.num_tev_stages, sh.num_ind_stages, sh.num_tex_gens, sh.num_color_chans, sh.lit_valid,
++               sh.alpha_comp0, sh.alpha_comp1, sh.alpha_logic, sh.fog_fsel, plan.draw_tag);
++  for (uint32_t i = 0; i < sh.num_tev_stages && i < gxc::kMaxTevStages; ++i) {
++    const auto& t = sh.tev_stages[i];
++    std::fprintf(stderr,
++                 "[draw-dump]   s%u tc%u map%u en%u ras%u  C=%u,%u,%u,%u op%u b%u s%u cl%u ->%u  "
++                 "A=%u,%u,%u,%u op%u b%u s%u cl%u ->%u  k=%u/%u  ind: st%u fmt%u bias%u mtx%u id%u wrap%u,%u add%u\n",
++                 i, t.tevorders_texcoord, t.tevorders_texmap, t.tevorders_enable, t.tevorders_colorchan, t.cc_a,
++                 t.cc_b, t.cc_c, t.cc_d, t.cc_op, t.cc_bias, t.cc_scale, t.cc_clamp, t.cc_dest, t.ac_a, t.ac_b, t.ac_c,
++                 t.ac_d, t.ac_op, t.ac_bias, t.ac_scale, t.ac_clamp, t.ac_dest, t.ksel_kc, t.ksel_ka, t.ind_stage,
++                 t.ind_format, t.ind_bias, t.ind_matrix_index, t.ind_matrix_id, t.ind_wrap_s, t.ind_wrap_t,
++                 t.ind_add_prev);
++  }
++  for (uint32_t i = 0; i < sh.num_ind_stages && i < 4u; ++i)
++    std::fprintf(stderr, "[draw-dump]   ind%u map%u tc%u scale=%u,%u\n", i, sh.ind_stages[i].texmap,
++                 sh.ind_stages[i].texcoord, sh.ind_stages[i].scale_s, sh.ind_stages[i].scale_t);
++  for (uint32_t i = 0; i < sh.num_tex_gens && i < gxc::kMaxTexGens; ++i) {
++    std::fprintf(stderr, "[draw-dump]   tg%u type%u src%u form%u proj%u row%u (MatrixIndexA %08X)\n", i,
++                 sh.tex_gens[i].texgentype, sh.tex_gens[i].sourcerow, sh.tex_gens[i].inputform,
++                 sh.tex_gens[i].projection, plan.texgen_row[i], plan.matrix_index_a);
++    for (uint32_t r = 0; r < 3u; ++r) {
++      const float* row = plan.constants.texmatrices[i * 3u + r];
++      std::fprintf(stderr, "[draw-dump]     tm%u.%u %.4f %.4f %.4f %.4f\n", i, r, row[0], row[1], row[2], row[3]);
++    }
++  }
++  if (plan.vertices.size() >= 3)
++    std::fprintf(stderr, "[draw-dump]   v0 %.2f %.2f %.2f\n", plan.vertices[0], plan.vertices[1], plan.vertices[2]);
++  for (uint32_t r = 0; r < 3u; ++r)
++    std::fprintf(stderr, "[draw-dump]   pos%u %.4f %.4f %.4f %.4f\n", r, m[r][0], m[r][1], m[r][2], m[r][3]);
++  for (uint32_t i = 0; i < 8u; ++i)
++    if (plan.textures[i].valid)
++      std::fprintf(stderr, "[draw-dump]   tex%u @%08X fmt%u %ux%u dims=%d,%d,%d,%d\n", i, plan.textures[i].address,
++                   plan.textures[i].format, plan.textures[i].width, plan.textures[i].height,
++                   plan.pixel_constants.texdims[i][0], plan.pixel_constants.texdims[i][1],
++                   plan.pixel_constants.texdims[i][2], plan.pixel_constants.texdims[i][3]);
++  if (sh.num_ind_stages != 0)
++    for (uint32_t i = 0; i < 6u; ++i)
++      std::fprintf(stderr, "[draw-dump]   indmtx%u %d %d %d %d\n", i, plan.pixel_constants.indtexmtx[i][0],
++                   plan.pixel_constants.indtexmtx[i][1], plan.pixel_constants.indtexmtx[i][2],
++                   plan.pixel_constants.indtexmtx[i][3]);
++  for (uint32_t i = 0; i < 4u; ++i)
++    std::fprintf(stderr, "[draw-dump]   c%u=%d,%d,%d,%d k%u=%d,%d,%d,%d\n", i, plan.pixel_constants.colors[i][0],
++                 plan.pixel_constants.colors[i][1], plan.pixel_constants.colors[i][2], plan.pixel_constants.colors[i][3],
++                 i, plan.pixel_constants.kcolors[i][0], plan.pixel_constants.kcolors[i][1],
++                 plan.pixel_constants.kcolors[i][2], plan.pixel_constants.kcolors[i][3]);
++}
++
+ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   if (!plan.ok || plan.vertex_count == 0 || plan.indices.empty()) {
+     return false;
+   }
++  dump_draw(plan);
+ 
+   if (plan.viewport_valid) {
+     gx::set_logical_viewport(retail_viewport(plan.viewport));
+@@ -1418,33 +1640,19 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                  plan.match_direct_position ? 1 : 0, plan.draw_tag, plan.draw_tag_age,
+                  tracedPositions != nullptr ? 1 : 0);
+   }
+-  if (!staging_has_capacity(vertBytes, indexBytes, sizeof(plan.constants),
++  if (!staging_has_capacity(vertBytes + gxc::kVertexStrideBytes, indexBytes, sizeof(plan.constants),
+                             pixelUniformBytes)) {
+     if (!segment_frame() ||
+-        !staging_has_capacity(vertBytes, indexBytes, sizeof(plan.constants),
++        !staging_has_capacity(vertBytes + gxc::kVertexStrideBytes, indexBytes, sizeof(plan.constants),
+                               pixelUniformBytes)) {
+       Log.error("GXCore draw exceeds an empty Aurora staging segment");
+       return false;
+     }
+   }
+ 
+-  const auto vertRange = push_verts(
+-      reinterpret_cast<const uint8_t*>(plan.vertices.data()),
+-      vertBytes, 4);
+-  const auto idxRange = push_indices(
+-      reinterpret_cast<const uint8_t*>(plan.indices.data()),
+-      indexBytes, 4);
+   const auto uniformRange = push_uniform_dedup(
+       g_vertexUniformCache, reinterpret_cast<const uint8_t*>(&plan.constants),
+       sizeof(plan.constants), repeatsLast ? 1 : 0);
+-  Range interpUniformRange{};
+-  uint32_t interpJob = UINT32_MAX;
+-  if (interpConstants != nullptr)
+-    interpUniformRange = push_interp_uniform_dedup(
+-        g_interpUniformCache, current_frame_id(), recording_frame_slot(), reinterpret_cast<const uint8_t*>(interpConstants),
+-        sizeof(*interpConstants), frame_interp::last_blend_repeated());
+-  else if (interpolating && !matchHere)
+-    interpJob = queue_interp_job(plan, repeatsLast);
+   Range pixelUniformRange{};
+   if (tev) {
+     pixelUniformRange = push_uniform_dedup(
+@@ -1452,20 +1660,91 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+         reinterpret_cast<const uint8_t*>(&plan.pixel_constants),
+         sizeof(plan.pixel_constants));
+   }
+-
+   const PipelineConfig colorConfig{
+       .version = GXCorePipelineConfigVersion,
+       .key = plan.pipeline,
+       .msaaSamples = get_sample_count(),
+   };
++  const PipelineRef pipeline = pipeline_ref(colorConfig);
+   PipelineRef depthPipeline = 0;
+   if (needs_early_depth_emulation(plan.pipeline)) {
+     PipelineConfig depthConfig = colorConfig;
+     depthConfig.depthOnly = 1u;
+     depthPipeline = pipeline_ref(depthConfig);
+   }
++  const bool ownVertices = plan.draw_tag != 0 || plan.draw_scope_part != 0;
++
++  // Batching: a draw of the state of the pass's last command (pipeline,
++  // constants, pixel constants, textures), with nothing between them, whose
++  // vertices and indices follow its, extends it, its indices counted from the
++  // batch's first vertex. Grass, rocks, a particle system's quads and a wake's
++  // strips are runs of such draws: 65 percent of Adanmae's 10,000 draws a
++  // frame repeat the constants of the draw before. In-between frames draw a
++  // batch as one where its draws' blocks came out the same (render()).
++  static const bool batching = [] {
++    const char* env = std::getenv("DOL_AURORA_GXCORE_BATCH");
++    return env == nullptr || env[0] != '0';
++  }();
++  const size_t vertexOffset = next_vertex_offset(gxc::kVertexStrideBytes);
++  DrawData* batch = nullptr;
++  uint32_t firstVertex = 0;
++  if (batching && !matchHere) {
++    DrawData* last = last_recorded_draw();
++    if (last != nullptr && last->pipeline == pipeline && last->depthPipeline == depthPipeline &&
++        last->uniformRange.offset == uniformRange.offset && last->tev == tev &&
++        (!tev || last->pixelUniformRange.offset == pixelUniformRange.offset) &&
++        last->textureBindGroup == textureBindGroup && last->ownVertices == ownVertices &&
++        last->interpUniformRange.size == 0 && last->interpVertRange.size == 0 &&
++        (interpolating ? last->interpJob != UINT32_MAX && last->interpJob + last->batchSize == next_interp_job()
++                       : last->interpJob == UINT32_MAX) &&
++        last->vertRange.offset % gxc::kVertexStrideBytes == 0 &&
++        last->vertRange.offset + last->vertRange.size == vertexOffset &&
++        last->idxRange.offset + last->idxRange.size == next_index_offset()) {
++      const size_t first = (vertexOffset - last->vertRange.offset) / gxc::kVertexStrideBytes;
++      if (first + plan.vertex_count <= 65536u) {
++        batch = last;
++        firstVertex = static_cast<uint32_t>(first);
++      }
++    }
++  }
++
++  // On a whole vertex: render() draws it at a base vertex of the whole buffer.
++  const auto vertRange = push_verts_strided(
++      reinterpret_cast<const uint8_t*>(plan.vertices.data()),
++      vertBytes, gxc::kVertexStrideBytes);
++  Range idxRange;
++  if (batch != nullptr) {
++    static std::vector<uint16_t> rebased;
++    rebased.resize(plan.indices.size());
++    for (size_t i = 0; i < rebased.size(); ++i)
++      rebased[i] = static_cast<uint16_t>(plan.indices[i] + firstVertex);
++    idxRange = push_indices(reinterpret_cast<const uint8_t*>(rebased.data()), indexBytes, 2);
++  } else {
++    idxRange = push_indices(reinterpret_cast<const uint8_t*>(plan.indices.data()), indexBytes, 2);
++  }
++  Range interpUniformRange{};
++  uint32_t interpJob = UINT32_MAX;
++  if (interpConstants != nullptr)
++    interpUniformRange = push_interp_uniform_dedup(
++        g_interpUniformCache, current_frame_id(), recording_frame_slot(), reinterpret_cast<const uint8_t*>(interpConstants),
++        sizeof(*interpConstants), frame_interp::last_blend_repeated());
++  else if (interpolating && !matchHere)
++    interpJob = queue_interp_job(plan, repeatsLast);
++
++  const auto indexCount = static_cast<uint32_t>(plan.indices.size());
++  if (batch != nullptr) {
++    if (batch->batchSize == 1)
++      batch->batch = push_batch_draw({.indexCount = batch->indexCount, .firstVertex = 0});
++    push_batch_draw({.indexCount = indexCount, .firstVertex = firstVertex});
++    ++batch->batchSize;
++    batch->indexCount += indexCount;
++    batch->idxRange.size += idxRange.size;
++    batch->vertRange.size = static_cast<uint32_t>(vertRange.offset + vertRange.size - batch->vertRange.offset);
++    ++g_mergedDrawCallCount;
++    return true;
++  }
+   push_draw_command(DrawData{
+-      .pipeline = pipeline_ref(colorConfig),
++      .pipeline = pipeline,
+       .depthPipeline = depthPipeline,
+       .vertRange = vertRange,
+       .idxRange = idxRange,
+@@ -1474,9 +1753,10 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       .interpVertRange = interpVertRange,
+       .interpJob = interpJob,
+       .pixelUniformRange = pixelUniformRange,
+-      .indexCount = static_cast<uint32_t>(plan.indices.size()),
++      .indexCount = indexCount,
+       .textureBindGroup = textureBindGroup,
+       .tev = tev,
++      .ownVertices = ownVertices,
+   });
+   return true;
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 85c9bfc774..242f97249a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -48,8 +48,20 @@ struct DrawData {
+   uint32_t indexCount;
+   BindGroupRef textureBindGroup; // 0 when untextured
+   bool tev = false; // TEV path: PS uniform at group 2, texture at group 3
++  // A tagged particle's, whose in-between vertices are its own (interpVertRange).
++  bool ownVertices = false;
++  // Consecutive draws of one state whose vertices and indices follow on are
++  // one draw (submit_draw_plan); an in-between frame whose blocks for them
++  // differ draws them one by one: their parts are batch_draw(batch + i), their
++  // jobs interpJob + i.
++  uint32_t batch = UINT32_MAX;
++  uint32_t batchSize = 1;
+ };
+ 
++// Recording: the pass's last command, when it is a GXCore draw a following
++// draw may extend; nullptr otherwise.
++DrawData* last_recorded_draw() noexcept;
++
+ // Bump when generate_wgsl output or the DrawData/vertex layout changes: the
+ // persisted pipeline cache precompiles stored configs at startup, and a
+ // layout/semantics drift under an unchanged key is the S8 poisoned-cache
+@@ -78,6 +90,9 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config);
+ bool needs_early_depth_emulation(
+     const gxruntime::gxcore::PipelineKey& key);
+ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass);
++// At a render pass's start, and after anything else draws in it: what
++// render() last bound is not known.
++void reset_pass_state();
+ 
+ // Perform one EFB copy-to-texture (63/S16): resolve the current EFB region into
+ // a texture keyed by the copy destination address, so a later draw binding that
+diff --git a/GXRuntime/graphics/aurora/lib/window.cpp b/GXRuntime/graphics/aurora/lib/window.cpp
+index 88cdf4335d..48463a0977 100644
+--- a/GXRuntime/graphics/aurora/lib/window.cpp
++++ b/GXRuntime/graphics/aurora/lib/window.cpp
+@@ -48,6 +48,7 @@ float g_frameBufferAspectOverride = 0.f;
+ AuroraWindowSize g_windowSize;
+ std::vector<AuroraEvent> g_events;
+ std::atomic_bool g_backgrounded = false;
++std::atomic_bool g_occluded = false; // macOS: out of sight (lifecycle_event_watch)
+ #if defined(SDL_PLATFORM_ANDROID)
+ std::atomic_bool g_surfaceReady = false;
+ #else
+@@ -127,6 +128,32 @@ bool SDLCALL lifecycle_event_watch(void*, SDL_Event* event) {
+   case SDL_EVENT_WINDOW_RESTORED:
+     g_backgrounded.store(false, std::memory_order_relaxed);
+     break;
++#endif
++#if defined(SDL_PLATFORM_MACOS)
++  // A window out of sight (another app's full-screen space, or ours sliding
++  // in or out) gets no drawables: nextDrawable blocked for its whole second,
++  // or half, and the game with it, every time the game was switched away
++  // from or back to in full screen. No presents until it is seen again
++  // (is_occluded); the game goes on.
++  case SDL_EVENT_WINDOW_OCCLUDED:
++  case SDL_EVENT_WINDOW_EXPOSED:
++  case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
++  case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
++  case SDL_EVENT_WINDOW_FOCUS_LOST:
++  case SDL_EVENT_WINDOW_FOCUS_GAINED: {
++    const char* name = event->type == SDL_EVENT_WINDOW_OCCLUDED           ? "occluded"
++                       : event->type == SDL_EVENT_WINDOW_EXPOSED          ? "exposed"
++                       : event->type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN ? "entered full screen"
++                       : event->type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN ? "left full screen"
++                       : event->type == SDL_EVENT_WINDOW_FOCUS_LOST       ? "lost focus"
++                                                                          : "gained focus";
++    if (event->type == SDL_EVENT_WINDOW_OCCLUDED)
++      g_occluded.store(true, std::memory_order_relaxed);
++    else if (event->type == SDL_EVENT_WINDOW_EXPOSED)
++      g_occluded.store(false, std::memory_order_relaxed);
++    std::fprintf(stderr, "[window] %s\n", name);
++    break;
++  }
+ #endif
+   default:
+     break;
+@@ -502,6 +529,8 @@ bool is_presentable() noexcept {
+          g_surfaceReady.load(std::memory_order_acquire);
+ }
+ 
++bool is_occluded() noexcept { return g_occluded.load(std::memory_order_acquire); }
++
+ void set_surface_ready(bool ready) noexcept { g_surfaceReady.store(ready, std::memory_order_release); }
+ 
+ SurfaceLock::SurfaceLock() noexcept {
+diff --git a/GXRuntime/graphics/aurora/lib/window.hpp b/GXRuntime/graphics/aurora/lib/window.hpp
+index 114a6e3024..d729cdfefc 100644
+--- a/GXRuntime/graphics/aurora/lib/window.hpp
++++ b/GXRuntime/graphics/aurora/lib/window.hpp
+@@ -40,6 +40,9 @@ SDL_Window* get_sdl_window();
+ SDL_Renderer* get_sdl_renderer();
+ bool is_paused() noexcept;
+ bool is_presentable() noexcept;
++// macOS: the window is out of sight (another space, or ours sliding in or
++// out): it gets no drawables, so none is asked for.
++bool is_occluded() noexcept;
+ void set_surface_ready(bool ready) noexcept;
+ void set_title(const char* title);
+ void set_fullscreen(bool fullscreen);
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 7bebda10db..696cb1a5ce 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -1,9 +1,11 @@
+ // Standalone checks for lib/gfx/frame_interp.cpp: draw matching across
+-// frames, plausibility rejection, the halfway blend and the cut verdict.
++// frames, plausibility rejection, the halfway blend, the cut verdict and the
++// pacing of in-between frames.
+ #include "../lib/gfx/frame_interp.hpp"
+ 
+ #include <cmath>
+ #include <cstdio>
++#include <cstdlib>
+ #include <cstring>
+ 
+ namespace fi = aurora::gfx::frame_interp;
+@@ -102,6 +104,8 @@ static const gxc::VertexShaderConstants* blend_plan(const gxc::DrawPlan& plan, c
+ }
+ 
+ int main() {
++  // Pacing at 120 Hz as well, for its checks (unset, 120 Hz is never lowered).
++  setenv("DOL_AURORA_FRAME_INTERP_PACING", "1", 1);
+   fi::set_enabled(true);
+   const uint64_t kShip = 11, kTree = 22, kHud = 33;
+ 
+@@ -974,6 +978,59 @@ int main() {
+     CHECK(fi::draw_key(plan) == 0);
+   }
+ 
++  // Pacing: overloads in 3 of 8 game frames take 120 Hz to 60, and more after
++  // the frames in flight to none; one now and then does nothing. 3 s of calm
++  // brings a level back, and an overload soon after coming back makes the
++  // next wait twice as long.
++  {
++    const auto overload_frames = [](int n) {
++      for (int i = 0; i < n; ++i) {
++        fi::note_overload("test");
++        fi::end_game_frame();
++      }
++    };
++    fi::set_steps(3);
++    fi::end_game_frame();
++    CHECK(fi::frame_steps() == 3 && !fi::frame_skipped());
++    // Now and then: never a drop.
++    for (int i = 0; i < 40; ++i) {
++      overload_frames(1);
++      for (int j = 0; j < 8; ++j)
++        fi::end_game_frame();
++    }
++    CHECK(fi::frame_steps() == 3);
++    overload_frames(2);
++    CHECK(fi::frame_steps() == 3);
++    overload_frames(1);
++    CHECK(fi::frame_steps() == 1 && !fi::frame_skipped());
++    overload_frames(3); // still the frames in flight: no second drop
++    CHECK(fi::frame_steps() == 1 && !fi::frame_skipped());
++    overload_frames(1); // with the three before: the next drop
++    CHECK(fi::frame_skipped());
++    for (int i = 0; i < 89; ++i)
++      fi::end_game_frame();
++    CHECK(fi::frame_skipped());
++    fi::end_game_frame();
++    CHECK(!fi::frame_skipped() && fi::frame_steps() == 1);
++    for (int i = 0; i < 90; ++i)
++      fi::end_game_frame();
++    CHECK(fi::frame_steps() == 3);
++    overload_frames(3);
++    CHECK(fi::frame_steps() == 1);
++    for (int i = 0; i < 90; ++i)
++      fi::end_game_frame();
++    CHECK(fi::frame_steps() == 1);
++    for (int i = 0; i < 90; ++i)
++      fi::end_game_frame();
++    CHECK(fi::frame_steps() == 3);
++    // A new setting starts over at it.
++    overload_frames(3);
++    CHECK(fi::frame_steps() == 1);
++    fi::set_steps(1);
++    fi::end_game_frame();
++    CHECK(fi::frame_steps() == 1 && !fi::frame_skipped());
++  }
++
+   if (g_failures == 0)
+     std::puts("frame_interp_test: all checks passed");
+   return g_failures == 0 ? 0 : 1;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 653b42b55a..0484518d9c 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -521,6 +521,9 @@ struct DrawPlan {
+   std::uint32_t texmap_mask = 0;
+   PlanSampler samplers[8]{};
+   PlanTexture textures[8]{};
++  // Diagnostics: each texgen's XF matrix row, and MatrixIndexA as captured.
++  std::uint8_t texgen_row[kMaxTexGens]{};
++  std::uint32_t matrix_index_a = 0;
+ };
+ 
+ // --- EFB copy-to-texture (S16) ------------------------------------------------
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index db699c9e7a..e2f017c4ba 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -6,6 +6,7 @@
+ #include <array>
+ #include <cstring>
+ #include <limits>
++#include <memory>
+ 
+ namespace gxruntime::gxcore {
+ 
+@@ -581,7 +582,11 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+   {
+     std::vector<float> vertices = std::move(plan.vertices);
+     std::vector<std::uint16_t> indices = std::move(plan.indices);
+-    plan = DrawPlan{};
++    // Re-constructed in place: assigning a DrawPlan{} built the zeroed
++    // temporary and then copied all of it (the shader constants are several
++    // KB) over the plan, at every draw.
++    std::destroy_at(&plan);
++    std::construct_at(&plan);
+     vertices.clear();
+     indices.clear();
+     plan.vertices = std::move(vertices);
+@@ -1392,7 +1397,10 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+     }
+     for (std::uint32_t k = 0; k < 3u; ++k)
+       std::memcpy(c.texmatrices[3u * i + k], rows[k], sizeof rows[k]);
++    if (i < kMaxTexGens)
++      plan.texgen_row[i] = static_cast<std::uint8_t>(resolved ? row : 0xFFu);
+   }
++  plan.matrix_index_a = mat_idx_a_valid ? mat_idx_a : 0xFFFFFFFFu;
+ 
+   // Viewport + texture.
+   if ((draw.transform_flags & ar::kDrawTransformViewportValid) != 0u) {
+-- 
+2.55.0
+

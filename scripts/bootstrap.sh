@@ -34,7 +34,7 @@ for dep in lock["dependencies"]:
         print(f"  {dep_id}: cloned at {sha[:12]}")
 PYEOF
 
-# DolRecomp is RecompCore's DolRecomp submodule (chrissotraidis/DolRecomp).
+# DolRecomp is RecompCore's DolRecomp submodule (elliotttate/DolRecomp, from chrissotraidis/DolRecomp).
 if [ -e ref/recompcore/.git ]; then
     git -C ref/recompcore submodule sync -q -- DolRecomp
     git -C ref/recompcore submodule update --init -- DolRecomp

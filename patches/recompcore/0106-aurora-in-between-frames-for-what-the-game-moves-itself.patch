@@ -1,0 +1,2203 @@
+From 3b65983e9becf28208c1ec62b07d5b45b1c435ce Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 11:45:02 -0400
+Subject: [PATCH 106/106] Aurora: in-between frames for what the game moves
+ itself
+
+The in-between frame blends each draw's matrices toward the frame before.
+What the game moves another way stepped at 30 FPS or was drawn twice:
+
+- The boat's hull, skinned on the CPU and drawn with the bare view matrix:
+  the rigid motion that carries three of its vertices from the frame before
+  gives the matrices those vertices were drawn with (vertex_motion). A model
+  drawn into a shadow map (orthographic) and into the scene is not two
+  copies of itself. The sea's strips, which get a new key every frame, are
+  blended from where the camera's motion carries them.
+- Fast turns: a bone of Link's sword arm turns 90 degrees and more in a game
+  frame. A draw with a key of its own may turn 150 degrees (copies still
+  41), and a linear part that turned more than 15 degrees is blended as a
+  rotation (slerp) times its scales, so it is not shrunk halfway. A copy the
+  same size as the draw, the nearest such and near enough, may turn as far:
+  a broken pot's shards, one model at random sizes.
+- Particles: the game sends their corners as positions. The host writes the
+  particle and its age to BP 0x7E and 0x7D (registers the retail GX never
+  uses) before each JPA particle draw; gxcore takes them with the next draw
+  (DrawPlan::draw_tag), and the draw is paired with the same particle's and
+  its positions blended halfway (blend_positions, a second vertex range the
+  in-between frame binds). An emitter's callback that draws the boat's bow
+  waves and trail announces its emitter and draw count at BP 0x7C and 0x7B;
+  those draws pair by their place and blend vertex by vertex.
+- The boat's real shadow: its volume (one box for every real shadow) pairs
+  with itself while it keeps its place in the view, and the sea triangles it
+  is cast on, a different count as the boat sails, pair by the shadow's
+  texture, so the projection is blended every frame.
+
+What blend_draw needs of a draw besides its constants (its key, the hull's
+samples, a particle's positions) is captured with the draw (DrawInput,
+capture_draw), since the helper thread matches it after its plan is gone;
+the helper stages a particle's blended vertices in their own area
+(push_interp_vertices, g_interpVertexBuffer), and each job resolves to its
+block and its vertices.
+
+DOL_AURORA_FRAME_INTERP_TRACE takes a range (first-last), and the trace
+shows the tag and whether the positions were blended. frame_interp_test
+covers each case; its new checks fail without the change.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  36 +-
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  17 +-
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 758 ++++++++++++++++--
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  39 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  93 ++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   6 +-
+ .../aurora/tests/frame_interp_test.cpp        | 534 ++++++++++++
+ .../include/gxruntime/gxcore/gxcore.hpp       |  14 +
+ .../include/gxruntime/gxcore/shader.hpp       |  11 +
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  25 +
+ 10 files changed, 1439 insertions(+), 94 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 6ff6c23..d149a6c 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -254,7 +254,11 @@ constexpr uint64_t InterpUniformBufferSize = 33554432; // 32mb
+ static std::array<std::vector<uint8_t>, FrameSlotCount> g_interpUniformStaging;
+ // Per frame slot, the range each in-between job resolved to, in job order
+ // (gxcore_draw.cpp's helper writes them; end_frame waits for it).
+-static std::array<std::vector<Range>, FrameSlotCount> g_interpJobRanges;
++static std::array<std::vector<InterpRanges>, FrameSlotCount> g_interpJobRanges;
++// A particle's blended vertices, per frame slot (see push_interp_vertices).
++constexpr uint64_t InterpVertexBufferSize = 8388608; // 8mb
++static std::array<std::vector<uint8_t>, FrameSlotCount> g_interpVertexStaging;
++wgpu::Buffer g_interpVertexBuffer;
+ static size_t g_replayFrameSlot = 0; // render worker: the frame whose in-between frame is encoded
+ static uint64_t g_interpUniformOverflows = 0; // recording thread
+ static wgpu::Buffer g_interpUniformBuffer;
+@@ -1147,6 +1151,7 @@ void shutdown() {
+   g_heldFrame = {};
+   g_interpUniformBindGroup = {};
+   g_interpUniformBuffer = {};
++  g_interpVertexBuffer = {};
+   for (auto& staging : g_interpUniformStaging) {
+     staging = {};
+   }
+@@ -1266,6 +1271,7 @@ bool begin_frame(bool preserveEfb) {
+   frame.continuation = preserveEfb;
+   g_interpUniformStaging[frameSlot].clear();
+   g_interpJobRanges[frameSlot].clear();
++  g_interpVertexStaging[frameSlot].clear();
+   g_recordingFrame = &frame;
+   g_recordingFrameSlot = frameSlot;
+ 
+@@ -1869,6 +1875,18 @@ static void upload_interp_uniforms(size_t frameSlot) {
+   if (!staging.empty()) {
+     g_queue.WriteBuffer(g_interpUniformBuffer, 0, staging.data(), AURORA_ALIGN(staging.size(), 4));
+   }
++  const auto& vertices = g_interpVertexStaging[frameSlot];
++  if (!vertices.empty()) {
++    if (!g_interpVertexBuffer) {
++      const wgpu::BufferDescriptor descriptor{
++          .label = "In-between frame vertex buffer",
++          .usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
++          .size = InterpVertexBufferSize,
++      };
++      g_interpVertexBuffer = g_device.CreateBuffer(&descriptor);
++    }
++    g_queue.WriteBuffer(g_interpVertexBuffer, 0, vertices.data(), AURORA_ALIGN(vertices.size(), 4));
++  }
+ }
+ 
+ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
+@@ -2196,11 +2214,21 @@ const uint8_t* interp_uniform_bytes(size_t slot, Range range) {
+   return g_interpUniformStaging[slot].data() + range.offset;
+ }
+ 
+-void resolve_interp_job(size_t slot, Range range) { g_interpJobRanges[slot].push_back(range); }
++Range push_interp_vertices(size_t slot, const uint8_t* data, size_t length) {
++  auto& staging = g_interpVertexStaging[slot];
++  const size_t offset = AURORA_ALIGN(staging.size(), 4);
++  if (offset + length > InterpVertexBufferSize)
++    return {};
++  staging.resize(offset);
++  staging.insert(staging.end(), data, data + length);
++  return {static_cast<uint32_t>(offset), static_cast<uint32_t>(length)};
++}
++
++void resolve_interp_job(size_t slot, InterpRanges ranges) { g_interpJobRanges[slot].push_back(ranges); }
+ 
+-Range interp_job_range(uint32_t job) {
++InterpRanges interp_job_ranges(uint32_t job) {
+   const auto& ranges = g_interpJobRanges[g_replayFrameSlot];
+-  return job < ranges.size() ? ranges[job] : Range{};
++  return job < ranges.size() ? ranges[job] : InterpRanges{};
+ }
+ 
+ Range push_uniform(const uint8_t* data, size_t length) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index da2305c..4af08a0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -315,10 +315,19 @@ size_t recording_frame_slot();
+ // An empty range when the area is full (the draw then keeps its own constants).
+ Range push_interp_uniform(size_t slot, const uint8_t* data, size_t length);
+ const uint8_t* interp_uniform_bytes(size_t slot, Range range);
+-void resolve_interp_job(size_t slot, Range range);
+-// Render worker, while the in-between frame is encoded: a job's range (empty
+-// when the draw keeps its own constants).
+-Range interp_job_range(uint32_t job);
++// A particle's blended vertices for the in-between frame, in their own area
++// (g_interpVertexBuffer); an empty range when it is full.
++Range push_interp_vertices(size_t slot, const uint8_t* data, size_t length);
++// A job's in-between block and vertices (either empty when the draw keeps
++// its own).
++struct InterpRanges {
++  Range uniform;
++  Range verts;
++};
++void resolve_interp_job(size_t slot, InterpRanges ranges);
++// Render worker, while the in-between frame is encoded: a job's ranges.
++InterpRanges interp_job_ranges(uint32_t job);
++extern wgpu::Buffer g_interpVertexBuffer;
+ template <typename T>
+ static Range push_uniform(const T& data) {
+   return push_uniform(reinterpret_cast<const uint8_t*>(&data), sizeof(T));
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 22f4972..16bcfe6 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -36,24 +36,44 @@ std::atomic_bool g_encodingInterpolated{false};
+ std::atomic<uint64_t> g_gameFrame{1};
+ 
+ // One game frame's draws: their constants (a consecutive run of identical
+-// blocks is stored once) and, per draw, its key and block, where its position
+-// matrix put it, and whether it stood still (the camera's motion carried a
+-// copy from the frame before onto it; see blend_draw).
++// blocks is stored once) and, per draw, its key and block, a few of its
++// vertices (see draw_key), where its position matrix put it, and whether it
++// stood still (the camera's motion carried a copy from the frame before onto
++// it; see blend_draw).
++constexpr uint32_t kNoSamples = UINT32_MAX;
++using VertexSamples = std::array<float, 9>;
+ struct Record {
+   uint64_t key;
+   uint32_t constants;
+-  bool still;
++  uint32_t samples; // index in FrameRecords::samples, or kNoSamples
+   float position[3];
++  bool still;
++  // A draw whose positions came in its payload (see blend_positions()): its
++  // first position in FrameRecords::positions (kNoSamples: not kept), how
++  // many, and a tagged draw's age.
++  uint32_t positions;
++  uint32_t positionCount;
++  uint32_t age;
+ };
+ struct FrameRecords {
+   std::vector<gxc::VertexShaderConstants> pool;
+   std::vector<Record> records;
++  std::vector<VertexSamples> samples;
++  std::vector<float> positions; // x, y, z per vertex
+   void clear() {
+     pool.clear();
+     records.clear();
++    samples.clear();
++    positions.clear();
+   }
+ };
+ 
++// At most this many vertices per draw are kept and blended.
++constexpr uint32_t kMaxBlendedVertices = 1024;
++// blend_draw()'s in-between positions for its draw (x, y, z per vertex).
++std::vector<float> g_blendedPositions;
++bool g_haveBlendedPositions = false;
++
+ FrameRecords g_frames[2];
+ unsigned g_current = 0;
+ bool g_havePrevious = false;
+@@ -76,7 +96,7 @@ gxc::VertexShaderConstants g_blended;
+ uint64_t g_drawSerial = 0;
+ uint64_t g_pooledSerial = 0; // the draw whose constants are the current pool's last
+ uint64_t g_motionGeneration = 0; // bumped when any motion's values change
+-enum class BlendPath { Main, OwnMotion, StoodBefore };
++enum class BlendPath { Main, OwnMotion, StoodBefore, Unmatched };
+ struct LastBlend {
+   uint64_t serial = 0; // 0: none
+   BlendPath path = BlendPath::Main;
+@@ -90,10 +110,12 @@ LastBlend g_lastBlend;
+ bool g_blendRepeated = false;
+ 
+ // Motions seen this frame (see vote_motion()): M_now * M_before^-1 of the
+-// draws matched without ambiguity, and how many draws agree with each.
++// draws matched without ambiguity, how many draws agree with each, and how
++// much their votes weigh.
+ struct Motion {
+   double m[3][4];
+   uint32_t votes;
++  double weight;
+   // For the camera's motion (see camera_motion()): its inverse, and the part
+   // of it the in-between frame is at (D^t: the rotation turned by t of its
+   // angle, and exactly half of D at t = 0.5, so D^0.5 * D^0.5 = D).
+@@ -104,6 +126,12 @@ struct Motion {
+ };
+ constexpr int kMaxMotions = 6;
+ constexpr uint32_t kMinMotionVotes = 4;
++// A vote weighs one per this many units of its draw's distance, and at least
++// one (see vote_motion()).
++constexpr double kVoteReach = 1000.0;
++// At most this many copies of a model, none standing still, are one moving
++// model drawn more than once (see blend_draw).
++constexpr size_t kFewCopies = 4;
+ Motion g_motions[kMaxMotions];
+ int g_motionCount = 0;
+ int g_leadingMotion = -1;
+@@ -137,6 +165,8 @@ struct Counts {
+   uint64_t rejected = 0;  // counterparts exist, none plausible (with the new in view)
+   uint64_t fresh = 0;     // of those, copies just come into view (blended from where they stood)
+   uint64_t unmatched = 0; // no counterpart
++  uint64_t moved = 0;     // matched draws whose vertices the game moved (see vertex_motion())
++  uint64_t positions = 0; // particles whose positions were blended (see blend_positions())
+ };
+ Counts g_frameCounts;
+ Counts g_totalCounts;
+@@ -147,7 +177,21 @@ bool g_lastVerdict = false;
+ const bool g_log = env_flag("DOL_AURORA_FRAME_INTERP_LOG", false);
+ // DOL_AURORA_FRAME_INTERP_LOG_FRAMES: a line per game frame (debug).
+ const bool g_logFrames = env_flag("DOL_AURORA_FRAME_INTERP_LOG_FRAMES", false);
+-const uint64_t g_traceFrame = env_u64("DOL_AURORA_FRAME_INTERP_TRACE", 0);
++// DOL_AURORA_FRAME_INTERP_TRACE=frame or first-last: a line per draw (debug).
++struct TraceRange {
++  uint64_t first = 0, last = 0;
++};
++const TraceRange g_trace = [] {
++  TraceRange range;
++  const char* value = std::getenv("DOL_AURORA_FRAME_INTERP_TRACE");
++  if (value == nullptr || value[0] == '\0')
++    return range;
++  char* end = nullptr;
++  range.first = range.last = std::strtoull(value, &end, 10);
++  if (end != nullptr && *end == '-')
++    range.last = std::strtoull(end + 1, nullptr, 10);
++  return range;
++}();
+ const char* g_outcome = "";
+ const char* g_rejectReason = "";
+ 
+@@ -158,13 +202,24 @@ double translation_length(const float rows[][4]) {
+                    double(rows[2][3]) * rows[2][3]);
+ }
+ 
++// How far plausible_matrix() lets a linear part turn from one frame to the
++// next, as |A - B|^2 / k^2 = 4 (1 - cos t) for a rotation by t at scale k.
++// Copies of one model: 41 degrees, since a turning camera must not pair a
++// copy with the next one along. A draw with a key of its own is the same
++// object as its counterpart whatever it did: 150 degrees. The bones of
++// Link's sword arm turn 90 degrees and more in one game frame of a swing; at
++// 41 degrees his arm and sword were drawn where the next frame has them
++// while the rest of him was halfway, and stepped at 30 FPS.
++constexpr double kTurnLimit = 1.0;
++constexpr double kOwnTurnLimit = 7.46;
++
+ // Whether two 3x4 matrices can be one object's transform a frame apart. A
+ // camera cut or a reused draw for another object fails at least one bound:
+-// scale within 1.5x, the linear part within about 40 degrees of rotation, and
+-// the translation within a fifth of its distance from the camera plus 100
+-// units (a camera turning 10 degrees a frame moves a point about 0.17 of its
++// scale within 1.5x, the linear part within the turn limit, and the
++// translation within a fifth of its distance from the camera plus 100 units
++// (a camera turning 10 degrees a frame moves a point about 0.17 of its
+ // distance; the boat at full sail covers about 60 units a frame).
+-bool plausible_matrix(const float current[][4], const float previous[][4]) {
++bool plausible_matrix(const float current[][4], const float previous[][4], double turnLimit) {
+   if (std::memcmp(current, previous, sizeof(float) * 12) == 0)
+     return true;
+   double currentScale = 0.0, previousScale = 0.0, difference = 0.0;
+@@ -188,7 +243,7 @@ bool plausible_matrix(const float current[][4], const float previous[][4]) {
+   }
+   // For a rotation by t at scale k, |A-B|^2 = 4 k^2 (1 - cos t): 1.0 is 41 deg.
+   const double axisScale = std::max(currentScale, previousScale) / 3.0;
+-  if (difference / axisScale > 1.0) {
++  if (difference / axisScale > turnLimit) {
+     g_rejectReason = "rotation";
+     return false;
+   }
+@@ -234,16 +289,16 @@ bool plausible_projection(const float current[4][4], const float previous[4][4])
+ }
+ 
+ bool plausible(const gxc::VertexShaderConstants& current, const gxc::VertexShaderConstants& previous,
+-               uint64_t usedMatrixRows) {
++               uint64_t usedMatrixRows, double turnLimit) {
+   if (!plausible_projection(current.projection, previous.projection))
+     return false;
+   if (usedMatrixRows == 0)
+-    return plausible_matrix(current.posnormalmatrix, previous.posnormalmatrix);
++    return plausible_matrix(current.posnormalmatrix, previous.posnormalmatrix, turnLimit);
+   // Per-vertex matrices (skinned models): the bank slots this draw's vertices
+   // use. The other slots hold whatever other models loaded last.
+   for (uint64_t rows = usedMatrixRows; rows != 0; rows &= rows - 1) {
+     const int row = __builtin_ctzll(rows);
+-    if (!plausible_matrix(&current.transformmatrices[row], &previous.transformmatrices[row]))
++    if (!plausible_matrix(&current.transformmatrices[row], &previous.transformmatrices[row], turnLimit))
+       return false;
+   }
+   return true;
+@@ -334,7 +389,16 @@ bool motion_agrees(const double motion[3][4], const float current[][4], const fl
+   return linear <= 1e-6 * scale && moved <= tolerance * tolerance;
+ }
+ 
++// The camera's motion is the one the scenery shares, and what stands farthest
++// pins it down: a vote weighs as much as its draw is far from the camera, in
++// thousands of units (one at least, so near the camera every draw counts the
++// same). At sea the camera follows the boat, and the boat and Link are drawn
++// before the scenery: their hundred parts, all moving with the boat, agreed
++// on its motion before the islands and the sea voted, so the boat's motion
++// was taken for the camera's through most of the frame. The sky, drawn around
++// the camera, turns with it but does not move with it, and weighs little too.
+ void vote_motion(const float current[][4], const float previous[][4]) {
++  const double weight = std::max(1.0, translation_length(current) / kVoteReach);
+   int agreed = -1;
+   if (g_leadingMotion >= 0 && motion_agrees(g_motions[g_leadingMotion].m, current, previous))
+     agreed = g_leadingMotion;
+@@ -344,17 +408,18 @@ void vote_motion(const float current[][4], const float previous[][4]) {
+   }
+   if (agreed >= 0) {
+     ++g_motions[agreed].votes;
++    g_motions[agreed].weight += weight;
+   } else {
+     double inverse[3][4];
+     if (!affine_inverse(previous, inverse))
+       return;
+-    // A new motion, in place of the one fewest draws agreed with.
++    // A new motion, in place of the one with the least weight.
+     agreed = 0;
+     if (g_motionCount < kMaxMotions) {
+       agreed = g_motionCount++;
+     } else {
+       for (int i = 1; i < kMaxMotions; ++i) {
+-        if (g_motions[i].votes < g_motions[agreed].votes)
++        if (g_motions[i].weight < g_motions[agreed].weight)
+           agreed = i;
+       }
+       if (agreed == g_leadingMotion)
+@@ -368,11 +433,12 @@ void vote_motion(const float current[][4], const float previous[][4]) {
+       m[r][3] += current[r][3];
+     }
+     g_motions[agreed].votes = 1;
++    g_motions[agreed].weight = weight;
+     g_motions[agreed].derived = false;
+     ++g_motionGeneration;
+   }
+-  // The motion most draws agree with is the camera's.
+-  if (g_leadingMotion < 0 || g_motions[agreed].votes > g_motions[g_leadingMotion].votes)
++  // The motion with the most weight is the camera's.
++  if (g_leadingMotion < 0 || g_motions[agreed].weight > g_motions[g_leadingMotion].weight)
+     g_leadingMotion = agreed;
+ }
+ 
+@@ -558,6 +624,7 @@ bool own_motion(const float previous[][4], const float current[][4], Motion& out
+     out.m[r][3] += current[r][3];
+   }
+   out.votes = 1;
++  out.weight = 1.0;
+   out.derived = false;
+   return true;
+ }
+@@ -583,22 +650,22 @@ void as_previous_camera(const Motion& camera, const float rows[][4], float out[]
+ }
+ 
+ bool plausible_relative(const Motion* camera, const gxc::VertexShaderConstants& current,
+-                        const gxc::VertexShaderConstants& previous, uint64_t usedMatrixRows) {
++                        const gxc::VertexShaderConstants& previous, uint64_t usedMatrixRows, double turnLimit) {
+   if (camera == nullptr || previous.projection[3][2] == 0.f || current.projection[3][2] == 0.f)
+-    return plausible(current, previous, usedMatrixRows);
++    return plausible(current, previous, usedMatrixRows, turnLimit);
+   if (!plausible_projection(current.projection, previous.projection))
+     return false;
+   float relative[3][4];
+   if (usedMatrixRows == 0) {
+     as_previous_camera(*camera, current.posnormalmatrix, relative);
+-    return plausible_matrix(relative, previous.posnormalmatrix);
++    return plausible_matrix(relative, previous.posnormalmatrix, turnLimit);
+   }
+   for (uint64_t rows = usedMatrixRows; rows != 0; rows &= rows - 1) {
+     const int row = __builtin_ctzll(rows);
+     if (row > 61)
+       continue;
+     as_previous_camera(*camera, &current.transformmatrices[row], relative);
+-    if (!plausible_matrix(relative, &previous.transformmatrices[row]))
++    if (!plausible_matrix(relative, &previous.transformmatrices[row], turnLimit))
+       return false;
+   }
+   return true;
+@@ -630,6 +697,143 @@ gxc::VertexShaderConstants g_stoodBefore;
+ 
+ // --- Blending -----------------------------------------------------------------
+ 
++// A straight blend of two matrices turned far apart shrinks what they draw
++// halfway (to 71 percent of its size at 90 degrees) and pulls it inward. A
++// linear part that turned more than about 15 degrees is blended as what it
++// is, a rotation times a scale per axis (J3D's joint matrices are R * S): the
++// rotation by slerp, the scales straight. A normal matrix, R * S^-1, is the
++// same kind.
++constexpr double kTurnedFar = 0.136; // 4 (1 - cos 15 degrees)
++
++template <typename A, typename B>
++bool turned_far(const A from[][4], const B to[][4]) {
++  double difference = 0.0, size = 0.0;
++  for (int r = 0; r < 3; ++r) {
++    for (int c = 0; c < 3; ++c) {
++      const double a = from[r][c], b = to[r][c];
++      difference += (b - a) * (b - a);
++      size += a * a + b * b;
++    }
++  }
++  // size / 6 is the mean of the two k^2.
++  return difference * 6.0 > kTurnedFar * size && size > 1e-12;
++}
++
++// A linear part's rotation, as a unit quaternion (w, x, y, z), and its scale
++// per axis; false when it is not a rotation times a scale (sheared or
++// collapsed). A mirror has its last scale negative.
++template <typename A>
++bool rotation_and_scale(const A m[][4], double q[4], double scale[3]) {
++  double r[3][3];
++  for (int c = 0; c < 3; ++c) {
++    const double s = std::sqrt(double(m[0][c]) * m[0][c] + double(m[1][c]) * m[1][c] + double(m[2][c]) * m[2][c]);
++    if (s < 1e-9)
++      return false;
++    for (int i = 0; i < 3; ++i)
++      r[i][c] = m[i][c] / s;
++    scale[c] = s;
++  }
++  for (int a = 0; a < 3; ++a) {
++    for (int b = a + 1; b < 3; ++b) {
++      if (std::fabs(r[0][a] * r[0][b] + r[1][a] * r[1][b] + r[2][a] * r[2][b]) > 0.02)
++        return false;
++    }
++  }
++  const double det = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1]) -
++                     r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0]) +
++                     r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
++  if (det < 0.0) {
++    scale[2] = -scale[2];
++    for (int i = 0; i < 3; ++i)
++      r[i][2] = -r[i][2];
++  }
++  double w, x, y, z;
++  const double trace = r[0][0] + r[1][1] + r[2][2];
++  if (trace > 0.0) {
++    const double s = std::sqrt(trace + 1.0) * 2.0;
++    w = 0.25 * s;
++    x = (r[2][1] - r[1][2]) / s;
++    y = (r[0][2] - r[2][0]) / s;
++    z = (r[1][0] - r[0][1]) / s;
++  } else if (r[0][0] > r[1][1] && r[0][0] > r[2][2]) {
++    const double s = std::sqrt(1.0 + r[0][0] - r[1][1] - r[2][2]) * 2.0;
++    w = (r[2][1] - r[1][2]) / s;
++    x = 0.25 * s;
++    y = (r[0][1] + r[1][0]) / s;
++    z = (r[0][2] + r[2][0]) / s;
++  } else if (r[1][1] > r[2][2]) {
++    const double s = std::sqrt(1.0 + r[1][1] - r[0][0] - r[2][2]) * 2.0;
++    w = (r[0][2] - r[2][0]) / s;
++    x = (r[0][1] + r[1][0]) / s;
++    y = 0.25 * s;
++    z = (r[1][2] + r[2][1]) / s;
++  } else {
++    const double s = std::sqrt(1.0 + r[2][2] - r[0][0] - r[1][1]) * 2.0;
++    w = (r[1][0] - r[0][1]) / s;
++    x = (r[0][2] + r[2][0]) / s;
++    y = (r[1][2] + r[2][1]) / s;
++    z = 0.25 * s;
++  }
++  const double norm = std::sqrt(w * w + x * x + y * y + z * z);
++  if (!(norm > 1e-9))
++    return false;
++  q[0] = w / norm, q[1] = x / norm, q[2] = y / norm, q[3] = z / norm;
++  return true;
++}
++
++// out's linear part (the first three columns of three rows): from's and to's
++// blended by t as a rotation and scales, or straight when either is not a
++// rotation times a scale.
++template <typename A, typename B, typename O>
++void blend_turn(const A from[][4], const B to[][4], double t, O out[][4]) {
++  double q0[4], q1[4], s0[3], s1[3];
++  if (!rotation_and_scale(from, q0, s0) || !rotation_and_scale(to, q1, s1) || (s0[2] < 0.0) != (s1[2] < 0.0)) {
++    for (int r = 0; r < 3; ++r)
++      for (int c = 0; c < 3; ++c)
++        out[r][c] = static_cast<O>(from[r][c] + (double(to[r][c]) - from[r][c]) * t);
++    return;
++  }
++  double dot = q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3];
++  if (dot < 0.0) {
++    dot = -dot;
++    for (double& v : q1)
++      v = -v;
++  }
++  double w0 = 1.0 - t, w1 = t;
++  if (dot < 0.9995) {
++    const double angle = std::acos(dot);
++    const double sine = std::sin(angle);
++    w0 = std::sin((1.0 - t) * angle) / sine;
++    w1 = std::sin(t * angle) / sine;
++  }
++  double q[4];
++  double norm = 0.0;
++  for (int k = 0; k < 4; ++k) {
++    q[k] = w0 * q0[k] + w1 * q1[k];
++    norm += q[k] * q[k];
++  }
++  norm = std::sqrt(norm);
++  const double w = q[0] / norm, x = q[1] / norm, y = q[2] / norm, z = q[3] / norm;
++  const double r[3][3] = {
++      {1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)},
++      {2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)},
++      {2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)},
++  };
++  for (int c = 0; c < 3; ++c) {
++    const double scale = s0[c] + (s1[c] - s0[c]) * t;
++    for (int i = 0; i < 3; ++i)
++      out[i][c] = static_cast<O>(r[i][c] * scale);
++  }
++}
++
++// After a straight blend of the rows into out: its linear part blended as a
++// rotation when it turned far.
++template <typename A, typename B, typename O>
++inline void blend_linear(const A from[][4], const B to[][4], double t, O out[][4]) {
++  if (turned_far(from, to))
++    blend_turn(from, to, t, out);
++}
++
+ inline void lerp_rows(float out[][4], const float from[][4], const float to[][4], int rows, float t) {
+   for (int r = 0; r < rows; ++r)
+     for (int c = 0; c < 4; ++c)
+@@ -672,10 +876,135 @@ inline unsigned used_matrices(uint64_t rows) {
+   return matrices;
+ }
+ 
++// Vertices the game moves itself. A model skinned on the CPU (J3D's
++// J3DSkinDeform: the boat's hull) has its vertices rewritten every frame in
++// world space and is drawn with the bare view matrix. Its key and matrices
++// match the frame before, but the in-between frame draws this frame's
++// vertices, so blending the matrices alone leaves it where it is now: under
++// full sail the hull and its shadow were drawn half a frame (50 units) ahead
++// of the boat's head, Link and the sail, a second hull flickering in front.
++//
++// The rigid motion E that carries three of the frame before's vertices onto
++// this frame's (the same vertices: the key is the same index stream) makes
++// the frame before's matrices M * E^-1 for these vertices, and those are
++// blended. A mesh that did not move rigidly (cloth) is left as it was.
++bool vertex_motion(const VertexSamples& before, const VertexSamples& now, const gxc::VertexShaderConstants& previous,
++                   uint64_t rows, gxc::VertexShaderConstants& out) {
++  if (std::memcmp(before.data(), now.data(), sizeof(float) * 9) == 0)
++    return false;
++  double p[3][3], q[3][3], moved = 0.0, extent = 0.0;
++  for (int i = 0; i < 3; ++i) {
++    double d = 0.0;
++    for (int k = 0; k < 3; ++k) {
++      p[i][k] = before[i * 3 + k];
++      q[i][k] = now[i * 3 + k];
++      d += (q[i][k] - p[i][k]) * (q[i][k] - p[i][k]);
++    }
++    moved = std::max(moved, std::sqrt(d));
++  }
++  if (moved < 0.01)
++    return false;
++  // An orthonormal frame on each triangle of samples; the rotation carries
++  // one onto the other (none when the samples are in a line).
++  const auto frame = [&](const double v[3][3], double f[3][3]) {
++    double a[3], b[3];
++    for (int k = 0; k < 3; ++k) {
++      a[k] = v[1][k] - v[0][k];
++      b[k] = v[2][k] - v[0][k];
++    }
++    const double la = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
++    extent = std::max(extent, la);
++    if (la < 1e-3)
++      return false;
++    for (int k = 0; k < 3; ++k)
++      a[k] /= la;
++    const double along = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
++    for (int k = 0; k < 3; ++k)
++      b[k] -= along * a[k];
++    const double lb = std::sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
++    if (lb < 1e-3 * la)
++      return false;
++    for (int k = 0; k < 3; ++k)
++      b[k] /= lb;
++    const double c[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
++    for (int k = 0; k < 3; ++k) { // columns a, b, c
++      f[k][0] = a[k];
++      f[k][1] = b[k];
++      f[k][2] = c[k];
++    }
++    return true;
++  };
++  double fp[3][3], fq[3][3], r[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
++  if (frame(p, fp) && frame(q, fq)) {
++    for (int i = 0; i < 3; ++i)
++      for (int k = 0; k < 3; ++k)
++        r[i][k] = fq[i][0] * fp[k][0] + fq[i][1] * fp[k][1] + fq[i][2] * fp[k][2];
++  }
++  double cp[3], cq[3], t[3];
++  for (int k = 0; k < 3; ++k) {
++    cp[k] = (p[0][k] + p[1][k] + p[2][k]) / 3.0;
++    cq[k] = (q[0][k] + q[1][k] + q[2][k]) / 3.0;
++  }
++  for (int i = 0; i < 3; ++i)
++    t[i] = cq[i] - (r[i][0] * cp[0] + r[i][1] * cp[1] + r[i][2] * cp[2]);
++  for (int i = 0; i < 3; ++i) {
++    double d = 0.0;
++    for (int k = 0; k < 3; ++k) {
++      const double carried = r[k][0] * p[i][0] + r[k][1] * p[i][1] + r[k][2] * p[i][2] + t[k];
++      d += (carried - q[i][k]) * (carried - q[i][k]);
++    }
++    if (std::sqrt(d) > 0.05 * moved + 0.01 * extent + 0.1)
++      return false; // not rigid
++  }
++  // E^-1 = [R^T | -R^T t].
++  double inverse[3][4];
++  for (int i = 0; i < 3; ++i) {
++    for (int k = 0; k < 3; ++k)
++      inverse[i][k] = r[k][i];
++    inverse[i][3] = -(r[0][i] * t[0] + r[1][i] * t[1] + r[2][i] * t[2]);
++  }
++  std::memcpy(&out, &previous, sizeof(out));
++  const auto place = [&](const float from[][4], float to[][4]) {
++    for (int i = 0; i < 3; ++i) {
++      double row[4];
++      for (int c = 0; c < 4; ++c)
++        row[c] = from[i][0] * inverse[0][c] + from[i][1] * inverse[1][c] + from[i][2] * inverse[2][c];
++      row[3] += from[i][3];
++      for (int c = 0; c < 4; ++c)
++        to[i][c] = static_cast<float>(row[c]);
++    }
++  };
++  const auto turn = [&](const float from[][4], float to[][4]) {
++    for (int i = 0; i < 3; ++i) {
++      double row[3];
++      for (int c = 0; c < 3; ++c)
++        row[c] = from[i][0] * inverse[0][c] + from[i][1] * inverse[1][c] + from[i][2] * inverse[2][c];
++      for (int c = 0; c < 3; ++c)
++        to[i][c] = static_cast<float>(row[c]);
++    }
++  };
++  if (rows == 0) {
++    place(previous.posnormalmatrix, out.posnormalmatrix);
++    turn(&previous.posnormalmatrix[3], &out.posnormalmatrix[3]);
++  } else {
++    const unsigned matrices = used_matrices(rows);
++    for (int m = 0; m < 10; ++m) {
++      if ((matrices >> m) & 1u) {
++        place(&previous.transformmatrices[m * 3], &out.transformmatrices[m * 3]);
++        turn(&previous.normalmatrices[m * 3], &out.normalmatrices[m * 3]);
++      }
++    }
++  }
++  return true;
++}
++gxc::VertexShaderConstants g_movedPrevious;
++
+ void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderConstants& current, float t,
+            gxc::VertexShaderConstants& out, uint64_t rows) {
+   std::memcpy(&out, &current, sizeof(out));
+   lerp_rows(out.posnormalmatrix, previous.posnormalmatrix, current.posnormalmatrix, 6, t);
++  blend_linear(previous.posnormalmatrix, current.posnormalmatrix, t, out.posnormalmatrix);
++  blend_linear(&previous.posnormalmatrix[3], &current.posnormalmatrix[3], t, &out.posnormalmatrix[3]);
+   lerp_rows(out.projection, previous.projection, current.projection, 4, t);
+   for (int m = 0; m < 8; ++m)
+     lerp_texture_rows(&out.texmatrices[m * 3], &previous.texmatrices[m * 3], &current.texmatrices[m * 3], t);
+@@ -686,7 +1015,10 @@ void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderCo
+     if ((matrices >> m) & 1u) {
+       lerp_rows(&out.transformmatrices[m * 3], &previous.transformmatrices[m * 3],
+                 &current.transformmatrices[m * 3], 3, t);
++      blend_linear(&previous.transformmatrices[m * 3], &current.transformmatrices[m * 3], t,
++                   &out.transformmatrices[m * 3]);
+       lerp_rows(&out.normalmatrices[m * 3], &previous.normalmatrices[m * 3], &current.normalmatrices[m * 3], 3, t);
++      blend_linear(&previous.normalmatrices[m * 3], &current.normalmatrices[m * 3], t, &out.normalmatrices[m * 3]);
+     }
+   }
+   for (int m = 0; m < 10; ++m) {
+@@ -726,6 +1058,7 @@ void blend_relative(const Motion& camera, const gxc::VertexShaderConstants& prev
+         mid[r][c] = from[r][c] + (value - from[r][c]) * t;
+       }
+     }
++    blend_linear(from, seen, t, mid);
+     for (int r = 0; r < 3; ++r) {
+       for (int c = 0; c < 3; ++c)
+         result[r][c] = static_cast<float>(camera.part[r][0] * mid[0][c] + camera.part[r][1] * mid[1][c] +
+@@ -779,6 +1112,91 @@ inline uint64_t mix64(uint64_t h) {
+   return h;
+ }
+ 
++// What blend_draw() matched its draw to: the counterpart's record and block,
++// and the motion the matrices were blended in (see blend_relative()), or none
++// for a straight blend. No record: nothing matched.
++struct Match {
++  const Record* record = nullptr;
++  const gxc::VertexShaderConstants* block = nullptr;
++  const Motion* motion = nullptr;
++};
++Match g_match;
++Motion g_ownMotion; // the "blended by its own motion" path's
++// The draw being matched is a particle the host tagged, and its age.
++bool g_currentTagged = false;
++uint32_t g_currentAge = 0;
++
++// A draw whose positions the game sends itself (particles, the sword's
++// trail): its matrices say nothing of how it moved, so the in-between frame
++// drew it where the next frame has it, at 30 FPS. Each vertex is taken
++// halfway from where it was drawn in the frame before to where it is now, in
++// the previous camera's view and carried by the camera's part motion as the
++// matrices are (blend_relative()), then back through the in-between frame's
++// matrix into the space the draw's matrix takes its positions from:
++//   q = Mh^-1 P ((1 - t) M0 p0 + t D^-1 M1 p1)
++// for the previous and current matrices M0 and M1, the motion D and its part
++// P (none: D = P = I) and the in-between matrix Mh. False when no vertex
++// moves from where it is drawn now, or one moved implausibly far for a frame
++// (a pair that is not the same thing).
++bool blend_positions(const float* before, const float* now, uint32_t count, const float previousMatrix[][4],
++                     const float currentMatrix[][4], const Motion* motion, const float inBetween[][4], double t,
++                     bool tagged, std::vector<float>& out) {
++  double back[3][4];
++  if (!affine_inverse(inBetween, back))
++    return false;
++  double a0[3][4], a1[3][4];
++  for (int r = 0; r < 3; ++r)
++    for (int c = 0; c < 4; ++c)
++      a0[r][c] = previousMatrix[r][c];
++  if (motion != nullptr) {
++    affine_multiply(motion->inverse, currentMatrix, a1);
++  } else {
++    for (int r = 0; r < 3; ++r)
++      for (int c = 0; c < 4; ++c)
++        a1[r][c] = currentMatrix[r][c];
++  }
++  double b0[3][4], b1[3][4];
++  if (motion != nullptr) {
++    double placed[3][4];
++    affine_multiply(motion->part, a0, placed);
++    affine_multiply(back, placed, b0);
++    affine_multiply(motion->part, a1, placed);
++    affine_multiply(back, placed, b1);
++  } else {
++    affine_multiply(back, a0, b0);
++    affine_multiply(back, a1, b1);
++  }
++  const auto apply = [](const double m[3][4], const float* p, double result[3]) {
++    for (int r = 0; r < 3; ++r)
++      result[r] = m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3];
++  };
++  out.resize(static_cast<size_t>(count) * 3u);
++  bool moves = false;
++  for (uint32_t i = 0; i < count; ++i) {
++    const float* p0 = before + i * 3u;
++    const float* p1 = now + i * 3u;
++    // How far it moved, in the previous camera's view: a particle flies at
++    // most a few hundred units a frame.
++    double u0[3], u1[3];
++    apply(a0, p0, u0);
++    apply(a1, p1, u1);
++    const double moved = std::sqrt((u1[0] - u0[0]) * (u1[0] - u0[0]) + (u1[1] - u0[1]) * (u1[1] - u0[1]) +
++                                   (u1[2] - u0[2]) * (u1[2] - u0[2]));
++    const double distance = std::sqrt(u0[0] * u0[0] + u0[1] * u0[1] + u0[2] * u0[2]);
++    if (moved > (tagged ? 0.5 * distance + 300.0 : 0.2 * distance + 100.0))
++      return false;
++    double q0[3], q1[3];
++    apply(b0, p0, q0);
++    apply(b1, p1, q1);
++    for (int k = 0; k < 3; ++k) {
++      const double q = q0[k] + (q1[k] - q0[k]) * t;
++      out[i * 3u + k] = static_cast<float>(q);
++      moves = moves || std::fabs(q - p1[k]) > 1e-3 * (1.0 + std::fabs(p1[k]));
++    }
++  }
++  return moves;
++}
++
+ void log_counts() {
+   const auto& c = g_totalCounts;
+   std::fprintf(stderr,
+@@ -796,15 +1214,38 @@ void log_counts() {
+ bool enabled() noexcept { return g_enabled.load(std::memory_order_relaxed); }
+ void set_enabled(bool enabled) noexcept { g_enabled.store(enabled, std::memory_order_relaxed); }
+ 
+-uint64_t draw_key(const gxc::DrawPlan& plan) noexcept {
++static uint64_t draw_key_of(const gxc::DrawPlan& plan) noexcept {
+   if (plan.match_payload == nullptr || plan.match_payload_size == 0)
+     return 0;
++  if (plan.match_direct_position && plan.draw_scope_part != 0) {
++    // One of the draws a wake's emitter makes (its fans and strips), by its
++    // place among them: its vertices are the wake's particles in order (see
++    // blend_positions()).
++    const uint64_t h = mix64(0x5C0Au ^ (uint64_t(plan.draw_scope) << 8) ^ (uint64_t(plan.draw_scope_part) << 40));
++    return h == 0 ? 1 : h;
++  }
++  if (plan.match_direct_position && plan.draw_tag == 0 && plan.match_primitive == 0x90 && plan.tex_address != 0 &&
++      plan.constants.projection[3][2] != 0.f) {
++    // A textured list of triangles in the scene: a real shadow cast onto the
++    // triangles of the ground or sea under its object, in its own texture.
++    // As many as lie there: a different count every few frames as the boat
++    // sails, so the draw had a new key, went unmatched and kept the next
++    // frame's shadow projection in the in-between frame while the boat was
++    // halfway, and the shadow flickered at its edges. Paired by its texture
++    // whatever the count (its triangles are not the same points from one
++    // frame to the next, so only its matrices are blended).
++    const uint64_t h = mix64(0x0B7Eu ^ (uint64_t(plan.tex_address) << 16) ^ (uint64_t(plan.match_vtx_fmt) << 8) ^
++                             (uint64_t(plan.texmap_mask) << 48));
++    return h == 0 ? 1 : h;
++  }
+   uint64_t h = mix64((uint64_t(plan.match_primitive) << 40) ^ (uint64_t(plan.match_vtx_fmt) << 32) ^
+                      plan.vertex_count ^ (uint64_t(plan.match_payload_size) << 48));
+   if (plan.match_direct_position) {
+-    // New positions every frame: the same shape with the same texture. Its
+-    // matrices (usually the camera's) are blended, its vertices are not.
++    // New positions every frame: the same shape with the same texture, and
++    // for a particle the host tagged, that particle (see blend_positions()).
+     h = mix64(h ^ 0xD1u ^ (uint64_t(plan.tex_address) << 8) ^ (uint64_t(plan.texmap_mask) << 40));
++    if (plan.draw_tag != 0)
++      h = mix64(h ^ (uint64_t(plan.draw_tag) << 20) ^ 0x7A6u);
+     return h == 0 ? 1 : h;
+   }
+   const uint8_t* bytes = plan.match_payload;
+@@ -822,6 +1263,47 @@ uint64_t draw_key(const gxc::DrawPlan& plan) noexcept {
+   return h == 0 ? 1 : h;
+ }
+ 
++uint64_t draw_key(const gxc::DrawPlan& plan) noexcept { return draw_key_of(plan); }
++
++void capture_draw(const gxc::DrawPlan& plan, DrawInput& out) noexcept {
++  out.key = draw_key_of(plan);
++  out.usedMatrixRows = used_matrix_rows(plan);
++  out.haveSamples = false;
++  out.positions.clear();
++  out.age = 0;
++  if (out.key == 0)
++    return;
++  // Only the positions of particles the host tagged: an untagged draw of one
++  // shape is not the same points from one frame to the next (the boat's
++  // shadow is cast on the sea's triangles under it, a different list as it
++  // moves), and blending one list toward the other drew the shadow torn.
++  const size_t decoded = plan.vertices.size() / gxc::kVertexFloats;
++  if (plan.match_direct_position) {
++    if ((plan.draw_tag != 0 || plan.draw_scope_part != 0) && decoded > 0 && decoded <= kMaxBlendedVertices) {
++      out.positions.resize(decoded * 3u);
++      for (size_t i = 0; i < decoded; ++i)
++        std::memcpy(out.positions.data() + i * 3u,
++                    plan.vertices.data() + i * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float),
++                    sizeof(float) * 3);
++      out.age = plan.draw_scope_part != 0 ? 0u : plan.draw_tag_age;
++    }
++    return;
++  }
++  // Three vertices, first, middle and last, as decoded (in the space the
++  // position matrix takes them from), for blend_draw() to see whether the
++  // game moved them itself (see vertex_motion()).
++  const uint32_t count = plan.vertex_count;
++  if (count >= 3 && plan.vertices.size() >= static_cast<size_t>(count) * gxc::kVertexFloats) {
++    const uint32_t picks[3] = {0, count / 2, count - 1};
++    for (int i = 0; i < 3; ++i)
++      std::memcpy(&out.samples[i * 3],
++                  plan.vertices.data() + static_cast<size_t>(picks[i]) * gxc::kVertexFloats +
++                      gxc::kVertexPosOffset / sizeof(float),
++                  sizeof(float) * 3);
++    out.haveSamples = true;
++  }
++}
++
+ uint64_t used_matrix_rows(const gxc::DrawPlan& plan) noexcept {
+   if (!plan.pipeline.shader.has_pos_mtx_idx || plan.match_payload == nullptr || plan.match_vertex_stride == 0)
+     return 0;
+@@ -835,13 +1317,22 @@ uint64_t used_matrix_rows(const gxc::DrawPlan& plan) noexcept {
+   return rows;
+ }
+ 
+-const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRows,
+-                                             const gxc::VertexShaderConstants& current, bool repeatsLastDraw) {
++static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedMatrixRows,
++                                                   const gxc::VertexShaderConstants& current, bool repeatsLastDraw,
++                                                   const VertexSamples* samples) {
+   g_outcome = "no key";
+   g_blendRepeated = false;
+   const uint64_t serial = ++g_drawSerial;
+   if (!enabled() || key == 0)
+     return nullptr;
++  const bool haveSamples = samples != nullptr;
++  // A model drawn into a shadow map (an orthographic projection) and into the
++  // scene sends the same vertices twice. They are not copies of one another:
++  // the boat's hull, one draw of each in the shadow pass and the scene, was
++  // two copies of itself, matched as copies are (see below).
++  const bool perspective = current.projection[3][2] != 0.f;
++  if (!perspective)
++    key = mix64(key ^ 0x6F7274686F677261ull) | 1u;
+   const float (*here)[4] = position_signature(current, usedMatrixRows);
+   FrameRecords& frame = g_frames[g_current];
+   // The pool keeps a run of identical blocks once. When the draw before this
+@@ -855,9 +1346,11 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+   // path, same previous block, same motion, same matrices) from the same
+   // constants is the one g_blended holds.
+   const auto repeat = [&](BlendPath path, const void* previousBlock, const void* motion) {
+-    const bool same = repeatsLastDraw && g_lastBlend.serial + 1 == serial && g_lastBlend.path == path &&
+-                      g_lastBlend.previous == previousBlock && g_lastBlend.motion == motion &&
+-                      g_lastBlend.motionGeneration == g_motionGeneration && g_lastBlend.rows == usedMatrixRows;
++    // g_movedPrevious is made anew for each draw whose vertices moved.
++    const bool same = previousBlock != &g_movedPrevious && repeatsLastDraw && g_lastBlend.serial + 1 == serial &&
++                      g_lastBlend.path == path && g_lastBlend.previous == previousBlock &&
++                      g_lastBlend.motion == motion && g_lastBlend.motionGeneration == g_motionGeneration &&
++                      g_lastBlend.rows == usedMatrixRows;
+     g_lastBlend.serial = serial;
+     if (same)
+       return true;
+@@ -869,7 +1362,13 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     return false;
+   };
+   const auto constantsIndex = static_cast<uint32_t>(frame.pool.size() - 1);
+-  frame.records.push_back({key, constantsIndex, false, {here[0][3], here[1][3], here[2][3]}});
++  uint32_t samplesIndex = kNoSamples;
++  if (haveSamples) {
++    samplesIndex = static_cast<uint32_t>(frame.samples.size());
++    frame.samples.push_back(*samples);
++  }
++  frame.records.push_back(
++      {key, constantsIndex, samplesIndex, {here[0][3], here[1][3], here[2][3]}, false, kNoSamples, 0, g_currentAge});
+   ++g_frameCounts.draws;
+   KeyState& state = g_keys[key];
+   const uint32_t occurrence = state.occurrence++;
+@@ -879,29 +1378,75 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     return nullptr;
+   }
+ 
+-  const auto range = std::equal_range(g_previousIndex.begin(), g_previousIndex.end(), Record{key, 0, false, {}},
+-                                      [](const Record& a, const Record& b) { return a.key < b.key; });
++  auto range =
++      std::equal_range(g_previousIndex.begin(), g_previousIndex.end(), Record{key, 0, kNoSamples, {}, false, 0, 0, 0},
++                       [](const Record& a, const Record& b) { return a.key < b.key; });
++  // A particle's address is reused for a new one once it dies: a counterpart
++  // older than it, or more than two game frames younger, is another particle.
++  if (g_currentTagged && range.first != range.second &&
++      (range.first->age > g_currentAge || g_currentAge - range.first->age > 2u))
++    range.second = range.first;
+   if (range.first == range.second) {
+     ++g_frameCounts.unmatched;
+     g_outcome = "unmatched";
+-    return nullptr;
++    // No counterpart: a model come into view, or geometry whose vertex
++    // stream changes every frame. The sea is 64 strips of the view matrix
++    // whose texture coordinates follow the player's position (the grid moves
++    // with him, even as the boat bobs), so no strip keeps its key. Drawn as it
++    // is now, the whole sea would stay on the real frame's camera while the
++    // boat, the islands and the sky are on the in-between camera: at sea the
++    // waves step at 30 FPS when the camera turns, and the boat, which the
++    // camera follows, stutters against the water. What stood still in the
++    // world was where the camera's motion carries it from, so it is blended
++    // from there.
++    Motion* const view = perspective && usedMatrixRows == 0 ? camera_motion() : nullptr;
++    if (view == nullptr)
++      return nullptr;
++    if (repeat(BlendPath::Unmatched, view, nullptr)) {
++      g_outcome = "unmatched, stood still";
++      g_blendRepeated = true;
++      return &g_blended;
++    }
++    if (!stood_before(*view, current, g_stoodBefore)) {
++      g_lastBlend.serial = 0;
++      return nullptr;
++    }
++    blend_relative(*view, g_stoodBefore, current, blend_weight(), g_blended, 0);
++    g_outcome = "unmatched, stood still";
++    return &g_blended;
+   }
+   g_rejectReason = "";
+   const FrameRecords& previousFrame = g_frames[g_current ^ 1u];
+   const Record* copies = &*range.first;
++  const gxc::VertexShaderConstants* movedPrevious = nullptr; // copy 0 as this frame's vertices see it
+   const auto constantsOf = [&](size_t copy) -> const gxc::VertexShaderConstants& {
+-    return previousFrame.pool[copies[copy].constants];
++    return copy == 0 && movedPrevious != nullptr ? *movedPrevious : previousFrame.pool[copies[copy].constants];
+   };
+   const size_t candidates = static_cast<size_t>(range.second - range.first);
+-  const bool perspective = current.projection[3][2] != 0.f;
++  const double turnLimit = candidates == 1 && occurrence == 0 ? kOwnTurnLimit : kTurnLimit;
+   const gxc::VertexShaderConstants* previous = nullptr;
++  size_t chosen = 0; // previous's copy
+   // A draw with a key of its own is the same object as its counterpart, so
+   // it votes for the camera's motion whether or not the pair looks plausible
+   // yet: a fast turn makes the scenery implausible until the camera's motion
+-  // is known.
+-  if (candidates == 1 && occurrence == 0 && usedMatrixRows == 0 && perspective &&
++  // is known. So do copies that all had one block (effects drawn with the
++  // view matrix, like the wave crests at sea): whichever this one was, it
++  // moved the same way. Their first copy votes, as the key's one draw would.
++  const bool uniformCopies = candidates > 1 && copies[0].constants == copies[candidates - 1].constants;
++  // Not a tagged particle: a key of its own each, and a billboard's matrix is
++  // the identity, whose votes would outweigh the camera's.
++  if ((candidates == 1 || uniformCopies) && occurrence == 0 && usedMatrixRows == 0 && perspective && !g_currentTagged &&
+       constantsOf(0).projection[3][2] != 0.f)
+     vote_motion(current.posnormalmatrix, constantsOf(0).posnormalmatrix);
++  // A draw of its own whose vertices the game moved itself: the in-between
++  // frame keeps this frame's vertices, so the frame before's matrices are
++  // taken as they would place them (see vertex_motion()).
++  if (candidates == 1 && occurrence == 0 && samplesIndex != kNoSamples && copies[0].samples != kNoSamples &&
++      vertex_motion(previousFrame.samples[copies[0].samples], frame.samples[samplesIndex],
++                    previousFrame.pool[copies[0].constants], usedMatrixRows, g_movedPrevious)) {
++    movedPrevious = &g_movedPrevious;
++    ++g_frameCounts.moved;
++  }
+   Motion* const view = perspective ? camera_motion() : nullptr;
+ 
+   // Copies of one model (grass, bushes, trees): the copy that a motion several
+@@ -928,6 +1473,44 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     }
+     return false;
+   };
++  // A copy the same size as this draw to within two percent, the nearest of
++  // those to it in the view and near enough for a frame, is this one, and may
++  // turn as far as a draw of its own. A broken pot's shards are one model
++  // drawn at random sizes, flying apart and tumbling faster than copies are
++  // let turn (kTurnLimit), so each was drawn where the next frame has it.
++  size_t nearestCopy = SIZE_MAX;
++  const auto size_of = [&](const float(*m)[4]) {
++    double size = 0.0;
++    for (int r = 0; r < 3; ++r)
++      for (int c = 0; c < 3; ++c)
++        size += double(m[r][c]) * m[r][c];
++    return size;
++  };
++  const auto same_copy = [&](size_t copy) {
++    if (nearestCopy == SIZE_MAX) {
++      nearestCopy = candidates;
++      const double size = size_of(here);
++      double best = HUGE_VAL;
++      for (size_t i = 0; i < std::min<size_t>(candidates, 256); ++i) {
++        const double other = size_of(position_signature(constantsOf(i), usedMatrixRows));
++        if (!(other > 1e-12) || std::fabs(size / other - 1.0) >= 0.04) // squared sizes: 2 percent
++          continue;
++        const double d = translation_distance2(here, copies[i].position);
++        if (d < best) {
++          best = d;
++          nearestCopy = i;
++        }
++      }
++    }
++    const double reach = 40.0 + 0.01 * translation_length(here);
++    return copy == nearestCopy && translation_distance2(here, copies[copy].position) <= reach * reach;
++  };
++  const auto plausible_copy = [&](size_t copy) {
++    if (plausible_relative(view, current, constantsOf(copy), usedMatrixRows, turnLimit))
++      return true;
++    return turnLimit < kOwnTurnLimit && same_copy(copy) &&
++           plausible_relative(view, current, constantsOf(copy), usedMatrixRows, kOwnTurnLimit);
++  };
+   size_t pick = candidates;
+   // How far the camera's motion puts the nearest copy that stood still.
+   double nearestStill = HUGE_VAL;
+@@ -949,8 +1532,10 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     state.next = static_cast<uint32_t>(pick + 1);
+     frame.records.back().still = motion_error(*camera, here, copies[pick].position) <= tolerance;
+     const auto& candidate = constantsOf(pick);
+-    if (plausible_relative(view, current, candidate, usedMatrixRows))
++    if (plausible_copy(pick)) {
+       previous = &candidate;
++      chosen = pick;
++    }
+   } else {
+     // Without such a copy, a copy that stood still would have been carried
+     // here had it been this one, unless it has just started to move (an idle
+@@ -958,15 +1543,31 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     // (grass, pots), one that moved is this draw only if it moved at an
+     // actor's pace (a pot Link carries) and no copy that stood still is
+     // nearer; otherwise this draw is a copy that has just come into view.
++    // A few copies none of which stood still are one moving model drawn more
++    // than once (the same parts in two passes): they move as fast as it
++    // does, the boat under full sail 100 units a frame, so a plausible one
++    // is usable at any pace.
++    bool fewMoving = candidates <= kFewCopies;
++    for (size_t i = 0; fewMoving && i < candidates; ++i)
++      fewMoving = !copies[i].still;
+     const auto usable = [&](size_t copy) {
+       if (camera == nullptr)
+         return true;
+       const double moved = motion_error(*camera, here, copies[copy].position);
+       if (copies[copy].still)
+         return moved <= 4.0 * tolerance;
++      // One that kept its place in the view: it moves with the camera, which
++      // follows it (the boat's shadow volume, the same box for every real
++      // shadow, as the boat sails 60 units a frame).
++      const double reach = 40.0 + 0.01 * translation_length(here);
++      if (translation_distance2(here, copies[copy].position) <= reach * reach)
++        return true;
+       // A copy that moved at an actor's pace (a pot Link carries), when no
+       // copy that stood still is nearer.
+-      return moved < nearestStill && moved <= 40.0 + 0.01 * translation_length(here);
++      if (!(moved < nearestStill))
++        return false;
++      return moved <= 40.0 + 0.01 * translation_length(here) ||
++             (fewMoving && plausible_relative(view, current, constantsOf(copy), usedMatrixRows, turnLimit));
+     };
+     bool anyUsable = false;
+     // The same occurrence of the key: a model drawn from a fixed list (a
+@@ -974,8 +1575,10 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     if (occurrence < candidates && usable(occurrence)) {
+       anyUsable = true;
+       const auto& candidate = constantsOf(occurrence);
+-      if (plausible_relative(view, current, candidate, usedMatrixRows))
++      if (plausible_copy(occurrence)) {
+         previous = &candidate;
++        chosen = occurrence;
++      }
+     }
+     if (previous == nullptr && candidates > 1) {
+       // Copies that changed places (a depth-sorted list): the nearest plausible.
+@@ -986,9 +1589,9 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+           continue;
+         anyUsable = true;
+         const double d = translation_distance2(here, copies[i].position);
+-        if ((previous == nullptr || d < bestDistance) &&
+-            plausible_relative(view, current, constantsOf(i), usedMatrixRows)) {
++        if ((previous == nullptr || d < bestDistance) && plausible_copy(i)) {
+           previous = &constantsOf(i);
++          chosen = i;
+           bestDistance = d;
+         }
+       }
+@@ -1005,7 +1608,7 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+       // turns). It stood where the camera's motion carries it from, so it is
+       // blended from there.
+       if (usedMatrixRows != 0 || !stood_before(*camera, current, g_stoodBefore) ||
+-          !plausible_relative(view, current, g_stoodBefore, 0))
++          !plausible_relative(view, current, g_stoodBefore, 0, kTurnLimit))
+         return nullptr;
+       if (repeat(BlendPath::StoodBefore, camera, view)) {
+         g_blendRepeated = true;
+@@ -1031,10 +1634,13 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+       ++g_frameCounts.blended;
+       g_outcome = "blended by its own motion";
+       g_blendRepeated = true;
++      g_match = {&copies[0], &constantsOf(0), &g_ownMotion}; // made for the same draw before this one
+       return &g_blended;
+     }
+-    Motion own{};
++    Motion& own = g_ownMotion;
++    own = Motion{};
+     if (own_motion(constantsOf(0).posnormalmatrix, current.posnormalmatrix, own) && derive(own)) {
++      g_match = {&copies[0], &constantsOf(0), &g_ownMotion};
+       blend_relative(own, constantsOf(0), current, blend_weight(), g_blended, usedMatrixRows);
+       ++g_frameCounts.blended;
+       g_outcome = "blended by its own motion";
+@@ -1050,6 +1656,7 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+   }
+   ++g_frameCounts.matched;
+   const bool relative = view != nullptr && previous->projection[3][2] != 0.f;
++  g_match = {&copies[chosen], previous, relative ? view : nullptr};
+   if (repeat(BlendPath::Main, previous, relative ? view : nullptr)) {
+     if (g_lastBlend.identical) {
+       ++g_frameCounts.identical;
+@@ -1076,6 +1683,54 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+   return &g_blended;
+ }
+ 
++const gxc::VertexShaderConstants* blend_draw(const DrawInput& input, const gxc::VertexShaderConstants& current,
++                                             bool repeatsLastDraw) {
++  g_haveBlendedPositions = false;
++  g_match = {};
++  const bool havePositions = !input.positions.empty();
++  const uint32_t count = static_cast<uint32_t>(input.positions.size() / 3u);
++  g_currentTagged = havePositions;
++  g_currentAge = havePositions ? input.age : 0u;
++  FrameRecords& frame = g_frames[g_current];
++  const size_t recorded = frame.records.size();
++  const gxc::VertexShaderConstants* result = match_draw(input.key, input.usedMatrixRows, current, repeatsLastDraw,
++                                                        input.haveSamples ? &input.samples : nullptr);
++  g_currentTagged = false;
++  g_currentAge = 0;
++  // A particle's positions: kept for the next frame, and blended when the
++  // draw was matched (in 3D or 2D, with one matrix).
++  if (!havePositions || frame.records.size() == recorded || input.usedMatrixRows != 0)
++    return result;
++  Record& record = frame.records.back();
++  record.positions = static_cast<uint32_t>(frame.positions.size() / 3u);
++  record.positionCount = count;
++  frame.positions.insert(frame.positions.end(), input.positions.begin(), input.positions.end());
++  const Record* before = g_match.record;
++  if (before == nullptr || g_match.block == nullptr || before->positions == kNoSamples ||
++      before->positionCount != count)
++    return result;
++  const FrameRecords& previousFrame = g_frames[g_current ^ 1u];
++  const float* now = frame.positions.data() + static_cast<size_t>(record.positions) * 3u;
++  const float* then = previousFrame.positions.data() + static_cast<size_t>(before->positions) * 3u;
++  const float(*inBetween)[4] = result != nullptr ? result->posnormalmatrix : current.posnormalmatrix;
++  g_haveBlendedPositions =
++      blend_positions(then, now, count, g_match.block->posnormalmatrix, current.posnormalmatrix, g_match.motion,
++                      inBetween, blend_weight(), true, g_blendedPositions);
++  if (g_haveBlendedPositions)
++    ++g_frameCounts.positions;
++  return result;
++}
++
++const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRows,
++                                             const gxc::VertexShaderConstants& current, bool repeatsLastDraw) {
++  DrawInput input;
++  input.key = key;
++  input.usedMatrixRows = usedMatrixRows;
++  return blend_draw(input, current, repeatsLastDraw);
++}
++
++const float* blended_positions() noexcept { return g_haveBlendedPositions ? g_blendedPositions.data() : nullptr; }
++
+ bool last_blend_repeated() noexcept { return g_blendRepeated; }
+ 
+ bool frame_verdict() noexcept {
+@@ -1132,14 +1787,16 @@ void end_game_frame() noexcept {
+               180.0 / M_PI;
+     std::fprintf(stderr,
+                  "[frame-interp-frame] frame=%llu verdict=%d draws=%llu blended=%llu rejected=%llu unmatched=%llu "
+-                 "camera=%s turn=%.1f votes=%u fresh=%llu\n",
++                 "camera=%s turn=%.1f votes=%u fresh=%llu moved=%llu positions=%llu\n",
+                  static_cast<unsigned long long>(g_gameFrame.load(std::memory_order_relaxed)), g_lastVerdictSeen,
+                  static_cast<unsigned long long>(g_frameCounts.draws),
+                  static_cast<unsigned long long>(g_frameCounts.blended),
+                  static_cast<unsigned long long>(g_frameCounts.rejected),
+                  static_cast<unsigned long long>(g_frameCounts.unmatched),
+                  camera == nullptr ? "none" : (camera == &g_predicted ? "predicted" : "voted"), angle,
+-                 camera == nullptr ? 0u : camera->votes, static_cast<unsigned long long>(g_frameCounts.fresh));
++                 camera == nullptr ? 0u : camera->votes, static_cast<unsigned long long>(g_frameCounts.fresh),
++                 static_cast<unsigned long long>(g_frameCounts.moved),
++                 static_cast<unsigned long long>(g_frameCounts.positions));
+   }
+   g_frameCounts = {};
+ 
+@@ -1182,7 +1839,10 @@ bool dump_frame(uint64_t frame) noexcept {
+ }
+ 
+ const char* last_outcome() noexcept { return g_outcome; }
+-bool tracing() noexcept { return g_traceFrame != 0 && g_gameFrame.load(std::memory_order_relaxed) == g_traceFrame; }
++bool tracing() noexcept {
++  const uint64_t frame = g_gameFrame.load(std::memory_order_relaxed);
++  return g_trace.first != 0 && frame >= g_trace.first && frame <= g_trace.last;
++}
+ 
+ uint64_t game_frame_number() noexcept { return g_gameFrame.load(std::memory_order_relaxed); }
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index a5dc4f7..1b6eca1 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -24,7 +24,9 @@
+ // passes are encoded once more with the blended blocks and presented at once,
+ // and the real frame follows half a game frame later.
+ 
++#include <array>
+ #include <cstdint>
++#include <vector>
+ 
+ #include <gxruntime/gxcore/shader.hpp>
+ 
+@@ -40,15 +42,40 @@ uint64_t draw_key(const gxruntime::gxcore::DrawPlan& plan) noexcept;
+ // a vertex uses the position matrix starting at XF row r. 0 otherwise.
+ uint64_t used_matrix_rows(const gxruntime::gxcore::DrawPlan& plan) noexcept;
+ 
+-// Recording thread, once per submitted gxcore draw. Returns the constants the
+-// draw uses in the in-between frame, or nullptr when they are its own (no
+-// match, an implausible match, or nothing moved). The pointer is valid until
+-// the next call. repeats_last_draw: `current` is the constants of the draw
+-// before this one (the caller already compared them), so they are not
+-// compared again, and an in-between block made from the same match is reused.
++// What blend_draw() needs of a draw besides its constants, captured from its
++// plan on the recording thread (the draw may be matched later, on another
++// thread): its key and indexed matrix rows, three of its vertices (for a
++// model the game skins on the CPU; see vertex_motion()), and a tagged
++// particle's positions (x, y, z per decoded vertex) and age.
++struct DrawInput {
++  uint64_t key = 0;
++  uint64_t usedMatrixRows = 0;
++  bool haveSamples = false;
++  std::array<float, 9> samples{};
++  std::vector<float> positions;
++  uint32_t age = 0;
++};
++void capture_draw(const gxruntime::gxcore::DrawPlan& plan, DrawInput& out) noexcept;
++
++// Once per submitted gxcore draw, in draw order, on one thread at a time.
++// Returns the constants the draw uses in the in-between frame, or nullptr
++// when they are its own (no match, an implausible match, or nothing moved).
++// The pointer is valid until the next call. repeats_last_draw: `current` is
++// the constants of the draw before this one (the caller already compared
++// them), so they are not compared again, and an in-between block made from
++// the same match is reused.
++const gxruntime::gxcore::VertexShaderConstants* blend_draw(const DrawInput& input,
++                                                           const gxruntime::gxcore::VertexShaderConstants& current,
++                                                           bool repeats_last_draw = false);
++// A draw known by its key and rows alone (no samples or positions).
+ const gxruntime::gxcore::VertexShaderConstants* blend_draw(
+     uint64_t key, uint64_t used_matrix_rows,
+     const gxruntime::gxcore::VertexShaderConstants& current, bool repeats_last_draw = false);
++// For a draw whose positions came in its payload (particles, the sword's
++// trail): after blend_draw(), the in-between frame's positions (x, y, z per
++// decoded vertex), valid until the next call, or nullptr when it draws its own.
++const float* blended_positions() noexcept;
++
+ // Whether the last blend_draw() returned the same in-between block as the call
+ // before it (its bytes unchanged), so the caller need not compare them.
+ bool last_blend_repeated() noexcept;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 48ae6eb..1796f97 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -646,14 +646,18 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+   // The in-between frame reads a moved draw's blended constants from their
+   // own area; every other draw keeps its own.
+   const bool interpolated = frame_interp::encoding_interpolated();
+-  const Range interpRange =
+-      interpolated && data.interpJob != UINT32_MAX ? interp_job_range(data.interpJob) : data.interpUniformRange;
+-  const bool blended = interpolated && interpRange.size != 0;
++  const InterpRanges interp = !interpolated                    ? InterpRanges{}
++                              : data.interpJob != UINT32_MAX ? interp_job_ranges(data.interpJob)
++                                                               : InterpRanges{data.interpUniformRange, data.interpVertRange};
++  const bool blended = interp.uniform.size != 0;
+   const auto& vsGroup = blended ? g_interpUniformBindGroup : g_uniformBindGroup;
+-  const std::array vsOffsets{blended ? interpRange.offset : data.uniformRange.offset};
++  const std::array vsOffsets{blended ? interp.uniform.offset : data.uniformRange.offset};
+   pass.SetBindGroup(1, vsGroup, vsOffsets.size(), vsOffsets.data());
+-  pass.SetVertexBuffer(0, g_vertexBuffer, data.vertRange.offset,
+-                       data.vertRange.size);
++  // A particle's vertices, blended, from the in-between vertex area.
++  if (interp.verts.size != 0)
++    pass.SetVertexBuffer(0, g_interpVertexBuffer, interp.verts.offset, interp.verts.size);
++  else
++    pass.SetVertexBuffer(0, g_vertexBuffer, data.vertRange.offset, data.vertRange.size);
+   pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16,
+                       data.idxRange.offset, data.idxRange.size);
+   if (data.depthPipeline != 0) {
+@@ -847,18 +851,30 @@ static Range push_interp_uniform_dedup(UniformCache& cache, uint64_t frameId, si
+ // Windows PC: 2026-09-29), so a helper thread does it, in draw order, while
+ // the worker goes on. Each draw records its job; end_frame waits for the
+ // helper before a frame packet is handed on, and the render worker reads the
+-// finished ranges (interp_job_range). One recording thread at a time queues
++// finished ranges (interp_job_ranges). One recording thread at a time queues
+ // jobs (the recording lock serialises them), so the queue is single-producer.
+ namespace {
+ struct InterpJob {
+-  uint64_t key;
+-  uint64_t usedMatrixRows;
++  frame_interp::DrawInput input; // its key, samples and a particle's positions
++  std::vector<float> vertices;   // a particle's decoded vertices, for its blended copy
+   uint64_t frameId;
+   size_t slot;
+   bool repeatsLastDraw; // the constants are the draw before's (repeats_cached)
+   gxc::VertexShaderConstants constants;
+ };
+ 
++// A particle's in-between vertices: its own, with the blended positions, in
++// the in-between vertex area of `slot`.
++Range push_blended_vertices(size_t slot, const std::vector<float>& vertices, const float* positions,
++                            std::vector<float>& scratch) {
++  scratch.assign(vertices.begin(), vertices.end());
++  const size_t count = scratch.size() / gxc::kVertexFloats;
++  for (size_t i = 0; i < count; ++i)
++    std::memcpy(scratch.data() + i * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float), positions + i * 3u,
++                sizeof(float) * 3u);
++  return push_interp_vertices(slot, reinterpret_cast<const uint8_t*>(scratch.data()), scratch.size() * sizeof(float));
++}
++
+ struct InterpHelper {
+   static constexpr uint64_t Capacity = 1024;
+   std::unique_ptr<InterpJob[]> ring{new InterpJob[Capacity]};
+@@ -871,8 +887,9 @@ struct InterpHelper {
+   // Recording thread: the frame packet being queued and its job count.
+   uint64_t packet = 0;
+   uint32_t jobs = 0;
+-  // Helper thread: the last block it staged.
++  // Helper thread: the last block it staged, and a particle's vertices.
+   UniformCache cache;
++  std::vector<float> vertices;
+ };
+ 
+ // Made with the thread and never destroyed: the detached thread may still be
+@@ -907,18 +924,19 @@ void interp_helper_main(InterpHelper* h) {
+       continue;
+     }
+     const InterpJob& job = h->ring[tail % InterpHelper::Capacity];
+-    Range range{};
+-    if (const auto* blended =
+-            frame_interp::blend_draw(job.key, job.usedMatrixRows, job.constants, job.repeatsLastDraw))
+-      range = push_interp_uniform_dedup(h->cache, job.frameId, job.slot, reinterpret_cast<const uint8_t*>(blended),
+-                                        sizeof(*blended), frame_interp::last_blend_repeated());
+-    resolve_interp_job(job.slot, range);
++    InterpRanges ranges{};
++    if (const auto* blended = frame_interp::blend_draw(job.input, job.constants, job.repeatsLastDraw))
++      ranges.uniform = push_interp_uniform_dedup(h->cache, job.frameId, job.slot,
++                                                 reinterpret_cast<const uint8_t*>(blended), sizeof(*blended),
++                                                 frame_interp::last_blend_repeated());
++    if (const float* positions = frame_interp::blended_positions())
++      ranges.verts = push_blended_vertices(job.slot, job.vertices, positions, h->vertices);
++    resolve_interp_job(job.slot, ranges);
+     h->consumed.store(tail + 1, std::memory_order_release);
+   }
+ }
+ 
+-uint32_t queue_interp_job(uint64_t key, uint64_t usedMatrixRows, const gxc::VertexShaderConstants& constants,
+-                          bool repeatsLastDraw) {
++uint32_t queue_interp_job(const gxc::DrawPlan& plan, bool repeatsLastDraw) {
+   InterpHelper* h = g_interpHelper.load(std::memory_order_acquire);
+   if (h == nullptr) {
+     h = new InterpHelper;
+@@ -934,12 +952,15 @@ uint32_t queue_interp_job(uint64_t key, uint64_t usedMatrixRows, const gxc::Vert
+   while (head - h->consumed.load(std::memory_order_acquire) >= InterpHelper::Capacity)
+     std::this_thread::yield();
+   InterpJob& job = h->ring[head % InterpHelper::Capacity];
+-  job.key = key;
+-  job.usedMatrixRows = usedMatrixRows;
++  frame_interp::capture_draw(plan, job.input);
++  if (job.input.positions.empty())
++    job.vertices.clear();
++  else
++    job.vertices.assign(plan.vertices.begin(), plan.vertices.end());
+   job.frameId = frameId;
+   job.slot = recording_frame_slot();
+   job.repeatsLastDraw = repeatsLastDraw;
+-  std::memcpy(&job.constants, &constants, sizeof(constants));
++  std::memcpy(&job.constants, &plan.constants, sizeof(plan.constants));
+   h->produced.store(head + 1, std::memory_order_seq_cst);
+   if (h->sleeping.load(std::memory_order_seq_cst)) {
+     std::lock_guard lock{h->mutex};
+@@ -1364,16 +1385,26 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   const bool matchHere = interpolating && frame_interp::tracing();
+   if (matchHere)
+     wait_interp_jobs();
++  static frame_interp::DrawInput tracedInput;
++  if (matchHere)
++    frame_interp::capture_draw(plan, tracedInput);
+   const gxc::VertexShaderConstants* interpConstants =
+-      matchHere ? frame_interp::blend_draw(frame_interp::draw_key(plan), frame_interp::used_matrix_rows(plan),
+-                                           plan.constants, repeatsLast)
+-                : nullptr;
++      matchHere ? frame_interp::blend_draw(tracedInput, plan.constants, repeatsLast) : nullptr;
++  // The helper is idle while a frame is traced, so its areas are ours.
++  static std::vector<float> tracedVertices;
++  const float* tracedPositions = matchHere ? frame_interp::blended_positions() : nullptr;
++  const Range interpVertRange =
++      tracedPositions != nullptr
++          ? push_blended_vertices(recording_frame_slot(), plan.vertices, tracedPositions, tracedVertices)
++          : Range{};
+   if (frame_interp::tracing()) {
+     const auto& m = plan.constants.posnormalmatrix;
+     std::fprintf(stderr,
+-                 "[frame-interp-trace] %s key=%016llx prim=0x%02X fmt=%u verts=%u payload=%u idx=%d "
+-                 "t=(%.1f,%.1f,%.1f) s=%.3f proj00=%.3f proj32=%.1f tex=%08X bt=(%.1f,%.1f,%.1f) bt0=(%.1f,%.1f,%.1f)\n",
+-                 frame_interp::last_outcome(), static_cast<unsigned long long>(frame_interp::draw_key(plan)),
++                 "[frame-interp-trace] frame=%llu %s key=%016llx prim=0x%02X fmt=%u verts=%u payload=%u idx=%d "
++                 "t=(%.1f,%.1f,%.1f) s=%.3f proj00=%.3f proj32=%.1f tex=%08X bt=(%.1f,%.1f,%.1f) bt0=(%.1f,%.1f,%.1f) "
++                 "direct=%d tag=%06X age=%u positions=%d\n",
++                 static_cast<unsigned long long>(frame_interp::game_frame_number()), frame_interp::last_outcome(),
++                 static_cast<unsigned long long>(frame_interp::draw_key(plan)),
+                  plan.match_primitive, plan.match_vtx_fmt, plan.vertex_count, plan.match_payload_size,
+                  plan.pipeline.shader.has_pos_mtx_idx, m[0][3], m[1][3], m[2][3],
+                  std::sqrt(m[0][0] * m[0][0] + m[1][0] * m[1][0] + m[2][0] * m[2][0]), plan.constants.projection[0][0],
+@@ -1383,7 +1414,9 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                  interpConstants ? interpConstants->posnormalmatrix[2][3] : 0.f,
+                  interpConstants ? interpConstants->transformmatrices[0][3] - plan.constants.transformmatrices[0][3] : 0.f,
+                  interpConstants ? interpConstants->transformmatrices[1][3] - plan.constants.transformmatrices[1][3] : 0.f,
+-                 interpConstants ? interpConstants->transformmatrices[2][3] - plan.constants.transformmatrices[2][3] : 0.f);
++                 interpConstants ? interpConstants->transformmatrices[2][3] - plan.constants.transformmatrices[2][3] : 0.f,
++                 plan.match_direct_position ? 1 : 0, plan.draw_tag, plan.draw_tag_age,
++                 tracedPositions != nullptr ? 1 : 0);
+   }
+   if (!staging_has_capacity(vertBytes, indexBytes, sizeof(plan.constants),
+                             pixelUniformBytes)) {
+@@ -1411,8 +1444,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+         g_interpUniformCache, current_frame_id(), recording_frame_slot(), reinterpret_cast<const uint8_t*>(interpConstants),
+         sizeof(*interpConstants), frame_interp::last_blend_repeated());
+   else if (interpolating && !matchHere)
+-    interpJob = queue_interp_job(frame_interp::draw_key(plan), frame_interp::used_matrix_rows(plan), plan.constants,
+-                                 repeatsLast);
++    interpJob = queue_interp_job(plan, repeatsLast);
+   Range pixelUniformRange{};
+   if (tev) {
+     pixelUniformRange = push_uniform_dedup(
+@@ -1439,6 +1471,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       .idxRange = idxRange,
+       .uniformRange = uniformRange,
+       .interpUniformRange = interpUniformRange,
++      .interpVertRange = interpVertRange,
+       .interpJob = interpJob,
+       .pixelUniformRange = pixelUniformRange,
+       .indexCount = static_cast<uint32_t>(plan.indices.size()),
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index d13fb58..1b092c0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -22,7 +22,11 @@ struct DrawData {
+   // The constants blended toward the previous frame, used while the
+   // in-between frame is encoded (frame_interp.hpp); uniformRange otherwise.
+   Range interpUniformRange;
+-  // Or the helper thread's job that makes them (interp_job_range), when the
++  // And its vertices, for a particle whose positions came in its payload,
++  // blended toward the previous frame's (in the in-between vertex area);
++  // vertRange otherwise.
++  Range interpVertRange;
++  // Or the helper thread's job that makes both (interp_job_ranges), when the
+   // draw was matched off the recording thread; UINT32_MAX when not.
+   uint32_t interpJob = UINT32_MAX;
+   Range pixelUniformRange;  // PixelShaderConstants (group 2), TEV path only
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 92b9c2e..635fb82 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -94,6 +94,13 @@ static bool halfway(const Result& result, const Camera& before, const Camera& no
+   return true;
+ }
+ 
++// A draw submitted as gxcore_draw.cpp does: its inputs captured from the plan.
++static const gxc::VertexShaderConstants* blend_plan(const gxc::DrawPlan& plan, const gxc::VertexShaderConstants& c) {
++  static fi::DrawInput input;
++  fi::capture_draw(plan, input);
++  return fi::blend_draw(input, c);
++}
++
+ int main() {
+   fi::set_enabled(true);
+   const uint64_t kShip = 11, kTree = 22, kHud = 33;
+@@ -312,6 +319,533 @@ int main() {
+     fi::end_game_frame();
+   }
+ 
++  // Sailing: the camera follows the boat. The sea is strips drawn with the
++  // view matrix whose texture coordinates follow the player, so each strip's
++  // key is new every frame (no counterpart). In the in-between frame the sea
++  // must still be seen from the in-between camera, like the islands and the
++  // boat, or the water steps at 30 FPS under a boat that moves at 60.
++  {
++    fi::end_game_frame();
++    fi::end_game_frame();
++    const auto near_translation = [](const gxc::VertexShaderConstants& got, const gxc::VertexShaderConstants& a,
++                                     const gxc::VertexShaderConstants& b) {
++      float length = 0.f;
++      for (int r = 0; r < 3; ++r) {
++        const float expected = (a.posnormalmatrix[r][3] + b.posnormalmatrix[r][3]) / 2.f;
++        length += expected * expected;
++      }
++      const float tolerance = 0.003f * std::sqrt(length) + 0.05f;
++      for (int r = 0; r < 3; ++r) {
++        const float expected = (a.posnormalmatrix[r][3] + b.posnormalmatrix[r][3]) / 2.f;
++        if (std::fabs(got.posnormalmatrix[r][3] - expected) > tolerance)
++          return false;
++      }
++      return true;
++    };
++    // The boat sails 30 units a frame along -z; the camera 600 units behind it
++    // turns a degree a frame.
++    const auto camera_at = [](int frame) { return Camera{float(frame), 0.f, 600.f - 30.f * frame}; };
++    const auto boat_z = [](int frame) { return -30.f * frame; };
++    uint64_t seaKey = 5000;
++    const auto sail = [&](int frame, Result* sea, Result& boat, Result* rooms) {
++      const Camera c = camera_at(frame);
++      for (int room = 0; room < 8; ++room) {
++        const auto* r = fi::blend_draw(8100 + room, 0,
++                                       seen(c.yaw, c.x, c.z, room * 500.f - 2000.f, -60.f, -6000.f - room * 70.f));
++        rooms[room].blended = r != nullptr;
++        if (r != nullptr)
++          rooms[room].constants = *r;
++      }
++      const auto* b = fi::blend_draw(8200, 0, seen(c.yaw, c.x, c.z, 0.f, 20.f, boat_z(frame)));
++      boat.blended = b != nullptr;
++      if (b != nullptr)
++        boat.constants = *b;
++      for (int strip = 0; strip < 8; ++strip) {
++        const auto* s = fi::blend_draw(++seaKey, 0, seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f), strip > 0);
++        sea[strip].blended = s != nullptr;
++        if (s != nullptr)
++          sea[strip].constants = *s;
++      }
++    };
++    Result sea[8], boat, rooms[8];
++    sail(0, sea, boat, rooms);
++    fi::end_game_frame();
++    sail(1, sea, boat, rooms);
++    fi::end_game_frame();
++    sail(2, sea, boat, rooms);
++    CHECK(fi::frame_verdict());
++    const auto viewBefore = seen(camera_at(1).yaw, camera_at(1).x, camera_at(1).z, 0.f, 0.f, 0.f);
++    const auto viewNow = seen(camera_at(2).yaw, camera_at(2).x, camera_at(2).z, 0.f, 0.f, 0.f);
++    bool seaHalfway = true;
++    for (int strip = 0; strip < 8; ++strip)
++      seaHalfway = seaHalfway && sea[strip].blended && near_translation(sea[strip].constants, viewBefore, viewNow);
++    CHECK(seaHalfway);
++    // Every strip the same: the in-between block of the first is reused.
++    CHECK(sea[7].blended && std::memcmp(&sea[7].constants, &sea[0].constants, sizeof(sea[0].constants)) == 0);
++    const auto boatBefore = seen(camera_at(1).yaw, camera_at(1).x, camera_at(1).z, 0.f, 20.f, boat_z(1));
++    const auto boatNow = seen(camera_at(2).yaw, camera_at(2).x, camera_at(2).z, 0.f, 20.f, boat_z(2));
++    CHECK(boat.blended && near_translation(boat.constants, boatBefore, boatNow));
++    fi::end_game_frame();
++
++    // Turning at open sea, in the game's order: a few draws with the view
++    // matrix (effects, some of them copies), the sky around the camera, then
++    // the boat's many parts, then distant copies (rocks, clouds), the wave
++    // crests (copies drawn with the view matrix) and the far islands last.
++    // The boat's parts, which hardly move in the camera's view, outnumber
++    // everything drawn before the scenery, but the camera's motion must still
++    // be the one that carries the distant copies and the crests.
++    fi::end_game_frame();
++    fi::end_game_frame();
++    const auto turning = [](int frame) { return Camera{2.f * frame, 0.f, 600.f - 30.f * frame}; };
++    // The camera follows the boat as it turns: the boat stays in front of it,
++    // bobbing a little.
++    const auto boat_part = [](int part, int frame) {
++      return draw_at(part * 2.f, 20.f + part + 0.5f * (frame % 2), -600.f - part);
++    };
++    Result far[5], crests[10], boatParts[20];
++    const auto open_sea = [&](int frame, bool check) {
++      const Camera c = turning(frame);
++      fi::blend_draw(9001, 0, seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f));
++      fi::blend_draw(9002, 0, seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f), true);
++      for (int effect = 0; effect < 3; ++effect)
++        for (int copy = 0; copy < 12; ++copy)
++          fi::blend_draw(9010 + effect, 0, seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f), true);
++      for (int sky = 0; sky < 8; ++sky)
++        fi::blend_draw(9020 + sky, 0, seen(c.yaw, c.x, c.z, c.x + sky * 3.f, 40.f * sky, c.z - 5.f * sky));
++      for (int part = 0; part < 20; ++part) {
++        const auto* p = fi::blend_draw(9100 + part, 0, boat_part(part, frame));
++        boatParts[part].blended = p != nullptr;
++        if (p != nullptr)
++          boatParts[part].constants = *p;
++      }
++      for (int copy = 0; copy < 5; ++copy) {
++        const auto* p = fi::blend_draw(9200, 0, seen(c.yaw, c.x, c.z, -4000.f + copy * 2000.f, 300.f, -30000.f));
++        far[copy].blended = p != nullptr;
++        if (p != nullptr)
++          far[copy].constants = *p;
++      }
++      for (int copy = 0; copy < 10; ++copy) {
++        const auto* p = fi::blend_draw(9300, 0, seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f), copy > 0);
++        crests[copy].blended = p != nullptr;
++        if (p != nullptr)
++          crests[copy].constants = *p;
++      }
++      for (int island = 0; island < 6; ++island)
++        fi::blend_draw(9400 + island, 0,
++                       seen(c.yaw, c.x, c.z, island * 20000.f - 50000.f, -100.f, -80000.f - island * 5000.f));
++      if (!check)
++        return;
++      const Camera b = turning(frame - 1);
++      bool farHalfway = true;
++      for (int copy = 0; copy < 5; ++copy) {
++        const float x = -4000.f + copy * 2000.f;
++        farHalfway = farHalfway && far[copy].blended &&
++                     near_translation(far[copy].constants, seen(b.yaw, b.x, b.z, x, 300.f, -30000.f),
++                                      seen(c.yaw, c.x, c.z, x, 300.f, -30000.f));
++      }
++      CHECK(farHalfway);
++      bool crestsHalfway = true;
++      for (int copy = 0; copy < 10; ++copy)
++        crestsHalfway = crestsHalfway && crests[copy].blended &&
++                        near_translation(crests[copy].constants, seen(b.yaw, b.x, b.z, 0.f, 0.f, 0.f),
++                                         seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f));
++      CHECK(crestsHalfway);
++      bool boatHalfway = true;
++      for (int part = 0; part < 20; ++part)
++        boatHalfway = boatHalfway && boatParts[part].blended &&
++                      near_translation(boatParts[part].constants, boat_part(part, frame - 1), boat_part(part, frame));
++      CHECK(boatHalfway);
++    };
++    open_sea(0, false);
++    fi::end_game_frame();
++    open_sea(1, false);
++    fi::end_game_frame();
++    open_sea(2, true);
++    CHECK(fi::frame_verdict());
++    fi::end_game_frame();
++    open_sea(3, true);
++    fi::end_game_frame();
++  }
++
++  // Under full sail (100 units a frame, the camera following): the hull is
++  // skinned and each of its parts is drawn twice, into the shadow map (an
++  // orthographic projection) and into the scene, and some parts twice into
++  // the scene. None of these draws is a copy come into view: each must be
++  // drawn halfway, or the in-between frame shows a second hull ahead of it.
++  {
++    fi::end_game_frame();
++    fi::end_game_frame();
++    const auto camera_at = [](int frame) { return Camera{1.f * frame, 0.f, 700.f - 100.f * frame}; };
++    // A skinned draw of a model at world (x, y, z): its matrix in XF row 0.
++    const auto skinned = [](const Camera& c, float x, float y, float z, bool shadowMap) {
++      auto constants = seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f);
++      const auto model = seen(c.yaw, c.x, c.z, x, y, z);
++      std::memcpy(constants.transformmatrices[0], model.posnormalmatrix, sizeof(float) * 12);
++      if (shadowMap) {
++        std::memset(constants.projection, 0, sizeof(constants.projection));
++        constants.projection[0][0] = constants.projection[1][1] = 0.002f;
++        constants.projection[2][2] = -0.001f;
++        constants.projection[3][3] = 1.f;
++      }
++      return constants;
++    };
++    const auto hull_z = [](int frame) { return 100.f - 100.f * frame; };
++    const auto halfway_row0 = [](const gxc::VertexShaderConstants* got, const gxc::VertexShaderConstants& a,
++                                 const gxc::VertexShaderConstants& b) {
++      if (got == nullptr)
++        return false;
++      for (int r = 0; r < 3; ++r) {
++        const float expected = (a.transformmatrices[r][3] + b.transformmatrices[r][3]) / 2.f;
++        if (std::fabs(got->transformmatrices[r][3] - expected) > 0.5f)
++          return false;
++      }
++      return true;
++    };
++    bool hullHalfway = true, twiceHalfway = true;
++    for (int frame = 0; frame < 4; ++frame) {
++      const Camera c = camera_at(frame), b = camera_at(frame - 1);
++      for (int room = 0; room < 8; ++room)
++        fi::blend_draw(9500 + room, 0, seen(c.yaw, c.x, c.z, room * 700.f - 2500.f, -60.f, -5000.f - room * 90.f));
++      for (int part = 0; part < 3; ++part)
++        fi::blend_draw(9600 + part, 1, skinned(c, part * 30.f, 0.f, hull_z(frame), true));
++      for (int part = 0; part < 3; ++part) {
++        const auto* got = fi::blend_draw(9600 + part, 1, skinned(c, part * 30.f, 0.f, hull_z(frame), false));
++        if (frame >= 2)
++          hullHalfway = hullHalfway && halfway_row0(got, skinned(b, part * 30.f, 0.f, hull_z(frame - 1), false),
++                                                    skinned(c, part * 30.f, 0.f, hull_z(frame), false));
++      }
++      for (int copy = 0; copy < 2; ++copy) {
++        const auto* got = fi::blend_draw(9700, 1, skinned(c, 0.f, 40.f, hull_z(frame), false), copy == 1);
++        if (frame >= 2)
++          twiceHalfway = twiceHalfway && halfway_row0(got, skinned(b, 0.f, 40.f, hull_z(frame - 1), false),
++                                                      skinned(c, 0.f, 40.f, hull_z(frame), false));
++      }
++      if (frame >= 2)
++        CHECK(fi::frame_verdict());
++      fi::end_game_frame();
++    }
++    CHECK(hullHalfway);
++    CHECK(twiceHalfway);
++  }
++
++  // The boat's hull is skinned on the CPU: the game rewrites its vertices in
++  // world space every frame and draws them with the view matrix, so its key
++  // and matrices match the frame before while its vertices moved 100 units.
++  // The in-between frame draws this frame's vertices: with the view blended
++  // alone, the hull would be where it is now, half a frame ahead of the rest
++  // of the boat. Its vertices must land halfway between the two frames.
++  {
++    fi::end_game_frame();
++    fi::end_game_frame();
++    const uint8_t payload[] = {0, 0, 0, 1, 0, 2, 0, 3, 0, 4, 0, 5};
++    const float local[6][3] = {{-40, 0, -90}, {40, 0, -90}, {-45, 30, 0}, {45, 30, 0}, {-30, 10, 80}, {30, 10, 80}};
++    const auto camera_at = [](int frame) { return Camera{0.f, 0.f, 700.f - 100.f * frame}; };
++    // The boat turns 3 degrees a frame about its middle, 100 units ahead.
++    const auto world = [&](int frame, int v, float out[3]) {
++      const float a = 3.f * frame * 3.14159265f / 180.f, cs = std::cos(a), sn = std::sin(a);
++      out[0] = cs * local[v][0] + sn * local[v][2];
++      out[1] = local[v][1];
++      out[2] = -sn * local[v][0] + cs * local[v][2] - 100.f * frame;
++    };
++    const auto seen_at = [](const float m[][4], const float p[3], float out[3]) {
++      for (int r = 0; r < 3; ++r)
++        out[r] = m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * p[2] + m[r][3];
++    };
++    float drawn[3][6][3]; // each real frame's view-space vertices
++    bool hullHalfway = true;
++    for (int frame = 0; frame < 3; ++frame) {
++      const Camera c = camera_at(frame);
++      for (int room = 0; room < 8; ++room)
++        fi::blend_draw(9800 + room, 0, seen(c.yaw, c.x, c.z, room * 700.f - 2500.f, -60.f, -5000.f - room * 90.f));
++      gxc::DrawPlan plan;
++      plan.match_payload = payload;
++      plan.match_payload_size = sizeof(payload);
++      plan.match_primitive = 0x98;
++      plan.match_vertex_stride = 2;
++      plan.vertex_count = 6;
++      plan.vertices.assign(6 * gxc::kVertexFloats, 0.f);
++      for (int v = 0; v < 6; ++v)
++        world(frame, v, &plan.vertices[v * gxc::kVertexFloats]);
++      const auto view = seen(c.yaw, c.x, c.z, 0.f, 0.f, 0.f);
++      for (int v = 0; v < 6; ++v)
++        seen_at(view.posnormalmatrix, &plan.vertices[v * gxc::kVertexFloats], drawn[frame][v]);
++      const auto* got = blend_plan(plan, view);
++      if (frame == 2) {
++        hullHalfway = got != nullptr;
++        for (int v = 0; hullHalfway && v < 6; ++v) {
++          float at[3];
++          seen_at(got->posnormalmatrix, &plan.vertices[v * gxc::kVertexFloats], at);
++          for (int r = 0; r < 3; ++r)
++            hullHalfway = hullHalfway && std::fabs(at[r] - (drawn[1][v][r] + drawn[2][v][r]) / 2.f) < 1.f;
++        }
++        CHECK(fi::frame_verdict());
++      }
++      fi::end_game_frame();
++    }
++    CHECK(hullHalfway);
++  }
++
++  // A bone of Link's sword arm turns 100 degrees in one game frame: a draw
++  // with a key of its own is still blended, halfway along the turn (50
++  // degrees, its size kept, not a straight blend shrunk to 64 percent), with
++  // its scale blended straight.
++  {
++    fi::end_game_frame();
++    fi::end_game_frame();
++    const auto scaled = [](gxc::VertexShaderConstants c, float k) {
++      for (int r = 0; r < 3; ++r)
++        for (int col = 0; col < 3; ++col)
++          c.posnormalmatrix[r][col] *= k;
++      return c;
++    };
++    fi::blend_draw(8001, 0, draw_at(10, 0, -400, 0.f));
++    fi::blend_draw(8002, 0, scaled(draw_at(-10, 0, -400, 0.f), 1.f));
++    fi::blend_draw(8003, 0, draw_at(30, 0, -400, 0.f));
++    fi::blend_draw(8003, 0, draw_at(60, 0, -400, 0.f));
++    fi::end_game_frame();
++    const auto* bone = fi::blend_draw(8001, 0, draw_at(10, 0, -400, 100.f));
++    CHECK(bone != nullptr);
++    if (bone != nullptr) {
++      const float c50 = std::cos(50.f * 3.14159265f / 180.f), s50 = std::sin(50.f * 3.14159265f / 180.f);
++      CHECK(std::fabs(bone->posnormalmatrix[0][0] - c50) < 1e-3f && std::fabs(bone->posnormalmatrix[0][2] - s50) < 1e-3f);
++      CHECK(std::fabs(bone->posnormalmatrix[2][0] + s50) < 1e-3f && std::fabs(bone->posnormalmatrix[1][1] - 1.f) < 1e-3f);
++      CHECK(near(bone->posnormalmatrix[0][3], 10.f) && near(bone->posnormalmatrix[2][3], -400.f));
++    }
++    const auto* grown = fi::blend_draw(8002, 0, scaled(draw_at(-10, 0, -400, 90.f), 1.3f));
++    CHECK(grown != nullptr);
++    if (grown != nullptr) {
++      const float c45 = std::cos(45.f * 3.14159265f / 180.f);
++      CHECK(std::fabs(grown->posnormalmatrix[0][0] - 1.15f * c45) < 1e-3f);
++      CHECK(std::fabs(grown->posnormalmatrix[1][1] - 1.15f) < 1e-3f);
++    }
++    // Two copies that changed places in the list, each turning 100 degrees
++    // where it stands: each pairs with the one nearest it, itself, not with
++    // the one at its place in the list.
++    const auto* swappedA = fi::blend_draw(8003, 0, draw_at(60, 0, -400, 100.f));
++    CHECK(swappedA != nullptr && near(swappedA->posnormalmatrix[0][3], 60.f));
++    const auto* swappedB = fi::blend_draw(8003, 0, draw_at(30, 0, -400, 100.f));
++    CHECK(swappedB != nullptr && near(swappedB->posnormalmatrix[0][3], 30.f));
++    // A small turn is still a straight blend (the same to within float).
++    fi::end_game_frame();
++    fi::blend_draw(8001, 0, draw_at(10, 0, -400, 110.f));
++    fi::end_game_frame();
++    const auto* small = fi::blend_draw(8001, 0, draw_at(10, 0, -400, 106.f));
++    CHECK(small != nullptr && std::fabs(small->posnormalmatrix[0][0] - (std::cos(1.91986f) + std::cos(1.85005f)) / 2.f) < 1e-5f);
++  }
++
++  // Particles: the game sends each one's corners as positions, and the host
++  // tags each draw with its particle and age. Each is drawn halfway between
++  // its own two places, even when the list's order changes; a new particle at
++  // a dead one's address, or a jump no particle makes, keeps its own.
++  {
++    static const uint8_t payload[48] = {1};
++    const auto particle = [](uint32_t tag, uint32_t age, float x, float y) {
++      gxc::DrawPlan plan;
++      plan.match_payload = payload;
++      plan.match_payload_size = sizeof(payload);
++      plan.match_primitive = 0x80;
++      plan.match_direct_position = true;
++      plan.vertex_count = 4;
++      plan.draw_tag = tag;
++      plan.draw_tag_age = age;
++      plan.tex_address = 0x1234;
++      plan.vertices.assign(4 * gxc::kVertexFloats, 0.f);
++      const float corners[4][2] = {{-5, 5}, {5, 5}, {5, -5}, {-5, -5}};
++      for (int i = 0; i < 4; ++i) {
++        float* v = plan.vertices.data() + i * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float);
++        v[0] = x + corners[i][0];
++        v[1] = y + corners[i][1];
++        v[2] = -400.f;
++      }
++      return plan;
++    };
++    // A billboard: view-space corners and the identity matrix.
++    const auto identity = draw_at(0, 0, 0);
++    const auto submit = [&](const gxc::DrawPlan& plan) {
++      blend_plan(plan, identity);
++      return fi::blended_positions();
++    };
++    fi::end_game_frame();
++    fi::end_game_frame();
++    submit(particle(100, 3, 0, 0));
++    submit(particle(101, 7, 50, 0));
++    submit(particle(102, 9, -50, 0));
++    submit(particle(103, 2, 0, 80));
++    fi::end_game_frame();
++    // The list's order changed (a new particle first); each still pairs with
++    // itself.
++    CHECK(submit(particle(104, 0, 200, 0)) == nullptr); // new
++    const float* second = submit(particle(101, 8, 70, 10));
++    CHECK(second != nullptr && near(second[0], 60.f - 5.f) && near(second[1], 5.f + 5.f) && near(second[2], -400.f));
++    const float* first = submit(particle(100, 4, 10, 0));
++    CHECK(first != nullptr && near(first[0], 5.f - 5.f) && near(first[1], 5.f));
++    CHECK(submit(particle(102, 0, -50, 20)) == nullptr);   // a new particle at a dead one's address
++    CHECK(submit(particle(103, 3, 900, 80)) == nullptr);   // too far for a frame
++    // Untagged, one of its shape (the boat's shadow on the sea's triangles
++    // under it): not the same points, so drawn as it is.
++    fi::end_game_frame();
++    auto trail = particle(0, 0, 0, 0);
++    trail.match_primitive = 0x98;
++    blend_plan(trail, identity);
++    fi::end_game_frame();
++    auto moved = particle(0, 0, 8, 0);
++    moved.match_primitive = 0x98;
++    blend_plan(moved, identity);
++    const float* halfway = fi::blended_positions();
++    CHECK(halfway == nullptr);
++
++    // The camera turns 12 degrees past a spark that hangs still: its corners,
++    // sent in the camera's view, change every frame. It is drawn where the
++    // halfway camera sees it, as the rooms around it are.
++    const auto frame = [&](float yaw) {
++      for (int room = 0; room < 8; ++room)
++        fi::blend_draw(900 + room, 0, seen(yaw, 0, 0, room * 300.f - 1000.f, -50.f, -900.f - room * 40.f));
++      const auto at = seen(yaw, 0, 0, 100.f, 20.f, -600.f);
++      auto spark = particle(300, 0, at.posnormalmatrix[0][3], at.posnormalmatrix[1][3]);
++      for (int i = 0; i < 4; ++i)
++        spark.vertices[i * gxc::kVertexFloats + 2] = at.posnormalmatrix[2][3];
++      return spark;
++    };
++    fi::end_game_frame();
++    fi::end_game_frame();
++    submit(frame(0.f));
++    fi::end_game_frame();
++    auto spark = frame(12.f);
++    spark.draw_tag_age = 1;
++    const float* hung = submit(spark);
++    const auto mid = seen(6.f, 0, 0, 100.f, 20.f, -600.f);
++    CHECK(hung != nullptr && std::fabs(hung[0] - (mid.posnormalmatrix[0][3] - 5.f)) < 0.5f &&
++          std::fabs(hung[2] - mid.posnormalmatrix[2][3]) < 0.5f);
++  }
++
++  // The boat's real shadow at full sail. Its volume is one box for every real
++  // shadow (copies of a key), carried along by the boat 60 units a frame, and
++  // the camera follows it: the copies keep their place in the view and pair
++  // with themselves. Its receiving triangles, in the shadow's own texture,
++  // pair with the frame before's though their count changed; their positions
++  // are the next frame's (not the same points).
++  {
++    fi::end_game_frame();
++    fi::end_game_frame();
++    static const uint8_t payload[48] = {2};
++    const auto receiver = [](uint32_t triangles, const gxc::VertexShaderConstants& view) {
++      gxc::DrawPlan plan;
++      plan.constants = view;
++      plan.match_payload = payload;
++      plan.match_payload_size = triangles * 36u;
++      plan.match_primitive = 0x90;
++      plan.match_direct_position = true;
++      plan.vertex_count = triangles * 3u;
++      plan.tex_address = 0x5678;
++      plan.vertices.assign(plan.vertex_count * gxc::kVertexFloats, 0.f);
++      return plan;
++    };
++    const char* outcomes[8] = {};
++    const auto frame = [&](float cameraX, uint32_t triangles, Result* volume, bool& receiverBlended) {
++      for (int room = 0; room < 8; ++room)
++        fi::blend_draw(960 + room, 0, seen(0.f, cameraX, 0, room * 300.f - 1000.f, -50.f, -900.f - room * 40.f));
++      for (int copy = 0; copy < 8; ++copy) {
++        // Bobbing a little with the boat.
++        const auto* r = fi::blend_draw(950, 0, seen(0.f, cameraX, 0, cameraX + copy * 3.f, cameraX * 0.01f - 20.f, -700.f));
++        outcomes[copy] = fi::last_outcome();
++        volume[copy].blended = r != nullptr;
++        if (r != nullptr)
++          volume[copy].constants = *r;
++      }
++      const auto plan = receiver(triangles, seen(0.f, cameraX, 0, 0.f, 0.f, 0.f));
++      receiverBlended = blend_plan(plan, plan.constants) != nullptr;
++      CHECK(fi::blended_positions() == nullptr);
++    };
++    Result volume[8];
++    bool receiverBlended = false;
++    frame(0.f, 18, volume, receiverBlended);
++    fi::end_game_frame();
++    frame(60.f, 18, volume, receiverBlended);
++    fi::end_game_frame();
++    frame(120.f, 16, volume, receiverBlended);
++    CHECK(fi::frame_verdict());
++    CHECK(receiverBlended);
++    for (int copy = 0; copy < 8; ++copy) {
++      CHECK(volume[copy].blended && std::fabs(volume[copy].constants.posnormalmatrix[0][3] - copy * 3.f) < 0.5f &&
++            std::fabs(volume[copy].constants.posnormalmatrix[1][3] - (0.9f - 20.f)) < 0.05f);
++      if (!volume[copy].blended)
++        std::fprintf(stderr, "copy %d: %s\n", copy, outcomes[copy]);
++    }
++  }
++
++  // A broken pot: its shards are one model drawn five times at random sizes,
++  // each flying off and tumbling 70 degrees a frame. Each pairs with itself
++  // (the same place in the list, the same size) and is blended halfway along
++  // its turn.
++  {
++    fi::end_game_frame();
++    fi::end_game_frame();
++    const float sizes[5] = {1.f, 0.575f, 1.389f, 1.298f, 0.775f};
++    const auto shard = [&](int i, int frame) {
++      auto c = draw_at(20.f * i + 3.f * frame, 100.f + 5.f * frame, -480.f, 70.f * frame + 13.f * i);
++      for (int r = 0; r < 3; ++r)
++        for (int col = 0; col < 3; ++col)
++          c.posnormalmatrix[r][col] *= sizes[i];
++      return c;
++    };
++    const auto rooms = [](int) {
++      for (int room = 0; room < 6; ++room)
++        fi::blend_draw(980 + room, 0, draw_at(room * 300.f - 750.f, -50.f, -900.f - room * 40.f));
++    };
++    rooms(0);
++    for (int i = 0; i < 5; ++i)
++      fi::blend_draw(990, 0, shard(i, 0));
++    fi::end_game_frame();
++    rooms(1);
++    for (int i = 0; i < 5; ++i) {
++      const auto* r = fi::blend_draw(990, 0, shard(i, 1));
++      CHECK(r != nullptr);
++      if (r != nullptr) {
++        const float turn = (35.f + 13.f * i) * 3.14159265f / 180.f;
++        CHECK(std::fabs(r->posnormalmatrix[0][0] - sizes[i] * std::cos(turn)) < 2e-3f);
++        CHECK(std::fabs(r->posnormalmatrix[0][3] - (20.f * i + 1.5f)) < 1e-3f);
++      }
++    }
++  }
++
++  // The boat's trail, drawn by its emitter as strips through its particles:
++  // each strip pairs with the one at its place the frame before, and its
++  // vertices blend in order. A steady trail's particles move one place a
++  // frame, so that is the trail half a frame later, and its front stays at
++  // the boat (halfway) instead of half a frame ahead of it.
++  {
++    fi::end_game_frame();
++    fi::end_game_frame();
++    static const uint8_t payload[48] = {3};
++    const auto strip = [](uint32_t part, float boatZ) {
++      gxc::DrawPlan plan;
++      plan.match_payload = payload;
++      plan.match_payload_size = sizeof(payload);
++      plan.match_primitive = 0x98;
++      plan.match_direct_position = true;
++      plan.vertex_count = 6;
++      plan.draw_scope = 0x4321;
++      plan.draw_scope_part = part;
++      plan.vertices.assign(6 * gxc::kVertexFloats, 0.f);
++      for (int i = 0; i < 6; ++i) {
++        float* v = plan.vertices.data() + i * gxc::kVertexFloats;
++        v[0] = (i % 3) * 10.f - 10.f;
++        v[2] = boatZ + 60.f * (part - 1 + i / 3); // a row every 60 units behind the boat
++      }
++      return plan;
++    };
++    const auto view = draw_at(0, -50, -400);
++    const auto s1 = strip(1, 0.f);
++    blend_plan(s1, view);
++    const auto s2 = strip(2, 0.f);
++    blend_plan(s2, view);
++    fi::end_game_frame();
++    const auto n1 = strip(1, -60.f); // the boat sailed 60 units on
++    blend_plan(n1, view);
++    const float* front = fi::blended_positions();
++    CHECK(front != nullptr && near(front[2], -30.f) && near(front[3 * 3 + 2], 30.f));
++  }
++
+   // Draw keys: the same payload gives the same key; another primitive does not.
+   {
+     const uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index b8e1318..49fd577 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -125,6 +125,16 @@ public:
+ 
+   std::uint32_t bp(std::uint8_t reg) const { return bp_regs_[reg]; }
+   bool bp_valid(std::uint8_t reg) const { return bp_valid_[reg]; }
++  // The draw tag goes with one draw (DrawPlan::draw_tag); a scope starts at
++  // one draw and covers the count of draws it gives (GxCoreSink).
++  void forget_draw_tag() {
++    bp_valid_[kDrawTagRegister] = bp_valid_[kDrawTagAgeRegister] = false;
++    bp_valid_[kDrawScopeRegister] = bp_valid_[kDrawScopeCountRegister] = false;
++  }
++  static constexpr std::uint8_t kDrawTagRegister = 0x7Eu;
++  static constexpr std::uint8_t kDrawTagAgeRegister = 0x7Du;
++  static constexpr std::uint8_t kDrawScopeRegister = 0x7Cu;
++  static constexpr std::uint8_t kDrawScopeCountRegister = 0x7Bu;
+ 
+ private:
+   std::uint32_t bp_regs_[256]{};
+@@ -198,6 +208,10 @@ private:
+   bool replay_overflow_ = false;
+   CachedVertexAttrs cached_attrs_{}; // cross-draw N/B/T fallback (stream order)
+   DrawPlan scratch_plan_{};          // reused by on_consumed_draw
++  // The draw scope under way: its emitter, the draws left and the next's place.
++  std::uint32_t scope_ = 0;
++  std::uint32_t scope_left_ = 0;
++  std::uint32_t scope_part_ = 0;
+   PlanObserver plan_observer_ = nullptr;
+   void* plan_observer_user_ = nullptr;
+   CopyObserver copy_observer_ = nullptr;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 75711b1..653b42b 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -475,6 +475,17 @@ struct DrawPlan {
+   // payload differs every frame, so such a draw is matched by its shape.
+   bool match_direct_position = false;
+   std::uint32_t match_vertex_stride = 0; // payload bytes per vertex
++  // The host's tag for the object this draw is, written just before it to
++  // BP registers the retail GX never uses (kDrawTagRegister and
++  // kDrawTagAgeRegister): the game's particle drawn here and its age in game
++  // frames, so frame interpolation can pair it with itself. 0: none.
++  std::uint32_t draw_tag = 0;
++  std::uint32_t draw_tag_age = 0;
++  // Or, for one of the draws an emitter's callback makes (kDrawScopeRegister:
++  // a wake's fans and strips), that emitter and the draw's place among them
++  // (from 1). 0: none.
++  std::uint32_t draw_scope = 0;
++  std::uint32_t draw_scope_part = 0;
+   // Viewport, raw XF values (wd/2, -ht/2, zmax*2^24, xorig+342, yorig+342,
+   // farz*2^24) — the submission layer maps these through the substrate's
+   // logical-viewport scaling.
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index e839d3c..db699c9 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -592,6 +592,10 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+   plan.match_primitive = draw.primitive;
+   plan.match_vtx_fmt = draw.vtx_fmt;
+   plan.match_vertex_stride = draw.vertex_size;
++  if (bp_valid_[kDrawTagRegister]) {
++    plan.draw_tag = bp_regs_[kDrawTagRegister];
++    plan.draw_tag_age = bp_valid_[kDrawTagAgeRegister] ? bp_regs_[kDrawTagAgeRegister] : 0u;
++  }
+   auto skip = [&](const char* reason) {
+     plan.ok = false;
+     plan.skip_reason = reason;
+@@ -1668,6 +1672,25 @@ void GxCoreSink::on_consumed_draw(const ar::ConsumedDraw& draw,
+   DrawPlan& plan = self->scratch_plan_;
+   self->pending_state_.build_draw_plan_into(draw, self->counters_,
+                                             &self->cached_attrs_, plan);
++  // A draw scope: the next draws with positions of their own, up to its
++  // count, are its emitter's; any other draw ends it.
++  const GxCoreState& state = self->pending_state_;
++  if (state.bp_valid(GxCoreState::kDrawScopeRegister)) {
++    self->scope_ = state.bp(GxCoreState::kDrawScopeRegister);
++    self->scope_left_ = state.bp_valid(GxCoreState::kDrawScopeCountRegister)
++                            ? state.bp(GxCoreState::kDrawScopeCountRegister)
++                            : 0u;
++    self->scope_part_ = 1;
++  }
++  if (self->scope_left_ != 0u) {
++    if (plan.ok && plan.match_direct_position) {
++      plan.draw_scope = self->scope_;
++      plan.draw_scope_part = self->scope_part_++;
++      --self->scope_left_;
++    } else {
++      self->scope_left_ = 0;
++    }
++  }
+   self->plan_observer_(plan, self->plan_observer_user_);
+ }
+ 
+@@ -1751,9 +1774,11 @@ bool GxCoreSink::submit_packet(const ar::RenderPacket& packet) {
+       pending_state_ = live_state_;
+       replay_overflow_ = false;
+     } else {
++      pending_state_.forget_draw_tag(); // unless written again since
+       for (const auto& state : since_draw_)
+         pending_state_.apply(state);
+     }
++    live_state_.forget_draw_tag();
+     since_draw_.clear();
+   }
+   return ok;
+-- 
+2.55.0
+

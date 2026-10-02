@@ -46,6 +46,7 @@ bool bluewake_edge_address_requires_host(u32 address, u32 module1_raw_base) {
     switch (address) {
     case 0x803193ACu: // JAudio DSP task boot handshake.
     case 0x80308A9Cu: // GX draw-done return publishes PE finish.
+    case 0x80322B20u: // GXSetDrawSync flush publishes the PE token.
     case 0x80322BC8u: // GXSetDrawDone return publishes the async PE finish.
     case 0x8030F2B0u: // DVD path to entry.
     case 0x8030F618u: // DVD open.
@@ -76,9 +77,6 @@ bool bluewake_edge_observation_requires_host(u32 canonical_address) {
     case 0x8017E86Cu:
     case 0x80181634u:
     case 0x80182A90u:
-    // 0x80328F84 (_restgpr_27, the GroundCross return) is observed by the
-    // edge service itself and no longer ends the turn; it stays in the
-    // lookup table so the edge front hands it to the full service.
     case 0x80120188u:
     case 0x800A0B60u:
     case 0x800D8DB8u:
@@ -86,6 +84,10 @@ bool bluewake_edge_observation_requires_host(u32 canonical_address) {
     case 0x8015EA5Cu:
     case 0x8015D80Cu:
         return true;
+    // Keep this as an explicit case: the table generator collects cases.
+    // GroundCross is observed by the full edge service without ending the turn.
+    case 0x80328F84u:
+        return false;
     // The pause menu's own execute (d_menu_window.cpp's dMs_Execute) and the
     // collect screen it creates. They are the two addresses that say whether
     // the START press reached the menu at all, which is the question P4

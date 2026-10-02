@@ -2,6 +2,19 @@
 #define BLUEWAKE_COMPOSITE_DISPATCH_LOOP_H
 
 #include "edge_intercept_abi.h"
+#if defined(BLUEWAKE_DIRECT_CALLS)
+#include "direct_calls.h"
+#endif
+#if defined(BLUEWAKE_GATHER_PIPE)
+#include "gather_pipe_batch.h"
+#endif
+
+static inline int bluewake_chassis_return(int dispatched) {
+#if defined(BLUEWAKE_GATHER_PIPE)
+    bw_gather_pipe_drain();
+#endif
+    return dispatched;
+}
 
 typedef int (*BluewakeCompositeDispatchFn)(CPUState* ctx, u32 address);
 
@@ -27,52 +40,47 @@ static inline int bluewake_chassis_dispatch_loop(
     CPUState* ctx, u32 address, BluewakeCompositeDispatchFn dispatch,
     BluewakeEdgeServiceFn edge_service, void* service_user) {
     if (ctx == NULL || dispatch == NULL)
-        return 0;
+        return bluewake_chassis_return(0);
 
     s64 prior_downcount = ctx->downcount;
     int dispatched = dispatch(ctx, address);
     if (!dispatched || edge_service == NULL)
-        return dispatched;
+        return bluewake_chassis_return(dispatched);
     if (ctx->downcount >= prior_downcount)
-        return 1;
+        return bluewake_chassis_return(1);
 
+    unsigned zero_charge_run = 0u;
     for (;;) {
         if (ctx->exception != 0u ||
             (ctx->cycle_budget > 0 &&
              ctx->downcount <= -ctx->cycle_budget))
-            return 1;
+            return bluewake_chassis_return(1);
 
         address = ctx->pc;
-        if (edge_service(service_user, ctx, address))
-            return 1;
+#if defined(BLUEWAKE_GATHER_PIPE)
+        bw_gather_pipe_drain();
+#endif
+        bool skip_edge = false;
+#if defined(BLUEWAKE_DIRECT_CALLS)
+        skip_edge = bw_edge_filter_enabled && bw_edge_watch_ready &&
+                    bw_edge_unwatched(address) && bw_direct_call_ready(ctx, address);
+#endif
+        if (!skip_edge && edge_service(service_user, ctx, address))
+            return bluewake_chassis_return(1);
 
         prior_downcount = ctx->downcount;
         dispatched = dispatch(ctx, address);
         if (!dispatched)
-            return 1;
+            return bluewake_chassis_return(1);
         if (ctx->downcount >= prior_downcount) {
-            /* A dispatched block that charges no cycles used to end the turn here,
-             * and that one exit owns 43.6 percent of the boot's turns: 598,350 of
-             * 1,372,978, with the whole inventory closing at budget 26.9, edge
-             * service 29.4 and dispatcher-miss 0.12 (docs/status/CURRENT.md,
-             * 2026-09-22). Tolerating a bounded run of them, screened on the
-             * certified pair, halves the turns for +2.67 percent of the play
-             * window - 398.3 M instructions a retrace against 409.2 M, digest
-             * 92dd816c unchanged over 1,050 records, both ceilings stopping at
-             * their certified pc.
-             *
-             * The bound is load-bearing rather than incidental: a block that
-             * charges nothing does not advance downcount, so a guest that stops
-             * charging - which is exactly what a stuck loop looks like - would
-             * never reach the budget exit above. A run of nine ends the turn, so
-             * the chassis always comes back to the host. */
-#define BLUEWAKE_ZERO_CHARGE_RUN_MAX 8u
-            static unsigned zero_charge_run;
-            if (++zero_charge_run <= BLUEWAKE_ZERO_CHARGE_RUN_MAX)
+            /* Eight non-advancing successors are allowed; the ninth yields
+             * so a stuck guest always returns to the host. Progress resets
+             * the run, and a new turn or CPU gets an independent allowance. */
+            if (++zero_charge_run <= 8u)
                 continue;
-            zero_charge_run = 0u;
-            return 1;
+            return bluewake_chassis_return(1);
         }
+        zero_charge_run = 0u;
     }
 }
 

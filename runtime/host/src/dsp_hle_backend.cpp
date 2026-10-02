@@ -22,6 +22,7 @@
 #include <cstring>
 #include <string>
 
+#include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/Swap.h"
 #include "Core/Config/MainSettings.h"
@@ -306,5 +307,37 @@ std::uint16_t HleBackend::read_dsp_mailbox_low()
 std::uint64_t HleBackend::interrupts() const
 {
   return g_host.interrupts;
+}
+
+namespace
+{
+void do_backend_state(DSP::HLE::DSPHLE& hle, PointerWrap& p)
+{
+  p.Do(g_host.interrupt_pending);
+  p.Do(g_host.interrupts);
+  hle.DoState(p);
+}
+}  // namespace
+
+std::vector<std::uint8_t> HleBackend::save_state()
+{
+  u8* measure_ptr = nullptr;
+  PointerWrap measure(&measure_ptr, 0, PointerWrap::Mode::Measure);
+  do_backend_state(m_impl->hle, measure);
+  std::vector<std::uint8_t> buffer(reinterpret_cast<std::size_t>(measure_ptr));
+  u8* write_ptr = buffer.data();
+  PointerWrap write(&write_ptr, buffer.size(), PointerWrap::Mode::Write);
+  do_backend_state(m_impl->hle, write);
+  if (!write.IsWriteMode())
+    buffer.clear();
+  return buffer;
+}
+
+bool HleBackend::load_state(const std::uint8_t* data, std::size_t size)
+{
+  u8* read_ptr = const_cast<u8*>(data);
+  PointerWrap read(&read_ptr, size, PointerWrap::Mode::Read);
+  do_backend_state(m_impl->hle, read);
+  return read.IsReadMode() && read_ptr == data + size;
 }
 }  // namespace bluewake::dsp

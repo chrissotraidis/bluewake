@@ -720,11 +720,13 @@ static inline DOLRECOMP_UNUSED int dolrecomp_run_blocks(CPUState* ctx, u32 max_b
         "    }", "}", ""])
     composite_text = composite_text[:miss_at] + extra_lookup + composite_text[miss_at + len(miss):]
     composite_text = composite_text.replace(anchor, file_scope + mod_types + anchor, 1)
-    (out_dir / "generated_composite.h").write_text(composite_text)
+    # newline=chr(10) everywhere: the output is byte-identical on Windows, whose
+    # text mode would otherwise write CRLF and change the verified digest.
+    (out_dir / "generated_composite.h").write_text(composite_text, newline=chr(10))
     if not (out_dir / "mod_variants.inc").exists():
         (out_dir / "mod_variants.inc").write_text(
             "// No mods: see scripts/mods/build_mod_variants.py." + chr(10) +
-            "#define MODULE_MOD_COUNT 0u" + chr(10))
+            "#define MODULE_MOD_COUNT 0u" + chr(10), newline=chr(10))
 
     # Copy chunk .c files into out_dir so that their relative include of
     # ../generated.h resolves to our composite header (NOT the original).
@@ -732,7 +734,7 @@ static inline DOLRECOMP_UNUSED int dolrecomp_run_blocks(CPUState* ctx, u32 max_b
     gen_h_path = out_dir / "generated.h"
     if gen_h_path.exists() or gen_h_path.is_symlink():
         gen_h_path.unlink()
-    gen_h_path.write_text(base_text)
+    gen_h_path.write_text(base_text, newline=chr(10))
 
     def copy_chunks(src_dir, dest_name, patterns=("*.c",)):
         dest = out_dir / dest_name
@@ -796,7 +798,7 @@ static inline DOLRECOMP_UNUSED int dolrecomp_run_blocks(CPUState* ctx, u32 max_b
     for h_val in chunk_hashes:
         tbl.append(f"    0x{h_val:016X}ull,")
     tbl.append("};")
-    (out_dir / "module_tables.inc").write_text(chr(10).join(tbl) + chr(10))
+    (out_dir / "module_tables.inc").write_text(chr(10).join(tbl) + chr(10), newline=chr(10))
 
     # --- Emit rel_modules.inc ---
     rm_lines = []
@@ -841,7 +843,7 @@ static inline DOLRECOMP_UNUSED int dolrecomp_run_blocks(CPUState* ctx, u32 max_b
         )
     rm_lines.append("};")
     rm_lines.append(f"#define MODULE_REL_MODULE_COUNT {len(rel_module_info)}u")
-    (out_dir / "rel_modules.inc").write_text(chr(10).join(rm_lines) + chr(10))
+    (out_dir / "rel_modules.inc").write_text(chr(10).join(rm_lines) + chr(10), newline=chr(10))
 
     # Emit relocated file-backed data separately from the existing code-only
     # section metadata. Keeping this additive preserves the v3 module ABI.
@@ -881,7 +883,7 @@ static inline DOLRECOMP_UNUSED int dolrecomp_run_blocks(CPUState* ctx, u32 max_b
         lifecycle_count += 1
     data_lines.append("};")
     data_lines.append(f"#define MODULE_REL_LIFECYCLE_COUNT {lifecycle_count}u")
-    (out_dir / "rel_data.inc").write_text(chr(10).join(data_lines) + chr(10))
+    (out_dir / "rel_data.inc").write_text(chr(10).join(data_lines) + chr(10), newline=chr(10))
 
     # --- Determinism audit ---
     output_files = ["generated_composite.h", "module_tables.inc", "rel_modules.inc", "rel_data.inc"]

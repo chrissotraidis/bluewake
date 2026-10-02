@@ -1,7 +1,13 @@
 // See disc_import.h.
 #include "disc_import.h"
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <bcrypt.h>
+#else
 #include <CommonCrypto/CommonDigest.h>
+#endif
 #include <dirent.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -94,6 +100,14 @@ bad:
 }
 
 static void sha1_hex(const uint8_t* data, size_t size, char out[41]) {
+#if defined(_WIN32)
+    uint8_t digest[20];
+    if (!BCRYPT_SUCCESS(BCryptHash(BCRYPT_SHA1_ALG_HANDLE, NULL, 0, (PUCHAR)data,
+                                   (ULONG)size, digest, (ULONG)sizeof digest)))
+        memset(digest, 0, sizeof digest);
+    for (int i = 0; i < (int)sizeof digest; ++i)
+        snprintf(out + i * 2, 3, "%02x", digest[i]);
+#else
     uint8_t digest[CC_SHA1_DIGEST_LENGTH];
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -101,6 +115,7 @@ static void sha1_hex(const uint8_t* data, size_t size, char out[41]) {
 #pragma clang diagnostic pop
     for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; ++i)
         snprintf(out + i * 2, 3, "%02x", digest[i]);
+#endif
 }
 
 static int write_file(const char* path, const uint8_t* data, size_t size) {

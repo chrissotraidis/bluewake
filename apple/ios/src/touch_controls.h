@@ -23,6 +23,8 @@ enum {
     BLUEWAKE_TOUCH_X = 1 << 10,
     BLUEWAKE_TOUCH_Y = 1 << 11,
     BLUEWAKE_TOUCH_START = 1 << 12,
+    BLUEWAKE_TOUCH_JUMP = 1 << 13,
+    BLUEWAKE_TOUCH_SPRINT = 1 << 14,
 };
 
 // Why the guest is held. It runs only while the set is empty.
@@ -51,6 +53,9 @@ void bluewake_touch_clear(void);
 // The last second's presented frames per second, game speed in percent of
 // full speed, and longest gap between presents (for the FPS display).
 void bluewake_fps_read(float* shown, float* speed, float* worst_ms);
+// Frames reaching the display a second, in-between frames included (equal to
+// the shown count when Display > Smooth Motion is off).
+float bluewake_fps_display(void);
 void bluewake_pause_set(unsigned reason, bool on);
 unsigned bluewake_pause_reasons(void);
 

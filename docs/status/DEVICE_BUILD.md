@@ -112,8 +112,8 @@ player onboarding path.
 
 | Component | Source | Pinned |
 | --- | --- | --- |
-| RecompCore (GXRuntime, Aurora, DSP) | https://github.com/chrissotraidis/RecompCore, branch `bluewake` | `2d6063614a9bc899f6b4d11c7e7b3cd66e4d96f3` |
-| DolRecomp (translator) | https://github.com/chrissotraidis/DolRecomp, branch `bluewake` (RecompCore's `DolRecomp` submodule) | `5c91d6ed1ac7ac2f1aa6535b893eabb70f0f0d8f` |
+| RecompCore (GXRuntime, Aurora, DSP) | https://github.com/chrissotraidis/RecompCore, candidate branch `codex/bluewake-runtime-parity` (maintained 99e47480 plus patches/recompcore 0131-0134; donor changes retain Elliott Tate authorship) | `70bc9957b89a145a5b457d1a9e5cd482f34e7e61` |
+| DolRecomp (translator) | https://github.com/elliotttate/DolRecomp, branch `bluewake` (RecompCore's `DolRecomp` submodule; chrissotraidis/DolRecomp 5c91d6e plus patches/dolrecomp/0019) | `b8b534591cba8ca7cd43943a655ee6e2591cf5de` |
 | Aurora | vendored in RecompCore at `GXRuntime/graphics/aurora` (plain files) | with RecompCore |
 | Dawn (WebGPU) for iOS | https://github.com/encounter/dawn/releases v20260618.032059, `dawn-ios-arm64.tar.gz` | sha256 `ada0bafc...a7ae2` |
 | SDL 3.4.10, fmt, xxhash and the rest | fetched by Aurora's CMake at configure time | Aurora's pins |

@@ -10,6 +10,19 @@ set(GAME_ID "GZLE01" CACHE STRING "Six-character disc ID")
 set(COMPOSITE_DIR "" CACHE PATH "Composite output dir (generated.h, module_tables.inc, rel_modules.inc)")
 set(GXRUNTIME_DIR "" CACHE PATH "GXRuntime checkout")
 set(ABI_DIR "" CACHE PATH "Directory containing StaticRecompABI.h")
+option(BLUEWAKE_INLINE_FP "Use explicitly prepared inline floating-point chunks" OFF)
+option(BLUEWAKE_GATHER_PIPE "Use explicitly prepared gather/inline-memory chunks" OFF)
+option(BLUEWAKE_NATIVE_J3D "Use certified native J3D matrix functions" OFF)
+option(BLUEWAKE_NATIVE_GAME_MATH "Use certified native game math" OFF)
+option(BLUEWAKE_NATIVE_SKIN "Use certified native skinning" OFF)
+option(BLUEWAKE_NATIVE_VEC "Use certified native vector functions" OFF)
+option(BLUEWAKE_NATIVE_MATH "Use certified native matrix functions" OFF)
+option(BLUEWAKE_DIRECT_CALLS "Use explicitly prepared direct-call chunks" OFF)
+option(BLUEWAKE_FIXED_CPU "Use explicitly prepared fixed-address guest CPU chunks" OFF)
+option(BLUEWAKE_FIXED_MEM1 "Use module-owned guest RAM (requires fixed CPU)" OFF)
+if(BLUEWAKE_FIXED_MEM1 AND NOT BLUEWAKE_FIXED_CPU)
+  message(FATAL_ERROR "Fixed MEM1 requires BLUEWAKE_FIXED_CPU")
+endif()
 set(COMPOSITE_OPTIMIZATION_LEVEL "2" CACHE STRING "Generated composite optimization level (0, 1, or 2)")
 set_property(CACHE COMPOSITE_OPTIMIZATION_LEVEL PROPERTY STRINGS 0 1 2)
 if(NOT COMPOSITE_OPTIMIZATION_LEVEL MATCHES "^[012]$")
@@ -68,13 +81,160 @@ add_library(${MODULE_NAME} SHARED
   ${GXRUNTIME_DIR}/src/core/cpu_interpreter_integer.c
   ${CHUNK_INPUTS})
 
+if(BLUEWAKE_INLINE_FP)
+  foreach(CHUNK_SOURCE IN LISTS CHUNK_INPUTS)
+    if(NOT CHUNK_SOURCE MATCHES "\\.c$")
+      message(FATAL_ERROR "Inline FP needs prepared C chunks, not native objects")
+    endif()
+    file(STRINGS "${CHUNK_SOURCE}" INLINE_FP_MARKER LIMIT_COUNT 1
+      REGEX "^#include \"inline_fp.h\"$")
+    if(NOT INLINE_FP_MARKER)
+      message(FATAL_ERROR "Inline FP chunk is unprepared: ${CHUNK_SOURCE}")
+    endif()
+  endforeach()
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
+if(BLUEWAKE_GATHER_PIPE)
+  foreach(CHUNK_SOURCE IN LISTS CHUNK_INPUTS)
+    if(NOT CHUNK_SOURCE MATCHES "\\.c$")
+      message(FATAL_ERROR "Gather memory needs prepared C chunks, not native objects")
+    endif()
+    file(STRINGS "${CHUNK_SOURCE}" GATHER_MARKER LIMIT_COUNT 1
+      REGEX "^#include \"gather_pipe.h\"$")
+    if(NOT GATHER_MARKER)
+      message(FATAL_ERROR "Gather memory chunk is unprepared: ${CHUNK_SOURCE}")
+    endif()
+  endforeach()
+  target_sources(${MODULE_NAME} PRIVATE gather_pipe.c)
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_compile_definitions(${MODULE_NAME} PRIVATE BLUEWAKE_GATHER_PIPE=1)
+endif()
+
+if(BLUEWAKE_NATIVE_J3D)
+  file(STRINGS "${COMPOSITE_DIR}/generated.h" J3D_MARKER LIMIT_COUNT 1
+    REGEX "^#define BLUEWAKE_NATIVE_J3D_PREPARED 1$")
+  if(NOT J3D_MARKER OR NOT EXISTS "${COMPOSITE_DIR}/native_j3d.json" OR DOL_CHUNK_OBJECTS)
+    message(FATAL_ERROR "Native J3D requires certified C chunks and its preparation manifest")
+  endif()
+  target_sources(${MODULE_NAME} PRIVATE native_j3d.c)
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
+if(BLUEWAKE_NATIVE_GAME_MATH)
+  file(STRINGS "${COMPOSITE_DIR}/generated.h" GAME_MATH_MARKER LIMIT_COUNT 1
+    REGEX "^#define BLUEWAKE_NATIVE_GAME_MATH_PREPARED 1$")
+  if(NOT GAME_MATH_MARKER OR NOT EXISTS "${COMPOSITE_DIR}/native_game_math.json" OR DOL_CHUNK_OBJECTS)
+    message(FATAL_ERROR "Native game math requires certified C chunks and its preparation manifest")
+  endif()
+  target_sources(${MODULE_NAME} PRIVATE native_game_math.c)
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
+if(BLUEWAKE_NATIVE_SKIN)
+  file(STRINGS "${COMPOSITE_DIR}/generated.h" SKIN_MARKER LIMIT_COUNT 1
+    REGEX "^#define BLUEWAKE_NATIVE_SKIN_PREPARED 1$")
+  if(NOT SKIN_MARKER OR NOT EXISTS "${COMPOSITE_DIR}/native_skin.json" OR DOL_CHUNK_OBJECTS)
+    message(FATAL_ERROR "Native skinning requires certified C chunks and its preparation manifest")
+  endif()
+  target_sources(${MODULE_NAME} PRIVATE native_skin.c)
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
+if(BLUEWAKE_NATIVE_VEC)
+  file(STRINGS "${COMPOSITE_DIR}/generated.h" VEC_MARKER LIMIT_COUNT 1
+    REGEX "^#define BLUEWAKE_NATIVE_VEC_PREPARED 1$")
+  if(NOT VEC_MARKER OR NOT EXISTS "${COMPOSITE_DIR}/native_vec.json" OR DOL_CHUNK_OBJECTS)
+    message(FATAL_ERROR "Native vectors requires certified C chunks and its preparation manifest")
+  endif()
+  target_sources(${MODULE_NAME} PRIVATE native_vec.c)
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
+if(BLUEWAKE_NATIVE_MATH)
+  file(STRINGS "${COMPOSITE_DIR}/generated_composite.h" MATH_MARKER LIMIT_COUNT 1
+    REGEX "^#define BLUEWAKE_NATIVE_MATH_CACHED 1$")
+  if(NOT MATH_MARKER OR NOT EXISTS "${COMPOSITE_DIR}/native_math.json" OR DOL_CHUNK_OBJECTS)
+    message(FATAL_ERROR "Native matrix functions require certified C chunks and their preparation manifest")
+  endif()
+  target_sources(${MODULE_NAME} PRIVATE native_math.c native_work_pool.c)
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_link_libraries(${MODULE_NAME} PRIVATE Threads::Threads)
+  endif()
+endif()
+
+if(BLUEWAKE_DIRECT_CALLS)
+  file(STRINGS "${COMPOSITE_DIR}/generated.h" DIRECT_MARKER LIMIT_COUNT 1
+    REGEX "^#define BLUEWAKE_DIRECT_CALLS_PREPARED 2$")
+  if(NOT DIRECT_MARKER OR NOT EXISTS "${COMPOSITE_DIR}/bw_edge_watch.inc")
+    message(FATAL_ERROR "Direct calls need a prepared composite and host watch list")
+  endif()
+  foreach(CHUNK_SOURCE IN LISTS CHUNK_INPUTS)
+    if(NOT CHUNK_SOURCE MATCHES "\\.c$")
+      message(FATAL_ERROR "Direct calls need prepared C chunks, not native objects")
+    endif()
+  endforeach()
+  target_sources(${MODULE_NAME} PRIVATE direct_calls.c)
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_compile_definitions(${MODULE_NAME} PRIVATE BLUEWAKE_DIRECT_CALLS=1 BLUEWAKE_EDGE_FILTER=1)
+endif()
+
+if(BLUEWAKE_FIXED_CPU)
+  foreach(CHUNK_SOURCE IN LISTS CHUNK_INPUTS)
+    if(NOT CHUNK_SOURCE MATCHES "\\.c$")
+      message(FATAL_ERROR "Fixed CPU needs prepared C chunks, not native objects")
+    endif()
+    file(STRINGS "${CHUNK_SOURCE}" FIXED_CPU_MARKER LIMIT_COUNT 1
+      REGEX "^extern CPUState bw_guest_cpu;$")
+    if(NOT FIXED_CPU_MARKER)
+      message(FATAL_ERROR "Fixed CPU chunk is unprepared: ${CHUNK_SOURCE}")
+    endif()
+  endforeach()
+  target_sources(${MODULE_NAME} PRIVATE guest_cpu.c)
+  target_compile_definitions(${MODULE_NAME} PRIVATE BLUEWAKE_FIXED_CPU=1)
+endif()
+if(BLUEWAKE_FIXED_MEM1)
+  file(STRINGS "${GXRUNTIME_DIR}/include/core/cpu.h" FIXED_MEM1_SUPPORT
+    LIMIT_COUNT 1 REGEX "^extern u8 BW_GUEST_MEM1\\[\\];$")
+  if(NOT FIXED_MEM1_SUPPORT)
+    message(FATAL_ERROR "Fixed MEM1 requires the supporting pinned runtime")
+  endif()
+  target_compile_definitions(${MODULE_NAME} PRIVATE
+    BW_GUEST_MEM1=bw_guest_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+endif()
+
 set_target_properties(${MODULE_NAME} PROPERTIES PREFIX "" OUTPUT_NAME "${MODULE_NAME}" UNITY_BUILD OFF C_VISIBILITY_PRESET hidden)
 target_compile_definitions(${MODULE_NAME} PRIVATE MODULE_GAME_ID="${GAME_ID}" DOLRECOMP_CPU_HEADER="core/cpu.h")
 target_include_directories(${MODULE_NAME} PRIVATE "${COMPOSITE_DIR}" "${GXRUNTIME_DIR}/include" "${ABI_DIR}")
 if(APPLE)
   set_target_properties(${MODULE_NAME} PROPERTIES SUFFIX ".dylib")
 endif()
-target_link_libraries(${MODULE_NAME} PRIVATE m)
+if(WIN32)
+  # A DLL exports only what is marked dllexport. module_export.c marks its own
+  # entry points; the guest-alias and write-journal hooks the host resolves in
+  # the runtime embedded here (GXRuntime cpu.c) are named for the linker.
+  foreach(EXPORTED_SYMBOL
+      ppc_set_mem_write_journal ppc_guest_alias_clear ppc_guest_alias_add
+      ppc_guest_alias_add_shared ppc_guest_alias_get_storage
+      ppc_guest_alias_remove ppc_guest_alias_resolve)
+    target_link_options(${MODULE_NAME} PRIVATE "LINKER:/EXPORT:${EXPORTED_SYMBOL}")
+  endforeach()
+  target_compile_definitions(${MODULE_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
+  # The Windows C runtime's getenv is slow, and the embedded runtime checks a
+  # trace switch on every guest exception: remember each call site's answer
+  # (windows/compat/bw_getenv_cache.h). Only these sources, whose every getenv
+  # names a literal; the translated chunks never call it.
+  set_property(SOURCE module_export.c dispatch_loop.c
+      ${GXRUNTIME_DIR}/src/core/cpu.c ${GXRUNTIME_DIR}/src/core/cpu_exception.c
+      ${GXRUNTIME_DIR}/src/core/cpu_interpreter.c ${GXRUNTIME_DIR}/src/core/cpu_interpreter_table.c
+      ${GXRUNTIME_DIR}/src/core/cpu_interpreter_float.c ${GXRUNTIME_DIR}/src/core/cpu_interpreter_integer.c
+      APPEND PROPERTY COMPILE_OPTIONS
+      -include "${CMAKE_CURRENT_SOURCE_DIR}/../../windows/compat/bw_getenv_cache.h")
+else()
+  target_link_libraries(${MODULE_NAME} PRIVATE m)
+endif()
 target_compile_options(${MODULE_NAME} PRIVATE -O${COMPOSITE_OPTIMIZATION_LEVEL} -ffp-contract=off)
 
 if(COMPOSITE_OPTIMIZATION_LEVEL STREQUAL "2")

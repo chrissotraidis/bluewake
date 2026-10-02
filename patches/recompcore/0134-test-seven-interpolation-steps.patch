@@ -1,0 +1,91 @@
+From 70bc9957b89a145a5b457d1a9e5cd482f34e7e61 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 09:51:22 +0900
+Subject: [PATCH] Test every 240 Hz interpolation step for draws particles and
+ camera motion
+
+---
+ .../aurora/tests/frame_interp_test.cpp        | 38 ++++++++++---------
+ 1 file changed, 20 insertions(+), 18 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 696cb1a5..0af55622 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -850,15 +850,14 @@ int main() {
+     CHECK(front != nullptr && near(front[2], -30.f) && near(front[3 * 3 + 2], 30.f));
+   }
+ 
+-  // 120 Hz: three in-between frames at a quarter, half and three quarters of
+-  // the way. A draw moving at 40 units a frame is at 10, 20 and 30; a turn of
+-  // the camera by 24 degrees puts what stands still at 6, 12 and 18 degrees
+-  // of it; a particle's corners move in quarters too.
+-  {
+-    fi::set_steps(3);
++  // 120/240 Hz: every in-between step advances evenly toward the next real
++  // frame, including moving draws, particle vertices and camera screw motion.
++  for (const int count : {3, 7}) {
++    const float part = 1.f / (count + 1);
++    fi::set_steps(count);
+     fi::end_game_frame();
+     fi::end_game_frame();
+-    CHECK(fi::frame_steps() == 3);
++    CHECK(fi::frame_steps() == count);
+     const auto rooms = [](float yaw, int skip) {
+       for (int room = 0; room < 8; ++room)
+         if (room != skip)
+@@ -888,15 +887,15 @@ int main() {
+     const auto* moving = fi::blend_draw(1150, 0, draw_at(40, 0, -400));
+     CHECK(moving != nullptr);
+     if (moving != nullptr) {
+-      for (int step = 0; step < 3; ++step)
+-        CHECK(near(fi::blended_step(step)->posnormalmatrix[0][3], 10.f * (step + 1)));
++      for (int step = 0; step < count; ++step)
++        CHECK(near(fi::blended_step(step)->posnormalmatrix[0][3], 40.f * part * (step + 1)));
+     }
+     auto p1 = spark(40.f);
+     p1.draw_tag_age = 1;
+     blend_plan(p1, draw_at(0, 0, 0));
+-    for (int step = 0; step < 3; ++step) {
++    for (int step = 0; step < count; ++step) {
+       const float* corners = fi::blended_positions(step);
+-      CHECK(corners != nullptr && near(corners[0], 10.f * (step + 1)));
++      CHECK(corners != nullptr && near(corners[0], 40.f * part * (step + 1)));
+     }
+     // The camera turns 24 degrees; the rooms stand still.
+     fi::end_game_frame();
+@@ -907,8 +906,8 @@ int main() {
+     const auto* room = fi::blend_draw(1100 + 3, 0, seen(24.f, 0, 0, 3 * 300.f - 1000.f, -50.f, -900.f - 3 * 40.f));
+     CHECK(room != nullptr);
+     if (room != nullptr) {
+-      for (int step = 0; step < 3; ++step) {
+-        const float yaw = 6.f * (step + 1);
++      for (int step = 0; step < count; ++step) {
++        const float yaw = 24.f * part * (step + 1);
+         const auto expected = seen(yaw, 0, 0, 3 * 300.f - 1000.f, -50.f, -900.f - 3 * 40.f);
+         const auto* got = fi::blended_step(step);
+         CHECK(std::fabs(got->posnormalmatrix[0][0] - expected.posnormalmatrix[0][0]) < 1e-3f);
+@@ -950,12 +949,15 @@ int main() {
+           out[r][3] += next[r][3];
+         }
+       };
+-      double first[3][4], second[3][4];
++      double first[3][4];
+       step_motion(0, first);
+-      step_motion(1, second);
+-      for (int r = 0; r < 3; ++r)
+-        for (int c = 0; c < 4; ++c)
+-          CHECK(std::fabs(first[r][c] - second[r][c]) < (c == 3 ? 0.05 : 1e-4));
++      for (int step = 1; step + 1 < count; ++step) {
++        double next[3][4];
++        step_motion(step, next);
++        for (int r = 0; r < 3; ++r)
++          for (int c = 0; c < 4; ++c)
++            CHECK(std::fabs(first[r][c] - next[r][c]) < (c == 3 ? 0.05 : 1e-4));
++      }
+     }
+     fi::set_steps(1);
+     fi::end_game_frame();
+-- 
+2.46.0
+

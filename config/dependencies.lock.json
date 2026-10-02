@@ -11,14 +11,14 @@
   "dependencies": [
     {
       "id": "dolrecomp",
-      "url": "https://github.com/chrissotraidis/DolRecomp",
-      "sha": "5c91d6ed1ac7ac2f1aa6535b893eabb70f0f0d8f",
+      "url": "https://github.com/elliotttate/DolRecomp",
+      "sha": "b8b534591cba8ca7cd43943a655ee6e2591cf5de",
       "license": "GPL-3.0",
-      "role": "CPU translator; the translator state used for the shipped GZLE01 composite",
-      "verified": "2026-09-25",
+      "role": "CPU translator; chrissotraidis/DolRecomp 5c91d6e (the translator state used for the shipped GZLE01 composite) plus runtime option sites (patches/dolrecomp/0019), which translate the base game byte-identically",
+      "verified": "2026-09-28",
       "local_checkout": {
         "path": "ref/recompcore/DolRecomp",
-        "sha": "5c91d6ed1ac7ac2f1aa6535b893eabb70f0f0d8f"
+        "sha": "b8b534591cba8ca7cd43943a655ee6e2591cf5de"
       },
       "local_patch": {
         "base_sha": "528a204fbf68fccf7353bff9202714fa6a009dcf",
@@ -112,16 +112,16 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "2d6063614a9bc899f6b4d11c7e7b3cd66e4d96f3",
-      "branch": "bluewake",
+      "sha": "0568feddb332e0d9fe8a3a7cff330263f14af2f1",
+      "branch": "codex/bluewake-pe-token",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
-      "verified": "2026-09-25",
+      "verified": "2026-10-03",
       "upstream": {
         "url": "https://github.com/ExpansionPak/RecompCore",
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
       },
-      "fork_contents": "the 80 BlueWake commits after the upstream base, including the former unpublished head 3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d and the patches/recompcore series through 0097 (0085-0091 in commit 0f642d4, the iPad device session of 2026-09-26; 0092, HD texture packs and the aspect override, in 7952fa2; 0093, background decoding of HD textures, in 594807d), plus the previously uncommitted GXRuntime core cpu.h/cpu.c and DSPIntTables sources, with .gitmodules pointing DolRecomp at chrissotraidis/DolRecomp branch bluewake",
+      "fork_contents": "the 80 BlueWake commits after the upstream base, including the former unpublished head 3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d and the patches/recompcore series through 0097 (0085-0091 in commit 0f642d4, the iPad device session of 2026-09-26; 0092, HD texture packs and the aspect override, in 7952fa2; 0093, background decoding of HD textures, in 594807d), plus the previously uncommitted GXRuntime core cpu.h/cpu.c and DSPIntTables sources, with .gitmodules pointing DolRecomp at chrissotraidis/DolRecomp branch bluewake (chrissotraidis/RecompCore 2d60636); elliotttate/RecompCore's copy adds patches/recompcore 0098-0113 (bluewake 8ab24da, then windows-release 9618e9d) and points DolRecomp at elliotttate/DolRecomp; chrissotraidis/RecompCore bluewake-next is 9618e9d plus patches 0114-0127 (Windows DSP layout, save safety, pipeline shutdown, audio recovery/capture opt-in display timing the reproduced worker-identity race post-publication card consistency and full-queue audio recovery)",
       "superseded_local_patch": {
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2",
         "head_sha": "3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d",
@@ -535,6 +535,33 @@
           ]
         },
         "note": "historical record only: 3476998 was never published and the patches/recompcore series does not apply cleanly to the base (0008 fails); use the fork commit above"
+      },
+      "reconciliation": {
+        "base_sha": "99e4748002d42c1a86fdcb33a47cd0e97292acff",
+        "donor_sha": "634895470af6e61e601f06a351f3a72888215159",
+        "tracked_patches": [
+          "patches/recompcore/0131-optional-global-mem1.patch",
+          "patches/recompcore/0132-display-rate-and-slow-game-interpolation.patch",
+          "patches/recompcore/0133-check-guest-span-before-subtraction.patch",
+          "patches/recompcore/0134-test-seven-interpolation-steps.patch",
+          "patches/recompcore/0135-honor-extended-mem1-aliases.patch",
+          "patches/recompcore/0136-dual-texture-post-transform.patch",
+          "patches/recompcore/0137-preserve-post-texture-save-state.patch",
+          "patches/recompcore/0138-pe-token-and-pictobox-readback.patch",
+          "patches/recompcore/0139-portable-runtime-save-fixture.patch"
+        ],
+        "evidence": "Prior runtime candidate passes Mac/Windows regressions. Extended MEM1 aliases, endian reads/writes, reservations, journals, MEM2 and MMIO pass plain/global ASan/UBSan fixtures; full candidate and gameplay/performance acceptance remain pending.",
+        "later_donor_dual_texture": {
+          "donor_patch": "585ad2a4547cd3c9f01361b706b217eb4bcb1eab",
+          "import": "94e9835c4da4fd3b23533de9342319b58aa9ccbf",
+          "save_state_adaptation": "18ba3b642588a33b9e8eac4aba7f713bb8d3d778",
+          "evidence": "Matrix-fold and FIFO/frontend save-state regressions pass Release and ASan/UBSan; Mac host builds. BlueWake lava scene and native Windows acceptance pending."
+        },
+        "pictobox_capture": {
+          "runtime": "2218107dac0150151b39d736924df57e8dc75104",
+          "evidence": "PE token/finish and tiled I8/RGB565 regressions pass; bounded Mac Metal regular/Deluxe photo content, album acceptance, repeat/cancel, actual game save/separate-launch photo reload and pre-fix state capture pass. Native Windows remains pending.",
+          "test_portability_followup": "0568feddb332e0d9fe8a3a7cff330263f14af2f1"
+        }
       }
     },
     {
@@ -564,7 +591,7 @@
         "sha": "8b690b60e699c92e3327886ebd84cf7f05c5d36c",
         "stale": false
       },
-      "vendored_in": "recompcore fork 2d60636 at GXRuntime/graphics/aurora (plain files, not a submodule); the build uses that copy with the BlueWake changes included"
+      "vendored_in": "recompcore candidate 18ba3b64 at GXRuntime/graphics/aurora (plain files, not a submodule); the build uses that copy with the BlueWake changes included"
     },
     {
       "id": "sunpad",
@@ -640,8 +667,8 @@
       "url": "https://github.com/WideBoner/betterww",
       "sha": "45014813424a7aebf7e4092fd26cae8f632837ae",
       "license": "MIT",
-      "role": "Better Wind Waker ISO patcher (based on LagoLunatic's wwrando), run on the user's Mac by scripts/mods/make_betterww_iso.sh with its default settings; the Mods menu's Better Wind Waker variants are built from its patched main.dol (SHA-1 e884a349a28ca534e272cf4c17737db587245cdd). Not vendored; nothing from it ships in the app except the translation of the user's own patched executable.",
-      "verified": "2026-09-26"
+      "role": "Better Wind Waker, the reference for BlueWake's Better Wind Waker settings: mods/betterww/options.txt lists the instructions and values its patches change at this commit (with their original instructions), and runtime/host/src/game_options.c does natively what its added assembly does. Not vendored; no code or assets from it ship.",
+      "verified": "2026-09-28"
     },
     {
       "id": "dolphin-gzle01-widescreen",

@@ -1,0 +1,149 @@
+# Better Wind Waker's settings as BlueWake game options (docs/MODS.md).
+#
+# Better Wind Waker (https://github.com/WideBoner/betterww, commit 4501481) patches
+# the disc. Here each of its settings is a switch of its own that the player turns
+# on and off in the Better Wind Waker menu, with no patched disc: the instructions
+# a setting changes are option sites that DolRecomp translates both ways
+# (--option-sites), what its added code did is native code in the host
+# (runtime/host/src/game_options.c), and the values it changes are writes made at
+# boot. scripts/mods/game_options.py turns this file into the translator's site
+# list and the composite's option table.
+#
+#   option NAME INDEX on|off TITLE...     a switch; INDEX is its slot (1-255)
+#   site   WHERE NAME insn|imm16 VALUE     the instruction, or its low 16 bits
+#   hook   WHERE NAME before|after ID      native code (game_options.c) at WHERE
+#   write  WHERE NAME f32|u32|u16|u8 VALUE a value written at boot
+#
+# WHERE is a main.dol address or MODULE.rel+OFFSET (an offset in the REL file,
+# as Better Wind Waker's patches give them). The comments give each site's
+# original instruction.
+
+option instant_text        1  on  Instant text boxes
+option swift_sail          2  on  Swift Sail
+option brisk_sail          3  off Brisk Sail
+option faster_movement     4  on  Faster rolling
+option faster_grapple      5  on  Faster grappling hook
+option faster_block_push   6  on  Faster block pushing
+option faster_animations   7  on  Faster crawling, climbing and NPC chat zoom
+option tingle_chests       8  on  Tingle Chests without the Tingle Tuner
+option unrestricted_boat   9  off Unrestricted boat
+option no_song_replays     10 on  No song replays
+option swing_turn          11 on  Turn while swinging
+option skip_intro_movie    12 off Skip the opening movie
+option faster_ballad       13 on  Faster Ballad of Gales
+option invert_camera_x     14 off Invert camera left and right
+option reveal_sea_chart    15 off Reveal the full sea chart (new games)
+
+# Instant text: every message draws at once and its timed waits are dropped
+# (native: the message data is patched in memory once it is loaded), and holding
+# B advances text as soon as it can: these read the buttons held rather than the
+# buttons just pressed (0x31 instead of 0x33 in the pad state).
+site 0x801E6A0C instant_text insn 0x88030031   # lbz r0, 0x33(r3) in dMesg_outwaitProc
+site 0x801E6BF0 instant_text insn 0x88030031   # dMesg_closewaitProc
+site 0x80211EF8 instant_text insn 0x88030031   # dMsg_stopProc
+site 0x8021211C instant_text insn 0x88030031   # dMsg_selectProc
+site 0x80212E14 instant_text insn 0x88030031   # dMsg_continueProc
+site 0x80213718 instant_text insn 0x88030031   # dMsg_closewaitProc
+site 0x80213858 instant_text insn 0x88030031   # dMsg_finishProc
+
+# Swift Sail: the wind turns to blow from behind the boat whenever the sail is
+# up (native, after KoRL's sail sound call), the boat sails twice as fast,
+# speeds up faster and brakes harder (Brisk Sail brakes harder still; the native
+# braking reads which). Brisk Sail turns these sites on too.
+hook  d_a_ship.rel+0xBA00 swift_sail before 3    # b (after bl setShipSailState)
+hook  d_a_ship.rel+0x3A74 swift_sail before 4    # bl cLib_addCalc: braking with A
+hook  d_a_ship.rel+0x3BC8 swift_sail before 5    # bl cLib_addCalc: braking when idle
+site  d_a_ship.rel+0x3A7C swift_sail insn 0xC03F0044   # lfs f1, 0x154(r31): cruising speed 10 -> 30
+site  d_a_ship.rel+0x2DD0 swift_sail insn 0xC06401A4   # lfs f3, 0xEC(r4): acceleration 0.1 -> 0.2
+site  d_a_ship.rel+0x2E18 swift_sail insn 0xC07F0008   # lfs f3, 0x80(r31): 5 -> 10
+site  d_a_ship.rel+0x2E1C swift_sail insn 0xC09F0008   # lfs f4, 0x88(r31): 1 -> 2
+write d_a_ship.rel+0xDC28 swift_sail f32 0.03          # acceleration step 0.015
+write d_a_ship.rel+0xDBE8 swift_sail f32 110.0         # sailing speed 55
+write d_a_ship.rel+0xDBC0 swift_sail f32 160.0         # initial speed 80
+
+# Faster rolling.
+write 0x8035DB94 faster_movement f32 6.0
+write 0x8035D3D0 faster_movement f32 0.3529412          # rolling speed per walking speed, 6/17
+write 0x8035D3D4 faster_movement f32 20.0               # rolling base speed
+
+# Faster grappling hook.
+site  0x800EE0E4 faster_grapple imm16 0xA0AC   # lfs f0, -0x5FD8(r2): read 0x803F9DAC
+site  0x800EDB74 faster_grapple insn 0x38030014 # addi r0, r3, 40 -> 20
+site  0x800EDEA4 faster_grapple insn 0x3803000A # addi r0, r3, 20 -> 10
+site  0x800EEC40 faster_grapple imm16 0xA028   # lfs f3, -0x60BC(r2): read 0x803F9D28
+site  0x800EECA8 faster_grapple insn 0x38A30006 # addi r5, r3, 1 -> 6
+write 0x803F9D60 faster_grapple f32 25.0
+
+# Faster block pushing: the push animation, and 12 frames instead of 20 for a
+# push or pull of each of the 13 block types (daObjMovebox::Act_c::M_attr).
+write 0x8035DBB0 faster_block_push f32 1.4
+write 0x8035DBB8 faster_block_push f32 1.4
+write d_a_obj_movebox.rel+0x54B4 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x54BA faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5550 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5556 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x55EC faster_block_push u16 12
+write d_a_obj_movebox.rel+0x55F2 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5688 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x568E faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5724 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x572A faster_block_push u16 12
+write d_a_obj_movebox.rel+0x57C0 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x57C6 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x585C faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5862 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x58F8 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x58FE faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5994 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x599A faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5A30 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5A36 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5ACC faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5AD2 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5B68 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5B6E faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5C04 faster_block_push u16 12
+write d_a_obj_movebox.rel+0x5C0A faster_block_push u16 12
+
+# Faster crawling, climbing and NPC chat zoom.
+write 0x8035D738 faster_animations f32 1.6
+write 0x8035DB38 faster_animations f32 1.6
+write 0x8035DB18 faster_animations f32 1.6
+write 0x8035DB20 faster_animations f32 1.4
+write 0x8035D6AC faster_animations f32 2.0
+site  0x8016DA2C faster_animations insn 0x3800000A # li r0, 20 -> 10
+
+# Tingle Chests open to ordinary bombs, and show on the maps once you have the
+# dungeon's compass.
+site d_a_agbsw0.rel+0x1CA4 tingle_chests insn 0x4800001C # skip the Tingle Tuner checks
+site d_a_agbsw0.rel+0x1D0C tingle_chests insn 0x60000000 # any bomb, not only a Tingle Bomb
+site 0x8004C68C tingle_chests insn 0x48000010 # cmplwi r0, 15: minimap
+site 0x801A9F8C tingle_chests insn 0x48000010 # cmpwi r23, 15: dungeon map
+
+# Unrestricted boat: King of Red Lions no longer turns you back for story
+# progress (the edge of the map still does).
+site d_a_ship.rel+0x29EC unrestricted_boat insn 0x48000064 # bne: before Dragon Roost
+site d_a_ship.rel+0x2A08 unrestricted_boat insn 0x48000048 # bne: before Farore's Pearl
+site d_a_ship.rel+0x2A24 unrestricted_boat insn 0x48000010 # beq: before the Master Sword
+site d_a_ship.rel+0xB2D8 unrestricted_boat insn 0x48000018 # bne: boarding before Dragon Roost
+
+# No song replays: Link does not conduct the song again after you play it.
+site 0x8014ECE0 no_song_replays insn 0x60000000 # bne: waiting for the text box
+site 0x8014EF28 no_song_replays insn 0x60000000 # bge: waiting for the animation
+
+# Turn while swinging on a rope (native: the stick turns Link).
+hook 0x80145648 swing_turn before 1              # lfs f0, -0x5BA8(r2) in procRopeSwing
+
+# Skip the opening movie.
+site 0x80232C78 skip_intro_movie insn 0x60000000 # original 0x48000F6D: bl 0x80233BE4
+site 0x80232C88 skip_intro_movie insn 0x60000000 # original 0x4082000C: bne 0x80232C94
+
+# Faster Ballad of Gales: no wait for KoRL to rise, and no warp music.
+site d_a_ship.rel+0x7A10 faster_ballad insn 0x60000000 # ble: KoRL's height
+site d_a_ship.rel+0x7680 faster_ballad insn 0x60000000 # bl: the warp music
+
+# Invert the camera's horizontal axis (native: the C-stick's X is negated).
+hook 0x80162488 invert_camera_x after 2          # lfs f1, 0x10(r3) in dCamera_c::updatePad
+
+# Reveal the whole sea chart when a new game starts.
+site 0x8005B2CC reveal_sea_chart insn 0x38800001 # li r4, 0 -> 1

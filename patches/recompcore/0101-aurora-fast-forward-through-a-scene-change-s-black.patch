@@ -1,0 +1,154 @@
+From 3c173c988b2ac5bdecd8c978b143a03aa17d13b4 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 00:39:30 -0400
+Subject: [PATCH 101/102] Aurora: fast-forward through a scene change's black
+
+dol_aurora_set_fast_forward(true) renders frames without presenting them
+(no drawable is taken, so nothing waits for the display) and keeps the audio
+queue at the stretcher's 100 ms target, dropping what is made past it, so
+neither the display nor the audio holds the guest to real time. The host
+turns it on while a scene change has the screen fully black. The screen
+keeps the last presented frame, and the queue holds neither late nor too
+little sound when it ends.
+---
+ GXRuntime/backends/aurora/aurora_audio.cpp         |  8 ++++++++
+ GXRuntime/backends/aurora/aurora_backend.cpp       |  6 ++++++
+ GXRuntime/backends/aurora/aurora_backend_private.h |  1 +
+ GXRuntime/graphics/aurora/include/aurora/aurora.h  |  3 +++
+ GXRuntime/graphics/aurora/lib/aurora.cpp           | 13 +++++++++++--
+ GXRuntime/include/gxruntime/aurora_backend.h       |  5 +++++
+ 6 files changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_audio.cpp b/GXRuntime/backends/aurora/aurora_audio.cpp
+index f4492ce..ca3f902 100644
+--- a/GXRuntime/backends/aurora/aurora_audio.cpp
++++ b/GXRuntime/backends/aurora/aurora_audio.cpp
+@@ -73,6 +73,14 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+     }
+ 
+     int queued = SDL_GetAudioStreamQueued(gx_aurora::g_audio_stream);
++    // Fast-forward (dol_aurora_set_fast_forward): the sound made faster than
++    // real time is kept only up to the stretcher's target, so the queue neither
++    // holds it late after the fast-forward nor runs dry during it.
++    if (gx_aurora::g_audio_discard.load(std::memory_order_relaxed) &&
++        queued >= bytes_per_second * static_cast<int>(kStretchTargetMs) / 1000) {
++        gx_aurora::g_audio_dropped_count++;
++        return;
++    }
+     // With the host pacing retraces by the wall clock (BlueWake's
+     // BLUEWAKE_WALL_PACE), the queue must not pace the game as well: its 1 ms
+     // waits added up to about 35 ms whenever the device drained a buffer, and
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index e8a10e0..2b8a06b 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -39,6 +39,7 @@ unsigned long long g_fifo_bytes = 0;
+ unsigned long long g_audio_push_count = 0;
+ unsigned long long g_audio_throttle_count = 0;
+ unsigned long long g_audio_dropped_count = 0;
++std::atomic_bool g_audio_discard{false};
+ unsigned long long g_audio_low_log_push = 0;
+ u32 g_audio_sample_rate = 32000;
+ SDL_AudioStream* g_audio_stream = nullptr;
+@@ -502,6 +503,11 @@ void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user)
+     gx_aurora::g_host_event_user = user;
+ }
+ 
++void dol_aurora_set_fast_forward(bool on) {
++    gx_aurora::g_audio_discard.store(on, std::memory_order_relaxed);
++    aurora_set_present_suppressed(on);
++}
++
+ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user) {
+     gx_aurora::g_host_hold = should_hold;
+     gx_aurora::g_host_hold_user = user;
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index ce5aa54..dc72a45 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -50,6 +50,7 @@ extern unsigned long long g_audio_low_log_push;
+ extern u32 g_audio_sample_rate;
+ extern SDL_AudioStream* g_audio_stream;
+ extern bool g_audio_playing;
++extern std::atomic_bool g_audio_discard;
+ extern int g_audio_prebuffer_ms;
+ extern int g_audio_max_queue_ms;
+ extern DolPlatformGuestAddressResolverFn g_guest_address_resolver;
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 6e225ce..b98707f 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -140,6 +140,9 @@ void aurora_set_resampler(AuroraSampler sampler);
+    buffer (3 renders 1920x1440 and scales the result to the window); 0 renders
+    at the window's native pixel size. Takes effect at the next frame. */
+ void aurora_set_frame_buffer_scale(float scale);
++/* While set, frames are rendered but not presented: no drawable is taken, so
++   nothing waits for the display. The screen keeps the last presented frame. */
++void aurora_set_present_suppressed(bool suppressed);
+ /* Anisotropic filtering for every mipmapped, linearly filtered texture, as
+    Dolphin's "Anisotropic Filtering" enhancement: 1 (or 0) leaves the game's
+    own sampler settings, 2-16 forces that many samples. Takes effect at the
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index d6a8d9c..cd1cfb6 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -282,6 +282,8 @@ static void draw_fps_overlay() {
+ }
+ #endif
+ 
++static std::atomic_bool g_presentSuppressed{false};
++
+ void end_frame() noexcept {
+   ZoneScoped;
+ #ifdef AURORA_ENABLE_GX
+@@ -312,7 +314,7 @@ void end_frame() noexcept {
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
+     {
+       window::SurfaceLock surfaceLock;
+-      if (window::is_presentable() && g_surface) {
++      if (!g_presentSuppressed.load(std::memory_order_relaxed) && window::is_presentable() && g_surface) {
+         ZoneScopedN("Acquire texture");
+         wgpu::SurfaceTexture surfaceTexture;
+         g_surface.GetCurrentTexture(&surfaceTexture);
+@@ -382,7 +384,7 @@ void end_frame() noexcept {
+         imgui::render(pass, imguiDrawData);
+         pass.End();
+       }
+-    } else {
++    } else if (!g_presentSuppressed.load(std::memory_order_relaxed)) {
+       Log.info("Skipping present; window not presentable");
+     }
+     webgpu::gpu_prof::frame_end(encoder);
+@@ -488,6 +490,13 @@ void aurora_set_background_input(bool value) {
+   aurora::window::set_background_input(value);
+ }
+ void aurora_set_frame_buffer_scale(float scale) { aurora::window::set_frame_buffer_scale(scale); }
++void aurora_set_present_suppressed(bool suppressed) {
++#ifdef AURORA_ENABLE_GX
++  aurora::g_presentSuppressed.store(suppressed, std::memory_order_relaxed);
++#else
++  (void)suppressed;
++#endif
++}
+ void aurora_set_resampler(AuroraSampler sampler) {
+ #ifdef AURORA_ENABLE_GX
+   aurora::webgpu::set_resampler(sampler);
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 2e84da1..16a37c0 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -38,6 +38,11 @@ void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user)
+ // it pumps events and sleeps on the main thread until the predicate clears.
+ typedef bool (*DolAuroraHoldFn)(void* user);
+ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user);
++// Fast-forward, for stretches with nothing to see or hear (a scene change's
++// black): frames are rendered but not presented, and audio pushes are
++// dropped, so neither the display nor the audio queue holds the guest to real
++// time. The screen keeps the last presented frame.
++void dol_aurora_set_fast_forward(bool on);
+ 
+ /* Cumulative main-thread frame timing, for per-second diagnostics: time spent
+    waiting for the FIFO translation worker at the guest's GX barriers, time in
+-- 
+2.55.0
+

@@ -14,6 +14,19 @@ GPLv3 is the license the parts BlueWake is built from allow together:
 - the translator, [DolRecomp](https://github.com/chrissotraidis/DolRecomp), and the Aurora renderer
   vendored in RecompCore keep their own licenses, recorded in those repositories
 
+Rendering interpolation, desktop camera controls, jump and sprint, quicker transitions, runtime
+game options and associated optimizations were contributed through
+[elliotttate's Wind-Waker-Recomp source fork](https://github.com/elliotttate/Wind-Waker-Recomp).
+Imported commits retain their original authorship. Its RecompCore and DolRecomp changes build on
+BlueWake's pinned forks; the exact revisions are recorded in the dependency lock.
+
+The recovered J3D rotation/translation formulas in `cmake/composite/native_j3d.c`
+were adapted by Elliott from zeldaret/tww's
+[J3DTransform.cpp](https://github.com/zeldaret/tww/blob/09de0609ecdb6d30dd012e2258f755afdac1cb56/src/JSystem/J3DGraphBase/J3DTransform.cpp).
+That fixed revision carries [CC0-1.0](https://github.com/zeldaret/tww/blob/09de0609ecdb6d30dd012e2258f755afdac1cb56/LICENSE).
+The import retains its attribution. Certification scripts record hashes and
+modify only a player's locally generated source; translated bodies stay private.
+
 BlueWake is released as source only. Every app is built by its player, on their own Mac, from their own
 disc ([docs/BUILD_YOUR_OWN.md](docs/BUILD_YOUR_OWN.md)).
 
@@ -35,8 +48,9 @@ the GPL.
 
 Better Wind Waker, the widescreen code from Dolphin's game settings and HD texture packs are the work
 of their authors and keep their own terms. The repository carries only the widescreen code's text
-(`mods/widescreen/GZLE01.gecko`); the build fetches Better Wind Waker at a pinned commit and applies it
-to your disc on your Mac, and you add texture packs yourself.
+(`mods/widescreen/GZLE01.gecko` and its 16:10 variant) and the option-site descriptions derived from
+Better Wind Waker. Personal builds translate both behaviors at those sites from the player's disc;
+the settings select which behavior runs. You add texture packs yourself.
 
 ## Runtime metadata
 

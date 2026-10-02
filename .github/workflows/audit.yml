@@ -9,3 +9,38 @@ jobs:
         run: bash scripts/audit_repo.sh
       - name: Validate dependency lock
         run: python3 -c "import json; d=json.load(open('config/dependencies.lock.json')); assert len(d['dependencies']) > 0"
+      - name: Preserve platform signing identities
+        run: python3 tests/test_signing_entitlements.py
+      - name: Check synthetic profiling fixtures
+        run: python3 tests/test_sample_owners.py
+      - name: Keep retrace and display timing separate
+        run: python3 tests/test_frame_tail.py
+      - name: Preserve one-game profiling isolation
+        run: python3 tests/test_one_game_guard.py
+      - name: Preserve synthetic Mac launcher cards
+        run: python3 tests/test_mac_launcher.py
+      - name: Preserve Mac packaging inputs and prior output
+        run: python3 tests/test_mac_package.py
+      - name: Preserve Mac optimization selection and interrupted source
+        run: python3 tests/test_mac_optimization_cache.py
+      - name: Preserve explicit Windows optimization cache selection
+        run: python3 tests/test_windows_prepared_cache.py
+      - name: Require complete guest checkpoint comparison coverage
+        run: python3 tests/test_guest_checkpoints.py
+      - name: Preserve direct-call host boundaries and preparation
+        run: |
+          python3 tests/test_direct_calls.py
+          python3 tests/test_inline_gpr.py
+          python3 tests/native_j3d_source_test.py
+          python3 tests/native_game_math_source_test.py
+          python3 tests/native_skin_source_test.py
+          python3 tests/native_vec_source_test.py
+          python3 tests/native_math_source_test.py
+      - name: Bound synthetic instant-text patching under sanitizers
+        run: |
+          cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/bmg_patch_test.c -o "$RUNNER_TEMP/bluewake_bmg_patch_test"
+          "$RUNNER_TEMP/bluewake_bmg_patch_test"
+      - name: Preserve audio DMA stereo order under sanitizers
+        run: |
+          cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/audio_dma_stereo_test.c -o "$RUNNER_TEMP/bluewake_audio_dma_stereo_test"
+          "$RUNNER_TEMP/bluewake_audio_dma_stereo_test"

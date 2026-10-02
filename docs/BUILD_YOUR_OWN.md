@@ -1,8 +1,74 @@
 # Build your own BlueWake
 
-BlueWake is distributed as source. You build it on your Mac from your own copy of *The Wind Waker*, and the
-result is an app for your own iPhone or iPad. The game's code is translated from your disc during the
-build, so **the app you build is yours alone: never share or upload it.**
+BlueWake is distributed as source. Build it on an Apple Silicon Mac from your
+own supported *The Wind Waker* disc for your iPhone/iPad, or use the Mac migration
+candidate below. The game's code is translated from your disc during the build,
+so **the app you build is yours alone: never share or upload it.**
+
+The migration candidate is reviewed in
+[PR #37](https://github.com/chrissotraidis/bluewake/pull/37), branch
+`codex/fork-consolidated`; it is not yet merged into `main`. Fresh player-build
+acceptance is tied to `3392854`. The later `9706637` host adds the bounded Mac
+Pictobox repair, tested with that same personal module; it has not repeated the
+complete clean player build. Follow-up test-fixture changes do not alter that
+host. For candidate testing from a new checkout use
+`git clone --branch codex/fork-consolidated https://github.com/chrissotraidis/bluewake.git`.
+Do not reset an existing checkout or replace its private build outputs to switch
+revisions. The [platform matrix](status/FORK_RECONCILIATION_2026-10-02.md#player-build-and-platform-gates)
+separates implemented routes from completed player acceptance. Windows has a
+separate [source-build guide](WINDOWS.md).
+
+## Mac personal app (migration candidate)
+
+The reconciliation branch also provides an Apple Silicon Mac target:
+
+```sh
+scripts/builder/build.sh /path/to/your/GZLE01.iso --platform macos --out build/macos
+```
+
+It uses the same supported USA revision-0 disc checks, translation, mods and
+local training as the device builder. The result is
+`build/macos/packaged/BlueWake.app`. It contains your disc, extracted game files
+and translated module. Keep the entire app personal; never share or upload it.
+The app can be moved out of the checkout. Its saves and preferences stay under
+`~/Library/Application Support/BlueWake`, so replacing the app does not replace
+player data. Experimental desktop save states use that folder's `States`
+subdirectory; existing explicit path overrides still work.
+
+Use `--source-only` to verify extraction and translation first, then rerun the
+same command without that flag. `--no-train` skips personal optimization training
+and must not be treated as equivalent performance. The builder retains any
+previous packaged app beside the new one. It signs locally with an ad-hoc
+signature; `--identity NAME` selects an installed Mac signing identity. Device
+options `--ipa`, `--app`, `--profile` and `--install` do not apply to Mac.
+
+The migration candidate also accepts `--combined-optimizations` for personal
+Mac builds. It selects the imported preparation/native helpers measured in the
+reconciliation ledger, applies the same configuration during local training and
+compilation, and records it in the app's provenance. The packaged app enables
+those compatible paths when launched; explicit diagnostic environment overrides
+still win. Original 30 Hz game logic and display-mode preferences stay unchanged.
+This option is off by default until clean player-build and sustained acceptance
+finish. Changing the option preserves and regenerates incompatible source;
+matching completed work is reused. This does not enable PadMint Mac support.
+
+`--app-only --platform macos` builds the shell without game files. It is for
+local packaging checks, not a playable build or an accepted public release.
+PadMint's complete Mac path is not implemented or claimed here.
+
+**Acceptance is in progress.** At `3392854`, the fresh owned-disc combined
+build completes translation, local training, compilation, packaging and local
+signature checks. Its relocated app passes actual game save/reload while
+preserving the original card and other slots, and fullscreen/preferences survive
+a separate launch. Fresh start reaches player control; a current-module F5/F9
+state also restores correctly after quitting and reopening the app. A fresh
+ladder/outdoor/door/indoor route passes. These checks do not establish every
+scene, audible output, physical
+controllers or sustained performance. A local replacement from the recorded
+earlier developer app also preserves copied saves/settings/SRAM and loads the
+save afterward; physical iOS upgrades remain untested. See the
+[reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) for remaining
+checks before migration is recommended.
 
 ## What you need
 
@@ -31,7 +97,8 @@ before mods, training, compilation and packaging; it produces no app. If it pass
 scripts/builder/build.sh "/path/to/The Legend Of Zelda The Wind Waker.iso" --ipa build/BlueWake.ipa
 ```
 
-This includes [local optimization](#local-optimization), which is what lets the game hold 30 FPS.
+This includes [local optimization](#local-optimization). Matched physical-device frame-rate
+acceptance of the current player-built candidate remains pending; training alone does not prove 30 FPS.
 Expect well over an hour on a fast Mac and longer on smaller ones; the Mac stays busy. The terminal
 shows each stage and its elapsed time. Rerunning the same command reuses compiled work and completed
 matching profiles. Interrupted training playback starts again from an isolated card; it does not
@@ -110,10 +177,9 @@ BlueWake slot for it; your current saves are backed up first. USA saves only.
 
 ## Mods
 
-The build includes the Widescreen and Better Wind Waker code mods (`--no-mods` leaves them out). Better
-Wind Waker also needs a patched disc, which the build writes to `build/device/mods/betterww.iso`: copy it
-to the device and use **⋯ › Mods › Install Better Wind Waker…**. See [MODS.md](MODS.md).
-With a custom `--out`, the patched disc is in that directory's `mods/betterww.iso`.
+The build includes the Widescreen (16:9 and 16:10) and Better Wind Waker mods (`--no-mods` leaves them
+out). Better Wind Waker's settings are built in: turn it on in **⋯ › Mods** and choose its settings in
+**⋯ › Mods › Better Wind Waker Settings**. No patched disc is needed. See [MODS.md](MODS.md).
 
 ## If something fails
 

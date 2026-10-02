@@ -13,15 +13,18 @@ extern "C" {
 // Keys in NSUserDefaults.
 #define BW_RENDER_SCALE_KEY "BlueWake.RenderScale"        // 0 native, 1-4 x 640x480; default 3
 #define BW_ANISOTROPY_KEY "BlueWake.Anisotropy"           // 1 game default, 4/8/16 forced; default 1
+#define BW_SMOOTH_MOTION_KEY "BlueWake.SmoothMotion" // 0 off, 1 (60 FPS), 3 (120 FPS)
 #define BW_INVERT_CAMERA_X_KEY "BlueWake.InvertCameraX"   // bool
 #define BW_INVERT_CAMERA_Y_KEY "BlueWake.InvertCameraY"   // bool
 #define BW_BUTTON_MAP_KEY "BlueWake.ButtonMap"            // {"A": nativeButton, ...}
-#define BW_MOD_WIDESCREEN_KEY "BlueWake.Mod.Widescreen"   // bool, applies at launch
+#define BW_MOD_WIDESCREEN_KEY "BlueWake.Mod.Widescreen"   // bool, applies at launch (16:9)
+#define BW_MOD_WIDESCREEN_1610_KEY "BlueWake.Mod.Widescreen1610" // bool, applies at launch; excludes 16:9
 #define BW_MOD_HD_TEXTURES_KEY "BlueWake.Mod.HDTextures"  // bool, applies at launch
 #define BW_MOD_BETTERWW_KEY "BlueWake.Mod.BetterWW"       // bool, applies at launch
-// Better Wind Waker's patched executable the composite's variants were built
-// from (betterww 4501481, default settings, scripts/mods/make_betterww_iso.sh).
-#define BW_BETTERWW_DOL_SHA1 "e884a349a28ca534e272cf4c17737db587245cdd"
+// Better Wind Waker's settings (game options, runtime/host/src/game_options.h):
+// BW_OPTION_KEY_PREFIX + the option's name, a bool set only once the player
+// changes it from its default; applies at launch.
+#define BW_OPTION_KEY_PREFIX "BlueWake.Option."
 
 // The GameCube buttons a controller can remap, and the controller buttons
 // they can come from (SDL gamepad buttons, named by position).
@@ -42,6 +45,7 @@ typedef struct BWSettingsSnapshot {
     bool invert_x, invert_y;
     unsigned native[BW_REMAP_COUNT];
     bool remapped;
+    int smooth_motion;
 } BWSettingsSnapshot;
 extern BWSettingsSnapshot g_bw_settings;
 

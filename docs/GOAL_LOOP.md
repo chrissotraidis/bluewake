@@ -1,6 +1,96 @@
 # BlueWake Autonomous Goal-Based Implementation Loop
 
-**ACTIVE — v56, 2026-09-23. The iPadOS loop.** The user redirected the project:
+## Current operating loop — migration acceptance, reoriented October 3, 2026
+
+Make BlueWake the maintained home for the approved consolidation with Elliott.
+The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) owns the
+feature inventory, platform matrix and evidence. Source is substantially
+consolidated; replacement of the donor project is not yet accepted. Finish the
+player paths and gameplay qualification before recommending cutover. Historical
+v56/v55/Route B campaigns below do not control this goal.
+
+### Preserve the completed work
+
+- Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
+  contains the integration ancestry, including 26 Elliott-authored commits and
+  13 Elliott co-author trailers in BlueWake. Runtime adaptations carry their own
+  attribution. Continue here; do not create another import stack.
+- Current maintained runtime is `0568fedd`; its product code matches
+  `2218107d` (the follow-up only fixes a Windows test output path). Translator
+  stays `b8b5345`. Windows host linking and all 58 source regressions pass.
+- The frozen clean Mac player build is BlueWake `3392854` / runtime `18ba3b64`.
+  Its owned-disc translation, local training, O2 compilation, signed relocatable
+  package, bounded restart/resume, game save/separate reload, settings, states,
+  local upgrade and bounded progression remain accepted within their scope.
+- The personal Pictobox candidate overlays host `9706637` / runtime `2218107d`
+  on that module. Regular/Deluxe photos, repeat/cancel, actual card saves,
+  separate album reload and legacy-state capture pass on Mac. Queued camera
+  pitch and water/wall collision also pass. This overlay is not a new clean build.
+
+Do not rerun these accepted checks without a relevant source change, failure or
+identified coverage gap. Documentation-only changes do not invalidate binaries.
+
+### Critical path and exit evidence
+
+| Priority / work package | Next action and completion evidence | Current dependency |
+| --- | --- | --- |
+| 1. Source consolidation and candidate identity | Keep one cumulative review, verify source/dependency/patch agreement and authorship, and remove stale current-status claims. Plan runtime integration into `bluewake-next` and BlueWake integration through #37 into `main`. Record the exact final package source, host, module and compatibility; distinguish clean-build provenance from a diagnostic host overlay. | Current PRs are mergeable drafts. Source review and documentation can proceed independently of hardware; merging source is not migration acceptance. |
+| 2. Complete the player build paths | Resume the retained `3392854` PadMint workspace without repinning; verify reused objects/profiles, final assembly and provenance. Then qualify the maintained candidate's reproducible app/update path and determine whether changed module inputs require a rebuild. Finish signing, device run/save/reload and in-place data-preserving upgrade. Do not count the older workspace as a clean build of the newer candidate. | Two previous attempts stopped for low disk. Retain 593 objects. Resume only with stable 30 GiB free or a verified suitable external target. Physical-device coordination remains pending. |
+| 3. Finish local Mac gameplay coverage | Use isolated copied saves and the existing identified app for the remaining option/climbing checks. Establish the relevant gameplay action before an off/on comparison. Complete real mouse/controller input, audible intro/scripted music, and a representative 30-minute gameplay route with actual progression, settings, save/reload and scene transitions. | Small functional checks can proceed. Real controller/audio acceptance needs the relevant input/output observation. Sustained performance needs an uncontended host. |
+| 4. Native Windows player acceptance | On confirmed x64 hardware, build the owned-disc O2 module and run native Direct3D. Cover disc import/recovery, fullscreen/restart, settings, controls/haptics, saves/states/upgrade, Pictobox, startup and scripted-music reports. Record app/module/source identities and distinguish reproduction from a claimed fix. | Hardware/controller availability unconfirmed. CI is green but cannot close these checks. Do not restart Parallels or take a shared device. |
+| 5. Performance and migration decision | Use matched original-30-Hz configurations and scenes, compare correctness plus frame-time tails/stalls, and complete sustained play on each claimed target. Review the single platform matrix, tested instructions, issue dispositions and proposed donor notice against those results. | Quiet hardware and completed player candidates required. Historical 22.8% Outset gain is bounded, not final performance parity. No redirect, donor closure or public release. |
+
+Select the highest-priority **available** missing result. Unavailable hardware
+or storage is a dependency, not a reason to repeat completed tests or add
+optimization families. Do not fetch new donor features into this fixed campaign
+unless they address an established migration blocker; track later changes apart.
+
+### Iteration contract
+
+1. Read live repository status and the ledger's current summary. Name one
+   missing acceptance result and the observation that would close it.
+2. Check prerequisites before launching. For gameplay, first prove the action
+   occurs (for example, an actual dialogue for instant text). A clean exit,
+   enabled-option log, idle screenshots or a compiled fixture does not suffice.
+3. Run the smallest discriminating check. If automation misses the action,
+   record a setup failure and correct the route before spending on an A/B pair.
+   After three materially identical failures, change the experiment. Do not
+   extend small input probes indefinitely while a larger gate is actionable.
+4. Change source only for an established defect. Run relevant regressions and
+   affected gameplay checks; preserve failed evidence and original player data.
+5. Record exact identities, result, limits and the next gate. Checkpoint validated
+   source-only progress in #37 and update the private continuation. Summarize
+   closed gates and external dependencies rather than counting probes or PRs.
+
+The October 3 instant-text pair `instant-text-ae5ceqfa` completed but never
+opened dialogue: both cases show idle Link and have identical captured frames.
+The enabled case patches message data, which is implementation evidence only.
+Its gameplay result is **inconclusive due to setup**, not a pass or game defect.
+Do not repeat that unchanged route.
+
+Storage is volatile: this reorientation observed 28 GiB free, up from the prior
+sub-2-GiB state, still below the resume threshold. Two unrelated simulator test
+processes each consume approximately 200% CPU. Recheck prerequisites when a
+relevant work package becomes actionable; do not start a large build or present
+this as a quiet performance window. Do not terminate other tasks to create one.
+
+### Retained state and completion boundary
+
+Primary checkout: `codex/fork-consolidated`; nested runtime:
+`codex/bluewake-pe-token`. The `bluewake-cpu-contract` worktree stays clean at
+`3392854`, runtime `18ba3b64`, for exact PadMint resume. Keep the other evidence
+worktrees, failed baseline, personal modules, profiles, captures, saves and
+signing material. Do not clean up unique artifacts to make a build fit.
+
+The goal stays active until required parity, player-build and gameplay checks
+have current evidence. Original 30 Hz simulation, Smooth Motion Off and
+experimental 60 Hz Off remain defaults; preserve explicit preferences.
+Public releases additionally require the private Clear audit and artifact gate.
+Publishing personal builds or donor redirects/closures is outside this goal.
+
+---
+
+**Historical — v56, 2026-09-23. The iPadOS loop.** The user redirected the project:
 make the game actually work on iPadOS, tested in the iOS simulators one at a
 time, with no hardware iPad yet. Route A is hosted on iPadOS by `apple/ios` and
 already reaches controllable Outset gameplay in the simulator; the loop now

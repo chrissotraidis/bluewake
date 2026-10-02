@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <pthread.h>
 
 #define BLUEWAKE_CARD_PATH_CAPACITY 4096u
 
@@ -15,6 +16,15 @@ typedef void (*CardHandler)(CPUState* cpu);
 
 static char g_card_path[BLUEWAKE_CARD_PATH_CAPACITY];
 static bool g_card_open;
+static bool g_card_suspended;
+static pthread_mutex_t g_card_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void bluewake_card_runtime_suspend_writes(bool suspend) {
+    // Wait for an in-flight write before returning to the restore/import UI.
+    pthread_mutex_lock(&g_card_mutex);
+    g_card_suspended = suspend;
+    pthread_mutex_unlock(&g_card_mutex);
+}
 static u64 g_card_write_calls;
 static u64 g_card_write_bytes;
 
@@ -86,9 +96,12 @@ bool bluewake_card_runtime_open(const char* explicit_path) {
 }
 
 void bluewake_card_runtime_close(void) {
+    pthread_mutex_lock(&g_card_mutex);
     if (g_card_open)
         dol_hle_card_close();
     g_card_open = false;
+    g_card_suspended = false;
+    pthread_mutex_unlock(&g_card_mutex);
 }
 
 const char* bluewake_card_runtime_path(void) {
@@ -151,7 +164,7 @@ bool bluewake_card_runtime_intercepts(u32 address) {
     }
 }
 
-bool bluewake_card_runtime_dispatch(CPUState* cpu) {
+static bool dispatch_card(CPUState* cpu) {
     static unsigned probe_reports;
     switch (cpu->pc) {
     case 0x8031D2E0u:
@@ -216,4 +229,20 @@ asynchronous_or_direct:
     }
     cpu->pc = cpu->lr & ~3u;
     return true;
+}
+
+bool bluewake_card_runtime_dispatch(CPUState* cpu) {
+    if (!bluewake_card_runtime_intercepts(cpu->pc))
+        return false;
+    pthread_mutex_lock(&g_card_mutex);
+    bool handled;
+    if (g_card_suspended && bluewake_card_runtime_intercepts(cpu->pc)) {
+        cpu->gpr[3] = (u32)DOL_CARD_RESULT_BUSY;
+        cpu->pc = cpu->lr & ~3u;
+        handled = true;
+    } else {
+        handled = dispatch_card(cpu);
+    }
+    pthread_mutex_unlock(&g_card_mutex);
+    return handled;
 }

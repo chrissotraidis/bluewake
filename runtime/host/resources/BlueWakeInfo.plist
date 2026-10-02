@@ -13,6 +13,8 @@
   <string>com.bluewake.host</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
+  <key>CFBundleIconFile</key>
+  <string>BlueWake.icns</string>
   <key>CFBundleName</key>
   <string>BlueWake</string>
   <key>CFBundlePackageType</key>

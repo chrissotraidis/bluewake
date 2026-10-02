@@ -1,0 +1,49 @@
+name: Windows source-only host
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the pinned public runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content config/dependencies.lock.json -Raw | ConvertFrom-Json
+          $runtime = $lock.dependencies | Where-Object id -eq 'recompcore'
+          if (-not $runtime -or $runtime.sha -notmatch '^[0-9a-f]{40}$') { throw 'Missing runtime pin' }
+          git init ref/recompcore
+          if ($LASTEXITCODE) { throw 'Runtime init failed' }
+          git -C ref/recompcore fetch --depth 1 --no-tags --recurse-submodules=no $runtime.url $runtime.sha
+          if ($LASTEXITCODE) { throw 'Runtime fetch failed' }
+          git -C ref/recompcore checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE) { throw 'Runtime checkout failed' }
+      - name: Compile and link the host without a disc or game module
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio C++ tools missing' }
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=amd64 -host_arch=amd64'
+          $env:PATH = "$vs\VC\Tools\Llvm\x64\bin;$env:PATH"
+          cmake -S windows -B build/windows-host -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DBUILD_TESTING=OFF -DBLUEWAKE_WINDOWS_REGRESSION_TESTS=ON -DAURORA_DAWN_PROVIDER=package
+          if ($LASTEXITCODE) { throw 'Windows configuration failed' }
+          cmake --build build/windows-host --target BlueWake bluewake_texture_encode_test bluewake_runtime_test bluewake_haptics_test bluewake_native_game_math_guard_test bluewake_native_skin_guard_test bluewake_native_math_guard_test bluewake_native_vec_guard_test bluewake_native_j3d_guard_test bluewake_inline_gpr_memory_test bluewake_direct_calls_test bluewake_guest_checkpoint_test bluewake_gather_host_test bluewake_gather_memory_plain_test bluewake_gather_memory_global_test bluewake_gather_dispatch_test bluewake_cycle_domain_test bluewake_interrupt_sources_test bluewake_delivery_digest_test bluewake_composite_dispatch_loop_test bluewake_edge_intercepts_test bluewake_inline_fp_test bluewake_module_cpu_contract_test bluewake_fast_blocks_test bluewake_guest_memory_plain_test bluewake_guest_memory_global_test bluewake_windows_disc_test bluewake_mouse_motion_test bluewake_gxcore_test bluewake_frontend_test bluewake_renderer_shared_flags_test bluewake_fifo_trace_worker_test bluewake_host_state_save_failure_test bluewake_save_state_test bluewake_atomic_copy_race_test bluewake_card_dispatch_lock_test bluewake_render_worker_identity_test bluewake_gx_flush_metrics_test bluewake_desktop_controller_test bluewake_face_button_swap_test bluewake_audio_sink_test bluewake_windows_crash_driver bluewake_crash_text_test bluewake_pipeline_shutdown_test bluewake_settings_state_test bluewake_launch_marker_test bluewake_restart_request_test bluewake_memory_card_io_test bluewake_disc_extract bluewake_windows_getenv_cache_test bluewake_windows_clock_test bluewake_feature_dispatch_test bluewake_bmg_patch_test bluewake_audio_dma_stereo_test bluewake_fps_watch_test bluewake_frame_interp_test bluewake_dsp_interpreter_layout_test --parallel 2
+          if ($LASTEXITCODE) { throw 'Windows host build failed' }
+          if (-not (Test-Path build/windows-host/BlueWake.exe)) { throw 'Windows host missing' }
+          if (Get-ChildItem build/windows-host -Recurse -Filter 'gGZLE01_recomp*') { throw 'Unexpected personal game module' }
+          ctest --test-dir build/windows-host --output-on-failure -R '^bluewake_'
+          if ($LASTEXITCODE) { throw 'Windows host regression failed' }
+          # No artifacts are uploaded and no release is created.

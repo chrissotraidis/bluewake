@@ -1,5 +1,6 @@
 // See ipl_sram.h.
 #include "ipl_sram.h"
+#include "atomic_file.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -33,11 +34,15 @@ void bluewake_ipl_sram_defaults(u8 s[BLUEWAKE_IPL_SRAM_SIZE]) {
 static void persist(const BluewakeIplSram* d) {
     if (d->path == NULL)
         return;
-    FILE* f = fopen(d->path, "wb");
-    if (f == NULL)
-        return;
-    fwrite(d->sram, 1, BLUEWAKE_IPL_SRAM_SIZE, f);
-    fclose(f);
+    char* pending = bw_atomic_path(d->path);
+    FILE* f = pending != NULL ? fopen(pending, "wb") : NULL;
+    bool ok = false;
+    if (f != NULL) {
+        ok = fwrite(d->sram, 1, BLUEWAKE_IPL_SRAM_SIZE, f) == BLUEWAKE_IPL_SRAM_SIZE;
+        ok = bw_atomic_finish(f, pending, d->path, ok);
+    }
+    if (!ok) fprintf(stderr, "[sram] could not save %s; previous file kept\n", d->path);
+    free(pending);
 }
 
 void bluewake_ipl_sram_init(BluewakeIplSram* d, const char* spec) {

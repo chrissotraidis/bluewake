@@ -1,0 +1,178 @@
+From 9618e9d84558429f9c057a821127930c35dd7db0 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Wed, 30 Sep 2026 22:30:36 -0400
+Subject: [PATCH 113/114] Aurora: the render worker paused while the swapchain
+ changes (a fullscreen crash)
+
+Going fullscreen (or any resize) reconfigured the surface and replaced the
+frame buffers and the copy bind group on the main thread after
+render_worker::synchronize(), which only drains the queue. Smooth Motion's
+deferred presents run on the worker between queue items (its idle hook), so
+one could start in the middle of the resize and submit or present with
+objects of the old swapchain: an access violation inside Dawn or the driver.
+Reported on an i7-8565U with Intel UHD 620 (every fullscreen switch crashed);
+reproduced on an RTX 5090 with the game held to two CPUs at a 4x render scale,
+crashing after 9 and after 21 rapid F11 presses (render worker:
+deferred_present_tick -> present_deferred -> end_frame -> Queue::Submit).
+
+render_worker::Pause holds the worker still for a scope: it finishes what is
+queued, runs a callback on the worker (here: the deferred presents still
+waiting, on the old swapchain), and waits, running neither queue items nor
+the idle hook, until released. resize_swapchain, refresh_surface and
+release_surface use it in place of synchronize(); the window system calls
+stay on the main thread. With it, 90 rapid fullscreen switches on the same
+setup ran without a crash.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  2 +
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  3 ++
+ .../graphics/aurora/lib/gfx/render_worker.cpp | 41 +++++++++++++++++++
+ .../graphics/aurora/lib/gfx/render_worker.hpp | 18 ++++++++
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp  | 13 ++++--
+ 5 files changed, 74 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 7b58c93..0b5844f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -2407,6 +2407,8 @@ void after_submit() noexcept {
+ 
+ void gpu_synchronize() { render_worker::synchronize(); }
+ 
++void flush_deferred_presents() { run_deferred_present(); }
++
+ void note_render_overload() noexcept { frame_interp::note_overload("a drawable came late"); }
+ 
+ static std::atomic<unsigned long long> g_shownFrames{0};
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 6197ba0..8c66706 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -249,6 +249,9 @@ uint32_t current_frame() noexcept;
+ void render_pass(const wgpu::RenderPassEncoder& pass, uint32_t idx);
+ void after_submit() noexcept;
+ void gpu_synchronize();
++// On the render worker: every deferred present still waiting, now, in order
++// (before the swapchain they were made for is reconfigured).
++void flush_deferred_presents();
+ void after_present() noexcept;
+ // Rendering fell behind: fewer in-between frames for a while (frame_interp::note_overload).
+ void note_render_overload() noexcept;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+index 99eb0bc..b85f9fe 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+@@ -303,4 +303,45 @@ void set_idle_hook(WorkCallback hook) { g_idleHook = std::move(hook); }
+ 
+ bool is_idle() noexcept { return g_pendingItems.load(std::memory_order_acquire) == 0; }
+ 
++struct Pause::State {
++  std::mutex mutex;
++  std::condition_variable cv;
++  bool parked = false;
++  bool released = false;
++};
++
++Pause::Pause(WorkCallback before) {
++  if (is_worker_thread() || !g_running.load(std::memory_order_acquire)) {
++    return;
++  }
++  ZoneScoped;
++  m_state = std::make_shared<State>();
++  enqueue({
++      .type = ItemType::Sync,
++      .work =
++          [state = m_state, before = std::move(before)] {
++            if (before) {
++              before();
++            }
++            std::unique_lock lock{state->mutex};
++            state->parked = true;
++            state->cv.notify_all();
++            state->cv.wait(lock, [&] { return state->released; });
++          },
++  });
++  std::unique_lock lock{m_state->mutex};
++  m_state->cv.wait(lock, [&] { return m_state->parked; });
++}
++
++Pause::~Pause() {
++  if (!m_state) {
++    return;
++  }
++  {
++    std::lock_guard lock{m_state->mutex};
++    m_state->released = true;
++  }
++  m_state->cv.notify_all();
++}
++
+ } // namespace aurora::gfx::render_worker
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+index d24253b..8dbd1a5 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+@@ -96,4 +96,22 @@ bool is_worker_thread() noexcept;
+ void set_idle_hook(WorkCallback hook);
+ bool is_idle() noexcept;
+ 
++// Holds the worker still while it lives: the worker finishes everything queued
++// before it, runs `before` (on the worker), then waits, running neither queue
++// items nor the idle hook, until the Pause is destroyed. synchronize() only
++// drains the queue; the idle hook (Smooth Motion's deferred presents) can run
++// right after it. Nothing on the pausing thread may wait for the worker while
++// paused. On the worker itself, or before it starts, a Pause does nothing.
++class Pause {
++public:
++  explicit Pause(WorkCallback before = {});
++  ~Pause();
++  Pause(const Pause&) = delete;
++  Pause& operator=(const Pause&) = delete;
++
++private:
++  struct State;
++  std::shared_ptr<State> m_state;
++};
++
+ } // namespace aurora::gfx::render_worker
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+index 91f4930..1372c17 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+@@ -1084,7 +1084,7 @@ void shutdown() {
+ }
+ 
+ void release_surface() noexcept {
+-  gfx::gpu_synchronize();
++  const gfx::render_worker::Pause pause{gfx::flush_deferred_presents};
+   {
+     window::SurfaceLock surfaceLock;
+     release_surface_locked();
+@@ -1121,7 +1121,7 @@ static void resize_swapchain_internal(uint32_t width, uint32_t height, uint32_t
+ }
+ 
+ bool refresh_surface(bool recreate) {
+-  gfx::gpu_synchronize();
++  const gfx::render_worker::Pause pause{gfx::flush_deferred_presents};
+   if (!g_instance || !g_device) {
+     return false;
+   }
+@@ -1152,8 +1152,15 @@ bool refresh_surface(bool recreate) {
+   return true;
+ }
+ 
++// The surface, the frame buffers and the copy bind group change here, on the
++// main thread, with the render worker paused: Smooth Motion's deferred
++// presents run on the worker between queue items (its idle hook) and use all
++// of them, so after a plain synchronize() one could start mid-resize and
++// present a texture of the old swapchain, a crash inside Dawn's Direct3D 12
++// backend when going fullscreen on a slower GPU (an Intel UHD 620 laptop,
++// 2026-09-30). The presents still waiting go out first, on the old swapchain.
+ void resize_swapchain(uint32_t width, uint32_t height, uint32_t nativeWidth, uint32_t nativeHeight, bool force) {
+-  gfx::gpu_synchronize();
++  const gfx::render_worker::Pause pause{gfx::flush_deferred_presents};
+   resize_swapchain_internal(width, height, nativeWidth, nativeHeight, force);
+ }
+ } // namespace aurora::webgpu
+-- 
+2.43.0
+

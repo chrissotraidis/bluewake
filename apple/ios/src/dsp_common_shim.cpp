@@ -1,4 +1,4 @@
-// Minimal Dolphin Common services for the donor DSP on iOS.
+// Minimal Dolphin Common services for the donor DSP on iOS (and Windows).
 //
 // The DSP interpreter needs nine Common helpers. The desktop build takes them
 // from RecompCore's libcommon, which drags in the log manager, config and file
@@ -7,8 +7,14 @@
 #include <cctype>
 #include <cstdio>
 #include <string>
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 #include <zlib.h>
 
 #include "Common/CommonTypes.h"
@@ -56,6 +62,30 @@ void ToLower(std::string* str)
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 }
 
+#if defined(_WIN32)
+void* AllocateMemoryPages(size_t size)
+{
+  return VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+}
+
+bool FreeMemoryPages(void* ptr, size_t)
+{
+  return ptr == nullptr || VirtualFree(ptr, 0, MEM_RELEASE) != 0;
+}
+
+// The DSP interpreter never asks for executable pages, as on iOS.
+bool WriteProtectMemory(void* ptr, size_t size, bool)
+{
+  DWORD old;
+  return VirtualProtect(ptr, size, PAGE_READONLY, &old) != 0;
+}
+
+bool UnWriteProtectMemory(void* ptr, size_t size, bool)
+{
+  DWORD old;
+  return VirtualProtect(ptr, size, PAGE_READWRITE, &old) != 0;
+}
+#else
 void* AllocateMemoryPages(size_t size)
 {
   void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
@@ -78,6 +108,7 @@ bool UnWriteProtectMemory(void* ptr, size_t size, bool)
 {
   return mprotect(ptr, size, PROT_READ | PROT_WRITE) == 0;
 }
+#endif
 }  // namespace Common
 
 // --- Services the high-level DSP (DSPHLE) reaches; only ucode dumping and

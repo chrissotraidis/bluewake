@@ -1,0 +1,173 @@
+From 789c17837f300d5a482ab7b1a3d8f7f5c73e9dc6 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:30:17 +0900
+Subject: [PATCH] audio: retry unavailable output on timer and device arrival
+
+---
+ GXRuntime/backends/aurora/aurora_audio.cpp    | 30 +++++++++++++++++--
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 26 +++++++---------
+ .../backends/aurora/aurora_backend_private.h  |  1 +
+ .../graphics/aurora/tests/audio_sink_test.cpp | 19 ++++++++++++
+ 4 files changed, 59 insertions(+), 17 deletions(-)
+ create mode 100644 GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+
+diff --git a/GXRuntime/backends/aurora/aurora_audio.cpp b/GXRuntime/backends/aurora/aurora_audio.cpp
+index ca3f902d..671541b2 100644
+--- a/GXRuntime/backends/aurora/aurora_audio.cpp
++++ b/GXRuntime/backends/aurora/aurora_audio.cpp
+@@ -5,6 +5,7 @@
+ #include <vector>
+ #include <SDL3/SDL_audio.h>
+ #include <SDL3/SDL_timer.h>
++#include <SDL3/SDL_init.h>
+ #include <cstdio>
+ 
+ namespace {
+@@ -26,6 +27,31 @@ bool stretch_enabled() {
+ }
+ }  // namespace
+ 
++namespace gx_aurora {
++bool retry_audio_open(bool force) {
++    if (g_audio_stream != nullptr) return true;
++    static Uint64 next_attempt;
++    Uint64 now = SDL_GetTicks();
++    if (!force && now < next_attempt) return false;
++    next_attempt = now + 2000;
++    if (!SDL_WasInit(SDL_INIT_AUDIO) && !SDL_InitSubSystem(SDL_INIT_AUDIO)) {
++        std::fprintf(stderr, "[audio] output unavailable; retrying in 2s: %s\n", SDL_GetError());
++        return false;
++    }
++    SDL_AudioSpec spec{};
++    spec.format = SDL_AUDIO_S16; spec.channels = 2; spec.freq = static_cast<int>(g_audio_sample_rate);
++    g_audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
++    g_audio_playing = false;
++    if (!g_audio_stream) {
++        std::fprintf(stderr, "[audio] output unavailable; retrying in 2s: %s\n", SDL_GetError());
++        return false;
++    }
++    g_stretcher = AudioStretcher(); g_stretch_out.clear(); g_stretch = 1.0;
++    std::fprintf(stderr, "[audio] output available; prebuffering\n");
++    return true;
++}
++} // namespace gx_aurora
++
+ extern "C" {
+ 
+ void aurora_backend_audio_set_sample_rate(u32 sample_rate) {
+@@ -50,8 +76,8 @@ void aurora_backend_audio_set_sample_rate(u32 sample_rate) {
+ }
+ 
+ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+-    if (gx_aurora::g_audio_stream == nullptr || samples == nullptr || frames == 0)
+-        return;
++    if (samples == nullptr || frames == 0) return;
++    if (!gx_aurora::retry_audio_open(false)) return;
+     const int bytes_per_second =
+         static_cast<int>(gx_aurora::g_audio_sample_rate) * 2 * static_cast<int>(sizeof(s16));
+     const int prebuffer_bytes = bytes_per_second * gx_aurora::g_audio_prebuffer_ms / 1000;
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 957d602d..41cdcc06 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -9,6 +9,7 @@
+ #include <gfx/gxcore_draw.hpp>
+ #endif
+ #include <SDL3/SDL_init.h>
++#include <imgui.h>
+ #include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -171,6 +172,8 @@ void poll_events() {
+     while (event != nullptr && event->type != AURORA_NONE) {
+         if (event->type == AURORA_EXIT)
+             g_should_quit = true;
++        if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_EVENT_AUDIO_DEVICE_ADDED)
++            retry_audio_open(true);
+         if (event->type == AURORA_SDL_EVENT && g_host_event_observer != nullptr) {
+             const clock::time_point before = clock::now();
+             g_host_event_observer(&event->sdl, g_host_event_user);
+@@ -180,6 +183,7 @@ void poll_events() {
+         ++count;
+         ++event;
+     }
++    retry_audio_open(false);
+     const auto ms = [](clock::duration d) { return std::chrono::duration<double, std::milli>(d).count(); };
+     if (clock::now() - start >= std::chrono::milliseconds(100))
+         std::fprintf(stderr, "[events-slow] pump=%.0f ms host=%.0f ms events=%u last=0x%X\n", ms(pumped - start),
+@@ -189,6 +193,12 @@ void poll_events() {
+ void run_host_overlay() {
+     if (g_host_overlay != nullptr)
+         g_host_overlay(g_host_overlay_user);
++    if (g_audio_stream == nullptr) {
++        ImGui::SetNextWindowBgAlpha(0.8f);
++        ImGui::Begin("Audio unavailable", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
++        ImGui::TextUnformatted("Audio output unavailable. BlueWake is retrying.");
++        ImGui::End();
++    }
+ }
+ 
+ bool host_wants_hold() {
+@@ -507,21 +517,7 @@ bool dol_aurora_initialize(int argc, char** argv,
+     gx_aurora::g_audio_low_log_push = 0;
+     gx_aurora::g_audio_sample_rate = 32000;
+ 
+-    if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+-        SDL_AudioSpec spec{};
+-        spec.format = SDL_AUDIO_S16;
+-        spec.channels = 2;
+-        spec.freq = static_cast<int>(gx_aurora::g_audio_sample_rate);
+-        gx_aurora::g_audio_stream = SDL_OpenAudioDeviceStream(
+-            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+-        if (gx_aurora::g_audio_stream == nullptr)
+-            std::fprintf(stderr, "[audio] SDL output unavailable: %s\n", SDL_GetError());
+-        else if (gx_aurora::g_audio_queue_log)
+-            std::fprintf(stderr, "[audio-queue] prebuffer_ms=%d max_queue_ms=%d\n",
+-                         gx_aurora::g_audio_prebuffer_ms, gx_aurora::g_audio_max_queue_ms);
+-    } else {
+-        std::fprintf(stderr, "[audio] SDL audio initialization failed: %s\n", SDL_GetError());
+-    }
++    gx_aurora::retry_audio_open(true);
+ 
+     gx_aurora::poll_events();
+     gx_aurora::g_frame_open = !gx_aurora::g_should_quit && aurora_begin_frame();
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index eea6111a..d7d5f1d1 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -171,6 +171,7 @@ int audio_ms_env(const char* name, int fallback, int min_value, int max_value);
+ unsigned long long ull_env(const char* name, unsigned long long fallback);
+ long long_env(const char* name, long fallback);
+ void log_callback(AuroraLogLevel level, const char* module, const char* message, unsigned int);
++bool retry_audio_open(bool force);
+ void poll_events();
+ void write_aurora_command(u16 command);
+ void flush_pending_resource_metadata();
+diff --git a/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+new file mode 100644
+index 00000000..ddd2748e
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#ifdef NDEBUG
++#undef NDEBUG
++#endif
++#include "../../../backends/aurora/aurora_backend_private.h"
++#include <SDL3/SDL.h>
++#include <cassert>
++int main() {
++    assert(SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "bluewake-nonexistent-driver"));
++    assert(!gx_aurora::retry_audio_open(true));
++    assert(!gx_aurora::retry_audio_open(false)); // timer backs off
++    assert(SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy"));
++    assert(gx_aurora::retry_audio_open(true)); // device-added style forced retry
++    assert(gx_aurora::g_audio_stream != nullptr && !gx_aurora::g_audio_playing);
++    auto* stream = gx_aurora::g_audio_stream;
++    assert(gx_aurora::retry_audio_open(true) && stream == gx_aurora::g_audio_stream);
++    SDL_DestroyAudioStream(stream); gx_aurora::g_audio_stream = nullptr;
++    SDL_QuitSubSystem(SDL_INIT_AUDIO);
++}
+-- 
+2.46.0
+

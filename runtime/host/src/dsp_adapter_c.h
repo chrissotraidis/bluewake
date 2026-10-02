@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -56,6 +57,12 @@ void bluewake_dsp_adapter_write_ifx(BluewakeDspAdapter* adapter,
                                      uint16_t address, uint16_t value);
 uint16_t bluewake_dsp_adapter_read_ifx(BluewakeDspAdapter* adapter,
                                        uint16_t address);
+// Save states (HLE only; the LLE interpreter answers 0/false). save returns
+// the size of a malloc'd blob in *out (free it), 0 on failure.
+size_t bluewake_dsp_adapter_save_state(BluewakeDspAdapter* adapter,
+                                       uint8_t** out);
+int bluewake_dsp_adapter_load_state(BluewakeDspAdapter* adapter,
+                                    const uint8_t* data, size_t size);
 
 #ifdef __cplusplus
 }

@@ -2,7 +2,7 @@
 
 PadMint is the shared local builder for the Pad projects. BlueWake supplies a
 game-specific adapter; PadMint should own the interactive build experience.
-The first supported workflow is an Apple Silicon Mac producing a personal iOS
+The first experimental workflow targets an Apple Silicon Mac producing a personal iOS
 IPA from a supported disc. Additional games and platforms can use the same
 stage interface after their own validation.
 
@@ -10,6 +10,40 @@ stage interface after their own validation.
 must reproduce the accepted developer build's performance in matched iPad
 tests. Generating an IPA alone does not satisfy this requirement. Do not present
 the slower unprofiled build as the recommended release path.
+
+## Current reconciliation evidence (October 3)
+
+The tested PadMint CLI is 0.2.9 at
+`de13bd769540642f89d6fb2e0492d466a58ae32b`. A new source-only workspace passes at
+BlueWake `3392854c8daaf5d7900cd034694fabe18b699a24`, selecting maintained runtime
+`18ba3b642588a33b9e8eac4aba7f713bb8d3d778` and translator
+`b8b534591cba8ca7cd43943a655ee6e2591cf5de`. The expected base-source digest matches.
+The full run uses the matching locally built app-only shell and fresh local
+training; final iOS module compilation is interrupted for low disk space. Its final assembly and
+provenance must be inspected before marking that run complete. Keep that
+workspace pinned to `3392854` when resuming it. The cumulative branch now
+contains a later host/runtime Pictobox repair; do not silently substitute its
+source or shell into the paused workspace or claim the older full-build result
+as clean-build acceptance of the newer revision.
+
+| Route | Evidence / remaining gate |
+| --- | --- |
+| Apple Silicon Mac → iOS source-only | Actual CLI source generation passes at `3392854`; USA rev-0 disc and exact source/dependency identities verified |
+| Apple Silicon Mac → iOS full personal IPA | Earlier `95adeed` / CLI 0.2.8 complete assembly passes. At `3392854` / CLI 0.2.9, fresh 23,000-retrace training passes and final compilation is interrupted for low disk space. Final assembly, signing/install, device save/reload/upgrade and matched performance remain open |
+| macOS player app | Direct BlueWake builder now produces a fresh personal app with save/reload evidence. PadMint Mac remains planned; the direct builder does not establish adapter support |
+| Windows / tvOS / Linux | No complete PadMint adapter acceptance; use each platform's explicitly documented source route or preview boundary |
+
+The exact-source iOS app-only input passes the repository content gate and
+PadMint audit without translated game code. It remains local while public
+releases are paused. Personal assemblies and generated profiles remain private.
+The source-only route must not receive the full mode's `--app` argument.
+A supplied app shell must match the intended source/module compatibility;
+never infer compatibility from the IPA filename alone.
+
+The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) is the
+single current platform and acceptance matrix. Player instructions are in
+[Build your own BlueWake](BUILD_YOUR_OWN.md). Older design and implementation
+snapshots below explain the history; they do not override current evidence.
 
 ## What exists
 

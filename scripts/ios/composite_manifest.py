@@ -22,7 +22,8 @@ def main():
     for directory, _, files in os.walk(root):
         for name in files:
             path = os.path.join(directory, name)
-            rel = os.path.relpath(path, root)
+            # "/" on every platform, so Windows computes the same digest.
+            rel = os.path.relpath(path, root).replace(os.sep, "/")
             with open(path, "rb") as stream:
                 entries.append((rel, hashlib.sha256(stream.read()).hexdigest()))
     entries.sort()

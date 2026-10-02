@@ -11,6 +11,7 @@
 //     app is inactive or a menu, settings panel, layout editor or alert is
 //     open, and resumes only when no reason remains (PRD FR-014/FR-015).
 #include <SDL3/SDL_events.h>
+#include <aurora/gfx.h>
 #include <dolphin/pad.h>
 
 #include <algorithm>
@@ -23,6 +24,8 @@
 #include "gxruntime/aurora_backend.h"
 #include "controller_settings.h"
 #include "touch_controls.h"
+#include "../../../runtime/host/src/jump_button.h"
+#include "../../../runtime/host/src/sprint.h"
 
 extern "C" unsigned long long bluewake_host_retrace_count(void);  // runtime/host/src/main.c
 extern "C" unsigned long long bluewake_host_thread_cpu_us(void);
@@ -116,7 +119,8 @@ void fps_tick() {
     const unsigned long long cpu = bluewake_host_thread_cpu_us();
     DolAuroraFrameTiming timing{};
     dol_aurora_frame_timing(&timing);
-    const double shown = frames / elapsed;
+    const double shown = timing.shown > timing0.shown ? (timing.shown - timing0.shown) / elapsed
+                                                    : frames / elapsed;
     const double speed = (retrace - retrace0) / elapsed / 60.0 * 100.0;
     g_fps_shown = static_cast<float>(shown);
     g_fps_speed = static_cast<float>(speed);
@@ -204,6 +208,8 @@ u16 to_pad_buttons(u16 bits) {
 // Called with g_pad_mutex held.
 void publish_locked() {
     const u16 bits = g_pad.buttons | g_latched;
+    bluewake_jump_button_touch((bits & BLUEWAKE_TOUCH_JUMP) != 0);
+    bluewake_sprint_touch((bits & BLUEWAKE_TOUCH_SPRINT) != 0);
     if (bits == 0 && g_pad.stick_x == 0 && g_pad.stick_y == 0 &&
         g_pad.c_stick_x == 0 && g_pad.c_stick_y == 0) {
         PADClearVirtualStatus(PAD_CHAN0);
@@ -229,6 +235,9 @@ void publish_locked() {
 // transitions synchronously to event watches from inside UIKit's callbacks.
 // The memory card needs no flush: every guest card write replaces the file.
 bool SDLCALL lifecycle_watch(void*, SDL_Event* e) {
+    // iOS skips the desktop mouse observer; its existing event watch still
+    // receives Space from a hardware keyboard.
+    bluewake_jump_button_event(e);
     switch (e->type) {
     case SDL_EVENT_WILL_ENTER_BACKGROUND:
         bluewake_pause_set(BLUEWAKE_PAUSE_INACTIVE, true);
@@ -292,6 +301,8 @@ extern "C" void bluewake_touch_clear(void) {
     std::lock_guard<std::mutex> lock(g_pad_mutex);
     g_pad = BlueWakeTouchPad{};
     g_latched = 0;
+    bluewake_jump_button_touch(false);
+    bluewake_sprint_touch(false);
     PADClearVirtualStatus(PAD_CHAN0);
 }
 
@@ -305,6 +316,8 @@ extern "C" void bluewake_pause_set(unsigned reason, bool on) {
 }
 
 extern "C" unsigned bluewake_pause_reasons(void) { return g_pause_reasons.load(); }
+
+extern "C" float bluewake_fps_display(void) { return aurora_get_fps(); }
 
 extern "C" void bluewake_fps_read(float* shown, float* speed, float* worst_ms) {
     *shown = g_fps_shown.load();

@@ -1,3 +1,449 @@
+## 2026-10-01 BlueWake source-fork integration
+
+See [FORK_INTEGRATION.md](../FORK_INTEGRATION.md) for the current integration and validation status.
+The September 28–30 entries imported below are elliotttate's engineering records and reported
+measurements, retained for provenance. They are not independent BlueWake device measurements.
+## 2026-09-30 The Windows build's GX worker work merged (Mac-tested)
+
+RecompCore 8ab24da (patch 0112) merges the Windows build's RecompCore branch (windows-release, forked
+at 6892947): 4f7a3ec's cheaper worker draws (the derived pipeline state cached by a register version,
+no assembly totals walk, the last pipeline lookup and bind group reused, Smooth Motion jobs without a
+copy for repeated constants and a fence only when the helper may sleep), 825f103 (constant blocks
+compared against a copy off Apple GPUs; the Mac keeps comparing in place), f93c05f (gather-pipe writes
+as a run of bytes, for a game module that batches them), e8c2bb3 (`DOL_AURORA_CACHE_DIR`), 2a85bd1 and
+82607d4 (the graphics threads' CPU time and slow presents in the log). With save states, a register
+state put back from a state takes a fresh derived-cache version (GxCoreState::renew_version).
+
+Mac-tested at the Outset spawn, Smooth Motion 60, an 8 s sample of each release host: the FIFO worker
+55.4 -> 53.2 percent busy (the Windows test PC's efficiency cores went from 23-26 to 29-30 game frames
+a second); 95.6 percent of draws hit the cache, and `DOL_GXCORE_DERIVED_VERIFY=1` finds no mismatch in
+5.7 million hits on a walk nor in 7.0 million after a save state load. The Mac app now keeps its shader
+and pipeline caches in its data folder (`DOL_AURORA_CACHE_DIR`), apart from test runs' (the first launch
+after this compiles them again).
+
+## 2026-09-30 Climbing any wall, on a stamina wheel (Mac-tested, headless)
+
+`runtime/host/src/climb.c`, the options menu's Gameplay tab (`BLUEWAKE_CLIMB=1`, off by default;
+`BLUEWAKE_CLIMB_STAMINA`, 12 seconds). Link climbs steep plain walls with the game's own ivy climbing:
+daPy_lk_c::setFrontWallType classifies the wall in front of him each frame, and a wall of code 1 is ivy
+(mFrontWallType 3, which changeFrontWallTypeProc turns into procClimbUpStart, or procClimbMoveUpDown in
+the air); setMoveBGCorrectClimb checks the code again every climbing frame and drops him when it is not.
+Only calls into another translation unit return through the dispatcher, so the hooks are the return sites
+of the collision queries in those functions: GetWallCode's in setFrontWallType (0x8010F0DC) marks a plain
+wall (code 0) and keeps the collision it hit; the LineCross at grabbing height (0x8010F554) returning a hit
+means the wall goes on above where he grabs ledges, and there the plain wall becomes type 3 (mPolyInfo
+set from the kept collision), under ivy's own conditions (daPyFlg0_UNK100 set, VINE_CATCH clear, 125
+above lava or water, in the air only while steered at it); the only change the game still makes after it
+is to a wall to sidle along, which wins. Ledges he pulls himself onto, ladders, blocks and real ivy keep
+the game's behaviour. In setMoveBGCorrectClimb (0x80135FE4) a plain wall reads as code 1 while there is
+stamina. The wheel drains in 12 seconds climbing (a 0.4 share holding still), empties into a fall and an
+exhaustion that allows no grab until it is full, and refills in 3 seconds after half a second on the
+ground; real ivy costs nothing. It is drawn with ImGui beside Link, projected from the camera's view
+(eye, centre, fovy, aspect) at camera_draw into the game's picture.
+
+Headless, in Orca's house (warp Ojhous:1:0) pushing into the back wall with a 6-second wheel: grabbed at
+the wall (proc 0x3D, then 0x3F), climbed from y -19 to the ceiling at 264, the wheel draining 0.1 every
+0.6 s; empty at 6 s, fell to the floor, no grab while exhausted, full again 3.3 s after landing, and
+grabbed again. The wheel's position came out at Link's (0.50, 0.43-0.56 of the picture). The wheel
+itself and a climb outdoors have not been seen in a window yet.
+
+## 2026-09-30 Save states (Mac-tested)
+
+Dolphin-style save states for debugging (`runtime/host/src/save_state.c`, the host_state_* functions in
+`main.c`; RecompCore: the GX front end's and gxcore's register state, `dol_aurora_gx_save_state` /
+`_load_state` / `_drain`, `dol_hle_callback_idle`, and a Smooth Motion cut after a load). A state is a
+gzip stream of tagged chunks: the CPU, MEM1 (32 MiB), ARAM, every guest alias's storage (linked REL
+data and BSS), the VI clock, the host's device models and milestones by name (150 fields), Dolphin's DSP
+HLE and the GX front end with any half-written command. It is taken at the next GXSetDrawDone return
+with no exception, REL prolog, memory card callback, scene change or quick door in progress, about 20
+MB and half a second; a load takes about 0.1 s. F5 saves (`quick-<retrace>.bwstate` in
+`BLUEWAKE_STATE_DIR`, the Mac app's `states/`), F9 loads the last one, or the newest in that folder after
+a relaunch; the options menu has both. `BLUEWAKE_SAVE_STATE=path@retrace` and `BLUEWAKE_LOAD_STATE=path`
+script them, `BLUEWAKE_STATE_TEST_LOAD=retrace` presses F9. Before replacing memory a load drains the
+FIFO worker, which reads guest memory as it translates.
+
+Checked on the Outset save with a scripted walk: headless, a state saved at retrace 1000 and loaded at
+boot, or mid-run at 900 or 1300, reaches retrace 1500 with every chunk but the renderer's byte for byte
+that of the run that never loaded (MEM1 04F48E8B). With the renderer, a load at boot and one mid-run
+reach the same 1500 as each other (windowed runs' own timing varies between launches), and the first
+frame after a load draws the whole scene. The subagent's first cut (branch wip/save-states) is this
+work's start; it had never been built or run.
+
+## 2026-09-30 A fast right-stick camera and aiming, and a camera kept out of the ground (Mac-tested)
+
+**The right stick as the camera** (`runtime/host/src/mouse_camera.c`, on by default on the Mac,
+`BLUEWAKE_STICK_CAMERA=0` for the game's own). The game's C-stick camera (dCamera_c's manual camera,
+mode 12) eases its turn in and out and starts only past a quarter of the stick (Aurora's substick dead
+zone, 8000). Wherever the mouse turns the camera (the follow camera, the player in control), the right
+stick now sets the view's angles the same way: a rate from its tilt (12 percent dead zone, then 30
+percent linear and 70 percent quadratic up to 360 degrees a second, `BLUEWAKE_STICK_CAMERA_SPEED`;
+up and down at 0.6 of it), by game time (a game frame's worth at each update, so a steady tilt turns
+evenly through the in-between frames), no easing, the view held where it is left. The pad read keeps
+the tilted stick from the game there. Its click is the C-stick's push up (first person); in first
+person a click is the push down out, a little then past three quarters, released as soon as
+subjectCamera's m3C4 has taken each step (held on, the follow camera took it for its own push down and
+switched to the manual camera). Scripted (`BLUEWAKE_STICK_TEST`, headless): full tilt 12.01 degrees a
+game frame, half tilt 3.41, first person in 4 retraces and out in 8, camera mode 0 throughout.
+
+**Aiming** (same file). In first person and when aiming an item, the right stick aims as the mouse
+does (aim_frame: shape_angle.y and mWork.subject.m388), at `BLUEWAKE_STICK_AIM_SPEED` (180 degrees a
+second), slower in proportion to the telescope's and Picto Box's zoom; pushing it down looks down
+instead of leaving first person. In those two views the left stick's up and down (or the D-pad's)
+zoom, as the C-stick's did, and the left stick no longer aims there. Scripted: 6.0 degrees a game
+frame at full tilt; the telescope 1x to 7.4x in two thirds of a second, and aiming at 7.4x turning
+7.4 times slower. The options menu's Controls tab has the switch, both speeds and inverted axes.
+
+**The camera kept out of the ground and the water** (mouse and stick). Their angles were applied at
+camera_draw, after bumpCheck (the camera's wall, ground and water check) had placed the eye, so a low
+tilt put it wherever the angle said, into the ground or under the sea. They now go into
+dCamera_c::mViewCache at bumpCheck's entry (0x80167F08, once a frame in Run), and the game pulls the
+eye in along the line from Link and lifts it to the water's surface. At the Outset start, tilted to
+the lowest angle facing up the slope: the eye 36 units under the ground before, now pulled in from 249
+to 190 units and 5 above it.
+
+## 2026-09-29 Cheaper, batched in-between frames and the PC branch's host fixes (Mac-tested)
+
+**Renderer** (RecompCore 6892947, patch 0110):
+- **Encoding:** the render worker binds the vertex and index buffers once a pass and sets bind groups only when they change; a busy scene's replay went from about 4.4 ms to 1.3-1.6 ms.
+- **Batching:** consecutive draws with the same pipeline, constants and textures, whose data follows on, are one draw. Adanmae went from about 6,400 draws a frame to 3,600, the sea from 11,800 to 4,600. In-between frames split a batch whose draws blend differently. `DOL_AURORA_GXCORE_BATCH=0` turns it off.
+- **In-between data:** written into mapped staging buffers and copied on the GPU, instead of a new zero-filled upload buffer every frame (a fifth of the render worker's time).
+- **Pacing:** under sustained overload 60 Hz drops its in-between frames and comes back after 3 s calm. 120 Hz is not lowered unless `DOL_AURORA_FRAME_INTERP_PACING=1`.
+- **Helper thread:** spins less and is woken in batches.
+- **Hidden full-screen window:** asks for no drawable and keeps its surface, so switching away no longer freezes the game for half a second or rebuilds the surface on return.
+- **Diagnostics:** `DOL_GXCORE_DRAW_DUMP=<game frame>` lists every draw of a frame.
+
+**From the PC branch (native-60hz-pc):**
+- Host: the guest-alias registry under a lock for the translation worker (a crash about one launch in eight), graphics address resolutions cached until the registry changes, and the actor search's budget checks collapsed.
+- RecompCore: gather-pipe words straight to the worker's batch, the batch buffer kept, draw plans reset in place, and the texture layout cache locked.
+
+**Other changes:**
+- The mouse camera's per-boundary check is inline.
+- `BLUEWAKE_TEST_PLACE=retrace:x:y:z` stands Link at a position for tests.
+
+**Tested:** Adanmae at 120 Hz holds 119.8 FPS with no slow render items. 40 dumped frames at sea show no pops. 60 Hz and Smooth Motion off hold their rates. `frame_interp_test` and `actor_search_budget_test` pass.
+
+**Known:** the lava in Adanmae renders flat orange. Its texgens read the room's world matrix instead of J3D's projection texture matrix. It is diagnosed, not fixed.
+
+## 2026-09-29 Smooth Motion at 120 FPS (Mac-tested)
+
+**120 FPS** (RecompCore d389b4b, patch 0108). The options menu's Smooth Motion is Off, 60 or 120
+(`DOL_AURORA_FRAME_INTERP_STEPS=3`, or `HZ=120` for `run_host.sh`), for 120 Hz displays such as a
+MacBook Pro's. Each game frame gets three in-between frames, at a quarter, half and three quarters of
+the way: a matched draw is blended once per step, the camera's part motion the screw motion's power at
+t (exactly half at 0.5, so four quarter steps make the whole), and the helper thread stages each
+step's block and a particle's vertices. On the user's save on a beach, full screen with the 4K pack
+and 16x anisotropy: 120 presents a second, 8.4 ms apart at the median.
+
+**A steady present clock** (same patch). Presents are held aside and shown on one clock, continuing
+from the game frame before's last, from two alternating sets of held frames, with what is due
+presented between the in-between frames' replays and every 512 commands of a pass. Before, the first
+in-between frame was presented at once and the rest a quarter of a frame after it: at 120 Hz the
+second came 18 ms late and the third and the real frame back to back when the next frame arrived
+(bursts, the sea shimmering), and at 60 Hz presents alternated 22 and 12 ms apart (now 16.5).
+`DOL_AURORA_PRESENT_LOG=1` logs each present; `DOL_AURORA_PRESENT_CLOCK=0` keeps the old 60 Hz timing.
+
+**The sea blinking out on a shore at 120.** The in-between blocks of a beach at 120 come to about 55 MB
+and the area had 32: 6,900 blocks a frame did not fit, and those draws kept the next frame's transforms
+in two of the three in-between frames, the sea among them. The area now has 32 MB per step. Found by
+dumping 144 game frames walking in the shallows and flagging any in-between frame unlike both real
+frames around it (five in a row, the sea missing); afterwards none.
+
+**Saved options at launch** (RecompCore df6c2b1, patch 0109). Smooth Motion, its steps, the FPS overlay
+and forced anisotropy were read by Aurora's static initialisers, before the host applies the saved
+options, so the menu's 120 came back as 60 and 16x anisotropy as none; the backend reads them again
+at initialisation.
+
+## 2026-09-29 An options menu, quick doors, and Smooth Motion for what the game moves itself (Mac-tested)
+
+**Options menu** (`runtime/host/src/settings_menu.cpp`, Mac; RecompCore 66205c2, patch 0105). F1, a
+controller's Back, or Esc while the mouse is free pauses the game and opens Display, Gameplay and
+Controls tabs over it (`dol_aurora_set_hold_redraw` keeps the paused picture on screen). Choices are
+saved to `~/Library/Application Support/Wind Waker Recomp/settings.ini` and applied at the next launch
+before anything reads the environment; the sprint, jump button, mouse camera, fast loading and quick
+doors also take them at once. Test runs pass `BLUEWAKE_SETTINGS=none`.
+
+**Quick doors** (`runtime/host/src/quick_doors.c`). Through a door with a knob, Link opens it as the
+game has him do; once its fade covers the screen the rest is cut (his walk behind it, the wait, and in
+the next room the door opening and closing again), and he stands inside with the door closed as the
+picture comes back: 5.1 seconds to 1.9. `BLUEWAKE_QUICK_DOORS=0` keeps the game's doors;
+`BLUEWAKE_DOOR_TRACE` logs them. With `BWW=1` the right stick now turns the camera the way the mouse
+does (Better Wind Waker's invert_camera_x).
+
+**Smooth Motion for what the game moves itself** (RecompCore 3b65983, patch 0106;
+`runtime/host/src/draw_tags.c`). The in-between frame blends each draw's matrices, so what the game
+moves another way stepped at 30 FPS or was drawn twice. Sword swings: a bone of Link's arm turns 90
+degrees and more in a game frame, which the old 41-degree bound rejected (150 to 420 draws a frame);
+a draw with a key of its own may now turn 150 degrees, blended as a rotation (slerp) so it keeps its
+size. Particles: before each JPA particle draw the host writes the particle and its age to BP 0x7E
+and 0x7D, registers the retail GX never uses, and the renderer pairs the draw with the same particle
+and blends its corners (dust, spray, smoke, sparkles, ripples). The boat's bow waves and trail, drawn
+by their emitters' callbacks, are announced with their emitter and draw count (BP 0x7C, 0x7B) and
+blend vertex by vertex, so the wake no longer sits half a frame ahead of the bow. A broken pot's
+shards (one model at random sizes, tumbling fast) pair with the nearest copy of their size. The boat:
+its CPU-skinned hull, its shadow-map pass, its real shadow's volume (one box for every shadow, moving
+with the camera) and the sea triangles the shadow is cast on (paired by the shadow's texture, a
+different count as it sails). frame_interp_test covers each case. RecompCore 94b97ce and 060293f
+(patches 0103, 0104) move the matching and blending to a helper thread and fix a device loss on
+Direct3D 12; the inputs a draw's blend needs are now captured with it (DrawInput) for that thread.
+
+**Where 60 is missed** (`runtime/host/src/fps_watch.c`). Once a second with fewer than 57 frames on
+screen: `[fps-dip]` with the game's speed, how many frames were interpolated, rejected and unmatched
+draws, the waits for the GX worker, presents and the GPU, and the stage, room and Link's position
+(`BLUEWAKE_FPS_WATCH=0` turns it off). `DOL_AURORA_FRAME_INTERP_TRACE` takes a range of game frames.
+
+**A crash after a long session.** The host places the game's modules (RELs) in memory above the
+game's 24 MiB; that window was 1.5 MiB. After 27 minutes through many islands it was full of linked
+modules, the sea by the pirate ship needed d_a_bb (52 KB), and the game jumped into the module it
+could not load. The window now starts at 0x81820000 (7.4 MiB).
+
+## 2026-09-29 Fast scene changes, a sprint, and 60 FPS in the Forsaken Fortress (Mac-tested)
+
+**Scene changes** (`runtime/host/src/fast_load.c`; RecompCore b4af144, patch 0101). A door or an exit
+took 2.2 seconds, none of it loading (disc reads are already instant): the plain fade (dOvlpFd,
+overlaps 0, 1, 6, 7, 8) counts 26 game frames each way, and the new scene may not load its sounds
+until 36 frames after the door (mDoAud_setSceneName's load timer, while the old music fades). The
+host now shortens a fade as it starts, fader (JUTFader mFadeTime/mTimer) and overlap count
+(overlap1_class 0xCC/0xD0) together, keeping their sum so the scene is swapped the frame the screen
+is fully black (`BLUEWAKE_FADE_FRAMES`, default 6; 0 keeps 26). Once the screen has been black for 6
+retraces of a scene change, the game runs unpaced with `dol_aurora_set_fast_forward`: frames are not
+presented and the audio queue is kept at its 100 ms target (`BLUEWAKE_FAST_FORWARD=0` turns it off;
+at most 600 retraces). Warping into Link's house, windowed with Smooth Motion and sound: 0.63
+seconds (fade 0.20, black 0.25, fade back 0.18) instead of 2.2, starved audio pushes 164 against
+200 before. `BLUEWAKE_LOAD_TRACE=1` logs each retrace of a change; `BLUEWAKE_TEST_WARP` asks for one.
+
+**Sprint** (`runtime/host/src/sprint.c`). Holding Shift makes Link run 1.5 times his top speed
+(`BLUEWAKE_SPRINT_SPEED`): daPy_HIO_move_c0::m (0x8035CED4) field 0x18, the 17 procMove sets
+mMaxNormalSpeed from, and field 0x48, the run animation's rate at it (setMoveAnime blends by speed
+over mMaxNormalSpeed), scaled together and put back on release. Scripted: mNormalSpeed 17 to 25.5
+and back. Swimming, iron boots, targeting and carrying have their own parameters. On a controller,
+a click of the left stick starts the sprint, which lasts until the stick rests in the middle or the
+next click, and the left bumper jumps (both are free in the GameCube mapping; on the Switch Online
+GameCube controller, product 0x2073, the bumper is L, so it does not jump there).
+
+**The Forsaken Fortress at 60** (RecompCore b4af144, patch 0102). Its exterior draws 17,500 times a
+frame (550 is usual) and fell to 49 retraces a second: the GX translation worker was 93 percent busy,
+about 40 ms a game frame, 31 percent of it the in-between frame's blending. 96 percent of its draws
+repeat the vertex constants of the draw before them; those are compared once instead of three times,
+a repeated draw matched the same way reuses its in-between block, and indexed position and normal
+matrices are blended only for draws that read them. A Fortress-shaped load (frame_interp benchmark):
+10.0 ms of blending a frame before, 1.8 ms after, with the same blended values; frame_interp_test
+covers the reuse and the indexed matrices. In play, the Fortress exterior at 17,900 draws a frame
+now holds 60 (the GX worker's slow batches average 22 ms; the emulation thread is 94 percent busy, so
+there is little headroom).
+
+## 2026-09-28 Jump button, mouse aiming and zoom, HD texture packs (Mac-tested)
+
+**Jump** (`runtime/host/src/jump_button.c`, the Mac host). Space makes Link jump: at his next proc
+call (execute's `(this->*mCurProcFunc)()`, a chassis edge), when that proc is procWait, procFreeWait
+or procMove and he is on the ground with nothing else going on, the call goes to procAutoJump_init
+(0x80115EA4) instead, the jump off a ledge, so the game flies and lands it. A press in the air, a
+roll, water, a ladder, an event, a menu, while carrying, in iron boots or targeting is dropped, not
+kept. From standing it is a short hop; it goes the way Link faces. `BLUEWAKE_JUMP_BUTTON=0`,
+`BLUEWAKE_JUMP_TRACE=1`, `BLUEWAKE_JUMP_TEST=retrace,...`.
+
+**Mouse aiming and zoom** (`mouse_camera.c`). In first person and every item's aim (bow, hookshot,
+grappling hook, boomerang, telescope, Picto Box: the subject camera, engine 4) the mouse turns the
+aim itself at the player's update (daPy_Execute's entry): shape_angle.y with the angles the USA
+execute puts back (l_debug_shape_angle / l_debug_current_angle), and the tilt (dCamera_c m388),
+with the same turn in the view cache, so the frame follows with no easing lag and the game's limits
+hold. The wheel zooms: the follow camera's distance in third person (0.5x-2x), and the telescope's and
+Picto Box's own 1x-9x zoom (m38C), also while the game locks the view on a target (Aryll's telescope
+lesson does, and waits for a full zoom). Her lesson checks the postman's head within 50 screen units
+of the circle's middle whatever the zoom, so it is found at 1x.
+
+**HD texture packs.** `run_host.sh TEXTURES=DIR` takes a Dolphin-format pack (its GZL folder, or a
+Dolphin folder holding one) into `DOL_AURORA_TEXTURE_PACK`. ZWW4K 1.0.0d: 561 replacements (BC7),
+the pier and the HUD replaced, 60 FPS without hitches, about 240 MB more; 23 of its mip files have the
+wrong size and are dropped with the levels below them, as in Dolphin.
+
+**Also:** `bluewake_edge_intercepts_test` builds again (the mouse camera's sources, which need SDL,
+had been added to it).
+
+## 2026-09-28 Mac mouse camera, and in-between frames through fast turns (Mac-tested)
+
+**Mouse camera** (`runtime/host/src/mouse_camera.c`, the Mac host). Click the window to hand it the
+mouse: moving it turns the camera around Link and tilts it, and left click is A; Esc, or leaving the
+window, gives it back. It turns the game's own camera, not the C-stick (whose vertical axis is the
+first-person view and a pull-back, not a tilt, and whose horizontal speed the game eases): at
+camera_draw's entry (a chassis edge at 0x8017C350), when the frame's camera is final, the mouse's
+yaw and pitch go into dCamera_c's view cache (the next frame starts from them) and into the view's
+eye for this frame, at the distance the game chose (walls push it in). From its first move the mouse
+owns the angles, since the follow camera eases the tilt back and the yaw behind Link and its wall
+check and smoothing move the eye after that; a cutscene, a door, Z-targeting or first person hands
+the camera back. 0.18 degrees a point (`BLUEWAKE_MOUSE_SENSITIVITY`, `run_host.sh MOUSE_SENSITIVITY=`),
+tilt -35 to 75 degrees, `BLUEWAKE_MOUSE_INVERT_Y`. Checked with scripted pointer motion
+(`BLUEWAKE_MOUSE_TEST`, `BLUEWAKE_MOUSE_TRACE`): every frame drawn at the mouse's angles while Link
+walks and a wall pulls the camera in (97 units and back), and a roll does not interrupt it.
+The game's layout used: the camera at 0x803CA718 (+0x244 dCamera_c, view at +0, mLookat +0xD8),
+mViewCache at +0x3C (the decomp's comment says 0x5C; the globe's radius equals |eye - center| at 0x3C).
+
+**In-between frames through fast turns** (RecompCore 21775f1, patch 0100). A mouse turn of more than
+about 11 degrees a game frame moved distant scenery past the plausibility bounds: up to a third of
+frames were taken for cuts (the counter fell toward 30) and draws that failed on their own jumped
+against the blended scene (a doubled look). The camera's motion is now taken out of each pair
+(plausibility judges the object's own motion; the in-between matrices are carried by exactly half the
+camera's motion, a quaternion half-turn), a unique draw that changed rigidly past the bounds is
+blended by half its own motion, copies are found through a grid of where the camera carries them (a
+budgeted scan ran out when a turn brought dozens into view), and copies just come into view do not
+count toward a cut during a turn. Scripted turns at 11-32 degrees a game frame: 355 of 355 frames
+interpolated (5 before), 0.65 percent of draws unblended (5.9), 59-60 FPS.
+
+**Also:** `run_host.sh` keeps OUT_DIR/test.card between runs (it used to copy the Outset save over it
+at every launch, which lost a session's progress); the pad script takes the C-stick
+(`retrace:buttons:length:x:y:cx:cy`); `DOL_AURORA_FRAME_INTERP_LOG_FRAMES` logs each game frame.
+
+## 2026-09-28 Better Wind Waker's settings as runtime options, no patched disc (Mac-tested)
+
+**What it is.** Each of Better Wind Waker's settings is now a switch of its own (Mods > Better Wind
+Waker Settings on iOS; `BLUEWAKE_OPTIONS` / `run_host.sh OPTIONS=` on the Mac), with Better Wind Waker's
+defaults, and the patched disc (`betterww.iso`, its patcher, PyYAML and Pillow) is no longer needed.
+
+**How** (docs/MODS.md, `mods/betterww/options.txt`):
+- DolRecomp `--option-sites` (patch `dolrecomp/0019`): at each listed instruction the C backend emits
+  the original and the replacement (or a call to native code) behind `dolrecomp_option_flags[n]`; a
+  site is its own block, a replacement branch's target is a block start, and a loop with a site is not
+  outlined. Without the flag the translation is byte-identical to the shipped one.
+- 37 sites (15 chunks: 11 in main.dol, d_a_ship's 3, d_a_agbsw0's 1; 3 more combine with each
+  widescreen mod), checked against Better Wind Waker's patch words and the original instructions.
+- Native code (runtime/host/src/game_options.c) for what its added assembly did: turning while
+  swinging, the camera's inverted C-stick axis, Swift Sail's wind (the hook returns into the game's
+  `dKyw_tact_wind_set` with the link register pointing back at itself) and braking. Instant text
+  patches the loaded messages (4,411 messages, 1,212 timed waits) as the patcher patched the disc's.
+- 40 values written at boot per option; a REL's at its section's linked address, where its data lives
+  for the session. The option table and the writes are generated into `mod_variants.inc`, so
+  `module_export.c` is unchanged.
+
+**Measured on the Mac** (headless unless noted, the Outset save):
+
+| Check | Result |
+| --- | --- |
+| Options mod on, every option off, vs no mod | identical player path (365 probe lines) and block count |
+| Faster rolling: the same run-and-roll input, 9 rolls | 3,450 units vs 3,170 |
+| Faster climbing: one ledge climb | 44 retraces vs 100 |
+| Skip the opening movie: new game to the play scene | retrace 1,043 vs 14,062 |
+| Inverted camera: C-stick right for 1 s (windowed) | the camera turns the other way |
+| All defaults, 3,000 retraces; 16:10 + options (40 chunks) | runs; messages patched |
+
+**Open.** Not reached from the Outset save: Swift/Brisk Sail, the unrestricted boat, the faster
+Ballad, Tingle Chests, no song replays, turning while swinging, grappling, block pushing and the chat
+zoom (the sites and values match the patch; each needs its place in the game). Swift Sail's texture
+and icons are Wind Waker HD's art and not included; the item is still named "Sail". The iOS app
+compiles and links; not yet run on a device. The translator change is in elliotttate/DolRecomp b8b5345 (chrissotraidis 5c91d6e
+plus patch 0019), which elliotttate/RecompCore 7845b6c points at and the Builder now pins.
+
+**Also:** a copy of grass or foliage that comes into view at the screen's edge while the camera turns
+is now blended from where the camera's motion says it stood (its matrix carried back by the inverse
+of the camera's motion) instead of drawn half a camera step ahead (unit test; the grass route is
+unchanged: 1,003 of 1,320 frames interpolated, 60 FPS). The pad script takes the C-stick
+(`retrace:buttons:length:x:y:cx:cy`).
+
+## 2026-09-28 Widescreen 16:10 and Mac window, fullscreen and render scale (Mac-tested)
+
+**What it is.** A second widescreen mod for 16:10 screens (the MacBook, iPad at 1.43 is closer to
+4:3), beside the existing 16:9 one, and Mac host options for the window and render size.
+
+**How.** The community 16:9 Gecko code changes a set of numbers that all move with the width the
+picture gains over 4:3: the camera aspect, the 2D bounds, HUD positions in the meter and map tuning
+structures, three instruction immediates, one `lis` float, and five `lfs` loads pointed at other
+r2 pool constants. `scripts/mods/widescreen_aspect.py 16:10` interpolates each between the game's
+4:3 value and the 16:9 value (t = 0.6) and writes `mods/widescreen/GZLE01-16x10.gecko`; the pool loads
+take the nearest existing constant (all within about a pixel except one picture width, +6). The same
+script with `16:9` reproduces the original code byte for byte. `build_mods.sh` builds it as mod
+`widescreen1610` plus a `widescreen1610+betterww` combo; `build_mod_variants.py --exclusive
+widescreen,widescreen1610` lets two mods own the same chunks when they are never on together (the
+module: 3 mods, 22 chunks and 103 writes for 16:10).
+- Mac host: `BLUEWAKE_ASPECT=16:9|16:10` picks the mod and sets `DOL_AURORA_ASPECT_RATIO` (1.7778 /
+  1.6); the window is then 720 high at that aspect. RecompCore patch 0099 (backend only):
+  `DOL_AURORA_WINDOW=WxH`, `DOL_AURORA_FULLSCREEN=1`, `DOL_AURORA_RENDER_SCALE=N` (N x 480 lines, any
+  window; 0 = the window's pixels). `scripts/mac/run_host.sh` passes `ASPECT`, `WINDOW`, `FULLSCREEN`
+  and `SCALE`, and uses `build/mac-interp/composite-1610` when it exists.
+- iOS: Mods > Widescreen 16:10, exclusive with Widescreen 16:9; the launch sets the mod and 1.6.
+
+**Measured on the Mac:**
+
+| | Window | Frame buffer | Presented, Smooth Motion on |
+| --- | --- | --- | --- |
+| 16:9 windowed | 1280x720 pt | 2560x1440 | 59.8-60.0 |
+| 16:10 windowed | 1152x720 pt | 2304x1440 | 59.8-60.0 |
+| 16:10 fullscreen (MacBook) | 1728x1084 pt | 3456x2168 | 59.8-60.0 |
+| 16:10, `SCALE=3`, 800x500 window | 800x500 pt | 2304x1440 | - |
+
+At 16:10 the hearts, magic meter, rupees, minimap and item buttons sit at the edges as at 16:9; the
+pause menu, map and the no-card dialog are not stretched (the doubled Save label in the pause menu is
+the game's own animation and shows at 4:3 too). **Open.** A dark strip on the left edge is there at 4:3 as
+well (not from this change): per-pass dumps show the game's 3D pass drawing nothing in its leftmost 2
+pixels (6 at 3x), and its depth-of-field pass, drawing a half-size copy of the frame over it, widens
+that to 11 columns (about 3.7 game pixels). The device module (`build/device/composite-ios`) was
+rebuilt with the 16:10 variants, so its digests no longer match `build.sh`'s record until the next full
+build; the iOS toggle compiles but has not been run on a device.
+
+## 2026-09-28 Smooth Motion: 60 FPS from the renderer, the game still at 30 (Mac-tested)
+
+**What it is.** Wind Waker's logic advances one step per frame and waits for 1/30 s between frames
+(JFWDisplay::beginRender's waitForTick). Unlocking that wait doubles the game's speed, and the
+Meowmaritus 60 FPS hack's ~50 slow-down patches list softlocks (Niko's platforms, the Earth Temple
+slime, Molgera) and need twice the CPU the device does not have. So the game keeps its 30 steps and
+the renderer draws a frame between each pair: every gxcore draw already carries its whole transform
+state (VertexShaderConstants) with object-space vertices, so an in-between frame is the finished
+frame's passes encoded a second time with each draw's position, normal, projection and texture
+matrices and light positions blended halfway toward the same draw in the previous frame. It is real
+geometry, not image warping: depth, occlusion, lighting and the HUD are exact; motion the game makes
+by rewriting vertices on the CPU (particles, the logo swirls) stays at 30.
+
+**How** (RecompCore patch 0098, `GXRuntime/graphics/aurora/lib/gfx/frame_interp.*`):
+- A draw is keyed by a hash of its FIFO vertex payload (indices and direct attributes), or by shape
+  and texture when positions are in the payload; the Nth draw of a key pairs with the Nth last frame,
+  or the nearest plausible copy when copies change places. A pair must be plausibly one object a frame
+  apart (scale within 1.5x, under ~41 degrees of rotation, moved under a fifth of its distance + 100);
+  skinned draws check only the matrix slots their vertices use. 40 percent implausible = a camera cut:
+  that frame is shown once.
+- Copies of one model (grass clumps, bushes, palms) share a key and the game culls them one by one,
+  so a copy leaving the view shifted every later one onto its neighbour (39-277 units away, inside the
+  bound): at 60 FPS the foliage flickered while the camera turned, and one in-between frame drew a
+  palm that is in neither real frame. Draws with a unique key now vote for their motion
+  (M_now * M_before^-1, the camera's for anything standing still); a copy pairs with the previous copy
+  that motion carries onto it (within ~0.02 units), and one no still copy lands on is new in view and
+  drawn unblended. Circling the grass by the fence: every clump blended to exactly half the camera
+  step; pier and title frames unchanged; the GX worker's matching 3.48 -> 3.68 ms a game frame.
+- Blended blocks go to their own 32 MB area, uploaded once per frame, so they never split a frame's
+  staging. The render worker submits the real frame and keeps a copy, encodes the passes again with
+  the blended blocks (EFB copies and conversions included, the depth snapshot not), presents that,
+  and presents the kept copy half a game frame later from its idle loop.
+- Off by default: `aurora_set_frame_interpolation`, `DOL_AURORA_FRAME_INTERP=1`; iOS Display >
+  Smooth Motion (60 FPS). FPS counter: `aurora_set_fps_overlay` / `DOL_AURORA_SHOW_FPS=1` (top centre,
+  "60 FPS (game 30)"); the iOS Show FPS label gives the display rate too.
+- Debug: `DOL_AURORA_FRAME_INTERP_LOG`, `_TRACE=<game frame>` (per-draw outcome), `_DUMP=dir` with
+  `_FROM`/`_TO` (real and in-between images), `_DUMP_PASSES`, `_T=<weight>`.
+
+**Measured on the Mac** (M-series, the retagged device module, `scripts/mac/run_host.sh`):
+
+| | 30 FPS today | Smooth Motion |
+| --- | --- | --- |
+| Frames presented a second, title and Outset play | 29.9-30.0 | 59.8-60.0 |
+| Title flyover, draws blended | - | 99.6 % (20,159 of 20,245 in a heavy frame) |
+| New game to control, 6.4 min: control retrace, guest blocks | 20,405; 17,413,581 | the same |
+| Same route: user CPU, cycles | 195 s, 704 G | 245 s (+25 %), 874 G (+24 %) |
+| Walking the pier, sampled: GX worker / render worker | 51 % / 27 % of a core | 73 % / 53 % |
+| Game thread busy (host counter) | 79-81 % | 81-84 % |
+| Peak memory | 1.26 GB | 1.43 GB |
+
+Image checks (`scripts/mac/frame_interp_report.py`): an in-between frame differs from both neighbours
+by about half of what they differ by: the Outset intro pan 1.06 (1.0 = exactly between), Link running
+down the pier symmetric (2.97 / 2.89 of 4.34, 3.78 / 3.78 of 5.77), 76 of 76 moving title frames
+between. A standalone unit test covers matching, cuts, wraps and keys.
+
+The iOS app (arm64, iOS 17) compiles and links with it and the menu toggle. **Open.** Not yet run on a device: on an iPad Pro the extra ~half core fits beside the game thread; on
+2-performance-core iPhones it competes with it, so the GX worker's full-block copies and blends
+(only the rows a draw uses are needed) come first. One more half frame of display latency (~17 ms).
+Bone rotations over ~41 degrees a frame (a gull's wing) stay at 30. Patches 0098 and 0099 are committed in elliotttate/RecompCore
+7845b6c (chrissotraidis 2d60636 plus these), which the Builder now pins.
+
+**Also:** a Mac test save (new game to control, saved from the pause menu by `BLUEWAKE_SAVE_ROUTE`, 2
+minutes headless) at `build/mac-interp/saves/outset-start.card`; `run_host.sh ... load` plays from it at
+retrace ~705 instead of ~20,400. And `scripts/builder/build.sh` turns off the machine outliner with a
+profile: untrained game code (486 of 748 chunks from the local profile, the boat, most enemies and NPCs)
+was being outlined into a call every three instructions (45,364 in d_a_bk's first chunk).
+
 ## 2026-09-27 (day) Release fixes from the iPad test: transitions, Mods and Game Data menus
 
 **Fixed: a strip of the previous area along the bottom during transitions.** The iPad test showed the

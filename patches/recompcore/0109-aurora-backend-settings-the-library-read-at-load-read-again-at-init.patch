@@ -1,0 +1,41 @@
+From df6c2b1f4427e87b9d2e71c72e2727dde9e66d4b Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 12:57:05 -0400
+Subject: [PATCH 109/109] Aurora backend: settings the library read at load,
+ read again at init
+
+Smooth Motion (DOL_AURORA_FRAME_INTERP and _STEPS), the frames-a-second
+overlay and forced anisotropy are read by static initialisers, before a
+host applies its saved options to the environment, so a menu's choices
+were lost at the next launch (120 FPS came back as 60, 16x anisotropy as
+none). dol_aurora_initialize reads them again.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 0bcb67d..684506e 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -310,6 +310,18 @@ bool dol_aurora_initialize(int argc, char** argv,
+         if (scale >= 0.f && scale <= 8.f)
+             aurora_set_frame_buffer_scale(scale);
+     }
++    // Settings the Aurora library read when it was loaded, before the host
++    // applied its saved options to the environment (a menu's choices would be
++    // lost at the next launch: Smooth Motion at 120 came back at 60). Read
++    // again now.
++    if (const char* v = std::getenv("DOL_AURORA_FRAME_INTERP"); v != nullptr && v[0] != '\0')
++        aurora_set_frame_interpolation(v[0] != '0');
++    if (const char* v = std::getenv("DOL_AURORA_FRAME_INTERP_STEPS"); v != nullptr && v[0] != '\0')
++        aurora_set_frame_interp_steps(std::atoi(v));
++    if (const char* v = std::getenv("DOL_AURORA_SHOW_FPS"); v != nullptr && v[0] != '\0')
++        aurora_set_fps_overlay(v[0] != '0');
++    if (const char* v = std::getenv("DOL_AURORA_FORCE_ANISO"); v != nullptr && v[0] != '\0')
++        aurora_set_forced_anisotropy(static_cast<unsigned>(std::strtoul(v, nullptr, 10)));
+     // DOL_AURORA_TEXTURE_PACK: a folder of Dolphin-format replacement
+     // textures (tex1_WxH_hash[_tlut]_fmt.png or .dds, searched recursively,
+     // with _mipN sidecars), such as an HD texture pack's GZL folder.
+-- 
+2.55.0
+

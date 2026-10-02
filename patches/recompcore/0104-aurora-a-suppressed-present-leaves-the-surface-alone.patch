@@ -1,0 +1,61 @@
+From 060293f5af3a4b4099522194eb4ff99f830795e7 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 08:03:19 -0400
+Subject: [PATCH 104/106] Aurora: a suppressed present leaves the surface alone
+
+With the present suppressed (dol_aurora_set_fast_forward), end_frame's
+callback takes no surface texture, so its status stays at the Error it
+starts from, and the status check after the submit took that for the
+surface's own and dropped it. The next frame made a new swapchain for the
+same window: harmless on Metal, but on Direct3D 12 the old one still held
+the window, CreateSwapChainForHwnd failed with E_ACCESSDENIED and the device
+was lost, at the first fast-forwarded scene change (the black before the
+title, about four seconds in). The suppression is read once per callback
+and the status check skipped when it is on.
+---
+ GXRuntime/graphics/aurora/lib/aurora.cpp | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index cd1cfb6..911f6fc 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -312,9 +312,12 @@ void end_frame() noexcept {
+     wgpu::Texture currentTexture;
+     wgpu::TextureView currentView;
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
++    // Read once: a suppressed present takes no texture, and its status (left
++    // at Error) must not be taken for the surface's.
++    const bool suppressed = g_presentSuppressed.load(std::memory_order_relaxed);
+     {
+       window::SurfaceLock surfaceLock;
+-      if (!g_presentSuppressed.load(std::memory_order_relaxed) && window::is_presentable() && g_surface) {
++      if (!suppressed && window::is_presentable() && g_surface) {
+         ZoneScopedN("Acquire texture");
+         wgpu::SurfaceTexture surfaceTexture;
+         g_surface.GetCurrentTexture(&surfaceTexture);
+@@ -384,7 +387,7 @@ void end_frame() noexcept {
+         imgui::render(pass, imguiDrawData);
+         pass.End();
+       }
+-    } else if (!g_presentSuppressed.load(std::memory_order_relaxed)) {
++    } else if (!suppressed) {
+       Log.info("Skipping present; window not presentable");
+     }
+     webgpu::gpu_prof::frame_end(encoder);
+@@ -410,7 +413,11 @@ void end_frame() noexcept {
+         Log.warn("Surface present failed");
+         webgpu::release_surface();
+       }
+-    } else if (g_surface) {
++    } else if (g_surface && !suppressed) {
++      // With the present suppressed the status is not the surface's: taking it
++      // for Error dropped a working surface, and on Direct3D 12 the swapchain
++      // made in its place for the same window failed (E_ACCESSDENIED) and lost
++      // the device at the first fast-forwarded scene change.
+       switch (surfaceStatus) {
+       case wgpu::SurfaceGetCurrentTextureStatus::Timeout:
+         Log.warn("Surface texture acquisition timed out");
+-- 
+2.55.0
+

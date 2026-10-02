@@ -1,0 +1,52 @@
+From 6699be9c9e48ec27e78730a4c1e089a71d50fdb7 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 20:04:58 +0900
+Subject: [PATCH] Remove shared render worker identity race
+
+---
+ GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+index b85f9fe0..4e52d337 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+@@ -25,7 +25,7 @@ BoundedQueue g_queue{QueueCapacity};
+ std::thread g_thread;
+ std::atomic_bool g_running = false;
+ std::atomic_size_t g_pendingItems = 0;
+-std::thread::id g_workerThreadId;
++thread_local bool g_isWorkerThread = false;
+ WorkCallback g_idleHook;
+ 
+ void complete_sync(const std::shared_ptr<SyncState>& sync) {
+@@ -45,7 +45,7 @@ void worker_main() {
+   tracy::SetThreadName("Aurora render worker");
+ #endif
+   thread_cpu::register_current(thread_cpu::Role::RenderWorker);
+-  g_workerThreadId = std::this_thread::get_id();
++  g_isWorkerThread = true;
+ #if !defined(_WIN32)
+   g_renderPthread.store(pthread_self(), std::memory_order_release);
+ #endif
+@@ -90,7 +90,7 @@ void worker_main() {
+     }
+   }
+ 
+-  g_workerThreadId = {};
++  g_isWorkerThread = false;
+ }
+ 
+ void enqueue(QueueItem item) {
+@@ -297,7 +297,7 @@ void synchronize() {
+   sync->cv.wait(lock, [&] { return sync->complete; });
+ }
+ 
+-bool is_worker_thread() noexcept { return g_workerThreadId == std::this_thread::get_id(); }
++bool is_worker_thread() noexcept { return g_isWorkerThread; }
+ 
+ void set_idle_hook(WorkCallback hook) { g_idleHook = std::move(hook); }
+ 
+-- 
+2.46.0
+

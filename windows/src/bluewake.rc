@@ -1,0 +1,28 @@
+// BlueWake for Windows: the application icon and version information.
+#include <winver.h>
+
+1 ICON "../resources/BlueWake.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "BlueWake (The Wind Waker static recompilation)"
+            VALUE "ProductName", "BlueWake"
+            VALUE "FileVersion", "0.1"
+            VALUE "ProductVersion", "0.1"
+            VALUE "LegalCopyright", "GPL-3.0-or-later; game code is the player's own"
+            VALUE "OriginalFilename", "BlueWake.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

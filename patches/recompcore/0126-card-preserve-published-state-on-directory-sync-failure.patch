@@ -1,0 +1,163 @@
+From ba0a5d52ff78f8f975c767038d49497d9651369c Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 00:12:19 +0900
+Subject: [PATCH] Keep card memory consistent after an uncertain directory sync
+
+---
+ GXRuntime/src/memory_card.c | 60 ++++++++++++++++++++++++++-----------
+ 1 file changed, 42 insertions(+), 18 deletions(-)
+
+diff --git a/GXRuntime/src/memory_card.c b/GXRuntime/src/memory_card.c
+index f0e27f6e..c7a898e4 100644
+--- a/GXRuntime/src/memory_card.c
++++ b/GXRuntime/src/memory_card.c
+@@ -266,16 +266,22 @@ static bool backup_card(const DolMemoryCard* card) {
+     return ok;
+ }
+ 
+-static bool write_container(const DolMemoryCard* card) {
++typedef enum {
++    CARD_WRITE_FAILED,
++    CARD_WRITE_PUBLISHED,
++    CARD_WRITE_SYNCED
++} CardWriteResult;
++
++static CardWriteResult write_container(const DolMemoryCard* card) {
+     if (card->path == NULL)
+-        return true;
++        return CARD_WRITE_SYNCED;
+ 
+     u32 file_count = 0;
+     u32 body_size = payload_size(card, &file_count);
+     size_t total_size = (size_t)DOL_CARD_HEADER_SIZE + body_size;
+     u8* bytes = (u8*)calloc(1, total_size);
+     if (bytes == NULL)
+-        return false;
++        return CARD_WRITE_FAILED;
+ 
+     memcpy(bytes, k_card_magic, sizeof k_card_magic);
+     write_be32(bytes + 8, DOL_CARD_CONTAINER_VERSION);
+@@ -316,7 +322,7 @@ static bool write_container(const DolMemoryCard* card) {
+     char* temporary_path = (char*)malloc(path_length + 40u);
+     if (temporary_path == NULL) {
+         free(bytes);
+-        return false;
++        return CARD_WRITE_FAILED;
+     }
+     snprintf(temporary_path, path_length + 40u, "%s.tmp-%lu", card->path,
+ #ifdef _WIN32
+@@ -346,8 +352,11 @@ static bool write_container(const DolMemoryCard* card) {
+         success = false;
+     // POSIX rename and the Windows replacement shim preserve the old card
+     // on failure. Never delete the destination to retry a failed replacement.
+-    if (success && rename(temporary_path, card->path) != 0)
+-        success = false;
++    bool published = false;
++    if (success) {
++        published = rename(temporary_path, card->path) == 0;
++        success = published;
++    }
+ #ifndef _WIN32
+     if (success && fsync(directory_fd) != 0)
+         success = false;
+@@ -359,7 +368,9 @@ static bool write_container(const DolMemoryCard* card) {
+ 
+     free(temporary_path);
+     free(bytes);
+-    return success;
++    // After publication, an uncertain directory flush is still an I/O error,
++    // but callers must retain the published contents in memory.
++    return success ? CARD_WRITE_SYNCED : published ? CARD_WRITE_PUBLISHED : CARD_WRITE_FAILED;
+ }
+ 
+ static bool read_whole_file(const char* path, u8** data, size_t* size) {
+@@ -544,7 +555,7 @@ DolMemoryCard* dol_card_open(const DolMemoryCardConfig* config) {
+         }
+         if (card->serial == 0)
+             card->serial = generated_serial(card->path);
+-        if (!write_container(card)) {
++        if (write_container(card) != CARD_WRITE_SYNCED) {
+             fprintf(stderr, "[card] could not create card container: %s\n",
+                     card->path != NULL ? card->path : "(memory)");
+             dol_card_close(card);
+@@ -609,12 +620,15 @@ DolCardResult dol_card_format(DolMemoryCard* card) {
+     DolMemoryCardFile previous[DOL_CARD_MAX_FILES];
+     memcpy(previous, card->files, sizeof previous);
+     memset(card->files, 0, sizeof card->files);
+-    if (!write_container(card)) {
++    CardWriteResult written = write_container(card);
++    if (written == CARD_WRITE_FAILED) {
+         memcpy(card->files, previous, sizeof card->files);
+         return set_result(card, DOL_CARD_RESULT_IO_ERROR, 0);
+     }
+     for (u32 i = 0; i < DOL_CARD_MAX_FILES; i++)
+         free(previous[i].data);
++    if (written != CARD_WRITE_SYNCED)
++        return set_result(card, DOL_CARD_RESULT_IO_ERROR, 0);
+     return set_result(card, DOL_CARD_RESULT_READY,
+                       DOL_CARD_SYSTEM_BLOCKS * DOL_CARD_SECTOR_SIZE);
+ }
+@@ -701,9 +715,12 @@ DolCardResult dol_card_create_file(DolMemoryCard* card, const char* name,
+     file->stat.icon_speed = 1u;
+     file->stat.comment_address = 0xFFFFFFFFu;
+ 
+-    if (!write_container(card)) {
+-        free(file->data);
+-        memset(file, 0, sizeof(*file));
++    CardWriteResult written = write_container(card);
++    if (written != CARD_WRITE_SYNCED) {
++        if (written == CARD_WRITE_FAILED) {
++            free(file->data);
++            memset(file, 0, sizeof(*file));
++        }
+         return set_result(card, DOL_CARD_RESULT_IO_ERROR, 0);
+     }
+     if (file_no != NULL)
+@@ -731,11 +748,14 @@ DolCardResult dol_card_delete_file(DolMemoryCard* card, const char* name) {
+ 
+     DolMemoryCardFile removed = card->files[index];
+     memset(&card->files[index], 0, sizeof(card->files[index]));
+-    if (!write_container(card)) {
++    CardWriteResult written = write_container(card);
++    if (written == CARD_WRITE_FAILED) {
+         card->files[index] = removed;
+         return set_result(card, DOL_CARD_RESULT_IO_ERROR, 0);
+     }
+     free(removed.data);
++    if (written != CARD_WRITE_SYNCED)
++        return set_result(card, DOL_CARD_RESULT_IO_ERROR, 0);
+     return set_result(card, DOL_CARD_RESULT_READY,
+                       2u * DOL_CARD_SECTOR_SIZE);
+ }
+@@ -787,10 +807,12 @@ DolCardResult dol_card_write_file(DolMemoryCard* card, s32 file_no, u32 offset,
+     }
+     u32 previous_time = card->files[file_no].stat.time;
+     card->files[file_no].stat.time = card_time();
+-    if (!write_container(card)) {
+-        if (length != 0)
++    CardWriteResult written = write_container(card);
++    if (written != CARD_WRITE_SYNCED) {
++        if (written == CARD_WRITE_FAILED && length != 0)
+             memcpy(destination, old_data, length);
+-        card->files[file_no].stat.time = previous_time;
++        if (written == CARD_WRITE_FAILED)
++            card->files[file_no].stat.time = previous_time;
+         free(old_data);
+         return set_result(card, DOL_CARD_RESULT_IO_ERROR, 0);
+     }
+@@ -824,8 +846,10 @@ DolCardResult dol_card_set_status(DolMemoryCard* card, s32 file_no,
+     card->files[file_no].stat.icon_speed = stat->icon_speed;
+     card->files[file_no].stat.comment_address = stat->comment_address;
+     card->files[file_no].stat.time = card_time();
+-    if (!write_container(card)) {
+-        card->files[file_no].stat = previous;
++    CardWriteResult written = write_container(card);
++    if (written != CARD_WRITE_SYNCED) {
++        if (written == CARD_WRITE_FAILED)
++            card->files[file_no].stat = previous;
+         return set_result(card, DOL_CARD_RESULT_IO_ERROR, 0);
+     }
+     return set_result(card, DOL_CARD_RESULT_READY, DOL_CARD_SECTOR_SIZE);
+-- 
+2.46.0
+

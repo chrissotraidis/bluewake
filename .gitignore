@@ -36,6 +36,13 @@ dolphin_*.bin
 *.o
 *.a
 *.dylib
+# Windows: gGZLE01_recomp.dll is the translated game (personal build)
+*.dll
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb
 *.app
 *.dmg
 *.xcarchive

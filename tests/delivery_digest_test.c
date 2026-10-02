@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include "delivery_digest.h"
 
 #include <assert.h>
@@ -61,6 +64,8 @@ int main(void) {
     assert(first.play_count == 0u);
     assert(first.play_hash == BLUEWAKE_DELIVERY_FNV64_OFFSET);
 
+    BluewakeDeliveryDigest play_only;
+    bluewake_delivery_digest_init(&play_only);
     const u64 route_hash_before_play = first.hash;
     bluewake_delivery_digest_record_external(
         &first, 3900000000ull, 0x100u, 0x80307EF4u, 0x803F06D0u, false,
@@ -71,7 +76,13 @@ int main(void) {
     assert(first.play_cycle_sum == 3900000000ull);
     assert(first.play_hash != BLUEWAKE_DELIVERY_FNV64_OFFSET);
     assert(first.play_hash_no_cycle != BLUEWAKE_DELIVERY_FNV64_OFFSET);
-    assert(first.play_hash == first.hash);
+    bluewake_delivery_digest_record_external(
+        &play_only, first.play_last_cycle, 0x100u, 0x80307EF4u, 0x803F06D0u,
+        false, true);
+    assert(first.play_hash == play_only.hash);
+    assert(first.play_hash_no_cycle == play_only.hash_no_cycle);
+    assert(first.play_count == play_only.external_count);
+    assert(first.play_hash != first.hash); // route-wide hash includes pre-play deliveries
     assert(first.hash != route_hash_before_play);
 
     // A second play delivery must accumulate rather than restart.
@@ -82,7 +93,13 @@ int main(void) {
     assert(first.play_first_cycle == 3900000000ull);
     assert(first.play_last_cycle == 3900000100ull);
     assert(first.play_cycle_sum == 7800000100ull);
-    assert(first.play_hash == first.hash);
+    bluewake_delivery_digest_record_external(
+        &play_only, first.play_last_cycle, 0x100u, 0x80307EF4u, 0x803F06D0u,
+        false, true);
+    assert(first.play_hash == play_only.hash);
+    assert(first.play_hash_no_cycle == play_only.hash_no_cycle);
+    assert(first.play_count == play_only.external_count);
+    assert(first.play_hash != first.hash); // route-wide hash includes pre-play deliveries
 
     BluewakeDeliveryDigest bounded;
     bluewake_delivery_digest_init(&bounded);

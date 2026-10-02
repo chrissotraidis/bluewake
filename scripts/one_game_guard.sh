@@ -12,7 +12,9 @@ ignore_sim=0
 busy=""
 if pgrep -x Dolphin >/dev/null 2>&1; then busy="$busy Dolphin"; fi
 if pgrep -x bluewake_host >/dev/null 2>&1; then busy="$busy bluewake_host"; fi
-if pgrep -f 'MacOS/BlueWake$' >/dev/null 2>&1; then busy="$busy BlueWake.app(macOS)"; fi
+if pgrep -f 'BlueWake\.app/Contents/MacOS/BlueWake([[:space:]]|$)' >/dev/null 2>&1; then
+    busy="$busy BlueWake.app(macOS)"
+fi
 if [ "$ignore_sim" -eq 0 ] && pgrep -f 'Bundle/Application/.*/BlueWake.app/BlueWake' >/dev/null 2>&1; then
     busy="$busy BlueWake(simulator)"
 fi
