@@ -118,3 +118,27 @@ The mouse-motion, virtual-controller and face-layout CTests all pass (3/3).
 Native Windows compilation/test is registered in source-only CI and pending.
 This does not establish a measured latency improvement, rendered aiming or
 physical controller/mouse acceptance.
+
+## Windows disc foundation batch (isolated while the player build runs)
+
+Branch `codex/windows-disc-parity` continues the reconciliation branch in a
+managed `.codex/worktrees/bluewake-disc-parity/bluewake` checkout. It imports
+Elliott Tate's Windows disc UI from donor `0b463cc`/`61e891e`/`640094e`, retaining
+his authorship. The current shared importer and BlueWake startup/crash/safe-mode,
+settings, saves and defaults are retained. No personal or donor binary is copied.
+
+BlueWake adaptations: each conversion/preparation gets a new directory; failed
+converted inputs are retained; previous prepared files survive a failed attempt;
+atomic text records select only a completed preparation. A missing REL retries
+preparation, and explicit compressed disc input reaches the converter. A missing
+player-generated module gets an actionable source-build message before any import.
+The builder includes its existing nodtool only if available. No default experiment
+is enabled.
+
+The native Windows fixture compiles the actual launcher with synthetic importer
+results and uses actual Win32 file/process APIs. It covers cancel/missing/rejected
+input, cached reuse, failed preparation preserving the old selection and files,
+retry, incomplete REL cache, and a real child converter whose rejected synthetic
+output cannot replace/delete the previous converted disc or original input.
+The source audit and whitespace checks pass; native compilation/execution is
+pending CI. This does not accept the real importer/UI/gameplay or Unicode paths.

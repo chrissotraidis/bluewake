@@ -633,6 +633,10 @@ int main(void) {
                     f.name == "initial_pipeline_cache.db":
                 shutil.copy2(f, app / f.name)
                 copied.append(f.name)
+        nodtool = ROOT / "build/tools/nodtool/bin/nodtool.exe"
+        if nodtool.is_file():
+            shutil.copy2(nodtool, app / "nodtool.exe")
+            copied.append("nodtool.exe")
         shutil.copy2(module, app / MODULE)
         # The Visual C++ runtime, app-local, so the folder also runs on a PC
         # without the redistributable installed (the UCRT ships with Windows).

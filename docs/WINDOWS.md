@@ -181,3 +181,26 @@ clang (GNU driver, MSVC ABI) from Visual Studio.
 The Windows overlay saves display, camera, mod and audio choices in `settings.ini`; mods and audio mode
 apply after restart. Touch-layout editing and save-management screens remain iOS-specific.
 Windows optimization training and full end-to-end build/play verification remain pending.
+
+## Disc recovery in the reconciliation candidate
+
+The launcher now accepts a replacement owned USA revision-0 disc when the
+prepared files/disc are missing. It validates and prepares a selected ISO/GCM,
+then remembers its location. Compressed inputs require nodtool.exe beside the
+app; the Windows builder copies its pinned nodtool when it is available. An
+ISO-only build can instead use an ISO converted locally in Dolphin. A missing
+player-generated module still requires the source build; choosing a disc alone
+does not create translated game code inside the launcher.
+
+Conversions and preparation use unique `disc-import-*` folders under the data
+directory. Failed/previous inputs and prepared files remain there. `disc.txt`
+remembers the disc and `game.txt` the completed preparation. Failed preparation
+does not overwrite the last prepared files; a missing REL invalidates the
+cached preparation. Saves/settings keep their existing paths and behavior.
+This retains Elliott Tate's disc UI/import foundation while replacing the
+fork's overwrite/delete recovery paths. No donor compiled distribution is used.
+
+Native source-only CI builds the launcher and a Win32 filesystem/process
+regression with synthetic importer results. Real owned-disc picking/conversion,
+Unicode paths, interruption, gameplay and physical Windows save/reload remain
+acceptance gates until recorded against this candidate.

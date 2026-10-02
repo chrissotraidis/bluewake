@@ -41,6 +41,7 @@
 #include <aurora/aurora.h>
 
 #include "win_settings.h"
+#include "win_disc.h"
 #include "win_crash.h"
 #include "launch_marker.h"
 
@@ -556,12 +557,6 @@ int main(int argc, char** argv) {
     snprintf(states, sizeof states, "%sstates", g_data_dir);
     _mkdir(states);
     bw_default("BLUEWAKE_STATE_DIR", states);
-    bw_default_path("BLUEWAKE_DOL", g_exe_dir, "game\\main.dol");
-    bw_default_path("BLUEWAKE_RELS_DIR", g_exe_dir, "game\\rels");
-    bw_default_path("BLUEWAKE_DISC", g_exe_dir, "game\\GZLE01.iso");
-    bw_default_path("BLUEWAKE_DSP_IROM", g_exe_dir, "dsp\\dsp_rom.bin");
-    bw_default_path("BLUEWAKE_DSP_COEF", g_exe_dir, "dsp\\dsp_coef.bin");
-
     char module[MAX_PATH * 4];
     const char* module_env = getenv("BLUEWAKE_COMPOSITE");
     if (module_arg != NULL)
@@ -570,6 +565,18 @@ int main(int argc, char** argv) {
         snprintf(module, sizeof module, "%s", module_env);
     else
         snprintf(module, sizeof module, "%sgGZLE01_recomp.dll", g_exe_dir);
+
+    if (!file_exists(module)) {
+        fatal_box("The player-generated game module is missing. Build your own copy from your USA revision-0 disc with python scripts\\windows\\build.py YOUR_DISC.iso. Keep that personal build local.");
+        return 1;
+    }
+    const int disc_status = bw_disc_setup(g_exe_dir, g_data_dir);
+    if (disc_status != 0) return disc_status < 0 ? 1 : 0;
+    bw_default_path("BLUEWAKE_DOL", g_exe_dir, "game\\main.dol");
+    bw_default_path("BLUEWAKE_RELS_DIR", g_exe_dir, "game\\rels");
+    bw_default_path("BLUEWAKE_DISC", g_exe_dir, "game\\GZLE01.iso");
+    bw_default_path("BLUEWAKE_DSP_IROM", g_exe_dir, "dsp\\dsp_rom.bin");
+    bw_default_path("BLUEWAKE_DSP_COEF", g_exe_dir, "dsp\\dsp_coef.bin");
 
     // Say plainly what is missing instead of failing somewhere in the host.
     const char* missing = NULL;

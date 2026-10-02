@@ -77,6 +77,8 @@ set(BLUEWAKE_HOST_SOURCES
 # one the linker embeds.
 add_executable(BlueWake
     src/win_entry.c
+    src/win_disc.c
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
     src/win_settings.cpp
     src/win_crash.cpp
     src/bluewake.rc
@@ -86,7 +88,7 @@ add_executable(BlueWake
 # owns main() and hands over after setting the defaults.
 set_source_files_properties(${BLUEWAKE_HOST_SRC}/main.c PROPERTIES
     COMPILE_DEFINITIONS "main=bluewake_host_main")
-target_link_libraries(BlueWake PRIVATE gxruntime GXRuntime::aurora bluewake_posix_compat winmm)
+target_link_libraries(BlueWake PRIVATE gxruntime GXRuntime::aurora bluewake_posix_compat winmm bcrypt comctl32 comdlg32)
 if(TARGET imgui)
     target_link_libraries(BlueWake PRIVATE imgui)
 endif()
@@ -94,6 +96,7 @@ set_target_properties(BlueWake PROPERTIES LINKER_LANGUAGE CXX OUTPUT_NAME BlueWa
 target_include_directories(BlueWake PRIVATE
     ${BLUEWAKE_COMPAT_INCLUDES}
     ${BLUEWAKE_HOST_SRC}
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src
     ${GXRUNTIME_DIR}/include
     ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
 target_compile_options(BlueWake PRIVATE
@@ -187,6 +190,13 @@ target_compile_options(bluewake_disc_extract PRIVATE ${BLUEWAKE_COMPAT_FORCE_INC
 target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt)
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
+    add_executable(bluewake_windows_disc_test ${BLUEWAKE_REPO_ROOT}/tests/windows_disc_test.c)
+    target_include_directories(bluewake_windows_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
+    target_link_libraries(bluewake_windows_disc_test PRIVATE comctl32 comdlg32)
+    target_compile_definitions(bluewake_windows_disc_test PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    add_test(NAME bluewake_windows_disc_test COMMAND bluewake_windows_disc_test)
+    set_tests_properties(bluewake_windows_disc_test PROPERTIES TIMEOUT 30)
+
     enable_testing()
     add_executable(bluewake_card_dispatch_lock_test ${BLUEWAKE_REPO_ROOT}/tests/card_dispatch_lock_test.c)
     target_include_directories(bluewake_card_dispatch_lock_test PRIVATE ${BLUEWAKE_HOST_SRC} ${GXRUNTIME_DIR}/include ${BLUEWAKE_COMPAT_INCLUDES})
