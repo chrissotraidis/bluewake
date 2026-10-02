@@ -50,7 +50,7 @@ translation belongs in each player's private workspace.
 | Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Integrated; clean player-generated module, all exports/options and relevant gameplay open |
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
-| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; global MEM1/native batches remain separate | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
+| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches remain open | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
@@ -607,7 +607,36 @@ reservation invalidation, write journals, MEM2, MMIO and oversized accesses.
 The rebuilt bundled host and all 247 Mac host/runtime regressions pass.
 Actual ABI-3 and ABI-4 hosts reject synthetic ABI-5 modules before creating
 player storage; the new host also rejects a missing MEM1 getter at that point.
-Native Windows checks and fresh matched ordinary/global modules remain pending. The new modules both use `c2905b7a` to avoid conflating
-the optimization with a runtime change. Inline-memory preparation, optimized
+Native Windows compilation and all **32/32 regressions** pass at `3222b915`
+(19.28 seconds; [run 36965014411](https://github.com/chrissotraidis/bluewake/actions/runs/36965014411)); both repository audit jobs pass. The fresh matched ordinary/global
+modules both link and use `c2905b7a` to avoid conflating the optimization with
+a runtime change. Inline-memory preparation, optimized
 x86 measurements, actual gameplay and player-build acceptance remain open.
 No donor performance number or public-release acceptance is transferred.
+
+
+### Module-owned RAM qualification and menu persistence
+
+At `3222b915c21ae65115d355558415a28075bf2d8c`, both full Mac arm64 O0
+modules pass all 30,000 strict CPU/32-MiB-RAM comparisons across 14 entries,
+including 264 partial stops and 12,539 near-deadline cases. The fixture now
+also rejects a dispatch that replaces its assigned RAM pointer before comparing
+CPU state; the strengthened comparison passes the same 30,000 cases.
+
+The controlled 6,000-retrace pair passes with the same host/runtime and
+byte-identical card/SRAM seeds. All 1,050 canonical records and resulting cards
+match, delivery/clock drift is zero, and all 600 exact guest-state samples
+match. Both hosts exit normally. Host and module hashes, the exact compiler
+settings, seeds and receipts remain private. This accepts bounded Mac O0
+function/boot correctness only. Concurrent compilation excludes use of these
+wall times as performance evidence; optimized and actual gameplay checks remain
+open.
+
+With the same `3222b915` / `c2905b7a` bundled Mac host and the ordinary baseline
+module, an isolated native-menu session verifies fresh Smooth Motion Off,
+selection of 120 Hz, then Off while retaining three interpolation steps in
+settings. Closing and relaunching the app shows Off and leaves the settings
+file byte-identical. Both launches exit normally. Keyboard selection is
+verified; automated pointer selection was unreliable and is not accepted.
+This supersedes the earlier unresolved off/rate persistence check, but does
+not establish display pacing, controller navigation, sustained play or audio.

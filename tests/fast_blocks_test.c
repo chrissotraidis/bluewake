@@ -252,6 +252,11 @@ int main(int argc, char** argv) {
         sa.ram = ram_a;
         sb.ram = ram_b;
         if (!run(&a, &sa) || !run(&b, &sb)) return 1;
+        if (sa.ram != ram_a || sb.ram != ram_b) {
+            fprintf(stderr, "case %u: dispatch replaced its assigned RAM buffer\n", i);
+            return 1;
+        }
+        /* Only the expected process-local RAM addresses differ. */
         sb.ram = sa.ram;
         if (memcmp(&sa, &sb, sizeof sa) != 0 || memcmp(ram_a, ram_b, RAM_SIZE) != 0) {
             fprintf(stderr, "case %u (%08X, seed %08X): the copies differ (fpr at %u, ps1 at %u)\n", i,
