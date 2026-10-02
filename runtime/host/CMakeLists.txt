@@ -261,6 +261,12 @@ target_include_directories(bluewake_fast_blocks_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
 target_link_libraries(bluewake_fast_blocks_test PRIVATE ${CMAKE_DL_LIBS})
 
+add_executable(bluewake_inline_fp_test ${BLUEWAKE_REPO_ROOT}/tests/inline_fp_test.c)
+target_link_libraries(bluewake_inline_fp_test PRIVATE gxruntime)
+target_include_directories(bluewake_inline_fp_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_compile_options(bluewake_inline_fp_test PRIVATE -ffp-contract=off)
+add_test(NAME bluewake_inline_fp_test COMMAND bluewake_inline_fp_test)
+
 add_executable(bluewake_module_cpu_contract_test ../../tests/module_cpu_contract_test.c)
 target_link_libraries(bluewake_module_cpu_contract_test PRIVATE GXRuntime::runtime)
 target_include_directories(bluewake_module_cpu_contract_test PRIVATE

@@ -74,7 +74,8 @@ class PreparedCacheTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         for script in ("scripts/ios/composite_manifest.py", "scripts/windows/fast_blocks.py",
-                       "scripts/windows/global_guest_cpu.py"):
+                       "scripts/windows/global_guest_cpu.py", "scripts/windows/chunk_headers.py",
+                       "cmake/composite/inline_fp.h"):
             dst = self.root / script
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / script, dst)
@@ -85,7 +86,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK)
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
@@ -161,6 +162,35 @@ class PreparedCacheTest(unittest.TestCase):
         self.cycle()
         self.assertFalse(json.loads((self.out / "prepared-blocks.json").read_text())["fixed_mem1"])
         self.assertIn("#define ctx (&bw_guest_cpu)", self.chunk().read_text())
+
+    def test_inline_fp_independent_combined_reuse_disable_and_helper_changes(self):
+        self.cycle()
+        self.assertNotIn('"inline_fp.h"', self.chunk().read_text())
+        self.args.inline_fp = True
+        self.cycle()
+        self.assertIn('#include "../generated.h"\n#include "inline_fp.h"', self.chunk().read_text())
+        self.assertNotIn('gather_pipe', self.chunk().read_text())
+        before = self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
+        for helper in ("scripts/windows/chunk_headers.py", "cmake/composite/inline_fp.h"):
+            path = self.root / helper
+            path.write_text(path.read_text() + "\n")
+            self.builder.generate()
+            self.assertEqual(self.chunk().read_text(), CHUNK)
+            self.builder.prepare_blocks()
+            receipt = json.loads((self.out / "prepared-blocks.json").read_text())
+            self.assertTrue(receipt["inline_fp"])
+            self.assertEqual(receipt["inline_fp_header_sha256"], bw.sha256_file(self.root / "cmake/composite/inline_fp.h"))
+        self.args.fixed_cpu = self.args.prepared_blocks = True
+        self.cycle()
+        self.assertIn('"inline_fp.h"', self.chunk().read_text())
+        self.assertIn("#define ctx (&bw_guest_cpu)", self.chunk().read_text())
+        self.assertIn(MARK, self.chunk().read_text())
+        self.args.inline_fp = False
+        self.cycle()
+        self.assertNotIn('"inline_fp.h"', self.chunk().read_text())
+        self.assertIn(MARK, self.chunk().read_text())
 
     def test_interrupted_preparation_is_not_reused(self):
         self.args.prepared_blocks = True

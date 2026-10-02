@@ -78,12 +78,12 @@ static void randomize(CPUState* cpu) {
     if (next() % 4u == 0u)
         cpu->fpscr |= (u32)next() & 0x000000F8u;  /* ...except sometimes */
     cpu->cr = (u32)next();
+    /* Exercise the guest-selected rounding/flush mode, not just FPSCR bits. */
+    ppc_fpscr_control_updated(cpu);
 }
 
 static bool same(const CPUState* a, const CPUState* b) {
-    return memcmp(a->fpr, b->fpr, sizeof a->fpr) == 0 &&
-           memcmp(a->ps1, b->ps1, sizeof a->ps1) == 0 &&
-           a->fpscr == b->fpscr && a->cr == b->cr;
+    return memcmp(a, b, sizeof *a) == 0;
 }
 
 static CPUState reference, candidate;
@@ -119,7 +119,7 @@ static void report(const char* name, unsigned iteration) {
     } while (0)
 
 int main(void) {
-    if (!cpu_init(&reference) || !cpu_init(&candidate))
+    if (!cpu_init(&reference))
         return 1;
     const unsigned iterations = 2000000u;
     for (unsigned i = 0; i < iterations; ++i) {
@@ -175,6 +175,9 @@ int main(void) {
                 report("fcmp", i);
         }
     }
+    reference.fpscr = 0;
+    ppc_fpscr_control_updated(&reference);
+    cpu_free(&reference);
     if (failures != 0u) {
         fprintf(stderr, "inline_fp: %u differences\n", failures);
         return 1;

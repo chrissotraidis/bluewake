@@ -10,6 +10,7 @@ set(GAME_ID "GZLE01" CACHE STRING "Six-character disc ID")
 set(COMPOSITE_DIR "" CACHE PATH "Composite output dir (generated.h, module_tables.inc, rel_modules.inc)")
 set(GXRUNTIME_DIR "" CACHE PATH "GXRuntime checkout")
 set(ABI_DIR "" CACHE PATH "Directory containing StaticRecompABI.h")
+option(BLUEWAKE_INLINE_FP "Use explicitly prepared inline floating-point chunks" OFF)
 option(BLUEWAKE_FIXED_CPU "Use explicitly prepared fixed-address guest CPU chunks" OFF)
 option(BLUEWAKE_FIXED_MEM1 "Use module-owned guest RAM (requires fixed CPU)" OFF)
 if(BLUEWAKE_FIXED_MEM1 AND NOT BLUEWAKE_FIXED_CPU)
@@ -72,6 +73,20 @@ add_library(${MODULE_NAME} SHARED
   ${GXRUNTIME_DIR}/src/core/cpu_interpreter_float.c
   ${GXRUNTIME_DIR}/src/core/cpu_interpreter_integer.c
   ${CHUNK_INPUTS})
+
+if(BLUEWAKE_INLINE_FP)
+  foreach(CHUNK_SOURCE IN LISTS CHUNK_INPUTS)
+    if(NOT CHUNK_SOURCE MATCHES "\\.c$")
+      message(FATAL_ERROR "Inline FP needs prepared C chunks, not native objects")
+    endif()
+    file(STRINGS "${CHUNK_SOURCE}" INLINE_FP_MARKER LIMIT_COUNT 1
+      REGEX "^#include \"inline_fp.h\"$")
+    if(NOT INLINE_FP_MARKER)
+      message(FATAL_ERROR "Inline FP chunk is unprepared: ${CHUNK_SOURCE}")
+    endif()
+  endforeach()
+  target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
 if(BLUEWAKE_FIXED_CPU)
   foreach(CHUNK_SOURCE IN LISTS CHUNK_INPUTS)

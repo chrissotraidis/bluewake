@@ -51,6 +51,9 @@ translation belongs in each player's private workspace.
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches remain open | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
+| Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Mac differential instruction checks pass, full-module/Windows/performance qualification pending |
+| Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Absent; needs BlueWake host-hook watch list and edge-service contract review | Open; preserve scheduling, exceptions, hooks and mod dispatch; strict module comparisons and matched timing |
+| Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Absent; separate from adopted MEM1 storage | Open; retain MMIO/alias/reservation/journal semantics and flush at every observable boundary; renderer/state comparisons and timing |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
@@ -640,3 +643,27 @@ file byte-identical. Both launches exit normally. Keyboard selection is
 verified; automated pointer selection was unreliable and is not accepted.
 This supersedes the earlier unresolved off/rate persistence check, but does
 not establish display pacing, controller navigation, sustained play or audio.
+
+
+### Independent inline floating-point candidate
+
+The next focused batch extracts the generic floating-point header, differential
+fixture and header-placement script from donor `4b6b268`, retaining Elliott's
+authorship in `52eec88`. BlueWake separates floating-point preparation from
+memory wrappers/gather batching and exposes `--inline-fp` off by default.
+CMake rejects unprepared/native-object chunks when explicitly enabled. The
+builder fingerprints the selection, preparation script and helper header,
+records their hashes, and regenerates ordinary calls when disabled. This
+changes neither the module ABI nor game-logic/display defaults.
+
+On Mac arm64, the original donor fixture passes two million iterations of
+19 operations against maintained runtime `c2905b7a`. A strengthened repeat
+also passes all 38 million operation comparisons after applying every sampled
+guest rounding/flush mode to the host and comparing the complete CPU state.
+The maintained fixture retains those stronger checks. Eight synthetic cache /
+preparation regressions pass, including independent/combined selection,
+unchanged reuse, helper edits and disabling. The maintained CMake fixture also
+passes (36.84 seconds); all 813 private chunks prepare, a second preparation
+is byte-identical, and unprepared CMake input is rejected. Native Windows, whole-module
+correctness and matched performance remain pending. No native game bodies,
+private profiles or donor benchmark claims are imported.

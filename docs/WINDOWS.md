@@ -38,7 +38,8 @@ three tests and the full app link also pass natively at `74da8ee` in
 These checks do not imply Windows gameplay or audio acceptance.
 
 The reconciliation candidate includes generic prepaid-block and fixed-address
-CPU transforms as separate builder opt-ins. Other register/native preparation and experimental
+CPU transforms, module-owned RAM and inline floating-point helpers as separate
+builder opt-ins. Other register/native preparation and experimental
 60 Hz simulation remain separate work. Windows PGO training, matched Windows
 measurements and full Windows gameplay remain acceptance gates.
 
@@ -81,10 +82,18 @@ Options (`--help` lists all):
 | `--prepared-blocks` | Opt into generic prepaid-block optimization; off by default, Windows timing/gameplay pending |
 | `--fixed-cpu` | Opt into experimental fixed-address CPU storage; off by default, requires the matching app |
 | `--fixed-mem1` | Also use module-owned RAM; requires `--fixed-cpu` and the matching app, off by default |
+| `--inline-fp` | Opt into inline floating-point helpers; off by default, module/gameplay/performance qualification pending |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
 | `--out DIR` | Build directory (default `build\windows`) |
+
+The `--inline-fp` option leaves the module ABI unchanged and can be selected
+independently of the storage/block experiments. It substitutes generic interpreter
+operations only; it does not add native game routines, direct calls or memory
+batching. Source preparation records the option and helper hashes, and disabling
+it regenerates ordinary calls. Mac instruction-level comparisons pass; this does
+not establish whole-module correctness or a speed improvement.
 
 ## Play
 
