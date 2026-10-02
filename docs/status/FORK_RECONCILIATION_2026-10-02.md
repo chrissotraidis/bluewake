@@ -540,12 +540,25 @@ a claim of identical state at every intervening instruction. The existing route 
   saved-scene frames and all 1,050 route/card records match, with zero measured
   delivery/clock drift. All five native helper families and direct calls execute;
   gather uses direct mode headless and actual batch mode with Aurora. Original
-  save backup hashes remain unchanged. An O2 combined/reference pair is building from frozen
-  copies of the module/runtime/prepared inputs with the same compiler and three
-  existing O1 fallback chunks. The combined O2 module has linked and passes the
+  save backup hashes remain unchanged. The O2 combined/reference pair has built
+  from frozen module/runtime/prepared inputs with the same compiler and three
+  existing O1 fallback chunks; the input digest remains unchanged. The combined O2 module passes the
   direct-call, matrix, skinning and game-math function fixtures against the ordinary
-  O0 module; the O2 reference build is still running. These builds reuse retained private translation;
-  neither clean player builds nor matched performance are accepted.
+  O0 module. Four-way O0/reference-O2/combined-Off/combined-On headless intro
+  comparison passes all six full-state checkpoints and 1,050 route/card records,
+  with zero delivery/clock drift. The rendered saved route matches all 37 player
+  states, both images and route/card records, but the strict MEM1 comparison
+  fails. The timing run therefore stops before measurement.
+
+  A focused save-state capture at retrace 501 reproduces 17 differing bytes
+  between O0 and reference O2, entirely within guest `gxData` texture-region
+  descriptors and its next-region counter; CPU state is identical. Repeating
+  reference O2 reproduces those bytes. Disabling only asynchronous EFB depth
+  feedback makes the retrace-500 checkpoint and saved CPU/MEM1/ARAM/aliases
+  identical. The full rendered route with that controlled input is pending;
+  production depth feedback remains enabled. No checkpoint bytes are masked,
+  and the original failure is retained. These builds reuse private translation;
+  clean player builds and matched performance remain unaccepted.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -642,8 +655,8 @@ Chris reoriented the loop after the initial integration campaign. The next
 iterations prioritize the complete player experience; see the current section
 of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
 
-1. **Combined performance decision:** finish the frozen O2 reference, execute
-   the existing four-way correctness routes and quiet matched timing. Use the
+1. **Combined performance decision:** finish the rendered correctness check
+   with controlled EFB depth feedback, then assess quiet matched timing. Use the
    result to select candidate defaults; no new optimization family without a
    reproduced blocker. Keep original 30 Hz logic and experimental display modes
    off by default.
