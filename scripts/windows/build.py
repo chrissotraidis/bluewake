@@ -479,9 +479,9 @@ int main(void) {
         # Keep an identical tree in place: rewriting 750 files would make the
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
-        inputs.update(f"{digest}\n{int(self.mods)}\n".encode())
+        inputs.update(f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n".encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
-                  + [ROOT / "mods/betterww/options.txt", Path(__file__)]):
+                  + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py", Path(__file__)]):
             if f.is_file():
                 inputs.update(f.read_bytes())
         inputs = inputs.hexdigest()
@@ -573,6 +573,28 @@ int main(void) {
         sync_tree(base, dst)
         (o / "composite-final.digest").write_text(tree_digest(dst) + "\n")
         (o / "mods.done").write_text("complete\n")
+
+    def prepare_blocks(self):
+        """Explicit generic optimization, after variants and before compilation.
+
+        generate() verifies both the input fingerprint and final tree digest.
+        Interrupted/edited preparation cannot be mistaken for finished work.
+        """
+        o = self.out
+        script = ROOT / "scripts/windows/fast_blocks.py"
+        if self.args.prepared_blocks:
+            self.run("prepared-blocks", [sys.executable, script, o / "composite-src"])
+        digest = tree_digest(o / "composite-src")
+        receipt = {"enabled": self.args.prepared_blocks,
+                   "script_sha256": sha256_file(script),
+                   "base_digest": (o / "composite-src.digest").read_text().strip(),
+                   "final_digest": digest}
+        pending = o / "prepared-blocks.json.tmp"
+        pending.write_text(json.dumps(receipt, indent=2) + "\n")
+        os.replace(pending, o / "prepared-blocks.json")
+        pending = o / "composite-final.digest.tmp"
+        pending.write_text(digest + "\n")
+        os.replace(pending, o / "composite-final.digest")
 
     # --- 8 compile -----------------------------------------------------------
     def compile_module(self):
@@ -733,6 +755,7 @@ int main(void) {
             print("mods already in the composite source")
         else:
             self.build_mods()
+        self.prepare_blocks()
         step(f"8/10 compile the game module (-O{args.opt_level}, -march={args.march}; this is the long step)")
         start = time.monotonic()
         module = self.compile_module()
@@ -781,6 +804,8 @@ def main():
                              "any Intel Haswell or AMD Zen or newer; lowered automatically on older CPUs)")
     parser.add_argument("--opt-level", choices=("1", "2"), default="2", help="game module optimization level")
     parser.add_argument("--no-mods", action="store_true", help="skip the widescreen and Better Wind Waker variants")
+    parser.add_argument("--prepared-blocks", action="store_true",
+                        help="opt into experimental prepaid-block optimization (off by default; Windows timing pending)")
     parser.add_argument("--console", action="store_true", help="build BlueWake.exe as a console program")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")

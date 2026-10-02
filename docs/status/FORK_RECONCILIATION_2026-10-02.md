@@ -50,7 +50,7 @@ translation belongs in each player's private workspace.
 | Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Integrated; clean player-generated module, all exports/options and relevant gameplay open |
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
-| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported for private qualification; builder defaults unchanged. Global/register transforms absent; native batches evaluated separately | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
+| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported for private qualification; explicit Windows builder opt-in, default off. Global/register transforms absent; native batches evaluated separately | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16, default off; oversized span guards fixed; plain/global bounds fixtures pass Mac/Windows. Inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
@@ -372,13 +372,26 @@ passes, as does the repository audit. A baseline-against-itself smoke exercises
 all 14 entries, establishing harness operation only.
 
 The isolated owned-disc source contains 443,166 prepared blocks in 813 chunks.
-Both full O0 comparison modules are being built with source `95adeed`, runtime
-`99e47480`, Apple Clang 21 and the same floating-point flags. These builds use
-no profiling instrumentation. The earlier instrumented training module can
-support an initial state comparison, but cannot establish matched timing.
-The exact private tree hashes/compiler/build receipts remain local. Thirty
-thousand state/RAM cases, negative controls, matched timings and actual
-Windows gameplay remain open. No contributor benchmark is claimed here.
+Both full O0 comparison modules compiled and linked all 822 units, using
+source `95adeed`, runtime `99e47480`, Apple Clang 21 and identical optimization /
+floating-point flags, without profiling instrumentation. **30,000 cases pass**
+with every CPU/RAM byte identical: 264 stop before returning and 12,539 start
+with a nearby deadline. All 14 entries have 2,142 or 2,143 cases. An initial
+comparison against the earlier instrumented baseline also passes. Deliberate
+cycle-suffix and RAM-byte mutations each fail on case 0; invalid inputs,
+incompatible ABI and advertised global-MEM1 modules are rejected. Exact tree /
+module hashes, compiler/build receipts and all generated game code remain local.
+This accepts bounded function equivalence only. Matched timing, optimized x86
+qualification, renderer/scheduling/image checks and actual gameplay remain open.
+
+Windows source builds now accept explicit `--prepared-blocks`; it remains off by
+default. Selection and script contents participate in the source fingerprint;
+preparation runs after mod variants and writes an atomic final-digest/receipt.
+Three synthetic regressions pass (1.44 seconds): enable/reuse/disable retains
+unchanged source timestamps, interrupted preparation is regenerated, and a
+transform revision invalidates the prepared cache. These use invented source
+and the actual Windows builder methods/transformer, not a disc or compiler;
+full Windows owned-disc build and interrupted compile acceptance remain open.
 
 The latest #16 native Windows app build and 31/31 regressions also pass at
 `5c8d348` ([run 36950369976](https://github.com/chrissotraidis/bluewake/actions/runs/36950369976)).

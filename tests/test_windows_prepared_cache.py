@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Synthetic Windows build-cache checks; no disc or translated game source."""
+import importlib.util
+import json
+from pathlib import Path
+import shutil
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+REPO = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("windows_builder", REPO / "scripts/windows/build.py")
+bw = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bw)
+
+# A small invented instruction block with the translator's public charge form.
+CHUNK = '''#include "../generated.h"
+void synthetic(CPUState* ctx) {
+    bool cycle_block_prepaid;
+    ctx->pc = 0x80001000u;
+    cycle_block_prepaid = dolrecomp_block_can_precharge(ctx, 2u);
+    if (ctx->downcount <= -(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) {
+        ctx->pc = 0x80001000u;
+        return;
+    }
+    ctx->downcount -= cycle_block_prepaid ? 2u : 1u;
+    ctx->gpr[3] += 1u;
+    ctx->pc = 0x80001004u;
+    if (!cycle_block_prepaid && !dolrecomp_charge_precise(ctx, 1u, 0x80001004u)) return;
+    ctx->gpr[4] += 1u;
+    ctx->pc = ctx->lr;
+    return;
+}
+'''
+MARK = "bluewake: prepaid block copies"
+
+
+class PreparedCacheTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        for script in ("scripts/ios/composite_manifest.py", "scripts/windows/fast_blocks.py"):
+            dst = self.root / script
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / script, dst)
+        self.base = self.root / "synthetic-base"
+        (self.base / "chunks_dol").mkdir(parents=True)
+        (self.base / "generated.h").write_text("/* synthetic fixture */\n")
+        for name in ("a.c", "b.c"):
+            (self.base / "chunks_dol" / name).write_text(CHUNK)
+        self.out = self.root / "build"
+        self.out.mkdir()
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False)
+        self.builder = bw.Builder(self.args)
+        self.builder.mods = False
+        self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
+        self.addCleanup(patch.stopall)
+        patch.object(bw, "ROOT", self.root).start()
+        self.digest = bw.tree_digest(self.base)
+        patch.object(bw, "profile_value", lambda name: self.digest).start()
+
+    def cycle(self):
+        self.builder.generate()
+        self.builder.prepare_blocks()
+
+    def chunk(self, name="a.c"):
+        return self.out / "composite-src/chunks_dol" / name
+
+    def test_explicit_enable_reuse_and_disable(self):
+        self.cycle()
+        self.assertNotIn(MARK, self.chunk().read_text())
+        self.args.prepared_blocks = True
+        self.cycle()
+        self.assertIn(MARK, self.chunk().read_text())
+        before = self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
+        receipt = json.loads((self.out / "prepared-blocks.json").read_text())
+        self.assertTrue(receipt["enabled"])
+        self.assertEqual(receipt["final_digest"], bw.tree_digest(self.out / "composite-src"))
+        self.args.prepared_blocks = False
+        self.cycle()
+        self.assertEqual(self.chunk().read_text(), CHUNK)
+        self.assertFalse(json.loads((self.out / "prepared-blocks.json").read_text())["enabled"])
+
+    def test_interrupted_preparation_is_not_reused(self):
+        self.args.prepared_blocks = True
+        self.builder.generate()
+        # Emulate interruption after one atomic chunk rewrite, before receipt.
+        self.chunk().write_text(self.chunk().read_text() + "/* partial preparation */\n")
+        self.builder.generate()
+        self.assertEqual(self.chunk().read_text(), CHUNK)
+        self.builder.prepare_blocks()
+        self.assertIn(MARK, self.chunk("a.c").read_text())
+        self.assertIn(MARK, self.chunk("b.c").read_text())
+
+    def test_transform_change_invalidates_prepared_cache(self):
+        self.args.prepared_blocks = True
+        self.cycle()
+        script = self.root / "scripts/windows/fast_blocks.py"
+        script.write_text(script.read_text() + "\n# synthetic revision change\n")
+        self.builder.generate()
+        self.assertNotIn(MARK, self.chunk().read_text())
+        self.builder.prepare_blocks()
+        self.assertIn(MARK, self.chunk().read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

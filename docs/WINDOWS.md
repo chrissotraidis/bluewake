@@ -37,8 +37,10 @@ three tests and the full app link also pass natively at `74da8ee` in
 [CI run 36810799124](https://github.com/chrissotraidis/bluewake/actions/runs/36810799124).
 These checks do not imply Windows gameplay or audio acceptance.
 
-The fork's later Windows-only code-generator optimizations and experimental 60 Hz simulation are
-not imported here. Local Windows PGO training and full Windows gameplay remain follow-up gates.
+The reconciliation candidate includes the generic prepaid-block transform as an
+explicit builder opt-in. Other register/native preparation and experimental
+60 Hz simulation remain separate work. Windows PGO training, matched Windows
+measurements and full Windows gameplay remain acceptance gates.
 
 ## What you need
 
@@ -76,6 +78,7 @@ Options (`--help` lists all):
 | --- | --- |
 | `--source-only` | Stop after generating the source: checks your tools, disc and translation in a few minutes |
 | `--no-mods` | Skip the mods (widescreen 16:9 and 16:10, Better Wind Waker's options) |
+| `--prepared-blocks` | Opt into generic prepaid-block optimization; off by default, Windows timing/gameplay pending |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
@@ -181,6 +184,16 @@ clang (GNU driver, MSVC ABI) from Visual Studio.
 The Windows overlay saves display, camera, mod and audio choices in `settings.ini`; mods and audio mode
 apply after restart. Touch-layout editing and save-management screens remain iOS-specific.
 Windows optimization training and full end-to-end build/play verification remain pending.
+
+The prepaid-block candidate has bounded correctness evidence on an M3 Max:
+30,000 cases across 14 SDK/J3D entries compare every CPU/RAM byte between two
+privately generated, uninstrumented O0 modules, including deadline observation
+suffixes and partial stops. Deliberate suffix/RAM mutations fail the fixture.
+This is function-level equivalence, not Windows timing or gameplay acceptance.
+The builder records the optimization selection and script hash, rejects stale
+generated-tree reuse, and safely re-prepares after an interrupted stage. Changing
+the selection regenerates the appropriate source; it does not change game logic,
+Smooth Motion preferences, saves or the module ABI.
 
 ## Disc recovery in the reconciliation candidate
 
