@@ -3,14 +3,12 @@
 #undef NDEBUG
 #endif
 #include "save_state.h"
+#include "gxruntime/interrupts.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-typedef uint8_t u8;
-typedef uint32_t u32;
-typedef uint64_t u64;
 typedef struct { u32 pc; u32 ram_size; u8* ram; } CPUState;
 typedef struct { int unused; } StaticRecompModuleDesc;
 typedef struct { bool* profile_prolog_called; bool* rel_prolog_sda_pending; u32* rel_prolog_saved_r13; } HostStateLoop;
@@ -21,6 +19,11 @@ static u32 g_state_alias_count = 1;
 static HostStateAlias g_state_aliases[] = {{0x90000000, 4}};
 static u64 g_host_retrace_count;
 static u32* g_cycle_vi_clock;
+static DolInterrupts g_interrupts = {
+    .pe_token = 0xBEEF,
+    .pe_control = DOL_PE_TOKEN_ENABLE_BIT | DOL_PE_FINISH_ENABLE_BIT,
+    .pe_token_pending = true,
+};
 static char g_state_last_path[512];
 static u32 host_field = 0x4321;
 static const BwStateField k_host_state_fields[] = {{"host_field", &host_field, sizeof host_field}};
@@ -57,6 +60,9 @@ int main(void) {
     BwStateReader reader;
     assert(bw_state_reader_open(&reader, path));
     assert(bw_state_find(&reader, "ALIASES") && bw_state_find(&reader, "HOSTVARS"));
+    const BwStateChunk* pe = bw_state_find(&reader, "PE");
+    assert(pe != NULL && pe->size == sizeof(g_interrupts) - offsetof(DolInterrupts, pe_token));
+    assert(memcmp(pe->data, &g_interrupts.pe_token, (size_t)pe->size) == 0);
     const size_t old_size = reader.buffer_size;
     const u64 old_hash = bw_state_hash(reader.buffer, reader.buffer_size, 0);
     bw_state_reader_close(&reader);

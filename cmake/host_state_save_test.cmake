@@ -13,5 +13,5 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/host_state_save_under_test.inc" "${_stat
 add_executable(bluewake_host_state_save_failure_test
     "${BLUEWAKE_REPO_ROOT}/tests/host_state_save_failure_test.c" "${BLUEWAKE_HOST_SRC}/save_state.c")
 target_include_directories(bluewake_host_state_save_failure_test PRIVATE
-    "${BLUEWAKE_HOST_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
+    "${BLUEWAKE_HOST_SRC}" "${CMAKE_CURRENT_BINARY_DIR}" "${GXRUNTIME_DIR}/include")
 add_test(NAME bluewake_host_state_save_failure_test COMMAND bluewake_host_state_save_failure_test)
