@@ -227,3 +227,23 @@ gameplay remain open. The default full player builder finished its isolated
 local training at fixed `95adeed` / runtime `99e47480`, merged the newly trained
 profile and started optimized iOS module compilation. Packaging/run acceptance
 still requires terminal results.
+
+## Runtime candidate checkpoint
+
+Runtime `70bc9957b89a145a5b457d1a9e5cd482f34e7e61` compiled the complete
+Mac host/renderer and passed **246/246** CTests from the fresh isolated build
+(5.07 seconds). The existing draw/particle/camera regression now exercises
+both three and seven steps, checking every intermediate position and
+consecutive camera transform. The first broad test invocation encountered
+four unbuilt Aurora test targets because that dependency is excluded from
+the default build; explicitly building those targets resolved the test setup.
+No regression was disabled.
+
+Candidate branch `codex/runtime-display-parity` selects this exact public
+runtime in the profile/lock/device documentation and exports byte-identical
+patches 0131-0134. The primary private build remains fixed at `95adeed` /
+`99e47480`. Windows CI now also compiles/runs plain/global memory bounds
+fixtures; its result is pending. Global MEM1 remains opt-in and is not enabled
+for existing modules. This checkpoint does not yet add display-rate settings,
+accept slow-game behavior under matched workloads or establish performance
+parity.

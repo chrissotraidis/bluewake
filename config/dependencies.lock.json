@@ -112,11 +112,11 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "99e4748002d42c1a86fdcb33a47cd0e97292acff",
-      "branch": "bluewake-next",
+      "sha": "70bc9957b89a145a5b457d1a9e5cd482f34e7e61",
+      "branch": "codex/bluewake-runtime-parity",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
-      "verified": "2026-09-25",
+      "verified": "2026-10-02",
       "upstream": {
         "url": "https://github.com/ExpansionPak/RecompCore",
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
@@ -535,6 +535,17 @@
           ]
         },
         "note": "historical record only: 3476998 was never published and the patches/recompcore series does not apply cleanly to the base (0008 fails); use the fork commit above"
+      },
+      "reconciliation": {
+        "base_sha": "99e4748002d42c1a86fdcb33a47cd0e97292acff",
+        "donor_sha": "634895470af6e61e601f06a351f3a72888215159",
+        "tracked_patches": [
+          "patches/recompcore/0131-optional-global-mem1.patch",
+          "patches/recompcore/0132-display-rate-and-slow-game-interpolation.patch",
+          "patches/recompcore/0133-check-guest-span-before-subtraction.patch",
+          "patches/recompcore/0134-test-seven-interpolation-steps.patch"
+        ],
+        "evidence": "Mac host/renderer linked; memory plain/global bounds tests and seven-step draw/particle/camera regression pass. Native Windows and gameplay/performance acceptance pending."
       }
     },
     {
@@ -564,7 +575,7 @@
         "sha": "8b690b60e699c92e3327886ebd84cf7f05c5d36c",
         "stale": false
       },
-      "vendored_in": "recompcore fork 99e47480 at GXRuntime/graphics/aurora (plain files, not a submodule); the build uses that copy with the BlueWake changes included"
+      "vendored_in": "recompcore candidate 70bc9957 at GXRuntime/graphics/aurora (plain files, not a submodule); the build uses that copy with the BlueWake changes included"
     },
     {
       "id": "sunpad",

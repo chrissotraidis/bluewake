@@ -1,0 +1,118 @@
+From 45364adfffc0485f4fb3560a46e7abae669623c6 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 09:41:29 +0900
+Subject: [PATCH] Reject oversized guest RAM spans before capacity subtraction
+
+---
+ GXRuntime/CMakeLists.txt                   | 10 ++++++
+ GXRuntime/include/core/cpu.h               |  8 ++---
+ GXRuntime/tests/guest_memory_bounds_test.c | 41 ++++++++++++++++++++++
+ 3 files changed, 55 insertions(+), 4 deletions(-)
+ create mode 100644 GXRuntime/tests/guest_memory_bounds_test.c
+
+diff --git a/GXRuntime/CMakeLists.txt b/GXRuntime/CMakeLists.txt
+index 02ce4d15..9af00b71 100644
+--- a/GXRuntime/CMakeLists.txt
++++ b/GXRuntime/CMakeLists.txt
+@@ -141,4 +141,14 @@ if(BUILD_TESTING)
+     )
+     target_link_libraries(gxruntime_tests PRIVATE GXRuntime::runtime)
+     add_test(NAME gxruntime_tests COMMAND gxruntime_tests)
++    foreach(_variant IN ITEMS plain global)
++        add_executable(gxruntime_guest_memory_${_variant}_test tests/guest_memory_bounds_test.c)
++        target_link_libraries(gxruntime_guest_memory_${_variant}_test PRIVATE GXRuntime::runtime)
++        if(_variant STREQUAL "global")
++            target_compile_definitions(gxruntime_guest_memory_${_variant}_test PRIVATE
++                BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=4096)
++        endif()
++        add_test(NAME gxruntime_guest_memory_${_variant}_test COMMAND gxruntime_guest_memory_${_variant}_test)
++    endforeach()
++
+ endif()
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index ded46793..ba2d5413 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -205,12 +205,12 @@ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size
+         (addr & 0x40000000u) == 0u) {
+         u32 offset = addr - GC_RAM_BASE;
+ #if defined(BW_GUEST_MEM1)
+-        if (offset <= BW_GUEST_MEM1_SIZE - size) {
++        if (size <= BW_GUEST_MEM1_SIZE && offset <= BW_GUEST_MEM1_SIZE - size) {
+             if (out_offset) *out_offset = offset;
+             return BW_GUEST_MEM1 + offset;
+         }
+ #else
+-        if (offset <= cpu->ram_size - size) {
++        if (size <= cpu->ram_size && offset <= cpu->ram_size - size) {
+             if (out_offset) *out_offset = offset;
+             return cpu->ram + offset;
+         }
+@@ -236,7 +236,7 @@ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size
+     // Check MEM2 (EXRAM) first as it is much more common in Wii titles
+     if (cpu->exram) {
+         u32 offset = masked_addr - 0x90000000u;
+-        if (offset <= cpu->exram_size - size) {
++        if (size <= cpu->exram_size && offset <= cpu->exram_size - size) {
+             if (out_offset) *out_offset = (u32)-1;
+             return cpu->exram + offset;
+         }
+@@ -244,7 +244,7 @@ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size
+     
+     // Check MEM1
+     u32 offset = masked_addr - 0x80000000u;
+-    if (offset <= cpu->ram_size - size) {
++    if (size <= cpu->ram_size && offset <= cpu->ram_size - size) {
+         if (out_offset) *out_offset = offset;
+         return cpu->ram + offset;
+     }
+diff --git a/GXRuntime/tests/guest_memory_bounds_test.c b/GXRuntime/tests/guest_memory_bounds_test.c
+new file mode 100644
+index 00000000..2879e69a
+--- /dev/null
++++ b/GXRuntime/tests/guest_memory_bounds_test.c
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#ifdef NDEBUG
++#undef NDEBUG
++#endif
++#include <assert.h>
++#include <stdint.h>
++#include "core/cpu.h"
++
++u8 bw_test_mem1[4096];
++static u8 exram[4096], aliased[16];
++int main(void) {
++    CPUState cpu = {0};
++    cpu.ram = bw_test_mem1; cpu.ram_size = sizeof bw_test_mem1;
++    cpu.exram = exram; cpu.exram_size = sizeof exram;
++    ppc_guest_alias_clear();
++    u32 offset = 123;
++    assert(get_ram_ptr(&cpu, GC_RAM_BASE, 4, &offset) == bw_test_mem1 && offset == 0);
++    assert(get_ram_ptr(&cpu, GC_RAM_BASE + 4092, 4, NULL) == bw_test_mem1 + 4092);
++    assert(get_ram_ptr(&cpu, GC_RAM_BASE + 4093, 4, NULL) == NULL);
++    assert(get_ram_ptr(&cpu, GC_RAM_BASE + 4096, 0, NULL) == bw_test_mem1 + 4096);
++    assert(get_ram_ptr(&cpu, 0x90000000u + 4092, 4, NULL) == exram + 4092);
++    assert(get_ram_ptr(&cpu, 0x90000000u + 4093, 4, NULL) == NULL);
++    assert(get_ram_ptr(&cpu, 0xC0000000u + 4092, 4, NULL) == bw_test_mem1 + 4092);
++    const u32 starts[] = {GC_RAM_BASE, GC_RAM_BASE + 4, GC_RAM_BASE - 4,
++                         0xC0000000u, 0x90000000u, 0xD0000000u};
++    for (unsigned i = 0; i < sizeof starts / sizeof starts[0]; ++i) {
++        assert(get_ram_ptr(&cpu, starts[i], 4097, NULL) == NULL);
++        assert(get_ram_ptr(&cpu, starts[i], UINT32_MAX, NULL) == NULL);
++    }
++    assert(ppc_guest_alias_add_shared(GC_RAM_BASE + 256, sizeof aliased, aliased));
++    assert(get_ram_ptr(&cpu, GC_RAM_BASE + 256, sizeof aliased, NULL) == aliased);
++    assert(get_ram_ptr(&cpu, 0xC0000000u + 256, sizeof aliased, NULL) == aliased);
++    assert(get_ram_ptr(&cpu, GC_RAM_BASE + 256, UINT32_MAX, NULL) == NULL);
++    ppc_guest_alias_clear();
++    cpu.exram_size = cpu.ram_size = 0;
++#ifndef BW_GUEST_MEM1
++    assert(get_ram_ptr(&cpu, GC_RAM_BASE + 4, 1, NULL) == NULL);
++#endif
++    assert(get_ram_ptr(&cpu, 0x90000000u + 4, 1, NULL) == NULL);
++    return 0;
++}
+-- 
+2.46.0
+
