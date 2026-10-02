@@ -54,7 +54,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#14](https://github.com/chrissotraidis/bluewake/pull/14) | `95adeed` | Fresh mouse queue, SDK preflight and source-only PadMint repair; primary player-build baseline |
 | [#15](https://github.com/chrissotraidis/bluewake/pull/15) | `54bbb26` | Windows disc import/recovery foundation; real UI/disc acceptance open |
 | [#16](https://github.com/chrissotraidis/bluewake/pull/16) | `5c8d348` | Maintained runtime/display-rate policy; physical pacing/play open |
-| [#17](https://github.com/chrissotraidis/bluewake/pull/17) | `5208567` (docs `05df605`) | Conservative prepared blocks; O2 pair compiling, measurements open |
+| [#17](https://github.com/chrissotraidis/bluewake/pull/17) | `5208567` (docs `05df605`) | Conservative prepared blocks; O0/O2 function and intro/saved-game state/image comparisons pass; quiet matched measurements open |
 | [#18](https://github.com/chrissotraidis/bluewake/pull/18) | `6532973` (docs `f1c1c7a`) | Fixed CPU / ABI 4; bounded arm64 O0 checks pass |
 | [#19](https://github.com/chrissotraidis/bluewake/pull/19) | `3222b91`, fixture `0e78428` | Module RAM / ABI 5 and extended-alias fix; bounded arm64 O0 checks pass |
 | [#20](https://github.com/chrissotraidis/bluewake/pull/20) | `9d3729a` | Corrected inline FP; native instruction tests and arm64 O0 module/boot pass |
@@ -131,8 +131,19 @@ a claim of identical state at every intervening instruction. The existing route 
   PC/suffix observations and leaves refund/unknown prepaid-state blocks alone.
   It passes 30,000 function cases and 6,000 retraces: 1,050 canonical/card records,
   600 matching selected startup records and delivery/clock timing match. This is bounded O0
-  correctness, not full donor optimization/performance parity. Matched O2 builds
-  remain running; preserve the failed candidates and unchanged comparator.
+  correctness, not full donor optimization/performance parity. Both matched O2
+  modules now compile/link successfully (baseline source `95adeed`, runtime
+  `99e47480`, transform `5208567`; ordinary ABI 3, no fixed CPU/RAM/native helpers).
+  The O2 pair passes 30,000 full CPU/RAM cases, including 264 partial returns and
+  12,539 deadline cases. With current host `ce31672` / host runtime `c2905b7a`,
+  it also passes the 6,000-retrace intro (six CPU/MEM1/MEM2/REL checkpoints) and
+  2,000-retrace Aurora existing-save movement route (four checkpoints, all 37
+  sampled player states and both nonblank Outset frames at 1,200/1,600).
+  Each pair matches all 1,050 route/card records and has zero delivery/clock drift.
+  Original save backup hashes remain unchanged. A six-run alternating-order
+  measurement harness is prepared, but its initial quiet-machine preflight
+  refuses to run while unrelated local compilation is active. No performance
+  result is accepted. Preserve failed candidates and the unchanged comparators.
 - **Fixed CPU and module RAM:** each independent O0 candidate passes the same
   30,000 function cases and strict 6,000-retrace pair. The RAM fixture also checks
   assigned pointer identity; plain/global alias, reservation, journal, MMIO,
@@ -309,8 +320,8 @@ bugs. No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-1. Finish the running prepared-block O2 pair and verify terminal artifacts, then
-   run matched measurements on a quiet machine. The direct-call three-way
+1. Run matched prepared-block O2 measurements when the machine is quiet; both
+   builds and the O2 function/intro/saved-game comparisons now pass. The direct-call three-way
    headless/Aurora comparisons pass; their traced wall times are not benchmarks.
    The copied-save route now demonstrates matched scripted movement; extend it
    to sustained scenes and save/reload acceptance.
@@ -332,7 +343,8 @@ bugs. No issue is closed or externally commented on by this work.
 
 Primary `codex/fork-reconciliation` at `95adeed` retains the completed baseline
 source-build/PadMint artifacts. The
-managed `bluewake-disc-parity` worktree at `05df605` stays fixed for the O2 pair.
+managed `bluewake-disc-parity` worktree at `05df605` retains both completed O2
+modules and the required private evidence.
 The managed `bluewake-cpu-contract` worktree holds the current source stack and
 private qualification artifacts; its nested runtime is `c2905b7a`. Both managed
 worktrees contain needed unique artifacts and remain in use. No checkout is
