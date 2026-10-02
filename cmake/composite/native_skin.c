@@ -5,7 +5,8 @@
  * matrix), 3x4, in paired singles. Translated, each of its instructions
  * carries the block machinery (pc, cycle suffix, deadline refund) and each
  * paired-single operation writes two registers and the FPSCR; it was the game
- * thread's largest single function at native 60 Hz on Outset (3.1 percent).
+ * thread's largest single function in the donor's native 60 Hz Outset
+ * measurement (3.1 percent); this is not a BlueWake benchmark.
  *
  * This runs the same operations in the same order on the same values with the
  * translation's own arithmetic (inline_fp.h: the interpreter's multiplier and
@@ -25,7 +26,7 @@
  * stopped part of the way through nor charged a block instruction by
  * instruction).
  *
- * scripts/windows/native_skin.py calls it from the function's one caller once
+ * scripts/windows/native_skin.py routes the certified function entry once
  * the translated body is the one this was checked against
  * (tests/native_skin_test.c, every register and byte against the translation).
  * No identifier here may be `ctx`. */
@@ -34,10 +35,26 @@
 
 #include <stdio.h>
 
-int bluewake_native_skin_enabled;
+#if defined(_WIN32)
+#define BW_SKIN_EXPORT __declspec(dllexport)
+#else
+#define BW_SKIN_EXPORT __attribute__((visibility("default")))
+#endif
+static BluewakeNativeSkinReady s_ready;
+static void* s_ready_user;
+BW_SKIN_EXPORT int bluewake_composite_native_skin_v1(
+    bool enabled, BluewakeNativeSkinReady ready, void* user) {
+    s_ready = enabled ? ready : NULL;
+    s_ready_user = s_ready != NULL ? user : NULL;
+    return s_ready != NULL;
+}
+int bluewake_native_skin_try(CPUState* cpu) {
+    return cpu != NULL && s_ready != NULL &&
+           s_ready(s_ready_user, cpu, BLUEWAKE_NATIVE_SKIN_ENTRY) && bluewake_native_skin(cpu);
+}
 static unsigned long long s_skin_runs, s_skin_declined, s_skin_joints;
 
-void bluewake_native_skin_report(void) {
+BW_SKIN_EXPORT void bluewake_native_skin_report(void) {
     fprintf(stderr, "[native-skin] calcWeightEnvelopeMtx native=%llu declined=%llu joints=%llu\n",
             s_skin_runs, s_skin_declined, s_skin_joints);
 }
@@ -50,7 +67,7 @@ void bluewake_native_skin_report(void) {
 typedef struct SkinPair { f64 p0, p1; } SkinPair;
 
 static inline const u8* skin_ram(const CPUState* cpu, u32 address, u32 size) {
-    if (!ppc_dispatch_poll_read_stable((CPUState*)cpu, address, size))
+    if (cpu->ram == NULL || !ppc_dispatch_poll_read_stable((CPUState*)cpu, address, size))
         return NULL;
     return cpu->ram + (address - GC_RAM_BASE);
 }
@@ -124,7 +141,7 @@ static inline SkinPair skin_madd(const CPUState* cpu, SkinPair a, SkinPair c, Sk
 }
 
 int bluewake_native_skin(CPUState* cpu) {
-    if (!bluewake_native_skin_enabled)
+    if (cpu == NULL)
         return 0;
     const u32 gqr = cpu->gqr[0];
     if (cpu->exception != 0u || (cpu->msr & PPC_MSR_FP) == 0u || (cpu->hid2 & PPC_HID2_LSQE) == 0u ||

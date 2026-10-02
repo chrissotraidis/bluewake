@@ -7539,6 +7539,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[chassis] native-j3d=%s\n", enabled ? "on" : "off");
     }
     {
+        typedef int (*NativeSkinFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
+        NativeSkinFn native_skin = (NativeSkinFn)dlsym(lib, "bluewake_composite_native_skin_v1");
+        const char* native_env = getenv("BLUEWAKE_NATIVE_SKIN");
+        const bool want = native_env != NULL && strcmp(native_env, "1") == 0;
+        const bool enabled = native_skin != NULL && native_skin(want, host_can_skip_observation, NULL);
+        fprintf(stderr, "[chassis] native-skin=%s\n", enabled ? "on" : "off");
+    }
+    {
         typedef int (*NativeVecFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
         NativeVecFn native_vec = (NativeVecFn)dlsym(lib, "bluewake_composite_native_vec_v1");
         const char* native_env = getenv("BLUEWAKE_NATIVE_VEC");
@@ -15576,6 +15584,11 @@ int main(int argc, char** argv) {
         void (*report_native_j3d)(void) = (void (*)(void))dlsym(lib, "bluewake_native_j3d_report");
         if (report_native_j3d != NULL)
             report_native_j3d();
+    }
+    {
+        void (*report_native_skin)(void) = (void (*)(void))dlsym(lib, "bluewake_native_skin_report");
+        if (report_native_skin != NULL)
+            report_native_skin();
     }
     {
         void (*report_native_vec)(void) = (void (*)(void))dlsym(lib, "bluewake_native_vec_report");

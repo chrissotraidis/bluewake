@@ -7,7 +7,9 @@
 
 #define BLUEWAKE_NATIVE_SKIN_ENTRY 0x802EE67Cu
 
-extern int bluewake_native_skin_enabled;
+typedef bool (*BluewakeNativeSkinReady)(void*, const CPUState*, u32);
+int bluewake_composite_native_skin_v1(bool enabled, BluewakeNativeSkinReady ready, void* user);
+int bluewake_native_skin_try(CPUState* cpu);
 
 /* The whole function, from its entry with the return address in LR, to the
  * return: nonzero with every register, flag, cycle and byte of memory as the

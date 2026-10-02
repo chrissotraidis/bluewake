@@ -90,6 +90,7 @@ class PreparedCacheTest(unittest.TestCase):
                        "scripts/windows/inline_save_restore_gpr.py", "scripts/mods/prepare_native_j3d.py",
                        "cmake/composite/native_j3d.c", "cmake/composite/native_j3d.h",
                        "scripts/mods/prepare_native_vec.py", "cmake/composite/native_vec.c", "cmake/composite/native_vec.h",
+                       "scripts/windows/native_skin.py", "cmake/composite/native_skin.c", "cmake/composite/native_skin.h",
                        "scripts/mods/prepare_native_math.py", "cmake/composite/native_math.c", "cmake/composite/native_math.h",
                        "cmake/composite/native_work_pool.c", "cmake/composite/native_work_pool.h"):
             dst = self.root / script
@@ -102,7 +103,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK)
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False, native_skin=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
@@ -213,6 +214,31 @@ label_80004004:
         self.assertNotIn('bw_native_call', self.chunk().read_text())
         self.assertIn('bw_chunk_fns[1](ctx)', self.chunk().read_text())
         self.assertFalse((prepared.parent / 'native_math.json').exists())
+
+    def test_native_skin_reuse_and_disable(self):
+        body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'
+        digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+        script = self.root / "scripts/windows/native_skin.py"
+        text = script.read_text()
+        start = text.index('LEAVES = (')
+        end = text.index('INCLUDE = ', start)
+        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:])
+        (self.base / 'chunks_dol/chunk_802ED6E0.c').write_text(
+            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_802ED6E0:\n')
+        self.digest = bw.tree_digest(self.base)
+        self.args.native_skin = True
+        self.cycle()
+        source = self.out / 'composite-src/chunks_dol/chunk_802ED6E0.c'
+        self.assertIn('bluewake_native_skin_try', source.read_text())
+        self.assertIn('BLUEWAKE_NATIVE_SKIN_PREPARED', (source.parent.parent / 'generated.h').read_text())
+        before = source.read_bytes(), source.stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (source.read_bytes(), source.stat().st_mtime_ns))
+        self.args.native_skin = False
+        self.cycle()
+        self.assertNotIn('bluewake_native_skin_try', source.read_text())
+        self.assertNotIn('BLUEWAKE_NATIVE_SKIN_PREPARED', (source.parent.parent / 'generated.h').read_text())
+        self.assertFalse((source.parent.parent / 'native_skin.json').exists())
 
     def test_native_vec_reuse_and_disable(self):
         body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'

@@ -367,10 +367,27 @@ a claim of identical state at every intervening instruction. The existing route 
   calls are confirmed active. The initial test-driver assertion incorrectly
   expected renderer batching in headless mode; the correct direct-writer mode
   was verified against the complete retained runs. The Aurora saved-game
-  comparison, which requires actual batch selection, is still running.
+  comparison also passes all four checkpoints, 37 sampled player states, scripted
+  movement, both images and 1,050 canonical/card records with zero measured timing
+  drift. It confirms batch selection and 244,126,396 allowed direct-call boundaries.
   These are private developer builds from
   retained translation; combined optimized performance, clean final player builds
   and final gameplay remain open.
+- **Native skinning candidate:** exact four-file Elliott import `46365c2`
+  supplies the weighted-envelope matrix helper and its fixture. BlueWake adds
+  independent `--native-skin` preparation and a versioned, default-Off host gate.
+  The raw pre-transform body is certified only after independent full-function
+  comparison; the entry hook supports both ordinary and direct dispatch.
+  Twenty thousand randomized helper cases pass: 16,743 native results match
+  every CPU byte (including the observation suffix) and every MEM1 byte;
+  3,257 cases decline unchanged. The donor fixture assumed a Windows module
+  completing this function in one dispatch; the portable fixture now follows
+  its complete dispatch window and retains the initial single-dispatch mismatch
+  as fixture-adaptation evidence. A reproduced null-RAM sanitizer failure is
+  fixed by checking RAM before resolving guest addresses, with a null-CPU guard.
+  Synthetic identity, unchanged CPU/RAM fallback and host handshake checks pass
+  in Release and ASan/UBSan. Sixteen builder/cache tests and three certificate
+  tests pass. Routed-module, scene and native Windows qualification are pending.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -439,11 +456,8 @@ bugs. No issue is closed or externally commented on by this work.
    adapting BlueWake hooks and retaining contributor credit. Direct-call/register
    and certified J3D/vector/matrix source and bounded routing checks are now integrated. Complete combined optimized and host FIFO batching
    qualification, including scheduling/hooks, gameplay and matched measurements.
-   Skin preflight reproduces a null-RAM sanitizer failure in the unmodified
-   donor helper; a minimal null-CPU/RAM guard passes the private probe but is
-   not yet integrated. Its donor body certificate also does not match our
-   current preparation order; establish the independent differential evidence
-   before adapting certification, rather than bypassing it.
+   Complete the native skinning candidate and import the remaining game-math
+   helpers. Later lava-rendering and controller-haptics changes also remain open.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
    fullscreen/restart, real controllers, save/reload, upgrades and sustained play.

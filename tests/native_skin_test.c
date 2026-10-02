@@ -1,28 +1,21 @@
-/* cmake/composite/native_skin.c against the translation it stands in for.
- *
- *   native_skin_test MODULE.dll [CASES]
- *
- * Builds a skinned model in guest RAM (random envelopes, joints, weights,
- * matrices, flags, registers, FPSCR and cycle state), runs
- * J3DModel::calcWeightEnvelopeMtx through the personal module's translation
- * and through bluewake_native_skin, and requires every byte of the CPU state
- * and of RAM to match - or, where the native declines, nothing to have
- * changed. Windows (the module keeps the guest CPU at a fixed address, which
- * bluewake_composite_guest_cpu names). Built against the app build's GXRuntime,
- * as the module compiles the native (-ffp-contract=off):
- *
- *   clang -O2 -march=x86-64-v3 -ffp-contract=off -Icmake/composite
- *     -Iref/recompcore/GXRuntime/include
- *     -Iref/recompcore/Source/Core/Core/PowerPC/StaticRecomp
- *     tests/native_skin_test.c cmake/composite/native_skin.c
- *     build/windows/app/gxruntime_build/gxruntime.lib -o native_skin_test.exe */
+/* Elliott's randomized skinning fixture, adapted to declared BlueWake module
+ * storage on Windows and POSIX. Compares every CPU byte, including the cycle
+ * observation suffix, and every byte of MEM1. Personal modules remain local.
+ * Usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]
+ */
 #include "native_skin.h"
 #include "StaticRecompABI.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
+#include "module_cpu_contract.h"
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #define RAM_SIZE GC_MAIN_RAM_SIZE
 #define SELF 0x80100000u
@@ -139,70 +132,92 @@ static CPUState build(u8* ram, unsigned scenario) {
     return c;
 }
 
-/* A module built with BW_GUEST_MEM1 (the Windows builder's) runs its
- * translated code on its own MEM1 array, whatever a state's ram says: the
- * translated side's RAM has to be that array. Zeroed and returned, or NULL
- * for a module without one. */
-static u8* module_mem1(HMODULE lib) {
-    u8* (*mem1)(u32*) = (u8* (*)(u32*))(void*)GetProcAddress(lib, "bluewake_composite_guest_mem1");
-    u32 size = 0;
-    u8* ram = mem1 != NULL ? mem1(&size) : NULL;
-    if (ram == NULL)
-        return NULL;
-    if (size < GC_MAIN_RAM_SIZE) {
-        fprintf(stderr, "the module's MEM1 is 0x%X bytes\n", size);
-        exit(1);
+typedef struct Module {
+    const StaticRecompModuleDesc* desc;
+    CPUState fallback;
+    BlueWakeModuleStorage storage;
+    int (*native_skin)(bool, BluewakeNativeSkinReady, void*);
+    void (*report)(void);
+} Module;
+
+static int load_module(const char* path, Module* module) {
+#if defined(_WIN32)
+    HMODULE lib = LoadLibraryA(path);
+#define SYMBOL(name) ((void*)GetProcAddress(lib, name))
+#else
+    void* lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#define SYMBOL(name) dlsym(lib, name)
+#endif
+    if (!lib) { fprintf(stderr, "cannot load %s\n", path); return 0; }
+    StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)SYMBOL(STATICRECOMP_GET_MODULE_SYMBOL);
+    if (!get) return 0;
+    module->desc = get();
+    module->native_skin = (int (*)(bool, BluewakeNativeSkinReady, void*))SYMBOL("bluewake_composite_native_skin_v1");
+    module->report = (void (*)(void))SYMBOL("bluewake_native_skin_report");
+    const char* error = bw_module_select_storage(module->desc,
+        (BlueWakeModuleCPUFn)SYMBOL("bluewake_composite_guest_cpu"),
+        (BlueWakeModuleMEM1Fn)SYMBOL("bluewake_composite_guest_mem1"),
+        &module->fallback, &module->storage);
+    if (error) { fprintf(stderr, "%s\n", error); return 0; }
+    if (module->storage.mem1 == NULL) {
+        module->storage.mem1 = calloc(1, GC_MAIN_RAM_SIZE);
+        module->storage.mem1_size = GC_MAIN_RAM_SIZE;
     }
-    memset(ram, 0, GC_MAIN_RAM_SIZE);
-    return ram;
+    return module->storage.mem1 != NULL;
+#undef SYMBOL
 }
 
-/* The cycle observation suffix is dead after an access to RAM: since
- * scripts/windows/lean_memory.py the translation stores it only on the way
- * to an MMIO or timebase handler, its only readers. It is not compared. */
+static unsigned routed_queries;
+static bool routed_ready(void* user, const CPUState* cpu, u32 entry) {
+    (void)user;
+    if (!cpu || entry != BLUEWAKE_NATIVE_SKIN_ENTRY) return false;
+    ++routed_queries; return true;
+}
+static int run_window(Module* module, CPUState initial, u8* ram) {
+    CPUState* cpu = module->storage.cpu;
+    *cpu = initial; cpu->ram = ram; module->desc->on_state_loaded(cpu);
+    unsigned turns = 0;
+    while (cpu->pc != 0xFFFFFFFCu && cpu->downcount > -cpu->cycle_budget && !cpu->exception) {
+        if (++turns > 10000 || !module->desc->dispatch(cpu, cpu->pc)) return 0;
+    }
+    return 1;
+}
+
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: native_skin_test MODULE.dll [CASES]\n");
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]\n");
         return 2;
     }
     const unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 4000u;
-    HMODULE lib = LoadLibraryA(argv[1]);
-    if (lib == NULL) {
-        fprintf(stderr, "cannot load %s\n", argv[1]);
-        return 1;
-    }
-    StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)(void*)GetProcAddress(lib, STATICRECOMP_GET_MODULE_SYMBOL);
-    CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))(void*)GetProcAddress(lib, "bluewake_composite_guest_cpu");
-    if (get == NULL || guest_cpu == NULL) {
-        fprintf(stderr, "not a BlueWake Windows module\n");
-        return 1;
-    }
-    const StaticRecompModuleDesc* mod = get();
-    if (mod->cpu_state_size != sizeof(CPUState) || strcmp(mod->game_id, "GZLE01") != 0) {
-        fprintf(stderr, "CPU state size %u, expected %u\n", mod->cpu_state_size, (unsigned)sizeof(CPUState));
-        return 1;
-    }
-    u8* reference_ram = module_mem1(lib);
-    if (reference_ram == NULL) reference_ram = calloc(1, RAM_SIZE);
+    Module original = {0}, candidate = {0};
+    if (!load_module(argv[1], &original)) return 1;
+    const StaticRecompModuleDesc* mod = original.desc;
+    if (strcmp(mod->game_id, "GZLE01") != 0) return 1;
+    if (argc > 3 && (!load_module(argv[3], &candidate) || !candidate.native_skin)) return 1;
+    u8* reference_ram = original.storage.mem1;
     u8* native_ram = calloc(1, RAM_SIZE);
     u8* before_ram = calloc(1, RAM_SIZE);
     if (!reference_ram || !native_ram || !before_ram) return 1;
-    bluewake_native_skin_enabled = 1;
     unsigned ran = 0, declined = 0;
     for (unsigned i = 0; i < cases; ++i) {
         CPUState c = build(native_ram, i);
         memcpy(reference_ram, native_ram, RAM_SIZE);
         memcpy(before_ram, native_ram, RAM_SIZE);
 
-        CPUState* g = guest_cpu();
-        *g = c;
-        g->ram = reference_ram;
-        mod->on_state_loaded(g);
-        if (!mod->dispatch(g, g->pc)) {
-            fprintf(stderr, "case %u: the translation did not run\n", i);
-            return 1;
+        if (!run_window(&original, c, reference_ram)) return 1;
+        CPUState reference = *original.storage.cpu;
+        if (candidate.desc) {
+            const bool enabled = i % 31 != 0;
+            if (candidate.native_skin(enabled, routed_ready, NULL) != enabled) return 1;
+            u8* routed_ram = candidate.storage.mem1;
+            memcpy(routed_ram, before_ram, RAM_SIZE);
+            if (!run_window(&candidate, c, routed_ram)) return 1;
+            CPUState actual = *candidate.storage.cpu; actual.ram = reference.ram;
+            if (memcmp(&actual, &reference, sizeof reference) || memcmp(routed_ram, reference_ram, RAM_SIZE)) {
+                fprintf(stderr, "case %u: routed skin module differs from translated reference\n", i);
+                return 1;
+            }
         }
-        CPUState reference = *g;
 
         CPUState native = c;
         ppc_fpscr_updated(&native);
@@ -217,7 +232,6 @@ int main(int argc, char** argv) {
         }
         ran++;
         reference.ram = native.ram;
-        reference.cycle_observation_suffix = native.cycle_observation_suffix;
         if (memcmp(&native, &reference, sizeof native) != 0 || memcmp(native_ram, reference_ram, RAM_SIZE) != 0) {
             fprintf(stderr, "case %u (seed %08X): mismatch\n", i, seed);
             for (unsigned b = 0; b < sizeof native; ++b)
@@ -235,5 +249,10 @@ int main(int argc, char** argv) {
         }
     }
     printf("native skin: %u cases identical to the translation, %u declined unchanged\n", ran, declined);
+    if (candidate.desc) {
+        if (candidate.report) candidate.report();
+        printf("routed skin: %u readiness queries, %u complete CPU/MEM1 comparisons\n", routed_queries, cases);
+        if (!routed_queries) return 1;
+    }
     return ran != 0u ? 0 : 1;
 }

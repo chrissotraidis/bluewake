@@ -1,74 +1,92 @@
 #!/usr/bin/env python3
-"""Call J3DModel::calcWeightEnvelopeMtx natively (cmake/composite/native_skin.c).
+"""Certify and route J3D skinning functions.
 
-  native_skin.py COMPOSITE_SRC
-
-The function's one caller, J3DModel::calc, is in the same chunk: its bl at
-0x802EE9D8 is a goto. This makes it try bluewake_native_skin first and carry
-on at the return address when that ran the whole function; otherwise, and
-whenever the native declines, the translation runs as before.
-
-Only where the translated body is the one tests/native_skin_test.c compared
-the native against, every register and byte: its hash as the Windows steps
-before this one leave it (whitespace aside). A different body (another
-translator, another step) is left alone and the step says so.
-
-The change is repeatable (a prepared chunk is left as it is) and keeps LF line
-ends. Run it after direct_calls.py and before prepare_native_math.py, whose
-manifest hashes the chunks as they finally are.
+Run after mod variants, before optional CPU/block/direct-call rewrites.
+The manifest records this certification stage; the builder records the final tree.
+Only exact GZLE01 bodies are accepted, including every mod variant. The
+unmodified translation remains available whenever the native guard declines.
+No game source is distributed by this script; it records body hashes only.
 """
+import argparse
 import hashlib
-import sys
+import json
 from pathlib import Path
 
-MARK = "/* bluewake: calcWeightEnvelopeMtx natively (cmake/composite/native_skin.c) */\n"
-INCLUDE = '#include "../generated.h"\n'
-START, END = "\nlabel_802EE67C:", "\nlabel_802EE874:"
-BODY_SHA256 = "401b6d74be3c73babb47e9a329fb6173007fe0c907b94780388a463ab09b6013"
-CALL = (
-    "    // 802EE9D8: bl      0x802EE67C\n"
-    "    {\n"
-    "            ctx->lr = 0x802EE9DCu;\n"
-    "            if (ctx->downcount <= -(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) {\n"
-    "                ctx->pc = 0x802EE67Cu;\n"
-    "                return;\n"
-    "            }\n"
-    "            goto label_802EE67C;\n"
-    "    }\n")
-NATIVE_CALL = CALL.replace(
-    "            goto label_802EE67C;\n",
-    "            if (bluewake_native_skin(ctx))\n"
-    "                goto label_802EE9DC;\n"
-    "            goto label_802EE67C;\n")
+# BlueWake pre-transform body, independently compared against the personal
+# translated module with every CPU byte and all MEM1 bytes. The donor script
+# certified 401b6d74be3c73babb47e9a329fb6173007fe0c907b94780388a463ab09b6013
+# after its Windows rewrites; BlueWake certifies before optional transforms.
+LEAVES = ((0x802EE67C, 0x802EE874, {"33370ed970c0bfdd1e53b4b63ed3b7c682ed2a7481256047531f14ca3bbe2fc1"}),)
+
+INCLUDE = '#include "native_skin.h"\n'
+GENERATED_INCLUDE = '#include "../generated.h"\n'
+MARKER = '#define BLUEWAKE_NATIVE_SKIN_PREPARED 1\n'
 
 
-def body_hash(text):
-    begin, end = text.find(START), text.find(END)
-    if begin < 0 or end <= begin:
-        return None
-    return hashlib.sha256(" ".join(text[begin:end].split()).encode()).hexdigest()
+def hook(start):
+    return (f"    /* bluewake: J3D skinning leaf {start:08X} */\n"
+            "    if (bluewake_native_skin_try(ctx))\n"
+            "        goto return_dispatch_802ED6E0;\n")
 
 
-def main():
-    root = Path(sys.argv[1])
-    done = kept = 0
-    for path in sorted(root.glob("chunks_*/*802ED6E0*.c")):
-        with open(path, encoding="utf-8", newline="") as file:
-            text = file.read()
-        if MARK in text:
-            kept += 1
-            continue
-        if body_hash(text) != BODY_SHA256 or text.count(CALL) != 1 or INCLUDE not in text:
-            print(f"{path.relative_to(root)}: not the verified calcWeightEnvelopeMtx; left alone")
-            continue
-        text = text.replace(CALL, NATIVE_CALL).replace(INCLUDE, INCLUDE + MARK + '#include "native_skin.h"\n', 1)
-        temporary = path.with_suffix(".c.tmp")
-        with open(temporary, "w", encoding="utf-8", newline="") as file:
-            file.write(text)
-        temporary.replace(path)
-        done += 1
-    print(f"native calcWeightEnvelopeMtx: {done} call sites (already {kept})")
+def prepare(root):
+    paths = sorted(root.rglob('*802ED6E0*.c'))
+    if not paths:
+        raise ValueError('missing translated skinning chunk 802ED6E0')
+    header = root / 'generated.h'
+    if not header.is_file():
+        raise ValueError('missing generated.h')
+    prepared = {}
+    for path in paths:
+        text = path.read_text()
+        if GENERATED_INCLUDE not in text or 'return_dispatch_802ED6E0:' not in text:
+            raise ValueError(f'unsupported skinning chunk {path}')
+        if text.count(INCLUDE) > 1:
+            raise ValueError(f'duplicate skinning include in {path}')
+        for start, end, expected in LEAVES:
+            begin = text.find(f'\nlabel_{start:08X}:')
+            finish = text.find(f'\nlabel_{end:08X}:')
+            if begin < 0 or finish <= begin:
+                raise ValueError(f'missing skinning function {start:08X} in {path}')
+            body = text[begin:finish]
+            native = hook(start)
+            if 'bluewake_native_skin_' in body:
+                if body.count(native) != 1:
+                    raise ValueError(f'modified skinning hook {start:08X} in {path}')
+                body = body.replace(native, '', 1)
+            digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+            if digest not in expected:
+                raise ValueError(f'changed skinning function {start:08X} in {path}; native skinning not certified')
+            if native not in text[begin:finish]:
+                label = f'\nlabel_{start:08X}:\n'
+                text = text.replace(label, label + native, 1)
+        if INCLUDE not in text:
+            text = text.replace(GENERATED_INCLUDE, GENERATED_INCLUDE + INCLUDE, 1)
+        prepared[path] = text
+    # Validate all variants before mutating any source or its manifest.
+    files = {}
+    for path, text in prepared.items():
+        if path.read_text() != text:
+            temporary = path.with_suffix('.c.tmp')
+            temporary.write_text(text, newline='\n')
+            temporary.replace(path)
+        files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    manifest = root / 'native_skin.json'
+    data = json.dumps({'abi': 1, 'files': files}, indent=2) + '\n'
+    if not manifest.exists() or manifest.read_text() != data:
+        temporary = manifest.with_suffix('.json.tmp')
+        temporary.write_text(data, newline='\n')
+        temporary.replace(manifest)
+    if MARKER not in header.read_text():
+        header.write_text(header.read_text() + '\n' + MARKER)
+    print(f'native skinning: {len(LEAVES)} J3D skinning functions certified in {len(files)} chunks')
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('composite', type=Path)
+    args = parser.parse_args()
+    try:
+        prepare(args.composite)
+    except ValueError as error:
+        parser.exit(1, f'{error}\n')
