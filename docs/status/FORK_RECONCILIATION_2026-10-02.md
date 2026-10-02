@@ -667,3 +667,15 @@ passes (36.84 seconds); all 813 private chunks prepare, a second preparation
 is byte-identical, and unprepared CMake input is rejected. Native Windows, whole-module
 correctness and matched performance remain pending. No native game bodies,
 private profiles or donor benchmark claims are imported.
+
+
+Before importing the remaining gather/memory helpers, a synthetic boundary
+probe reproduces a donor-wrapper bug: with one byte of ordinary RAM, an
+eight-byte load passes `BW_RAM_FAST` because subtracting the access width
+underflows. ASan reports a stack-buffer-overflow in `bw_mem_read64`. The same
+probe using the maintained runtime's ordinary `mem_read64` exits normally.
+These donor wrappers remain absent from BlueWake. Any later import must retain
+explicit size/buffer validity guards along with the already corrected extended
+alias behavior; test both pointer and fixed-MEM1 forms before module use.
+Private source/hash/compiler receipts are retained. This establishes a synthetic
+boundary failure, not a cause for any reported gameplay crash.
