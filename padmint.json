@@ -29,8 +29,6 @@
         "/bin/bash",
         "{repo}/scripts/builder/build.sh",
         "{disc}",
-        "--app",
-        "{app}",
         "--out",
         "{work}",
         "--jobs",
@@ -38,6 +36,8 @@
       ],
       "modes": {
         "full": [
+          "--app",
+          "{app}",
           "--train-pgo",
           "--ipa",
           "{output}"
