@@ -480,11 +480,12 @@ int main(void) {
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n").encode())
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n").encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
                   + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py",
                      ROOT / "scripts/windows/global_guest_cpu.py", ROOT / "scripts/windows/chunk_headers.py",
-                     ROOT / "cmake/composite/inline_fp.h", Path(__file__)]):
+                     ROOT / "cmake/composite/inline_fp.h", ROOT / "cmake/composite/gather_pipe.h",
+                     ROOT / "cmake/composite/gather_pipe.c", ROOT / "cmake/composite/gather_pipe_batch.h", Path(__file__)]):
             if f.is_file():
                 inputs.update(f.read_bytes())
         inputs = inputs.hexdigest()
@@ -588,8 +589,13 @@ int main(void) {
         cpu_script = ROOT / "scripts/windows/global_guest_cpu.py"
         if self.args.fixed_cpu:
             self.run("fixed-cpu", [sys.executable, cpu_script, o / "composite-src"])
-        if self.args.inline_fp:
-            self.run("inline-fp", [sys.executable, ROOT / "scripts/windows/chunk_headers.py", o / "composite-src"])
+        if self.args.inline_fp or self.args.gather_pipe:
+            helpers = [sys.executable, ROOT / "scripts/windows/chunk_headers.py", o / "composite-src"]
+            if self.args.inline_fp:
+                helpers.append("--inline-fp")
+            if self.args.gather_pipe:
+                helpers.append("--gather-pipe")
+            self.run("inline-helpers", helpers)
         if self.args.prepared_blocks:
             self.run("prepared-blocks", [sys.executable, script, o / "composite-src"])
         digest = tree_digest(o / "composite-src")
@@ -597,6 +603,9 @@ int main(void) {
                    "fixed_cpu": self.args.fixed_cpu,
                    "fixed_mem1": self.args.fixed_mem1,
                    "inline_fp": self.args.inline_fp,
+                   "gather_pipe": self.args.gather_pipe,
+                   "gather_sha256": {name: sha256_file(ROOT / "cmake/composite" / name)
+                                     for name in ("gather_pipe.h", "gather_pipe.c", "gather_pipe_batch.h")},
                    "inline_fp_script_sha256": sha256_file(ROOT / "scripts/windows/chunk_headers.py"),
                    "inline_fp_header_sha256": sha256_file(ROOT / "cmake/composite/inline_fp.h"),
                    "fixed_cpu_script_sha256": sha256_file(cpu_script),
@@ -629,6 +638,7 @@ int main(void) {
             "cmake", "-S", ROOT / "cmake/composite", "-B", build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang",
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_C_FLAGS={flags}", "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
             f"-DBLUEWAKE_FIXED_CPU={'ON' if self.args.fixed_cpu else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={self.args.opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
@@ -708,6 +718,7 @@ int main(void) {
             "fixed_cpu": self.args.fixed_cpu,
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
+            "gather_pipe": self.args.gather_pipe,
             "compiler": self.clang_version,
             "module_sha256": sha256_file(app / MODULE),
             "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -833,6 +844,8 @@ def main():
                         help="opt into module-owned RAM; requires --fixed-cpu and a supporting app")
     parser.add_argument("--inline-fp", action="store_true",
                         help="opt into experimental inline floating-point helpers (off by default)")
+    parser.add_argument("--gather-pipe", action="store_true",
+                        help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
     parser.add_argument("--console", action="store_true", help="build BlueWake.exe as a console program")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")

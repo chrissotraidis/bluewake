@@ -102,17 +102,20 @@ int main(void) {
     bluewake_composite_set_gather_pipe(capture_word);
 
     /* Interpreter paths must expose all earlier FIFO bytes before MMIO. */
+    const unsigned prior_external = external_calls;
+    cpu.hid2 = PPC_HID2_LSQE | PPC_HID2_LCE;
     mem_write8(&cpu, 0xCC008000u, 0xAA);
     cpu.gpr[3] = 0x11223344u;
     cpu.gpr[4] = 0xCC002000u;
     ppc_fallback_instruction(&cpu, 0x90640000u, 0x80001000u); /* stw r3,0(r4) */
     assert(bw_gather_pipe_length == 0 && captured_size == 20);
     mem_write8(&cpu, 0xCC008000u, 0xBB);
-    (void)ppc_psq_load(&cpu, 0, 0xCC002000u, true, 0, false, 0x80001004u);
+    assert(ppc_psq_load(&cpu, 0, 0xCC002000u, true, 0, false, 0x80001004u));
     assert(bw_gather_pipe_length == 0 && captured_size == 21);
     mem_write8(&cpu, 0xCC008000u, 0xCC);
-    (void)ppc_psq_store(&cpu, 0, 0xCC002000u, true, 0, false, 0x80001008u);
+    assert(ppc_psq_store(&cpu, 0, 0xCC002000u, true, 0, false, 0x80001008u));
     assert(bw_gather_pipe_length == 0 && captured_size == 22);
+    assert(external_calls == prior_external + 3);
     mem_write8(&cpu, 0xCC008000u, 0xDD);
     ppc_dcbz_l(&cpu, GC_RAM_BASE, 0x8000100Cu);
     assert(bw_gather_pipe_length == 0 && captured_size == 23);

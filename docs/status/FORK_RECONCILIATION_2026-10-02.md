@@ -81,7 +81,7 @@ source only. No source merge or test result implies release readiness.
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches remain open | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
 | Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Absent; needs BlueWake host-hook watch list and edge-service contract review | Open; preserve scheduling, exceptions, hooks and mod dispatch; strict module comparisons and matched timing |
-| Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; not enabled in generated modules or the host. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures pass locally. Builder/host selection, whole-module/renderer/state comparisons and matched timing remain required |
+| Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; separate default-off `--gather-pipe` prepares modules. Host direct writer/batching remains unselected. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures and nine cache tests pass locally; 813 chunks prepare reproducibly and unprepared inputs are rejected. Whole-module/renderer/state comparisons, host writer selection and matched timing remain required |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
@@ -156,9 +156,11 @@ foundation guards the subtraction and checks normal memory precedence before
 using the writer. Shared maintained memory contracts exercise ordinary/global
 RAM, aliases, reservation, journal, endian and MMIO behavior. Additional tests
 cover byte order, batching thresholds, writer changes, interpreter/MMIO flushes
-and inline/exported dispatch boundaries. These helpers are not enabled in the
-player builder or host; module, renderer and performance qualification remains
-open. Direct-call/native batches also remain open work.
+and inline/exported dispatch boundaries. Module, renderer and performance
+qualification remains
+open. Explicit module preparation is now available independently of inline FP;
+current hosts retain ordinary MMIO pipe stores. Direct-call/native batches also
+remain open work.
 All measured wall times under concurrent compilation are excluded from performance
 acceptance. No donor benchmark is transferred.
 

@@ -38,8 +38,8 @@ three tests and the full app link also pass natively at `74da8ee` in
 These checks do not imply Windows gameplay or audio acceptance.
 
 The reconciliation candidate includes generic prepaid-block and fixed-address
-CPU transforms, module-owned RAM and inline floating-point helpers as separate
-builder opt-ins. Other register/native preparation and experimental
+CPU transforms, module-owned RAM, inline floating-point and gather/inline-memory
+helpers as separate builder opt-ins. Other register/native preparation and experimental
 60 Hz simulation remain separate work. Windows PGO training, matched Windows
 measurements and full Windows gameplay remain acceptance gates.
 
@@ -83,6 +83,7 @@ Options (`--help` lists all):
 | `--fixed-cpu` | Opt into experimental fixed-address CPU storage; off by default, requires the matching app |
 | `--fixed-mem1` | Also use module-owned RAM; requires `--fixed-cpu` and the matching app, off by default |
 | `--inline-fp` | Opt into inline floating-point helpers; off by default, module/gameplay/performance qualification pending |
+| `--gather-pipe` | Prepare experimental gather/inline-memory wrappers; off by default, host batching and module qualification remain separate gates |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
@@ -93,7 +94,14 @@ independently of the storage/block experiments. It substitutes generic interpret
 operations only; it does not add native game routines, direct calls or memory
 batching. Source preparation records the option and helper hashes, and disabling
 it regenerates ordinary calls. Mac instruction-level comparisons pass; this does
-not establish whole-module correctness or a speed improvement.
+not establish a speed improvement. Current bounded module results and their
+limits are tracked in the [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
+
+The `--gather-pipe` option also leaves the module ABI unchanged. It can be used
+with or without `--inline-fp` and records its helper hashes in build provenance.
+The current host does not install a direct FIFO writer, so stores still use the
+ordinary MMIO path while the inline RAM wrappers are qualified. Renderer batching,
+whole-module optimized comparisons and performance remain unaccepted.
 
 ## Play
 

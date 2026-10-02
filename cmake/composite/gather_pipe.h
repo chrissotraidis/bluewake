@@ -2,8 +2,8 @@
 #define BLUEWAKE_COMPOSITE_GATHER_PIPE_H
 
 /* Stores to the GX gather pipe, straight to the host's GX writer.
- * Qualification foundation: the player builder and host do not enable this
- * yet. Prepared chunks must include it ahead of the generated header so that
+ * Explicit module opt-in; host writer setup is separate. Prepared chunks
+ * include it ahead of the generated header so that
  * header's paired-single stores use the wrappers too.
  *
  * The game writes the pipe (0xCC008000) a word at a time: every matrix, TEV
