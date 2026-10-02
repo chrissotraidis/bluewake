@@ -221,6 +221,35 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
+    # Source-only contracts for helpers awaiting whole-module qualification.
+    foreach(_variant plain global)
+        add_executable(bluewake_gather_memory_${_variant}_test
+            ${BLUEWAKE_REPO_ROOT}/tests/gather_memory_test.c
+            ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+        target_include_directories(bluewake_gather_memory_${_variant}_test PRIVATE
+            ${BLUEWAKE_REPO_ROOT}/cmake/composite ${GXRUNTIME_DIR}/tests)
+        target_link_libraries(bluewake_gather_memory_${_variant}_test PRIVATE gxruntime)
+        if(_variant STREQUAL "global")
+            target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
+                BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+        endif()
+        add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
+    endforeach()
+    add_executable(bluewake_gather_dispatch_test
+        ${BLUEWAKE_REPO_ROOT}/tests/gather_dispatch_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/dispatch_loop.c)
+    target_include_directories(bluewake_gather_dispatch_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+    target_link_libraries(bluewake_gather_dispatch_test PRIVATE gxruntime)
+    target_compile_definitions(bluewake_gather_dispatch_test PRIVATE BLUEWAKE_GATHER_PIPE=1)
+    add_test(NAME bluewake_gather_dispatch_test COMMAND bluewake_gather_dispatch_test)
+    foreach(_test bluewake_gather_memory_plain_test bluewake_gather_memory_global_test bluewake_gather_dispatch_test)
+        target_include_directories(${_test} PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})
+        target_compile_options(${_test} PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+        target_link_libraries(${_test} PRIVATE bluewake_posix_compat)
+        set_target_properties(${_test} PROPERTIES LINKER_LANGUAGE CXX)
+    endforeach()
+
     add_executable(bluewake_inline_fp_test ${BLUEWAKE_REPO_ROOT}/tests/inline_fp_test.c)
     target_link_libraries(bluewake_inline_fp_test PRIVATE gxruntime)
     target_include_directories(bluewake_inline_fp_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)

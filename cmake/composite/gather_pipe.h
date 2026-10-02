@@ -1,9 +1,10 @@
 #ifndef BLUEWAKE_COMPOSITE_GATHER_PIPE_H
 #define BLUEWAKE_COMPOSITE_GATHER_PIPE_H
 
-/* Stores to the GX gather pipe, straight to the host's GX writer
- * (scripts/windows/chunk_headers.py includes this in every chunk, ahead of the
- * generated header, so the header's own paired-single stores use it too).
+/* Stores to the GX gather pipe, straight to the host's GX writer.
+ * Qualification foundation: the player builder and host do not enable this
+ * yet. Prepared chunks must include it ahead of the generated header so that
+ * header's paired-single stores use the wrappers too.
  *
  * The game writes the pipe (0xCC008000) a word at a time: every matrix, TEV
  * register and immediate vertex it sends. Translated, each store looked for
@@ -31,9 +32,11 @@
 typedef void (*BwGatherPipeWrite)(u64 value, u8 size);
 extern BwGatherPipeWrite bw_gather_pipe_write;
 
-static inline bool bw_gather_pipe(u32 addr) {
+static inline bool bw_gather_pipe(CPUState* cpu, u32 addr, u32 size) {
     /* The mirror bit first: guest RAM stores, which never have it, pay one test. */
-    return (addr & 0x40000000u) != 0u && (addr & ~0x1Fu) == 0xCC008000u && bw_gather_pipe_write != NULL;
+    /* Registered storage takes precedence over hardware in the ordinary path. */
+    return (addr & 0x40000000u) != 0u && (addr & ~0x1Fu) == 0xCC008000u &&
+           bw_gather_pipe_write != NULL && get_ram_ptr(cpu, addr, size, NULL) == NULL;
 }
 
 /* The EFB and the hardware registers: an access there may see how far the
@@ -76,7 +79,7 @@ static inline void bw_gather_pipe_put(u64 value, u8 size) {
 
 static __attribute__((noinline)) void bw_mem_write8_slow(CPUState* cpu, u32 addr, u8 value) {
     if (__builtin_expect(bw_hardware(addr), 0)) {
-        if (bw_gather_pipe(addr)) {
+        if (bw_gather_pipe(cpu, addr, 1u)) {
             bw_gather_pipe_put(value, 1);
             return;
         }
@@ -87,7 +90,7 @@ static __attribute__((noinline)) void bw_mem_write8_slow(CPUState* cpu, u32 addr
 
 static __attribute__((noinline)) void bw_mem_write16_slow(CPUState* cpu, u32 addr, u16 value) {
     if (__builtin_expect(bw_hardware(addr), 0)) {
-        if (bw_gather_pipe(addr)) {
+        if (bw_gather_pipe(cpu, addr, 2u)) {
             bw_gather_pipe_put(value, 2);
             return;
         }
@@ -98,7 +101,7 @@ static __attribute__((noinline)) void bw_mem_write16_slow(CPUState* cpu, u32 add
 
 static __attribute__((noinline)) void bw_mem_write32_slow(CPUState* cpu, u32 addr, u32 value) {
     if (__builtin_expect(bw_hardware(addr), 0)) {
-        if (bw_gather_pipe(addr)) {
+        if (bw_gather_pipe(cpu, addr, 4u)) {
             bw_gather_pipe_put(value, 4);
             return;
         }
@@ -109,7 +112,7 @@ static __attribute__((noinline)) void bw_mem_write32_slow(CPUState* cpu, u32 add
 
 static __attribute__((noinline)) void bw_mem_write64_slow(CPUState* cpu, u32 addr, u64 value) {
     if (__builtin_expect(bw_hardware(addr), 0)) {
-        if (bw_gather_pipe(addr)) {
+        if (bw_gather_pipe(cpu, addr, 8u)) {
             bw_gather_pipe_put(value, 8);
             return;
         }
@@ -160,7 +163,8 @@ static __attribute__((noinline)) u64 bw_mem_read64_slow(CPUState* cpu, u32 addr)
 #define BW_RAM_SIZE(cpu) ((cpu)->ram_size)
 #endif
 #define BW_RAM_FAST(cpu, addr, size) \
-    (!g_ppc_guest_aliases_overlap_mem1 && (u32)((addr) - GC_RAM_BASE) <= BW_RAM_SIZE(cpu) - (size))
+    (!g_ppc_guest_aliases_overlap_mem1 && (size) <= BW_RAM_SIZE(cpu) && \
+     (u32)((addr) - GC_RAM_BASE) <= BW_RAM_SIZE(cpu) - (size))
 #define BW_RAM_FAST_STORE(cpu, addr, size) \
     (BW_RAM_FAST(cpu, addr, size) && !(cpu)->reserve_valid && g_mem_write_journal == NULL)
 
