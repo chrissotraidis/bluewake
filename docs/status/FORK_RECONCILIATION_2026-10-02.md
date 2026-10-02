@@ -87,9 +87,15 @@ entrance barricade obscures the lava. This is not affected-scene acceptance.
 Two further 2,500-retrace upper-bridge runs (including a camera-downward probe)
 match five checkpoints each, route/card/timing and both frames per pair. Local
 inspection still does not show the lava surface: the second view faces down onto
-the platform. The next affected-scene experiment must change to a lower route;
-these three room probes do not establish the reported colour fix. No donor
-screenshot or performance result is counted as BlueWake acceptance.
+the platform. Those three room probes do not establish the colour fix.
+A later paired boss-room view (`M_DragB`, room 0) directly shows the old
+`0ea7ffb` / `c2905b7a` host's white lava becoming orange at `f861eae` /
+`18ba3b64`. All four full-state checkpoints, 1,050 route/card records and timing
+match, and the original save is unchanged. Both captures differ only within the
+visible lava strip (59,685 and 63,951 pixels); the rest of each image is identical.
+This accepts the reported colour correction in that bounded Mac scene, not
+progression, other platforms or a performance claim. No donor screenshot or
+benchmark is counted as BlueWake evidence.
 
 Elliott's exact `haptics.c` / `.h` from `7ca0cb9` are retained in authored import
 `193870f`. The adaptation connects retraces, SI motor decoding, Mac/Windows
@@ -115,11 +121,28 @@ port-zero rumble disabling. The adaptation clears cached shocks when withdrawn,
 silences when no pattern remains and checks the guest's rumble flags. These
 checks follow [the vibration cancellation behavior](https://github.com/zeldaret/tww/blob/main/src/d/d_vibration.cpp)
 and [the controller enable mask](https://github.com/zeldaret/tww/blob/main/include/JSystem/JUtility/JUTGamePad.h);
-they do not copy translated game code. The Mac host and ten focused checks pass.
-The follow-up still needs current Windows and route qualification. Actual
-Mac/Windows menu interaction, real controllers and the game's visible vibration
-option remain pending; synthetic guest state and virtual output are not player
-or felt-feedback acceptance. Repository/source-archive audits pass for `558438a`.
+they do not copy translated game code. At `9849eb0`, the Mac host and ten
+focused checks pass; native Windows builds the app and passes all 56 tests
+([run 37013449326](https://github.com/chrissotraidis/bluewake/actions/runs/37013449326)).
+Five ASan/UBSan cases and the DualSense timer/reconnect case under TSan pass;
+haptics and the fixture are instrumented, while linked runtime/SDL are not.
+Mac keyboard interaction shows the default Enhanced/80%/triggers On, changes
+strength to 37% and triggers Off, then selects Classic and Off with the retained
+strength/trigger controls visibly disabled. Resume writes Off/37%/triggers Off
+to an isolated settings file. A separate relaunch reads the same effective
+runtime values and leaves the settings byte-identical. Visual inspection of
+the reopened controls is still pending.
+That menu run completes the 2,000-retrace route with all 37 sampled player states
+and 1,050 route/card records matching, but the full-memory comparison differs at
+retrace 500. Its changed window size and menu interactions are not a canonical
+state comparison. A separate unchanged-route run at `9849eb0` matches all four
+full-state checkpoints, 37 player states, both nonblank frames and 1,050
+route/card records against `f861eae`, with zero measured delivery/clock drift
+and unchanged original save. Automated
+pointer interaction remains unreliable. Windows menu interaction, real
+controllers and the game's visible vibration option remain pending; virtual
+output is not felt-feedback acceptance. Repository/source-archive audits pass
+for `9849eb0`.
 
 ## Source checkpoints and integration order
 
@@ -151,8 +174,8 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#30](https://github.com/chrissotraidis/bluewake/pull/30) | `a294985`, import `a080b16` | Four certified native matrix functions, cached dispatch and optional workers; routed fixtures, four-way intro/saved-game state/image comparisons and all 48 native Windows tests pass; combined performance/gameplay open |
 | [#31](https://github.com/chrissotraidis/bluewake/pull/31) | `4cfd99e`, import `46365c2` | Native skinning with certified entry routing; full-CPU/MEM1 fixtures, three-way startup comparisons and all 49 native Windows tests pass; saved-game state/image comparisons pass; combined performance open |
 | [#32](https://github.com/chrissotraidis/bluewake/pull/32) | `0ea7ffb`, import `ca8c584`, fixture `459df34` | Twelve certified game-math entries; full-CPU/protected-MEM1 fixtures, three-way intro comparison and all 50 native Windows tests pass; saved-game state/image comparisons pass; combined optimized qualification in progress |
-| [#33](https://github.com/chrissotraidis/bluewake/pull/33) | `f861eae`, runtime `18ba3b64` | Later donor post-texture renderer fix with backward-compatible save-state loading; FIFO/fold/sanitizer checks and Outset state/image comparison pass; 51 native Windows tests pass; visible lava-scene comparison pending |
-| [#34](https://github.com/chrissotraidis/bluewake/pull/34) | `193870f` import, `558438a` adaptation | Elliott's controller feedback in Mac/Windows, preserved preferences, menu/teardown fixes; Mac fixtures, bounded Outset and 54 native Windows tests pass at initial adaptation. Guest cancellation follow-up and real controller qualification tracked above |
+| [#33](https://github.com/chrissotraidis/bluewake/pull/33) | `f861eae`, runtime `18ba3b64` | Later donor post-texture renderer fix with backward-compatible save-state loading; FIFO/fold/sanitizer checks and Outset state/image comparison pass; 51 native Windows tests pass; paired boss-room view confirms the white-to-orange lava correction |
+| [#34](https://github.com/chrissotraidis/bluewake/pull/34) | `193870f` import, `558438a` / `9849eb0` adaptations | Controller feedback with preserved preferences, menu/teardown and guest-cancellation fixes; ten Mac checks, 56 Windows tests, bounded Outset and sanitizer checks pass; real controller qualification open |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -589,8 +612,8 @@ bugs. No issue is closed or externally commented on by this work.
    scheduling/hooks, gameplay and matched measurements. All fixed-baseline native
    helper families now have direct source imports with contributor credit and
    bounded routing evidence. Finish the combined scene and optimized checks; retain the exact build/input identities. Later lava-rendering
-   and controller-haptics source is imported; affected-scene, real-controller
-   and platform qualification remains open.
+   and controller-haptics source is imported; the lava colour fix has bounded Mac
+   scene evidence, while real-controller and platform qualification remain open.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
    fullscreen/restart, real controllers, save/reload, upgrades and sustained play.
