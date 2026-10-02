@@ -45,12 +45,15 @@ void bluewake_draw_tags_attach(CPUState* cpu);
 // the guest's state is not changed.
 extern bool bluewake_draw_tags_enabled;
 void bluewake_draw_tags_enter(CPUState* cpu, u32 address);
+static inline bool bluewake_draw_tags_observes(u32 address) {
+    return bluewake_draw_tags_enabled &&
+           (address - BLUEWAKE_PARTICLE_DRAW_FIRST <=
+                BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST ||
+            address - BLUEWAKE_WAKE_DRAW_FIRST <=
+                BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST);
+}
 static inline void bluewake_draw_tags_dispatch(CPUState* cpu, u32 address) {
-    if (__builtin_expect(address - BLUEWAKE_PARTICLE_DRAW_FIRST <=
-                                 BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST ||
-                             address - BLUEWAKE_WAKE_DRAW_FIRST <= BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST,
-                         0) &&
-        bluewake_draw_tags_enabled)
+    if (__builtin_expect(bluewake_draw_tags_observes(address), 0))
         bluewake_draw_tags_enter(cpu, address);
 }
 

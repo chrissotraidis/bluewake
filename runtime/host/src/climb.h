@@ -43,10 +43,13 @@ bool bluewake_climb_hud(float* fraction, bool* exhausted, float* x, float* y, fl
 // At every dispatch boundary: a flag when off, a few compares when on.
 extern bool bluewake_climb_on;
 void bluewake_climb_hook(CPUState* cpu, u32 address);
-static inline void bluewake_climb_dispatch(CPUState* cpu, u32 address) {
-    if (__builtin_expect(bluewake_climb_on, 0) &&
+static inline bool bluewake_climb_observes(u32 address) {
+    return bluewake_climb_on &&
         (address == 0x8010F0DCu || address == 0x8010F554u || address == 0x80135FE4u ||
-         address == 0x80122D30u || address == 0x8017C350u))
+         address == 0x80122D30u || address == 0x8017C350u);
+}
+static inline void bluewake_climb_dispatch(CPUState* cpu, u32 address) {
+    if (__builtin_expect(bluewake_climb_observes(address), 0))
         bluewake_climb_hook(cpu, address);
 }
 

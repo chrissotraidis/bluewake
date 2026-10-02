@@ -76,7 +76,10 @@ class PreparedCacheTest(unittest.TestCase):
         for script in ("scripts/ios/composite_manifest.py", "scripts/windows/fast_blocks.py",
                        "scripts/windows/global_guest_cpu.py", "scripts/windows/chunk_headers.py",
                        "cmake/composite/inline_fp.h", "cmake/composite/gather_pipe.h",
-                       "cmake/composite/gather_pipe.c", "cmake/composite/gather_pipe_batch.h"):
+                       "cmake/composite/gather_pipe.c", "cmake/composite/gather_pipe_batch.h",
+                       "scripts/windows/direct_calls.py", "cmake/composite/direct_calls.c",
+                       "cmake/composite/direct_calls.h", "cmake/composite/inline_gpr.h",
+                       "scripts/windows/inline_save_restore_gpr.py"):
             dst = self.root / script
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / script, dst)
@@ -87,7 +90,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK)
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
@@ -102,6 +105,44 @@ class PreparedCacheTest(unittest.TestCase):
 
     def chunk(self, name="a.c"):
         return self.out / "composite-src/chunks_dol" / name
+
+    def test_direct_calls_reuse_disable_and_host_watch_changes(self):
+        source = '''#include "../generated.h"
+void synthetic(CPUState* ctx) {
+    // 80004000: bl      0x80006000
+    {
+            ctx->lr = 0x80004004u;
+            ctx->pc = 0x80006000u;
+            return;
+    }
+label_80004004:
+    return;
+}
+'''
+        (self.base / "chunks_dol/a.c").write_text(source)
+        (self.base / "generated_composite.h").write_text(
+            "static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_80006000};\n")
+        self.digest = bw.tree_digest(self.base)
+        self.args.direct_calls = True
+        self.cycle()
+        self.assertIn("bw_chunk_fns[1](ctx)", self.chunk().read_text())
+        receipt = json.loads((self.out / "prepared-blocks.json").read_text())
+        self.assertTrue(receipt["direct_calls"])
+        before = self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
+        host = self.root / "runtime/host/src/synthetic.c"
+        host.parent.mkdir(parents=True)
+        host.write_text("/* host now watches 0x80006000u */\n")
+        self.cycle()
+        self.assertNotIn("bw_chunk_fns", self.chunk().read_text())
+        self.assertIn("0x80006000u", (self.out / "composite-src/bw_edge_watch.inc").read_text())
+        self.args.direct_calls = False
+        self.cycle()
+        self.assertEqual(self.chunk().read_text(), source)
+        self.assertNotIn("BLUEWAKE_DIRECT_CALLS_PREPARED",
+                         (self.out / "composite-src/generated.h").read_text())
+        self.assertFalse((self.out / "composite-src/bw_edge_watch.inc").exists())
 
     def test_explicit_enable_reuse_and_disable(self):
         self.cycle()

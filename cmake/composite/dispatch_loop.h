@@ -2,6 +2,9 @@
 #define BLUEWAKE_COMPOSITE_DISPATCH_LOOP_H
 
 #include "edge_intercept_abi.h"
+#if defined(BLUEWAKE_DIRECT_CALLS)
+#include "direct_calls.h"
+#endif
 #if defined(BLUEWAKE_GATHER_PIPE)
 #include "gather_pipe_batch.h"
 #endif
@@ -57,7 +60,12 @@ static inline int bluewake_chassis_dispatch_loop(
 #if defined(BLUEWAKE_GATHER_PIPE)
         bw_gather_pipe_drain();
 #endif
-        if (edge_service(service_user, ctx, address))
+        bool skip_edge = false;
+#if defined(BLUEWAKE_DIRECT_CALLS)
+        skip_edge = bw_edge_filter_enabled && bw_edge_watch_ready &&
+                    bw_edge_unwatched(address) && bw_direct_call_ready(ctx, address);
+#endif
+        if (!skip_edge && edge_service(service_user, ctx, address))
             return bluewake_chassis_return(1);
 
         prior_downcount = ctx->downcount;

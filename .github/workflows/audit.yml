@@ -23,6 +23,10 @@ jobs:
         run: python3 tests/test_windows_prepared_cache.py
       - name: Require complete guest checkpoint comparison coverage
         run: python3 tests/test_guest_checkpoints.py
+      - name: Preserve direct-call host boundaries and preparation
+        run: |
+          python3 tests/test_direct_calls.py
+          python3 tests/test_inline_gpr.py
       - name: Bound synthetic instant-text patching under sanitizers
         run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/bmg_patch_test.c -o "$RUNNER_TEMP/bluewake_bmg_patch_test"

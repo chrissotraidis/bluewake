@@ -57,10 +57,12 @@ void bluewake_mouse_camera_retrace(void);
 #define BLUEWAKE_MOUSE_CAMERA_DRAW 0x8017C350u    // camera_draw__FP20camera_process_class
 #define BLUEWAKE_MOUSE_PLAYER_EXECUTE 0x80122D30u // daPy_Execute__FP9daPy_lk_c
 void bluewake_mouse_camera_hook(CPUState* cpu, u32 address);
+static inline bool bluewake_mouse_camera_observes(u32 address) {
+    return address == BLUEWAKE_MOUSE_CAMERA_DRAW || address == BLUEWAKE_MOUSE_PLAYER_EXECUTE ||
+           address == BLUEWAKE_MOUSE_CAMERA_BUMP;
+}
 static inline void bluewake_mouse_camera_dispatch(CPUState* cpu, u32 address) {
-    if (__builtin_expect(address == BLUEWAKE_MOUSE_CAMERA_DRAW || address == BLUEWAKE_MOUSE_PLAYER_EXECUTE ||
-                             address == BLUEWAKE_MOUSE_CAMERA_BUMP,
-                         0))
+    if (__builtin_expect(bluewake_mouse_camera_observes(address), 0))
         bluewake_mouse_camera_hook(cpu, address);
 }
 // On every pad read, on channel 0's live state: left click is A; with the fast

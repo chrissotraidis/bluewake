@@ -27,17 +27,22 @@ the result is the one the translated routine gives:
 - the observation suffix the routine leaves: 0, or 1 after the prepaid block.
 - the chassis's own stop after the return (an exception, or the turn's budget
   spent) ends the turn at the return address, as the chassis would.
-Otherwise the call goes out as before. A call whose return address the host
+BlueWake additionally requires the versioned direct-call host approval at entry
+and return, a plain-RAM frame without journal callbacks, and certified helper
+bodies. These checks preserve the current host boundary observations.
+
+Otherwise the call goes out as before. A call whose target or return address the host
 watches (any guest address named in runtime/host/src or windows/src, in
 either mirror form) is left alone, so every host hook still sees its boundary.
 
 The change is repeatable (a prepared chunk is left as it is) and keeps LF line
-ends. Run it after scripts/windows/global_guest_cpu.py and before
+ends. It supports ordinary or fixed-CPU chunks. Run it before direct_calls.py and
 scripts/mods/prepare_simulation_60hz.py, whose manifest hashes the chunks as
 they finally are.
 """
 import re
 import sys
+import hashlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,8 +55,14 @@ CALL = re.compile(
     r"            ctx->pc = 0x\2u;\n"
     r"            return;\n"
     r"    \}\n")
-FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx_param\) \{$", re.M)
+FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx(?:_param)?\) \{$", re.M)
 BUDGET = "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET"
+# Elliott's helper-body certificates from scripts/mods/prepare_native_gpr.py.
+# Check all variants before modifying any caller; only hashes are distributed.
+LEAVES = (
+    (0x80328F04, 0x80328F50, 'b7fa7b91c185412cce8d7dfc7eccafd5c50d69f7f49b66d111c582d11ab8df1b'),
+    (0x80328F50, 0x80328F9C, 'f525cbda6f2bed00dbaa48533f1a32c12ed19b571328e7045945a08b9c3ca2d4'),
+)
 
 
 def watched_addresses():
@@ -75,6 +86,8 @@ def inline_body(target, ret):
     first = 14 + (target - (SAVE if save else RESTORE)) // 4
     count = 32 - first + 1  # the stores or loads, and the blr
     lines = [f"            {MARK.strip()}"]
+    lines.append(f"            if (bw_direct_call_ready(ctx, 0x{target:08X}u) &&")
+    lines.append(f"                bw_inline_gpr_memory_ready(ctx, {first}u)) {{")
     if first == 14:
         # The routine's first instruction leads a block that prepays it all.
         lines.append(f"            if (ctx->downcount > {BUDGET} &&")
@@ -97,9 +110,11 @@ def inline_body(target, ret):
     lines.append(f"                ctx->pc = 0x{ret:08X}u;")
     # The routine's return dispatch, then the chassis's checks at the boundary.
     lines.append(f"                if (ctx->downcount <= {BUDGET} || ctx->exception != 0u ||")
-    lines.append("                    (ctx->cycle_budget > 0 && ctx->downcount <= -ctx->cycle_budget))")
+    lines.append("                    (ctx->cycle_budget > 0 && ctx->downcount <= -ctx->cycle_budget) ||")
+    lines.append(f"                    !bw_direct_call_ready(ctx, 0x{ret:08X}u))")
     lines.append("                    return;")
     lines.append(f"                goto label_{ret:08X};")
+    lines.append("            }")
     lines.append("            }")
     return "\n".join(lines) + "\n"
 
@@ -115,7 +130,8 @@ def transform(text, watched):
         for m in CALL.finditer(body):
             site, target, ret = int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)
             routine = SAVE <= target < SAVE + 18 * 4 or RESTORE <= target < RESTORE + 18 * 4
-            if (not routine or ret != site + 4 or ret in watched or site in watched
+            if (not routine or target % 4 != 0 or target in watched or
+                    ret != site + 4 or ret in watched or site in watched
                     or f"\nlabel_{ret:08X}:\n" not in body):
                 continue
             pieces.append(body[cursor:m.start()])
@@ -123,6 +139,7 @@ def transform(text, watched):
                 f"    // {m.group(1)}: bl      0x{m.group(2)}\n"
                 "    {\n"
                 f"            ctx->lr = 0x{m.group(3)}u;\n"
+                f"            ctx->pc = 0x{m.group(2)}u;\n"
                 + inline_body(target, ret) +
                 f"            ctx->pc = 0x{m.group(2)}u;\n"
                 "            return;\n"
@@ -134,7 +151,29 @@ def transform(text, watched):
         out.append("".join(pieces))
         last = end
     out.append(text[last:])
-    return "".join(out), done
+    result = "".join(out)
+    if done:
+        anchor = '#include "../generated.h"\n'
+        if anchor not in result:
+            raise ValueError("GPR preparation needs generated.h include")
+        result = result.replace(anchor, anchor + '#include "inline_gpr.h"\n', 1)
+    return result, done
+
+
+def validate_helpers(root):
+    paths = list(root.rglob('*803256E0*.c'))
+    if not paths:
+        raise ValueError("missing translated GPR helper chunk")
+    for path in paths:
+        source = path.read_text()
+        for start, end, expected in LEAVES:
+            begin = source.find(f'\nlabel_{start:08X}:')
+            finish = source.find(f'\nlabel_{end:08X}:')
+            if begin < 0 or finish <= begin:
+                raise ValueError(f"missing GPR helper {start:08X} in {path}")
+            actual = hashlib.sha256(' '.join(source[begin:finish].split()).encode()).hexdigest()
+            if actual != expected:
+                raise ValueError(f"changed GPR helper {start:08X} in {path}")
 
 
 def main():
@@ -142,6 +181,7 @@ def main():
     chunks = sorted(root.glob("chunks_*/*.c"))
     if not chunks:
         sys.exit(f"no chunks under {root}")
+    validate_helpers(root)
     watched = watched_addresses()
     sites = files = 0
     for path in chunks:

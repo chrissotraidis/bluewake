@@ -160,7 +160,22 @@ typedef struct Module {
     CPUState* cpu;
     u8* mem1;
     CPUState storage;
+    void (*set_edge)(bool (*)(void*, CPUState*, u32), void*);
+    int (*set_direct)(bool, const bool*, const bool*, const u32*, const u32*,
+                      bool (*)(void*, const CPUState*, u32), void*);
+    int (*set_filter)(bool);
 } Module;
+
+static u64 direct_queries;
+static bool fixture_edge(void* user, CPUState* cpu, u32 address) {
+    (void)user; (void)cpu;
+    return address == 0xFFFFFFFCu;
+}
+static bool fixture_can_skip(void* user, const CPUState* cpu, u32 address) {
+    (void)user; (void)cpu;
+    direct_queries++;
+    return address != 0xFFFFFFFCu;
+}
 
 static int open_module(const char* path, Module* out) {
 #if defined(_WIN32)
@@ -192,6 +207,12 @@ static int open_module(const char* path, Module* out) {
     }
     out->cpu = selected.cpu;
     out->mem1 = selected.mem1;
+    out->set_edge = (void (*)(bool (*)(void*, CPUState*, u32), void*))
+        MODULE_SYMBOL("bluewake_set_edge_service");
+    out->set_direct = (int (*)(bool, const bool*, const bool*, const u32*, const u32*,
+                               bool (*)(void*, const CPUState*, u32), void*))
+        MODULE_SYMBOL("bluewake_composite_direct_calls_v2");
+    out->set_filter = (int (*)(bool))MODULE_SYMBOL("bluewake_composite_edge_filter");
     return 1;
 #undef MODULE_SYMBOL
 }
@@ -218,7 +239,7 @@ static int run(Module* m, CPUState* state) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: fast_blocks_test ORIGINAL_MODULE TRANSFORMED_MODULE [CASES]\n");
+        fprintf(stderr, "usage: fast_blocks_test ORIGINAL_MODULE TRANSFORMED_MODULE [CASES [--direct-calls]]\n");
         return 2;
     }
     unsigned cases = 20000u;
@@ -226,7 +247,7 @@ int main(int argc, char** argv) {
         char* end;
         errno = 0;
         unsigned long parsed = strtoul(argv[3], &end, 10);
-        if (argc != 4 || argv[3][0] == '-' || end == argv[3] || *end != '\0' || errno || parsed > UINT_MAX)
+        if ((argc != 4 && argc != 5) || argv[3][0] == '-' || end == argv[3] || *end != '\0' || errno || parsed > UINT_MAX)
             return 2;
         cases = (unsigned)parsed;
     }
@@ -234,6 +255,24 @@ int main(int argc, char** argv) {
     Module a, b;
     if (!open_module(argv[1], &a) || !open_module(argv[2], &b))
         return 1;
+    const bool direct = argc == 5;
+    if (direct) {
+        if (strcmp(argv[4], "--direct-calls") != 0) return 2;
+        if (!a.set_edge || !b.set_edge || !b.set_direct || !b.set_filter) {
+            fprintf(stderr, "direct comparison requires chassis edges and candidate v2 exports\n");
+            return 1;
+        }
+        /* Both modules run the same chassis/budget windows. The historical
+         * one-chunk fixture would compare different amounts of guest work
+         * once a direct call spans several chunks in one dispatch. */
+        a.set_edge(fixture_edge, NULL);
+        b.set_edge(fixture_edge, NULL);
+        static const bool clear;
+        static const u32 zero;
+        if (a.set_direct) a.set_direct(false, NULL, NULL, NULL, NULL, NULL, NULL);
+        if (!b.set_direct(true, &clear, &clear, &zero, &zero, fixture_can_skip, NULL) ||
+            !b.set_filter(true)) return 1;
+    }
     if (a.cpu == b.cpu) {
         fprintf(stderr, "the two modules share one guest CPU: load them under different file names\n");
         return 1;
@@ -280,6 +319,10 @@ int main(int argc, char** argv) {
            stopped, refunded);
     for (unsigned k = 0; k < ENTRY_COUNT; ++k)
         printf("  %08X: %u cases\n", ENTRIES[k], per_entry[k]);
+    if (direct) {
+        printf("direct-call readiness queries: %llu\n", (unsigned long long)direct_queries);
+        if (direct_queries == 0) return 1;
+    }
     if (a.mem1 == NULL) free(ram_a);
     if (b.mem1 == NULL) free(ram_b);
     return 0;

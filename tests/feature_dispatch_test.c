@@ -33,6 +33,7 @@ static void compare_dispatch(u32 address) {
     bluewake_draw_tags_dispatch(NULL, address);
     unsigned expected[4];
     const unsigned expected_order = order;
+    assert(bluewake_feature_observes(address) == (order != 0));
     memcpy(expected, calls, sizeof calls);
     memset(calls, 0, sizeof calls);
     order = 0;

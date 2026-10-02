@@ -275,6 +275,21 @@ foreach(_variant plain global)
     endif()
     add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
 endforeach()
+add_executable(bluewake_inline_gpr_memory_test ${BLUEWAKE_REPO_ROOT}/tests/inline_gpr_memory_test.c)
+target_include_directories(bluewake_inline_gpr_memory_test PRIVATE
+    ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_inline_gpr_memory_test PRIVATE gxruntime)
+add_test(NAME bluewake_inline_gpr_memory_test COMMAND bluewake_inline_gpr_memory_test)
+
+add_executable(bluewake_direct_calls_test
+    ${BLUEWAKE_REPO_ROOT}/tests/direct_calls_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/direct_calls.c)
+target_include_directories(bluewake_direct_calls_test PRIVATE
+    ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_REPO_ROOT}/tests)
+target_compile_definitions(bluewake_direct_calls_test PRIVATE
+    BLUEWAKE_EDGE_FILTER=1 BW_EDGE_WATCH_INCLUDE="direct_call_watch.inc")
+add_test(NAME bluewake_direct_calls_test COMMAND bluewake_direct_calls_test)
+
 add_executable(bluewake_guest_checkpoint_test ${BLUEWAKE_REPO_ROOT}/tests/guest_checkpoint_test.c)
 target_include_directories(bluewake_guest_checkpoint_test PRIVATE
     ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/runtime/host/src)

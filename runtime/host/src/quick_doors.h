@@ -35,8 +35,11 @@ bool bluewake_quick_doors_busy(void);
 #define BLUEWAKE_QUICK_DOORS_ACTOR_CREATE 0x80041628u // dStage_actorCreate
 extern bool bluewake_quick_doors_armed;
 void bluewake_quick_doors_enter(CPUState* cpu);
+static inline bool bluewake_quick_doors_observes(u32 address) {
+    return bluewake_quick_doors_armed && address == BLUEWAKE_QUICK_DOORS_ACTOR_CREATE;
+}
 static inline void bluewake_quick_doors_dispatch(CPUState* cpu, u32 address) {
-    if (__builtin_expect(bluewake_quick_doors_armed, 0) && address == BLUEWAKE_QUICK_DOORS_ACTOR_CREATE)
+    if (__builtin_expect(bluewake_quick_doors_observes(address), 0))
         bluewake_quick_doors_enter(cpu);
 }
 

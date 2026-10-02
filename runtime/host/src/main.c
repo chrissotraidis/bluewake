@@ -1829,6 +1829,68 @@ static void host_actor_search_native(CPUState* cpu) {
     g_actor_search_native_runs++;
 }
 
+static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) {
+    if (__builtin_expect(cpu == NULL || g_turn_census_enabled ||
+                             g_boundary_census_enabled ||
+                             g_chassis_service_each_block ||
+                             g_interrupt_sources_dirty,
+                         0))
+        return true;
+    if (g_name_scene_object >= 0x80000000u &&
+        (g_file_start_pulse.triggered || !g_file_start_pulse.configured)) {
+        if (g_ppc_guest_alias_generation != g_overlap_cached_alias_state ||
+            g_overlap_slot_ptr == NULL)
+            return true;
+        const u32 object = read_be32(g_overlap_slot_ptr);
+        if (object >= 0x80000000u) {
+            if (object != g_overlap_cached_object || g_overlap_fields_ptr == NULL)
+                return true;
+            if (read_be16(g_overlap_fields_ptr + 0x04u) == 1u &&
+                read_be32(g_overlap_fields_ptr + 0x1Cu) != g_overlap_last_phase)
+                return true;
+        }
+    }
+    if (!g_new_game_intro_reported &&
+        (address == 0x80018554u || address == 0x8001199Cu))
+        return true;
+    // The address first: a compare with an immediate, where the flag is a load.
+    if (__builtin_expect(address == 0x80122D30u, 0) && g_player_route_waiting)
+        return true;
+    if ((g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) ||
+        bluewake_edge_maybe_intercept(host_canonical_linked_pc(address)))
+        return true;
+    if ((cpu->msr & PPC_MSR_EE) != 0u &&
+        (g_guest_decrementer_pending ||
+         (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
+        return true;
+    return false;
+}
+
+static bool g_direct_call_trace;
+static u64 g_direct_call_queries, g_direct_call_allowed;
+
+/* Read-only handshake for direct calls. Use the same dynamic predicate as
+ * ordinary edges, including overlap-phase changes that interrupt flags alone
+ * do not describe. Feature ranges and an armed jump must retain their hooks. */
+static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
+    (void)user;
+#if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
+    (void)cpu; (void)address;
+    return false;
+#else
+    const bool allowed = !g_deadline_census_enabled && !g_delivery_safety_census_enabled &&
+           !g_guest_state_trace_enabled && !bluewake_jump_button_armed &&
+           !bluewake_feature_observes(address) &&
+           !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
+           !host_chassis_requires_full(cpu, address);
+    if (g_direct_call_trace) {
+        g_direct_call_queries++;
+        g_direct_call_allowed += allowed;
+    }
+    return allowed;
+#endif
+}
+
 static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING
     host_trace_bgm_stream(cpu, address);
@@ -1836,38 +1898,7 @@ static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
     bluewake_feature_dispatch(cpu, address);
     if (bluewake_jump_button_dispatch(cpu, address))
         return true;
-    if (__builtin_expect(cpu == NULL || g_turn_census_enabled ||
-                             g_boundary_census_enabled ||
-                             g_chassis_service_each_block ||
-                             g_interrupt_sources_dirty,
-                         0))
-        return host_chassis_edge_service_full(user, cpu, address);
-    if (g_name_scene_object >= 0x80000000u &&
-        (g_file_start_pulse.triggered || !g_file_start_pulse.configured)) {
-        if (g_ppc_guest_alias_generation != g_overlap_cached_alias_state ||
-            g_overlap_slot_ptr == NULL)
-            return host_chassis_edge_service_full(user, cpu, address);
-        const u32 object = read_be32(g_overlap_slot_ptr);
-        if (object >= 0x80000000u) {
-            if (object != g_overlap_cached_object || g_overlap_fields_ptr == NULL)
-                return host_chassis_edge_service_full(user, cpu, address);
-            if (read_be16(g_overlap_fields_ptr + 0x04u) == 1u &&
-                read_be32(g_overlap_fields_ptr + 0x1Cu) != g_overlap_last_phase)
-                return host_chassis_edge_service_full(user, cpu, address);
-        }
-    }
-    if (!g_new_game_intro_reported &&
-        (address == 0x80018554u || address == 0x8001199Cu))
-        return host_chassis_edge_service_full(user, cpu, address);
-    // The address first: a compare with an immediate, where the flag is a load.
-    if (__builtin_expect(address == 0x80122D30u, 0) && g_player_route_waiting)
-        return host_chassis_edge_service_full(user, cpu, address);
-    if ((g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) ||
-        bluewake_edge_maybe_intercept(host_canonical_linked_pc(address)))
-        return host_chassis_edge_service_full(user, cpu, address);
-    if ((cpu->msr & PPC_MSR_EE) != 0u &&
-        (g_guest_decrementer_pending ||
-         (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
+    if (host_chassis_requires_full(cpu, address))
         return host_chassis_edge_service_full(user, cpu, address);
     if (address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native)
         host_actor_search_native(cpu);
@@ -7471,6 +7502,28 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[chassis] service-each-block=on\n");
         if (set_edge_service)
             set_edge_service(host_chassis_edge_service, &cpu);
+    }
+    {
+        typedef bool (*CanSkipFn)(void*, const CPUState*, u32);
+        typedef int (*DirectCallsFn)(bool, const bool*, const bool*, const u32*,
+                                     const u32*, CanSkipFn, void*);
+        DirectCallsFn direct_calls = (DirectCallsFn)
+            dlsym(lib, "bluewake_composite_direct_calls_v2");
+        const char* direct_env = getenv("BLUEWAKE_DIRECT_CALLS");
+        const char* direct_trace = getenv("BLUEWAKE_DIRECT_CALL_TRACE");
+        g_direct_call_trace = direct_trace != NULL && strcmp(direct_trace, "1") == 0;
+        const bool want = direct_env != NULL && strcmp(direct_env, "1") == 0 &&
+                          getenv("BLUEWAKE_PER_BLOCK_TURNS") == NULL &&
+                          dlsym(lib, "bluewake_set_edge_service") != NULL;
+        const bool enabled = direct_calls != NULL && direct_calls(
+            want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
+            &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL);
+        typedef int (*EdgeFilterFn)(bool);
+        EdgeFilterFn edge_filter = (EdgeFilterFn)
+            dlsym(lib, "bluewake_composite_edge_filter");
+        if (edge_filter != NULL)
+            edge_filter(enabled);
+        fprintf(stderr, "[chassis] direct-calls=%s\n", enabled ? "on" : "off");
     }
     BluewakeSetGatherWord set_gather_word = (BluewakeSetGatherWord)
         dlsym(lib, "bluewake_composite_set_gather_pipe");
@@ -15490,6 +15543,10 @@ int main(int argc, char** argv) {
             (unsigned long long)g_gx_flush_calls, (unsigned long long)g_gx_flush_us_total,
             (unsigned long long)g_gx_flush_us_max, g_gx_flush_lines, (unsigned long long)g_gx_flush_min_retrace);
     }
+    if (g_direct_call_trace)
+        fprintf(stderr, "[direct-calls] summary queries=%llu allowed=%llu\n",
+                (unsigned long long)g_direct_call_queries,
+                (unsigned long long)g_direct_call_allowed);
     return g_guest_checkpoint_failed ? 1 : bw_host_stop_status(stop_reason);
 }
 

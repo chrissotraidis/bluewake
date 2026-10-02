@@ -480,14 +480,24 @@ int main(void) {
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n").encode())
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n").encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
                   + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py",
                      ROOT / "scripts/windows/global_guest_cpu.py", ROOT / "scripts/windows/chunk_headers.py",
                      ROOT / "cmake/composite/inline_fp.h", ROOT / "cmake/composite/gather_pipe.h",
-                     ROOT / "cmake/composite/gather_pipe.c", ROOT / "cmake/composite/gather_pipe_batch.h", Path(__file__)]):
+                     ROOT / "cmake/composite/gather_pipe.c", ROOT / "cmake/composite/gather_pipe_batch.h",
+                     ROOT / "scripts/windows/direct_calls.py", ROOT / "cmake/composite/direct_calls.c",
+                     ROOT / "cmake/composite/direct_calls.h", ROOT / "cmake/composite/inline_gpr.h",
+                     ROOT / "scripts/windows/inline_save_restore_gpr.py", Path(__file__)]):
             if f.is_file():
                 inputs.update(f.read_bytes())
+        if self.args.direct_calls:
+            # The source-derived watch list is part of the prepared module.
+            for folder in ("runtime/host/src", "windows/src"):
+                for path in sorted((ROOT / folder).rglob("*")):
+                    if path.suffix in (".c", ".h", ".cpp", ".mm", ".m"):
+                        inputs.update(str(path.relative_to(ROOT)).encode())
+                        inputs.update(path.read_bytes())
         inputs = inputs.hexdigest()
         current = o / "composite-src"
         saved = (o / "composite-final.digest").read_text().strip() if (o / "composite-final.digest").exists() else ""
@@ -596,14 +606,22 @@ int main(void) {
             if self.args.gather_pipe:
                 helpers.append("--gather-pipe")
             self.run("inline-helpers", helpers)
+        if self.args.inline_gpr:
+            self.run("inline-gpr", [sys.executable, ROOT / "scripts/windows/inline_save_restore_gpr.py",
+                                     o / "composite-src"])
         if self.args.prepared_blocks:
             self.run("prepared-blocks", [sys.executable, script, o / "composite-src"])
+        if self.args.direct_calls:
+            self.run("direct-calls", [sys.executable, ROOT / "scripts/windows/direct_calls.py",
+                                       o / "composite-src"])
         digest = tree_digest(o / "composite-src")
         receipt = {"enabled": self.args.prepared_blocks,
                    "fixed_cpu": self.args.fixed_cpu,
                    "fixed_mem1": self.args.fixed_mem1,
                    "inline_fp": self.args.inline_fp,
                    "gather_pipe": self.args.gather_pipe,
+                   "direct_calls": self.args.direct_calls,
+                   "inline_gpr": self.args.inline_gpr,
                    "gather_sha256": {name: sha256_file(ROOT / "cmake/composite" / name)
                                      for name in ("gather_pipe.h", "gather_pipe.c", "gather_pipe_batch.h")},
                    "inline_fp_script_sha256": sha256_file(ROOT / "scripts/windows/chunk_headers.py"),
@@ -638,6 +656,7 @@ int main(void) {
             "cmake", "-S", ROOT / "cmake/composite", "-B", build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang",
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_C_FLAGS={flags}", "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
             f"-DBLUEWAKE_FIXED_CPU={'ON' if self.args.fixed_cpu else 'OFF'}",
+            f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
@@ -719,6 +738,8 @@ int main(void) {
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
+            "direct_calls": self.args.direct_calls,
+            "inline_gpr": self.args.inline_gpr,
             "compiler": self.clang_version,
             "module_sha256": sha256_file(app / MODULE),
             "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -846,6 +867,10 @@ def main():
                         help="opt into experimental inline floating-point helpers (off by default)")
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
+    parser.add_argument("--inline-gpr", action="store_true",
+                        help="inline certified register saves/restores; requires --direct-calls")
+    parser.add_argument("--direct-calls", action="store_true",
+                        help="opt into direct-call preparation (off by default; compatible host selection required)")
     parser.add_argument("--console", action="store_true", help="build BlueWake.exe as a console program")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
@@ -853,6 +878,8 @@ def main():
                         help="stop after generating the source: checks tools, disc and translation in minutes")
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
     args = parser.parse_args()
+    if args.inline_gpr and not args.direct_calls:
+        parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:
         parser.error("--fixed-mem1 requires --fixed-cpu")
     if args.jobs is None:

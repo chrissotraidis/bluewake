@@ -19,14 +19,14 @@ resolves on its slow path), and calls between a REL module's chunks. None
 whose target or return address the host names (runtime/host/src,
 windows/src, either mirror form) is: the host hooks those addresses in its
 edge service, which a direct call does not consult. Calls to the register save and restore routines are already inline
-(scripts/windows/inline_save_restore_gpr.py) and keep that form. A call to a
-leaf with a native form (the SDK's matrix and vector leaves: DISPATCHER_NATIVE,
-VEC_LEAVES) tries the native first and runs the translated body where it
-declines. The same test lets an instruction handed to the interpreter carry on
+(scripts/windows/inline_save_restore_gpr.py) and keep that form. Native replacements remain a separate opt-in qualification batch; this
+preparation calls the selected translated chunks. BlueWake also asks the host's
+versioned read-only predicate before skipping a boundary, preserving dynamic
+scene/input observations and the complete particle/wake address ranges. The same test lets an instruction handed to the interpreter carry on
 in its chunk instead of leaving it (transform_fallback).
 
 The change is repeatable (a prepared chunk is left as it is) and keeps LF line
-ends. Run it after inline_save_restore_gpr.py and before
+ends. When register inlining is selected, run it after inline_save_restore_gpr.py and before
 scripts/mods/prepare_simulation_60hz.py, whose manifest hashes the chunks as
 they finally are.
 """
@@ -46,7 +46,7 @@ CALL = re.compile(
     r"            ctx->pc = 0x\2u;\n"
     r"            return;\n"
     r"    \}\n")
-FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx_param\) \{$", re.M)
+FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx(?:_param)?\) \{$", re.M)
 TABLE = re.compile(r"static DolRecompFunction s_dolrecomp_chunk_fns\[\] = \{(.*?)\};", re.S)
 DOL_CODE = (0x80003100, 0x80400000)
 REL_CODE = (0xC0400000, 0xC2000000)  # the REL modules' translated code (rel_modules.inc)
@@ -134,7 +134,7 @@ def certified_vec_leaves(chunks):
     return {start for start in certified if found[start]}
 
 
-def transform(text, own_start, starts, index_of, watched, natives=DISPATCHER_NATIVE):
+def transform(text, own_start, starts, index_of, watched, natives=()):
     if MARK in text:
         return text, 0
     if INCLUDE not in text:
@@ -176,9 +176,9 @@ def transform(text, own_start, starts, index_of, watched, natives=DISPATCHER_NAT
                 "    {\n"
                 f"            ctx->lr = 0x{m.group(3)}u;\n"
                 f"            ctx->pc = 0x{m.group(2)}u;\n"
-                "            if (bw_direct_call_ready(ctx)) {\n"
+                f"            if (bw_direct_call_ready(ctx, 0x{run:08X}u)) {{\n"
                 + enter + translated +
-                f"                if (ctx->pc == 0x{m.group(3)}u && bw_direct_call_ready(ctx))\n"
+                f"                if (ctx->pc == 0x{m.group(3)}u && bw_direct_call_ready(ctx, 0x{ret:08X}u))\n"
                 f"                    goto label_{m.group(3)};\n"
                 "            }\n"
                 "            return;\n"
@@ -238,8 +238,8 @@ def transform_indirect(text, watched):
                 "        if (ctr_ok && cr_ok) {\n"
                 f"            ctx->lr = 0x{m.group(2)}u;\n"
                 "            ctx->pc = target;\n"
-                "            if (bw_direct_call_ready(ctx) && bw_call_translated(ctx, target) &&\n"
-                f"                ctx->pc == 0x{m.group(2)}u && bw_direct_call_ready(ctx))\n"
+                "            if (bw_direct_call_ready(ctx, target) && bw_call_translated(ctx, target) &&\n"
+                f"                ctx->pc == 0x{m.group(2)}u && bw_direct_call_ready(ctx, 0x{ret:08X}u))\n"
                 f"                goto label_{m.group(2)};\n"
                 "            return;\n"
                 "        }\n"
@@ -293,7 +293,7 @@ def transform_fallback(text, watched):
             pieces.append(
                 f"    // {m.group(1)}: {m.group(2)}\n"
                 f"    ppc_fallback_instruction(ctx, {m.group(3)}, 0x{m.group(1)}u);\n"
-                f"    if (ctx->pc == 0x{following:08X}u && bw_direct_call_ready(ctx))\n"
+                f"    if (ctx->pc == 0x{following:08X}u && bw_direct_call_ready(ctx, 0x{following:08X}u))\n"
                 f"        goto label_{following:08X};\n"
                 "    return;\n")
             cursor = m.end()
@@ -334,8 +334,9 @@ def main():
         sys.exit(f"no chunks under {root}")
     starts, index_of = chunk_table(root)
     watched = watched_addresses()
-    vec = certified_vec_leaves(chunks)
-    natives = DISPATCHER_NATIVE | vec
+    # Native replacements are a separate qualification batch. Direct calls
+    # continue through the selected translated chunk table, including mods.
+    natives = set()
     sites = files = indirect = fallback = 0
     for path in chunks:
         m = re.search(r"_([0-9A-F]{8})\.c$", path.name)
@@ -355,9 +356,15 @@ def main():
             fallback += count_fallback
             files += 1
     listed = write_watch_list(root, watched)
+    header = root / "generated.h"
+    marker = "#define BLUEWAKE_DIRECT_CALLS_PREPARED 2\n"
+    text = header.read_text()
+    if marker not in text:
+        # Written last: a failed first preparation must not claim readiness.
+        header.write_text(marker + text)
     print(f"direct calls between chunks: {sites} calls, {indirect} indirect calls and "
           f"{fallback} interpreted instructions in {files} chunks; {listed} watched addresses; "
-          f"{len(vec)} of {len(VEC_LEAVES)} vector leaves native")
+          "native replacements not selected")
 
 
 if __name__ == "__main__":

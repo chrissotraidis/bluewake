@@ -84,10 +84,22 @@ Options (`--help` lists all):
 | `--fixed-mem1` | Also use module-owned RAM; requires `--fixed-cpu` and the matching app, off by default |
 | `--inline-fp` | Opt into inline floating-point helpers; off by default, module/gameplay/performance qualification pending |
 | `--gather-pipe` | Prepare experimental gather/inline-memory wrappers; off by default, host batching and module qualification remain separate gates |
+| `--direct-calls` | Prepare direct cross-chunk/indirect calls; off by default, matching host selection and qualification required |
+| `--inline-gpr` | Also inline certified register saves/restores; requires `--direct-calls` |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
 | `--out DIR` | Build directory (default `build\windows`) |
+
+The direct-call options retain the ordinary module ABI and are selected separately
+from fixed CPU/RAM storage. To enable them in a supporting host, set
+`BLUEWAKE_DIRECT_CALLS=1`; default and older hosts use ordinary dispatch.
+The host must approve each skipped boundary, including scene observations,
+feature hooks and pending jump input. Register inlining also verifies the
+translated helper hashes and declines aliases, MMIO and write journals.
+Changing host watch sources or either option invalidates prepared-source reuse.
+These options are being qualified; no performance gain or gameplay acceptance
+is claimed yet. Personal generated source and modules stay local.
 
 The `--inline-fp` option leaves the module ABI unchanged and can be selected
 independently of the storage/block experiments. It substitutes generic interpreter

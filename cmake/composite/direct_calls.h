@@ -39,6 +39,16 @@ extern const bool* bw_host_sources_dirty;
 extern const bool* bw_host_decrementer_pending;
 extern const u32* bw_host_pi_cause;
 extern const u32* bw_host_pi_mask;
+/* BlueWake's host has address-independent observations and input hooks beyond
+ * the donor interrupt flags. A versioned, read-only query must also approve
+ * each skipped boundary. Older hosts leave the optimization disabled. */
+typedef bool (*BwHostCanSkipFn)(void*, const CPUState*, u32);
+extern BwHostCanSkipFn bw_host_can_skip;
+extern void* bw_host_can_skip_user;
+int bluewake_composite_direct_calls(bool, const bool*, const bool*, const u32*, const u32*);
+int bluewake_composite_direct_calls_v2(bool, const bool*, const bool*, const u32*,
+                                     const u32*, BwHostCanSkipFn, void*);
+int bluewake_composite_edge_filter(bool);
 
 /* The host's edge service has nothing to do at an address it does not watch:
  * its interrupt sources are clean and no interrupt the guest would take is
@@ -52,12 +62,13 @@ static inline bool bw_host_quiet(const CPUState* cpu) {
 
 /* The chassis loop's checks before a dispatch (an exception, the turn's
  * budget), and the edge service's before it would have nothing to do. */
-static inline bool bw_direct_call_ready(const CPUState* cpu) {
-    if (!bw_direct_enabled || bw_direct_depth >= BW_DIRECT_DEPTH_MAX)
+static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
+    if (!bw_direct_enabled || cpu == NULL || bw_host_can_skip == NULL ||
+        bw_direct_depth >= BW_DIRECT_DEPTH_MAX)
         return false;
     if (cpu->exception != 0u || (cpu->cycle_budget > 0 && cpu->downcount <= -cpu->cycle_budget))
         return false;
-    return bw_host_quiet(cpu);
+    return bw_host_quiet(cpu) && bw_host_can_skip(bw_host_can_skip_user, cpu, address);
 }
 
 /* The addresses the host's edge service acts at, from the builder's watch list
@@ -79,7 +90,7 @@ static inline bool bw_edge_unwatched(u32 address) {
     if (!(main_code || rel_code))
         return false;
     u32 slot = (canonical * 0x9E3779B1u) >> 20;
-    for (;;) {
+    for (u32 probes = 0; probes < BW_EDGE_WATCH_SLOTS; ++probes) {
         const u32 entry = bw_edge_watch_table[slot];
         if (entry == 0u)
             return true;
@@ -87,6 +98,7 @@ static inline bool bw_edge_unwatched(u32 address) {
             return false;
         slot = (slot + 1u) & (BW_EDGE_WATCH_SLOTS - 1u);
     }
+    return false;
 }
 
 /* An indirect call's target run the way the dispatcher would run it, when the

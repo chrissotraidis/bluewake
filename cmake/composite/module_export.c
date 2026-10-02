@@ -11,6 +11,14 @@ extern void ppc_set_mem_write_journal(PPCMemWriteJournal fn, void* user);
 unsigned dolrecomp_call_depth = 0;
 static BluewakeEdgeServiceFn s_edge_service;
 static void* s_edge_service_user;
+#if defined(BLUEWAKE_DIRECT_CALLS)
+/* Use the same selected chunk table and lookup as ordinary dispatch, including
+ * mod variants. The donor's direct calls must not bypass player options. */
+void (**const bw_chunk_fns)(CPUState*) = s_dolrecomp_chunk_fns;
+DolRecompFunction bw_find_chunk(u32 address) {
+    return dolrecomp_find_original(address);
+}
+#endif
 
 /* The x86-64-v3 dispatch clones come only from DolRecomp's LLVM object
  * backend; the C backend the Builder uses emits none, so an x86-64 build (the

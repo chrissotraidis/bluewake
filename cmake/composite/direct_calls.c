@@ -19,13 +19,20 @@ const bool* bw_host_sources_dirty = &k_attention;
 const bool* bw_host_decrementer_pending = &k_clear;
 const u32* bw_host_pi_cause = &k_zero;
 const u32* bw_host_pi_mask = &k_zero;
+BwHostCanSkipFn bw_host_can_skip;
+void* bw_host_can_skip_user;
 
 u32 bw_edge_watch_table[BW_EDGE_WATCH_SLOTS];
 bool bw_edge_watch_ready;
 bool bw_edge_filter_enabled;
 
 #ifdef BLUEWAKE_EDGE_FILTER
-#include "bw_edge_watch.inc" /* static const u32 bw_edge_watch_list[] */
+#ifndef BW_EDGE_WATCH_INCLUDE
+#define BW_EDGE_WATCH_INCLUDE "bw_edge_watch.inc"
+#endif
+#include BW_EDGE_WATCH_INCLUDE /* static const u32 bw_edge_watch_list[] */
+_Static_assert(sizeof bw_edge_watch_list / sizeof bw_edge_watch_list[0] < BW_EDGE_WATCH_SLOTS,
+               "direct-call watch list must leave an empty hash-table slot");
 
 static void edge_watch_build(void) {
     if (bw_edge_watch_ready)
@@ -84,15 +91,33 @@ BW_DIRECT_EXPORT int bluewake_composite_edge_filter(bool enabled) {
 BW_DIRECT_EXPORT int bluewake_composite_direct_calls(bool enabled, const bool* sources_dirty,
                                                      const bool* decrementer_pending, const u32* pi_cause,
                                                      const u32* pi_mask) {
+    /* The donor handshake cannot describe BlueWake's extra host observations. */
+    (void)enabled; (void)sources_dirty; (void)decrementer_pending;
+    (void)pi_cause; (void)pi_mask;
+    bw_direct_enabled = false;
+    bw_edge_filter_enabled = false;
+    bw_host_can_skip = NULL;
+    bw_host_can_skip_user = NULL;
+    return 0;
+}
+
+BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v2(
+    bool enabled, const bool* sources_dirty, const bool* decrementer_pending,
+    const u32* pi_cause, const u32* pi_mask, BwHostCanSkipFn can_skip, void* user) {
     if (!enabled || sources_dirty == NULL || decrementer_pending == NULL || pi_cause == NULL ||
-        pi_mask == NULL) {
+        pi_mask == NULL || can_skip == NULL) {
         bw_direct_enabled = false;
+        bw_edge_filter_enabled = false;
+        bw_host_can_skip = NULL;
+        bw_host_can_skip_user = NULL;
         return 0;
     }
     bw_host_sources_dirty = sources_dirty;
     bw_host_decrementer_pending = decrementer_pending;
     bw_host_pi_cause = pi_cause;
     bw_host_pi_mask = pi_mask;
+    bw_host_can_skip = can_skip;
+    bw_host_can_skip_user = user;
     bw_direct_enabled = true;
     return 1;
 }
