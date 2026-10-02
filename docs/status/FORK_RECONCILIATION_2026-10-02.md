@@ -176,6 +176,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#32](https://github.com/chrissotraidis/bluewake/pull/32) | `0ea7ffb`, import `ca8c584`, fixture `459df34` | Twelve certified game-math entries; full-CPU/protected-MEM1 fixtures, three-way intro comparison and all 50 native Windows tests pass; saved-game state/image comparisons pass; combined optimized qualification in progress |
 | [#33](https://github.com/chrissotraidis/bluewake/pull/33) | `f861eae`, runtime `18ba3b64` | Later donor post-texture renderer fix with backward-compatible save-state loading; FIFO/fold/sanitizer checks and Outset state/image comparison pass; 51 native Windows tests pass; paired boss-room view confirms the white-to-orange lava correction |
 | [#34](https://github.com/chrissotraidis/bluewake/pull/34) | `193870f` import, `558438a` / `9849eb0` adaptations | Controller feedback with preserved preferences, menu/teardown and guest-cancellation fixes; ten Mac checks, 56 Windows tests, bounded Outset and sanitizer checks pass; real controller qualification open |
+| [#35](https://github.com/chrissotraidis/bluewake/pull/35) | `9c205c3` | Relocatable personal Mac builder; fresh shell/translation, packaging/signing and bounded existing-module relocation checks pass; complete player build and gameplay acceptance open |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -607,6 +608,13 @@ pacing restores the checkpoint match. This establishes the setting difference
 in this bounded route, not general correctness of paced gameplay. Full fresh
 module compilation/training, game saves, updates and sustained acceptance
 remain open. These runs overlapped compilation and are not benchmarks.
+
+The imported module-preparation switches are currently exposed by the Windows
+builder. The Mac builder still compiles the ordinary module path. After the
+frozen combined comparison, carry the selected enhancements through Mac
+preparation, matching training/compiler options and bundle provenance before
+claiming them as part of a player-produced Mac app. The bounded relocation
+check does not establish that integration.
 
 The baseline personal iOS build cannot establish acceptance for every later
 integrated change. Existing artifacts and private profiles are not prerequisites
