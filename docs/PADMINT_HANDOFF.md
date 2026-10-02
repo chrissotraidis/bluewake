@@ -20,7 +20,11 @@ BlueWake `3392854c8daaf5d7900cd034694fabe18b699a24`, selecting maintained runtim
 `b8b534591cba8ca7cd43943a655ee6e2591cf5de`. The expected base-source digest matches.
 The full run uses the matching locally built app-only shell and fresh local
 training; final iOS module compilation is interrupted for low disk space. Its final assembly and
-provenance must be inspected before marking that run complete.
+provenance must be inspected before marking that run complete. Keep that
+workspace pinned to `3392854` when resuming it. The cumulative branch now
+contains a later host/runtime Pictobox repair; do not silently substitute its
+source or shell into the paused workspace or claim the older full-build result
+as clean-build acceptance of the newer revision.
 
 | Route | Evidence / remaining gate |
 | --- | --- |

@@ -7,8 +7,11 @@ so **the app you build is yours alone: never share or upload it.**
 
 The migration candidate is reviewed in
 [PR #37](https://github.com/chrissotraidis/bluewake/pull/37), branch
-`codex/fork-consolidated`; it is not yet merged into `main`. Current executable
-acceptance is tied to `3392854`. For candidate testing from a new checkout use
+`codex/fork-consolidated`; it is not yet merged into `main`. Fresh player-build
+acceptance is tied to `3392854`. The later `9706637` host adds the bounded Mac
+Pictobox repair, tested with that same personal module; it has not repeated the
+complete clean player build. Follow-up test-fixture changes do not alter that
+host. For candidate testing from a new checkout use
 `git clone --branch codex/fork-consolidated https://github.com/chrissotraidis/bluewake.git`.
 Do not reset an existing checkout or replace its private build outputs to switch
 revisions. The [platform matrix](status/FORK_RECONCILIATION_2026-10-02.md#player-build-and-platform-gates)
