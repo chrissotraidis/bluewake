@@ -18,6 +18,7 @@ fast_spec = importlib.util.spec_from_file_location("fast_blocks", REPO / "script
 fast = importlib.util.module_from_spec(fast_spec)
 fast_spec.loader.exec_module(fast)
 
+# Keep synthetic translation fixtures LF on every host, matching DolRecomp output.
 # A small invented instruction block with the translator's public charge form.
 CHUNK = '''#include "../generated.h"
 void synthetic(CPUState* ctx) {
@@ -99,9 +100,9 @@ class PreparedCacheTest(unittest.TestCase):
             shutil.copy2(REPO / script, dst)
         self.base = self.root / "synthetic-base"
         (self.base / "chunks_dol").mkdir(parents=True)
-        (self.base / "generated.h").write_text("/* synthetic fixture */\n")
+        (self.base / "generated.h").write_text("/* synthetic fixture */\n", newline="\n")
         for name in ("a.c", "b.c"):
-            (self.base / "chunks_dol" / name).write_text(CHUNK)
+            (self.base / "chunks_dol" / name).write_text(CHUNK, newline="\n")
         self.out = self.root / "build"
         self.out.mkdir()
         self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False, native_skin=False, native_game_math=False)
@@ -133,9 +134,9 @@ label_80004004:
     return;
 }
 '''
-        (self.base / "chunks_dol/a.c").write_text(source)
+        (self.base / "chunks_dol/a.c").write_text(source, newline="\n")
         (self.base / "generated_composite.h").write_text(
-            "static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_80006000};\n")
+            "static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_80006000};\n", newline="\n")
         self.digest = bw.tree_digest(self.base)
         self.args.direct_calls = True
         self.cycle()
@@ -147,7 +148,7 @@ label_80004004:
         self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
         host = self.root / "runtime/host/src/synthetic.c"
         host.parent.mkdir(parents=True)
-        host.write_text("/* host now watches 0x80006000u */\n")
+        host.write_text("/* host now watches 0x80006000u */\n", newline="\n")
         self.cycle()
         self.assertNotIn("bw_chunk_fns", self.chunk().read_text())
         self.assertIn("0x80006000u", (self.out / "composite-src/bw_edge_watch.inc").read_text())
@@ -165,9 +166,9 @@ label_80004004:
         text = script.read_text()
         start = text.index('LEAVES = (')
         end = text.index('INCLUDE = ', start)
-        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:])
+        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:], newline="\n")
         (self.base / 'chunks_dol/chunk_802D96E0.c').write_text(
-            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_802D96E0:\n')
+            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_802D96E0:\n', newline="\n")
         self.digest = bw.tree_digest(self.base)
         self.args.native_j3d = True
         self.cycle()
@@ -190,15 +191,15 @@ label_80004004:
         text = script.read_text()
         start = text.index('LEAVES = (')
         end = text.index('DECLARATION = ', start)
-        script.write_text(text[:start] + f"LEAVES = ((0x8030D0C8, 0x8030D0FC, '803096E0', '{digest}'),)\n" + text[end:])
-        (self.base / 'chunks_dol/chunk_803096E0.c').write_text('#include "../generated.h"\n' + body + '\nlabel_8030D0FC:\n')
+        script.write_text(text[:start] + f"LEAVES = ((0x8030D0C8, 0x8030D0FC, '803096E0', '{digest}'),)\n" + text[end:], newline="\n")
+        (self.base / 'chunks_dol/chunk_803096E0.c').write_text('#include "../generated.h"\n' + body + '\nlabel_8030D0FC:\n', newline="\n")
         header = self.base / 'generated_composite.h'
         header.write_text('typedef void (*DolRecompFunction)(CPUState* ctx);\n'
                          '    if (s_cached_pc[cache_index] == address)\n'
                          '        return s_cached_pc_fn[cache_index];\n'
-                         'static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_803096E0};\n')
+                         'static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_803096E0};\n', newline="\n")
         self.chunk_source = '#include "../generated.h"\nvoid synthetic(CPUState* ctx) {\n    // 80004000: bl      0x8030D0C8\n    {\n            ctx->lr = 0x80004004u;\n            ctx->pc = 0x8030D0C8u;\n            return;\n    }\nlabel_80004004:\n    return;\n}\n'
-        (self.base / 'chunks_dol/a.c').write_text(self.chunk_source)
+        (self.base / 'chunks_dol/a.c').write_text(self.chunk_source, newline="\n")
         self.args.direct_calls = True
         self.digest = bw.tree_digest(self.base)
         self.args.native_math = True
@@ -225,9 +226,9 @@ label_80004004:
         end = text.index('def canonical(', begin)
         definitions = (f"FRAGMENTS = {{'fixture': (0x80000100, 0x80000100, 0x80000104, '{digest}')}}\n"
                        "ENTRIES = {0x80000100: ('fixture',)}\n\n")
-        script.write_text(text[:begin] + definitions + text[end:])
+        script.write_text(text[:begin] + definitions + text[end:], newline="\n")
         (self.base / 'chunks_dol/chunk_80000100.c').write_text(
-            '#include "../generated.h"\n' + body + '\nlabel_80000104:\n\nreturn_dispatch_80000100:\n')
+            '#include "../generated.h"\n' + body + '\nlabel_80000104:\n\nreturn_dispatch_80000100:\n', newline="\n")
         self.digest = bw.tree_digest(self.base)
         self.args.native_game_math = True
         self.cycle()
@@ -238,7 +239,7 @@ label_80004004:
         self.assertEqual(before, (source.read_bytes(), source.stat().st_mtime_ns))
         fingerprint = (self.out / 'composite-inputs.digest').read_text()
         host = self.root / 'runtime/host/src/test_watch.c'; host.parent.mkdir(parents=True)
-        host.write_text('/* watched 0x80001000 */\n')
+        host.write_text('/* watched 0x80001000 */\n', newline="\n")
         self.cycle()
         self.assertNotEqual(fingerprint, (self.out / 'composite-inputs.digest').read_text())
         self.args.native_game_math = False
@@ -254,9 +255,9 @@ label_80004004:
         text = script.read_text()
         start = text.index('LEAVES = (')
         end = text.index('INCLUDE = ', start)
-        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:])
+        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:], newline="\n")
         (self.base / 'chunks_dol/chunk_802ED6E0.c').write_text(
-            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_802ED6E0:\n')
+            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_802ED6E0:\n', newline="\n")
         self.digest = bw.tree_digest(self.base)
         self.args.native_skin = True
         self.cycle()
@@ -279,9 +280,9 @@ label_80004004:
         text = script.read_text()
         start = text.index('LEAVES = (')
         end = text.index('INCLUDE = ', start)
-        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:])
+        script.write_text(text[:start] + f"LEAVES = ((0x100, 0x104, {{'{digest}'}}),)\n" + text[end:], newline="\n")
         (self.base / 'chunks_dol/chunk_8030D6E0.c').write_text(
-            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_8030D6E0:\n')
+            '#include "../generated.h"\n' + body + '\nlabel_00000104:\nreturn_dispatch_8030D6E0:\n', newline="\n")
         self.digest = bw.tree_digest(self.base)
         self.args.native_vec = True
         self.cycle()
@@ -310,21 +311,21 @@ label_80004004:
     return;
 }
 '''
-        (self.base / "chunks_dol/a.c").write_text(source)
+        (self.base / "chunks_dol/a.c").write_text(source, newline="\n")
         (self.base / "generated_composite.h").write_text(
-            "static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_803256E0};\n")
+            "static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_803256E0};\n", newline="\n")
         # Invented helper text and fixture-local certificates: no game code.
         bodies = ["\nlabel_80328F04:\n    return;\n", "\nlabel_80328F50:\n    return;\n"]
         helper = self.base / "chunks_dol/synthetic_803256E0.c"
         helper.write_text('#include "../generated.h"\nvoid func_803256E0(CPUState* ctx) {\n' +
-                          ''.join(bodies) + "\nlabel_80328F9C:\n    return;\n}\n")
+                          ''.join(bodies) + "\nlabel_80328F9C:\n    return;\n}\n", newline="\n")
         script = self.root / "scripts/windows/inline_save_restore_gpr.py"
         text = script.read_text()
         for old, body in zip((
             'b7fa7b91c185412cce8d7dfc7eccafd5c50d69f7f49b66d111c582d11ab8df1b',
             'f525cbda6f2bed00dbaa48533f1a32c12ed19b571328e7045945a08b9c3ca2d4'), bodies):
             text = text.replace(old, hashlib.sha256(' '.join(body.split()).encode()).hexdigest())
-        script.write_text(text)
+        script.write_text(text, newline="\n")
         self.digest = bw.tree_digest(self.base)
         self.args.direct_calls = self.args.inline_gpr = True
         self.cycle()
@@ -372,7 +373,7 @@ label_80004004:
         self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
         self.assertTrue(json.loads((self.out / "prepared-blocks.json").read_text())["fixed_cpu"])
         script = self.root / "scripts/windows/global_guest_cpu.py"
-        script.write_text(script.read_text() + "\n# synthetic CPU transform revision\n")
+        script.write_text(script.read_text() + "\n# synthetic CPU transform revision\n", newline="\n")
         self.builder.generate()
         self.assertEqual(self.chunk().read_text(), CHUNK)
         self.builder.prepare_blocks()
@@ -413,7 +414,7 @@ label_80004004:
         self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
         for helper in ("scripts/windows/chunk_headers.py", "cmake/composite/inline_fp.h"):
             path = self.root / helper
-            path.write_text(path.read_text() + "\n")
+            path.write_text(path.read_text() + "\n", newline="\n")
             self.builder.generate()
             self.assertEqual(self.chunk().read_text(), CHUNK)
             self.builder.prepare_blocks()
@@ -442,7 +443,7 @@ label_80004004:
         self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
         for helper in ("gather_pipe.h", "gather_pipe.c", "gather_pipe_batch.h"):
             path = self.root / "cmake/composite" / helper
-            path.write_text(path.read_text() + "\n")
+            path.write_text(path.read_text() + "\n", newline="\n")
             self.builder.generate()
             self.assertEqual(self.chunk().read_text(), CHUNK)
             self.builder.prepare_blocks()
@@ -466,7 +467,7 @@ label_80004004:
         self.args.prepared_blocks = True
         self.builder.generate()
         # Emulate interruption after one atomic chunk rewrite, before receipt.
-        self.chunk().write_text(self.chunk().read_text() + "/* partial preparation */\n")
+        self.chunk().write_text(self.chunk().read_text() + "/* partial preparation */\n", newline="\n")
         self.builder.generate()
         self.assertEqual(self.chunk().read_text(), CHUNK)
         self.builder.prepare_blocks()
@@ -477,7 +478,7 @@ label_80004004:
         self.args.prepared_blocks = True
         self.cycle()
         script = self.root / "scripts/windows/fast_blocks.py"
-        script.write_text(script.read_text() + "\n# synthetic revision change\n")
+        script.write_text(script.read_text() + "\n# synthetic revision change\n", newline="\n")
         self.builder.generate()
         self.assertNotIn(MARK, self.chunk().read_text())
         self.builder.prepare_blocks()
