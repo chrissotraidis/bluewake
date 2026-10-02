@@ -57,7 +57,8 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#20](https://github.com/chrissotraidis/bluewake/pull/20) | `9d3729a` | Corrected inline FP; native instruction tests and arm64 O0 module/boot pass |
 | [#21](https://github.com/chrissotraidis/bluewake/pull/21) | `7b7e530`, Windows includes `9303569` | Active Release assertions and restored GroundCross observation; bounded host check and native Windows pass |
 | [#22](https://github.com/chrissotraidis/bluewake/pull/22) | `69426b2` | Per-turn consecutive dispatch counter; unit/sanitizer, strict module boot and native Windows checks pass |
-| [#23](https://github.com/chrissotraidis/bluewake/pull/23) | `b85f931` | Gather/inline-memory contract foundation; two reproduced guards, local plain/global/flush tests pass; host/builder selection and module qualification open |
+| [#23](https://github.com/chrissotraidis/bluewake/pull/23) | `b85f931` | Gather/inline-memory contract foundation; two reproduced guards, local contracts and all 41 native Windows tests pass; module/renderer/performance qualification open |
+| [#24](https://github.com/chrissotraidis/bluewake/pull/24) | `608edaa` | Independent gather-module preparation; nine cache tests and preparation/rejection checks pass, full module comparison running; host batching not selected |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -153,12 +154,12 @@ A separate donor gather-wrapper probe overreads an undersized RAM buffer under
 ASan; the maintained ordinary memory path does not. A second regression shows
 the donor pipe shortcut bypassing registered guest aliases. The imported helper
 foundation guards the subtraction and checks normal memory precedence before
-using the writer. Shared maintained memory contracts exercise ordinary/global
+using the writer. Native Windows at `ab8ff52` builds the app and passes all 41
+tests (43.21 s; [run 36972986519](https://github.com/chrissotraidis/bluewake/actions/runs/36972986519)). Shared maintained memory contracts exercise ordinary/global
 RAM, aliases, reservation, journal, endian and MMIO behavior. Additional tests
 cover byte order, batching thresholds, writer changes, interpreter/MMIO flushes
 and inline/exported dispatch boundaries. Module, renderer and performance
-qualification remains
-open. Explicit module preparation is now available independently of inline FP;
+qualification remains open. Explicit module preparation is now available independently of inline FP;
 current hosts retain ordinary MMIO pipe stores. Direct-call/native batches also
 remain open work.
 All measured wall times under concurrent compilation are excluded from performance
@@ -198,7 +199,8 @@ bugs. No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-1. Finish the running prepared-block O2 pair and full PadMint build, then verify
+1. Finish the running gather-wrapper module/function/boot comparison, prepared-block
+   O2 pair and full PadMint build, then verify
    their terminal artifacts. Run matched performance measurements on a quiet
    machine; do not derive performance from current loaded runs.
 2. Integrate/qualify remaining gather, inline-memory, direct-call/register and
