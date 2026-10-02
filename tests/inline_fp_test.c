@@ -118,7 +118,49 @@ static void report(const char* name, unsigned iteration) {
             report(name, i);                                                \
     } while (0)
 
+/* Explicit zero/subnormal divisors under every guest rounding, NI and
+ * divide/invalid exception-enable combination. Random FPSCR bits alone did
+ * not exercise DAZ before the fixture synchronized the host mode. */
+static bool division_edges(void) {
+    static const u64 divisors[] = {
+        0, 0x8000000000000000ull, 1, 0x8000000000000001ull,
+        0x000FFFFFFFFFFFFFull, 0x800FFFFFFFFFFFFFull,
+        0x0010000000000000ull, 0x8010000000000000ull,
+    };
+    static const u64 numerators[] = {
+        0, 0x8000000000000000ull, 0x3FF0000000000000ull,
+        0xBFF0000000000000ull, 1, 0x7FEFFFFFFFFFFFFFull,
+    };
+    for (u32 mode = 0; mode < 32; ++mode) {
+        for (unsigned x = 0; x < sizeof numerators / sizeof numerators[0]; ++x) {
+            for (unsigned y = 0; y < sizeof divisors / sizeof divisors[0]; ++y) {
+                CPUState a = {0}, b;
+                a.fpscr = (mode & 7u) | ((mode & 8u) ? 0x10u : 0u) |
+                          ((mode & 16u) ? 0x80u : 0u);
+                a.fpr[1] = from_bits(numerators[x]);
+                a.fpr[2] = from_bits(divisors[y]);
+                a.fpr[3] = 123.0;
+                a.ps1[3] = -123.0;
+                ppc_fpscr_control_updated(&a);
+                b = a;
+                ppc_fdivs(&a, 3, 1, 2);
+                bw_fp_fdivs(&b, 3, 1, 2);
+                if (!same(&a, &b)) {
+                    fprintf(stderr, "fdivs edge differs: mode=%u numerator=%016llX divisor=%016llX\n",
+                            mode, (unsigned long long)numerators[x], (unsigned long long)divisors[y]);
+                    return false;
+                }
+            }
+        }
+    }
+    CPUState reset = {0};
+    ppc_fpscr_control_updated(&reset);
+    return true;
+}
+
 int main(void) {
+    if (!division_edges())
+        return 1;
     if (!cpu_init(&reference))
         return 1;
     const unsigned iterations = 2000000u;

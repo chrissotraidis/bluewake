@@ -679,3 +679,27 @@ explicit size/buffer validity guards along with the already corrected extended
 alias behavior; test both pointer and fixed-MEM1 forms before module use.
 Private source/hash/compiler receipts are retained. This establishes a synthetic
 boundary failure, not a cause for any reported gameplay crash.
+
+
+### Inline-FP cross-architecture correction
+
+The original candidate `9a831836` links and passes the 30,000-case arm64 module
+comparison and controlled 6,000-retrace route: all 1,050 canonical/card records
+and 600 guest-state samples match, with zero scheduling drift. Both hosts exit
+normally. This remains evidence for that exact pre-correction arm64 module.
+
+Native Windows run 36968127476 reveals 9,526 `fdivs` differences in the
+strengthened two-million-iteration test. Local x86-64/Rosetta reproduces the
+same first mismatches (232 in 50,000 iterations). A deterministic case narrows
+it to `0 / smallest-subnormal` with NI enabled: host DAZ treats the divisor as
+zero, while the optimized fast-path zero comparison does not reliably do so.
+The header now classifies zero/subnormal divisors by their exponent bits and
+uses the interpreter's existing exception/NaN path for those cases. Finite
+normal divisors keep the inline path.
+
+The new explicit regression covers all four rounding modes, NI on/off, and
+divide/invalid exception enables. It fails on the original header and passes
+after correction. Full 38-million-operation comparisons pass on both arm64
+(the maintained CMake fixture, 39.51 seconds) and local x86-64/Rosetta. This is
+not native Windows or whole-module acceptance of the corrected header; those
+checks must be repeated. All earlier private modules/receipts are preserved.

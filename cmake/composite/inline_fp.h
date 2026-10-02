@@ -184,11 +184,14 @@ static inline void bw_fp_fmul(CPUState* cpu, u8 d, u8 a, u8 c) {
     cpu->fpscr &= ~(BW_FP_FPSCR_FI | BW_FP_FPSCR_FR);
 }
 
-/* ppc_fdivs: ni_div of finite operands with a nonzero divisor is the plain
- * quotient (an overflow to infinity included), with no exception. */
+/* ppc_fdivs: a finite, normal divisor takes the plain quotient. A subnormal
+ * divisor can become zero in the host's DAZ mode. Classify it by bits: an
+ * optimizer may fold y == 0 into a bit test that does not observe DAZ, while
+ * the interpreter's division does. Keep its zero/NaN/exception handling. */
 static inline void bw_fp_fdivs(CPUState* cpu, u8 d, u8 a, u8 b) {
     const f64 x = cpu->fpr[a], y = cpu->fpr[b];
-    if (__builtin_expect(!(bw_fp_finite(x) && bw_fp_finite(y)) || y == 0.0, 0)) {
+    if (__builtin_expect(!(bw_fp_finite(x) && bw_fp_finite(y)) ||
+                         (bw_fp_bits(y) & 0x7FF0000000000000ull) == 0, 0)) {
         ppc_fdivs(cpu, d, a, b);
         return;
     }
