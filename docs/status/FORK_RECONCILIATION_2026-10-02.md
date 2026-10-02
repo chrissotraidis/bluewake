@@ -726,3 +726,18 @@ Release fixtures now pass (0.56 seconds). Five portable scheduler/observation
 fixtures are also added to the Windows source-only workflow; that run is pending.
 A fresh host/controlled route must qualify the restored observation before any
 broader acceptance claim.
+
+
+At `7b7e530eb6c404fbb6cfcc4b7c3149f36b61cb61`, the rebuilt bundled host
+and all **248/248 Mac regressions** pass (67.65 seconds), now with the eight
+restored assertion fixtures active. Repository audit and the source ZIP content
+gate pass. The controlled old/new-host comparison uses the same ordinary
+module/runtime and preserved old host binary; it remains in progress.
+
+A separate synthetic scheduler probe also identifies follow-up work before
+further loop optimization: alternating charged and zero-charge blocks return
+after 18 dispatches / 18 cycles with a 50-cycle budget. The purported run
+counter is static and does not reset after a charged block, so it counts
+nonconsecutive zero-charge blocks. Preserve the current loop inputs while the
+corrected FP module compiles, then repair and qualify consecutive-run/reset
+semantics separately. No timing or gameplay conclusion follows from this probe.
