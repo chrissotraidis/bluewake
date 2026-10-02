@@ -11,11 +11,14 @@ do not reopen their campaigns or broaden the migration objective.
 
 Work in this order:
 
-1. Finish the already-running frozen optimized/reference build pair. Run the
-   existing combined correctness routes, then one matched, quiet performance
-   comparison. Decide whether the combined path is suitable for the candidate.
-   Add instrumentation or another optimization only for a reproduced blocker.
-2. While the build finishes, complete the clean Mac owned-disc builder and a
+1. The frozen optimized/reference comparison is complete: bounded Outset timing
+   improves from 24.43 to 30.01 game FPS, with the correctness scope and slightly
+   worse frame tails recorded in the ledger. Carry that existing combined
+   configuration into an explicit Mac player-build candidate, including matching
+   preparation, training/compiler choices and bundle defaults. Preserve the
+   ordinary path pending end-to-end acceptance. Add instrumentation or another
+   optimization only for a reproduced blocker.
+2. Complete the clean Mac owned-disc builder and a
    relocatable personal app. It must launch outside the source checkout without
    private caches, preserve the player's normal saves/preferences and record
    source/dependency provenance. Reuse the existing builder and desktop host.

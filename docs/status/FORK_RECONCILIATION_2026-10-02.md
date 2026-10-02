@@ -559,10 +559,19 @@ a claim of identical state at every intervening instruction. The existing route 
   passes: four complete checkpoints through retrace 2,000, 37 player states,
   both images and all route/card records match, with zero delivery/clock drift.
   Production depth feedback remains enabled. No checkpoint bytes are masked,
-  and the original live-depth failure is retained. A six-run alternating-order
-  timing comparison using normal live depth feedback is running after compiler
-  activity ends. These builds reuse private translation; clean player builds,
-  live-depth full-state equality and overall performance parity remain unaccepted.
+  and the original live-depth failure is retained. The six-run alternating-order
+  timing comparison with normal live depth feedback completes on an Apple M3 Max,
+  with no competing compiler/game process detected before or after each run.
+  The 1,200–2,000 retrace Outset window measures median equivalent game rates of
+  **24.43 FPS reference versus 30.01 FPS combined (+22.8%)**, with original 30 Hz
+  logic and interpolation off. All route/card records match. Frame-time tails
+  do not improve: per-run p99 is 42.64–43.37 ms reference and 44.42–46.33 ms
+  combined; frames above 50 ms total one versus two across the three runs each.
+  These are bounded developer-build measurements using retained translation,
+  not sustained gameplay, clean player-build or donor Windows performance proof.
+  Select the combined path for an explicit Mac player-build candidate, preserving
+  the ordinary path until end-to-end acceptance. Live-depth full-state equality
+  and overall performance parity remain unaccepted.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -659,11 +668,13 @@ Chris reoriented the loop after the initial integration campaign. The next
 iterations prioritize the complete player experience; see the current section
 of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
 
-1. **Combined performance decision:** collect the quiet matched timing after
-   passing intro and controlled-depth rendered correctness checks. Use the
-   result to select candidate defaults; no new optimization family without a
-   reproduced blocker. Keep original 30 Hz logic and experimental display modes
-   off by default.
+1. **Carry the measured configuration into the player build:** the combined
+   path's bounded Outset improvement justifies an explicit Mac builder candidate.
+   Wire the existing preparation, training/compiler choices and bundle defaults
+   consistently, then run it from the player's disc. Preserve the ordinary path
+   while sustained/frame-tail and gameplay acceptance remain open. No new
+   optimization family without a reproduced blocker; original 30 Hz logic and
+   experimental display modes off remain the defaults.
 2. **Clean Mac player path (current implementation):** extend the existing
    builder, assemble a relocatable personal app and launch it outside the repo.
    Validate disc-to-app provenance, resume, save/reload and data-preserving
