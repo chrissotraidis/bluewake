@@ -62,7 +62,9 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#22](https://github.com/chrissotraidis/bluewake/pull/22) | `69426b2` | Per-turn consecutive dispatch counter; unit/sanitizer, strict module boot and native Windows checks pass |
 | [#23](https://github.com/chrissotraidis/bluewake/pull/23) | `b85f931` | Gather/inline-memory contract foundation; two reproduced guards, local contracts and all 41 native Windows tests pass; module/renderer/performance qualification open |
 | [#24](https://github.com/chrissotraidis/bluewake/pull/24) | `608edaa` | Independent gather-module preparation; nine cache tests, strict function/boot comparisons and 41 native Windows tests pass; host batching not selected |
-| [#25](https://github.com/chrissotraidis/bluewake/pull/25) | `80eb353` | Explicit host writer/batching; 42 native Windows tests and bounded Mac route/card/intro-image comparisons pass; longer player route running |
+| [#25](https://github.com/chrissotraidis/bluewake/pull/25) | `80eb353` | Explicit host writer/batching; 42 native Windows tests and bounded Mac route/card/intro-image comparisons pass; 23,000-retrace route/card match; player-control trigger not reached |
+
+| [#26](https://github.com/chrissotraidis/bluewake/pull/26) | `9de9cf2` | Optional complete-coverage checkpoint comparisons; six CPU/RAM/REL hash checkpoints match over 6,000 headless retraces; native Windows and Aurora pair pending |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -112,8 +114,9 @@ wording saying "600 exact guest states" overstated this evidence; this correctio
 also applies to the historical appendix. Route/card, independently checked timing,
 function-fixture and image results retain their stated scopes. The 30,000-case
 function fixtures do compare full CPU/RAM within those cases. Broader optional
-checkpoint instrumentation is implemented and its local fixtures pass; no new
-full-route checkpoint result is accepted yet. The existing route comparator remains unchanged.
+checkpoint instrumentation and its local fixtures pass; six headless checkpoints
+now match across the 6,000-retrace Off/direct pair. This is sampled coverage, not
+a claim of identical state at every intervening instruction. The existing route comparator remains unchanged.
 
 - **Host/runtime regressions:** all 248 Mac tests pass at `7b7e530` (67.65 s).
   Eight older assertion-based fixtures were previously disabled by Release's
@@ -173,8 +176,12 @@ full-route checkpoint result is accepted yet. The existing route comparator rema
   600 matching selected startup records and zero delivery/clock drift. The
   renderer pair also has two identical nonblank 1920x1440 intro frames at
   retraces 2,000/4,000. An older module without writer exports stays Off when
-  batching is requested. A longer player-control route is running; no sustained
-  gameplay or performance acceptance follows from the short intro comparison.
+  batching is requested. Both 23,000-retrace Aurora runs complete normally with
+  matching route/card records and zero delivery/clock drift, but neither reaches
+  the player-control trigger or captures player frames. The private driver's
+  incorrect expectation of 2,300 legacy trace records fails; its original failure
+  is retained. Empty capture sets do not establish image agreement. Player-control,
+  sustained gameplay and performance acceptance remain open.
 - **Checkpoint coverage:** optional `BLUEWAKE_GUEST_CHECKPOINT_INTERVAL=N`
   hashes normalized CPU fields, full MEM1/MEM2 and registered REL storage at each
   Nth retrace. Native addresses and padding are excluded; pointer presence is
@@ -185,6 +192,11 @@ full-route checkpoint result is accepted yet. The existing route comparator rema
   malformed, truncated and differing evidence. Use it alongside route/card and
   image checks. It is disabled by default, adds measurement overhead when enabled,
   and does not cover GPU/peripheral state or execution between checkpoints.
+  At host `9de9cf2` / module `608edaa` / runtime `c2905b7a`, all six checkpoints
+  at retraces 1,000 through 6,000 match in the headless Off/direct pair, alongside
+  route/card and zero delivery/clock drift. Comparing the new instrumented Off
+  run with the previous host's Off run also preserves route/card/timing results.
+  The corresponding Aurora Off/batch pair and native Windows CI are pending.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -241,8 +253,8 @@ bugs. No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-1. Finish the running prepared-block O2 pair and longer batching route, then
-   verify their terminal artifacts. The baseline full PadMint package is complete;
+1. Finish the running prepared-block O2 pair and Aurora checkpoint comparison,
+   then verify their terminal artifacts. The baseline full PadMint package is complete;
    player signing and final-source/device acceptance remain open. Complete broader guest
    checkpoints and correct startup-only trace claims throughout the current evidence. Run matched performance measurements on a quiet
    machine; do not derive performance from current loaded runs.
