@@ -70,7 +70,15 @@ a newer runtime. Regular memory-card saves are unchanged. Direct/indexed FIFO
 capture, per-draw snapshots, normalization/disable flags, valid/legacy states and
 malformed-state rejection pass Release and ASan/UBSan, as do the donor matrix-fold
 checks. Five related save/FIFO/replay/texture regressions and the Mac host build
-pass. BlueWake lava-scene, ordinary-scene and native Windows checks are pending.
+pass. At source `f861eae`, the ordinary-module 2,000-retrace Outset movement route
+matches the prior `0ea7ffb` / `c2905b7a` host: four full-state checkpoints, all 37
+sampled player states, both nonblank frames and 1,050 route/card records match,
+with zero measured delivery/clock drift and unchanged original save. An initial
+private comparator compared JSON lists with regex tuples; comparing the completed
+canonical receipts resolves that harness error without rerunning the game.
+BlueWake affected-lava-scene and native Windows checks remain pending. The Windows
+frontend test reserves 8 MiB stack: the current Mac compiler reports a 2,297,504-byte
+main frame for the existing replay suite's multiple complete frontend objects.
 No donor screenshot or performance result is counted as BlueWake acceptance.
 
 ## Source checkpoints and integration order
@@ -103,6 +111,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#30](https://github.com/chrissotraidis/bluewake/pull/30) | `a294985`, import `a080b16` | Four certified native matrix functions, cached dispatch and optional workers; routed fixtures, four-way intro/saved-game state/image comparisons and all 48 native Windows tests pass; combined performance/gameplay open |
 | [#31](https://github.com/chrissotraidis/bluewake/pull/31) | `4cfd99e`, import `46365c2` | Native skinning with certified entry routing; full-CPU/MEM1 fixtures, three-way startup comparisons and all 49 native Windows tests pass; saved-game state/image comparisons pass; combined performance open |
 | [#32](https://github.com/chrissotraidis/bluewake/pull/32) | `0ea7ffb`, import `ca8c584`, fixture `459df34` | Twelve certified game-math entries; full-CPU/protected-MEM1 fixtures, three-way intro comparison and all 50 native Windows tests pass; saved-game state/image comparisons pass; combined optimized qualification in progress |
+| [#33](https://github.com/chrissotraidis/bluewake/pull/33) | `f861eae`, runtime `18ba3b64` | Later donor post-texture renderer fix with backward-compatible save-state loading; FIFO/fold/sanitizer checks and Outset state/image comparison pass; affected lava scene and native Windows checks pending |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime

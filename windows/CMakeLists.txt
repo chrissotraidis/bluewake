@@ -397,6 +397,8 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
 
     add_executable(bluewake_frontend_test ${GXRUNTIME_DIR}/graphics/frontend/tests/frontend_replay_test.cpp)
     target_link_libraries(bluewake_frontend_test PRIVATE GXRuntime::retail_gx_frontend)
+    # Replay fixtures hold multiple complete frontend states (over 2 MiB).
+    target_link_options(bluewake_frontend_test PRIVATE "LINKER:/STACK:8388608")
     add_test(NAME bluewake_frontend_test COMMAND bluewake_frontend_test)
     set_tests_properties(bluewake_frontend_test PROPERTIES TIMEOUT 30)
 
