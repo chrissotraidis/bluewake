@@ -189,7 +189,13 @@ The prepaid-block candidate has bounded correctness evidence on an M3 Max:
 30,000 cases across 14 SDK/J3D entries compare every CPU/RAM byte between two
 privately generated, uninstrumented O0 modules, including deadline observation
 suffixes and partial stops. Deliberate suffix/RAM mutations fail the fixture.
-This is function-level equivalence, not Windows timing or gameplay acceptance.
+A conservative transform also passes a controlled 6,000-retrace headless boot
+comparison: 1,050 canonical records, resulting cards and 600 guest-state samples
+match, with zero scheduling drift. It retains every PC store and leaves blocks
+that refund cycles or use unsupported prepaid-state forms untouched. Earlier
+less conservative candidates failed the existing route comparator. This is
+bounded Mac O0 correctness; optimized x86, Windows timing and gameplay
+acceptance remain open.
 The builder records the optimization selection and script hash, rejects stale
 generated-tree reuse, and safely re-prepares after an interrupted stage. Changing
 the selection regenerates the appropriate source; it does not change game logic,

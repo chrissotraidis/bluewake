@@ -371,7 +371,8 @@ requires game data. Local strict C11 compilation with `-Wall -Wextra -Werror`
 passes, as does the repository audit. A baseline-against-itself smoke exercises
 all 14 entries, establishing harness operation only.
 
-The isolated owned-disc source contains 443,166 prepared blocks in 813 chunks.
+The initial donor-style isolated owned-disc source contains 443,166 prepared
+blocks in 813 chunks. The conservative successor below prepares fewer blocks.
 Both full O0 comparison modules compiled and linked all 822 units, using
 source `95adeed`, runtime `99e47480`, Apple Clang 21 and identical optimization /
 floating-point flags, without profiling instrumentation. **30,000 cases pass**
@@ -408,3 +409,53 @@ Other donor native helpers describe guest-register/stack/cycle behavior derived
 from the translation. None of these replacement bodies were imported in the
 generic batch; provenance, fallback and function-level correctness still need
 separate qualification. This source inventory does not clear the release audit.
+
+### Broader boot-route experiment, still open
+
+At `e2789b7`, native Windows app/manual-fixture linking and 31/31 regressions
+pass ([run 36953040570](https://github.com/chrissotraidis/bluewake/actions/runs/36953040570)).
+The cache regressions pass in repository CI; a fresh tracked-source ZIP also
+passes `check_public_assets.sh`, with zero address-named functions. The ZIP
+stays local and no release is authorized.
+
+The initial two 6,000-retrace headless routes each exit normally. Their 1,050
+canonical route records match, but the card-inclusive digests differ: the
+independently created cards have 14 different header bytes. That experiment did
+not control initial card identity and cannot accept the card comparison.
+The 600 guest-state samples also differ at 217 positions (PC and some cycle /
+interrupt observations), so these results do not establish complete state
+identity. Keep this evidence; do not relax the comparator to claim a pass.
+
+Subsequent experiments use byte-identical seed cards and SRAM in separate
+folders, with the same host/modules/settings and 6,000-retrace ceiling. The
+original O0 baseline and all candidate modules/receipts are retained privately.
+Compilation load excludes wall-clock performance acceptance. These are headless
+boot checks, not rendered or audible gameplay, save/reload or current
+affected-device acceptance.
+
+The controlled-input repeat finishes normally, with byte-identical result
+cards and 1,049 identical canonical summary/delivery records. It still fails
+the existing route comparator: the final-PC record differs (`80324DC0` versus
+`80324D68`), and 22/600 exact guest-state samples differ. The comparator and
+its scheduling bounds are unchanged. This is a failed broader qualification
+of the donor-style transform despite the passing 14-function fixture. Retaining
+every PC store alone subsequently fails with the same final-PC values and
+22/600 differing samples, so PC removal alone does not explain the mismatch.
+The unchanged comparator correctly keeps both candidates unaccepted.
+
+The conservative successor retains all PC stores and leaves any block with
+deadline refunds or unsupported prepaid-state expressions entirely unchanged.
+It prepares **197,459 blocks in 812 chunks**. Both full 822-unit O0 modules link,
+and the successor passes the same 30,000 CPU/RAM comparisons. Its controlled
+6,000-retrace boot route passes the existing comparator: all 1,050 canonical
+records match, output cards are byte-identical, scheduling/clock drift is zero,
+and all 600 exact guest-state samples match. Both hosts exit normally.
+The current transformer reproduces every tested chunk byte-for-byte; exact
+source/module/script identities and inputs remain in private receipts.
+
+Five synthetic regressions pass: the three cache checks plus retention of
+PC/suffix observations and exclusion of refund/unknown prepaid-state forms.
+This accepts bounded Mac O0 function/boot correctness only. Optimized x86
+qualification, matched timing and actual Windows/Apple gameplay remain open.
+Keep the builder option off by default and the PR in draft; no performance
+parity or public-release acceptance is claimed.

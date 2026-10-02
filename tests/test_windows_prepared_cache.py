@@ -13,6 +13,9 @@ REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("windows_builder", REPO / "scripts/windows/build.py")
 bw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bw)
+fast_spec = importlib.util.spec_from_file_location("fast_blocks", REPO / "scripts/windows/fast_blocks.py")
+fast = importlib.util.module_from_spec(fast_spec)
+fast_spec.loader.exec_module(fast)
 
 # A small invented instruction block with the translator's public charge form.
 CHUNK = '''#include "../generated.h"
@@ -34,6 +37,35 @@ void synthetic(CPUState* ctx) {
 }
 '''
 MARK = "bluewake: prepaid block copies"
+
+
+class PreparedBlockSelectionTest(unittest.TestCase):
+    def test_retains_pc_and_prepaid_observation_suffix(self):
+        source = CHUNK.replace("    ctx->gpr[4] += 1u;",
+                               "    ctx->cycle_observation_suffix = cycle_block_prepaid ? 1u : 0u;\n"
+                               "    ctx->gpr[4] += 1u;")
+        converted, count = fast.transform(source)
+        self.assertEqual(count, 1)
+        copy = converted.split("bwfast_0:\n", 1)[1]
+        self.assertIn("ctx->pc = 0x80001004u;", copy)
+        self.assertIn("ctx->cycle_observation_suffix = 1u;", copy)
+        self.assertNotIn("dolrecomp_charge_precise", copy)
+        self.assertEqual(fast.transform(converted), (converted, 0))
+
+    def test_refund_and_unknown_prepaid_forms_keep_original_body(self):
+        refund = """    if (cycle_block_prepaid &&
+        ctx->cycle_deadline_budget > 0 &&
+        (s64)ctx->cycle_observation_suffix > ctx->cycle_deadline_budget) {
+        ctx->downcount += (s64)ctx->cycle_observation_suffix;
+        cycle_block_prepaid = false;
+    }
+"""
+        for unsupported in (refund, "    cycle_block_prepaid = false;\n",
+                            "    synthetic_observe(cycle_block_prepaid);\n"):
+            with self.subTest(form=unsupported):
+                source = CHUNK.replace("    ctx->gpr[4] += 1u;",
+                                       unsupported + "    ctx->gpr[4] += 1u;")
+                self.assertEqual(fast.transform(source), (source, 0))
 
 
 class PreparedCacheTest(unittest.TestCase):
