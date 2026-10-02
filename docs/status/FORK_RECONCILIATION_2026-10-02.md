@@ -55,8 +55,8 @@ represented by the fixed main snapshot. The later implementation commits are:
   controller haptics, including Mac/Windows controls and Windows build wiring.
 
 These changes are not included in the fixed-baseline parity evidence above.
-The current candidate has no `haptics.c` implementation. Review and reconcile
-this later-change list before recommending cutover; donor commit descriptions
+Both implementations are now imported; their remaining qualification is tracked
+below before recommending cutover; donor commit descriptions
 are not BlueWake validation. Do not silently repin the active qualification
 builds or treat the fixed baseline as the donor's current head.
 
@@ -84,8 +84,29 @@ main frame for the existing replay suite's multiple complete frontend objects.
 A paired 3,000-retrace warp to Dragon Roost Cavern room 2 also matches all six
 checkpoints, route/card/timing and both images, but visual inspection shows the
 entrance barricade obscures the lava. This is not affected-scene acceptance.
-A paired upper-bridge-spawn run is in progress; its spawn was located from the
-player-owned room metadata. No donor screenshot or performance result is counted as BlueWake acceptance.
+Two further 2,500-retrace upper-bridge runs (including a camera-downward probe)
+match five checkpoints each, route/card/timing and both frames per pair. Local
+inspection still does not show the lava surface: the second view faces down onto
+the platform. The next affected-scene experiment must change to a lower route;
+these three room probes do not establish the reported colour fix. No donor
+screenshot or performance result is counted as BlueWake acceptance.
+
+Elliott's exact `haptics.c` / `.h` from `7ca0cb9` are retained in authored import
+`193870f`. The adaptation connects retraces, SI motor decoding, Mac/Windows
+controls and all three host source lists, preserving the Windows saved/session
+preference separation and the iOS Classic stub. Two actual virtual-controller
+regressions reproduce the imported menu behavior: Classic still forwards while
+blocked, and Enhanced does not silence immediately when the Mac pauses retraces.
+Both are corrected. Explicit shutdown clears output before SDL/CPU teardown;
+DualSense watchdog callbacks validate their current timer under the joystick
+lock, and disconnected slots can be reused. The test virtual controller is
+closed/detached during shutdown. Strength/trigger controls apply to Enhanced.
+The full Mac host and eight focused regressions pass, including Xbox-style
+rumble, DualSense expiry/rearm, ten reconnects, menu silence, shutdown and saved
+preference preservation. Repository audit passes. Native Windows build, actual
+Mac/Windows menu interaction, real controllers, game vibration preference and
+bounded gameplay comparison remain pending; virtual output is not felt-feedback
+acceptance.
 
 ## Source checkpoints and integration order
 
@@ -554,7 +575,8 @@ bugs. No issue is closed or externally commented on by this work.
    scheduling/hooks, gameplay and matched measurements. All fixed-baseline native
    helper families now have direct source imports with contributor credit and
    bounded routing evidence. Finish the combined scene and optimized checks; retain the exact build/input identities. Later lava-rendering
-   and controller-haptics source integration also remains open.
+   and controller-haptics source is imported; affected-scene, real-controller
+   and platform qualification remains open.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
    fullscreen/restart, real controllers, save/reload, upgrades and sustained play.

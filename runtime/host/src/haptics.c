@@ -9,6 +9,7 @@
 // iOS: the game's own motor bits drive the device's rumble, as before.
 void bluewake_haptics_attach(CPUState* cpu) { (void)cpu; }
 void bluewake_haptics_retrace(void) {}
+void bluewake_haptics_shutdown(void) {}
 void bluewake_haptics_reload(void) {}
 void bluewake_haptics_block(bool blocked) { (void)blocked; }
 bool bluewake_haptics_forward_motor(void) { return true; }
@@ -124,7 +125,7 @@ static void read_settings(void) {
                                                                                 : MODE_OFF;
     const char* strength = getenv("BLUEWAKE_HAPTICS_STRENGTH");
     const double percent = strength != NULL && strength[0] != '\0' ? atof(strength) : 80.0;
-    g_strength = percent < 0.0 ? 0.0 : percent > 100.0 ? 1.0 : percent / 100.0;
+    g_strength = !isfinite(percent) ? 0.8 : percent < 0.0 ? 0.0 : percent > 100.0 ? 1.0 : percent / 100.0;
     g_triggers = !env_is("BLUEWAKE_HAPTICS_TRIGGERS", '0');
     g_trace = env_is("BLUEWAKE_HAPTICS_TRACE", '1') || env_is("BLUEWAKE_HAPTICS_TRACE", '2');
     g_trace_raw = env_is("BLUEWAKE_HAPTICS_TRACE", '2');
@@ -132,9 +133,9 @@ static void read_settings(void) {
 
 // Classic, and Enhanced until the vibration object is found (on a disc this
 // was not written for, never): the game's own on-off motor.
-bool bluewake_haptics_forward_motor(void) { return g_mode == MODE_CLASSIC || (g_mode == MODE_ENHANCED && !g_found); }
-
-void bluewake_haptics_block(bool blocked) { g_blocked = blocked; }
+bool bluewake_haptics_forward_motor(void) {
+    return !g_blocked && (g_mode == MODE_CLASSIC || (g_mode == MODE_ENHANCED && !g_found));
+}
 
 // --- output ---------------------------------------------------------------------
 
@@ -175,41 +176,52 @@ static bool dualsense_send(SDL_Gamepad* pad, int amplitude) {
 }
 
 static Uint32 SDLCALL dualsense_watchdog(void* userdata, SDL_TimerID timer, Uint32 interval) {
-    (void)timer;
     (void)interval;
     const int slot = (int)(uintptr_t)userdata;
-    SDL_Gamepad* pad = SDL_GetGamepadFromID(g_dualsense[slot].id);
-    if (pad != NULL)
-        dualsense_send(pad, 0);
-    SDL_SetAtomicInt(&g_dualsense[slot].cleared, 1);
-    return 0; // once
+    SDL_LockJoysticks();
+    // Removal can race a callback already dispatched by SDL. Only the current
+    // timer may clear this slot; the lock also protects disconnect/reuse.
+    if (g_dualsense[slot].watchdog == timer) {
+        SDL_Gamepad* pad = SDL_GetGamepadFromID(g_dualsense[slot].id);
+        if (pad != NULL)
+            dualsense_send(pad, 0);
+        SDL_SetAtomicInt(&g_dualsense[slot].cleared, 1);
+        g_dualsense[slot].watchdog = 0;
+    }
+    SDL_UnlockJoysticks();
+    return 0;
 }
 
 static void dualsense_triggers(SDL_Gamepad* pad, SDL_JoystickID id, double level) {
+    SDL_LockJoysticks();
     int slot = -1;
-    for (int i = 0; i < kMaxPads; i++)
-        if (g_dualsense[i].id == id || (slot < 0 && g_dualsense[i].id == 0))
+    for (int i = 0; i < kMaxPads; i++) {
+        if (g_dualsense[i].id == id) { slot = i; break; }
+        if (slot < 0 && (g_dualsense[i].id == 0 || SDL_GetGamepadFromID(g_dualsense[i].id) == NULL))
             slot = i;
-    if (slot < 0)
-        return;
-    g_dualsense[slot].id = id;
-    if (g_dualsense[slot].watchdog != 0) {
-        SDL_RemoveTimer(g_dualsense[slot].watchdog);
-        g_dualsense[slot].watchdog = 0;
     }
-    if (SDL_GetAtomicInt(&g_dualsense[slot].cleared) != 0) {
-        SDL_SetAtomicInt(&g_dualsense[slot].cleared, 0);
+    if (slot < 0) { SDL_UnlockJoysticks(); return; }
+    SDL_TimerID previous = g_dualsense[slot].watchdog;
+    g_dualsense[slot].watchdog = 0;
+    if (g_dualsense[slot].id != id || SDL_GetAtomicInt(&g_dualsense[slot].cleared))
         g_dualsense[slot].amplitude = 0;
-    }
-    // Amplitude in steps of 1-8; a change of a step or more is sent.
+    g_dualsense[slot].id = id;
+    SDL_SetAtomicInt(&g_dualsense[slot].cleared, 0);
     const int amplitude = level < 0.05 ? 0 : 1 + (int)lround(level * 7.0);
+    bool sent = true;
     if (amplitude != g_dualsense[slot].amplitude) {
-        if (!dualsense_send(pad, amplitude))
-            return; // not over HIDAPI (no effect reports): its rumble still works
-        g_dualsense[slot].amplitude = amplitude;
+        sent = dualsense_send(pad, amplitude);
+        if (sent) g_dualsense[slot].amplitude = amplitude;
     }
-    if (amplitude > 0)
+    if (g_dualsense[slot].amplitude > 0) {
         g_dualsense[slot].watchdog = SDL_AddTimer(kWatchdogMs, dualsense_watchdog, (void*)(uintptr_t)slot);
+        if (g_dualsense[slot].watchdog == 0) {
+            dualsense_send(pad, 0); // No persistent effect without its expiry.
+            g_dualsense[slot].amplitude = 0;
+        }
+    }
+    SDL_UnlockJoysticks();
+    if (previous != 0) SDL_RemoveTimer(previous);
 }
 
 // Every open controller gets the same levels (0-1, before strength).
@@ -251,6 +263,45 @@ static void silence(Uint64 now) {
     g_heavy = g_light = g_trigger = 0.0;
     g_shock.on = false;
     send(0.0, 0.0, 0.0, now);
+}
+
+void bluewake_haptics_block(bool blocked) {
+    if (blocked && !g_blocked) {
+        for (u32 channel = 0; channel < 4; ++channel)
+            dol_platform_pad_control_motor(channel, 2u);
+        silence(SDL_GetTicksNS());
+    }
+    g_blocked = blocked;
+}
+
+static SDL_JoystickID g_virtual_id;
+static SDL_Gamepad* g_virtual_pad;
+
+void bluewake_haptics_shutdown(void) {
+    bluewake_haptics_block(true);
+    for (int i = 0; i < kMaxPads; ++i) {
+        SDL_LockJoysticks();
+        SDL_TimerID timer = g_dualsense[i].watchdog;
+        g_dualsense[i].watchdog = 0;
+        SDL_Gamepad* pad = SDL_GetGamepadFromID(g_dualsense[i].id);
+        if (pad != NULL && g_dualsense[i].amplitude > 0) dualsense_send(pad, 0);
+        g_dualsense[i].id = 0;
+        g_dualsense[i].amplitude = 0;
+        SDL_SetAtomicInt(&g_dualsense[i].cleared, 0);
+        SDL_UnlockJoysticks();
+        if (timer != 0) SDL_RemoveTimer(timer);
+    }
+    if (g_virtual_pad != NULL) SDL_CloseGamepad(g_virtual_pad);
+    if (g_virtual_id != 0) SDL_DetachVirtualJoystick(g_virtual_id);
+    g_virtual_pad = NULL;
+    g_virtual_id = 0;
+    g_cpu = NULL;
+    g_found = false;
+    g_looked = g_retrace = 0;
+    g_frame_seen = false;
+    g_shock_idx = g_quake_idx = -1;
+    g_shock_frame = -99;
+    g_quake_on = false;
 }
 
 // --- testing ---------------------------------------------------------------------
@@ -332,9 +383,9 @@ static bool SDLCALL virtual_effect(void* userdata, const void* data, int size) {
     const Uint8* bytes = (const Uint8*)data;
     if (size >= 32)
         fprintf(stderr,
-                "[haptics-virtual] retrace=%llu effect enable=0x%02X right=%02X %02X%02X %02X%02X%02X%02X f=%u "
+                "[haptics-virtual] ticks=%llu effect enable=0x%02X right=%02X %02X%02X %02X%02X%02X%02X f=%u "
                 "left=%02X\n",
-                g_retrace, bytes[0], bytes[10], bytes[12], bytes[11], bytes[16], bytes[15], bytes[14], bytes[13],
+                (unsigned long long)SDL_GetTicks(), bytes[0], bytes[10], bytes[12], bytes[11], bytes[16], bytes[15], bytes[14], bytes[13],
                 bytes[19], bytes[21]);
     return true;
 }
@@ -359,6 +410,8 @@ static void attach_virtual(const char* kind) {
     }
     const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
     SDL_Gamepad* pad = id != 0 ? SDL_OpenGamepad(id) : NULL;
+    g_virtual_id = id;
+    g_virtual_pad = pad;
     fprintf(stderr, "[haptics] test: virtual %s %s (%s)\n", desc.name, pad != NULL ? "attached" : "failed",
             pad != NULL ? (SDL_GetGamepadType(pad) == SDL_GAMEPAD_TYPE_PS5 ? "PS5" : "Xbox") : SDL_GetError());
 }
@@ -377,6 +430,8 @@ static bool pattern_bit(u32 pattern, s32 length, s32 k) {
 }
 
 void bluewake_haptics_attach(CPUState* cpu) {
+    if (g_cpu != NULL) bluewake_haptics_shutdown();
+    g_blocked = false;
     g_cpu = cpu;
     read_settings();
     read_tests();

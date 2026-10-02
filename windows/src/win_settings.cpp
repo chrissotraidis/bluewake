@@ -57,6 +57,8 @@ extern "C" {
 void bluewake_mouse_camera_configure(bool enabled, double sensitivity, bool invert_y);
 void bluewake_mouse_camera_block(bool blocked);
 bool bluewake_mouse_camera_captured(void);
+void bluewake_haptics_reload(void);
+void bluewake_haptics_block(bool blocked);
 const char* bluewake_game_options_describe(uint32_t position, const char** title, bool* default_on, bool* on);
 }
 
@@ -126,6 +128,9 @@ void load_file() {
         else if (k == "controller_swap_xy") d.controller_swap_xy = parse_bool(v);
         else if (k == "controller_invert_x") d.pad_invert_x = parse_bool(v);
         else if (k == "controller_invert_y") d.pad_invert_y = parse_bool(v);
+        else if (k == "haptics") d.haptics = v == "off" ? 0 : v == "classic" ? 1 : 2;
+        else if (k == "haptics_strength") d.haptics_strength = std::clamp(std::atoi(v.c_str()), 0, 100);
+        else if (k == "haptics_triggers") d.haptics_triggers = parse_bool(v);
         else if (k == "aspect") d.aspect = (v == "16:9" || v == "16:10") ? v : "4:3";
         else if (k == "keep_aspect") d.keep_aspect = parse_bool(v);
         else if (k == "betterww") d.betterww = parse_bool(v);
@@ -158,6 +163,9 @@ void save_file() {
                  d.mouse_sensitivity, d.mouse_invert_y);
     std::fprintf(f, "controller_swap_ab=%d\ncontroller_swap_xy=%d\n", d.controller_swap_ab, d.controller_swap_xy);
     std::fprintf(f, "controller_invert_x=%d\ncontroller_invert_y=%d\n", d.pad_invert_x, d.pad_invert_y);
+    std::fprintf(f, "haptics=%s\nhaptics_strength=%d\nhaptics_triggers=%d\n",
+                 d.haptics == 0 ? "off" : d.haptics == 1 ? "classic" : "enhanced",
+                 d.haptics_strength, d.haptics_triggers);
     std::fprintf(f, "aspect=%s\nkeep_aspect=%d\nbetterww=%d\nhd_textures=%d\nlle_audio=%d\n", d.aspect.c_str(),
                  d.keep_aspect, d.betterww, d.hd_textures, d.lle_audio);
     for (const auto& [name, on] : d.options)
@@ -332,6 +340,16 @@ void apply_smooth_rate(SDL_Window* window) {
     aurora_set_frame_interp_steps(bw_smooth_steps(g_session.smooth_steps, display_refresh(window)));
 }
 
+const char* haptics_name(int mode) { return mode == 0 ? "off" : mode == 1 ? "classic" : "enhanced"; }
+
+void apply_haptics() {
+    const Settings& d = g_session;
+    _putenv_s("BLUEWAKE_HAPTICS", haptics_name(d.haptics));
+    _putenv_s("BLUEWAKE_HAPTICS_STRENGTH", std::to_string(d.haptics_strength).c_str());
+    _putenv_s("BLUEWAKE_HAPTICS_TRIGGERS", d.haptics_triggers ? "1" : "0");
+    bluewake_haptics_reload();
+}
+
 void apply_live() {
     const Settings& d = g_session;
     aurora_set_frame_buffer_scale(static_cast<float>(d.render_scale));
@@ -352,6 +370,7 @@ void set_menu_open(bool open) {
     // The menu's keys and clicks are not the game's.
     PADSetKeyboardActive(0, open ? FALSE : TRUE);
     bluewake_mouse_camera_block(open);
+    bluewake_haptics_block(open);
     std::fprintf(stderr, "[windows] settings menu %s\n", open ? "open" : "closed");
     if (!open && g_dirty)
         save_file();
@@ -492,6 +511,29 @@ void tab_controls() {
     pad |= ImGui::Checkbox("Swap X and Y", &d.controller_swap_xy);
     if (pad) {
         apply_controller();
+        changed();
+    }
+    ImGui::Spacing();
+    ImGui::SeparatorText("Haptics");
+    // The game's vibration on an Xbox controller, a DualSense and others:
+    // rendered from what the game asked for, or its own on-off motor.
+    static const char* const kHaptics[] = {"Off", "Classic (the game's own on and off)",
+                                           "Enhanced (shaped, with the triggers)"};
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+    bool haptics = ImGui::Combo("Controller vibration", &d.haptics, kHaptics, IM_ARRAYSIZE(kHaptics));
+    ImGui::BeginDisabled(d.haptics != 2);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
+    haptics |= ImGui::SliderInt("Vibration strength", &d.haptics_strength, 0, 100, "%d%%");
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(d.haptics != 2);
+    haptics |= ImGui::Checkbox("Trigger feedback (Xbox impulse triggers, DualSense trigger vibration)",
+                               &d.haptics_triggers);
+    ImGui::EndDisabled();
+    ImGui::TextDisabled(d.haptics == 2   ? "    Hits, falls, explosions and quakes as the game times them, shaped by their strength."
+                        : d.haptics == 1 ? "    The motor on and off, as a GameCube controller's."
+                                         : "    No vibration. (The game's own Vibration option turns it off too.)");
+    if (haptics) {
+        apply_haptics();
         changed();
     }
     ImGui::Spacing();
@@ -914,6 +956,17 @@ extern "C" void bw_settings_apply_launch(void) {
         d.mouse_sensitivity = std::clamp(std::atof(std::getenv("BLUEWAKE_MOUSE_SENSITIVITY")), 0.1, 10.0);
     if (env_set("BLUEWAKE_MOUSE_INVERT_Y"))
         d.mouse_invert_y = std::getenv("BLUEWAKE_MOUSE_INVERT_Y")[0] == '1';
+    if (env_set("BLUEWAKE_HAPTICS")) {
+        const char mode = std::getenv("BLUEWAKE_HAPTICS")[0];
+        d.haptics = mode == 'e' || mode == '1' ? 2 : mode == 'c' ? 1 : 0;
+    }
+    if (env_set("BLUEWAKE_HAPTICS_STRENGTH"))
+        d.haptics_strength = std::clamp(std::atoi(std::getenv("BLUEWAKE_HAPTICS_STRENGTH")), 0, 100);
+    if (env_set("BLUEWAKE_HAPTICS_TRIGGERS"))
+        d.haptics_triggers = std::getenv("BLUEWAKE_HAPTICS_TRIGGERS")[0] != '0';
+    env_default("BLUEWAKE_HAPTICS", haptics_name(d.haptics));
+    env_default("BLUEWAKE_HAPTICS_STRENGTH", std::to_string(d.haptics_strength));
+    env_default("BLUEWAKE_HAPTICS_TRIGGERS", d.haptics_triggers ? "1" : "0");
     if (d.aspect != "4:3")
         env_default("BLUEWAKE_ASPECT", d.aspect);
     env_default("DOL_AURORA_ASPECT_FIT", d.keep_aspect ? "1" : "0");

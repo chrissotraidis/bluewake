@@ -35,6 +35,7 @@
 #include "settings_menu.h"
 #include "sprint.h"
 #include "quick_doors.h"
+#include "haptics.h"
 #include "draw_tags.h"
 #include "mouse_camera.h"
 #include "callback_delivery.h"
@@ -4386,9 +4387,11 @@ static void host_mmio_write(CPUState* ctx, u32 address, u64 value, u8 size) {
             static u8 s_motor[4];
             const u32 channel = (address - DOL_SI_BASE) / 0x0Cu;
             const u8 motor = (u8)((u32)value & 3u);
-            if (((u32)value >> 24) == 0x40u && motor != s_motor[channel]) {
+            // PADControlMotor encodes the command in bits 16-23.
+            if ((((u32)value >> 16) & 0xFFu) == 0x40u && motor != s_motor[channel]) {
                 s_motor[channel] = motor;
-                dol_platform_pad_control_motor(channel, motor);
+                if (bluewake_haptics_forward_motor())
+                    dol_platform_pad_control_motor(channel, motor);
                 if (g_input_log_enabled)
                     fprintf(stderr, "[rumble] channel=%u motor=%u retrace=%llu\n", channel,
                             (unsigned)motor, (unsigned long long)g_host_retrace_count);
@@ -4973,6 +4976,7 @@ static void host_sync_vi_cycles(CPUState* cpu) {
         bluewake_fps_watch_retrace();
         bluewake_fast_load_retrace(bluewake_host_thread_cpu_us());
         bluewake_quick_doors_retrace();
+        bluewake_haptics_retrace();
         if (g_wall_pace_enabled && !bluewake_fast_load_fast_forward())
             host_wall_pace(g_host_retrace_count);
         if (g_perf_log_enabled)
@@ -7592,6 +7596,7 @@ int main(int argc, char** argv) {
     bluewake_fast_load_attach(&cpu);
     bluewake_quick_doors_attach(&cpu);
     bluewake_draw_tags_attach(&cpu);
+    bluewake_haptics_attach(&cpu);
 
     unsigned long long blocks = 0;
     const char* stop_reason = NULL;
@@ -7936,6 +7941,7 @@ int main(int argc, char** argv) {
         if (load_state != NULL && load_state[0] != '\0') {
             if (!host_state_load(load_state, &cpu, mod, &state_loop)) {
                 fprintf(stderr, "[state] BLUEWAKE_LOAD_STATE=%s failed\n", load_state);
+                bluewake_haptics_shutdown();
                 if (aurora_enabled)
                     dol_aurora_shutdown();
                 return 1;
@@ -15573,6 +15579,7 @@ int main(int argc, char** argv) {
                 g_heap_write_watch_reports + g_heap_write_watch_control_reports);
     (void)bluewake_gather_pipe_configure(
         set_gather_word, set_gather_bytes, NULL, NULL, NULL, NULL, false);
+    bluewake_haptics_shutdown();
     if (aurora_enabled)
         dol_aurora_shutdown();
 #ifdef BLUEWAKE_HAS_DSP_ADAPTER

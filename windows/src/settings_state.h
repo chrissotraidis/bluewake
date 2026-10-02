@@ -20,6 +20,10 @@ struct Settings {
     bool mouse_invert_y = false;
     bool controller_swap_ab = false, controller_swap_xy = false;
     bool pad_invert_x = false, pad_invert_y = false;
+    // Elliott Tate's controller feedback: off, classic, enhanced.
+    int haptics = 2;
+    int haptics_strength = 80;
+    bool haptics_triggers = true;
     // At the next launch.
     std::string aspect = "4:3";
     bool keep_aspect = true;
@@ -55,6 +59,9 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.mouse_invert_y != session.mouse_invert_y) saved.mouse_invert_y = session.mouse_invert_y;
     if (before.pad_invert_x != session.pad_invert_x) saved.pad_invert_x = session.pad_invert_x;
     if (before.pad_invert_y != session.pad_invert_y) saved.pad_invert_y = session.pad_invert_y;
+    if (before.haptics != session.haptics) saved.haptics = session.haptics;
+    if (before.haptics_strength != session.haptics_strength) saved.haptics_strength = session.haptics_strength;
+    if (before.haptics_triggers != session.haptics_triggers) saved.haptics_triggers = session.haptics_triggers;
     if (before.aspect != session.aspect) saved.aspect = session.aspect;
     if (before.keep_aspect != session.keep_aspect) saved.keep_aspect = session.keep_aspect;
     if (before.betterww != session.betterww) saved.betterww = session.betterww;

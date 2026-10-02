@@ -8,16 +8,24 @@
 int main() {
     Settings saved;
     assert(!saved.smooth_motion && saved.smooth_steps == 1);
+    assert(saved.haptics == 2 && saved.haptics_strength == 80 && saved.haptics_triggers);
+    saved.haptics = 0; saved.haptics_strength = 25; saved.haptics_triggers = false;
     saved.options["old"] = true;
     Settings session = saved;
     session.fullscreen = true; session.render_scale = 4; session.lle_audio = true;
     session.smooth_motion = true; session.smooth_steps = -1; session.options["session_only"] = true;
+    session.haptics = 2; session.haptics_strength = 90; session.haptics_triggers = true;
     Settings before = session;
     session.show_fps = true;
     bw_settings_keep_edits(saved, before, session);
     assert(saved.show_fps && !saved.fullscreen && saved.render_scale == 0);
     assert(!saved.lle_audio && !saved.smooth_motion && saved.options.count("session_only") == 0);
     assert(saved.smooth_steps == 1); // A session override is not a stored edit.
+    assert(saved.haptics == 0 && saved.haptics_strength == 25 && !saved.haptics_triggers);
+    before = session;
+    session.haptics = 1; session.haptics_strength = 60; session.haptics_triggers = false;
+    bw_settings_keep_edits(saved, before, session);
+    assert(saved.haptics == 1 && saved.haptics_strength == 60 && !saved.haptics_triggers);
     before = session;
     session.render_scale = 2; session.options["edited"] = false;
     bw_settings_keep_edits(saved, before, session);

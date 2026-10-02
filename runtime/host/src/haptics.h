@@ -31,7 +31,7 @@
 // expires on its own (120 ms) if the host stops sending them.
 //
 //   BLUEWAKE_HAPTICS=enhanced|classic|off   default enhanced (iOS: the game's own, as before)
-//   BLUEWAKE_HAPTICS_STRENGTH=80            percent of full strength
+//   BLUEWAKE_HAPTICS_STRENGTH=80            Enhanced: percent of full strength
 //   BLUEWAKE_HAPTICS_TRIGGERS=0             no trigger rumble or trigger vibration
 //   BLUEWAKE_HAPTICS_TRACE=1                log each shock and quake and the motor levels
 //   BLUEWAKE_HAPTICS_TRACE=2                also the object's motor half each retrace, and
@@ -44,6 +44,8 @@
 
 // Once the guest is running (Aurora's window and SDL's gamepads exist).
 void bluewake_haptics_attach(CPUState* cpu);
+// Before closing controllers or releasing the guest CPU.
+void bluewake_haptics_shutdown(void);
 // Once per retrace.
 void bluewake_haptics_retrace(void);
 // Reads the BLUEWAKE_HAPTICS settings again (the options menu).
