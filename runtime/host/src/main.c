@@ -25,6 +25,7 @@
 #include "card_runtime.h"
 #include "host_stop.h"
 #include "gx_flush_metrics.h"
+#include "gather_pipe_bridge.h"
 #include "edge_intercepts.h"
 #include "game_options.h"
 #include "fast_load.h"
@@ -7400,6 +7401,18 @@ int main(int argc, char** argv) {
         if (set_edge_service)
             set_edge_service(host_chassis_edge_service, &cpu);
     }
+    BluewakeSetGatherWord set_gather_word = (BluewakeSetGatherWord)
+        dlsym(lib, "bluewake_composite_set_gather_pipe");
+    BluewakeSetGatherBytes set_gather_bytes = (BluewakeSetGatherBytes)
+        dlsym(lib, "bluewake_composite_set_gather_pipe_bytes");
+    const BluewakeGatherMode gather_mode = bluewake_gather_pipe_configure(
+        set_gather_word, set_gather_bytes, dol_platform_gx_write,
+        dol_platform_gx_write_bytes_available() ? dol_platform_gx_write_bytes : NULL,
+        getenv("BLUEWAKE_GATHER_PIPE"), getenv("BLUEWAKE_GATHER_PIPE_BATCH"),
+        g_gx_fifo_trace || BLUEWAKE_EDGE_CENSUS);
+    fprintf(stderr, "[chassis] gather-pipe=%s\n",
+            gather_mode == BLUEWAKE_GATHER_BATCH ? "batch" :
+            gather_mode == BLUEWAKE_GATHER_DIRECT ? "direct" : "off");
     host_mods_enable(lib, &cpu);
     bluewake_game_options_enable(lib, &cpu, g_options_mod);
     bluewake_mouse_camera_attach(&cpu);
@@ -15389,6 +15402,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[heap-journal] callback-writes=%llu watched=%u\n",
                 g_heap_write_watch_total,
                 g_heap_write_watch_reports + g_heap_write_watch_control_reports);
+    (void)bluewake_gather_pipe_configure(
+        set_gather_word, set_gather_bytes, NULL, NULL, NULL, NULL, false);
     if (aurora_enabled)
         dol_aurora_shutdown();
 #ifdef BLUEWAKE_HAS_DSP_ADAPTER

@@ -99,9 +99,13 @@ limits are tracked in the [reconciliation ledger](status/FORK_RECONCILIATION_202
 
 The `--gather-pipe` option also leaves the module ABI unchanged. It can be used
 with or without `--inline-fp` and records its helper hashes in build provenance.
-The current host does not install a direct FIFO writer, so stores still use the
-ordinary MMIO path while the inline RAM wrappers are qualified. Renderer batching,
-whole-module optimized comparisons and performance remain unaccepted.
+The host keeps direct FIFO writes off unless `BLUEWAKE_GATHER_PIPE=1` is set.
+With that enabled, `BLUEWAKE_GATHER_PIPE_BATCH=1` additionally requests batching
+on a backend that supports byte writes. Both require a module prepared with
+`--gather-pipe`; older modules keep their ordinary MMIO path. FIFO diagnostic
+tracing and edge-census builds retain the ordinary handler. Renderer batching,
+whole-module optimized comparisons and performance remain unaccepted until the
+reconciliation ledger records their specific qualification.
 
 ## Play
 

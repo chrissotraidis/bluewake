@@ -275,6 +275,14 @@ foreach(_variant plain global)
     endif()
     add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
 endforeach()
+add_executable(bluewake_gather_host_test
+    ${BLUEWAKE_REPO_ROOT}/tests/gather_host_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+target_include_directories(bluewake_gather_host_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
+target_link_libraries(bluewake_gather_host_test PRIVATE gxruntime)
+add_test(NAME bluewake_gather_host_test COMMAND bluewake_gather_host_test)
+
 add_executable(bluewake_gather_dispatch_test
     ${BLUEWAKE_REPO_ROOT}/tests/gather_dispatch_test.c
     ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c
