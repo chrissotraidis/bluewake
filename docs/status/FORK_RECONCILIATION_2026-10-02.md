@@ -763,3 +763,18 @@ The first Windows assertion-fixture run (36969791283) reaches compilation but
 fails because the new edge fixture lacks the existing compatibility-header
 include path (`dlfcn.h` from `game_options.c`). The shared fixture setup now
 uses that path; native build/regressions are being repeated.
+
+
+### Consecutive non-advancing dispatch repair
+
+The isolated probe is now a maintained regression through both the inline
+and exported loop entry points. It fails on the prior loop and passes after
+making the counter local to each call and resetting it after progress. An
+alternating sequence reaches its 50-cycle budget (49 dispatches); a genuinely
+stuck sequence still yields on its ninth non-advancing successor. Interrupted
+runs and subsequent turns/CPUs receive independent allowances. The existing
+initial-no-progress, exception, budget, host-yield and delivery tests remain.
+The Release CMake fixture and ASan/UBSan run pass. Whole-module and Windows
+qualification remain pending; no speedup is inferred from the synthetic probe.
+The header change was applied only after the preceding FP module finished
+linking, preserving that comparison's source inputs.

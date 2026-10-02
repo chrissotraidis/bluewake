@@ -13,6 +13,8 @@ typedef struct Fixture {
     unsigned exception_at;
     unsigned miss_at;
     unsigned no_progress_at;
+    bool alternate_zero;
+    bool stop_charging;
     u64 absolute_cycles;
     u64 delivery_deadline;
     u64 delivery_cycle;
@@ -26,8 +28,10 @@ static int dispatch(CPUState* cpu, u32 address) {
     if (fixture.miss_at != 0u && fixture.dispatches == fixture.miss_at)
         return 0;
     cpu->pc = address + 4u;
-    if (fixture.no_progress_at == 0u ||
-        fixture.dispatches != fixture.no_progress_at)
+    if (!(fixture.alternate_zero && !(fixture.dispatches & 1u)) &&
+        !(fixture.stop_charging && fixture.dispatches > 1u) &&
+        (fixture.no_progress_at == 0u ||
+         fixture.dispatches != fixture.no_progress_at))
         cpu->downcount -= 2;
     if (fixture.exception_at != 0u &&
         fixture.dispatches == fixture.exception_at)
@@ -62,6 +66,36 @@ static CPUState fresh_cpu(void) {
     memset(&cpu, 0, sizeof(cpu));
     cpu.cycle_budget = 8;
     return cpu;
+}
+
+typedef int (*RunLoop)(CPUState*, u32, BluewakeCompositeDispatchFn,
+                       BluewakeEdgeServiceFn, void*);
+
+static void check_zero_charge_runs(RunLoop run) {
+    // Real progress between zero-charge blocks must reset the consecutive run.
+    CPUState cpu = fresh_cpu();
+    cpu.cycle_budget = 50;
+    memset(&fixture, 0, sizeof(fixture));
+    fixture.alternate_zero = true;
+    assert(run(&cpu, 0x80001000u, dispatch, edge_service, &fixture));
+    assert(fixture.dispatches == 49u && cpu.downcount == -50);
+
+    // A host yield in the middle of a run must not consume the next turn's
+    // allowance, even for a different CPU using the same entry point.
+    cpu = fresh_cpu();
+    memset(&fixture, 0, sizeof(fixture));
+    fixture.stop_charging = true;
+    fixture.yield_at = 4;
+    assert(run(&cpu, 0x80001000u, dispatch, edge_service, &fixture));
+    assert(fixture.dispatches == 4u && cpu.downcount == -2);
+    for (unsigned turn = 0; turn < 2; ++turn) {
+        CPUState other = fresh_cpu();
+        memset(&fixture, 0, sizeof(fixture));
+        fixture.stop_charging = true;
+        assert(run(&other, 0x80002000u, dispatch, edge_service, &fixture));
+        // First dispatch advances; the ninth non-advancing successor yields.
+        assert(fixture.dispatches == 10u && other.downcount == -2);
+    }
 }
 
 int main(void) {
@@ -154,5 +188,7 @@ int main(void) {
     service_after_outer_return(&cpu);
     assert(fixture.delivery_cycle == outer_delivery_cycle);
     assert(fixture.delivery_pc == outer_delivery_pc);
+    check_zero_charge_runs(bluewake_composite_dispatch_until_boundary);
+    check_zero_charge_runs(bluewake_chassis_dispatch_loop);
     return 0;
 }

@@ -36,6 +36,7 @@ static inline int bluewake_chassis_dispatch_loop(
     if (ctx->downcount >= prior_downcount)
         return 1;
 
+    unsigned zero_charge_run = 0u;
     for (;;) {
         if (ctx->exception != 0u ||
             (ctx->cycle_budget > 0 &&
@@ -51,28 +52,14 @@ static inline int bluewake_chassis_dispatch_loop(
         if (!dispatched)
             return 1;
         if (ctx->downcount >= prior_downcount) {
-            /* A dispatched block that charges no cycles used to end the turn here,
-             * and that one exit owns 43.6 percent of the boot's turns: 598,350 of
-             * 1,372,978, with the whole inventory closing at budget 26.9, edge
-             * service 29.4 and dispatcher-miss 0.12 (docs/status/CURRENT.md,
-             * 2026-09-22). Tolerating a bounded run of them, screened on the
-             * certified pair, halves the turns for +2.67 percent of the play
-             * window - 398.3 M instructions a retrace against 409.2 M, digest
-             * 92dd816c unchanged over 1,050 records, both ceilings stopping at
-             * their certified pc.
-             *
-             * The bound is load-bearing rather than incidental: a block that
-             * charges nothing does not advance downcount, so a guest that stops
-             * charging - which is exactly what a stuck loop looks like - would
-             * never reach the budget exit above. A run of nine ends the turn, so
-             * the chassis always comes back to the host. */
-#define BLUEWAKE_ZERO_CHARGE_RUN_MAX 8u
-            static unsigned zero_charge_run;
-            if (++zero_charge_run <= BLUEWAKE_ZERO_CHARGE_RUN_MAX)
+            /* Eight non-advancing successors are allowed; the ninth yields
+             * so a stuck guest always returns to the host. Progress resets
+             * the run, and a new turn or CPU gets an independent allowance. */
+            if (++zero_charge_run <= 8u)
                 continue;
-            zero_charge_run = 0u;
             return 1;
         }
+        zero_charge_run = 0u;
     }
 }
 
