@@ -29,27 +29,24 @@ whenever the block is prepaid. A block this cannot read with certainty keeps
 no copy.
 
 The change is repeatable (a prepared chunk is left as it is) and keeps LF line
-ends. Run it last among the chunk rewrites (after direct_calls.py and
-native_skin.py, which match the original text) and before
-scripts/mods/prepare_simulation_60hz.py and prepare_native_math.py, which hash
-the chunks as they end up.
+ends. Prepare mod variants first and run this before recording the final
+generated-source digest. This generic transform accepts the ordinary pointer
+state chunks; it does not require fixed-register or native replacements.
+Qualification is manual until correctness and matched performance are accepted.
 """
 import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts/mods"))
-from prepare_native_math import LEAVES  # noqa: E402
-
-# The SDK leaves scripts/mods/prepare_native_math.py certifies by their
-# translated bodies' hashes keep their blocks as they are (the dispatcher and
-# the direct calls run them natively in any case).
-CERTIFIED = [(start, end) for start, end, _, _ in LEAVES]
+# Keep the four SDK leaves reserved by the donor's optional native-math
+# certification unchanged. The generic transform does not require importing
+# native replacements or enabling them in a player build.
+CERTIFIED = [(0x8030D0C8, 0x8030D0FC), (0x8030D0FC, 0x8030D1C8),
+             (0x8030DA44, 0x8030DA98), (0x8030DA98, 0x8030DB24)]
 
 MARK = "/* bluewake: prepaid block copies (scripts/windows/fast_blocks.py) */\n"
 INCLUDE = '#include "../generated.h"\n'
-FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx_param\) \{$")
+FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* (?:ctx|ctx_param)\) \{$")
 PRECHARGE = re.compile(r"^    cycle_block_prepaid = dolrecomp_block_can_precharge\(ctx, (\d+)u\);$")
 CHARGE = re.compile(r"^    if \(!cycle_block_prepaid && !dolrecomp_charge_precise\(ctx, \d+u, 0x([0-9A-F]{8})u\)\) return;$")
 PC = re.compile(r"^    ctx->pc = 0x([0-9A-F]{8})u;$")

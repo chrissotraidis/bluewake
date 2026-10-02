@@ -253,6 +253,14 @@ target_include_directories(bluewake_composite_dispatch_loop_test PRIVATE
 add_test(NAME bluewake_composite_dispatch_loop_test
     COMMAND bluewake_composite_dispatch_loop_test)
 
+# Manual A/B qualification consumes two local player-generated modules. It is
+# intentionally absent from CTest: CI must never need or publish game code.
+add_executable(bluewake_fast_blocks_test EXCLUDE_FROM_ALL ../../tests/fast_blocks_test.c)
+target_include_directories(bluewake_fast_blocks_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_fast_blocks_test PRIVATE ${CMAKE_DL_LIBS})
+
 add_executable(bluewake_fpu_context_test
     ../../tests/fpu_context_test.c
     src/fpu_context.c)

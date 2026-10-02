@@ -190,6 +190,12 @@ target_compile_options(bluewake_disc_extract PRIVATE ${BLUEWAKE_COMPAT_FORCE_INC
 target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt)
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
+    # Run manually against two private own-disc modules; no game code in CI.
+    add_executable(bluewake_fast_blocks_test EXCLUDE_FROM_ALL ${BLUEWAKE_REPO_ROOT}/tests/fast_blocks_test.c)
+    target_include_directories(bluewake_fast_blocks_test PRIVATE
+        ${GXRUNTIME_DIR}/include
+        ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+    target_compile_definitions(bluewake_fast_blocks_test PRIVATE _CRT_SECURE_NO_WARNINGS)
     foreach(_variant IN ITEMS plain global)
         add_executable(bluewake_guest_memory_${_variant}_test ${GXRUNTIME_DIR}/tests/guest_memory_bounds_test.c)
         target_include_directories(bluewake_guest_memory_${_variant}_test PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})

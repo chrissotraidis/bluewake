@@ -50,7 +50,7 @@ translation belongs in each player's private workspace.
 | Fifteen Better Wind Waker options, 16:10; all claimed targets | main `b6f87e0`; DolRecomp `b8b5345` | Integrated; same verified base-source digest; new options require module rebuild, legacy fallback retained | Integrated; clean player-generated module, all exports/options and relevant gameplay open |
 | Desktop save states and climbing | main `b39bd0d`, windows `3ba8599`, `1510ed1` | Integrated; #12 adds checked/atomic serialization; states experimental, climbing off | Integrated; current module state compatibility, real save/load and climbing acceptance open; no new Apple touch state UI claimed |
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
-| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Absent; donor native batches include experiments and recovered-source replacements requiring provenance review | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
+| Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported for private qualification; builder defaults unchanged. Global/register transforms absent; native batches evaluated separately | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16, default off; oversized span guards fixed; plain/global bounds fixtures pass Mac/Windows. Inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
@@ -58,7 +58,7 @@ translation belongs in each player's private workspace.
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
 | Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | iOS local training defaults; Windows training/optimization path incomplete; developer artifacts are not clean-build evidence | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
 | PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; full clean PadMint iOS build, selected source/pins/provenance, audit, in-place device save/reload and matched trained performance |
-| Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Local baseline app-only audit passes; candidate runtime app-only build running. Compatible old-module update vs rebuild and physical acceptance open; no publication |
+| Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Baseline and candidate runtime app-only audits pass. Compatible old-module update vs rebuild and physical acceptance open; no publication |
 
 Experimental 60 Hz simulation (`8435ec7`, `4b6b268`) is optional work. If imported,
 it must default off, require explicit selection and reject incompatible modules.
@@ -353,3 +353,45 @@ full native Windows app compile/link and **31/31** regressions in
 memory variants, and supersedes the fixture-standard failure above. Real
 window movement, refresh changes, overload/performance and gameplay remain
 open. Later commits only update documentation/evidence until the next batch.
+
+## Generic prepaid-block qualification
+
+Imported donor `f319afa71db14b60b525b7ba95c20134f61d66ce` with Elliott Tate's
+original authorship (`743fe4f`). The transform accepts ordinary pointer-state
+chunks independently of fixed-register/global-memory/native replacements.
+The four SDK leaves reserved by the donor's native-math certification remain
+unchanged. Player build defaults and simulation/interpolation defaults are
+unchanged; this batch first supplies manual qualification tools.
+
+The private-module fixture now loads modules on Mac or Windows, checks module
+and CPU ABI/version/size and game identity, rejects unexpected dispatch misses,
+and compares every byte of CPU state and RAM. It retains deadline observation
+suffix checks. CI builds this manual fixture without any game module; no CTest
+requires game data. Local strict C11 compilation with `-Wall -Wextra -Werror`
+passes, as does the repository audit. A baseline-against-itself smoke exercises
+all 14 entries, establishing harness operation only.
+
+The isolated owned-disc source contains 443,166 prepared blocks in 813 chunks.
+Both full O0 comparison modules are being built with source `95adeed`, runtime
+`99e47480`, Apple Clang 21 and the same floating-point flags. These builds use
+no profiling instrumentation. The earlier instrumented training module can
+support an initial state comparison, but cannot establish matched timing.
+The exact private tree hashes/compiler/build receipts remain local. Thirty
+thousand state/RAM cases, negative controls, matched timings and actual
+Windows gameplay remain open. No contributor benchmark is claimed here.
+
+The latest #16 native Windows app build and 31/31 regressions also pass at
+`5c8d348` ([run 36950369976](https://github.com/chrissotraidis/bluewake/actions/runs/36950369976)).
+The direct personal iOS build remains live on the untouched primary checkout;
+PadMint's complete path is next after it terminates, run serially.
+
+Native replacements remain a separate batch. Donor `native_j3d.c` identifies
+recovered J3D formulas from zeldaret/tww revision
+`09de0609ecdb6d30dd012e2258f755afdac1cb56`; that public revision contains a
+[CC0 license](https://github.com/zeldaret/tww/blob/09de0609ecdb6d30dd012e2258f755afdac1cb56/LICENSE)
+and the referenced
+[J3DTransform source](https://github.com/zeldaret/tww/blob/09de0609ecdb6d30dd012e2258f755afdac1cb56/src/JSystem/J3DGraphBase/J3DTransform.cpp).
+Other donor native helpers describe guest-register/stack/cycle behavior derived
+from the translation. None of these replacement bodies were imported in the
+generic batch; provenance, fallback and function-level correctness still need
+separate qualification. This source inventory does not clear the release audit.
