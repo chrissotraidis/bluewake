@@ -20,6 +20,43 @@ DolRecompFunction bw_find_chunk(u32 address) {
 }
 #endif
 
+#ifdef BLUEWAKE_NATIVE_MATH_CACHED
+#include "native_math.h"
+static void native_matrix_copy(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030D0C8u)) func_803096E0(cpu);
+}
+static void native_matrix_concat(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030D0FCu)) func_803096E0(cpu);
+}
+static void native_matrix_vec(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030DA44u)) func_8030D6E0(cpu);
+}
+static void native_matrix_array(CPUState* cpu) {
+    if (!bluewake_native_math_try(cpu, 0x8030DA98u)) func_8030D6E0(cpu);
+}
+static DolRecompFunction bluewake_native_math_find(u32 address) {
+    /* Cached wrappers always recheck the host handshake, including after disable. */
+    switch (address) {
+    case 0x8030D0C8u: return native_matrix_copy;
+    case 0x8030D0FCu: return native_matrix_concat;
+    case 0x8030DA44u: return native_matrix_vec;
+    case 0x8030DA98u: return native_matrix_array;
+    default: return NULL;
+    }
+}
+#endif
+
+#if defined(BLUEWAKE_DIRECT_CALLS)
+int bw_native_call(CPUState* cpu, u32 address) {
+#ifdef BLUEWAKE_NATIVE_MATH_CACHED
+    return bluewake_native_math_try(cpu, address);
+#else
+    (void)cpu; (void)address;
+    return 0;
+#endif
+}
+#endif
+
 /* The x86-64-v3 dispatch clones come only from DolRecomp's LLVM object
  * backend; the C backend the Builder uses emits none, so an x86-64 build (the
  * Windows port) dispatches through dolrecomp_call unless the source says it

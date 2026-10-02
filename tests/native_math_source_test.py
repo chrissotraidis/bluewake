@@ -34,7 +34,9 @@ class CertificationTest(unittest.TestCase):
         variant.write_text(self.source)
         prepare.prepare(self.root)
         manifest = (self.root / 'native_math.json').read_bytes()
+        stamps = {p.name: p.stat().st_mtime_ns for p in self.root.iterdir()}
         prepare.prepare(self.root)
+        self.assertEqual(stamps, {p.name: p.stat().st_mtime_ns for p in self.root.iterdir()})
         self.assertEqual(manifest, (self.root / 'native_math.json').read_bytes())
         # An executable-body change without changing labels must be rejected.
         variant.write_text(self.source.replace('= 1;', '= 2;'))

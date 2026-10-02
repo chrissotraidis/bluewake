@@ -87,17 +87,22 @@ Options (`--help` lists all):
 | `--direct-calls` | Prepare direct cross-chunk/indirect calls; off by default, matching host selection and qualification required |
 | `--native-j3d` | Prepare certified J3D matrix functions; off by default, host opt-in and module qualification required |
 | `--native-vec` | Prepare nine certified SDK vector functions; off by default, host opt-in and module qualification required |
+| `--native-math` | Prepare four certified SDK matrix functions; off by default, host opt-in and module qualification required |
 | `--inline-gpr` | Also inline certified register saves/restores; requires `--direct-calls` |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
 | `--out DIR` | Build directory (default `build\windows`) |
 
-The independent `--native-j3d` and `--native-vec` options certify the original
-function bodies before other rewrites. `BLUEWAKE_NATIVE_J3D=1` and
-`BLUEWAKE_NATIVE_VEC=1` enable their respective supporting host/module paths
+The independent `--native-j3d`, `--native-vec` and `--native-math` options certify
+the original function bodies before other rewrites. `BLUEWAKE_NATIVE_J3D=1`,
+`BLUEWAKE_NATIVE_VEC=1` and `BLUEWAKE_NATIVE_MATH=1` enable their respective
+supporting host/module paths
 through versioned handshakes; absent support, disabled selection,
 unsupported inputs and observed boundaries retain translated execution.
+Matrix-array workers remain opt-in on macOS (`BLUEWAKE_NATIVE_WORKERS=1` through
+`8`); Windows keeps Elliott's serial path. Both paths require qualification,
+and worker selection is separate from rendering interpolation.
 
 The direct-call options retain the ordinary module ABI and are selected separately
 from fixed CPU/RAM storage. To enable them in a supporting host, set

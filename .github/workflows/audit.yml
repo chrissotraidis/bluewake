@@ -29,6 +29,7 @@ jobs:
           python3 tests/test_inline_gpr.py
           python3 tests/native_j3d_source_test.py
           python3 tests/native_vec_source_test.py
+          python3 tests/native_math_source_test.py
       - name: Bound synthetic instant-text patching under sanitizers
         run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/bmg_patch_test.c -o "$RUNNER_TEMP/bluewake_bmg_patch_test"

@@ -62,12 +62,15 @@ def prepare(root):
         source = source.replace(TYPE, TYPE + DECLARATION)
         source = source.replace(CACHE, CACHE + LOOKUP)
     # Finish validation before changing the header or its certification.
-    header.write_text(source)
+    if header.read_text() != source:
+        header.write_text(source)
     files[header.name] = hashlib.sha256(header.read_bytes()).hexdigest()
     manifest = root / 'native_math.json'
-    temporary = manifest.with_suffix('.json.tmp')
-    temporary.write_text(json.dumps({'abi': 1, 'files': files}, indent=2) + '\n')
-    temporary.replace(manifest)
+    data = json.dumps({'abi': 1, 'files': files}, indent=2) + '\n'
+    if not manifest.exists() or manifest.read_text() != data:
+        temporary = manifest.with_suffix('.json.tmp')
+        temporary.write_text(data)
+        temporary.replace(manifest)
     print(f'native math: {len(LEAVES)} SDK leaves verified across {len(files)} source files')
 
 

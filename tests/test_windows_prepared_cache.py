@@ -89,7 +89,9 @@ class PreparedCacheTest(unittest.TestCase):
                        "cmake/composite/direct_calls.h", "cmake/composite/inline_gpr.h",
                        "scripts/windows/inline_save_restore_gpr.py", "scripts/mods/prepare_native_j3d.py",
                        "cmake/composite/native_j3d.c", "cmake/composite/native_j3d.h",
-                       "scripts/mods/prepare_native_vec.py", "cmake/composite/native_vec.c", "cmake/composite/native_vec.h"):
+                       "scripts/mods/prepare_native_vec.py", "cmake/composite/native_vec.c", "cmake/composite/native_vec.h",
+                       "scripts/mods/prepare_native_math.py", "cmake/composite/native_math.c", "cmake/composite/native_math.h",
+                       "cmake/composite/native_work_pool.c", "cmake/composite/native_work_pool.h"):
             dst = self.root / script
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / script, dst)
@@ -100,7 +102,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK)
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
@@ -178,6 +180,39 @@ label_80004004:
         self.assertNotIn('bluewake_native_j3d_try', source.read_text())
         self.assertNotIn('BLUEWAKE_NATIVE_J3D_PREPARED', (source.parent.parent / 'generated.h').read_text())
         self.assertFalse((source.parent.parent / 'native_j3d.json').exists())
+
+    def test_native_math_reuse_and_disable(self):
+        body = '\nlabel_8030D0C8:\n    ctx->gpr[3] = 1;\n'
+        digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+        script = self.root / "scripts/mods/prepare_native_math.py"
+        text = script.read_text()
+        start = text.index('LEAVES = (')
+        end = text.index('DECLARATION = ', start)
+        script.write_text(text[:start] + f"LEAVES = ((0x8030D0C8, 0x8030D0FC, '803096E0', '{digest}'),)\n" + text[end:])
+        (self.base / 'chunks_dol/chunk_803096E0.c').write_text('#include "../generated.h"\n' + body + '\nlabel_8030D0FC:\n')
+        header = self.base / 'generated_composite.h'
+        header.write_text('typedef void (*DolRecompFunction)(CPUState* ctx);\n'
+                         '    if (s_cached_pc[cache_index] == address)\n'
+                         '        return s_cached_pc_fn[cache_index];\n'
+                         'static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_803096E0};\n')
+        self.chunk_source = '#include "../generated.h"\nvoid synthetic(CPUState* ctx) {\n    // 80004000: bl      0x8030D0C8\n    {\n            ctx->lr = 0x80004004u;\n            ctx->pc = 0x8030D0C8u;\n            return;\n    }\nlabel_80004004:\n    return;\n}\n'
+        (self.base / 'chunks_dol/a.c').write_text(self.chunk_source)
+        self.args.direct_calls = True
+        self.digest = bw.tree_digest(self.base)
+        self.args.native_math = True
+        self.cycle()
+        prepared = self.out / 'composite-src/generated_composite.h'
+        self.assertIn('BLUEWAKE_NATIVE_MATH_CACHED', prepared.read_text())
+        self.assertIn('bw_native_call(ctx, 0x8030D0C8u)', self.chunk().read_text())
+        before = prepared.read_bytes(), prepared.stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (prepared.read_bytes(), prepared.stat().st_mtime_ns))
+        self.args.native_math = False
+        self.cycle()
+        self.assertNotIn('BLUEWAKE_NATIVE_MATH_CACHED', prepared.read_text())
+        self.assertNotIn('bw_native_call', self.chunk().read_text())
+        self.assertIn('bw_chunk_fns[1](ctx)', self.chunk().read_text())
+        self.assertFalse((prepared.parent / 'native_math.json').exists())
 
     def test_native_vec_reuse_and_disable(self):
         body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'

@@ -7546,6 +7546,14 @@ int main(int argc, char** argv) {
         const bool enabled = native_vec != NULL && native_vec(want, host_can_skip_observation, NULL);
         fprintf(stderr, "[chassis] native-vec=%s\n", enabled ? "on" : "off");
     }
+    {
+        typedef int (*NativeMathFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
+        NativeMathFn native_math = (NativeMathFn)dlsym(lib, "bluewake_composite_native_math_v1");
+        const char* native_env = getenv("BLUEWAKE_NATIVE_MATH");
+        const bool want = native_env != NULL && strcmp(native_env, "1") == 0;
+        const bool enabled = native_math != NULL && native_math(want, host_can_skip_observation, NULL);
+        fprintf(stderr, "[chassis] native-math=%s\n", enabled ? "on" : "off");
+    }
     BluewakeSetGatherWord set_gather_word = (BluewakeSetGatherWord)
         dlsym(lib, "bluewake_composite_set_gather_pipe");
     BluewakeSetGatherBytes set_gather_bytes = (BluewakeSetGatherBytes)
@@ -15573,6 +15581,11 @@ int main(int argc, char** argv) {
         void (*report_native_vec)(void) = (void (*)(void))dlsym(lib, "bluewake_native_vec_report");
         if (report_native_vec != NULL)
             report_native_vec();
+    }
+    {
+        void (*report_native_math)(void) = (void (*)(void))dlsym(lib, "bluewake_native_math_report");
+        if (report_native_math != NULL)
+            report_native_math();
     }
     if (g_direct_call_trace)
         fprintf(stderr, "[direct-calls] summary queries=%llu allowed=%llu\n",

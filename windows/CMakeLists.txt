@@ -279,6 +279,19 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         set_target_properties(${_test} PROPERTIES LINKER_LANGUAGE CXX)
     endforeach()
 
+    add_executable(bluewake_native_math_guard_test
+        ${BLUEWAKE_REPO_ROOT}/tests/native_math_guard_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_math.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_work_pool.c)
+    target_include_directories(bluewake_native_math_guard_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+    target_link_libraries(bluewake_native_math_guard_test PRIVATE gxruntime)
+    target_compile_options(bluewake_native_math_guard_test PRIVATE -ffp-contract=off)
+    add_test(NAME bluewake_native_math_guard_test COMMAND bluewake_native_math_guard_test)
+
+    target_compile_options(bluewake_native_math_guard_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+    target_link_libraries(bluewake_native_math_guard_test PRIVATE bluewake_posix_compat)
+    set_target_properties(bluewake_native_math_guard_test PROPERTIES LINKER_LANGUAGE CXX)
+
     add_executable(bluewake_native_vec_guard_test
         ${BLUEWAKE_REPO_ROOT}/tests/native_vec_guard_test.c
         ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_vec.c)

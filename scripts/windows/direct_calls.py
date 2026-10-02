@@ -334,9 +334,12 @@ def main():
         sys.exit(f"no chunks under {root}")
     starts, index_of = chunk_table(root)
     watched = watched_addresses()
-    # Native replacements are a separate qualification batch. Direct calls
-    # continue through the selected translated chunk table, including mods.
-    natives = set()
+    # Only separately certified matrix sources may use the native direct-call path.
+    matrix_manifest = (root / "native_math.json").is_file()
+    matrix_header = "#define BLUEWAKE_NATIVE_MATH_CACHED 1" in (root / "generated_composite.h").read_text()
+    if matrix_manifest != matrix_header:
+        sys.exit("incomplete native matrix preparation")
+    natives = DISPATCHER_NATIVE if matrix_manifest else set()
     sites = files = indirect = fallback = 0
     for path in chunks:
         m = re.search(r"_([0-9A-F]{8})\.c$", path.name)
@@ -364,7 +367,7 @@ def main():
         header.write_text(marker + text)
     print(f"direct calls between chunks: {sites} calls, {indirect} indirect calls and "
           f"{fallback} interpreted instructions in {files} chunks; {listed} watched addresses; "
-          "native replacements not selected")
+          f"{len(natives)} certified native matrix targets")
 
 
 if __name__ == "__main__":

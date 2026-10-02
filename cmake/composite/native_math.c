@@ -5,9 +5,29 @@
 // GZLE01 SDK leaves. Keep the original register results, stack stores, paired
 // rounding, reservation invalidation and guest cycle accounting. The ordinary
 // translation handles exceptional values, quantization and device accesses.
+#if defined(_WIN32)
+#define BW_MATH_EXPORT __declspec(dllexport)
+#else
+#define BW_MATH_EXPORT __attribute__((visibility("default")))
+#endif
+static BluewakeNativeMathReady s_ready;
+static void* s_ready_user;
+
+BW_MATH_EXPORT int bluewake_composite_native_math_v1(
+    bool enabled, BluewakeNativeMathReady ready, void* user) {
+    s_ready = enabled ? ready : NULL;
+    s_ready_user = s_ready != NULL ? user : NULL;
+    return s_ready != NULL;
+}
+
+int bluewake_native_math_try(CPUState* cpu, u32 address) {
+    return cpu != NULL && s_ready != NULL && s_ready(s_ready_user, cpu, address) &&
+           bluewake_native_math(cpu, address);
+}
+
 static unsigned long long s_hits[4], s_fallbacks[4], s_array_vectors, s_array_max;
 static unsigned long long s_gpr_hits, s_gpr_fallbacks;
-void bluewake_native_math_report(void) {
+BW_MATH_EXPORT void bluewake_native_math_report(void) {
     fprintf(stderr, "[native-math] copy=%llu/%llu concat=%llu/%llu vec=%llu/%llu array=%llu/%llu vectors=%llu max=%llu parallel=%llu (native/fallback)\n",
         s_hits[0],s_fallbacks[0],s_hits[1],s_fallbacks[1],s_hits[2],s_fallbacks[2],
         s_hits[3],s_fallbacks[3],s_array_vectors,s_array_max,bluewake_parallel_batches());
@@ -33,7 +53,7 @@ static void store_pair(CPUState* c, u32 p, Pair f) {
 }
 static Pair pair(const float* a) { return (Pair){a[0],a[1]}; }
 static int ram(CPUState* c,u32 p,u32 n) {
-    return ppc_dispatch_poll_read_stable(c,p,n) && (p & 3u)==0;
+    return c->ram != NULL && ppc_dispatch_poll_read_stable(c,p,n) && (p & 3u)==0;
 }
 static int overlap(u32 a,u32 n,u32 b,u32 m) {
     return (u64)a < (u64)b+m && (u64)b < (u64)a+n;
