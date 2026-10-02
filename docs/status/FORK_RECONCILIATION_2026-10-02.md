@@ -435,6 +435,8 @@ a claim of identical state at every intervening instruction. The existing route 
   measured delivery/clock drift. Native Windows at `0ea7ffb` builds the app and
   passes all 50 tests (37.45 s;
   [run 37003496869](https://github.com/chrissotraidis/bluewake/actions/runs/37003496869)).
+  Corrected-fixture revision `459df34` also passes all 50 Windows tests (34.06 s;
+  [run 37005141587](https://github.com/chrissotraidis/bluewake/actions/runs/37005141587)).
   The three-way 2,000-retrace Aurora copied-save movement route also passes:
   four checkpoints, all 37 sampled player states, 1,050 route/card records and
   both nonblank frames at retraces 1,200/1,600 match, with zero measured timing
@@ -446,8 +448,13 @@ a claim of identical state at every intervening instruction. The existing route 
   direct calls, gather and all five native helper families. It passes 30,000
   direct-call function cases, the routed matrix fixture, 20,000 skinning cases,
   and 130,000 game-math cases (including all twelve native entries and the
-  corrected disabled-routing checks). Intro and rendered saved-game comparisons
-  remain in progress. An O2 combined/reference pair is building from frozen
+  corrected disabled-routing checks). Three-way ordinary/all-Off/all-On intro
+  and Aurora copied-save movement comparisons also pass: six intro checkpoints,
+  four saved-route checkpoints, all 37 sampled player states, both nonblank
+  saved-scene frames and all 1,050 route/card records match, with zero measured
+  delivery/clock drift. All five native helper families and direct calls execute;
+  gather uses direct mode headless and actual batch mode with Aurora. Original
+  save backup hashes remain unchanged. An O2 combined/reference pair is building from frozen
   copies of the module/runtime/prepared inputs with the same compiler and three
   existing O1 fallback chunks. These builds reuse retained private translation;
   neither clean player builds nor matched performance are accepted.
