@@ -40,6 +40,11 @@ static void external_write(CPUState* cpu, u32 addr, u64 value, u8 size) {
     assert(bw_gather_pipe_length == 0u);
     external_calls++;
 }
+static void instruction_fallback(CPUState* cpu, u32 raw, u32 cia) {
+    assert(raw == 0x90640000u && cia == 0x80001000u);
+    assert(bw_gather_pipe_length == 0);
+    cpu->external_write(cpu, cpu->gpr[4], cpu->gpr[3], 4);
+}
 
 int main(void) {
     assert(ordinary_memory_contract() == 0);
@@ -104,6 +109,7 @@ int main(void) {
     /* Interpreter paths must expose all earlier FIFO bytes before MMIO. */
     const unsigned prior_external = external_calls;
     cpu.hid2 = PPC_HID2_LSQE | PPC_HID2_LCE;
+    cpu.instruction_fallback = instruction_fallback;
     mem_write8(&cpu, 0xCC008000u, 0xAA);
     cpu.gpr[3] = 0x11223344u;
     cpu.gpr[4] = 0xCC002000u;
