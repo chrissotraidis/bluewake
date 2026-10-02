@@ -43,7 +43,7 @@ translation belongs in each player's private workspace.
 | --- | --- | --- | --- |
 | Interpolation, batching, upload staging, worker/cache improvements; Apple/Windows | main `b6f87e0`, `7f4f1a0`, `e5c6ae4`, `b39bd0d`; runtime through `9618e9d` | Integrated in #10 plus newer synchronization fixes in #12 | Integrated; final same-scene images, 60/120 pacing and sustained play open |
 | Swapchain/fullscreen and orderly restart; Windows | `db2944e`, `1ce29ac`; runtime `9618e9d` | Swapchain fix already in maintained runtime; #12 orderly quit/relaunch replaces donor process-exit approach | Integrated; actual Windows F11/Restart/settings/startup recovery open |
-| Disc picker, remembered disc, compressed import and recovery; Windows | `0b463cc`, `61e891e`, `640094e`; shared `disc_import.c`, nodtool | Missing Windows launcher flow; builder supports ISO/compressed input. Donor deletes converted images after rejection and can overwrite the prior converted disc; preserve input/recovery instead | Open; supported/rejected/missing disc, interruption/resume, Unicode paths and preserved prior files |
+| Disc picker, remembered disc, compressed import and recovery; Windows | `0b463cc`, `61e891e`, `640094e`; shared `disc_import.c`, nodtool | Launcher source integrated in #15; unique import folders retain original/converted/previous files; candidate native 29/29 regressions pass | Integrated; real supported/rejected/missing disc and UI/Unicode interruption/recovery checks open |
 | Disc picker / launcher; Apple Silicon Mac | main `561ddbf`, `7a2ac23`, `5eaa981` | Developer host route exists; donor bundled-game packaging is intentionally excluded | Open; personal clean source build and app-only launcher with player's generated module, save/reload and installation |
 | Camera, right-stick aiming/zoom/collision; desktops | main `887c26d`, windows `9511241` | Latest SDL queue timing integrated with window-scoped filtering; prior BlueWake camera/menu code retained | Integrated; actual SDL queue regression passes; real mouse/controller/camera timing acceptance open |
 | Jump, sprint, quick doors, transitions; Apple/Windows | main `22fa284`, `d55ce11`, `2c9f16c`, `df62ae0` | Integrated; Apple touch controls use existing editor, new options remain opt-in | Integrated; final new-module progression and controls on/off open |
@@ -52,13 +52,13 @@ translation belongs in each player's private workspace.
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Absent; donor native batches include experiments and recovered-source replacements requiring provenance review | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
-| Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Absent; current CPU/module ABI and safety fixes must survive | Open; aliases/MMIO/reservations/journaling/bounds/dispatch checks, clear compatible-module/rebuild behavior and matched measurements |
-| Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Only 30/60/120 presentation exists; 30 Hz logic and interpolation off remain defaults | Open; runtime pacing regressions, window/display-change tests, preference preservation, low-end workload and images |
+| Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16, default off; oversized span guards fixed; plain/global bounds fixtures pass Mac/Windows. Inline module wrappers absent | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
+| Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; real UI/window/display changes, slow-game workloads, images and matched performance |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
 | Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | iOS local training defaults; Windows training/optimization path incomplete; developer artifacts are not clean-build evidence | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
 | PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; full clean PadMint iOS build, selected source/pins/provenance, audit, in-place device save/reload and matched trained performance |
-| Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Open; exact app-only audit, compatible old-module update vs explicit rebuild, no download/publication while audit paused |
+| Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Local baseline app-only audit passes; candidate runtime app-only build running. Compatible old-module update vs rebuild and physical acceptance open; no publication |
 
 Experimental 60 Hz simulation (`8435ec7`, `4b6b268`) is optional work. If imported,
 it must default off, require explicit selection and reject incompatible modules.
@@ -87,8 +87,8 @@ No external issue comments or messages were sent during this inventory.
   Actual runtime test includes the 38 truncated-vertex cases. On this M3 Max,
   all **243/243 Mac CTests passed** (2.78 seconds) and the repository audit passed.
   This reused built test binaries; the prior overnight ledger records their
-  builds. Native Windows CI at this checkpoint is pending; earlier 26/26 at
-  `ad7f551` does not cover patch 0130.
+  builds. Native Windows at this checkpoint passed 27/27 (run 36944660446);
+  later checkpoints and their added regressions are recorded below.
 - Earlier physical iPad bridge/bird checks and Mac intro/skip checks are precisely
   scoped in [overnight](OVERNIGHT_2026-10-02.md) and
   [local stability](LOCAL_STABILITY_2026-10-01.md). They are not acceptance of
@@ -117,7 +117,8 @@ M3 Max: native Mac host and iOS app compile/link. The real SDL event-queue test
 covers 81 game-window motion events, another window's motion, key/wheel/quit
 order, no double consumption, disabled/uncaptured/blocked/zero-window states.
 The mouse-motion, virtual-controller and face-layout CTests all pass (3/3).
-Native Windows compilation/test is registered in source-only CI and pending.
+Native Windows compilation/link and 28/28 tests passed at `491b375`
+(run 36945248680), including the real SDL queue fixture.
 This does not establish a measured latency improvement, rendered aiming or
 physical controller/mouse acceptance.
 
@@ -284,9 +285,8 @@ cancellation still require their separate checks.
 
 ## Migration proposal (not published to the donor)
 
-Keep both repositories and existing issue history intact. BlueWake's maintainer
-receives source PRs and support only after the required parity, clean builder
-and gameplay gates above are accepted. Retain Elliott Tate's rendering,
+Keep both repositories and existing issue history intact. Direct donor users to BlueWake for future development and support only after
+the required parity, clean builder and gameplay gates above are accepted. Retain Elliott Tate's rendering,
 desktop and gameplay credit and Ian MacFarlane's Apple TV credit alongside the
 existing upstream/runtime, mod and texture-pack authors. Preserve contribution
 commit authors; do not squash away their attribution without carrying it forward.
@@ -327,3 +327,29 @@ transforms in a separate batch after reproducing those checks locally. Keep
 recovered/native bodies, global registers, inline FP/memory, 60 Hz simulation
 and their certification dependencies separately reviewable. Do not enable the
 whole donor optimization stack solely on its benchmark claims.
+
+## Candidate iOS app-only result
+
+A new app-only build at BlueWake `9ec4ab5f8f341d3db13d712de2b27ed3895f02d3`
+selected runtime `70bc9957` and translator `b8b5345`, fetched the pinned public
+Dawn iOS package and compiled/linked all 736 app build steps. The resulting
+local app-only package passes both `check_public_assets.sh` (including its
+source archive) and PadMint audit, with zero address-named functions.
+Executable SHA-256:
+`76d50773f5a6ee6f7b2ce7029da7a995190a5f46f3c200fa8186e2416035eec7`.
+No output was published or linked. This does not establish physical Apple
+or game-module compatibility/performance acceptance.
+
+A bounded Mac startup probe with the fresh instrumented training module and
+an isolated new card exited normally at the configured retrace budget. The
+native UI tool could not bind that unbundled binary, and no rendered-menu
+observation was obtained; menu interaction/display movement stay unaccepted.
+The probe does not substitute for narrated intro, saves or sustained play.
+
+The display follow-up at `8583be50fdd531adfb42c9fc13b41ed796b289cc` passed
+full native Windows app compile/link and **31/31** regressions in
+[run 36949734759](https://github.com/chrissotraidis/bluewake/actions/runs/36949734759)
+(9.34 seconds of tests). This includes the rate/preference fixture and both
+memory variants, and supersedes the fixture-standard failure above. Real
+window movement, refresh changes, overload/performance and gameplay remain
+open. Later commits only update documentation/evidence until the next batch.
