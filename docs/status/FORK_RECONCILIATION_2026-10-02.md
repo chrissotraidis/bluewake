@@ -281,3 +281,49 @@ exactly the same training receipt/profile hashes. Ninja starts the remaining
 **639** build steps; all 183 completed objects were retained. This accepts
 resume at the module-compilation stage only; packaging/install and PadMint
 cancellation still require their separate checks.
+
+## Migration proposal (not published to the donor)
+
+Keep both repositories and existing issue history intact. BlueWake's maintainer
+receives source PRs and support only after the required parity, clean builder
+and gameplay gates above are accepted. Retain Elliott Tate's rendering,
+desktop and gameplay credit and Ian MacFarlane's Apple TV credit alongside the
+existing upstream/runtime, mod and texture-pack authors. Preserve contribution
+commit authors; do not squash away their attribution without carrying it forward.
+
+Proposed donor notice, for maintainer review only after acceptance:
+
+> Future development and support for this project will continue in BlueWake,
+> maintained by Chris Sotraidis, with Elliott Tate's rendering, desktop and
+> gameplay contributions integrated and credited. Build from your own supported
+> disc using BlueWake's tested player instructions. Existing issues and commit
+> history remain here for reference; please check the reconciled issue map
+> before opening a duplicate report.
+
+This text is a proposal, not an instruction to post or redirect. No notice,
+issue closure or access change has been made. At acceptance, reconcile reports
+by exact reproduced app/module identities and link their evidence; do not mark
+startup, scripted music or Pictobox reports fixed solely because source changes
+or CI checks passed. Release/download links remain excluded while the private
+release audit is not Clear.
+
+## Continuation checkpoint
+
+Primary checkout: `codex/fork-reconciliation` at `95adeed`, runtime `99e47480`;
+the resumed private full builder uses `build/reconciliation/player-source`
+and eight jobs. Its terminal outcome must be recorded before full acceptance.
+Keep its source/runtime fixed and run PadMint's full path serially afterward.
+Managed worktree: `.codex/worktrees/bluewake-disc-parity/bluewake`, now
+`codex/runtime-display-parity`; it also contains the nested pushed runtime
+branch `codex/bluewake-runtime-parity`. Retain both while source/build evidence
+is needed; the nested Git worktree prevents safe managed archival until it is
+reconciled and its needed local artifacts preserved.
+
+Next engineering blocker: generic generated-code preparation. The donor's
+prepaid-block transformer imports certified SDK leaf metadata from its native
+math preparer, absent in the maintained tree; its equivalence harness loads
+personal Windows modules and compares deadline/refund states. Integrate generic
+transforms in a separate batch after reproducing those checks locally. Keep
+recovered/native bodies, global registers, inline FP/memory, 60 Hz simulation
+and their certification dependencies separately reviewable. Do not enable the
+whole donor optimization stack solely on its benchmark claims.

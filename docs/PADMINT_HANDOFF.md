@@ -2,7 +2,7 @@
 
 PadMint is the shared local builder for the Pad projects. BlueWake supplies a
 game-specific adapter; PadMint should own the interactive build experience.
-The first supported workflow is an Apple Silicon Mac producing a personal iOS
+The first experimental workflow targets an Apple Silicon Mac producing a personal iOS
 IPA from a supported disc. Additional games and platforms can use the same
 stage interface after their own validation.
 
@@ -10,6 +10,28 @@ stage interface after their own validation.
 must reproduce the accepted developer build's performance in matched iPad
 tests. Generating an IPA alone does not satisfy this requirement. Do not present
 the slower unprofiled build as the recommended release path.
+
+## Current reconciliation evidence (October 2)
+
+The current public PadMint CLI at `018a9f0fdd2030d2fa9f328617d6541fd83c9af1`
+(0.2.8) completed a new BlueWake source-only workspace at
+`95adeed0f32a39739341dd9381c50756c5247bf4`. The expected base source digest
+matches. The full mode's `--app` arguments are now isolated from source-only
+mode, fixing the empty-app argument failure. SDK prerequisites are explicit.
+
+| Route | Current evidence / remaining gate |
+| --- | --- |
+| Apple Silicon Mac → iOS source-only | Actual CLI source generation passes; USA rev-0 disc, exact source/dependency identities |
+| Apple Silicon Mac → iOS full personal IPA | Direct builder's fresh local training completed; compilation running; PadMint full packaging and device save/reload/upgrade/performance remain unaccepted |
+| macOS player app | Planned PadMint route; development host compilation does not establish adapter acceptance |
+| Windows / tvOS / Linux | No complete PadMint adapter acceptance; use each platform's explicitly documented source route or preview boundary |
+
+The local app-only candidate passed both the repository asset gate and PadMint
+audit. It stays local while public releases are paused. Direct compilation
+interruption/resume preserved all completed objects and unchanged validated
+profiles; this is separate from PadMint process-tree cancellation acceptance.
+The [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md) records
+exact check scope and pending gates. Historical design snapshots follow.
 
 ## What exists
 
