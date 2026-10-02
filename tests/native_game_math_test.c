@@ -362,12 +362,12 @@ int main(int argc, char** argv) {
     if (strcmp(mod->game_id, "GZLE01") != 0) return 1;
     u8* a=image();
     u8* b=original.storage.mem1;
-    unsigned routed_cases=0;
+    unsigned routed_cases=0, routed_off_cases=0;
     u8 initial_area[DATA_BYTES];
     if (!a || !b)
         return 1;
     for (unsigned which = 0; which < sizeof entries / sizeof entries[0]; ++which) {
-        unsigned ran = 0, declined = 0;
+        unsigned ran = 0, declined = 0, entry_on = 0, entry_off = 0;
         for (unsigned i = 0; i < cases; ++i) {
             CPUState c = build(a, which, i, true);
             memcpy(b + AREA - GC_RAM_BASE, a + AREA - GC_RAM_BASE, DATA_BYTES);
@@ -398,14 +398,25 @@ int main(int argc, char** argv) {
                 return 1;
             }
             if (candidate.desc) {
-                bool enabled = i % 31 != 0;
+                /* Select from accepted cases: scenario % 31 == 0 deliberately
+                 * misaligns the input and always declines before this branch. */
+                bool enabled = (ran - 1u) % 31u != 0;
                 if (candidate.native_game_math(enabled, routed_ready, NULL) != enabled) return 1;
+                unsigned queries_before = routed_queries;
                 u8* routed_ram = candidate.storage.mem1;
                 memcpy(routed_ram + AREA - GC_RAM_BASE, initial_area, DATA_BYTES);
                 if (!run_window(&candidate, untouched, routed_ram)) return 1;
                 CPUState actual = *candidate.storage.cpu; actual.ram = a;
                 if (memcmp(&actual, &ref, sizeof ref) || ram_diff(routed_ram,b)) {
                     mismatch(&actual,&ref,i,entries[which]);return 1;
+                }
+                if (enabled) {
+                    if (routed_queries == queries_before) return 1;
+                    ++entry_on;
+                } else {
+                    if (routed_queries != queries_before) return 1;
+                    ++entry_off;
+                    ++routed_off_cases;
                 }
                 ++routed_cases;
             }
@@ -424,11 +435,13 @@ int main(int argc, char** argv) {
             continue;
         } /* dropped component multiply is unsupported */
         if (!ran) return 1;
+        if (candidate.desc && (!entry_on || !entry_off)) return 1;
     }
     if (candidate.desc) {
         if (!routed_queries || !routed_cases) return 1;
         if (candidate.report) candidate.report();
-        printf("routed game math: %u calls, %u readiness queries\n", routed_cases, routed_queries);
+        printf("routed game math: %u calls, %u readiness queries, %u disabled calls\n",
+               routed_cases, routed_queries, routed_off_cases);
     }
     return 0;
 }
