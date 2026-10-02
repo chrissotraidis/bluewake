@@ -12,7 +12,8 @@
  * blocks' own stops all run; every byte of the CPU state and of RAM must
  * match after each, including the cycle observation suffix. Modules are
  * generated privately from the player's disc; no native replacement sources.
- * Works with either ordinary pointer-state or optional fixed-state modules. */
+ * Works with either ordinary pointer-state or optional fixed-state modules.
+ * Global-MEM1 modules require a separate fixture bound to their own RAM. */
 #include "core/cpu.h"
 #include "StaticRecompABI.h"
 
@@ -173,6 +174,10 @@ static int open_module(const char* path, Module* out) {
     }
     StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)MODULE_SYMBOL(STATICRECOMP_GET_MODULE_SYMBOL);
     CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))MODULE_SYMBOL("bluewake_composite_guest_cpu");
+    if (MODULE_SYMBOL("bluewake_composite_guest_mem1") != NULL) {
+        fprintf(stderr, "%s: global MEM1 needs a separate RAM comparison fixture\n", path);
+        return 0;
+    }
     if (get == NULL) {
         fprintf(stderr, "%s: not a BlueWake module\n", path);
         return 0;
