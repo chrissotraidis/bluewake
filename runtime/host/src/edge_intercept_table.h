@@ -12,7 +12,7 @@
 
 #include "core/cpu.h"
 
-#define BLUEWAKE_EDGE_KEY_COUNT 55u
+#define BLUEWAKE_EDGE_KEY_COUNT 56u
 #define BLUEWAKE_EDGE_KEY_MULT 668265263u
 #define BLUEWAKE_EDGE_KEY_SHIFT 24u
 #define BLUEWAKE_EDGE_KEY_SLOTS 256u
@@ -22,7 +22,7 @@ static const u32 g_edge_keys[BLUEWAKE_EDGE_KEY_SLOTS] = {
     0u, 0x8031F7C8u, 0u, 0u, 0u, 0x80230A14u, 0x81E01B88u, 0u,
     0x8031E5C8u, 0x8030FBCCu, 0u, 0u, 0u, 0u, 0u, 0u,
     0u, 0u, 0u, 0u, 0u, 0u, 0x8031F984u, 0u,
-    0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
+    0u, 0u, 0u, 0u, 0u, 0x80322B20u, 0u, 0u,
     0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
     0u, 0u, 0u, 0u, 0u, 0x8031DD80u, 0u, 0u,
     0u, 0x8030F2B0u, 0x802315A8u, 0u, 0u, 0u, 0u, 0u,
@@ -63,7 +63,7 @@ static const u32 g_edge_keys_all[BLUEWAKE_EDGE_KEY_COUNT] = {
     0x8030F5A4u, 0x8030F618u, 0x8030FADCu, 0x8030FBCCu, 0x803193ACu, 0x8031A6E8u, 0x8031CD50u, 0x8031D2E0u,
     0x8031D400u, 0x8031D438u, 0x8031DAFCu, 0x8031DC9Cu, 0x8031DD80u, 0x8031E5C8u, 0x8031E74Cu, 0x8031E8C4u,
     0x8031EA48u, 0x8031EC68u, 0x8031EF98u, 0x8031F0E0u, 0x8031F348u, 0x8031F45Cu, 0x8031F69Cu, 0x8031F7C8u,
-    0x8031F93Cu, 0x8031F984u, 0x80322BC8u, 0x80328F84u, 0x81E000D4u, 0x81E01B88u, 0x81E01BA4u,
+    0x8031F93Cu, 0x8031F984u, 0x80322B20u, 0x80322BC8u, 0x80328F84u, 0x81E000D4u, 0x81E01B88u, 0x81E01BA4u,
 };
 
 /* Probe until the address is found or an empty slot ends the chain. */

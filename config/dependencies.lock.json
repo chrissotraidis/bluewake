@@ -112,11 +112,11 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "18ba3b642588a33b9e8eac4aba7f713bb8d3d778",
-      "branch": "codex/bluewake-post-texture-parity",
+      "sha": "2218107dac0150151b39d736924df57e8dc75104",
+      "branch": "codex/bluewake-pe-token",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
-      "verified": "2026-10-02",
+      "verified": "2026-10-03",
       "upstream": {
         "url": "https://github.com/ExpansionPak/RecompCore",
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
@@ -546,7 +546,8 @@
           "patches/recompcore/0134-test-seven-interpolation-steps.patch",
           "patches/recompcore/0135-honor-extended-mem1-aliases.patch",
           "patches/recompcore/0136-dual-texture-post-transform.patch",
-          "patches/recompcore/0137-preserve-post-texture-save-state.patch"
+          "patches/recompcore/0137-preserve-post-texture-save-state.patch",
+          "patches/recompcore/0138-pe-token-and-pictobox-readback.patch"
         ],
         "evidence": "Prior runtime candidate passes Mac/Windows regressions. Extended MEM1 aliases, endian reads/writes, reservations, journals, MEM2 and MMIO pass plain/global ASan/UBSan fixtures; full candidate and gameplay/performance acceptance remain pending.",
         "later_donor_dual_texture": {
@@ -554,6 +555,10 @@
           "import": "94e9835c4da4fd3b23533de9342319b58aa9ccbf",
           "save_state_adaptation": "18ba3b642588a33b9e8eac4aba7f713bb8d3d778",
           "evidence": "Matrix-fold and FIFO/frontend save-state regressions pass Release and ASan/UBSan; Mac host builds. BlueWake lava scene and native Windows acceptance pending."
+        },
+        "pictobox_capture": {
+          "runtime": "2218107dac0150151b39d736924df57e8dc75104",
+          "evidence": "PE token/finish and tiled I8/RGB565 regressions pass; bounded Mac Metal regular/Deluxe photo content, album acceptance, repeat/cancel, actual game save/separate-launch photo reload and pre-fix state capture pass. Native Windows remains pending."
         }
       }
     },

@@ -6090,7 +6090,10 @@ static const BwStateField k_host_state_fields[] = {
     HS_FIELD(g_dsp_task_boot_started), HS_FIELD(g_dsp_audio_frame_words_remaining),
     HS_FIELD(g_dsp_mail_to_high_value),
     // Device models.
-    HS_FIELD(g_audio_dma), HS_FIELD(g_interrupts), HS_FIELD(g_si),
+    HS_FIELD(g_audio_dma),
+    // Preserve the old named field's wire size; PE state extends it separately.
+    {"g_interrupts", &g_interrupts, offsetof(DolInterrupts, pe_token)},
+    HS_FIELD(g_si),
     HS_FIELD(g_virtual_pad), HS_FIELD(g_aram_dma),
     HS_FIELD(g_ipl_sram.sram), HS_FIELD(g_ipl_sram.status),
     HS_FIELD(g_ipl_sram.dma_address), HS_FIELD(g_ipl_sram.dma_length),
@@ -6257,6 +6260,8 @@ static bool host_state_save(const char* path, CPUState* cpu,
                              (u32)(sizeof k_host_state_fields / sizeof k_host_state_fields[0]),
                              &vars, &vars_size)) {
         ok = ok && bw_state_write_chunk(writer, "HOSTVARS", vars, vars_size);
+        ok = ok && bw_state_write_chunk(writer, "PE", &g_interrupts.pe_token,
+            sizeof(g_interrupts) - offsetof(DolInterrupts, pe_token));
         free(vars);
     } else {
         ok = false;
@@ -6378,6 +6383,11 @@ static bool host_state_load(const char* path, CPUState* cpu,
     const BwStateChunk* aliases = bw_state_find(&reader, "ALIASES");
     const BwStateChunk* vars = bw_state_find(&reader, "HOSTVARS");
     const BwStateChunk* loops = bw_state_find(&reader, "LOOPVARS");
+    const BwStateChunk* pe = bw_state_find(&reader, "PE");
+    if (pe != NULL && pe->size != sizeof(g_interrupts) - offsetof(DolInterrupts, pe_token)) {
+        fprintf(stderr, "[state] %s: incompatible PE state size\n", path);
+        goto done;
+    }
     if (aliases == NULL || aliases->size < 4u || vars == NULL ||
         !bw_state_fields_valid(vars->data, vars->size) ||
         (loops != NULL && !bw_state_fields_valid(loops->data, loops->size))) {
@@ -6475,6 +6485,16 @@ static bool host_state_load(const char* path, CPUState* cpu,
         fprintf(stderr, "[state] %s: host variables unreadable\n", path);
         goto done;
     }
+    // Older states have only the original interrupt prefix. Reconstruct their
+    // always-enabled finish model and never retain token state from the future.
+    g_interrupts.pe_token = 0u;
+    g_interrupts.pe_control = DOL_PE_TOKEN_ENABLE_BIT | DOL_PE_FINISH_ENABLE_BIT;
+    g_interrupts.pe_token_pending =
+        (g_interrupts.pi_cause & DOL_PI_CAUSE_PE_TOKEN) != 0u;
+    g_interrupts.pe_finish_pending =
+        (g_interrupts.pi_cause & DOL_PI_CAUSE_PE_FINISH) != 0u;
+    if (pe != NULL)
+        memcpy(&g_interrupts.pe_token, pe->data, (size_t)pe->size);
     chunk = bw_state_find(&reader, "LOOPVARS");
     if (chunk != NULL) {
         const BwStateField loop_fields[] = {
@@ -9611,6 +9631,15 @@ int main(int argc, char** argv) {
                         dol_interrupts_pi_cause(&g_interrupts),
                         dol_interrupts_pi_mask(&g_interrupts), cpu.pc, cpu.msr);
             }
+        }
+        if (cpu.pc == 0x80322B20u) {
+            // GXSetDrawSync has written its token and flushed the FIFO, with
+            // interrupts still disabled. Drain the backend before publishing
+            // PE token completion; the guest restores interrupts and invokes
+            // its own callback (including the Pictobox capture continuation).
+            u16 token;
+            if (dol_platform_gx_read_draw_sync(&token))
+                dol_interrupts_commit_pe_token(&g_interrupts, token);
         }
         if (cpu.pc == 0x80322BC8u && g_async_draw_done) {
             // GXSetDrawDone's return: the asynchronous draw-done token that

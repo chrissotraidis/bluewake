@@ -396,6 +396,17 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     add_test(NAME bluewake_gxcore_test COMMAND bluewake_gxcore_test)
     set_tests_properties(bluewake_gxcore_test PROPERTIES TIMEOUT 30)
 
+    add_executable(bluewake_texture_encode_test ${GXRUNTIME_DIR}/graphics/gxcore/tests/gxcore_texture_encode_test.cpp)
+    target_link_libraries(bluewake_texture_encode_test PRIVATE GXRuntime::gxcore)
+    add_test(NAME bluewake_texture_encode_test COMMAND bluewake_texture_encode_test)
+
+    add_executable(bluewake_runtime_test ${GXRUNTIME_DIR}/tests/runtime_tests.c)
+    target_include_directories(bluewake_runtime_test PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})
+    target_compile_options(bluewake_runtime_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+    target_link_libraries(bluewake_runtime_test PRIVATE gxruntime bluewake_posix_compat)
+    set_target_properties(bluewake_runtime_test PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME bluewake_runtime_test COMMAND bluewake_runtime_test)
+
     add_executable(bluewake_frontend_test ${GXRUNTIME_DIR}/graphics/frontend/tests/frontend_replay_test.cpp)
     target_link_libraries(bluewake_frontend_test PRIVATE GXRuntime::retail_gx_frontend)
     # Replay fixtures hold multiple complete frontend states (over 2 MiB).

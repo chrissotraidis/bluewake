@@ -19,7 +19,7 @@ int main(void) {
         assert(bluewake_edge_maybe_intercept(g_edge_keys_all[i]));
 
     static const u32 semantic_addresses[] = {
-        0x803193ACu, 0x80308A9Cu,
+        0x803193ACu, 0x80308A9Cu, 0x80322B20u, 0x80322BC8u,
         0x8030F2B0u, 0x8030F618u, 0x8030F5A4u, 0x80017FD8u,
         0x8030FADCu, 0x8030FBCCu,
         0x80240744u, 0x81E000D4u,

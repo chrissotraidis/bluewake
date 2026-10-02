@@ -8,10 +8,11 @@ scope and acceptance. All v56, v55 and Route B campaigns below are historical
 for this goal. Do not resume them or add optimization families without a
 reproduced migration blocker.
 
-The executable candidate is `3392854`, runtime `18ba3b64`, translator
-`b8b5345`. Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
+The frozen fresh-player baseline is `3392854`, runtime `18ba3b64`, translator
+`b8b5345`. The focused Pictobox host candidate uses runtime `2218107d` with
+the unchanged private module; its exact host hash and evidence are in the ledger. Cumulative draft [PR #37](https://github.com/chrissotraidis/bluewake/pull/37)
 retains the existing integration history, including 26 Elliott-authored commits
-and 13 co-author trailers. Documentation-only follow-ups do not change the
+and the Elliott co-author trailers. Documentation-only follow-ups do not change the
 revision of tested binaries. Continue source work in this cumulative review.
 
 ### Accepted work to retain
@@ -29,7 +30,7 @@ remain accepted unless a relevant change invalidates them.
 
 | Work package | Next action and exit evidence | Availability |
 | --- | --- | --- |
-| Pictobox capture blocker | Fresh Mac reproduces black shutter and capture timeout; compression never starts. Capture states confirm callback wait at 2605/2625 then timeout by 2700. Trace the missing PE token/draw-sync completion path, implement the smallest correct fix, and verify actual photo content, repeat/cancel/save behavior plus interrupt regressions. Keep Windows reproduction separate. | Local copied Windfall fixture and exact failing app/state available; no source fix accepted yet |
+| Pictobox Windows qualification | Runtime `2218107d` and the host boundary pass bounded Mac regular/Deluxe photo content, album acceptance, repeated capture/cancel, actual game Save and separate-launch album reload, plus pre-fix state capture. Six focused regressions and encoder sanitizers pass. Verify Windows separately; do not re-run the accepted Mac route without a relevant change. | Mac gate closed for the copied Windfall fixture; Windows machine availability pending |
 | Mac controls and options | Finish vertical camera/collision and physical-controller checks; exercise remaining imported gameplay options on/off. Real wheel zoom, bounded jump/sprint on/off, selected keyboard-menu persistence and live Space jump now pass. The zoom diagnostic works after guaranteed guest input wakes the follow camera; do not remove its readiness guard. | Local controls can proceed; physical controller coordination pending |
 | Mac audio and sustained gameplay | Establish audible narrated intro/scripted music, then a representative 30-minute play session and matched frame times on an idle host. Guest PCM, screenshots and the historical bounded 22.8% Outset gain do not close these gates. | Audio listening and an uncontended measurement window required |
 | Final iOS / PadMint | Resume the existing exact-revision build, inspect module/assembly/provenance, then coordinated signing, device gameplay/save/reload and in-place upgrade with data readback. | Build stopped twice below 5 GiB free; 593 objects and verified profiles retained. Await stable storage headroom; maintainer asked for 30 GiB or external storage. Device availability pending |
@@ -37,10 +38,10 @@ remain accepted unless a relevant change invalidates them.
 | Maintained source and migration decision | Reconcile runtime into `bluewake-next`, BlueWake through PR #37 into `main`, retaining authorship. Review the single platform matrix, tested instructions, issue mapping and proposed donor notice against all gate results. | Engineering acceptance remains incomplete; no donor redirect or closure |
 
 Skip unavailable work and continue the next independent required item. The
-current local checkout stays clean at `3392854` so the interrupted PadMint build
-can resume with exact provenance. Documentation may be checkpointed on the
-existing cumulative branch without changing that checkout or starting another
-build. The reproduced Pictobox defect justifies a focused host/runtime fix and
+frozen `bluewake-cpu-contract` worktree stays clean at `3392854` so the
+interrupted PadMint build can resume with exact provenance. The primary checkout
+is now `codex/fork-consolidated` for focused host/runtime changes and PR #37;
+its nested runtime branch is `codex/bluewake-pe-token`. The reproduced Pictobox defect justifies a focused host/runtime fix and
 incremental host validation with the existing personal module. Preserve the
 exact-revision PadMint workspace and failing baseline; record new identities
 and invalidate affected acceptance when the fix is introduced.

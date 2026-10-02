@@ -33,9 +33,10 @@ later donor changes separately. Baseline refs were verified October 2 JST.
 
 
 The current candidate's lock and builder profile both select maintained runtime
-`18ba3b642588a33b9e8eac4aba7f713bb8d3d778` (runtime PR #3, based on #2 / `c2905b7a`).
-Patches through 0137 preserve BlueWake's safety changes and add the later donor
-post-texture renderer correction with save-state serialization. Existing native
+`2218107dac0150151b39d736924df57e8dc75104` (runtime PR #4, stacked on #3).
+Patches through 0138 preserve BlueWake's safety changes, the later donor
+post-texture correction, and PE token/capture readback. The previous fresh
+player build and paused PadMint workspace remain fixed at runtime `18ba3b64`. Existing native
 module/scene evidence below remains tied to its stated `c2905b7a` runtime. The translator remains
 `b8b534591cba8ca7cd43943a655ee6e2591cf5de`. Ordinary modules use ABI 3;
 fixed-CPU modules declare ABI 4; fixed-CPU plus module-owned RAM declares ABI 5.
@@ -839,6 +840,49 @@ complete token-delivery correction with interrupt/acknowledgment regressions,
 photo completion, B return, repeated captures and save/reload. Photo content
 must also be inspected: clearing the shutter alone is insufficient.
 
+### Pictobox repair candidate, October 3
+
+Runtime `2218107d` ([PR #4](https://github.com/chrissotraidis/RecompCore/pull/4))
+completes PE token delivery with independent token/finish masks and acknowledgments.
+The first token-only experiment reached the guest compressor, which then halted
+on an all-zero capture buffer. The complete candidate submits the actual EFB
+copy and reads I8/RGB565 pixels back into tiled guest RAM before publishing the
+token. It does not bypass the capture state or fabricate photo pixels. The
+BlueWake host adds the draw-sync boundary and a separate optional PE state chunk,
+preserving the old named interrupt field's layout and preflighting the new chunk
+before restoring CPU or memory.
+
+Six focused runtime/interrupt/edge/save-state/texture tests pass, along with the
+encoder's ASan/UBSan fixture and the Mac host build. The final test host hash is
+`70168c1e333cd53ea141ee3b066f1684168566780272d5ae48d1bc4aecfef1da`,
+with unchanged fresh-player module
+`3edc9c4dbf6d1f3fc9f840efa0e7ea39ffdd0333688d7876da14b0f271b34c7e`.
+The host was built from modified `b3f3f53` with the source now checkpointed in
+this PR and runtime `2218107d`; the frozen `3392854` baseline stays intact.
+
+On Mac/Metal at original 30 Hz and interpolation off, regular and Deluxe
+Pictobox previews contain the actual grayscale and color scene, respectively.
+Accepting a photo changes the remaining count from three to two; a repeated
+capture, cancellation and return to gameplay pass. These are bounded diagnostics
+on a copied Windfall fixture, with the relevant item granted in memory.
+Both photo types then pass the actual game Save menu and a separate normal
+launch from the saved card, without a state load or item grant on that launch:
+the album displays the corresponding stored grayscale/color image and one recorded
+pictograph.
+Both copies of the changed quest log have valid checksums; the other two quest
+slots are unchanged. Originals and preferences are preserved.
+
+The first persistence harness could not open the menu because its restored
+state contained disabled automated button schedules. Explicit scripted menu
+presses resolve that harness problem. One intermediate restored-state save
+panel showed unrelated item-message text before the final saved confirmation;
+this remains a state/message restoration observation, not a Pictobox freeze.
+The pre-fix state also loads all 150 host fields without missing/mismatched
+fields, then takes an actual grayscale photo, cancels and returns to gameplay.
+This closes the bounded Mac Pictobox checks. Native Windows reproduction and
+the broader gameplay/performance gates remain open. Private receipts and captures
+stay local; neither report is closed and no builds are published.
+
 ## Report reconciliation
 
 Reports from both repositories are investigation leads. The bounded Mac
@@ -847,7 +891,7 @@ No issue is closed or externally commented on by this work.
 
 | Report | Evidence / disposition | Next discriminating check |
 | --- | --- | --- |
-| [BlueWake #13](https://github.com/chrissotraidis/bluewake/issues/13), [donor #19: Pictobox](https://github.com/elliotttate/Wind-Waker-Recomp/issues/19) | Reporter confirmed donor Windows x64 0.3.0 on Windows 11/RTX 4070; a second Windows/Nvidia user confirms the same symptom. Windfall photo shutter blacks out while sound continues, with 120 displayed FPS / 30 game FPS, maximum render settings and 16:9. Exact binary-to-source identity still unverified | Mac final-candidate diagnostic now reproduces the black shutter with interpolation off and capture timeout state; see above. Trace and repair token delivery, inspect photo content and repeat/cancel/save behavior, then verify Windows separately. No fix claimed; neither issue closed |
+| [BlueWake #13](https://github.com/chrissotraidis/bluewake/issues/13), [donor #19: Pictobox](https://github.com/elliotttate/Wind-Waker-Recomp/issues/19) | Reporter confirmed donor Windows x64 0.3.0 on Windows 11/RTX 4070; a second Windows/Nvidia user confirms the same symptom. Windfall photo shutter blacks out while sound continues, with 120 displayed FPS / 30 game FPS, maximum render settings and 16:9. Exact binary-to-source identity still unverified | Mac final-candidate diagnostic now reproduces the black shutter with interpolation off and capture timeout state; see above. Runtime #4 and the host boundary now pass bounded Mac regular/Deluxe photo, repeat/cancel and both card-save/reload checks and legacy-state capture. Verify Windows separately. Neither issue closed |
 | [Donor #16: startup freeze](https://github.com/elliotttate/Wind-Waker-Recomp/issues/16) | 0.2.2 Windows logs reject PAL, then accept USA, initialize D3D12 on RTX 2050; stop after gxcore initialization. Also occurs on integrated GPU | Symbolized/blocked-thread evidence at first-frame boundary with exact app/module/pins; avoid assuming disc/settings/GPU cause |
 | [Donor #5: settings/startup crash](https://github.com/elliotttate/Wind-Waker-Recomp/issues/5) | Earlier access violation at zero; #12 startup/restart safeguards do not establish a fix | Windows HLE/LLE and real Restart/settings reproduction; bounded crash/safe-mode recovery |
 | [Donor #12: scripted music](https://github.com/elliotttate/Wind-Waker-Recomp/issues/12), [#1: intro](https://github.com/elliotttate/Wind-Waker-Recomp/issues/1) | #12 identifies Windows x86/0.2.2, ambient-only intro and bird/Zelda/sister/Ganon cues; Mac intro stream/sink evidence covers only its stated scene/build | Fresh-card and matching scripted-scene Windows guest/sink/output comparison, then audible output; do not extrapolate Mac intro captures |
@@ -862,9 +906,10 @@ Chris reoriented the loop after the initial integration campaign. The next
 iterations prioritize the complete player experience; see the current section
 of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
 
-1. **Pictobox blocker:** establish and correct the missing completion path,
-   then verify real photo content, repeat/cancel and save/reload. Preserve the
-   reproducer and baseline; do not bypass capture state or force success.
+1. **Pictobox Windows qualification:** bounded Mac regular/Deluxe photos,
+   repeat/cancel, both card-save/reload routes and legacy-state capture pass
+   with runtime `2218107d`. Verify the reporters' Windows path separately;
+   retain the failing baseline and avoid claiming cross-platform acceptance.
 2. **Remaining Mac qualification:** complete actual camera/controller and
    required gameplay-option checks, audible intro/scripted music and sustained
    play with matched measurements on an idle host. The fresh build, bounded
@@ -884,8 +929,9 @@ of [GOAL_LOOP.md](../GOAL_LOOP.md). The remaining cutover gates are:
    [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
    remains unposted until migration is accepted.
 
-Primary `codex/fork-reconciliation` at `95adeed` retains the completed baseline
-source-build/PadMint artifacts. The
+Primary checkout now uses `codex/fork-consolidated` for the cumulative source
+changes; branch `codex/fork-reconciliation` at `95adeed` and its completed
+baseline source-build artifacts remain preserved. The
 managed `bluewake-disc-parity` worktree at `05df605` retains both completed O2
 modules and the required private evidence.
 The managed `bluewake-cpu-contract` worktree holds the current source stack and

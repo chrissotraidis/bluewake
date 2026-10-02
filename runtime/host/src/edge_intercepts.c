@@ -46,6 +46,7 @@ bool bluewake_edge_address_requires_host(u32 address, u32 module1_raw_base) {
     switch (address) {
     case 0x803193ACu: // JAudio DSP task boot handshake.
     case 0x80308A9Cu: // GX draw-done return publishes PE finish.
+    case 0x80322B20u: // GXSetDrawSync flush publishes the PE token.
     case 0x80322BC8u: // GXSetDrawDone return publishes the async PE finish.
     case 0x8030F2B0u: // DVD path to entry.
     case 0x8030F618u: // DVD open.
