@@ -28,6 +28,13 @@ jobs:
           if ($LASTEXITCODE) { throw 'Runtime fetch failed' }
           git -C ref/recompcore checkout --detach FETCH_HEAD
           if ($LASTEXITCODE) { throw 'Runtime checkout failed' }
+      - name: Check the Windows player training and cache contracts
+        shell: pwsh
+        run: |
+          python tests/test_windows_training.py
+          if ($LASTEXITCODE) { throw 'Windows training contract failed' }
+          python tests/test_windows_prepared_cache.py
+          if ($LASTEXITCODE) { throw 'Windows prepared-source cache contract failed' }
       - name: Compile and link the host without a disc or game module
         shell: pwsh
         run: |

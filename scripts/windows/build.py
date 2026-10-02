@@ -36,6 +36,7 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -142,6 +143,7 @@ class Builder:
         self.env = None
         self.recompcore = ROOT / "ref/recompcore"
         self.iso = None
+        self.profile = None
 
     # --- helpers -------------------------------------------------------
     def run(self, name, command, *, env=None, cwd=None, ninja=False):
@@ -665,7 +667,16 @@ int main(void) {
 
     # --- 8 compile -----------------------------------------------------------
     def compile_module(self):
-        build = self.out / "composite"
+        flags = []
+        if self.profile is not None:
+            flags = [f"-fprofile-instr-use={self.profile.as_posix()}",
+                     "-Wno-profile-instr-unprofiled", "-Wno-profile-instr-out-of-date",
+                     "-Wno-backend-plugin"]
+            print(f"with the local optimization profile {self.profile.name}")
+        return self.compile_composite(self.out / "composite", self.args.opt_level,
+                                      flags, [], "composite")
+
+    def compile_composite(self, build, opt_level, extra_flags, extra_link_flags, name):
         rc = self.recompcore
         # Each chunk is one very large function, and two LLVM passes are
         # superlinear on it (clang 22, x86-64, measured with -ftime-report):
@@ -678,9 +689,11 @@ int main(void) {
         #   it to about 2 minutes, at the cost of a few register copies.
         flags = (f"-march={self.args.march} -fno-slp-vectorize "
                  "-mllvm -large-interval-freq-threshold=10")
-        self.run("composite-configure", [
+        flags += " " + subprocess.list2cmdline(extra_flags)
+        link_flags = subprocess.list2cmdline(["-fuse-ld=lld", *extra_link_flags])
+        self.run(f"{name}-configure", [
             "cmake", "-S", ROOT / "cmake/composite", "-B", build, "-G", "Ninja", "-DCMAKE_C_COMPILER=clang",
-            "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_C_FLAGS={flags}", "-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
+            "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_C_FLAGS={flags}", f"-DCMAKE_SHARED_LINKER_FLAGS={link_flags}",
             f"-DBLUEWAKE_FIXED_CPU={'ON' if self.args.fixed_cpu else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_J3D={'ON' if self.args.native_j3d else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_VEC={'ON' if self.args.native_vec else 'OFF'}",
@@ -691,7 +704,7 @@ int main(void) {
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
-            f"-DCOMPOSITE_OPTIMIZATION_LEVEL={self.args.opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
+            f"-DCOMPOSITE_OPTIMIZATION_LEVEL={opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
             f"-DGXRUNTIME_DIR={rc / 'GXRuntime'}", f"-DABI_DIR={rc / 'Source/Core/Core/PowerPC/StaticRecomp'}"])
         # -k 0: a chunk that fails does not stop the others. The usual cause is
         # memory (clang reports "out of memory" when several of the largest
@@ -699,10 +712,10 @@ int main(void) {
         jobs = self.args.jobs
         while True:
             try:
-                self.run("composite-build", ["cmake", "--build", build, "-j", jobs, "--", "-k", "0"], ninja=True)
+                self.run(f"{name}-build", ["cmake", "--build", build, "-j", jobs, "--", "-k", "0"], ninja=True)
                 break
             except BuildError:
-                log = (self.logs / "composite-build.log").read_text(errors="replace")
+                log = (self.logs / f"{name}-build.log").read_text(errors="replace")
                 if jobs <= 1 or "out of memory" not in log:
                     raise
                 jobs = max(1, jobs // 2)
@@ -711,6 +724,145 @@ int main(void) {
         if not module.exists():
             die("the game module was not produced")
         return module
+
+    # --- local optimization training ---------------------------------------
+    # The counterpart of scripts/builder/train_local_pgo.py: the game module is
+    # compiled with LLVM's instrumentation, the normal app plays the opening to
+    # player control headless with it, and the counts it records guide the
+    # optimized compile. The profile is made from the game, so it is private and
+    # stays in the build directory. Adapted from Elliott Tate's Windows builder
+    # (4fbcc7f and follow-ups through 7ca0cb9). Unlike the Mac, the
+    # bundled Apple-silicon profiles are not used: this one covers the runtime
+    # in the module too, from this compiler.
+    TRAINING_VERSION = "bluewake-1"
+    TRAINING_RETRACES = 23000
+    # After player control (retrace 20,257 on the lookout), Link runs - off the
+    # lookout, around Outset, turning - instead of standing until the end: the
+    # collision, movement and animation code that play spends its time in is
+    # then trained hot, not compiled cold for size. retrace:buttons:length:x:y.
+    TRAINING_RUN = ["20400:0:700:0:127", "21100:0:500:90:110", "21600:0:500:-90:110", "22100:0:900:0:127"]
+
+    def training_fingerprint(self):
+        """Bind local counts to actual prepared source, compiler and playback code."""
+        key = hashlib.sha256()
+        key.update(json.dumps({"recipe": self.TRAINING_VERSION,
+                               "compiler": self.clang_version, "march": self.args.march,
+                               "mods": self.mods,
+                               "options": {name: getattr(self.args, name) for name in
+                                           ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp",
+                                            "gather_pipe", "direct_calls", "inline_gpr", "native_j3d",
+                                            "native_vec", "native_math", "native_skin", "native_game_math")},
+                               "runtime": self.git("-C", str(self.recompcore), "rev-parse", "HEAD"),
+                               "source": tree_digest(self.out / "composite-src")},
+                              sort_keys=True).encode())
+        for folder in ("cmake/composite", "runtime/host/src", "windows/src"):
+            for path in sorted((ROOT / folder).rglob("*")):
+                if path.is_file():
+                    key.update(path.relative_to(ROOT).as_posix().encode())
+                    key.update(path.read_bytes())
+        key.update(Path(__file__).read_bytes())
+        return key.hexdigest()
+
+    def train(self):
+        work = self.out / "pgo-local"
+        work.mkdir(parents=True, exist_ok=True)
+        profile = work / "composite.profdata"
+        receipt = work / "training.json"
+        key = self.training_fingerprint()
+        if profile.exists() and receipt.exists() and not self.args.retrain:
+            try:
+                previous = json.loads(receipt.read_text())
+            except ValueError:
+                previous = {}
+            if previous.get("fingerprint") == key and previous.get("profile") == sha256_file(profile):
+                print("reusing the optimization profile trained for these inputs")
+                return self.hashed_profile(profile)
+
+        exe = self.build_app()
+        start = time.monotonic()
+        module = self.compile_composite(work / "composite", "0", ["-fprofile-instr-generate"],
+                                        ["-fprofile-instr-generate"], "training-composite")
+        print(f"instrumented game module built ({int(time.monotonic() - start) // 60} min)")
+        attempt = Path(tempfile.mkdtemp(prefix="attempt-", dir=work))
+        raw = []
+        # The opening as a new player plays it, then again with widescreen and
+        # Better Wind Waker's options, so the chunks those mods replace are
+        # optimized for play too rather than as code that never ran.
+        runs = [("plain", None)]
+        if self.mods:
+            runs.append(("mods", "widescreen,betterww"))
+        for name, mods in runs:
+            raw += self.training_run(exe, module, attempt / f"run-{name}", mods)
+        candidate = attempt / "composite.profdata"
+        self.run("training-merge", [self.llvm_profdata, "merge", "-o", candidate, *raw])
+        shown = subprocess.run([self.llvm_profdata, "show", "--all-functions", candidate], capture_output=True,
+                               text=True, env=self.env)
+        if shown.returncode:
+            die(f"llvm-profdata could not read the new profile; previous profile retained (see {candidate})")
+        stats = shown.stdout
+        executed = [int(c) for c in re.findall(r"(?m)^  func_[0-9A-Fa-f]+\S*:\n(?:    .*\n)*?    Function count: (\d+)",
+                                               stats)]
+        ran = sum(1 for count in executed if count > 0)
+        if ran == 0:
+            die("the optimization profile counted no translated game functions")
+        print(f"optimization profile: {ran} translated functions ran ({len(executed)} in the module)")
+        os.replace(candidate, profile)
+        pending = receipt.with_suffix(".tmp")
+        pending.write_text(json.dumps({"fingerprint": key, "profile": sha256_file(profile),
+                                       "trained": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                       "executed_functions": ran}, indent=2))
+        os.replace(pending, receipt)
+        return self.hashed_profile(profile)
+
+    def training_run(self, exe, module, run, mods):
+        """One headless playback of the opening: boot, A at the title, the
+        opening cutscene's text confirmed, player control on Outset. A new card
+        in its own folder; the player's saves are never touched."""
+        run.mkdir(parents=True)
+        env = {k: v for k, v in (self.env or os.environ).items() if not k.startswith(("BLUEWAKE_", "DOL_", "LLVM_PROFILE_"))}
+        env.update({
+            "LLVM_PROFILE_FILE": str(run / "%m-%p.profraw"),
+            "BLUEWAKE_DATA_DIR": str(run), "BLUEWAKE_NO_DIALOG": "1", "BLUEWAKE_RENDERER": "headless",
+            "BLUEWAKE_DOL": str(self.out / "game/main.dol"), "BLUEWAKE_RELS_DIR": str(self.out / "game/rels"),
+            "BLUEWAKE_DISC": str(self.iso),
+            "BLUEWAKE_DSP_IROM": str(self.recompcore / "Data/Sys/GC/dsp_rom.bin"),
+            "BLUEWAKE_DSP_COEF": str(self.recompcore / "Data/Sys/GC/dsp_coef.bin"),
+            "BLUEWAKE_MAX_RETRACES": str(self.TRAINING_RETRACES), "BLUEWAKE_WALL_PACE": "0",
+            "BLUEWAKE_PLAYER_PROBE": "1", "BLUEWAKE_PAD_BUTTONS": "0x0100",
+            # The player-control milestone below waits on the overlap phase
+            # this observation latches; the Windows app turns it off for play.
+            "BLUEWAKE_OVERLAP_OBSERVATION": "1",
+            "BLUEWAKE_PAD_PULSE_ON_TITLE_READY": "1", "BLUEWAKE_PAD_PULSE_LENGTH": "2",
+            "BLUEWAKE_PAD_CONFIRM_EVENT": "any",
+            "BLUEWAKE_PAD_SCRIPT": ",".join([f"{n}:0x0100:2" for n in range(17800, 22001, 150)] + self.TRAINING_RUN),
+        })
+        env["DOL_AURORA_FRAME_INTERP"] = "0"
+        for option, name in (("direct_calls", "BLUEWAKE_DIRECT_CALLS"),
+                             ("gather_pipe", "BLUEWAKE_GATHER_PIPE"),
+                             ("native_j3d", "BLUEWAKE_NATIVE_J3D"),
+                             ("native_vec", "BLUEWAKE_NATIVE_VEC"),
+                             ("native_math", "BLUEWAKE_NATIVE_MATH"),
+                             ("native_skin", "BLUEWAKE_NATIVE_SKIN"),
+                             ("native_game_math", "BLUEWAKE_NATIVE_GAME_MATH")):
+            env[name] = "1" if getattr(self.args, option) else "0"
+        if mods:
+            env["BLUEWAKE_MODS"] = mods
+        log = self.run(f"training-playback-{run.name[4:]}", [exe, "--module", module], env=env)
+        text = log.read_text(errors="replace")
+        if "[player-milestone] control-admitted" not in text:
+            die(f"the training playback did not reach player control; profile rejected (see {log})")
+        raw = sorted(run.glob("*.profraw"))
+        if not raw:
+            die(f"the training playback wrote no profile (see {log})")
+        return raw
+
+    def hashed_profile(self, profile):
+        folder = self.out / "profiles"
+        folder.mkdir(exist_ok=True)
+        target = folder / f"composite-{sha256_file(profile)[:16]}.profdata"
+        if not target.exists() or sha256_file(target) != sha256_file(profile):
+            shutil.copy2(profile, target)
+        return target
 
     # --- 9 app ---------------------------------------------------------------
     def build_app(self):
@@ -742,7 +894,7 @@ int main(void) {
         redist = Path(self.env.get("VCToolsRedistDir", "")) / "x64"
         crt = sorted(redist.glob("Microsoft.VC*.CRT")) if redist.is_dir() else []
         if crt:
-            for name in ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
+            for name in ("msvcp140.dll", "msvcp140_atomic_wait.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
                 if (crt[-1] / name).exists():
                     shutil.copy2(crt[-1] / name, app / name)
         else:
@@ -776,6 +928,8 @@ int main(void) {
             "native_math": self.args.native_math,
             "native_skin": self.args.native_skin,
             "native_game_math": self.args.native_game_math,
+            "local_training": self.profile is not None,
+            "composite_profile_sha256": sha256_file(self.profile) if self.profile else "",
             "compiler": self.clang_version,
             "module_sha256": sha256_file(app / MODULE),
             "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -845,6 +999,15 @@ int main(void) {
         else:
             self.build_mods()
         self.prepare_blocks()
+        if not (args.no_train or args.no_pgo):
+            self.llvm_profdata = str(Path(self.clang).with_name("llvm-profdata.exe"))
+            if not Path(self.llvm_profdata).is_file():
+                die("llvm-profdata.exe is missing beside Visual Studio's clang; install its LLVM tools "
+                    "or explicitly use --no-train for an untrained build")
+            step("local optimization training (instrumented module and private opening playbacks)")
+            self.profile = self.train()
+        else:
+            print("local training skipped: compiling without an optimization profile")
         step(f"8/10 compile the game module (-O{args.opt_level}, -march={args.march}; this is the long step)")
         start = time.monotonic()
         module = self.compile_module()
@@ -893,6 +1056,10 @@ def main():
                              "any Intel Haswell or AMD Zen or newer; lowered automatically on older CPUs)")
     parser.add_argument("--opt-level", choices=("1", "2"), default="2", help="game module optimization level")
     parser.add_argument("--no-mods", action="store_true", help="skip the widescreen and Better Wind Waker variants")
+    parser.add_argument("--no-train", action="store_true",
+                        help="skip local optimization training; compile without a profile")
+    parser.add_argument("--no-pgo", action="store_true", help="alias for --no-train")
+    parser.add_argument("--retrain", action="store_true", help="record a new local profile instead of reusing one")
     parser.add_argument("--prepared-blocks", action="store_true",
                         help="opt into experimental prepaid-block optimization (off by default; Windows timing pending)")
     parser.add_argument("--fixed-cpu", action="store_true",

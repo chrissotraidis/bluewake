@@ -50,9 +50,11 @@ The candidate includes prepaid blocks, fixed CPU/RAM storage, inline floating
 point, gather helpers, direct calls and certified native replacements as explicit
 builder options. Their bounded Mac evidence is in the
 [reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md); it does not
-establish Windows performance. The Windows builder currently compiles at O2
-without PGO training. Mac local-training receipts do not validate that Windows
-path. Full clean Windows builds, matched performance and gameplay remain open.
+establish Windows performance. The Windows builder now carries Elliott’s local PGO training route: it builds
+an instrumented module, plays the opening to control in isolated plain/modded
+runs, validates executed translated functions, and uses the local profile for O2.
+Source contract checks cover the wiring; a complete Windows disc-to-playback run
+remains unverified. Mac training receipts do not validate that Windows path. Full clean Windows builds, matched performance and gameplay remain open.
 
 ## What you need
 
@@ -80,7 +82,7 @@ python scripts/windows/build.py "D:\Games\The Legend of Zelda - The Wind Waker (
 
 The builder finds Visual Studio itself (no developer prompt needed), fetches the pinned RecompCore and DolRecomp
 into `ref/`, checks and converts the disc, extracts and translates the game, checks the generated source against
-the verified digest, adds the mods, compiles the game module and the app, and writes the app folder
+the verified digest, adds the mods, records a local optimization profile, compiles the game module and the app, and writes the app folder
 `build\windows\BlueWake`. Each stage prints its progress; full logs are in `build\windows\logs`. Rerunning the
 same command reuses finished work.
 
@@ -89,6 +91,8 @@ Options (`--help` lists all):
 | Option | |
 | --- | --- |
 | `--source-only` | Stop after generating the source: checks your tools, disc and translation in a few minutes |
+| `--no-train` / `--no-pgo` | Explicitly skip local training and compile without a profile |
+| `--retrain` | Record a new local profile instead of reusing a matching one |
 | `--no-mods` | Skip the mods (widescreen 16:9 and 16:10, Better Wind Waker's options) |
 | `--prepared-blocks` | Opt into generic prepaid-block optimization; off by default, Windows timing/gameplay pending |
 | `--fixed-cpu` | Opt into experimental fixed-address CPU storage; off by default, requires the matching app |
@@ -106,6 +110,15 @@ Options (`--help` lists all):
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
 | `--out DIR` | Build directory (default `build\windows`) |
+
+Local profiles stay inside the private build directory. Training uses new isolated
+data folders, original 30 Hz gameplay and interpolation off; it never uses the
+player's normal card or a bundled Apple profile. Both reaching player control and
+recording executed game functions are required. Failed attempts remain available
+for diagnosis and do not replace a previously validated profile. Reuse requires
+matching prepared source, runtime, compiler, CPU level, selected options and host
+playback code. A profile hash in its filename makes changed counts invalidate
+Ninja's compile inputs.
 
 The independent `--native-j3d`, `--native-vec`, `--native-math`, `--native-skin` and `--native-game-math` options certify
 the original function bodies before other rewrites. `BLUEWAKE_NATIVE_J3D=1`,

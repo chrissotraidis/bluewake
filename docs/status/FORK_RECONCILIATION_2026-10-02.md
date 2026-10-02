@@ -57,6 +57,26 @@ The instant-text pair `instant-text-ae5ceqfa` remains inconclusive: both
 all seven off/on captured frames are identical. The enabled message-patch logs
 are implementation evidence only. Establish dialogue before another A/B check.
 
+## Windows player-build follow-up
+
+The earlier ledger explicitly left Windows local PGO unimplemented. The source
+landing does not erase that gap. The follow-up now ports Elliott's existing
+instrumented-module/plain+modded training route (introduced in `4fbcc7f`, later
+recipe through `7ca0cb9`) into BlueWake's Windows builder. Default builds train
+locally; `--no-train` / `--no-pgo` skip it, and `--retrain` refreshes counts.
+The adaptation binds reuse to prepared source/runtime/compiler/options/host code,
+keeps failed attempts, isolates player data, requires actual player-control and
+executed-function evidence, and preserves the previous profile on failed training.
+Final compilation and provenance use the validated local profile. Packaging also
+includes Elliott's `msvcp140_atomic_wait.dll` runtime dependency when available.
+
+Seven synthetic training/packaging checks and 17 existing prepared-source cache
+checks pass locally. These cover instrumentation/link flags, paths with spaces,
+profile rejection/preservation/reuse, source/option invalidation, isolated
+playback setup and runtime-DLL packaging. Native Windows CI and a complete
+owned-disc Windows run remain pending for this follow-up; fixtures do not replace
+that player-build result.
+
 ## Fixed baseline and selected dependencies
 
 Reconcile the fixed donor main **and** windows-release snapshots below. Track
@@ -256,7 +276,7 @@ on #3. All four are now merged into `bluewake-next`; all public checkpoints are 
 | Overload suspension and display-rate interpolation, up to 240 | `f70305c`; runtime `63489547`; UI `4fedbfc` | Runtime and Mac/Windows display settings source integrated in #16; three/seven-step regressions and rate/preference policy pass; 30 Hz logic and interpolation off remain defaults | Open; Off/120/Off/relaunch UI persistence passes on Mac; real display changes, pacing, slow-game workloads, images and matched performance remain open |
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
-| Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | Clean owned-disc iOS baseline passes at `95adeed`; fresh Mac `3392854` translation/training/O2/package and bounded save/reload/upgrade pass. Current host overlay is separate. Windows O2 builder has no PGO training stage | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
+| Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | Clean owned-disc iOS baseline passes at `95adeed`; fresh Mac `3392854` translation/training/O2/package and bounded save/reload/upgrade pass. Current host overlay is separate. Windows local PGO is now implemented in the follow-up; actual owned-disc training acceptance remains open | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
 | PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; earlier `95adeed` assembly passes. At frozen `3392854` / CLI 0.2.9, source generation and training pass, compilation is stopped with 593 objects retained. Final assembly/provenance, maintained-candidate qualification, signing/install, device save/reload and matched performance remain open |
 | Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Baseline and candidate runtime app-only audits pass. Compatible old-module update vs rebuild and physical acceptance open; no publication |
 | Consecutive non-advancing dispatch bound; desktop modules | Existing BlueWake loop, found during #21 assertion audit | #22 makes the counter per-call and resets after progress; stuck guest still yields on ninth non-advancing successor | Open; Release and ASan/UBSan regression, strict module boot and all 38 native Windows checks pass; optimized/performance/gameplay acceptance open |
@@ -651,7 +671,7 @@ acceptance. No donor benchmark is transferred.
 | PadMint / iOS | Adapter `018a9f0` (CLI 0.2.8), new workspace, exact `95adeed`, matching audited app-only input: translation/mods, new 23,000-retrace local training, full compilation and personal assembly pass; package integrity, module hash and exact source provenance rechecked | Player signing/install (assembled module is unsigned), final integrated-source acceptance, device run/save/reload/upgrade and trained performance |
 | App-only / iOS | Fresh `3392854` shell excludes translated code; PadMint 0.2.9 audit and public-assets gate pass locally | Final-source compatible old-module update and device acceptance; no upload/publication |
 | Owned-disc / Mac | Fresh `3392854` / runtime `18ba3b64`: owned-disc translation, new training, module compilation, signed relocatable app and actual game save/separate reload pass; bounded completed-build restart recovery passes | Audible intro/scripted music, documented state/rebuild restrictions, remaining real camera checks, real controllers and sustained performance; local replacement from the recorded earlier developer app now passes |
-| Owned-disc / Windows | Native app/source fixtures pass; disc/recovery and preparation scripts integrated | Full clean O2 module build (current builder has no PGO training), real disc/Unicode/UI/recovery, Direct3D/fullscreen/restart, controllers/audio/gameplay and save-preserving upgrade |
+| Owned-disc / Windows | Native app/source fixtures pass; disc/recovery and preparation scripts integrated | Full clean locally trained O2 module build, real disc/Unicode/UI/recovery, Direct3D/fullscreen/restart, controllers/audio/gameplay and save-preserving upgrade |
 | PadMint / Mac, Windows, tvOS | No complete adapter path accepted; Mac remains planned | Do not claim support; implement/test before widening the matrix |
 | Apple TV | Existing preview source and contributor work preserved | Physical hardware/storage acceptance for any claimed feature; no new acceptance inferred |
 
