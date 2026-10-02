@@ -547,3 +547,22 @@ matched O2 prepared-block build on `05df605`. Both managed checkouts retain
 unique private qualification artifacts and remain in use; preserve them until
 source integration and artifact retention are reconciled. No release or fork
 redirect is authorized.
+
+
+At `65329732a2536b0a4fa4319220a803e1eaddb6bd`, draft
+[PR #18](https://github.com/chrissotraidis/bluewake/pull/18) stacks on #17.
+Native Windows app/manual-fixture compilation and all **32/32 regressions**
+pass (9.83 seconds; [run 36962008520](https://github.com/chrissotraidis/bluewake/actions/runs/36962008520)).
+All **247 Mac host/runtime regressions** pass after explicitly building the
+four runtime test targets excluded from the default build. The initial suite
+run passed its 58 built tests but could not run those four missing targets;
+the completed suite resolves that coverage gap. A fresh source-only ZIP passes
+`check_public_assets.sh`, with zero address-named functions. Repository CI
+audit jobs remain queued; the local repository audit passes.
+
+The tested fixed-CPU transformer reproduces all 813 generated chunks exactly,
+leaving the other private composite files unchanged. The controlled boot pair
+is scheduled serially behind full PadMint's local training, using the same new
+host for both modules and byte-identical card/SRAM seeds. No boot result is
+claimed while that comparison is waiting. Full PadMint packaging and the
+matched O2 prepared-block comparison remain in progress on their fixed inputs.
