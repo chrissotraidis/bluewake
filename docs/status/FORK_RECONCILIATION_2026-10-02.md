@@ -93,7 +93,7 @@ source only. No source merge or test result implies release readiness.
 | Save durability, failed startup/audio recovery; all claimed targets | Current reports; donor initial mechanisms | #12 adds stronger atomic card/settings/state writes, lock/recovery, crash logs, launch marker, sink audio recovery; retained over donor files | Integrated; real error/restart/output-device/upgrade acceptance open, no power-loss guarantee |
 | Apple identity, touch, saves, settings, tvOS | BlueWake contributions incl. Ian MacFarlane #3, #6, #8 | Preserve existing Apple shell and BlueWake styling; tvOS remains preview with separate hardware/storage gates | Integrated; latest iPhone/iPad candidate acceptance open; TV parity only where claimed, no physical TV evidence |
 | Source build from owned USA rev-0 disc | BlueWake shell builder; donor Windows builder | Clean owned-disc iOS build/package and bounded resume pass at `95adeed`; final integrated-source build and actual run/save/upgrade still required. Windows training/build path incomplete | Open; fresh output, pinned public sources, validation/translation/mods/train/compile/package, interruption/resume, local personal run/save/reload |
-| PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; Fresh PadMint iOS translation/training pass, module compilation running; packaging, final-source selection, in-place device save/reload and matched performance open |
+| PadMint | `padmint.json`, docs/PADMINT_HANDOFF.md; actual selected PadMint adapter/revision must be refreshed | Manifest: experimental iOS on Apple Silicon, macOS planned; no Windows/tvOS adapter claim | Open; Fresh PadMint iOS translation/training, module compilation, assembly and provenance checks pass at the baseline; player signing/install, final-source selection, device save/reload and matched performance open |
 | Public app-only candidate and compatibility | BlueWake `--app-only` / `--app` model | Donor game-containing distribution excluded; keep own-disc modules local | Baseline and candidate runtime app-only audits pass. Compatible old-module update vs rebuild and physical acceptance open; no publication |
 | Consecutive non-advancing dispatch bound; desktop modules | Existing BlueWake loop, found during #21 assertion audit | #22 makes the counter per-call and resets after progress; stuck guest still yields on ninth non-advancing successor | Open; Release and ASan/UBSan regression, strict module boot and all 38 native Windows checks pass; optimized/performance/gameplay acceptance open |
 
@@ -112,8 +112,8 @@ wording saying "600 exact guest states" overstated this evidence; this correctio
 also applies to the historical appendix. Route/card, independently checked timing,
 function-fixture and image results retain their stated scopes. The 30,000-case
 function fixtures do compare full CPU/RAM within those cases. Broader optional
-checkpoint instrumentation is being added; no new full-route state result is
-accepted yet. The existing route comparator remains unchanged.
+checkpoint instrumentation is implemented and its local fixtures pass; no new
+full-route checkpoint result is accepted yet. The existing route comparator remains unchanged.
 
 - **Host/runtime regressions:** all 248 Mac tests pass at `7b7e530` (67.65 s).
   Eight older assertion-based fixtures were previously disabled by Release's
@@ -175,6 +175,16 @@ accepted yet. The existing route comparator remains unchanged.
   retraces 2,000/4,000. An older module without writer exports stays Off when
   batching is requested. A longer player-control route is running; no sustained
   gameplay or performance acceptance follows from the short intro comparison.
+- **Checkpoint coverage:** optional `BLUEWAKE_GUEST_CHECKPOINT_INTERVAL=N`
+  hashes normalized CPU fields, full MEM1/MEM2 and registered REL storage at each
+  Nth retrace. Native addresses and padding are excluded; pointer presence is
+  retained. The C fixture passes Release and arm64 ASan/UBSan. The separate
+  `scripts/guest_checkpoints.py --interval 1000 --through 6000 A.log B.log`
+  comparator requires every expected checkpoint, increasing cycles, one normal
+  stop and the requested terminal retrace. Its fixtures reject missing, duplicate,
+  malformed, truncated and differing evidence. Use it alongside route/card and
+  image checks. It is disabled by default, adds measurement overhead when enabled,
+  and does not cover GPU/peripheral state or execution between checkpoints.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -202,7 +212,7 @@ acceptance. No donor benchmark is transferred.
 | Route / platform | Current evidence | Still required |
 | --- | --- | --- |
 | Owned-disc source / iOS | Fresh `95adeed` / runtime `99e47480`: disc validation, translation, mods, locally generated PGO, full module/app link, personal packaging and signature/provenance checks pass. Controlled interruption/resume preserves prior objects/profile hashes | Repeat final integrated-source selection where changed; physical launch, fresh/existing save/reload and in-place upgrade preserving data |
-| PadMint / iOS | Adapter `018a9f0` (CLI 0.2.8), new workspace, exact `95adeed`, matching audited app-only input: translation/mods and new 23,000-retrace local training pass; iOS module compilation is running | Full assembly/provenance validation, final integrated-source acceptance, device run/save/reload/upgrade and trained performance |
+| PadMint / iOS | Adapter `018a9f0` (CLI 0.2.8), new workspace, exact `95adeed`, matching audited app-only input: translation/mods, new 23,000-retrace local training, full compilation and personal assembly pass; package integrity, module hash and exact source provenance rechecked | Player signing/install (assembled module is unsigned), final integrated-source acceptance, device run/save/reload/upgrade and trained performance |
 | App-only / iOS | Fresh matching candidate excludes translated code; PadMint audit and public-assets gate pass locally | Final-source compatible old-module update and device acceptance; no upload/publication |
 | Owned-disc / Mac | Bundled development host, private module correctness and isolated menu checks pass | Complete documented fresh player route, installation/launcher, actual game/save/reload/upgrade and sustained performance |
 | Owned-disc / Windows | Native app/source fixtures pass; disc/recovery and preparation scripts integrated | Full clean module build/training, real disc/Unicode/UI/recovery, Direct3D/fullscreen/restart, controllers/audio/gameplay and save-preserving upgrade |
@@ -231,8 +241,9 @@ bugs. No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-1. Finish the running prepared-block O2 pair, full PadMint build and longer
-   batching route, then verify their terminal artifacts. Complete broader guest
+1. Finish the running prepared-block O2 pair and longer batching route, then
+   verify their terminal artifacts. The baseline full PadMint package is complete;
+   player signing and final-source/device acceptance remain open. Complete broader guest
    checkpoints and correct startup-only trace claims throughout the current evidence. Run matched performance measurements on a quiet
    machine; do not derive performance from current loaded runs.
 2. Continue directly importing the remaining Elliott direct-call/register and

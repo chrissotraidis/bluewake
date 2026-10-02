@@ -59,7 +59,7 @@ add_executable(bluewake_host
     src/rel_scratch_allocator.c
     src/scheduler_contract.c
     src/save_state.c)
-target_link_libraries(bluewake_host PRIVATE gxruntime GXRuntime::aurora z)
+target_link_libraries(bluewake_host PRIVATE gxruntime GXRuntime::aurora z xxhash)
 # The options menu (settings_menu.cpp) draws with Aurora's Dear ImGui.
 if(TARGET imgui)
     target_link_libraries(bluewake_host PRIVATE imgui)
@@ -275,6 +275,12 @@ foreach(_variant plain global)
     endif()
     add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
 endforeach()
+add_executable(bluewake_guest_checkpoint_test ${BLUEWAKE_REPO_ROOT}/tests/guest_checkpoint_test.c)
+target_include_directories(bluewake_guest_checkpoint_test PRIVATE
+    ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
+target_link_libraries(bluewake_guest_checkpoint_test PRIVATE xxhash)
+add_test(NAME bluewake_guest_checkpoint_test COMMAND bluewake_guest_checkpoint_test)
+
 add_executable(bluewake_gather_host_test
     ${BLUEWAKE_REPO_ROOT}/tests/gather_host_test.c
     ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)

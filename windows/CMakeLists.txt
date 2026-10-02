@@ -88,7 +88,7 @@ add_executable(BlueWake
 # owns main() and hands over after setting the defaults.
 set_source_files_properties(${BLUEWAKE_HOST_SRC}/main.c PROPERTIES
     COMPILE_DEFINITIONS "main=bluewake_host_main")
-target_link_libraries(BlueWake PRIVATE gxruntime GXRuntime::aurora bluewake_posix_compat winmm bcrypt comctl32 comdlg32)
+target_link_libraries(BlueWake PRIVATE gxruntime GXRuntime::aurora xxhash bluewake_posix_compat winmm bcrypt comctl32 comdlg32)
 if(TARGET imgui)
     target_link_libraries(BlueWake PRIVATE imgui)
 endif()
@@ -235,6 +235,12 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         endif()
         add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
     endforeach()
+    add_executable(bluewake_guest_checkpoint_test ${BLUEWAKE_REPO_ROOT}/tests/guest_checkpoint_test.c)
+    target_include_directories(bluewake_guest_checkpoint_test PRIVATE
+        ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
+    target_link_libraries(bluewake_guest_checkpoint_test PRIVATE xxhash)
+    add_test(NAME bluewake_guest_checkpoint_test COMMAND bluewake_guest_checkpoint_test)
+
     add_executable(bluewake_gather_host_test
         ${BLUEWAKE_REPO_ROOT}/tests/gather_host_test.c
         ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
@@ -251,7 +257,7 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     target_link_libraries(bluewake_gather_dispatch_test PRIVATE gxruntime)
     target_compile_definitions(bluewake_gather_dispatch_test PRIVATE BLUEWAKE_GATHER_PIPE=1)
     add_test(NAME bluewake_gather_dispatch_test COMMAND bluewake_gather_dispatch_test)
-    foreach(_test bluewake_gather_host_test bluewake_gather_memory_plain_test bluewake_gather_memory_global_test bluewake_gather_dispatch_test)
+    foreach(_test bluewake_guest_checkpoint_test bluewake_gather_host_test bluewake_gather_memory_plain_test bluewake_gather_memory_global_test bluewake_gather_dispatch_test)
         target_include_directories(${_test} PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})
         target_compile_options(${_test} PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
         target_link_libraries(${_test} PRIVATE bluewake_posix_compat)

@@ -26,6 +26,7 @@
 #include "host_stop.h"
 #include "gx_flush_metrics.h"
 #include "gather_pipe_bridge.h"
+#include "guest_checkpoint.h"
 #include "edge_intercepts.h"
 #include "game_options.h"
 #include "fast_load.h"
@@ -1217,6 +1218,9 @@ static bool g_player_route_waiting;
 static bool g_guest_state_trace_enabled;
 static u64 g_guest_state_trace_next = 100000ull;
 static unsigned g_guest_state_trace_reports;
+static u32 g_guest_checkpoint_interval;
+static bool g_guest_checkpoint_failed;
+static const StaticRecompModuleDesc* g_guest_checkpoint_module;
 static BluewakeCycleDomain g_cycle_domain;
 static BluewakeDeliveryDigest g_delivery_digest;
 // Bounded delivery-trace window (BLUEWAKE_DELIVERY_TRACE=LO:HI). Prints the
@@ -4854,6 +4858,66 @@ static void host_input_chain_probe(CPUState* cpu) {
     }
 }
 
+static void host_guest_checkpoint(CPUState* cpu) {
+    if (g_guest_checkpoint_interval == 0u ||
+        g_host_retrace_count % g_guest_checkpoint_interval != 0u)
+        return;
+    XXH3_state_t* aliases = XXH3_createState();
+    if (aliases == NULL || (cpu->ram == NULL && cpu->ram_size != 0u) ||
+        (cpu->exram == NULL && cpu->exram_size != 0u)) {
+        fprintf(stderr, "[guest-checkpoint] failed retrace=%llu\n",
+                (unsigned long long)g_host_retrace_count);
+        g_guest_checkpoint_failed = true;
+        XXH3_freeState(aliases);
+        return;
+    }
+    XXH3_128bits_reset(aliases);
+    u32 alias_spans = 0;
+    u64 alias_bytes = 0;
+    pthread_mutex_lock(&g_guest_alias_lock);
+    /* These are the two metadata lists used to install shared REL storage.
+     * Keep both: file-backed images and BSS/later materialized sections.
+     * Overlapping/repeated spans are deliberately retained in metadata order. */
+    for (u32 group = 0; group < 2; ++group) {
+        const u32 count = group == 0 ? g_rel_data_count : g_guest_checkpoint_module->num_rel_modules;
+        for (u32 i = 0; i < count; ++i) {
+            const StaticRecompRelModule* rel = group == 1 ? &g_guest_checkpoint_module->rel_modules[i] : NULL;
+            const u32 sections = rel != NULL ? rel->num_sections : 1u;
+            for (u32 j = 0; j < sections; ++j) {
+                const u32 start = rel != NULL ? rel->sections[j].linked_start : g_rel_data[i].linked_start;
+                const u32 size = rel != NULL ? rel->sections[j].size : g_rel_data[i].size;
+                u8* storage = NULL;
+                const bool present = size != 0u && start != 0u &&
+                    ppc_guest_alias_get_storage(start, size, &storage);
+                const u32 identity[] = {group, i, j, start, size, present};
+                XXH3_128bits_update(aliases, identity, sizeof identity);
+                if (present) {
+                    XXH3_128bits_update(aliases, storage, size);
+                    alias_spans++;
+                    alias_bytes += size;
+                }
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_guest_alias_lock);
+    const XXH128_hash_t state = bluewake_guest_cpu_hash(cpu);
+    const XXH128_hash_t ram = XXH3_128bits(cpu->ram, cpu->ram_size);
+    const XXH128_hash_t exram = XXH3_128bits(cpu->exram, cpu->exram_size);
+    const XXH128_hash_t alias = XXH3_128bits_digest(aliases);
+    XXH3_freeState(aliases);
+    fprintf(stderr,
+            "[guest-checkpoint] version=1 retrace=%llu cycle=%llu "
+            "cpu=%016llX%016llX mem1=%016llX%016llX mem2=%016llX%016llX "
+            "aliases=%016llX%016llX alias_spans=%u alias_bytes=%llu\n",
+            (unsigned long long)g_host_retrace_count,
+            (unsigned long long)g_cycle_domain.absolute_cycles,
+            (unsigned long long)state.high64, (unsigned long long)state.low64,
+            (unsigned long long)ram.high64, (unsigned long long)ram.low64,
+            (unsigned long long)exram.high64, (unsigned long long)exram.low64,
+            (unsigned long long)alias.high64, (unsigned long long)alias.low64,
+            alias_spans, (unsigned long long)alias_bytes);
+}
+
 static void host_sync_vi_cycles(CPUState* cpu) {
     const u64 elapsed_cycles = host_cycle_cursor_delta(&g_vi_cycle_cursor);
     if (g_cycle_vi_clock == NULL || elapsed_cycles == 0u)
@@ -4919,6 +4983,7 @@ static void host_sync_vi_cycles(CPUState* cpu) {
             g_previous_retrace_timebase = cpu->timebase;
             g_vi_assert_reports++;
         }
+        host_guest_checkpoint(cpu);
     }
 }
 
@@ -6614,6 +6679,12 @@ int main(int argc, char** argv) {
     if (!get_module) { fprintf(stderr, "dlsym: %s\n", dlerror()); return 1; }
 
     const StaticRecompModuleDesc* mod = get_module();
+    if (!bluewake_guest_checkpoint_interval(
+            getenv("BLUEWAKE_GUEST_CHECKPOINT_INTERVAL"), &g_guest_checkpoint_interval)) {
+        fprintf(stderr, "invalid BLUEWAKE_GUEST_CHECKPOINT_INTERVAL\n");
+        return 1;
+    }
+    g_guest_checkpoint_module = mod;
     CPUState cpu_storage;
     BlueWakeModuleStorage module_storage;
     BlueWakeModuleCPUFn module_guest_cpu =
@@ -15419,7 +15490,7 @@ int main(int argc, char** argv) {
             (unsigned long long)g_gx_flush_calls, (unsigned long long)g_gx_flush_us_total,
             (unsigned long long)g_gx_flush_us_max, g_gx_flush_lines, (unsigned long long)g_gx_flush_min_retrace);
     }
-    return bw_host_stop_status(stop_reason);
+    return g_guest_checkpoint_failed ? 1 : bw_host_stop_status(stop_reason);
 }
 
 #undef cpu
