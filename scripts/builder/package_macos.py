@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from module_optimizations import MODES
 
 
 def sha(path):
@@ -22,6 +23,8 @@ def assemble(args):
     personal = args.module is not None
     if personal != (args.game is not None) or personal != (args.disc is not None):
         raise ValueError("--module, --game and --disc must be supplied together")
+    if args.module_optimizations != "none" and not personal:
+        raise ValueError("combined optimizations require a personal module")
     executable = args.app / "Contents/MacOS/BlueWake"
     if not executable.is_file():
         raise ValueError("the source app has no BlueWake executable")
@@ -53,6 +56,7 @@ def assemble(args):
         "runtime_commit": subprocess.check_output(["git", "-C", args.runtime, "rev-parse", "HEAD"], text=True).strip(),
         "translator_commit": subprocess.check_output(["git", "-C", args.runtime / "DolRecomp", "rev-parse", "HEAD"], text=True).strip(),
         "containsTranslatedGameCode": personal,
+        "module_optimizations": args.module_optimizations,
     }
     if personal:
         game = resources / "Game"
@@ -74,6 +78,8 @@ def assemble(args):
     for name in ("dsp_rom.bin", "dsp_coef.bin"):
         shutil.copy2(args.runtime / "Data/Sys/GC" / name, dsp / name)
     (resources / "BuilderProvenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    if args.module_optimizations == "combined-v1":
+        (resources / "ModuleOptimizations").write_text("combined-v1\n")
     subprocess.run(["codesign", "--force", "--sign", args.identity, app], check=True)
     subprocess.run(["codesign", "--verify", "--deep", "--strict", app], check=True)
     # Only replace the builder's output after the complete candidate verifies.
@@ -96,6 +102,7 @@ def main():
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--source-modified", action="store_true")
+    parser.add_argument("--module-optimizations", choices=MODES, default="none")
     parser.add_argument("--identity", default="-")
     args = parser.parse_args()
     if args.output.suffix != ".app" or args.output.resolve() == args.app.resolve():

@@ -28,6 +28,16 @@ previous packaged app beside the new one. It signs locally with an ad-hoc
 signature; `--identity NAME` selects an installed Mac signing identity. Device
 options `--ipa`, `--app`, `--profile` and `--install` do not apply to Mac.
 
+The migration candidate also accepts `--combined-optimizations` for personal
+Mac builds. It selects the imported preparation/native helpers measured in the
+reconciliation ledger, applies the same configuration during local training and
+compilation, and records it in the app's provenance. The packaged app enables
+those compatible paths when launched; explicit diagnostic environment overrides
+still win. Original 30 Hz game logic and display-mode preferences stay unchanged.
+This option is off by default until clean player-build and sustained acceptance
+finish. Changing the option preserves and regenerates incompatible source;
+matching completed work is reused. This does not enable PadMint Mac support.
+
 `--app-only --platform macos` builds the shell without game files. It is for
 local packaging checks, not a playable build or an accepted public release.
 PadMint's complete Mac path is not implemented or claimed here.

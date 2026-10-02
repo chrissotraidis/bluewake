@@ -5,11 +5,14 @@ import json
 from pathlib import Path
 import plistlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location("package_macos", Path(__file__).resolve().parents[1] / "scripts/builder/package_macos.py")
+BUILDER = Path(__file__).resolve().parents[1] / "scripts/builder"
+sys.path.insert(0, str(BUILDER))
+SPEC = importlib.util.spec_from_file_location("package_macos", BUILDER / "package_macos.py")
 PACKAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PACKAGE)
 
@@ -21,7 +24,7 @@ class MacPackageTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.args = argparse.Namespace(app=self.root / "input.app", output=self.root / "output/BlueWake.app",
             runtime=self.root / "runtime", module=None, game=None, disc=None, identity="-",
-            source_commit="synthetic-source", source_modified=False)
+            source_commit="synthetic-source", source_modified=False, module_optimizations="none")
         contents = self.args.app / "Contents"
         (contents / "MacOS").mkdir(parents=True)
         (contents / "Resources").mkdir()
@@ -87,6 +90,16 @@ class MacPackageTest(unittest.TestCase):
             PACKAGE.assemble(self.args)
         self.assertEqual((self.args.output / "old").read_text(), "previous app")
         self.run.assert_not_called()
+
+    def test_combined_candidate_requires_module_and_records_selection(self):
+        self.args.module_optimizations = "combined-v1"
+        with self.assertRaisesRegex(ValueError, "require a personal module"):
+            PACKAGE.assemble(self.args)
+        self.assertEqual((self.args.output / "old").read_text(), "previous app")
+        self.personal()
+        result = PACKAGE.assemble(self.args)
+        self.assertEqual(result["module_optimizations"], "combined-v1")
+        self.assertEqual((self.args.output / "Contents/Resources/ModuleOptimizations").read_text(), "combined-v1\n")
 
 
 if __name__ == "__main__":

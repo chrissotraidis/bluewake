@@ -5916,6 +5916,28 @@ static bool host_bundle_defaults(char* module, size_t module_size) {
     // the desktop qualification routes. Explicit diagnostic choices win.
     if (getenv("BLUEWAKE_WALL_PACE") == NULL) setenv("BLUEWAKE_WALL_PACE", "1", 0);
     if (getenv("BLUEWAKE_DSP_MODE") == NULL) setenv("BLUEWAKE_DSP_MODE", "hle", 0);
+    // Only a builder-selected personal candidate opts in. Existing module
+    // compatibility/readiness checks still govern each fast path, and explicit
+    // diagnostic choices win. Simulation/display preferences are untouched.
+    if (snprintf(marker, sizeof marker, "%s/Resources/ModuleOptimizations", contents) < (int)sizeof marker) {
+        FILE* config = fopen(marker, "r");
+        char mode[32] = {0};
+        if (config != NULL) {
+            const bool combined = fgets(mode, sizeof mode, config) != NULL &&
+                                  strcmp(mode, "combined-v1\n") == 0;
+            fclose(config);
+            if (combined) {
+                static const char* const enabled[] = {
+                    "BLUEWAKE_DIRECT_CALLS", "BLUEWAKE_GATHER_PIPE", "BLUEWAKE_GATHER_PIPE_BATCH",
+                    "BLUEWAKE_NATIVE_J3D", "BLUEWAKE_NATIVE_VEC", "BLUEWAKE_NATIVE_MATH",
+                    "BLUEWAKE_NATIVE_SKIN", "BLUEWAKE_NATIVE_GAME_MATH"
+                };
+                for (size_t i = 0; i < sizeof enabled / sizeof enabled[0]; ++i)
+                    setenv(enabled[i], "1", 0);
+                setenv("BLUEWAKE_NATIVE_WORKERS", "2", 0);
+            }
+        }
+    }
     return true;
 #else
     (void)module;

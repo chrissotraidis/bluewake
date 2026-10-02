@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import time
+from module_optimizations import MODES, HOST_DEFAULTS, cmake_flags
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -86,6 +87,8 @@ def fingerprint(args, compiler):
                 digest.update(str(path.relative_to(root)).encode())
                 digest.update(path.read_bytes())
     digest.update(Path(__file__).read_bytes())
+    digest.update((ROOT / "scripts/builder/module_optimizations.py").read_bytes())
+    digest.update(args.module_optimizations.encode())
     digest.update((ROOT / "apple/ios/src/dsp_common_shim.cpp").read_bytes())
     digest.update(subprocess.check_output(["git", "-C", str(ROOT / "ref/recompcore"), "rev-parse", "HEAD"]))
     with args.disc.open("rb") as disc:
@@ -104,6 +107,7 @@ def main():
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--save", type=Path, help="optional personal BlueWake .card container; only a copy is used")
+    parser.add_argument("--module-optimizations", choices=MODES, default="none")
     args = parser.parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("local training currently requires an Apple Silicon Mac")
@@ -156,6 +160,7 @@ def main():
     # of optimization level. O0 shortens this disposable first compilation.
     run(["cmake", "-S", ROOT / "cmake/composite", "-B", module_build, *common,
          "-DCMAKE_SHARED_LINKER_FLAGS=-fprofile-instr-generate -Wl,-no_compact_unwind", "-DCOMPOSITE_OPTIMIZATION_LEVEL=0",
+         *cmake_flags(args.module_optimizations),
          f"-DCOMPOSITE_DIR={args.out / 'composite-src'}", f"-DGXRUNTIME_DIR={donor / 'GXRuntime'}",
          f"-DABI_DIR={donor / 'Source/Core/Core/PowerPC/StaticRecomp'}"], logs / "composite-configure.log")
     run(["cmake", "--build", module_build, "-j", args.jobs], logs / "composite-build.log")
@@ -182,6 +187,8 @@ def main():
         "BLUEWAKE_PAD_PULSE_LENGTH": "2", "BLUEWAKE_PAD_CONFIRM_EVENT": "any",
         "BLUEWAKE_PAD_SCRIPT": ",".join(f"{n}:0x0100:2" for n in range(17800, 22001, 150)),
     })
+    if args.module_optimizations == "combined-v1":
+        environment.update(HOST_DEFAULTS)
     run([host_build / "host/bluewake_host", module_build / "gGZLE01_recomp.dylib"],
         logs / "playback.log", env=environment, timeout=3600)
     playback = (logs / "playback.log").read_text(errors="replace")
@@ -201,6 +208,7 @@ def main():
     receipt.write_text(json.dumps({"fingerprint": key, "compiler": compiler,
         "route": "local boot through player-control, 23000 retraces", "performance_verified": False,
         "dsp_mode": "hle", "renderer": "headless",
+        "module_optimizations": args.module_optimizations,
         "executed_translated_functions": sum(int(count) > 0 for count in executed),
         "profiles": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in outputs}}, indent=2) + "\n")
     print("training: local game counters generated; optimized device performance still requires testing", flush=True)

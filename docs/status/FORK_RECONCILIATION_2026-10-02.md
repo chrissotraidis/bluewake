@@ -635,12 +635,19 @@ in this bounded route, not general correctness of paced gameplay. Full fresh
 module compilation/training, game saves, updates and sustained acceptance
 remain open. These runs overlapped compilation and are not benchmarks.
 
-The imported module-preparation switches are currently exposed by the Windows
-builder. The Mac builder still compiles the ordinary module path. After the
-frozen combined comparison, carry the selected enhancements through Mac
-preparation, matching training/compiler options and bundle provenance before
-claiming them as part of a player-produced Mac app. The bounded relocation
-check does not establish that integration.
+The Windows builder exposes individual module-preparation switches. The Mac
+builder now offers an explicit `--combined-optimizations` candidate using the
+same ordered steps, with matching training/compiler options and bundle launch
+defaults. Ordinary builds explicitly reset those compiler switches; changing
+selection or an interrupted preparation preserves the previous source and
+regenerates it. Two synthetic cache/resume cases and five packaging cases pass.
+The updated static host and locally signed bundle launch outside the checkout
+with the retained combined test module: all native families/direct calls and
+gather batching activate without explicit feature environment variables. Its
+controlled-depth 2,000-retrace route matches four complete checkpoints, both
+images and all route/card records; the original save remains unchanged. This
+qualifies bundle configuration, not a clean player build. Full fresh candidate
+preparation, compilation/training and player acceptance remain open.
 
 The baseline personal iOS build cannot establish acceptance for every later
 integrated change. Existing artifacts and private profiles are not prerequisites

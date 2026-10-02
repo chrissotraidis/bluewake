@@ -160,8 +160,9 @@ profile_generate() {
     fi
     # Reuse only a verified tree made by the same generators and mod selection.
     # Checking the base digest alone used to retain mod variants after --no-mods.
-    local inputs current saved
-    inputs=$( { printf '%s\n' "$digest" "$mods"; shasum -a 256 \
+    local inputs current saved optimization_recipe
+    optimization_recipe=$(python3 "$root/scripts/builder/module_optimizations.py" fingerprint "$module_optimizations")
+    inputs=$( { printf '%s\n' "$digest" "$mods" "$optimization_recipe"; shasum -a 256 \
         "$root/scripts/mods/"*.py "$root/scripts/mods/"*.sh \
         "$root/mods/widescreen/"*.gecko "$root/mods/betterww/options.txt"; } | shasum -a 256 | awk '{print $1}')
     current=""
@@ -201,7 +202,7 @@ profile_mods() {
 }
 
 profile_train() {
-    local args=(--disc "$iso" --out "$out" --jobs "$jobs")
+    local args=(--disc "$iso" --out "$out" --jobs "$jobs" --module-optimizations "$module_optimizations")
     [ -z "$training_save" ] || args+=(--save "$training_save")
     run local-training python3 "$root/scripts/builder/train_local_pgo.py" "${args[@]}"
     [ -s "$out/pgo-local/composite.profdata" ] || die "local training produced no game profile"
@@ -218,7 +219,10 @@ profile_compile() {
     if [ "$platform" = tvos ]; then
         cmake_system=tvOS sdk=appletvos build_dir="$out/composite-tvos"
     fi
-    local flags="-mcpu=$device_cpu"
+    local flags="-mcpu=$device_cpu" feature_flags feature
+    local optimization_flags=()
+    feature_flags=$(python3 "$root/scripts/builder/module_optimizations.py" flags "$module_optimizations")
+    while IFS= read -r feature; do optimization_flags+=("$feature"); done <<< "$feature_flags"
     if [ ${#composite_pgo[@]} -gt 0 ]; then
         run composite-pgo-merge xcrun llvm-profdata merge -o "$out/composite.profdata" "${composite_pgo[@]}"
         # The profile is a compiler input but not a C header dependency. Put
@@ -234,7 +238,7 @@ profile_compile() {
     run "composite-configure-$platform" cmake -S cmake/composite -B "$build_dir" -G Ninja \
         "-DCMAKE_SYSTEM_NAME=$cmake_system" "-DCMAKE_OSX_SYSROOT=$sdk" -DCMAKE_OSX_ARCHITECTURES=arm64 \
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=$deployment" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_FLAGS=$flags" \
-        -DCOMPOSITE_OPTIMIZATION_LEVEL="$opt_level" \
+        -DCOMPOSITE_OPTIMIZATION_LEVEL="$opt_level" "${optimization_flags[@]}" \
         -DCOMPOSITE_DIR="$out/composite-src" -DGXRUNTIME_DIR="$recompcore/GXRuntime" \
         -DABI_DIR="$recompcore/Source/Core/Core/PowerPC/StaticRecomp"
     run "composite-build-$platform" cmake --build "$build_dir" -j "$jobs"
@@ -289,7 +293,7 @@ profile_build_app() {
 profile_package_mac() {
     local args=(--app "$app" --output "$out/packaged/BlueWake.app"
         --runtime "$recompcore" --source-commit "$source_commit"
-        --identity "${identity:--}")
+        --identity "${identity:--}" --module-optimizations "$module_optimizations")
     if [ "$app_only" -eq 0 ]; then
         args+=(--module "$module" --game "$out/game" --disc "$iso")
     fi
