@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic Windows build-cache checks; no disc or translated game source."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -143,6 +144,49 @@ label_80004004:
         self.assertNotIn("BLUEWAKE_DIRECT_CALLS_PREPARED",
                          (self.out / "composite-src/generated.h").read_text())
         self.assertFalse((self.out / "composite-src/bw_edge_watch.inc").exists())
+
+    def test_inline_gpr_reuse_and_disable_rebuilds_callers(self):
+        source = '''#include "../generated.h"
+void synthetic(CPUState* ctx) {
+    // 80004000: bl      0x80328F84
+    {
+            ctx->lr = 0x80004004u;
+            ctx->pc = 0x80328F84u;
+            return;
+    }
+label_80004004:
+    return;
+}
+'''
+        (self.base / "chunks_dol/a.c").write_text(source)
+        (self.base / "generated_composite.h").write_text(
+            "static DolRecompFunction s_dolrecomp_chunk_fns[] = {func_80004000, func_803256E0};\n")
+        # Invented helper text and fixture-local certificates: no game code.
+        bodies = ["\nlabel_80328F04:\n    return;\n", "\nlabel_80328F50:\n    return;\n"]
+        helper = self.base / "chunks_dol/synthetic_803256E0.c"
+        helper.write_text('#include "../generated.h"\nvoid func_803256E0(CPUState* ctx) {\n' +
+                          ''.join(bodies) + "\nlabel_80328F9C:\n    return;\n}\n")
+        script = self.root / "scripts/windows/inline_save_restore_gpr.py"
+        text = script.read_text()
+        for old, body in zip((
+            'b7fa7b91c185412cce8d7dfc7eccafd5c50d69f7f49b66d111c582d11ab8df1b',
+            'f525cbda6f2bed00dbaa48533f1a32c12ed19b571328e7045945a08b9c3ca2d4'), bodies):
+            text = text.replace(old, hashlib.sha256(' '.join(body.split()).encode()).hexdigest())
+        script.write_text(text)
+        self.digest = bw.tree_digest(self.base)
+        self.args.direct_calls = self.args.inline_gpr = True
+        self.cycle()
+        self.assertIn('bw_inline_gpr_memory_ready', self.chunk().read_text())
+        before = self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns
+        self.cycle()
+        self.assertEqual(before, (self.chunk().read_bytes(), self.chunk().stat().st_mtime_ns))
+        self.args.inline_gpr = False
+        self.cycle()
+        self.assertNotIn('bw_inline_gpr_memory_ready', self.chunk().read_text())
+        self.assertIn('bw_chunk_fns[1](ctx)', self.chunk().read_text())
+        receipt = json.loads((self.out / "prepared-blocks.json").read_text())
+        self.assertFalse(receipt["inline_gpr"])
+        self.assertTrue(receipt["direct_calls"])
 
     def test_explicit_enable_reuse_and_disable(self):
         self.cycle()

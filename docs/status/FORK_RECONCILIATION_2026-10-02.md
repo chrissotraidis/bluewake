@@ -64,7 +64,7 @@ PR #11's SDK preflight is reconciled by #14; do not import it again.
 | [#24](https://github.com/chrissotraidis/bluewake/pull/24) | `608edaa` | Independent gather-module preparation; nine cache tests, strict function/boot comparisons and 41 native Windows tests pass; host batching not selected |
 | [#25](https://github.com/chrissotraidis/bluewake/pull/25) | `80eb353` | Explicit host writer/batching; 42 native Windows tests and bounded Mac route/card/intro-image comparisons pass; 23,000-retrace route/card match; player-control trigger not reached |
 | [#26](https://github.com/chrissotraidis/bluewake/pull/26) | `9de9cf2` | Optional complete-coverage checkpoint comparisons; six CPU/RAM/REL hash checkpoints match over 6,000 headless retraces; Aurora checkpoints and two intro frames match; native Windows host build passes |
-| [#27](https://github.com/chrissotraidis/bluewake/pull/27) | `8233de9`, import `d176f3e` | Direct/indirect calls and certified register inlining; local contracts, source/cache checks and full O0 module/host link pass; active-mode comparisons and native Windows pending |
+| [#27](https://github.com/chrissotraidis/bluewake/pull/27) | `8233de9`, import `d176f3e` | Direct/indirect calls and certified register inlining; 30,000 active function cases, three-way headless/Aurora routes and intro frames, and 45 native Windows tests pass; optimized measurements and gameplay remain open |
 
 Runtime [PR #1](https://github.com/chrissotraidis/RecompCore/pull/1) at `70bc9957`
 rebases donor global MEM1/display overload work with bounds checks. Runtime
@@ -87,7 +87,7 @@ source only. No source merge or test result implies release readiness.
 | Controller face layouts/navigation | donor reports #2/#8/#14; existing SDL controls | #12 adds A/B and X/Y swaps, navigation/game-input isolation and virtual-controller checks | Integrated; real Switch Pro/Xbox/8BitDo hot-plug/menu/closing-input checks open; arbitrary remap is separate scope |
 | Prepared-block/global-register module optimizations; Windows | `f319afa`, `8435ec7`, `16fabda`; scripts/windows transformers and cmake/composite helpers | Generic prepaid-block transform and portable strict A/B fixture imported; fixed-CPU preparation from `4b6b268` added separately with a declared module ABI and explicit builder opt-in. Both default off; module-owned MEM1 is integrated separately in #19, native batches remain open | Open; isolate generic transforms from native/decomp work, private generated-code correctness and matched before/after performance |
 | Inline floating-point interpreter operations; Windows | `4b6b268`; `inline_fp.h`, chunk header preparation | Separate `--inline-fp` opt-in, off by default; no game-native replacements or ABI change | Open; Corrected helper: arm64/Rosetta and native Windows checks pass; 30,000 module cases and 6,000-retrace arm64 boot match. Optimized module/performance/gameplay open |
-| Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Imported directly with Elliott's authorship in `d176f3e`; candidate adds versioned host readiness, shared feature predicates and guarded/certified register inlining. Builder options remain independent and off by default | In progress; local runtime/preparation/cache tests pass and all 823 private O0 module units link. Active function/route/image comparisons, native Windows and matched timing remain required |
+| Direct cross-chunk/indirect calls and inline GPR save/restore; Windows | `4b6b268`, `742f1a0`, `76c688d`, `7576dc9` | Imported directly with Elliott's authorship in `d176f3e`; candidate adds versioned host readiness, shared feature predicates and guarded/certified register inlining. Builder options remain independent and off by default | Integrated with bounded checks; all 823 private O0 module units link, 30,000 active function cases and three-way headless/Aurora route/checkpoint/intro-image comparisons pass. All 45 native Windows tests pass. Optimized combined modules, gameplay and matched timing remain required |
 | Gather-pipe batching and inline memory wrappers; Windows | `3e14287`, `6def7cd` | Generic helper foundation imported with original authorship; separate default-off `--gather-pipe` prepares modules. Host direct writer/batching now has separate default-off selection; bounded Mac route/card/intro-image comparisons pass. Undersized-RAM and pipe-alias precedence regressions fixed | Open; source-only memory/flush fixtures and nine cache tests pass locally; 813 chunks prepare reproducibly and unprepared inputs are rejected. Arm64 O0 function/boot comparisons pass with the host writer disabled; optimized modules, sustained renderer/gameplay qualification and matched timing remain required |
 | Native math/J3D/skin/vector replacements; Windows | `689f042`, `845a589`, `833e6fb`, `1e97dca` | Absent; contributor's certification/benchmarks do not transfer to BlueWake | Open; public-source provenance, per-function exactness/fallback, same-module state/image checks and matched measurements |
 | Global MEM1 / inline guest-memory accesses; Windows | `f70305c`, `6def7cd`; runtime `460b5b84`, `63489547` | Optional runtime global MEM1 rebased in #16; explicit ABI-5 module storage adoption now in a separate default-off candidate. Extended alias guard fixed in maintained runtime `c2905b7a`; inline module wrappers imported and separately qualified in #23/#24 | Open; remaining MMIO/reservations/journaling/dispatch, module compatibility and matched measurements |
@@ -199,6 +199,23 @@ a claim of identical state at every intervening instruction. The existing route 
   The corresponding Aurora Off/batch pair also matches all six checkpoints,
   route/card/timing and both nonblank intro frames. Native Windows at `91e0417`
   builds the host successfully (run 36980025091).
+- **Direct calls/register inlining:** source `8233de9` preserves Elliott's exact
+  import (`d176f3e`) and credits the adaptation with a co-author trailer. The O0
+  candidate passes 30,000 full CPU/RAM cases against the ordinary #22 module,
+  including 264 partial returns, 12,539 deadline cases and 6,400 active readiness
+  queries. The fixture gives both modules the same observation/budget boundaries.
+  Same-host three-way comparisons (ordinary module, candidate Off, candidate On)
+  complete 6,000 retraces headless and with Aurora: all 1,050 route/card records,
+  all six normalized CPU/MEM1/MEM2/REL checkpoints and delivery/clock timing match.
+  Both nonblank intro frames at retraces 2,000/4,000 also match exactly. The On
+  runs record over 138 million approved readiness queries; Off runs record zero.
+  Native Windows at `a2b18bf` passes all 45 tests (41.14 s;
+  [run 36983460501](https://github.com/chrissotraidis/bluewake/actions/runs/36983460501)).
+  Eleven cache regressions cover reuse and disabling register inlining while
+  direct calls remain enabled. No timing from these traced/loaded runs establishes
+  performance parity. The separate 2,000-retrace existing-card probe reaches file
+  selection but not player control; the copied seed's original hash is unchanged.
+  Active gameplay and combined optimized performance remain open.
 - **Menu persistence:** Mac `3222b915` / `c2905b7a`, isolated ordinary-module session:
   fresh Off, select 120, disable while retaining three steps, close/relaunch and
   visibly remain Off with byte-identical settings. Keyboard selection passes;
@@ -217,7 +234,8 @@ and inline/exported dispatch boundaries. Sustained gameplay and optimized perfor
 qualification remain open. Explicit module preparation is now available independently of inline FP;
 the host has explicit direct/batch opt-ins, with ordinary MMIO retained by
 default and for diagnostics. The bounded host/renderer results above are now
-available; direct-call/native batches remain open work.
+available; direct calls now have bounded qualification, while native imports and
+combined optimized gameplay/performance remain open work.
 All measured wall times under concurrent compilation are excluded from performance
 acceptance. No donor benchmark is transferred.
 
@@ -255,15 +273,16 @@ bugs. No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-1. Finish the running prepared-block O2 pair and direct-call candidate comparisons,
-   then verify their terminal artifacts. The short Aurora checkpoint comparison passes. The baseline full PadMint package is complete;
-   player signing and final-source/device acceptance remain open. Complete broader guest
-   checkpoints and correct startup-only trace claims throughout the current evidence. Run matched performance measurements on a quiet
-   machine; do not derive performance from current loaded runs.
-2. Continue directly importing the remaining Elliott direct-call/register and
-   provenance-reviewed native enhancements, adapting BlueWake hooks and retaining
-   contributor credit. Finish host FIFO batching qualification alongside them. Correctness,
-   scheduling/hooks and matched measurements are separate gates.
+1. Finish the running prepared-block O2 pair and verify terminal artifacts, then
+   run matched measurements on a quiet machine. The direct-call three-way
+   headless/Aurora comparisons pass; their traced wall times are not benchmarks.
+   Continue the copied-save route beyond file selection to actual player control.
+   The baseline full PadMint package is complete; player signing and final-source/
+   device acceptance remain open.
+2. Directly import the remaining provenance-reviewed native enhancements,
+   adapting BlueWake hooks and retaining contributor credit. Direct-call/register
+   source is now integrated. Complete combined optimized and host FIFO batching
+   qualification, including scheduling/hooks, gameplay and matched measurements.
 3. Complete final-source clean player routes and the full gameplay matrix:
    fresh/existing saves, narrated intro, progression, scripted music/Pictobox,
    fullscreen/restart, real controllers, save/reload, upgrades and sustained play.
@@ -274,7 +293,8 @@ bugs. No issue is closed or externally commented on by this work.
    The [proposed migration notice](FORK_RECONCILIATION_EVIDENCE_2026-10-02.md#migration-proposal-not-published-to-the-donor)
    remains unposted. Keep the donor and its history intact until acceptance.
 
-Primary `codex/fork-reconciliation` at `95adeed` stays fixed for PadMint. The
+Primary `codex/fork-reconciliation` at `95adeed` retains the completed baseline
+source-build/PadMint artifacts. The
 managed `bluewake-disc-parity` worktree at `05df605` stays fixed for the O2 pair.
 The managed `bluewake-cpu-contract` worktree holds the current source stack and
 private qualification artifacts; its nested runtime is `c2905b7a`. Both managed
