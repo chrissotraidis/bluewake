@@ -459,3 +459,45 @@ This accepts bounded Mac O0 function/boot correctness only. Optimized x86
 qualification, matched timing and actual Windows/Apple gameplay remain open.
 Keep the builder option off by default and the PR in draft; no performance
 parity or public-release acceptance is claimed.
+
+
+### Current conservative checkpoint and player-build progress
+
+At `520856766e8bf2f4627a365dd871e8310617a338`, repository CI and native
+Windows app/manual-fixture compilation pass. All **31/31 Windows regressions**
+pass (18.44 seconds; [run 36957741929](https://github.com/chrissotraidis/bluewake/actions/runs/36957741929)).
+Fresh, matched Mac O2 baseline/candidate modules are compiling in separate new
+output directories with identical compiler/runtime/floating-point settings;
+optimization-level correctness and timing are not yet accepted.
+
+The untouched primary source `95adeed0f32a39739341dd9381c50756c5247bf4`, runtime
+`99e47480` direct owned-disc iOS build now completes with exit 0. After the
+controlled interruption it reuses the prior objects and identical training /
+profile hashes, completes the module build, links all 736 app steps, verifies
+ad-hoc signatures and packages the unsigned personal IPA. PadMint 0.2.8's package
+validator passes source/disc provenance, module identity and IPA structure;
+private-input/save/profile/signing-file exclusions also pass. Its linked iOS
+slice has minimum OS 17, SDK 27 and the scene-configuration callback. Runtime
+launch is untested. This is clean build/package and bounded resume evidence,
+not physical-device play, save/reload or in-place upgrade acceptance. All
+personal output and exact private receipts remain local.
+
+A fresh app-only build at the same clean source/pins completes separately,
+without a translated module. PadMint audit and `check_public_assets.sh` both
+pass; no candidate is uploaded or published. Full PadMint iOS acceptance is
+now running serially after the direct build, in a new workspace using the
+owned disc and that matching audited app-only input. It has regenerated source
+and mod variants and reached local training. No private game profile or old
+module cache is supplied. Complete packaging and device acceptance remain open.
+
+The bundled Mac host (`d9a25d0`, runtime `70bc9957`, pointer-state module from
+`95adeed` / runtime `99e47480`) now binds to the native UI tool. With isolated
+settings/card/SRAM/state paths, the menu visibly starts with Smooth Motion off,
+shows all four choices and accepts “Match the display”; closing with Esc saves
+`DOL_AURORA_FRAME_INTERP=1` and `DOL_AURORA_FRAME_INTERP_STEPS=display`. The timed
+menu hook reopens during its interval, so immediate closure snapshots in that
+interval cannot prove persistent closure. Later automated pointer retries do
+not reliably select Off; actual UI off/rate persistence remains unaccepted,
+although its synthetic policy tests pass. The app exits normally on window
+close. This is bounded menu/preference evidence; measured display pacing,
+real display changes, gameplay and speaker/audio acceptance remain open.
