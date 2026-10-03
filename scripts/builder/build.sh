@@ -54,7 +54,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 
 iso="" game=bluewake platform=ios out="" ipa="" published_app="" app_only=0
-jobs=$(sysctl -n hw.ncpu)
+jobs=$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 identity="" profile="" install_device="" host_pgo=""
 train_pgo=auto training_save=""
 module_optimizations=none
@@ -192,11 +192,24 @@ else
 fi
 
 step "1/9 tools"
-for tool in xcrun cmake ninja python3 git curl shasum clang codesign ditto; do
-    command -v "$tool" >/dev/null || die "missing $tool (Xcode, CMake 3.25+ and Ninja are required; brew install cmake ninja)"
-done
-case "$platform" in macos) sdk=macosx ;; tvos) sdk=appletvos ;; *) sdk=iphoneos ;; esac
-xcrun --sdk "$sdk" --show-sdk-path >/dev/null 2>&1 || die "the $sdk SDK is missing: install Xcode and run sudo xcode-select -s /Applications/Xcode.app"
+# Off a Mac, --source-only prepares the game's source for PadMint, which compiles the
+# module with its open-source iPhone SDK: no Xcode, only a C compiler for the disc tool.
+apple_tools=1
+if [ "$source_only" -eq 1 ] && [ "$(uname -s)" != Darwin ]; then apple_tools=0; fi
+if [ "$apple_tools" -eq 1 ]; then
+    for tool in xcrun cmake ninja python3 git curl shasum clang codesign ditto; do
+        command -v "$tool" >/dev/null || die "missing $tool (Xcode, CMake 3.25+ and Ninja are required; brew install cmake ninja)"
+    done
+    case "$platform" in macos) sdk=macosx ;; tvos) sdk=appletvos ;; *) sdk=iphoneos ;; esac
+    xcrun --sdk "$sdk" --show-sdk-path >/dev/null 2>&1 || die "the $sdk SDK is missing: install Xcode and run sudo xcode-select -s /Applications/Xcode.app"
+    host_cc=clang
+else
+    for tool in cmake ninja python3 git shasum; do
+        command -v "$tool" >/dev/null || die "missing $tool (CMake 3.25+, Ninja, Python 3, Git and shasum are required)"
+    done
+    host_cc=${CC:-$(command -v clang || command -v cc || true)}
+    [ -n "$host_cc" ] || die "missing a C compiler for the disc tool (install clang or gcc)"
+fi
 cmake_version=$(cmake --version | awk 'NR == 1 { print $3 }')
 python3 - "$cmake_version" <<'EOF' || die "CMake 3.25 or newer is required"
 import sys
@@ -204,7 +217,11 @@ v = tuple(int(x) for x in sys.argv[1].split('.')[:2])
 sys.exit(0 if v >= (3, 25) else 1)
 EOF
 profile_check_tools
-echo "xcode $(xcodebuild -version | awk 'NR == 1 { print $2 }'), $sdk SDK, cmake $cmake_version, $jobs jobs"
+if [ "$apple_tools" -eq 1 ]; then
+    echo "xcode $(xcodebuild -version | awk 'NR == 1 { print $2 }'), $sdk SDK, cmake $cmake_version, $jobs jobs"
+else
+    echo "source only on $(uname -s), C compiler $host_cc, cmake $cmake_version, $jobs jobs"
+fi
 
 step "2/9 dependencies"
 profile_dependencies
