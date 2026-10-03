@@ -58,6 +58,42 @@
       "hosts": {
         "macos-arm64": "planned"
       }
+    },
+    "windows": {
+      "hosts": {
+        "windows-x86_64": "experimental",
+        "windows-arm64": "experimental"
+      },
+      "tools": [
+        "git",
+        "cmake",
+        "ninja"
+      ],
+      "command": [
+        "{python}",
+        "{repo}/scripts/windows/build.py",
+        "{disc}",
+        "--out",
+        "{work}",
+        "--jobs",
+        "{jobs}"
+      ],
+      "modes": {
+        "full": [
+          "--no-train"
+        ],
+        "source-only": [
+          "--source-only"
+        ]
+      },
+      "options": {
+        "no-mods": [
+          "--no-mods"
+        ]
+      },
+      "output": "folder",
+      "folder": "{work}/BlueWake",
+      "check": "none"
     }
   },
   "requirements": {
@@ -85,6 +121,11 @@
         "name": "python3",
         "version_args": [
           "--version"
+        ],
+        "hosts": [
+          "macos-arm64",
+          "linux-x86_64",
+          "linux-arm64"
         ]
       },
       {
@@ -93,7 +134,10 @@
           "-version"
         ],
         "player": true,
-        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough."
+        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough.",
+        "hosts": [
+          "macos-arm64"
+        ]
       },
       {
         "name": "xcrun",
@@ -104,7 +148,31 @@
           "--show-sdk-path"
         ],
         "player": true,
-        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough."
+        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough.",
+        "hosts": [
+          "macos-arm64"
+        ]
+      },
+      {
+        "name": "%ProgramFiles(x86)%/Microsoft Visual Studio/Installer/vswhere.exe",
+        "label": "Visual Studio Build Tools with C++ Clang",
+        "version_args": [
+          "-latest",
+          "-products",
+          "*",
+          "-requires",
+          "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+          "Microsoft.VisualStudio.Component.VC.Llvm.Clang",
+          "-property",
+          "catalog_productDisplayVersion"
+        ],
+        "min_version": "17",
+        "player": true,
+        "note": "Install Visual Studio Build Tools 2022 (free) from https://visualstudio.microsoft.com/downloads/ with Desktop development with C++, then in Individual components add C++ Clang Compiler for Windows. Run PadMint again when it finishes.",
+        "hosts": [
+          "windows-x86_64",
+          "windows-arm64"
+        ]
       }
     ]
   },

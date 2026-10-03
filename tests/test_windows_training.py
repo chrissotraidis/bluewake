@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -30,6 +31,7 @@ class TrainingTest(unittest.TestCase):
                           DOL_AURORA_FRAME_INTERP="1", LLVM_PROFILE_FILE="player.profraw")
         self.b.mods = True
         self.b.clang_version = "clang version fixture"
+        self.b.clang = str(self.root / "clang.exe")
         self.b.llvm_profdata = "llvm-profdata"
         self.b.iso = self.root / "owned-disc.iso"
         self.b.logs.mkdir()
@@ -64,6 +66,22 @@ class TrainingTest(unittest.TestCase):
             self.assertNotIn("-fprofile-instr-generate", " ".join(map(str, argv)))
         self.b.run = check
         self.b.configure_app()
+
+    def test_app_profile_only_when_this_clang_reads_it(self):
+        # Visual Studio 2022 17.14's clang 19 cannot read a profile recorded with a newer clang;
+        # the app is then built without it rather than the configure failing.
+        (self.root / "llvm-profdata.exe").write_bytes(b"fixture")
+        for code, used in ((0, True), (1, False)):
+            with self.subTest(code=code):
+                if hasattr(self.b, "_app_profile_readable"):
+                    del self.b._app_profile_readable
+                calls = []
+                self.b.run = lambda name, argv, **kw: calls.append([str(a) for a in argv])
+                with patch.object(bw.subprocess, "run", return_value=SimpleNamespace(returncode=code)):
+                    self.b.configure_app()
+                flags = next(x for x in calls[0] if x.startswith("-DCMAKE_C_FLAGS="))
+                self.assertEqual("-fprofile-instr-use=" in flags, used)
+                self.assertEqual("-flto=thin" in " ".join(calls[0]), used)
 
     def test_playback_isolated_and_requires_control_and_profile(self):
         for marker, profile, succeeds in [(False, True, False), (True, False, False), (True, True, True)]:
@@ -158,6 +176,38 @@ class TrainingTest(unittest.TestCase):
             self.b.args.fixed_mem1 = True;self.assertNotEqual(original, self.b.training_fingerprint());self.b.args.fixed_mem1 = False
             host.write_text("new");self.assertNotEqual(original, self.b.training_fingerprint());host.write_text("old")
             self.b.git = lambda *a: "runtime2";self.assertNotEqual(original, self.b.training_fingerprint())
+
+
+class ProgressEventTest(unittest.TestCase):
+    def test_each_command_reports_start_and_end_for_padmint(self):
+        # PadMint reads OUT/logs/progress.jsonl, as the Mac builder's run_stage.py writes it.
+        with tempfile.TemporaryDirectory(prefix="windows progress ") as folder:
+            args = SimpleNamespace(out=Path(folder), jobs=1, **dict.fromkeys(OPTIONS, False))
+            builder = bw.Builder(args)
+            builder.run("probe", [sys.executable, "-c", "print('[3/7] compiling')"], env=dict(os.environ))
+            with self.assertRaises(bw.BuildError):
+                builder.run("broken", [sys.executable, "-c", "raise SystemExit(4)"], env=dict(os.environ))
+            events = [json.loads(line) for line in (Path(folder) / "logs/progress.jsonl").read_text().splitlines()]
+            self.assertEqual([(e["event"], e["stage"]) for e in events],
+                             [("stage_started", "probe"), ("stage_completed", "probe"),
+                              ("stage_started", "broken"), ("stage_failed", "broken")])
+            self.assertTrue(all(e["schema_version"] == 1 for e in events))
+            self.assertEqual(events[-1]["exit_code"], 4)
+
+    def test_cmake_on_windows_on_arm_targets_x64(self):
+        # An ARM64 Windows PC builds the x64 game; CMake must not take the PC's processor.
+        with tempfile.TemporaryDirectory(prefix="windows arm ") as folder:
+            builder = bw.Builder(SimpleNamespace(out=Path(folder), jobs=1, **dict.fromkeys(OPTIONS, False)))
+            for machine, expected in (("ARM64", True), ("AMD64", False)):
+                seen = []
+                def popen(argv, **kw):
+                    seen.append(argv)
+                    return SimpleNamespace(wait=lambda timeout=None: 0)
+                with patch.object(bw.platform, "machine", return_value=machine),                         patch.object(bw.subprocess, "Popen", popen):
+                    builder.run("configure", ["cmake", "-S", "src", "-B", "out"], env={})
+                    builder.run("compile", ["cmake", "--build", "out"], env={})
+                self.assertEqual("-DCMAKE_SYSTEM_PROCESSOR=AMD64" in seen[0], expected, machine)
+                self.assertNotIn("-DCMAKE_SYSTEM_PROCESSOR=AMD64", seen[1])
 
 
 if __name__ == "__main__":
