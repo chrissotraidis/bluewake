@@ -24,6 +24,19 @@ from a Redump-verified `.rvz` converted to ISO with Dolphin, built on a Windows 
 - Local optimization training runs on the device (`--device`, below); the trained module holds the title's
   flyover at full speed with the game thread 67 percent busy, where the untrained one ran at 83 to 98 percent speed.
 
+Checked again on 2026-10-04 on BlueWake's `main` (f1915a1), on the same phone and PC, untrained (no `--device`):
+
+- The builder runs end to end with the Windows builder's steps as they are now: the verified digest, its default
+  source optimizations (`prepare_blocks`), and the game module compiled at `-O2` for `cortex-a78` in 29 minutes
+  (18 jobs).
+- The scripted route reaches player control on Outset at the same retrace and position as the build above (20255).
+  At retrace 15000 the picture matches that build's frame for frame (the lookout, the sea, the island); sound plays and
+  the memory card is created in the app's folder.
+- Speed, with the phone already warm (surface 38 °C, charging): the title and the opening at 30 FPS, the prologue at
+  23 FPS, Outset at 22 FPS with the game thread 98 percent busy. The earlier build trained on the phone with
+  `--device` and compiled for `oryon-1` held Outset at 30 FPS on the phone the same night, so train on the device
+  for play.
+
 Measured with the scripted route, rendered and paced, the phone charging over USB:
 
 | Build | Boot, title, file select | Prologue (the view over Outset) | Player control on Outset |
