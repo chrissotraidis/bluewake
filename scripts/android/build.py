@@ -667,8 +667,11 @@ class AndroidBuilder(wb.Builder):
             print("mods already in the composite source")
         else:
             self.build_mods()
-        step("the source's optimizations (the Windows builder's prepare_blocks, unchanged)")
-        self.prepare_blocks()
+        # --app-only reuses the compiled module and leaves its source alone:
+        # prepare_blocks's steps are not meant to run twice on one tree.
+        if not args.app_only:
+            step("the source's optimizations (the Windows builder's prepare_blocks, unchanged)")
+            self.prepare_blocks()
         lib = None
         if args.device and self.profile is None and not args.app_only:
             step("9/10 build the app (libmain.so), for the training APK")
