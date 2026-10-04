@@ -73,6 +73,9 @@
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
+#if defined(_WIN32)
+#include <SDL3/SDL_video.h>
+#endif
 
 #ifndef BLUEWAKE_ENABLE_DEVELOPER_TRACING
 #define BLUEWAKE_ENABLE_DEVELOPER_TRACING 0
@@ -7078,6 +7081,23 @@ int main(int argc, char** argv) {
     // when no window server is reachable.
     const bool renderer_requested = renderer != NULL && renderer[0] != '\0';
     if (!renderer_requested || strcmp(renderer, "aurora") == 0) {
+        // Where the window is created. Aurora shows it before the first frame,
+        // so a window moved afterwards is seen to jump. On Windows it opens
+        // centred, or at BLUEWAKE_WINDOW_POSITION=X,Y: where the player left
+        // it, which windows/src/win_settings.cpp passes on only while that spot
+        // is on a monitor. Elsewhere it opens where it always has.
+        int window_x = 0, window_y = 0;
+#if defined(_WIN32)
+        window_x = window_y = SDL_WINDOWPOS_CENTERED;
+        const char* window_position = getenv("BLUEWAKE_WINDOW_POSITION");
+        int saved_x = 0, saved_y = 0;
+        char trailing;  // anything after X,Y makes it malformed: centred
+        if (window_position != NULL &&
+            sscanf(window_position, "%d,%d%c", &saved_x, &saved_y, &trailing) == 2) {
+            window_x = saved_x;
+            window_y = saved_y;
+        }
+#endif
         const AuroraBackendConfig aurora_config = {
             .app_name = "BlueWake",
             .window_width = 960u,
@@ -7087,6 +7107,8 @@ int main(int argc, char** argv) {
             .info_logging = true,
             .graphics_logging = getenv("DOL_AURORA_RECOMP_GRAPHICS_LOG") != NULL,
             .force_untextured = false,
+            .window_pos_x = window_x,
+            .window_pos_y = window_y,
         };
         if (dol_aurora_initialize(argc, argv, &aurora_config)) {
             aurora_enabled = true;
