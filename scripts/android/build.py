@@ -197,9 +197,23 @@ class AndroidBuilder(wb.Builder):
             flags = [f"-fprofile-instr-use={self.profile.as_posix()}", "-Wno-profile-instr-unprofiled",
                      "-Wno-profile-instr-out-of-date", "-Wno-backend-plugin"]
             print(f"with the optimization profile {self.profile.name}")
-        return self.compile_composite(self.out / "composite", self.args.opt_level, flags, [], "composite")
+        # As on Windows: with a profile, the chunks the training never ran
+        # compile at -O1 (--no-tiered compiles them all at -O2).
+        cold = self.cold_sources() if self.profile is not None and not self.args.no_tiered else None
+        return self.compile_composite(self.out / "composite", self.args.opt_level, flags, [], "composite", cold)
 
-    def compile_composite(self, build, opt_level, extra_flags, extra_link_flags, name, extra_cmake=()):
+    def module_switches(self):
+        """The composite's CMake switches for the source steps prepare_blocks
+        ran, as the Windows builder passes them (compile_composite there)."""
+        a = self.args
+        switches = {"FIXED_CPU": a.fixed_cpu, "NATIVE_J3D": a.native_j3d, "NATIVE_VEC": a.native_vec,
+                    "NATIVE_GAME_MATH": a.native_game_math, "NATIVE_SKIN": a.native_skin,
+                    "NATIVE_MATH": a.native_math, "NATIVE_ENTRIES": a.native_entries,
+                    "DIRECT_CALLS": a.direct_calls, "GATHER_PIPE": a.gather_pipe, "INLINE_FP": a.inline_fp,
+                    "FIXED_MEM1": a.fixed_mem1}
+        return [f"-DBLUEWAKE_{name}={'ON' if on else 'OFF'}" for name, on in switches.items()]
+
+    def compile_composite(self, build, opt_level, extra_flags, extra_link_flags, name, cold=None, extra_cmake=()):
         rc = self.recompcore
         # The Windows builder's two compile-time limits apply to AArch64 too:
         # each chunk is one very large function (docs/WINDOWS.md).
@@ -213,7 +227,8 @@ class AndroidBuilder(wb.Builder):
             f"-DCMAKE_C_FLAGS={flags}", f"-DCMAKE_SHARED_LINKER_FLAGS={link_flags}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={opt_level}", f"-DCOMPOSITE_DIR={(self.out / 'composite-src').as_posix()}",
             f"-DGXRUNTIME_DIR={(rc / 'GXRuntime').as_posix()}",
-            f"-DABI_DIR={(rc / 'Source/Core/Core/PowerPC/StaticRecomp').as_posix()}", *extra_cmake])
+            f"-DABI_DIR={(rc / 'Source/Core/Core/PowerPC/StaticRecomp').as_posix()}", *self.module_switches(),
+            f"-DCOMPOSITE_COLD_SOURCES_FILE={cold.as_posix() if cold is not None else ''}", *extra_cmake])
         gb_per_job = 1.0 if opt_level == "0" else 1.25
         jobs = wb.default_jobs(gb_per_job) if self.args.jobs_auto else self.args.jobs
         print(f"  {jobs} parallel compiles")
@@ -428,7 +443,7 @@ class AndroidBuilder(wb.Builder):
         module = self.compile_composite(
             work / "composite", "0", ["-fprofile-instr-generate"], ["-fprofile-instr-generate"],
             "training-composite",
-            [f"-DCOMPOSITE_EXTRA_SOURCES={(ROOT / 'android/src/profile_flush.c').as_posix()}"])
+            extra_cmake=[f"-DCOMPOSITE_EXTRA_SOURCES={(ROOT / 'android/src/profile_flush.c').as_posix()}"])
         exported = subprocess.run([str(self.ndk_bin / "llvm-nm.exe"), "-D", "--defined-only", str(module)],
                                   capture_output=True, text=True).stdout
         if " bluewake_profile_write" not in exported:
@@ -652,8 +667,8 @@ class AndroidBuilder(wb.Builder):
             print("mods already in the composite source")
         else:
             self.build_mods()
-        step("the last source steps (the Windows builder's, unchanged)")
-        self.finish_in_place()
+        step("the source's optimizations (the Windows builder's prepare_blocks, unchanged)")
+        self.prepare_blocks()
         lib = None
         if args.device and self.profile is None and not args.app_only:
             step("9/10 build the app (libmain.so), for the training APK")
@@ -699,6 +714,14 @@ def main():
                              "headset of the last few years, the Quest 3 included; oryon-1 for a Snapdragon 8 Elite only)")
     parser.add_argument("--opt-level", choices=("0", "1", "2"), default="2", help="game module optimization level")
     parser.add_argument("--no-mods", action="store_true", help="skip the widescreen and Better Wind Waker variants")
+    parser.add_argument("--no-tiered", action="store_true",
+                        help="with a profile, compile every chunk at -O2, not only those the training ran")
+    parser.add_argument("--conservative", action="store_true",
+                        help="build the plain translation, without the Windows builder's default source "
+                             "optimizations (its --fixed-cpu, --direct-calls, ... options then add them one at a time)")
+    for name in (*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_memory", "native_entries"):
+        parser.add_argument("--" + name.replace("_", "-"), action="store_true",
+                            help="as in scripts/windows/build.py")
     parser.add_argument("--profile", type=Path, help="an optimization profile (.profdata) for the game module")
     parser.add_argument("--device", metavar="SERIAL",
                         help="train the optimization profile on this adb device (the phone the game is for)")
@@ -720,6 +743,18 @@ def main():
     parser.add_argument("--sdk", type=Path, help="the Android SDK (default: ANDROID_HOME)")
     parser.add_argument("--jdk", type=Path, help="a JDK 17 (default: JAVA_HOME)")
     args = parser.parse_args()
+    # The Windows builder's defaults and the same checks (scripts/windows/build.py main).
+    if not args.conservative:
+        for name in wb.WINDOWS_DEFAULT_OPTIMIZATIONS:
+            setattr(args, name, True)
+    if args.inline_gpr and not args.direct_calls:
+        parser.error("--inline-gpr requires --direct-calls")
+    if args.fixed_mem1 and not args.fixed_cpu:
+        parser.error("--fixed-mem1 requires --fixed-cpu")
+    if args.lean_memory and not args.prepared_blocks:
+        parser.error("--lean-memory requires --prepared-blocks")
+    if args.native_entries and not (args.direct_calls and args.gather_pipe and args.native_vec):
+        parser.error("--native-entries requires --direct-calls, --gather-pipe and --native-vec")
     args.jobs_auto = args.jobs is None
     if args.jobs is None:
         args.jobs = wb.default_jobs()
