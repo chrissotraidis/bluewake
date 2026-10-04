@@ -4,6 +4,7 @@
 #include <cassert>
 #include "../windows/src/settings_state.h"
 #include "../runtime/host/src/smooth_rate.h"
+#include "../runtime/host/src/fps_position.h"
 #include <limits>
 int main() {
     Settings saved;
@@ -59,4 +60,26 @@ int main() {
     assert(bw_smooth_steps(-1, std::numeric_limits<float>::quiet_NaN()) == 1);
     // Falling back on a slower/unknown display never edits the preference.
     assert(bw_smooth_steps(saved.smooth_steps, 60) == 1 && saved.smooth_steps == 3);
+
+    // The frame rate's place: top center unless a corner is named.
+    assert(Settings{}.fps_position == FPS_OVERLAY_TOP_CENTER);
+    for (int i = 0; i < BW_FPS_POSITIONS; ++i)
+        assert(bw_fps_position(kBwFpsPositionValues[i]) == i);
+    assert(bw_fps_position("bottom-right") == FPS_OVERLAY_BOTTOM_RIGHT);
+    assert(bw_fps_position(nullptr) == 0 && bw_fps_position("") == 0);
+    assert(bw_fps_position("middle") == 0 && bw_fps_position("Top-Left") == 0 && bw_fps_position("top-left ") == 0);
+    // DOL_AURORA_FPS_POSITION for one session is not saved when another
+    // setting changes; choosing a place in the menu is.
+    Settings file;
+    file.fps_position = FPS_OVERLAY_TOP_LEFT;
+    Settings launch = file;
+    launch.fps_position = bw_fps_position("bottom-right");
+    Settings edit = launch;
+    launch.show_fps = true;
+    bw_settings_keep_edits(file, edit, launch);
+    assert(file.show_fps && file.fps_position == FPS_OVERLAY_TOP_LEFT);
+    edit = launch;
+    launch.fps_position = FPS_OVERLAY_TOP_RIGHT;
+    bw_settings_keep_edits(file, edit, launch);
+    assert(file.fps_position == FPS_OVERLAY_TOP_RIGHT);
 }

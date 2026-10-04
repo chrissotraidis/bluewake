@@ -13,6 +13,7 @@ struct Settings {
     bool smooth_motion = false;  // experimental: off unless the player turns it on
     int smooth_steps = 1; // 60 FPS; 3: 120; -1: match the display, up to 240.
     bool show_fps = false;
+    int fps_position = 0;  // where the frame rate is (fps_position.h); 0: the top center
     bool pause_unfocused = false;
     // At start, the game waits until the saved and bundled pipelines are compiled.
     bool shaders_first = false;
@@ -71,6 +72,7 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.smooth_motion != session.smooth_motion) saved.smooth_motion = session.smooth_motion;
     if (before.smooth_steps != session.smooth_steps) saved.smooth_steps = session.smooth_steps;
     if (before.show_fps != session.show_fps) saved.show_fps = session.show_fps;
+    if (before.fps_position != session.fps_position) saved.fps_position = session.fps_position;
     if (before.pause_unfocused != session.pause_unfocused) saved.pause_unfocused = session.pause_unfocused;
     if (before.shaders_first != session.shaders_first) saved.shaders_first = session.shaders_first;
     if (before.mouse_camera != session.mouse_camera) saved.mouse_camera = session.mouse_camera;
