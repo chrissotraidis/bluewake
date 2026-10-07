@@ -151,6 +151,12 @@ class Builder:
         self.logs.mkdir(parents=True, exist_ok=True)
         log = self.logs / f"{name}.log"
         environment = dict(env or self.env or os.environ)
+        command = list(command)
+        if command[:1] == ["cmake"] and "-S" in command and platform.machine().lower() == "arm64":
+            # Windows on ARM builds the x64 game: say so, or CMake takes this ARM64 PC's
+            # processor for the target and libraries pick ARM code for the x64 compiler
+            # (libpng: "NEON intrinsics not available").
+            command += ["-DCMAKE_SYSTEM_NAME=Windows", "-DCMAKE_SYSTEM_PROCESSOR=AMD64"]
         if ninja:
             environment["NINJA_STATUS"] = "[%f/%t] "
         start = time.monotonic()
@@ -199,8 +205,13 @@ class Builder:
     def check_tools(self):
         if platform.system() != "Windows":
             die("this builder is for Windows; on a Mac use scripts/builder/build.sh")
-        if platform.machine().lower() not in ("amd64", "x86_64"):
-            die(f"an x86-64 PC is required (this is {platform.machine()})")
+        machine = platform.machine().lower()
+        if machine not in ("amd64", "x86_64", "arm64"):
+            die(f"an x86-64 or ARM64 Windows PC is required (this is {platform.machine()})")
+        if machine == "arm64":
+            # Windows on ARM runs x64 programs: the same x64 tools and game as on an x64 PC,
+            # under Windows' x64 emulation (slower to build and play than native x64).
+            print("Windows on ARM: building the x64 game, which runs under Windows' x64 emulation")
         if sys.version_info < (3, 10):
             die("Python 3.10 or newer is required")
         for tool in ("git", "cmake", "ninja"):
@@ -1270,6 +1281,10 @@ def main():
         parser.error("--native-entries requires --direct-calls, --gather-pipe and --native-vec")
     if args.jobs is None:
         args.jobs = default_jobs()
+    if args.source_only:
+        # Only the disc extractor is built from the app's project: its optimization
+        # profile is for the app, and an older Visual Studio clang cannot read it.
+        args.no_app_pgo = True
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     args.out = args.out.resolve()

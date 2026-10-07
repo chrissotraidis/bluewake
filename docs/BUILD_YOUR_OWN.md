@@ -143,6 +143,30 @@ it and prepares the game. Keep the imported disc on the device: the game reads i
 **⋯ › Game Data & Saves › Remove Disc Image…** removes the imported disc and extracted game files,
 keeps your saves and settings, and requires importing the disc again before playing.
 
+## On a Windows PC (experimental)
+
+From 0.6.0, [PadMint](https://github.com/chrissotraidis/padmint) can build the iPhone and iPad app on a
+Windows 10 or 11 PC, with no Mac. It downloads the app without game code from the release and compiles
+the game from your disc on the PC.
+
+You need:
+
+- PadMint for Windows, the latest release.
+- Visual Studio Build Tools 2022 (free) with **Desktop development with C++** and, under Individual
+  components, **C++ Clang Compiler for Windows**. PadMint checks for it and says how to add it.
+- Your disc image, at least 25 GB of free space, and a few hours: the first build compiles about 760 files.
+- To install: [Sideloadly](https://sideloadly.io) with iTunes and iCloud from Apple's website (not the
+  Microsoft Store versions), a USB cable and your Apple ID.
+- An iPhone or iPad with an A13 chip or newer, on iOS/iPadOS 17 or later.
+
+Open PadMint, choose BlueWake and iPhone or iPad, and pick your disc. Install the IPA PadMint saves with
+Sideloadly. Then copy the same disc image to the device: in the Apple Devices app, select the device,
+open **Files** and drag it onto **BlueWake**.
+
+A copy built on Windows skips the Mac build's [local optimization](#local-optimization) and uses the
+optimization profile that comes with BlueWake, so busy scenes may run a little slower than in a copy built
+on a Mac. Windows on ARM PCs work too, more slowly. Linux works the same way and is less tested.
+
 ## Updating
 
 ```sh

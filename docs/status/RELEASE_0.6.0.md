@@ -28,6 +28,8 @@ Fixes and changes since 0.5.0:
 - Quitting is cleaner on every platform (a fix from the Linux port).
 - Building from source works with Visual Studio 2022 again (#153).
 - The session log names the controller mapping in use, to help with controller reports.
+- New, experimental: build the iPhone and iPad app on a Windows PC with PadMint, no Mac needed
+  ([how](https://github.com/chrissotraidis/bluewake/blob/main/docs/BUILD_YOUR_OWN.md#on-a-windows-pc-experimental)).
 
 Windows: the intro-music fix is [on / off, after step 4]. To try it when it's off, start BlueWake from PowerShell with
 `$env:BLUEWAKE_DEFER_DVD_COMPLETION="1"`.
@@ -48,4 +50,8 @@ Windows: the intro-music fix is [on / off, after step 4]. To try it when it's of
 | Quit from the menu | Windows | | not yet |
 | Controller rows (player 1, baton, left stick, aim option) | Windows, if a controller is at hand | | not yet |
 | Windows intro default decided | | | not yet |
+| iPhone app built on Windows, older build | Windows 11 on ARM (Parallels VM), then iPad Pro 12.9" (M2), iPadOS 27.0.1, as a separate test app | `e99c451` (#100 on October 4) with the v0.2.0 app | Pass as far as it went: PadMint compiled all 757 files with its LLVM 21.1.8, checked and inserted the module, and the IPA and publication checks passed. On the iPad it loaded the module and ran the title sequence at 30 FPS and full speed with no audio drops for about 90 seconds. Not played. |
+| iPhone app built on Windows from #100 | Windows 11 on ARM (Parallels VM) | `43a8bd8` | not yet: running |
+| That app played: file select, a save, relaunch, sound, touch | iPad Pro 12.9" (M2) | | not yet |
+| Mac PadMint build with #100's recipe (trained module, published app) | Mac (M3 Max) | `43a8bd8` | not yet: running |
 | Release check on all five assets | Mac | | not yet |

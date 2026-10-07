@@ -27,6 +27,7 @@ The code is done and merged. What is left is building, checking on real hardware
 | Clean quit (shutdown fix from the Linux port) | #56 | All | Mac quit with Smooth Motion on | Windows quit |
 | The session log names the controller mapping in use | #61 | Mac, Windows | Unit test | None |
 | Visual Studio 2022 builds from source | #153 | Windows builder | LLVM 18, 20 and 22 against the real profile | The reporter's build |
+| New, experimental: build the iPhone and iPad app on a Windows PC with PadMint | #100 | iPhone, iPad | An older build from Windows on ARM ran the title on an iPad Pro | The candidate's build from Windows played on an iPad; the Mac route with the new recipe |
 
 Not in 0.6.0: the Linux build (#107), the performance work (PRIORITIES Tier 2), later cutscene sound (#65), the
 flicker (#136), HD pack shading (#80), the controller picker (#155). The Pictobox fallback stays opt-in.

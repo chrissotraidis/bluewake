@@ -5,7 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
-#else
+#elif defined(__APPLE__)
 #include <CommonCrypto/CommonDigest.h>
 #endif
 #include <dirent.h>
@@ -107,7 +107,7 @@ static void sha1_hex(const uint8_t* data, size_t size, char out[41]) {
         memset(digest, 0, sizeof digest);
     for (int i = 0; i < (int)sizeof digest; ++i)
         snprintf(out + i * 2, 3, "%02x", digest[i]);
-#else
+#elif defined(__APPLE__)
     uint8_t digest[CC_SHA1_DIGEST_LENGTH];
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -115,6 +115,42 @@ static void sha1_hex(const uint8_t* data, size_t size, char out[41]) {
 #pragma clang diagnostic pop
     for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; ++i)
         snprintf(out + i * 2, 3, "%02x", digest[i]);
+#else
+    // Linux and other hosts building with the disc tool: plain SHA-1 (FIPS 180-4).
+    uint32_t h[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
+    uint8_t block[64];
+    uint64_t bits = (uint64_t)size * 8;
+    size_t total = ((size + 8) / 64 + 1) * 64;
+    for (size_t offset = 0; offset < total; offset += 64) {
+        for (size_t i = 0; i < 64; ++i) {
+            size_t at = offset + i;
+            if (at < size) block[i] = data[at];
+            else if (at == size) block[i] = 0x80;
+            else if (at >= total - 8) block[i] = (uint8_t)(bits >> (8 * (total - 1 - at)));
+            else block[i] = 0;
+        }
+        uint32_t w[80];
+        for (int i = 0; i < 16; ++i)
+            w[i] = (uint32_t)block[i * 4] << 24 | (uint32_t)block[i * 4 + 1] << 16 |
+                   (uint32_t)block[i * 4 + 2] << 8 | block[i * 4 + 3];
+        for (int i = 16; i < 80; ++i) {
+            uint32_t x = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+            w[i] = x << 1 | x >> 31;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+        for (int i = 0; i < 80; ++i) {
+            uint32_t f, k;
+            if (i < 20) { f = (b & c) | (~b & d); k = 0x5A827999u; }
+            else if (i < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1u; }
+            else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDCu; }
+            else { f = b ^ c ^ d; k = 0xCA62C1D6u; }
+            uint32_t t = (a << 5 | a >> 27) + f + e + k + w[i];
+            e = d; d = c; c = b << 30 | b >> 2; b = a; a = t;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
+    }
+    for (int i = 0; i < 20; ++i)
+        snprintf(out + i * 2, 3, "%02x", (unsigned)(h[i / 4] >> (24 - 8 * (i % 4))) & 0xffu);
 #endif
 }
 

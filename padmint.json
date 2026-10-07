@@ -17,42 +17,114 @@
   "targets": {
     "ios": {
       "hosts": {
-        "macos-arm64": "experimental"
+        "macos-arm64": "experimental",
+        "linux-x86_64": "experimental",
+        "linux-arm64": "experimental",
+        "windows-x86_64": "experimental",
+        "windows-arm64": "experimental"
       },
       "tools": [
         "git",
         "cmake",
-        "ninja"
+        "ninja",
+        "libcxx"
       ],
       "published_app": "BlueWake-v{version}-ios-unsigned.ipa",
-      "command": [
-        "/bin/bash",
-        "{repo}/scripts/builder/build.sh",
-        "{disc}",
-        "--out",
-        "{work}",
-        "--jobs",
-        "{jobs}"
+      "ios_module": {
+        "file": "{work}/composite-ios/gGZLE01_recomp.dylib",
+        "into": "Frameworks/gGZLE01_recomp.dylib"
+      },
+      "steps": [
+        {
+          "stage": "translate",
+          "on": [
+            "macos"
+          ],
+          "command": [
+            "/bin/bash",
+            "{repo}/scripts/builder/build.sh",
+            "{disc}",
+            "--out",
+            "{work}",
+            "--jobs",
+            "{jobs}",
+            "--train-pgo",
+            "--app",
+            "{app}"
+          ]
+        },
+        {
+          "stage": "translate",
+          "on": [
+            "linux"
+          ],
+          "command": [
+            "/bin/bash",
+            "{repo}/scripts/builder/build.sh",
+            "{disc}",
+            "--out",
+            "{work}",
+            "--jobs",
+            "{jobs}",
+            "--source-only"
+          ]
+        },
+        {
+          "stage": "translate",
+          "on": [
+            "windows"
+          ],
+          "command": [
+            "{python}",
+            "{repo}/scripts/windows/build.py",
+            "{disc}",
+            "--out",
+            "{work}",
+            "--jobs",
+            "{jobs}",
+            "--source-only"
+          ]
+        },
+        {
+          "stage": "configure",
+          "on": [
+            "linux",
+            "windows"
+          ],
+          "command": [
+            "cmake",
+            "-S",
+            "{repo}/cmake/composite",
+            "-B",
+            "{work}/composite-ios",
+            "-G",
+            "Ninja",
+            "-DCMAKE_TOOLCHAIN_FILE={ios_toolchain}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_C_FLAGS=-mcpu=apple-a13 -fno-slp-vectorize -mllvm -large-interval-freq-threshold=10 -fprofile-instr-use={repo}/scripts/builder/profiles/bluewake/composite-rt.profdata -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date -Wno-backend-plugin -mllvm -enable-machine-outliner=never",
+            "-DCOMPOSITE_OPTIMIZATION_LEVEL=2",
+            "-DCOMPOSITE_DIR={work}/composite-src",
+            "-DGXRUNTIME_DIR={repo}/ref/recompcore/GXRuntime",
+            "-DABI_DIR={repo}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp"
+          ]
+        },
+        {
+          "stage": "compile",
+          "on": [
+            "linux",
+            "windows"
+          ],
+          "command": [
+            "cmake",
+            "--build",
+            "{work}/composite-ios",
+            "-j",
+            "{jobs}"
+          ]
+        }
       ],
-      "modes": {
-        "full": [
-          "--app",
-          "{app}",
-          "--train-pgo",
-          "--ipa",
-          "{output}"
-        ],
-        "source-only": [
-          "--source-only"
-        ]
-      },
-      "options": {
-        "no-mods": [
-          "--no-mods"
-        ]
-      },
       "output": "ipa",
-      "check": "bluewake-ipa"
+      "check": "ipa"
     },
     "macos": {
       "hosts": {
@@ -85,6 +157,11 @@
         "name": "python3",
         "version_args": [
           "--version"
+        ],
+        "hosts": [
+          "macos-arm64",
+          "linux-x86_64",
+          "linux-arm64"
         ]
       },
       {
@@ -93,7 +170,10 @@
           "-version"
         ],
         "player": true,
-        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough."
+        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough.",
+        "hosts": [
+          "macos-arm64"
+        ]
       },
       {
         "name": "xcrun",
@@ -104,7 +184,44 @@
           "--show-sdk-path"
         ],
         "player": true,
-        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough."
+        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough.",
+        "hosts": [
+          "macos-arm64"
+        ]
+      },
+      {
+        "name": "cc",
+        "label": "C compiler",
+        "version_args": [
+          "--version"
+        ],
+        "player": true,
+        "hosts": [
+          "linux-x86_64",
+          "linux-arm64"
+        ],
+        "note": "Install a C compiler for the disc tool, for example: sudo apt install build-essential"
+      },
+      {
+        "name": "%ProgramFiles(x86)%/Microsoft Visual Studio/Installer/vswhere.exe",
+        "label": "Visual Studio Build Tools with C++ Clang",
+        "version_args": [
+          "-latest",
+          "-products",
+          "*",
+          "-requires",
+          "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+          "Microsoft.VisualStudio.Component.VC.Llvm.Clang",
+          "-property",
+          "catalog_productDisplayVersion"
+        ],
+        "min_version": "17",
+        "player": true,
+        "note": "Install Visual Studio Build Tools 2022 (free) from https://visualstudio.microsoft.com/downloads/ with Desktop development with C++, then in Individual components add C++ Clang Compiler for Windows. Run PadMint again when it finishes.",
+        "hosts": [
+          "windows-x86_64",
+          "windows-arm64"
+        ]
       }
     ]
   },

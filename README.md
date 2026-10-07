@@ -27,7 +27,7 @@
 | You play on | What to do |
 | --- | --- |
 | **Windows** 10 or 11 | [Download the ready-made build](#windows) and choose your disc image |
-| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it |
+| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac or, new and experimental, a Windows PC, then install it |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/status/TVOS_BUILD.md) (experimental) |
 | **Linux** | Not yet; see [the FAQ](#frequently-asked-questions) |
@@ -71,7 +71,9 @@ nothing happens when you open it, see the FAQ below. To build it yourself from y
 
 You need:
 
-- a Mac with Apple silicon, Xcode (with the iOS platform installed), and at least 25 GB of free space
+- a Mac with Apple silicon and Xcode (with the iOS platform installed), or, new and experimental, a
+  Windows 10 or 11 PC ([what it needs](docs/BUILD_YOUR_OWN.md#on-a-windows-pc-experimental)); at least
+  25 GB of free space either way
 - your `GZLE01` revision 0 disc image
 - an A13 or newer iPhone or iPad on iOS/iPadOS 17 or later, with Developer Mode on
 - an Apple ID for signing (a free one works, but its apps expire after seven days)
@@ -88,10 +90,11 @@ Then:
    ~~~
 
    Expect a first build of well over an hour. Add `--source-only` first to check your tools and
-   disc in a few minutes.
-2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode.
-3. **Copy the same disc image to your device:** in Finder, select the device, open **Files** and
-   drag it onto **BlueWake**. The app imports it on first launch.
+   disc in a few minutes. On a Windows PC, use PadMint; the first build takes a few hours.
+2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode. On Windows, Sideloadly.
+3. **Copy the same disc image to your device:** in Finder on a Mac, or the Apple Devices app on
+   Windows, select the device, open **Files** and drag it onto **BlueWake**. The app imports it on
+   first launch.
 
 Step by step, with updating and troubleshooting: [Build your own BlueWake](docs/BUILD_YOUR_OWN.md).
 If you used PadMint, please tell us how it went in
