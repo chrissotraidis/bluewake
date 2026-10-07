@@ -1922,7 +1922,13 @@ static void host_actor_search_native(CPUState* cpu) {
     g_actor_search_native_runs++;
 }
 
-static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) {
+// The part of the full edge test that depends only on host state, not on the
+// address being dispatched. host_chassis_requires_full calls this first and
+// then the address-keyed checks; the direct-call skip path calls this alone
+// (see host_direct_can_skip), because the module has already proven the
+// address unwatched - and every address-keyed check below keys on an address
+// the watch list contains, so an unwatched address can never trip one.
+static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
     if (__builtin_expect(cpu == NULL || g_turn_census_enabled ||
                              g_boundary_census_enabled ||
                              g_chassis_service_each_block ||
@@ -1943,6 +1949,16 @@ static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) 
                 return true;
         }
     }
+    if ((cpu->msr & PPC_MSR_EE) != 0u &&
+        (g_guest_decrementer_pending ||
+         (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
+        return true;
+    return false;
+}
+
+static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) {
+    if (host_chassis_dynamic_requires_full(cpu))
+        return true;
     if (!g_new_game_intro_reported &&
         (address == 0x80018554u || address == 0x8001199Cu))
         return true;
@@ -1951,10 +1967,6 @@ static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) 
         return true;
     if ((g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) ||
         bluewake_edge_maybe_intercept(host_canonical_linked_pc(address)))
-        return true;
-    if ((cpu->msr & PPC_MSR_EE) != 0u &&
-        (g_guest_decrementer_pending ||
-         (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
         return true;
     return false;
 }
@@ -1981,7 +1993,27 @@ static bool host_can_skip_observation(void* user, const CPUState* cpu, u32 addre
 }
 
 static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
-    const bool allowed = host_can_skip_observation(user, cpu, address);
+    (void)user;
+#if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
+    (void)cpu; (void)address;
+    const bool allowed = false;
+#else
+    // The direct-call skip is only ever permitted for addresses the module's
+    // watch list has already rejected (bw_edge_unwatched gates every actual
+    // skip), and that list is a superset of the intercept table and of every
+    // feature-observation address below. So the address-keyed checks the full
+    // predicate adds cannot fire here; run the dynamic-only predicate, which
+    // skips the intercept-table walk on the hot path. The one address-keyed
+    // check that must stay is the module-1 raw alias: g_module1_raw_base is a
+    // runtime value, not a compile-time literal, so it is the one address the
+    // watch list cannot guarantee.
+    const bool allowed = !g_deadline_census_enabled && !g_delivery_safety_census_enabled &&
+           !g_guest_state_trace_enabled && !bluewake_jump_button_armed &&
+           !bluewake_feature_observes(address) &&
+           !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
+           !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
+           !host_chassis_dynamic_requires_full(cpu);
+#endif
     if (g_direct_call_trace) {
         g_direct_call_queries++;
         g_direct_call_allowed += allowed;
