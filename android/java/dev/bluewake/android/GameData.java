@@ -109,7 +109,10 @@ final class GameData {
                         + "screen or right after saving. BlueWake then closes so the restored saves load when you "
                         + "open it again.", "Cancel", "Replace Saves", true,
                 () -> {
-                    if (!replaceCardWith(copy, stamp)) return;
+                    final boolean replaced = replaceCardWith(copy, stamp);
+                    //noinspection ResultOfMethodCallIgnored
+                    copy.delete();
+                    if (!replaced) return;
                     Shell.log("[shell] saves restored from " + name + "; previous card kept in Backups");
                     closeForSaves("Saves Restored", "BlueWake will close now. Open it again to play with the restored "
                             + "saves.");
@@ -282,14 +285,20 @@ final class GameData {
             overlay.showMessage("Could Not Import", error[0] != null ? error[0] : "The memory card could not be read.");
             return;
         }
-        File staged = new File(cardFile().getPath() + ".import");
+        // The new card waits in the app's cache; replaceCardWith copies it into place.
+        File staged = new File(activity.getCacheDir(), "import.card");
         try (OutputStream out = new FileOutputStream(staged)) {
             out.write(result);
         } catch (IOException e) {
+            //noinspection ResultOfMethodCallIgnored
+            staged.delete();
             overlay.showMessage("Saves Not Changed", e.getMessage() != null ? e.getMessage() : "");
             return;
         }
-        if (!replaceCardWith(staged, stamp)) return;
+        final boolean replaced = replaceCardWith(staged, stamp);
+        //noinspection ResultOfMethodCallIgnored
+        staged.delete();
+        if (!replaced) return;
         Shell.log("[shell] Dolphin save imported from " + name + " (quest log " + source + " into " + destination
                 + "); previous card kept in Backups");
         closeForSaves("Save Imported", "BlueWake will close now. Open it again and pick the quest log to play.");

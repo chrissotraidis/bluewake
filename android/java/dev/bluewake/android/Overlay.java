@@ -129,9 +129,14 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         fpsLabel.setTextColor(Color.WHITE);
         fpsLabel.setGravity(Gravity.CENTER);
         fpsLabel.setSingleLine(true);
+        fpsLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        fpsLabel.setPadding(px(12), 0, px(12), 0);
         fpsLabel.setBackground(rounded(Color.argb(140, 0, 0, 0), 8f, 0, 0));
         fpsLabel.setVisibility(GONE);
-        addView(fpsLabel, topLeft());
+        // As wide as its text, at the top center.
+        LayoutParams fpsParams = new LayoutParams(LayoutParams.WRAP_CONTENT, px(28));
+        fpsParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        addView(fpsLabel, fpsParams);
 
         menuButton = new MenuButton(activity);
         menuButton.setContentDescription("Menu");
@@ -421,7 +426,13 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
 
         place(menuButton, safe.right - 52f * dp, safe.top + 12f * dp, 40f * dp, 40f * dp);
         // The FPS label sits at the top center rather than the iPhone app's top left, where the Start button is.
-        place(fpsLabel, safe.centerX() - 125f * dp, safe.top + 12f * dp, 250f * dp, 28f * dp);
+        LayoutParams fpsParams = (LayoutParams) fpsLabel.getLayoutParams();
+        int fpsTop = Math.round(safe.top + 12f * dp);
+        if (fpsParams.topMargin != fpsTop) {
+            fpsParams.topMargin = fpsTop;
+            fpsLabel.setLayoutParams(fpsParams);
+        }
+        fpsLabel.setMaxWidth(Math.max(px(120), Math.round(safe.width() - 140f * dp)));
         float panelWidth = Math.min(360f * dp, safe.width() - 32f * dp);
         panelMaxHeight = Math.round(Math.min(330f * dp, safe.height() - 72f * dp));
         place(settingsPanel, safe.right - panelWidth - 12f * dp, safe.top + 60f * dp, panelWidth,
