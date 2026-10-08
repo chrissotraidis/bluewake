@@ -11,6 +11,23 @@ must reproduce the accepted developer build's performance in matched iPad
 tests. Generating an IPA alone does not satisfy this requirement. Do not present
 the slower unprofiled build as the recommended release path.
 
+## The player path from the published release (October 4)
+
+On an M3 Max (macOS, Xcode 27.0), a fresh clone of PadMint at `fb9fd8f` ran
+`padmint make bluewake ios --disc GZLE01.iso` against the published
+[0.2.0 release](https://github.com/chrissotraidis/bluewake/releases/tag/v0.2.0) recipe and finished:
+`doctor` passed, then disc extraction, translation, local training (it reached player control at
+retrace 20257), the module compile (822 objects), signing and the build record. The result is the
+released 0.2.0 app (version 0.2.0, build 3) with a 502 MB module made from the disc.
+
+- Time: 2 h 37 min of wall time, with the compile taking 135 minutes. The Mac was running a Windows VM and
+  other builds at the same time; the clean October 3 build compiled in 88 minutes.
+- The first attempt was interrupted and left its training run behind; the retry reported that run's
+  failure, then trained again and passed. A single uninterrupted run should not see this.
+- `--out NAME.ipa` creates a folder of that name with `BlueWake-v0.2.0-ios-personal.ipa` inside.
+- Not checked: installing this IPA on a device (the iPad was away). No player has reported a PadMint
+  build yet; [#104](https://github.com/chrissotraidis/bluewake/issues/104) asks.
+
 ## Current reconciliation evidence (October 3)
 
 The tested PadMint CLI is 0.2.9 at

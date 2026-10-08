@@ -71,8 +71,12 @@ remains unverified. Mac training receipts do not validate that Windows path. Ful
 - Windows 10 or 11 on an x86-64 PC. The game module is compiled for `x86-64-v3` by default (AVX2, FMA, BMI2,
   MOVBE: Intel Haswell, AMD Zen or newer); the builder drops to an older level on older CPUs.
 - A GPU with Direct3D 12
-- [Visual Studio 2022 or newer](https://visualstudio.microsoft.com/) (Community is fine) with the
-  **Desktop development with C++** workload and the **C++ Clang Compiler for Windows** component
+- [Visual Studio 2026](https://visualstudio.microsoft.com/) (Community or Build Tools is fine), version 18.10 or
+  newer, with the **Desktop development with C++** workload and the **C++ Clang Compiler for Windows**
+  component. Visual Studio 2022 also builds: its clang (19) can't read the app's optimization profile
+  (`windows/pgo/app.profdata`, recorded with clang 22), so the builder says so and builds the app without it,
+  which leaves its graphics thread a little slower ([#153](https://github.com/chrissotraidis/bluewake/issues/153)).
+  `--no-app-pgo` does the same on any version.
 - [Python 3.10+](https://www.python.org/), [Git](https://git-scm.com/), and CMake 3.25+ and Ninja
   (`pip install cmake ninja` works)
 - Your disc image of *The Legend of Zelda: The Wind Waker*, GameCube USA (`GZLE01`, revision 0). An `.iso` or
@@ -179,8 +183,14 @@ Run `build\windows\BlueWake\BlueWake.exe`.
 | Frame rate | F9 |
 
 Game controllers work through SDL (Xbox, PlayStation, Switch Pro and others). The title screen wants A to reach
-the file menu. The mouse turns the game's own camera around Link and tilts it, and a left click is A; a
+the file menu. To choose which controller button presses each GameCube button, open settings and use
+**Controls › Controller buttons** (builds from `main` after October 4, 2026). The mouse turns the game's own camera around Link and tilts it, and a left click is A; a
 cutscene, door, Z-target or first-person view takes the camera back.
+**Controls › Mouse buttons** sets what the left, middle, right and side buttons press, and **Keyboard keys for
+the GameCube buttons** changes their keys (builds from `main` after October 5, 2026). A controller SDL doesn't
+recognise works once its mapping is in a `gamecontrollerdb.txt` (from
+[SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB)) beside your saves; the session log's
+`[pad] N controller mappings` line shows it was read.
 
 Command-line options (`BlueWake.exe --help`):
 
@@ -215,6 +225,11 @@ never touches it:
   wrong. Attach the relevant one to a bug report. If BlueWake crashes, the log says where.
 - Aurora's pipeline cache, so later launches start drawing sooner
 
+**Portable mode:** create an empty file named `portable.txt` next to `BlueWake.exe`, and BlueWake keeps all of
+this in a `user` folder beside it instead (builds from `main` after October 4, 2026). To bring existing saves
+along, copy the contents of `%APPDATA%\BlueWake` into that `user` folder first. An `.iso` or `.gcm` disc image
+is read where it is in either mode; only Dolphin's compressed formats are unpacked to a copy.
+
 ## How the port works
 
 The Windows host is `windows/`: a CMake project that compiles the unchanged host (`runtime/host/src`), GXRuntime
@@ -246,7 +261,7 @@ clang (GNU driver, MSVC ABI) from Visual Studio.
   reserves 64 MB for the main thread (Windows' default is 1 MB).
 
 - **Better Wind Waker's REL sites.** DolRecomp names a REL's option sites by its file name after the last `/`,
-  and on Windows it joins a folder and a file with `\`, so the sites in `d_a_ship` and `d_a_agbsw0` would not
+  and on Windows it joins a folder and a file with ``, so the sites in `d_a_ship` and `d_a_agbsw0` would not
   match. The builder names the RELs' folder with `/` and a trailing `/` for that translation, which gives the
   15 option chunks the Mac build has, not 11.
 - **Windows' own costs.** The C runtime's `getenv` locks and scans the whole environment, and GXRuntime reads

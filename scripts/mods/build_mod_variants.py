@@ -38,6 +38,13 @@ import sys
 from pathlib import Path
 
 FUNC_RE = re.compile(r"\bfunc_([0-9A-F]{8})\b")
+
+
+def write_lf(path, text):
+    """Write text with LF line ends on every platform. Path.write_text's
+    newline argument needs Python 3.10, and macOS's own python3 is 3.9."""
+    with open(path, "w", newline="\n") as f:
+        f.write(text)
 CHUNK_FN_RE = re.compile(r"^void func_([0-9A-F]{8})\(CPUState\* ctx\) \{", re.M)
 
 
@@ -232,7 +239,7 @@ def main():
                 owner.setdefault(start, []).append(name)
                 suffix = "__mod_" + name
                 target = dest / (chunk_dir.name + "__" + variant.name)
-                target.write_text(FUNC_RE.sub(lambda g: g.group(0) + suffix, text), newline=chr(10))
+                write_lf(target, FUNC_RE.sub(lambda g: g.group(0) + suffix, text))
                 fn = "func_%08X%s" % (start, suffix)
                 decls.append("void %s(CPUState* ctx);" % fn)
                 if start in base_ranges:
@@ -274,8 +281,8 @@ def main():
                     continue
                 start = int(m.group(1), 16)
                 suffix = "__mod_" + "_".join(members)
-                (dest / (chunk_dir.name + "__" + variant.name)).write_text(
-                    FUNC_RE.sub(lambda g: g.group(0) + suffix, text), newline=chr(10))
+                write_lf(dest / (chunk_dir.name + "__" + variant.name),
+                         FUNC_RE.sub(lambda g: g.group(0) + suffix, text))
                 fn = "func_%08X%s" % (start, suffix)
                 decls.append("void %s(CPUState* ctx);" % fn)
                 chunks.append((mask, start, fn))
@@ -334,7 +341,7 @@ def main():
         lines.append("#define MODULE_OPTION_WRITE_COUNT %du" % len(option_writes))
         lines.append(OPTION_EXPORTS)
         print("options: %d, %d writes" % (len(spec.options), len(option_writes)))
-    (out / "mod_variants.inc").write_text("\n".join(lines) + "\n", newline=chr(10))
+    write_lf(out / "mod_variants.inc", "\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":

@@ -21,12 +21,18 @@ struct Settings {
     double mouse_sensitivity = 1.0;
     bool mouse_invert_y = false;
     bool controller_swap_ab = false, controller_swap_xy = false;
+    // A custom controller button layout (button_remap.h); "" is the controller's own.
+    std::string button_map;
+    // What the mouse buttons press and the GameCube buttons' keys
+    // (input_remap.h); "" is the default (left click A; J K U I Q E R Return).
+    std::string mouse_buttons, key_map;
     bool pad_invert_x = false, pad_invert_y = false;
     // The fast right-stick camera (mouse_camera.h): the stick turns the view
     // and aims directly, instead of the game's eased C-stick camera.
     bool stick_camera = true;
     int stick_speed = 360;      // degrees a second at full tilt
     int stick_aim_speed = 180;  // the same when aiming
+    bool aim_invert_y = false;  // the left stick's up and down the other way when aiming (#154)
     bool climb = false;         // climb any wall on a stamina wheel (climb.h)
     int climb_stamina = 12;     // seconds of climbing on a full wheel
     // The Forest Water challenge (forest_water.h): watered trees kept when the
@@ -79,6 +85,7 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.stick_camera != session.stick_camera) saved.stick_camera = session.stick_camera;
     if (before.stick_speed != session.stick_speed) saved.stick_speed = session.stick_speed;
     if (before.stick_aim_speed != session.stick_aim_speed) saved.stick_aim_speed = session.stick_aim_speed;
+    if (before.aim_invert_y != session.aim_invert_y) saved.aim_invert_y = session.aim_invert_y;
     if (before.climb != session.climb) saved.climb = session.climb;
     if (before.climb_stamina != session.climb_stamina) saved.climb_stamina = session.climb_stamina;
     if (before.forest_keep_trees != session.forest_keep_trees) saved.forest_keep_trees = session.forest_keep_trees;
@@ -97,6 +104,9 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.quick_doors != session.quick_doors) saved.quick_doors = session.quick_doors;
     if (before.controller_swap_ab != session.controller_swap_ab) saved.controller_swap_ab = session.controller_swap_ab;
     if (before.controller_swap_xy != session.controller_swap_xy) saved.controller_swap_xy = session.controller_swap_xy;
+    if (before.button_map != session.button_map) saved.button_map = session.button_map;
+    if (before.mouse_buttons != session.mouse_buttons) saved.mouse_buttons = session.mouse_buttons;
+    if (before.key_map != session.key_map) saved.key_map = session.key_map;
     for (const auto& [key, value] : session.options) {
         auto old = before.options.find(key);
         if (old == before.options.end() || old->second != value) saved.options[key] = value;

@@ -11,35 +11,40 @@ bool bluewake_quick_doors_armed;
 bool bluewake_draw_tags_enabled;
 bool bluewake_forest_water_enabled;
 u32 bluewake_forest_water_tree_timer_check;
-static unsigned calls[5];
+static unsigned calls[6];
 static unsigned order;
 void bluewake_mouse_camera_hook(CPUState* cpu, u32 address) {
-    (void)cpu; (void)address; ++calls[0]; order = order * 5 + 1;
+    (void)cpu; (void)address; ++calls[0]; order = order * 6 + 1;
 }
 void bluewake_climb_hook(CPUState* cpu, u32 address) {
-    (void)cpu; (void)address; ++calls[1]; order = order * 5 + 2;
+    (void)cpu; (void)address; ++calls[1]; order = order * 6 + 2;
 }
 void bluewake_quick_doors_enter(CPUState* cpu) {
-    (void)cpu; ++calls[2]; order = order * 5 + 3;
+    (void)cpu; ++calls[2]; order = order * 6 + 3;
 }
 void bluewake_draw_tags_enter(CPUState* cpu, u32 address) {
-    (void)cpu; (void)address; ++calls[3]; order = order * 5 + 4;
+    (void)cpu; (void)address; ++calls[3]; order = order * 6 + 4;
 }
 void bluewake_forest_water_enter(CPUState* cpu, u32 address) {
-    (void)cpu; (void)address; ++calls[4]; order = order * 5 + 0;
+    (void)cpu; (void)address; ++calls[4]; order = order * 6 + 0;
+}
+void bluewake_audio_watch_cue(CPUState* cpu) {
+    (void)cpu; ++calls[5]; order = order * 6 + 5;
 }
 
 static void compare_dispatch(u32 address) {
     memset(calls, 0, sizeof calls);
     order = 0;
     bluewake_forest_water_dispatch(NULL, address);
+    bluewake_audio_watch_dispatch(NULL, address);
     bluewake_mouse_camera_dispatch(NULL, address);
     bluewake_climb_dispatch(NULL, address);
     bluewake_quick_doors_dispatch(NULL, address);
     bluewake_draw_tags_dispatch(NULL, address);
-    unsigned expected[5];
+    unsigned expected[6];
     const unsigned expected_order = order;
-    assert(bluewake_feature_observes(address) == (calls[0] + calls[1] + calls[2] + calls[3] + calls[4] != 0));
+    assert(bluewake_feature_observes(address) ==
+           (calls[0] + calls[1] + calls[2] + calls[3] + calls[4] + calls[5] != 0));
     memcpy(expected, calls, sizeof calls);
     memset(calls, 0, sizeof calls);
     order = 0;

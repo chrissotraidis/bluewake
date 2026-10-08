@@ -1,5 +1,7 @@
 #include "mouse_camera.h"
+#include "controller_ports.h"
 #include "game_options.h"
+#include "input_remap.h"
 #include "jump_button.h"
 #include "settings_menu.h"
 #include "save_state.h"
@@ -8,6 +10,7 @@
 #include "gxruntime/aurora_backend.h"
 
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
@@ -64,6 +67,7 @@ enum {
     kEventMode = 0x803C9EA2u, // g_dComIfG_gameInfo.play.mEvtCtrl's mode
     kPlayerPointer = 0x803CA74Cu,
     kPlayerStatus0 = 0x803CA8D0u, // g_dComIfG_gameInfo.play.mPlayerStatus[0][0]
+    kPlayerStatus1 = 0x803CA8D4u, // mPlayerStatus[0][1]
     kPlayerExecute = BLUEWAKE_MOUSE_PLAYER_EXECUTE, // r3: the player
     kPlayerAngleY = 0x206u, // fopAc_ac_c::current.angle.y
     kPlayerShapeY = 0x20Eu, // fopAc_ac_c::shape_angle.y
@@ -93,6 +97,7 @@ enum {
     kSubjectTagValue = 0x5355424Au,   // 'SUBJ'
     kStatusHookshotOut = 0x00040000u, // daPyStts0_UNK40000_e: the aim is frozen
     kStatusCrawl = 0x08000000u,       // daPyStts0_CRAWL_e: no pitch
+    kStatus1Conduct = 0x00000001u,    // daPyStts1_WIND_WAKER_CONDUCT_e: the baton is out
 };
 
 // Degrees a point of pointer travel turns the camera, at sensitivity 1, and
@@ -110,7 +115,13 @@ static const double kScopeZoomPerNotch = 0.125;
 static bool g_enabled;
 static bool g_blocked;
 static bool g_captured;
-static bool g_click; // left button held while the mouse is the camera: A
+// The mouse buttons held while the mouse is the camera (bit n-1 for SDL
+// button n), and what each presses (BLUEWAKE_MOUSE_BUTTONS; left is A).
+static unsigned g_buttons_down;
+// Pressed since the pad was last read: a click shorter than a frame (a
+// trackpad tap) still reaches the game, as Aurora latches keys.
+static unsigned g_buttons_latched;
+static BwMouseMap g_mouse_map = {{1, 0, 0, 0, 0}};
 static SDL_WindowID g_window;
 static double g_sum_x, g_sum_y;
 static double g_wheel; // notches, positive away from the player (zoom in)
@@ -193,6 +204,9 @@ static bool g_stick_zooms;      // ... one that zooms (telescope, Picto Box): th
 // much of their 1x-9x zoom a second.
 static const double kPadZoomPerSecond = 1.2;
 static bool g_first_person;     // ... or first person (C-stick up's view, SS01)
+static bool g_aiming;     // first person or an item's aim, the player in control
+static bool g_aim_invert_y; // BLUEWAKE_AIM_INVERT_Y: the left stick's up and down the other way there (#154)
+static bool g_conducting; // the Wind Waker is out: its C-stick picks the notes (#156)
 static bool g_stick_click_down; // the stick's click, as last read
 static unsigned long long g_exit_from; // retrace a click in first person started its push down
 static int g_subject_step;             // first person's push-down step (subjectCamera's m3C4), or -1
@@ -217,18 +231,28 @@ static void set_captured(bool captured) {
     if (!SDL_SetWindowRelativeMouseMode(window, captured))
         return;
     g_captured = captured;
-    g_click = false;
+    g_buttons_down = 0;
+    g_buttons_latched = 0;
     g_sum_x = g_sum_y = 0.0;
     g_wheel = 0.0;
     g_held = false;
     fprintf(stderr, "[mouse] camera %s\n",
-            captured ? "on (left click is A, the wheel zooms, Esc gives the mouse back)"
+            captured ? "on (the buttons press what Controls says, the wheel zooms, Esc gives the mouse back)"
                      : "off (click to turn it on)");
 }
 
 static void observe(const void* sdl_event, void* user) {
     (void)user;
     const SDL_Event* event = (const SDL_Event*)sdl_event;
+    // Before anything can consume it: a controller arriving, leaving or newly
+    // recognized may leave player 1 free (controller_ports.h).
+    if (event->type == SDL_EVENT_GAMEPAD_ADDED || event->type == SDL_EVENT_GAMEPAD_REMOVED ||
+        event->type == SDL_EVENT_GAMEPAD_REMAPPED) {
+        if (event->type != SDL_EVENT_GAMEPAD_REMOVED)
+            bw_log_gamepad_mapping(event->gdevice.which);
+        bw_claim_player_one();
+        bw_game_dead_zone(0);
+    }
     // The options menu first: it opens and closes on its keys, and while it
     // is open it has the keyboard, mouse and controller to itself.
     if (bluewake_settings_menu_event(sdl_event))
@@ -244,19 +268,20 @@ static void observe(const void* sdl_event, void* user) {
         return;
     switch (event->type) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        if (event->button.button != SDL_BUTTON_LEFT)
-            break;
         if (g_captured) {
-            g_click = true;
-        } else {
+            if (event->button.button >= 1 && event->button.button <= BW_MOUSE_BUTTONS) {
+                g_buttons_down |= 1u << (event->button.button - 1);
+                g_buttons_latched |= 1u << (event->button.button - 1);
+            }
+        } else if (event->button.button == SDL_BUTTON_LEFT) {
             // The click that hands over the mouse is not a press.
             g_window = event->button.windowID;
             set_captured(true);
         }
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (event->button.button == SDL_BUTTON_LEFT)
-            g_click = false;
+        if (event->button.button >= 1 && event->button.button <= BW_MOUSE_BUTTONS)
+            g_buttons_down &= ~(1u << (event->button.button - 1));
         break;
     case SDL_EVENT_MOUSE_MOTION:
         if (g_captured) {
@@ -283,6 +308,41 @@ static void observe(const void* sdl_event, void* user) {
     }
 }
 
+// gamecontrollerdb.txt beside the saves (the community SDL_GameControllerDB
+// file, or a line from a mapping tool): controllers SDL doesn't recognise, such
+// as a generic Bluetooth pad, become usable (#61). SDL is already running here, so
+// such a controller arrives without a player slot; bw_claim_player_one gives it one.
+static void load_gamepad_mappings(void) {
+    char path[4096];
+    const char* card = getenv("BLUEWAKE_CARD_PATH");
+    if (card != NULL && card[0] != '\0') {
+        snprintf(path, sizeof path, "%s", card);
+        char* slash = strrchr(path, '/');
+        char* backslash = strrchr(path, '\\');
+        if (backslash != NULL && (slash == NULL || backslash > slash))
+            slash = backslash;
+        if (slash == NULL)
+            return;
+        slash[1] = '\0';
+        if (strlen(path) + sizeof "gamecontrollerdb.txt" > sizeof path)
+            return;
+        strcat(path, "gamecontrollerdb.txt");
+    } else {
+        const char* home = getenv("HOME");
+        if (home == NULL || home[0] == '\0' ||
+            snprintf(path, sizeof path, "%s/Library/Application Support/BlueWake/gamecontrollerdb.txt", home) >=
+                (int)sizeof path)
+            return;
+    }
+    if (!SDL_GetPathInfo(path, NULL))
+        return;
+    const int added = SDL_AddGamepadMappingsFromFile(path);
+    if (added < 0)
+        fprintf(stderr, "[pad] %s: %s\n", path, SDL_GetError());
+    else
+        fprintf(stderr, "[pad] %d controller mappings from %s\n", added, path);
+}
+
 void bluewake_mouse_camera_install(void) {
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     // An iPad's touches arrive as mouse events too; its controls are on screen.
@@ -292,10 +352,12 @@ void bluewake_mouse_camera_install(void) {
     // jump key read the same events.
     const char* on = getenv("BLUEWAKE_MOUSE_CAMERA");
     g_enabled = on == NULL || on[0] != '0';
+    bluewake_mouse_camera_buttons(getenv("BLUEWAKE_MOUSE_BUTTONS"));
     const char* fresh = getenv("BLUEWAKE_MOUSE_FRESH");
     g_fresh = fresh == NULL || fresh[0] != '0';
     const char* latency = getenv("BLUEWAKE_MOUSE_LATENCY");
     g_latency_log = latency != NULL && latency[0] == '1';
+    load_gamepad_mappings();
     dol_aurora_set_event_observer(observe, NULL);
     if (g_enabled)
         fprintf(stderr, "[mouse] click the game to turn the camera with the mouse\n");
@@ -303,6 +365,12 @@ void bluewake_mouse_camera_install(void) {
 }
 
 bool bluewake_mouse_camera_captured(void) { return g_captured; }
+
+void bluewake_mouse_camera_buttons(const char* map) {
+    bw_mouse_map_parse(map, &g_mouse_map);
+    g_buttons_down = 0;
+    g_buttons_latched = 0;
+}
 
 void bluewake_mouse_camera_configure(bool enabled, double sensitivity, bool invert_y) {
     g_enabled = enabled;
@@ -332,6 +400,7 @@ static bool env_is(const char* name, char value) {
 }
 
 static void read_stick_settings(void) {
+    g_aim_invert_y = env_is("BLUEWAKE_AIM_INVERT_Y", '1');
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     // Not tried with the touch controls yet: off unless asked for.
     g_stick_on = env_is("BLUEWAKE_STICK_CAMERA", '1');
@@ -345,7 +414,7 @@ static void read_stick_settings(void) {
     g_stick_invert_x = env_is("BLUEWAKE_STICK_CAMERA_INVERT_X", '1') ? -1.0 : 1.0;
     g_stick_invert_y = env_is("BLUEWAKE_STICK_CAMERA_INVERT_Y", '1') ? -1.0 : 1.0;
     if (!g_stick_on) {
-        g_stick_owns = g_stick_aims = g_stick_zooms = g_first_person = false;
+        g_stick_owns = g_stick_aims = g_stick_zooms = g_first_person = g_conducting = false;
         g_exit_from = 0;
     }
 }
@@ -361,6 +430,7 @@ void bluewake_mouse_camera_reload(void) {
     g_sensitivity = sensitivity != NULL && atof(sensitivity) > 0.0 ? atof(sensitivity) : 1.0;
     const char* invert = getenv("BLUEWAKE_MOUSE_INVERT_Y");
     g_invert_y = invert != NULL && invert[0] == '1' ? -1.0 : 1.0;
+    bluewake_mouse_camera_buttons(getenv("BLUEWAKE_MOUSE_BUTTONS"));
     read_stick_settings();
 }
 
@@ -502,8 +572,24 @@ static void stick_turn(double x, double y, double seconds, double speed, double*
 }
 
 void bluewake_mouse_camera_pad(DolPadState* pad) {
-    if (g_click)
-        pad->button |= 0x0100u; // PAD_BUTTON_A
+    // First person and items aim with the left stick the way a flight stick
+    // does (up aims down). The GameCube game has no setting for it; this one
+    // turns it the other way while aiming, and only then (#154).
+    if (g_aim_invert_y && g_aiming)
+        pad->stick_y = pad->stick_y == -128 ? 127 : (s8)-pad->stick_y;
+    const unsigned held = g_buttons_down | g_buttons_latched;
+    g_buttons_latched = 0;
+    for (int i = 0; i < BW_MOUSE_BUTTONS; i++) {
+        if ((held & (1u << i)) == 0u)
+            continue;
+        const unsigned short bit = bw_mouse_choice_pad(g_mouse_map.choice[i]);
+        pad->button |= bit;
+        // L and R are analog triggers too: all the way in, as a key press is.
+        if (bit == 0x0040u)
+            pad->trigger_left = 0xFF;
+        else if (bit == 0x0020u)
+            pad->trigger_right = 0xFF;
+    }
     if (!g_stick_on)
         return;
     double x, y, left_x, left_y;
@@ -520,11 +606,14 @@ void bluewake_mouse_camera_pad(DolPadState* pad) {
         // C-stick still goes through while the stick rests.
         if (sqrt(x * x + y * y) > kStickInUse)
             pad->substick_x = pad->substick_y = 0;
-    } else if (sqrt(x * x + y * y) > kStickInUse && !bluewake_game_options_invert_camera_x()) {
+    } else if (sqrt(x * x + y * y) > kStickInUse && !bluewake_game_options_invert_camera_x() &&
+               !g_conducting) {
         // The game's own camera has the view (swimming, the boat, a target):
         // its C-stick turns the camera the other way from this stick's, so left
         // and right flipped as Link went into the water (Wind-Waker-Recomp
         // #24). Turn it this stick's way. The keyboard's C-stick is unchanged.
+        // Not while conducting: there the C-stick picks the baton's notes, not
+        // the view, and flipping it mirrored every song (#156).
         pad->substick_x = pad->substick_x == -128 ? 127 : (s8)-pad->substick_x;
     }
     if (g_stick_owns && click) {
@@ -901,9 +990,13 @@ static void camera_frame(CPUState* cpu, u32 process) {
     const bool aiming = aiming_view(cpu, camera);
     const u32 style = camera_style(cpu, camera);
     g_first_person = aiming && style != 0u && mem_read32(cpu, style) == 0x53533031u; // 'SS01'
+    // procTactWait_init and procTactPlay_init set it (USA 8014DF4C..5C stores
+    // into 0x803C4C08 + 0x5CCC); the next proc's commonProcInit clears it.
+    g_conducting = (mem_read32(cpu, kPlayerStatus1) & kStatus1Conduct) != 0u;
     g_subject_step = g_first_person ? (int)mem_read32(cpu, camera + kSubjectStep) : -1;
     g_stick_owns = false;
-    g_stick_aims = aiming && g_stick_on && player_in_control(cpu);
+    g_aiming = aiming && player_in_control(cpu);
+    g_stick_aims = g_aiming && g_stick_on;
     g_stick_zooms = g_stick_aims && (mem_read16(cpu, style + kStyleFlags) & kStyleZoom) != 0u;
     if (aiming && player_in_control(cpu)) {
         // First person or an item's aim: aim_frame, at the player's next
@@ -942,7 +1035,7 @@ static void camera_frame(CPUState* cpu, u32 process) {
 static void grant_test_item(CPUState* cpu) {
     static const struct {
         u8 item, slot;
-    } kSlots[] = {{0x20, 0}, {0x25, 3},  {0x2D, 5},  {0x34, 6},  {0x23, 8},
+    } kSlots[] = {{0x20, 0}, {0x22, 1}, {0x25, 3},  {0x2D, 5},  {0x34, 6},  {0x23, 8},
                   {0x26, 8}, {0x27, 12}, {0x35, 12}, {0x36, 12}, {0x2F, 19}};
     for (unsigned i = 0; i < sizeof kSlots / sizeof kSlots[0]; ++i) {
         if (kSlots[i].item != g_test_item)
@@ -967,7 +1060,7 @@ static void trace_camera(CPUState* cpu, u32 process) {
     const u32 name = style != 0u ? mem_read32(cpu, style) : 0x3F3F3F3Fu;
     fprintf(stderr,
             "[mouse-trace] retrace=%llu mode=%u style=%c%c%c%c event=%u demo=%u view V=%d U=%d final V=%d U=%d "
-            "reach=%.1f held=%d stick=%d radius=%.1f limits=%.1f..%.1f zoom=%.2f/%.2f link=%d eye_y=%.1f "
+            "reach=%.1f held=%d stick=%d conduct=%d aim=%d radius=%.1f limits=%.1f..%.1f zoom=%.2f/%.2f link=%d eye_y=%.1f "
             "center_y=%.1f floor=%.1f/%.1f\n",
             g_retrace, mem_read32(cpu, camera + kMode), (char)(name >> 24), (char)(name >> 16), (char)(name >> 8),
             (char)name, mem_read8(cpu, kEventMode),
@@ -976,6 +1069,8 @@ static void trace_camera(CPUState* cpu, u32 process) {
             (s16)mem_read16(cpu, camera + kFinalPitch), (s16)mem_read16(cpu, camera + kFinalYaw),
             distance(cpu, process + kLookatEye, process + kLookatCenter), g_held ? 1 : 0,
             g_stick_owns ? 1 : g_first_person ? 2 : 0,
+            g_conducting ? 1 : 0,
+            g_aiming ? 1 : 0,
             read_f32(cpu, camera + kViewRadius), read_f32(cpu, camera + kFollowMinRadius),
             read_f32(cpu, camera + kFollowMaxRadius), g_zoom_live, g_zoom,
             guest_pointer(player) ? (s16)mem_read16(cpu, player + kPlayerShapeY) : 0,

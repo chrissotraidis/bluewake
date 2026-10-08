@@ -3,8 +3,9 @@
 **Current migration status:** see [migration status](../MIGRATION_STATUS.md), with details in the
 [reconciliation ledger](FORK_RECONCILIATION_2026-10-02.md). The merged
 [PR #37](https://github.com/chrissotraidis/bluewake/pull/37) holds the source consolidation.
-Release rules are in [AGENTS.md](../../AGENTS.md): since October 4 the Windows build is published, and
-Mac, iPhone and iPad stay on PadMint. The October 1 snapshot below is historical; its
+Release rules are in [AGENTS.md](../../AGENTS.md): since October 4 the Windows build (and, once there is
+one, a Linux build) is published with game code, and Mac, iPhone and iPad stay on PadMint. The October 1
+snapshot below is historical; its
 then-open checks and PR references do not override the current ledger. The
 private release audit and personal-build restrictions still apply.
 

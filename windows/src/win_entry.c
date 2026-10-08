@@ -17,6 +17,8 @@
 //   %APPDATA%\BlueWake\GZLE01.card             the memory card (saves)
 //   %APPDATA%\BlueWake\sram.bin                the console's settings
 //   %APPDATA%\BlueWake\logs\session-*.log      the newest eight sessions
+// Portable mode (#64): with a file named portable.txt beside BlueWake.exe, the
+// player data goes in a user folder beside it instead (BlueWake\user\...).
 // Every default is only a default: an environment variable that is already
 // set (BLUEWAKE_DISC, BLUEWAKE_CARD_PATH, ...) wins.
 #ifndef WIN32_LEAN_AND_MEAN
@@ -47,9 +49,64 @@
 
 int bluewake_host_main(int argc, char** argv);
 
+// A clear message on a CPU this build can't run on (#77). A build for
+// x86-64-v3 (the release's -march: AVX2, FMA, BMI1 and BMI2, MOVBE, LZCNT) stops
+// at its first such instruction on an older CPU, with no message at all. This
+// check is compiled for plain x86-64 and runs from the C runtime's initializer
+// table, before the C++ static initializers and main. A build for an older
+// level (the builder picks one on such a CPU) doesn't need it and leaves it out.
+#if defined(__AVX2__)
+#define BW_PLAIN_X86_64 __attribute__((target("arch=x86-64"), noinline))
+BW_PLAIN_X86_64 static void bw_cpuid(unsigned leaf, unsigned sub, unsigned out[4]) {
+    __asm__ volatile("cpuid" : "=a"(out[0]), "=b"(out[1]), "=c"(out[2]), "=d"(out[3]) : "a"(leaf), "c"(sub));
+}
+
+BW_PLAIN_X86_64 static int bw_cpu_runs_this_build(void) {
+    unsigned r[4];
+    bw_cpuid(0, 0, r);
+    if (r[0] < 7u)
+        return 0;
+    bw_cpuid(1, 0, r);
+    const unsigned leaf1 = (1u << 12) | (1u << 22) | (1u << 27) | (1u << 28);  // FMA, MOVBE, OSXSAVE, AVX
+    if ((r[2] & leaf1) != leaf1)
+        return 0;
+    unsigned lo, hi;
+    __asm__ volatile("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+    (void)hi;
+    if ((lo & 6u) != 6u)  // Windows saves the AVX registers
+        return 0;
+    bw_cpuid(7, 0, r);
+    const unsigned leaf7 = (1u << 3) | (1u << 5) | (1u << 8);  // BMI1, AVX2, BMI2
+    if ((r[1] & leaf7) != leaf7)
+        return 0;
+    bw_cpuid(0x80000000u, 0, r);
+    if (r[0] < 0x80000001u)
+        return 0;
+    bw_cpuid(0x80000001u, 0, r);
+    return (r[2] & (1u << 5)) != 0;  // LZCNT
+}
+
+BW_PLAIN_X86_64 static int __cdecl bw_cpu_check(void) {
+    if (bw_cpu_runs_this_build())
+        return 0;
+    if (GetEnvironmentVariableW(L"BLUEWAKE_NO_DIALOG", NULL, 0) == 0)
+        MessageBoxW(NULL,
+                    L"BlueWake can't run on this processor.\n\n"
+                    L"This download needs a CPU with AVX2: an Intel Core from 2013 (Haswell) or later, "
+                    L"or an AMD Ryzen or later.",
+                    L"BlueWake", MB_OK | MB_ICONERROR);
+    ExitProcess(1);
+    return 1;
+}
+
+#pragma section(".CRT$XIU", long, read)
+__declspec(allocate(".CRT$XIU")) __attribute__((used)) static int(__cdecl* bw_cpu_check_entry)(void) = bw_cpu_check;
+#endif
+
 static char g_exe_dir[MAX_PATH * 4];
 static char g_data_dir[MAX_PATH * 4];
 static char g_log_path[MAX_PATH * 4];
+static int g_portable;
 
 static int file_exists(const char* path) {
     DWORD attributes = GetFileAttributesA(path);
@@ -74,6 +131,35 @@ static void bw_default_path(const char* name, const char* dir, const char* relat
     bw_default(name, path);
 }
 
+// Aurora's own files: controller button remaps (*.controller), keyboard
+// bindings, the controller port choice and imgui.ini. They follow
+// DOL_AURORA_USER_DIR into the portable folder now (#64); before, they went to
+// %APPDATA%\BlueWake even in portable mode. Copy the ones the portable folder
+// doesn't have yet, so remaps made there carry over. Nothing is moved or
+// replaced.
+static void bw_copy_aurora_files(void) {
+    static const char* const names[] = {"*.controller", "keyboard_bindings.dat", "controller_ports.dat", "imgui.ini"};
+    const char* appdata = getenv("APPDATA");
+    if (appdata == NULL || appdata[0] == '\0')
+        return;
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        char pattern[MAX_PATH * 4];
+        snprintf(pattern, sizeof pattern, "%s\\BlueWake\\%s", appdata, names[i]);
+        WIN32_FIND_DATAA found;
+        HANDLE find = FindFirstFileA(pattern, &found);
+        if (find == INVALID_HANDLE_VALUE)
+            continue;
+        do {
+            char from[MAX_PATH * 4], to[MAX_PATH * 4];
+            snprintf(from, sizeof from, "%s\\BlueWake\\%s", appdata, found.cFileName);
+            snprintf(to, sizeof to, "%s%s", g_data_dir, found.cFileName);
+            if (CopyFileA(from, to, TRUE))
+                fprintf(stderr, "[portable] copied %s from %%APPDATA%%\\BlueWake\n", found.cFileName);
+        } while (FindNextFileA(find, &found));
+        FindClose(find);
+    }
+}
+
 static void resolve_dirs(void) {
     wchar_t wide[MAX_PATH * 2];
     DWORD n = GetModuleFileNameW(NULL, wide, (DWORD)(sizeof wide / sizeof wide[0]));
@@ -87,9 +173,14 @@ static void resolve_dirs(void) {
     }
     const char* override = getenv("BLUEWAKE_DATA_DIR");
     const char* appdata = getenv("APPDATA");
+    char portable[MAX_PATH * 4];
+    snprintf(portable, sizeof portable, "%sportable.txt", g_exe_dir);
     if (override != NULL && override[0] != '\0')
         snprintf(g_data_dir, sizeof g_data_dir, "%s\\", override);
-    else if (appdata != NULL && appdata[0] != '\0')
+    else if (file_exists(portable)) {
+        snprintf(g_data_dir, sizeof g_data_dir, "%suser\\", g_exe_dir);
+        g_portable = 1;
+    } else if (appdata != NULL && appdata[0] != '\0')
         snprintf(g_data_dir, sizeof g_data_dir, "%s\\BlueWake\\", appdata);
     else
         snprintf(g_data_dir, sizeof g_data_dir, "%suser\\", g_exe_dir);
@@ -449,8 +540,8 @@ static void usage(void) {
             "H/F/T/G C-stick, E/R L/R, Q Z, Return START. Game controllers work too.\n"
             "Mouse: click the game, then move it to turn the camera; Esc releases it.\n"
             "F1 or Esc settings, F11 or Alt+Enter fullscreen, F10 Smooth Motion, F9 frame rate.\n"
-            "The settings menu saves to %%APPDATA%%\\BlueWake\\settings.ini; options given here\n"
-            "win for the session.\n");
+            "The settings menu saves to %%APPDATA%%\\BlueWake\\settings.ini (with portable.txt beside\n"
+            "BlueWake.exe, to its user folder); options given here win for the session.\n");
 }
 
 static void fatal_box(const char* message) {
@@ -559,6 +650,15 @@ int main(int argc, char** argv) {
     snprintf(states, sizeof states, "%sstates", g_data_dir);
     _mkdir(states);
     bw_default("BLUEWAKE_STATE_DIR", states);
+    // Aurora's shader and pipeline caches (dawn_cache.db, pipeline_cache.db)
+    // and its own files (controller remaps, keyboard bindings, imgui.ini) go
+    // with the rest of the player's data: the same %APPDATA%\BlueWake as before,
+    // or the user folder in portable mode (#64), which otherwise still filled
+    // %APPDATA%.
+    bw_default("DOL_AURORA_CACHE_DIR", g_data_dir);
+    bw_default("DOL_AURORA_USER_DIR", g_data_dir);
+    if (g_portable)
+        bw_copy_aurora_files();
     char module[MAX_PATH * 4];
     const char* module_env = getenv("BLUEWAKE_COMPOSITE");
     if (module_arg != NULL)

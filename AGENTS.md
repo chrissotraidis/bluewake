@@ -8,9 +8,11 @@ one, this one wins.
 
 - `README.md`: for players.
 - `AGENTS.md` (this file): the rules.
+- `docs/PRIORITIES.md`: the ranked list of bugs, performance work and requests. Start here.
 - `docs/MIGRATION_STATUS.md`: what is done and what is open. `docs/GOAL_LOOP.md`: the current work loop.
 - `docs/BUILD_YOUR_OWN.md`, `docs/BUILDER.md`, `docs/WINDOWS.md`, `docs/MODS.md`, `docs/WWHD_TEXTURES.md`:
   how things work.
+- `docs/WINDOWS_TASKS.md`: Windows work waiting on a Windows PC, in priority order.
 - `docs/status/*_YYYY-MM-DD.md`: dated records of past work. They are evidence, not instructions.
 - `docs/archive/`: old plans, goal prompts and handoffs. Never act on them.
 
@@ -39,6 +41,20 @@ one, this one wins.
   `config/dependencies.lock.json`) and exports it as `patches/recompcore/NNNN-*.patch`.
 - Run the checks that fit the change: `scripts/audit_repo.sh`, the host tests, and the Windows CI.
 
+## Keep Windows in step
+
+Chris works on a Mac; Elliott builds and tests Windows. Write every fix so the Windows build gets it
+just by building from `main`:
+
+- Put game, audio, timing and logging changes in shared code (`runtime/host/src`, or RecompCore for the
+  runtime). The Windows build compiles the same files.
+- A desktop setting goes in both menus: `runtime/host/src/settings_menu.cpp` (Mac) and
+  `windows/src/win_settings.cpp` (Windows). Share a header between them when you can, as
+  `runtime/host/src/button_remap.h` does.
+- The Windows CI ("host" job) must pass before merging.
+- If the change still needs a check on a Windows PC, add it to "In `main`, waiting for a Windows build"
+  in [docs/WINDOWS_TASKS.md](docs/WINDOWS_TASKS.md) in the same pull request.
+
 ## Talking to people on GitHub
 
 - Write as the person whose account posts, in the first person and in plain, friendly language. If a bot
@@ -52,15 +68,17 @@ one, this one wins.
 
 ## Releases
 
-The maintainers decided on October 4, 2026 to make one exception: BlueWake publishes a ready-made Windows build that contains the translated game module, as Wind Waker Recomp did. Mac, iPhone and iPad stay on PadMint: their releases hold source and the app without game code. Do not publish any other build with game code.
+The maintainers decided on October 4, 2026 to make two exceptions: BlueWake may publish a ready-made Windows build and a ready-made Linux build that contain the translated game module, as Wind Waker Recomp did for Windows. Mac, iPhone and iPad stay on PadMint: their releases hold source and the app without game code. Do not publish any other build with game code.
 
-Every release artifact must pass `scripts/release/check_public_assets.sh <artifact>...`, which runs `python3 ~/.codex/release-gate/release_gate.py` on the maintainer's machine. For the Windows build the only accepted finding is `containsTranslatedGameCode: true`. Any other failure is a stop, not a note: the Windows build must contain no disc data, game assets, saves, signing material or console keys (Elliott's `nodtool.exe` embeds Wii common keys, so it is left out).
+Every release artifact must pass `scripts/release/check_public_assets.sh <artifact>...`, which runs `python3 ~/.codex/release-gate/release_gate.py` on the maintainer's machine. For the Windows and Linux builds the only accepted finding is `containsTranslatedGameCode: true`. Any other failure is a stop, not a note: these builds must contain no disc data, game assets, saves, signing material or console keys (Elliott's `nodtool.exe` embeds Wii common keys, so it is left out).
+
+Build the Windows and Linux release builds on a maintainer's or contributor's own machine from their own disc. Never put a disc image, files from a disc, or keys in CI secrets, caches or artifacts.
 
 Only Chris publishes or changes releases.
 
 ## Personal builds stay personal
 
-The game module (`gGZLE01_recomp.dylib`) is translated from the player's own disc. An IPA or app that contains it is a personal build: never upload, attach, commit or link it anywhere. The maintainers' Windows release build is the only exception. Public releases hold source plus the app without game code (`scripts/builder/build.sh --app-only --ipa BlueWake-vX.Y.Z-ios-unsigned.ipa`, checked with PadMint's `audit` before upload); players add their own module with PadMint (`padmint make bluewake ios`) or `scripts/builder/build.sh DISC.iso --ipa OUT.ipa`.
+The game module (`gGZLE01_recomp.dylib`) is translated from the player's own disc. An IPA or app that contains it is a personal build: never upload, attach, commit or link it anywhere. The maintainers' Windows and Linux release builds are the only exceptions. Public Mac, iPhone and iPad releases hold source plus the app without game code (`scripts/builder/build.sh --app-only --ipa BlueWake-vX.Y.Z-ios-unsigned.ipa`, checked with PadMint's `audit` before upload); players add their own module with PadMint (`padmint make bluewake ios`) or `scripts/builder/build.sh DISC.iso --ipa OUT.ipa`.
 
 Never commit or upload disc images, files extracted from a disc, saves or memory cards, signing
 certificates or profiles, or console keys. Test with copies of saves, and never delete a player's data.

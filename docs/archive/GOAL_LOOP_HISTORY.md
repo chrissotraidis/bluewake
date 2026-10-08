@@ -1,6 +1,116 @@
-# BlueWake goal loops before October 4, 2026
+# Earlier BlueWake goal loops
 
 Moved from [GOAL_LOOP.md](../GOAL_LOOP.md) on October 4, 2026. These loops are superseded: they are a record, not instructions.
+
+## Cutscene audio, PadMint and fixes Windows can pick up, October 4, 2026 (superseded October 5)
+
+Find out why cutscenes lose their music and sound effects without needing play sessions to do it,
+confirm that the PadMint path players are told to use works, and land small fixes that Elliott's Windows
+build gets just by building from `main`.
+
+### Limits
+
+- One Apple Silicon Mac. No Windows PC and no physical iPad in this loop. Anything that needs one goes
+  into [WINDOWS_TASKS.md](../WINDOWS_TASKS.md) or is labeled `needs-device`.
+- No long play sessions. Short automated runs are fine to confirm that new log lines appear.
+- Follow [Keep Windows in step](../../AGENTS.md#keep-windows-in-step): shared code first, both desktop menus,
+  Windows CI green, and the Windows check listed.
+- No new platforms or features beyond what players asked for. Anything risky is off by default.
+
+### Steps
+
+| Step | Done when |
+| --- | --- |
+| 1. Audio logging | Every build (Mac, iPad, Windows) writes `[audio]` lines when something changes: whether a cutscene or event is running, the state and volume of the background music and the streamed track, how loud the output is, and samples the host dropped. An `[audio-lost]` line marks music or all sound going quiet while the game runs, with the scene and the game's speed. `scripts/triage_session_log.py` summarizes them. A short automated Mac run shows the lines and the Windows CI passes. |
+| 2. Audio code review | Each difference between Wind Waker Recomp 0.4.0 and `main` that can affect sound timing has been checked in the code: Smooth Motion's in-between frames, the experimental 60 Hz gameplay (in 0.4.0 only), the native function replacements, DSP and streamed-music handling, and slow frames. Any that can drop cutscene audio is fixed in shared code or turned off by default, or written up in WINDOWS_TASKS.md with the log lines that would confirm it. |
+| 3. PadMint confirmation | The player path, `padmint make bluewake ios` from the published release and a disc, runs on this Mac to a finished IPA that passes PadMint's audit. The time and result are in [PADMINT_HANDOFF.md](../PADMINT_HANDOFF.md), and the README asks players to say whether it worked. Installing on an iPad waits for the iPad. |
+| 4. Small fixes | Each fix is in shared code or both menus, passes the Windows CI, is listed under "In `main`, waiting for a Windows build", and its issue is answered. First: portable mode for Windows (#64). |
+| 5. Linux | With Chris's go-ahead, the author of the native Linux port (Wind-Waker-Recomp PR #33) is invited to open it on BlueWake, and its release workflow follows the Linux rules in AGENTS.md (no disc in CI). |
+| 6. Issues and docs | Every pass: new issues and comments answered in Chris's voice and labeled, nothing closed without the reporter, and README, MIGRATION_STATUS.md and WINDOWS_TASKS.md match `main`. |
+
+### Each iteration
+
+1. Pick the first step that isn't done and name what will close it.
+2. Prefer reading the code and adding logging over playing the game.
+3. Make the smallest change, run the host tests, and let the Windows CI build it.
+4. Update the issue, WINDOWS_TASKS.md and the progress below.
+
+Stop when steps 1 to 4 are done or blocked on hardware, and say which. Don't repeat runs that can't tell
+causes apart.
+
+### Progress
+
+- October 4: loop written. Done before it: controller button remapping on Mac and Windows (#66), Jump
+  and Sprint off by default everywhere (#71), #67 closed after the reporter confirmed 0.4.0 fixed it.
+- **1. Audio logging:** done. `runtime/host/src/audio_watch.c` writes `[demo]`, `[demo-sound]` and
+  `[audio-lost]` in every build; the triage script reports them. On the Mac, a new game to control logs
+  the opening cutscene as `cues=4 sounds=4 missing=0 silent=0.4s of 104.7s`. A test feeds it a
+  fake cutscene with a missing sound and silence.
+- **2. Audio code review:** done. The audio pacing settings are the same on every platform; only the
+  Windows 0.4.0 download has native math on, Smooth Motion on by default and the 60 Hz option. How to
+  read the new lines and where each points is in [WINDOWS_TASKS.md](../WINDOWS_TASKS.md#reading-the-cutscene-sound-lines-65-97).
+  Confirming the cause needs a log from a Windows build of `main`.
+- **5. Linux:** the port's author was invited to open it on BlueWake without the disc in CI
+  ([comment](https://github.com/elliotttate/Wind-Waker-Recomp/pull/33#issuecomment-5979167274)).
+- **3. PadMint confirmation:** done on this Mac. `padmint make bluewake ios` from the 0.2.0 release
+  finished with a personal IPA in 2 h 37 min on a busy machine ([PADMINT_HANDOFF.md](../PADMINT_HANDOFF.md)).
+  [#104](https://github.com/chrissotraidis/bluewake/issues/104) asks players how it went. Installing it
+  waits for the iPad.
+- **4. Small fixes:** Windows portable mode (#64) merged in
+  [#103](https://github.com/chrissotraidis/bluewake/pull/103) and listed for a Windows check.
+- **6. Issues:** #64 answered; #65 and #97 asked to retest 0.4.0 with Smooth Motion and 60 Hz gameplay
+  off, which separates the remaining causes without a new build.
+
+## Mac and iPad stability loop, October 4, 2026 (finished)
+
+Make BlueWake steadier on Mac and iPad and keep the docs true, without growing the project. Windows
+belongs to Elliott (his hardware); a native Linux port is not planned (players can try Proton, README FAQ).
+
+### Limits
+
+- Use one Apple Silicon Mac: the Mac app and the iOS Simulator. No physical iPad in this loop; anything
+  that needs one is labeled `needs-device` and left for a device session.
+- No new platforms or features. Fix what players report, in small changes. Anything risky is off by default.
+- One concern per pull request, following [AGENTS.md](../../AGENTS.md).
+
+### Steps
+
+| Step | Done when |
+| --- | --- |
+| 0. Docs | README, AGENTS.md, this file, [migration status](../MIGRATION_STATUS.md), the build guides and the Windows pages agree with `main`. |
+| 1. Triage | Every open bug report has a platform label and one status: `needs-info`, `needs-windows`, `needs-device` or `confirmed`. Duplicates point to one issue. Nothing is closed without the reporter, except clear duplicates. |
+| 2. Reproduce and fix on the Mac | With a Mac build from current `main`, each Mac-reproducible report (music in the intro and scripted scenes, the slow bird and Aryll scenes, dungeon maps, the pirate flag, the Forsaken Fortress soft lock, Smooth Motion at 120 Hz, HD texture shading) is fixed with before and after evidence, explained, or labeled. |
+| 3. iPad in the Simulator | The iPad app builds and runs in the Simulator with no regressions in menus, touch controls or saves. |
+| 4. Release candidate | A Mac/iPad app-only release (no game code) and its PadMint recipe are built from `main` and pass the release check. Chris decides whether to publish. |
+
+### Progress, October 4
+
+- **0. Docs:** done ([#87](https://github.com/chrissotraidis/bluewake/pull/87)).
+- **1. Triage:** done. Every open issue has platform and status labels; four duplicates closed into
+  #65, #64, #56 and #60; reporters asked for logs or a retest on the current download where needed.
+- **2. Mac:** a complete build from current `main` plays a new game to control with Smooth Motion at
+  120 FPS and no slow seconds. The intro music plays on the Mac (October 1 trace), so #65 looks
+  Windows-only. The remaining reports need a save at that point in the game, a texture pack or Windows,
+  and are labeled.
+- **3. iPad Simulator:** the same source reaches control on Outset with the HUD and touch controls drawn.
+- **4. Release:** BlueWake 0.2.0 is published ([v0.2.0](https://github.com/chrissotraidis/bluewake/releases/tag/v0.2.0)):
+  the iPad app without game code and its PadMint recipe, built from `72a241f`, plus the Windows 0.4.0 files.
+  It passes the release check and PadMint's audit, and PadMint resolves and verifies it. Not yet checked
+  through PadMint on a physical iPad.
+- **Windows:** the remaining work is in [WINDOWS_TASKS.md](../WINDOWS_TASKS.md).
+- **Quick wins:** controller button remapping on Mac and Windows, matching the iPad (#66), and Jump and
+  Sprint starting off on the Mac as on the other platforms (#71), merged in
+  [#98](https://github.com/chrissotraidis/bluewake/pull/98). They reach players in the next Mac release and
+  Windows build.
+
+### Each iteration
+
+1. Pick the highest step that isn't done and name what will close it.
+2. Reproduce before changing anything. A fix needs the same scene before and after, with the same settings.
+3. Make the smallest change that addresses the cause, then run the host tests and the affected scene.
+4. Update the issue in Chris's voice and the [migration status](../MIGRATION_STATUS.md) when something changes.
+
+Stop when every item is fixed, explained, or labeled as needing hardware.
 
 ## Current operating loop — stability and slowdowns, October 3, 2026
 
@@ -2208,3 +2318,79 @@ bogus-`realloc` crash is gone: the room path now walks the actor records and sto
 **heap-buffer-overflow in `cXyz::set`** (`c_xyz.h` 92) inside the actor decode. **(35) The next step:**
 that is a decode-size question - which record length the actor decode assumes against the length the
 room's file provides - rather than a class or layout one. Note
+
+
+---
+
+# BlueWake goal loop
+
+## Current loop: Mac fixes for the next Windows build and Mac release, October 5, 2026
+
+Fix the reported problems that can be fixed or reproduced on a Mac, so the next Windows build and the next
+Mac release get them. A separate agent is building and checking Windows 0.5.0 on Chris's Windows PC at the
+same time: it owns the Windows build, packaging and the release draft. This loop doesn't wait for it and
+doesn't repeat its work.
+
+The reports this loop works from are catalogued in
+[OPEN_ISSUES_2026-10-05.md](status/OPEN_ISSUES_2026-10-05.md).
+
+### How to work
+
+- Targeted, not exhaustive. Each step has a time limit; when it runs out, write down what was found, mark
+  the step "not finished" and move on.
+- Read code and logs before running the game. Short automated runs only, one run per question. No long
+  play sessions, no performance work, no repeated runs that can't tell causes apart.
+- Fixes go in shared code (`runtime/host/src`, or RecompCore `bluewake-next` with the pin and patch
+  export). A desktop setting goes in both menus, `runtime/host/src/settings_menu.cpp` and
+  `windows/src/win_settings.cpp`, sharing a header where possible as `button_remap.h` does. Host tests
+  pass and the Windows CI is green before merging, and the change gets a row under "In `main`, waiting
+  for a Windows build" in [WINDOWS_TASKS.md](WINDOWS_TASKS.md) in the same pull request.
+- Anything that changes gameplay, timing or rendering is off by default.
+- One concern per pull request, on a `codex/<topic>` branch from `origin/main`. Never push to `main`.
+- The Windows agent's files are left alone: `codex/win-*` branches, `scripts/windows/package_release.py`
+  and `docs/status/WINDOWS_BUILD_*.md`.
+
+### Every pass
+
+1. `git fetch` and `gh pr list`. If the Windows report (`docs/status/WINDOWS_BUILD_2026-10-05.md`) has
+   appeared, add its findings to the catalog; anything it shows broken in shared code moves to the front.
+2. Take the first step that isn't done, make the smallest change that finishes it, and update the progress
+   below.
+
+### Steps
+
+| Step | Limit | Done when |
+| --- | --- | --- |
+| 1. Catalog and loop | 30 min | The catalog lists every open issue and the Discord reports; this loop replaces the last one, which is archived. |
+| 2. Replies on GitHub | 45 min | #58, #66, #64, #65, #108, #70, #75, #60, #61 and #57 are answered in Chris's voice and labeled. Nothing is closed. Discord reports get no replies. |
+| 3. Exact sound crash (#58) | 1 h | Exact works, or a crash with it on can't trap the player: the next launch uses Fast and says so. |
+| 4. Camera invert and settings that revert | 45 min | Each camera control does one clear thing and Controls settings survive a restart on the Mac, or the cause is written up. |
+| 5. Mouse buttons and keyboard rebinding | 2 h | In both menus, the right, middle and side mouse buttons can press any GameCube button (or nothing) and the keyboard keys can be changed; on the Mac, right-click set to B presses B and survives a restart. |
+| 6. Small menu fixes | 45 min | Windows has the Mac's "Quit the game" button; Brisk Sail and Unrestricted Boat have plain descriptions in both menus. |
+| 7. Dungeon map and sea charts (#74) | 1.5 h | Reproduced on the Mac and fixed or explained, or shown not to happen on the Mac and written up for Windows. Without a save that reaches a dungeon after 20 minutes, ask Chris and move on. |
+| 8. Cutscene sound (#65, #97) | 1 h | One opening-cutscene run per option (Better Wind Waker, mouse camera, 16:9 vs 4:3, HD textures if installed), each `[demo] end` line recorded, and either the cause fixed or the result written down. |
+| 9. Forsaken Fortress map and compass | 30 min | Code reading shows whether a BlueWake patch hands them out; fixed if so, written up if not. |
+| 10. Hand-off for the second Windows run | 15 min | When steps 3 to 6 are merged, WINDOWS_TASKS.md lists exactly the new rows the Windows PC should check. |
+
+Not in this loop: performance (#86, Steam Deck), ultrawide (#70), the graphics hotkey (#108), Android, the
+European disc, the Wii U interface, reviewing PRs #106 and #107, and releases (only Chris publishes).
+
+Stop when steps 1 to 10 are done or blocked, and say which. A step that needs Windows hardware is done once
+it is written up in WINDOWS_TASKS.md; finishing doesn't depend on the Windows PC.
+
+### Progress
+
+- **1. Catalog and loop:** done ([#110](https://github.com/chrissotraidis/bluewake/pull/110)).
+- **2. Replies:** done. #58, #66, #64, #65, #108, #70, #75, #60, #61 and #57 answered and labeled; nothing closed.
+- **3. Exact sound crash:** done. The crash was already fixed in `main` (October 1, after 0.4.0), and the launch recovery already existed; its message is now plain ([#111](https://github.com/chrissotraidis/bluewake/pull/111)).
+- **4. Camera invert and settings:** done. The Mac's invert now reaches the game's own camera ([#112](https://github.com/chrissotraidis/bluewake/pull/112)); the reverting settings were fixed in `main` on October 1 and 2.
+- **5. Mouse and keyboard rebinding:** done ([#113](https://github.com/chrissotraidis/bluewake/pull/113)), checked on the Mac with the pad trace.
+- **6. Small menu fixes:** done ([#114](https://github.com/chrissotraidis/bluewake/pull/114)).
+- **7. Dungeon map:** not finished. The Mac draws the minimap, sea chart and Charts screen correctly; the large dungeon map needs a save inside a dungeon (asked Chris), and the Windows capture is in WINDOWS_TASKS.md.
+- **8. Cutscene sound:** done. No option drops the opening cutscene's sound on the Mac (four runs, all `cues=4 sounds=4 missing=0`).
+- **9. Forsaken Fortress map and compass:** done. No BlueWake patch hands them out; most likely the original game.
+- **10. Hand-off:** done. "The second Windows run" in WINDOWS_TASKS.md lists the five rows to check.
+
+Details: [OPEN_ISSUES_2026-10-05.md](status/OPEN_ISSUES_2026-10-05.md#what-the-october-5-loop-found).
+
+Earlier loops are in [the archive](archive/GOAL_LOOP_HISTORY.md).

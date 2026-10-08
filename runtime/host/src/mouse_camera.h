@@ -6,7 +6,8 @@
 
 // Mouse camera (the Mac host): click the game window to hand it the mouse,
 // then moving it turns the camera around Link, left and right and up and
-// down, and left click is A; Esc, or leaving the window, gives the mouse back. The mouse turns the
+// down, and its buttons press GameCube buttons (left click A unless BLUEWAKE_MOUSE_BUTTONS
+// says otherwise); Esc, or leaving the window, gives the mouse back. The mouse turns the
 // game's own camera (its view angles), so walls, the stick's direction and the
 // camera's easing behind Link all carry on as they do.
 //
@@ -31,6 +32,8 @@
 //   BLUEWAKE_MOUSE_CAMERA=0              off
 //   BLUEWAKE_MOUSE_SENSITIVITY=1.0       degrees per point of mouse travel, scaled
 //   BLUEWAKE_MOUSE_INVERT_Y=1            moving the mouse forward looks down
+//   BLUEWAKE_MOUSE_BUTTONS=A,-,B,-,-     what the left, middle, right and two side
+//                                        buttons press (input_remap.h); left A by default
 //   BLUEWAKE_MOUSE_TRACE=1               log the camera's angles (and the aim's)
 //   BLUEWAKE_MOUSE_TEST=r:dx:dy:n[:wheel],...  testing: motion per retrace from r for n
 //   BLUEWAKE_MOUSE_TEST_ITEM=0x27[@900]  testing: that item on X (see grant_test_item)
@@ -73,6 +76,9 @@ void bluewake_mouse_camera_pad(DolPadState* pad);
 bool bluewake_mouse_camera_scripted(void);
 // Whether the mouse is the camera now (Esc gives it back), and giving it back.
 bool bluewake_mouse_camera_captured(void);
+// What each mouse button presses (BLUEWAKE_MOUSE_BUTTONS's form; NULL or "" is
+// the default, left click A).
+void bluewake_mouse_camera_buttons(const char* map);
 void bluewake_mouse_camera_release(void);
 // Reads BLUEWAKE_MOUSE_CAMERA, _SENSITIVITY and _INVERT_Y, and the
 // BLUEWAKE_STICK_CAMERA settings, again (the options menu).

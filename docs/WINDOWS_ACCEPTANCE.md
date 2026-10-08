@@ -1,5 +1,7 @@
 # Windows testing handoff for Elliott
 
+The current list of Windows work is [WINDOWS_TASKS.md](WINDOWS_TASKS.md); this checklist is its task 1.
+
 The source consolidation is merged into BlueWake `main` in [#37](https://github.com/chrissotraidis/bluewake/pull/37),
 with the Windows local-training follow-up in [#38](https://github.com/chrissotraidis/bluewake/pull/38).
 Please use BlueWake for new changes and preserve contributor attribution.
