@@ -155,7 +155,8 @@ In that same folder (`files/`):
 | --- | --- |
 | `GZLE01.card` | the memory card: your saves |
 | `sram.bin` | the console's settings (sound mode) |
-| `settings.ini` | the options menu's choices |
+| `Backups/` | the cards kept before Restore Saves or Import Dolphin Save replaced one |
+| `Load/Textures/GZLE01/` | an HD texture pack (Mods > Install Texture Pack) |
 | `launch.env` | optional launch settings, one `NAME=value` a line (`install.py --env NAME=value`) |
 | `logs/session-*.log` | the newest eight sessions (also in logcat, tag `BlueWake`) |
 
@@ -168,14 +169,24 @@ never does.
 
 ## Play
 
-- **Touch controls**: the control stick on the left, A, B, X and Y on the right, L and R in the top corners with
-  Z under R, START at the top and a D-pad above the stick. Drag anywhere else on the right half to move the
-  C-stick (the camera). They hide while a game controller is connected.
-- **Controllers**: through SDL, as a GameCube pad (as on Windows).
-- **Options**: the Back button or gesture (or a controller's Back/Select) opens the options menu over the paused
-  game: display, controls, mods (4:3, 16:10 or 16:9, Better Wind Waker, quick doors). Touch works in it.
-- The picture keeps the game's shape and renders at twice the GameCube's 480 lines by default; the mouse camera
-  is off (touches would reach it as clicks).
+The app is the iPhone and iPad app's, feature for feature (apple/ios/src/BWGameOverlay.mm): the same menu, the
+same touch controls, the same settings under the same names.
+
+- **The ⋯ button** (top right) opens the menu over the paused game: Display (Show FPS, Smooth Motion, Render
+  Resolution, Texture Filtering, Aspect Ratio), Gameplay (Jump & Sprint, Fast Transitions, Quick Doors), Mods
+  (Widescreen 16:9 and 16:10, HD Texture Pack, Better Wind Waker and its settings, Install Texture Pack),
+  Controller (Camera Stick, Button Mapping), Touch Controls (show or hide, Touch Control Settings, Move Controls),
+  Game Data & Saves (Back Up Saves, Restore Saves, Import Dolphin Save, Where Are My Files?, Remove Disc Image) and
+  Help & Feedback (Report a Problem on GitHub, Share Session Log). Back works the menu too: out of a submenu, and
+  with nothing open it opens the menu. It never closes the game.
+- **Touch controls**: the iPhone app's buttons, colors and layouts, every GameCube button. With the original 4:3
+  picture they sit in two columns beside it, clear of the game's HUD; on a near-square screen (a foldable's inner
+  screen) the picture is narrowed to make that room while they are shown. The movement stick also floats: touch
+  anywhere on the left half. Move Controls drags and resizes each one; phones and tablets keep separate layouts.
+  They hide while a game controller is connected (Touch Control Settings > Hide with a controller).
+- **Controllers**: through SDL, as a GameCube pad (as on Windows), with the menu's camera and button mapping.
+- The picture keeps the game's shape and renders at three times the GameCube's 480 lines by default; the mouse
+  camera is off (touches would reach it as clicks).
 
 ## Files
 
@@ -183,14 +194,14 @@ never does.
 | --- | --- |
 | `android/CMakeLists.txt` | `libmain.so`: the host, GXRuntime, Aurora, SDL3 and Dawn (static), the donor DSP |
 | `android/src/android_entry.c` | The entry shim: paths, the session log, `launch.env`, the training profile's write |
-| `android/src/android_touch.c` | The touch overlay's native end: Aurora's virtual pad |
+| `android/src/android_shell.cpp` | The shell's native side: the touch pad, pause reasons, FPS, settings and save glue (the iPhone app's `apple/ios/src` C++ is compiled in) |
 | `android/src/profile_flush.c` | Compiled into training modules only |
-| `android/java/dev/bluewake/android/` | The activity (SDL's, a 60 Hz display request) and the touch overlay |
+| `android/java/dev/bluewake/android/` | The activity (SDL's, a 60 Hz display request), the ⋯ menu, touch controls and panels (`Overlay`, `MenuView`, `TouchControlsView`), the settings (`Settings`), saves and texture packs (`GameData`), and the log share (`LogProvider`) |
 | `android/AndroidManifest.xml`, `android/res/` | The manifest and the icon (the iOS app's) |
 | `scripts/android/build.py`, `install.py` | The builder (on top of `scripts/windows/build.py`) and the installer |
 
-Outside these, the port changes three lines of shared code: Android's Back opens the options menu
-(`runtime/host/src/settings_menu.cpp`), `cmake/composite` accepts extra sources for the training module, and
+Outside these, the port changes a few lines of shared code: Android leaves out the desktop options menu as iOS
+does (`runtime/host/src/settings_menu.h`), `cmake/composite` accepts extra sources for the training module, and
 `.gitignore` ignores APKs, `.so` files and keystores.
 
 The Android port was written with substantial AI assistance (Claude), like the rest of the project; the status

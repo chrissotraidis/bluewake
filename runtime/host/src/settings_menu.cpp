@@ -30,7 +30,6 @@ extern "C" {
 #include "option_notes.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 
 #include <cerrno>
@@ -72,8 +71,7 @@ const char* const kKeys[] = {
 
 std::string g_path;                          // the settings file ("" when none)
 std::map<std::string, std::string> g_other;  // its other keys, kept as they were
-// Atomic: the Android touch overlay reads it from its own thread (bluewake_settings_is_open).
-std::atomic<bool> g_open{false};
+bool g_open = false;
 bool g_dirty = false;
 bool g_nav_set = false;
 
@@ -821,12 +819,6 @@ void draw(void*) {
 
 } // namespace
 
-// Whether the options menu is open, for a touch overlay that must leave the
-// menu's touches to it (android/src/android_touch.c). Read from another thread.
-extern "C" bool bluewake_settings_is_open(void) {
-    return g_open.load(std::memory_order_relaxed);
-}
-
 extern "C" void bluewake_settings_load(void) {
     const char* chosen = std::getenv("BLUEWAKE_SETTINGS");
     if (chosen != nullptr && std::strcmp(chosen, "none") == 0)
@@ -887,8 +879,7 @@ extern "C" bool bluewake_settings_menu_event(const void* sdl_event) {
     case SDL_EVENT_KEY_DOWN:
         if (event->key.repeat)
             break;
-        // Android's Back button or gesture reads as AC_BACK.
-        if (event->key.scancode == SDL_SCANCODE_F1 || event->key.scancode == SDL_SCANCODE_AC_BACK) {
+        if (event->key.scancode == SDL_SCANCODE_F1) {
             g_open ? close_menu() : open_menu();
             return true;
         }

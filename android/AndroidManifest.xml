@@ -45,5 +45,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Help & Feedback > Share Session Log: the newest session log, read-only, to the app it is shared with. -->
+        <provider
+            android:name="dev.bluewake.android.LogProvider"
+            android:authorities="@PACKAGE@.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

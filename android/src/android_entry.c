@@ -16,9 +16,13 @@
 // (/sdcard/Android/data/<package>/files), reachable over adb:
 //   <external>/GZLE01.card                   the memory card (saves)
 //   <external>/sram.bin                      the console's settings
-//   <external>/settings.ini                  the options menu's choices
+//   <external>/Backups/                      cards kept before a restore
+//   <external>/Load/Textures/GZLE01/         the HD texture pack
 //   <external>/logs/session-*.log            the newest eight sessions
-// Aurora's shader and pipeline caches go to the internal files folder.
+// Aurora's shader and pipeline caches go to the internal files folder. The
+// player's settings are the Java shell's (android/java Settings.java, the
+// iPhone app's names); those that apply at launch arrive as environment
+// variables before SDL_main runs.
 // Every default is only a default: an environment variable that is already
 // set wins.
 #include <SDL3/SDL.h>
@@ -38,6 +42,9 @@
 #include <unistd.h>
 
 int bluewake_host_main(int argc, char** argv);
+// The shell's frame hook and the hold (apple/ios/src/touch_controls.cpp, shared
+// with the iPhone app): the touch pad, the pause reasons and the FPS count.
+void bluewake_touch_controls_install(void);
 // The profiling runtime's writer, in the app's own training build only
 // (scripts/android/build.py train_app_on_device: libmain.so compiled with
 // -fprofile-instr-generate); null in every other build.
@@ -205,6 +212,35 @@ static void resolve_dirs(void) {
     mkdir(g_game_dir, 0755);
 }
 
+// Better Wind Waker (Mods in the ⋯ menu) needs a game module built with its
+// options, as ios_entry.m checks (bluewake_composite_option_count); with an
+// older module the switch is dropped and the log says why.
+static void check_better_wind_waker(const char* module) {
+    const char* mods = getenv("BLUEWAKE_MODS");
+    if (mods == NULL || strstr(mods, "betterww") == NULL)
+        return;
+    // Opened as the host opens it, and left open: the host's own dlopen then
+    // finds it loaded.
+    void* lib = dlopen(module, RTLD_NOW | RTLD_LOCAL);
+    unsigned (*count)(void) = lib != NULL ? (unsigned (*)(void))dlsym(lib, "bluewake_composite_option_count") : NULL;
+    const int built_in = count != NULL && count() > 0;
+    if (built_in)
+        return;
+    char kept[512] = "";
+    char list[512];
+    snprintf(list, sizeof list, "%s", mods);
+    for (char* save = NULL, *mod = strtok_r(list, ",", &save); mod != NULL; mod = strtok_r(NULL, ",", &save)) {
+        if (strcmp(mod, "betterww") == 0)
+            continue;
+        snprintf(kept + strlen(kept), sizeof kept - strlen(kept), "%s%s", kept[0] ? "," : "", mod);
+    }
+    if (kept[0] != '\0')
+        setenv("BLUEWAKE_MODS", kept, 1);
+    else
+        unsetenv("BLUEWAKE_MODS");
+    fprintf(stderr, "[mods] Better Wind Waker not enabled: rebuild the game module with its options\n");
+}
+
 static void fatal_box(const char* message) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Wind Waker Recomp", message, NULL);
 }
@@ -234,8 +270,10 @@ int main(int argc, char** argv) {
         fclose(env_file);
     }
 
-    // The same play configuration as the Windows and iOS apps.
+    // The same play configuration as the Windows and iOS apps. And, as on
+    // iOS, the player's inputs next to the moments the game reads them.
     bw_default("BLUEWAKE_PERF_LOG", "1");
+    bw_default("BLUEWAKE_INPUT_LOG", "1");
     bw_default("BLUEWAKE_WALL_PACE", "1");
     bw_default("DOL_AUDIO_NO_THROTTLE", "1");
     bw_default("BLUEWAKE_RENDERER", "aurora");
@@ -246,16 +284,15 @@ int main(int argc, char** argv) {
     bw_default("BLUEWAKE_OVERLAP_OBSERVATION", "0");
     bw_default("BLUEWAKE_NATIVE_MATH", "1");
     bw_default("DOL_AURORA_FULLSCREEN", "1");
-    // A phone's screen is never 4:3: keep the game's shape, as on iOS, and
-    // render at twice the GameCube's 480 lines (the options menu changes both).
+    // A phone's screen is never 4:3: keep the game's shape, as on iOS (Display
+    // > Aspect Ratio and Render Resolution in the ⋯ menu set both).
     bw_default("DOL_AURORA_ASPECT_FIT", "1");
-    bw_default("DOL_AURORA_RENDER_SCALE", "2");
+    bw_default("DOL_AURORA_RENDER_SCALE", "3");
     // Touches arrive as mouse events too: the mouse camera would take every
     // tap as a click on the game (A) and a camera grab.
     bw_default("BLUEWAKE_MOUSE_CAMERA", "0");
     bw_default_path("BLUEWAKE_SRAM", g_data_dir, "sram.bin");
     bw_default_path("BLUEWAKE_CARD_PATH", g_data_dir, "GZLE01.card");
-    bw_default_path("BLUEWAKE_SETTINGS", g_data_dir, "settings.ini");
     bw_default("DOL_AURORA_CACHE_DIR", g_internal_dir);
     bw_default_path("BLUEWAKE_DOL", g_game_dir, "main.dol");
     bw_default_path("BLUEWAKE_RELS_DIR", g_game_dir, "rels");
@@ -295,10 +332,12 @@ int main(int argc, char** argv) {
              module_env != NULL && module_env[0] != '\0' ? module_env : MODULE_NAME);
     fprintf(stderr, "[android] data=%s internal=%s module=%s disc=%s\n", g_data_dir, g_internal_dir,
             module, getenv("BLUEWAKE_DISC"));
+    check_better_wind_waker(module);
     SDL_SetAppMetadata("Wind Waker Recomp", "0.1", "dev.bluewake.BlueWake");
-    // The Back button or gesture opens the options menu (settings_menu.cpp)
-    // instead of closing the game.
+    // The Back button or gesture works the ⋯ menu (BlueWakeActivity takes it
+    // before SDL); should one reach SDL, it does not close the game.
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    bluewake_touch_controls_install();
     char* host_argv[3] = {argc > 0 ? argv[0] : "bluewake", module, NULL};
     const int status = bluewake_host_main(2, host_argv);
     fprintf(stderr, "[android] host returned %d\n", status);

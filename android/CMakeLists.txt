@@ -1,9 +1,12 @@
 # BlueWake for Android (arm64): the unchanged host, GXRuntime/Aurora (Dawn on
 # Vulkan, SDL3) and the donor DSP, as windows/CMakeLists.txt and
-# apple/ios/CMakeLists.txt build them. The only Android-specific source is the
+# apple/ios/CMakeLists.txt build them. The Android-specific sources are the
 # entry shim (src/android_entry.c), which fills in default paths in the app's
-# storage and hands over to the host; SDL's Java activity (android/java) starts
-# it from libmain.so.
+# storage and hands over to the host, and the shell's native side
+# (src/android_shell.cpp) for the Java touch controls and menu (android/java),
+# which share the iPhone app's glue (apple/ios/src: touch_controls.cpp,
+# controller_apply.cpp, dolphin_save_import.c). SDL's Java activity starts it
+# all from libmain.so.
 #
 # Built by scripts/android/build.py with the NDK's CMake toolchain.
 cmake_minimum_required(VERSION 3.25)
@@ -81,14 +84,19 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/forest_water.c
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c
-    ${BLUEWAKE_HOST_SRC}/settings_menu.cpp
     ${BLUEWAKE_HOST_SRC}/save_state.c)
+# The shell (the touch controls and the ⋯ menu) is the iPhone app's, so the
+# desktop options menu (settings_menu.cpp) is left out, as on iOS.
+set(BLUEWAKE_IOS_SRC ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
 
 # libmain.so: the name SDL's activity loads (android/java overrides
 # getLibraries() to load only this one, with SDL3 inside).
 add_library(main SHARED
     src/android_entry.c
-    src/android_touch.c
+    src/android_shell.cpp
+    ${BLUEWAKE_IOS_SRC}/touch_controls.cpp
+    ${BLUEWAKE_IOS_SRC}/controller_apply.cpp
+    ${BLUEWAKE_IOS_SRC}/dolphin_save_import.c
     ${BLUEWAKE_HOST_SOURCES})
 # The unchanged host keeps its own entry point under another name; the shim
 # owns SDL_main and hands over after setting the defaults.
@@ -103,6 +111,7 @@ set_target_properties(main PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(main PRIVATE
     ${GXRUNTIME_DIR}/include
     ${BLUEWAKE_HOST_SRC}
+    ${BLUEWAKE_IOS_SRC}
     ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
 target_compile_definitions(main PRIVATE
     DOLRECOMP_CPU_HEADER="core/cpu.h"
