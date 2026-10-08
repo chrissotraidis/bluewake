@@ -24,3 +24,21 @@ inline void bw_apply_face_swaps(unsigned port, bool ab, bool xy) {
     }
     for (const auto& button : mapping) PADSetButtonMapping(port, button);
 }
+// The right stick's left-and-right and up-and-down for the game's own C-stick,
+// which has the camera when Link swims, sails or targets. The direct stick
+// camera inverts itself (BLUEWAKE_STICK_CAMERA_INVERT_X/_Y); without this the
+// game's camera turned the other way from it in those places. Call after
+// PADRestoreDefaultMapping.
+inline void bw_apply_camera_axes(unsigned port, bool invert_x, bool invert_y) {
+    const PADAxisMapping axes[4] = {
+        {{SDL_GAMEPAD_AXIS_RIGHTX, invert_x ? AXIS_SIGN_NEGATIVE : AXIS_SIGN_POSITIVE},
+         SDL_GAMEPAD_BUTTON_INVALID, PAD_AXIS_RIGHT_X_POS},
+        {{SDL_GAMEPAD_AXIS_RIGHTX, invert_x ? AXIS_SIGN_POSITIVE : AXIS_SIGN_NEGATIVE},
+         SDL_GAMEPAD_BUTTON_INVALID, PAD_AXIS_RIGHT_X_NEG},
+        {{SDL_GAMEPAD_AXIS_RIGHTY, invert_y ? AXIS_SIGN_POSITIVE : AXIS_SIGN_NEGATIVE},
+         SDL_GAMEPAD_BUTTON_INVALID, PAD_AXIS_RIGHT_Y_POS},
+        {{SDL_GAMEPAD_AXIS_RIGHTY, invert_y ? AXIS_SIGN_NEGATIVE : AXIS_SIGN_POSITIVE},
+         SDL_GAMEPAD_BUTTON_INVALID, PAD_AXIS_RIGHT_Y_NEG},
+    };
+    for (const PADAxisMapping& axis : axes) PADSetAxisMapping(port, axis);
+}

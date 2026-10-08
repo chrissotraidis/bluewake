@@ -58,10 +58,12 @@ typedef NS_ENUM(NSInteger, BWItemState) { BWItemMissing, BWItemReady, BWItemBusy
     BWRowView* _codeRow;
     BWRowView* _discRow;
     BWRowView* _filesRow;
+    UILabel* _subtitle;
     UILabel* _status;
     UIProgressView* _progress;
     UIButton* _choose;
     UIButton* _play;
+    UIButton* _guide;
     BOOL _importing;
 }
 
@@ -121,9 +123,7 @@ static UIButton* BWButton(NSString* title, BOOL prominent) {
     header.spacing = 16;
     header.alignment = UIStackViewAlignmentCenter;
     UILabel* subtitle = BWLabel(17, UIFontWeightRegular, soft);
-    subtitle.text = @"BlueWake plays your own copy of the game: an uncompressed disc image of the "
-                     "US release (GZLE01). Nothing from the game ships with the app. "
-                     "It needs three things before it can start.";
+    _subtitle = subtitle;
 
     _codeRow = [[BWRowView alloc] init];
     _discRow = [[BWRowView alloc] init];
@@ -136,8 +136,16 @@ static UIButton* BWButton(NSString* title, BOOL prominent) {
     [_choose addTarget:self action:@selector(chooseDisc) forControlEvents:UIControlEventPrimaryActionTriggered];
     _play = BWButton(@"Play", YES);
     [_play addTarget:self action:@selector(play) forControlEvents:UIControlEventPrimaryActionTriggered];
+    // A copy without the game (the release's app, installed directly) can never play:
+    // in place of Play, the steps for making a copy with the game in it.
+    _guide = BWButton(@"How to Add the Game", YES);
+    [_guide addAction:[UIAction actionWithHandler:^(__kindof UIAction* a) {
+        (void)a;
+        [UIApplication.sharedApplication openURL:[NSURL URLWithString:@"https://github.com/chrissotraidis/bluewake#iphone-and-ipad"]
+                                         options:@{} completionHandler:nil];
+    }] forControlEvents:UIControlEventPrimaryActionTriggered];
 
-    UIStackView* buttons = [[UIStackView alloc] initWithArrangedSubviews:@[ _choose, _play ]];
+    UIStackView* buttons = [[UIStackView alloc] initWithArrangedSubviews:@[ _choose, _play, _guide ]];
     buttons.axis = UILayoutConstraintAxisHorizontal;
     buttons.spacing = 12;
     buttons.distribution = UIStackViewDistributionFillEqually;
@@ -235,10 +243,15 @@ static void BWRow(BWRowView* row, BWItemState state, NSString* name, NSString* d
 
 - (void)refresh {
     const BOOL code = [self hasComposite], disc = [self hasDisc], files = [self hasPreparedFiles];
+    _subtitle.text = code
+        ? @"BlueWake plays your own copy of the game: an uncompressed disc image of the US release "
+           "(GZLE01). Nothing from the game ships with the app. It needs three things before it can start."
+        : @"This copy of BlueWake doesn't have the game in it yet, so it can't play. The game's code can't "
+           "be shared: each player makes their own from their disc with PadMint, a free app for a Mac with "
+           "Apple silicon. PadMint builds a BlueWake with your game inside. Install that one over this one.";
     BWRow(_codeRow, code ? BWItemReady : BWItemMissing, @"Translated game code",
         code ? @"Built into this copy of BlueWake."
-             : @"Missing. PadMint makes it on a Mac from your disc and adds it to BlueWake; "
-               "install the BlueWake it makes (github.com/chrissotraidis/padmint).");
+             : @"Not in this copy. PadMint makes it from your disc on a Mac.");
     BWRow(_discRow, disc ? BWItemReady : (_importing ? BWItemBusy : BWItemMissing),
         @"Disc image (GZLE01, USA)",
         disc ? @"Imported."
@@ -248,6 +261,8 @@ static void BWRow(BWRowView* row, BWItemState state, NSString* name, NSString* d
         @"Prepared game files", files ? @"Ready." : @"Made from the disc on this iPad in a few seconds.");
     _choose.enabled = !_importing;
     _play.enabled = !_importing && code && disc && files;
+    _play.hidden = !code;
+    _guide.hidden = code;
 }
 
 - (void)setStatus:(NSString*)text error:(BOOL)error {
@@ -277,7 +292,7 @@ static void BWRow(BWRowView* row, BWItemState state, NSString* name, NSString* d
     if (bluewake_disc_check(url.fileSystemRepresentation, error, sizeof error) != 0) {
         if (!copy)
             [[NSFileManager defaultManager] removeItemAtURL:url error:nil];
-        [self setStatus:@(error) error:YES];
+        [self setStatus:[self pickError:url.lastPathComponent detail:@(error)] error:YES];
         return;
     }
     NSFileManager* fm = [NSFileManager defaultManager];
@@ -293,6 +308,23 @@ static void BWRow(BWRowView* row, BWItemState state, NSString* name, NSString* d
     }
     [target setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
     [self prepareFromDisc];
+}
+
+// Why a picked file was refused, naming it, with the fix for the usual mix-ups:
+// a compressed Dolphin image or an archive instead of the plain disc image.
+- (NSString*)pickError:(NSString*)name detail:(NSString*)detail {
+    NSString* extension = name.pathExtension.lowercaseString;
+    NSString* text;
+    if ([@[ @"rvz", @"wia", @"gcz", @"ciso" ] containsObject:extension])
+        text = [NSString stringWithFormat:@"\u201C%@\u201D is a compressed Dolphin image. Convert it to an ISO "
+                                          "first: in Dolphin, right-click the game, choose Convert File\u2026 and "
+                                          "pick ISO. Then choose the .iso here.", name];
+    else if ([@[ @"zip", @"7z", @"rar" ] containsObject:extension])
+        text = [NSString stringWithFormat:@"\u201C%@\u201D is an archive. Unzip it first, then choose the .iso "
+                                          "inside.", name];
+    else
+        text = [NSString stringWithFormat:@"\u201C%@\u201D: %@", name, detail];
+    return [self hasDisc] ? [text stringByAppendingString:@" The disc already imported is unchanged."] : text;
 }
 
 static void BWProgress(void* context, double fraction, const char* stage) {

@@ -73,3 +73,38 @@ blended with their UVs, screen sprites matched by their artwork and bounds); HD 
 their own mip levels, so HD packs stop shimmering while the camera turns; and vertex-by-vertex blending
 kept to meshes the game wrote, so the water path costs what it did. They replace Wind-Waker-Recomp's
 working-tree patches 0113, 0140, 0160 and 0170; its lava patch 0120 is BlueWake's 0136.
+
+Patch 0156 resolves the textures a linked module's own display list names at the module's address.
+SETIMAGE3 keeps only 24 bits of a texture address, so a texture in a module's data (linked at
+`0xC0xxxxxx`) pointed at unrelated MEM1, and Molgera's sand floor (`d_a_bwdg`, issue #126) drew
+scrambled. The HLE `GXCallDisplayList` now passes the list's guest address down
+(`call_display_list_guest`). The floor's vertex arrays are BlueWake's host fix in the same pull request.
+
+Patch 0157 gives gxcore the hardware's eight texgens and sixteen TEV stages (they were capped at 5 and
+8), so the dungeon map draws its grid and rooms (issue #74). The fixed vertex layout keeps five raw
+texture coordinates; a vertex with TEX5..7 and no normal, as the map's quads are, carries them in the
+normal, binormal and tangent slots (`ShaderKey::raw_tex_hi_in_nbt`). The key grew, so the pipeline config
+is version 13, and BlueWake's bundled pipeline seeds were converted to it row by row (same pipelines, new
+layout) in the same pull request.
+
+Patch 0158 fixes two shutdown bugs the Linux port surfaced. Three wgpu::Device-bound statics in
+gxcore_draw.cpp were function-locals, so their destructors ran at exit() after webgpu::shutdown()/
+window::shutdown() had freed the Vulkan instance and XCB connection; the last device ref then aborted
+in xcb_send_request -> realloc ("double free or corruption (!prev)"). The statics are now file-scope
+and gxcore::shutdown() releases them in the right order. Fixing that unmasked the second bug: two
+detached background threads (texture_replacement's decoder_main and gxcore's interp_helper_main)
+waited forever with no stop signal, so exit() hung on the still-live threads. Each now has a stop flag
+signalled from its module's shutdown(), and the process exits cleanly. By James Koehler-Killeen
+(RecompCore pull request #16, from BlueWake pull request #107).
+
+Patch 0159 scales a controller's sticks to a GameCube stick's travel when Aurora's dead-zone cutoff is
+off (`gamecube_axis`: full travel is 100, where a GameCube stick's gate stops it), so the game's own
+`PADClamp` is the only dead zone. BlueWake turns the cutoff off for player 1's controller
+(`runtime/host/src/controller_ports.h`, issue #138). With it on, the first value the game saw was 22% of
+its range and full tilt came at two thirds of the travel. Number 0158 is the Linux port's shutdown fix above.
+
+Patch 0160 lets a host choose Aurora's user folder with `DOL_AURORA_USER_DIR`, as `DOL_AURORA_CACHE_DIR`
+already chooses its cache folder. That folder holds `imgui.ini`, controller button remaps (`*.controller`),
+keyboard bindings and `controller_ports.dat`. BlueWake's Windows host points it at the player's data folder,
+so portable mode no longer writes them to `%APPDATA%\BlueWake` (issue #64), and copies any the portable
+folder doesn't have yet. In normal mode the data folder is the one SDL picks, so nothing moves.

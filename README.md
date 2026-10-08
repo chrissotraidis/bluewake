@@ -1,18 +1,16 @@
 # BlueWake
 
 <p align="center">
-  <strong>The Legend of Zelda: The Wind Waker, running natively on iPhone and iPad.</strong><br>
-  A static recompilation of the GameCube original, with Metal rendering, touch controls, controllers and mods.
+  <strong>The Legend of Zelda: The Wind Waker, running natively on iPhone, iPad, Mac and Windows.</strong><br>
+  A static recompilation of the GameCube original, with touch controls, controller support and mods.
 </p>
 
 <p align="center">
-  <img alt="iPhone and iPad" src="https://img.shields.io/badge/platform-iPhone%20%2F%20iPad-0A84FF?logo=apple">
-  <img alt="Metal renderer" src="https://img.shields.io/badge/renderer-Metal-5E5CE6">
+  <img alt="iPhone, iPad, Mac and Windows" src="https://img.shields.io/badge/platform-iPhone%20%7C%20iPad%20%7C%20Mac%20%7C%20Windows-0A84FF?logo=apple">
   <img alt="Ahead-of-time static recompilation" src="https://img.shields.io/badge/PowerPC-static%20recompilation-FF9F0A">
   <img alt="Developer build: 30 FPS on iPad Pro M2" src="https://img.shields.io/badge/developer%20build%20(M2)-30%20FPS-30D158">
   <img alt="Game data not included" src="https://img.shields.io/badge/game%20data-not%20included-FF453A">
   <img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-lightgrey">
-  <img alt="Status: source preview" src="https://img.shields.io/badge/status-source%20preview-FFD60A">
   <a href="https://github.com/chrissotraidis/padmint"><img alt="Build BlueWake with PadMint" src="https://img.shields.io/badge/PadMint-build%20your%20own-3EB489"></a>
   <a href="https://discord.gg/xwHfUD2bxW"><img alt="Join the community on Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&amp;logoColor=white"></a>
 </p>
@@ -21,350 +19,345 @@
 
 > [!IMPORTANT]
 > **Bring your own disc.** BlueWake needs your own legally obtained copy of *The Wind Waker* for
-> GameCube, USA version (`GZLE01`, revision 0). This repository contains no disc image, playable game
-> assets or saves. Your personal app contains code translated from your disc; you also import the
-> disc on your device.
->
-> **Windows: download and play.** A ready-made Windows build is on the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest). It
-> contains the recompiled game code; at first launch you choose your own disc image (`.iso` or `.gcm`).
->
-> **Mac, iPhone and iPad: build your own** from your disc with PadMint or the builder in
-> [Getting started](#getting-started). No prebuilt app with game code is provided for these.
->
-> **AI disclosure:** BlueWake is developed with substantial AI assistance for code, testing,
-> documentation and debugging. The status log records what has actually been checked, and on what.
+> GameCube, USA version (`GZLE01`, revision 0). This repository contains no disc image, game assets
+> or saves.
 
-**Questions or bugs?** Join the [Discord](https://discord.gg/xwHfUD2bxW) or
+## Get BlueWake
+
+| You play on | What to do |
+| --- | --- |
+| **Windows** 10 or 11 | [Download the ready-made build](#windows) and choose your disc image |
+| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it |
+| **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
+| **Apple TV** | Follow the [tvOS build guide](docs/status/TVOS_BUILD.md) (experimental) |
+| **Linux** | Not yet; see [the FAQ](#frequently-asked-questions) |
+
+On Mac, iPhone and iPad, the app you build contains code translated from your disc. **It is yours
+alone: never share or upload it.**
+
+**Questions or bugs?** Ask on [Discord](https://discord.gg/xwHfUD2bxW) or
 [open an issue](https://github.com/chrissotraidis/bluewake/issues).
 
 ## Coming from Wind Waker Recomp?
 
-Wind Waker Recomp, Elliott's fork of BlueWake, is moving here, and Elliott and Chris now maintain BlueWake
-together. His work is being brought in with his authorship. How the move works: [migration log](docs/WIND_WAKER_RECOMP_MIGRATION.md)
-and [status](docs/MIGRATION_STATUS.md).
+Wind Waker Recomp has moved here. Its creator, [Elliott](https://github.com/elliotttate), now
+maintains BlueWake together with Chris, and his work is part of BlueWake with his authorship kept.
 
-- **Report bugs and request features in [BlueWake's issues](https://github.com/chrissotraidis/bluewake/issues)**,
-  not on Wind-Waker-Recomp. Say whether you use a Wind Waker Recomp release or a BlueWake build, and
-  attach your session log. Open issues there are being moved here with a link back.
-- **Your Windows saves carry over:** both keep them in `%APPDATA%\BlueWake`. Back that folder up
-  before switching.
-- **Windows:** the same ready-made build as Wind Waker Recomp 0.4.0 is on BlueWake's
-  [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest). Unpack it, run `BlueWake.exe` and choose your disc image. A Dolphin `.rvz`
-  must first be converted to ISO in Dolphin (right-click the game, Convert File).
-- **Questions:** the [Discord](https://discord.gg/xwHfUD2bxW), shared by both projects.
+- **Windows:** BlueWake 0.6.0, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
+  is built from BlueWake itself and replaces Wind Waker Recomp 0.4.0. Smooth
+  Motion is off by default (press **F10** to turn it on), and 0.4.0's experimental 60 FPS game logic
+  is gone.
+- **Saves carry over:** both use `%APPDATA%\BlueWake`. Back that folder up before switching.
+- **Bugs and requests** go to [BlueWake's issues](https://github.com/chrissotraidis/bluewake/issues).
+  Say which build you use and attach your session log.
 
-The measurements below describe earlier developer builds; they are not acceptance of every personal
-player build. Windows and Apple TV remain experimental.
+What is done and what is still open: [migration status](docs/MIGRATION_STATUS.md).
 
-## What is BlueWake?
+## Install
 
-BlueWake translates the game's PowerPC code, the main executable and all 415 of its modules, into
-native arm64 code ahead of time, on your Mac. The app runs that code with a compatibility runtime for
-the GameCube's hardware: memory and timing, disc and memory card, controllers, DSP audio, and graphics
-through Metal. Nothing is compiled on the device while you play, so it needs no JIT; the few rare instructions the translator does not handle fall back to an interpreter.
+### Windows
 
-The runtime is derived from [Dolphin](https://dolphin-emu.org/) and keeps an interpreter fallback, so
-BlueWake is a static recompilation with a hardware compatibility layer, not an "emulation-free" rewrite.
+1. Download `BlueWake-v0.6.0-windows-x64.zip` from the
+   [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest).
+2. Unpack the whole ZIP and run `BlueWake.exe`.
+3. On first launch, choose your disc image (`.iso` or `.gcm`). A Dolphin `.rvz` must first be
+   converted to ISO in Dolphin: right-click the game and choose **Convert File**.
+
+You need a Direct3D 12 GPU and a CPU with AVX2 (Intel Haswell from 2013, AMD Ryzen, or newer). If
+nothing happens when you open it, see the FAQ below. To build it yourself from your disc instead, see
+[BlueWake on Windows](docs/WINDOWS.md).
+
+### iPhone and iPad
+
+You need:
+
+- a Mac with Apple silicon, Xcode (with the iOS platform installed), and at least 25 GB of free space
+- your `GZLE01` revision 0 disc image
+- an A13 or newer iPhone or iPad on iOS/iPadOS 17 or later, with Developer Mode on
+- an Apple ID for signing (a free one works, but its apps expire after seven days)
+
+Then:
+
+1. **Build your app.** The easiest way is [PadMint](https://github.com/chrissotraidis/padmint): open it,
+   choose BlueWake and pick your disc. It takes the app from the
+   [latest release](https://github.com/chrissotraidis/bluewake/releases/latest) and adds the game made
+   from your disc. To build from the latest source instead, run this from a checkout of this repository:
+
+   ~~~bash
+   scripts/builder/build.sh "/path/to/The Legend Of Zelda The Wind Waker.iso" --ipa build/BlueWake.ipa
+   ~~~
+
+   Expect a first build of well over an hour. Add `--source-only` first to check your tools and
+   disc in a few minutes.
+2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode.
+3. **Copy the same disc image to your device:** in Finder, select the device, open **Files** and
+   drag it onto **BlueWake**. The app imports it on first launch.
+
+Step by step, with updating and troubleshooting: [Build your own BlueWake](docs/BUILD_YOUR_OWN.md).
+If you used PadMint, please tell us how it went in
+[#104](https://github.com/chrissotraidis/bluewake/issues/104), whether it worked or not.
+
+### Mac
+
+~~~bash
+scripts/builder/build.sh "/path/to/your/GZLE01.iso" --platform macos --out build/macos
+~~~
+
+This writes `build/macos/packaged/BlueWake.app`, which you can move anywhere. Saves are kept in
+`~/Library/Application Support/BlueWake`, so replacing the app keeps them. Details:
+[Mac personal app](docs/BUILD_YOUR_OWN.md#mac-personal-app).
 
 ## What works
 
-- **Tested areas and features:** the opening and prologue, Outset Island, sailing the
-  Great Sea, Windfall, a late-game Hyrule save, menus, and saving and reloading through the game's own
-  memory card
-- **Developer build: 30 FPS at full speed** on an iPad Pro (M2), the game's native frame rate, with stereo audio
-- **Touch controls** with a layout editor, opacity and size settings
-- **Game controllers and keyboards**, with camera inversion and button remapping
-- **The ⋯ menu:** FPS display, render resolution up to 4×, texture filtering up to 16× anisotropic,
-  aspect ratio, mods, save backup and restore, and Report a Problem
-- **Mods:** 16:9 widescreen, Dolphin-format HD texture packs and
-  [Better Wind Waker](https://github.com/WideBoner/betterww)
+- **Tested:** the opening and prologue, Outset Island, sailing the Great Sea, Windfall, a late-game
+  Hyrule save, menus, and saving and reloading with the game's own memory card. Later dungeons and
+  boss fights are largely untested, so please [report](#getting-help) what you find there.
+- **Touch controls** with a layout editor, and **controllers and keyboards** with button remapping
+- **Settings:** FPS display, render resolution up to 4×, 16× anisotropic filtering, aspect ratio,
+  save backup and restore, and Report a Problem
+- **Mods:** widescreen, HD texture packs, [Better Wind Waker](https://github.com/WideBoner/betterww),
+  optional gameplay tweaks and the experimental Smooth Motion
 
-Later dungeons and boss fights are still largely untested. If you find a problem there, please
-[report it](#getting-help).
-
-## Performance
-
-| Device | Result |
+| Device | Developer build |
 | --- | --- |
-| iPad Pro 12.9" (M2) | Steady 30 FPS at full speed; a 44-minute session had 14 seconds below 29 FPS, all brief dips at area loads |
-| iPhone 14 (A15) | 30 FPS in most play; dips to about 25-27 FPS in the busiest scenes and the title-screen flyover |
+| iPad Pro 12.9" (M2) | Steady 30 FPS at full speed, with brief dips at area loads |
+| iPhone 14 (A15) | 30 FPS in most play; about 25-27 FPS in the busiest scenes |
 | Older devices | A13 or newer is required; slower chips have not been measured |
 
-These measurements come from the developer build. Much of its speed comes from an optimization
-profile: a record of which parts of the game's code run most, which the compiler uses to arrange
-that code for speed. That profile is made from the game itself, so it cannot be published. Instead,
-the builder makes your own: it runs the game briefly on your Mac, records the same kind of counts,
-then compiles your app with them. On the Mac, an app built this way ran the same test route slightly
-faster than the developer build; iPad frame-rate tests of it are still to come. Without the profile
-(`--no-train`), the game runs at about 27.5 FPS instead of 30 at the Outset Island pier on the iPad Pro (M2).
+30 FPS is the game's own frame rate. These numbers come from the developer build; frame-rate tests of
+player-built apps on iPad are still to come. The Mac, Windows and Apple TV versions remain experimental.
 
-In the measured slow scenes, the CPU is the main limit, so lowering render resolution alone has
-not recovered full speed. Other scenes and HD texture packs can have different limits. Performance
-on smaller devices is active work.
+**Known issues:** changing areas can briefly stall, some objects can take a moment to appear the first
+time you visit an untested area, and busy scenes on iPhone drop below 30 FPS.
+
+## Mods
+
+Open **⋯ › Mods** on iPhone and iPad, or press **F1 › Mods** on Windows. Mods apply the next time
+BlueWake starts and never change your saves.
+
+| Mod | What it does |
+| --- | --- |
+| **Widescreen 16:9 / 16:10** | A wider view with the HUD placed to fit. Built in |
+| **HD Texture Pack** | Replaces the game's textures, for example with Hypatia's HD pack (see the FAQ) |
+| **Better Wind Waker** | Swift Sail, instant text, faster animations and more, each set separately |
+| **Gameplay extras** | Jump & Sprint, Fast Transitions and Quick Doors, under **⋯ › Gameplay** |
+
+Code mods are built into your app, so a module built before an update does not gain newer Better Wind
+Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.md).
+
+## Your saves
+
+- Saves are in **GZLE01.card**: in Files under **On My iPhone/iPad › BlueWake › BlueWake**, or in
+  **`%APPDATA%\BlueWake`** on Windows. Windows also has a
+  [portable mode](docs/WINDOWS.md#your-saves-and-logs).
+- On iPhone and iPad, **⋯ › Game Data & Saves › Back Up Saves…** exports a copy, and
+  **Restore Saves…** brings one back.
+- Install updates over the existing app. **Deleting BlueWake deletes its saves**, so back them up first.
+
+## Getting help
+
+- **Discord:** [discord.gg/xwHfUD2bxW](https://discord.gg/xwHfUD2bxW), one community for BlueWake and
+  its sibling projects such as KartPad, MeleePad and SunPad
+- **Bug reports:** **⋯ › Help & Feedback › Report a Problem on GitHub** opens a prefilled issue.
+  Say which device, where in the game it happened and what you saw, and attach the session log
+  (**Share Session Log**, same menu). Please don't attach game files or disc images.
+
+## Frequently asked questions
+
+<details>
+<summary><strong>Can I download it?</strong></summary>
+
+On Windows, yes: the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest) has a
+ready-made build that needs your own disc image. On Mac, iPhone and iPad, you build your own app from
+your disc (see [Install](#install)). The app on the Releases page holds no game code by itself; if it
+says "Translated game code: Missing", add your game with PadMint.
+
+</details>
+
+<details>
+<summary><strong>Why does it need my disc?</strong></summary>
+
+The game's code is translated from your disc during the build, and the game's graphics, sound and
+world data are read from your disc while you play. Neither is included here.
+
+</details>
+
+<details>
+<summary><strong>Which version of the game works?</strong></summary>
+
+Only the GameCube USA release, `GZLE01` revision 0. The build checks the disc and refuses others. The
+Wii U *Wind Waker HD* is a different game and can't be used as the disc, but you can
+[import its textures from your own HD disc](docs/WWHD_TEXTURES.md) into a texture pack.
+
+</details>
+
+<details>
+<summary><strong>Is this an emulator?</strong></summary>
+
+Not in the usual sense. BlueWake translates the game's PowerPC code (the main program and all 415 of
+its modules) into native code ahead of time, on your computer. Nothing is compiled while you play, so
+it needs no JIT; a few rare instructions fall back to an interpreter. The hardware around the CPU
+(graphics, audio, memory card, timing) comes from a runtime derived from [Dolphin](https://dolphin-emu.org/).
+
+</details>
+
+<details>
+<summary><strong>Why does the first build take so long?</strong></summary>
+
+Besides translating the game, the builder tunes your app for speed. It runs the game briefly on your
+Mac without a window, records which code runs most, then compiles your app with those counts. This
+profile comes from the game itself, so it can't be published. You don't need to play or supply a save.
+Skipping it with `--no-train` makes the build faster, but the game measured about 27.5 FPS instead of
+30 at the Outset Island pier on an iPad Pro (M2). Rerunning the same command reuses finished work.
+
+</details>
+
+<details>
+<summary><strong>Why 30 FPS?</strong></summary>
+
+That is the game's own frame rate on the GameCube. Running the game faster would also make gameplay
+faster. For smoother motion, try Smooth Motion below.
+
+</details>
+
+<details>
+<summary><strong>How does Smooth Motion work?</strong></summary>
+
+BlueWake matches objects between two game frames, works out where they are in between, and renders
+extra views of the scene. **Game logic stays at 30 updates per second.** It uses no AI image
+generation or DLSS, and it doesn't blend two finished screenshots.
+
+On iPhone and iPad, **⋯ › Display › Smooth Motion (Experimental)** offers 60 FPS and, on ProMotion
+screens, 120 FPS. On desktop you can also match your display, up to 240 FPS. It is off by default;
+turn it off if you see glitches or slowdowns.
+
+</details>
+
+<details>
+<summary><strong>Does it work on iPhone?</strong></summary>
+
+Yes, on an A13 or newer. The touch controls sit in the black bars beside the picture. The busiest
+scenes dip below 30 FPS on an iPhone 14.
 
 <p align="center">
   <img alt="BlueWake on an iPhone 14, with the touch controls in the black bars beside the picture" src="docs/images/bluewake-iphone-title.jpg" width="720">
 </p>
 
-## Getting started
+</details>
 
-You need:
+<details>
+<summary><strong>Is there a Linux version?</strong></summary>
 
-- a Mac with Apple silicon, Xcode, CMake and Ninja, and at least 25 GB of free disk space
-  (PadMint's required disk-space check, not a measured peak-space guarantee)
-- your `GZLE01` revision 0 disc image
-- an A13 or newer iPhone or iPad on iOS/iPadOS 17 or later, with Developer Mode on
-- Or an Apple TV on tvOS 17 or later, with Developer Mode on ([Apple TV build guide](docs/status/TVOS_BUILD.md))
-- an Apple ID for signing (a free one works; its apps expire after seven days)
+Not yet. A native Linux port from the community is in review
+([#107](https://github.com/chrissotraidis/bluewake/pull/107)), and once it is ready BlueWake will offer
+a ready-made Linux build like the Windows one. Until then, some players run the Windows build on Linux
+and Steam Deck through Proton (add `BlueWake.exe` as a non-Steam game). We haven't tested that
+ourselves, so please share how it goes in [#56](https://github.com/chrissotraidis/bluewake/issues/56).
 
-PadMint's BlueWake workflow starts from the app-only IPA on the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest)
-(0.2.0) and adds the game made from your disc. To build from the latest source instead, use the builder below.
+</details>
 
-**From this repository,** one command builds your own personal app from a fresh checkout:
+<details>
+<summary><strong>Do controllers work?</strong></summary>
 
-~~~bash
-scripts/builder/build.sh "/path/to/The Legend Of Zelda The Wind Waker.iso" --ipa build/BlueWake.ipa
-~~~
+Yes. On iPhone and iPad, any controller iOS supports works, with rumble, camera inversion and button
+remapping under **⋯ › Controller**. On Mac and Windows, Xbox, PlayStation, Switch Pro and other SDL
+controllers work; remap buttons under **Settings › Controls › Controller buttons** (F1 or Esc opens
+settings). The same tab changes what the mouse buttons and keyboard keys press.
 
-It fetches the pinned runtime and translator, checks your disc, translates the game from it, tunes it
-on your Mac, compiles it for iOS and writes an unsigned IPA. Install that with Sideloadly, AltStore, SideStore or Xcode, then
-copy the same disc image to your device (Finder › your device › Files › BlueWake); BlueWake imports it on
-first launch. Expect a first build of well over an hour on a fast Mac, longer on smaller ones; the
-terminal shows each stage and its elapsed time, and completed work is reused if you stop and rerun
-the same command. Run it with `--source-only` first to check your tools and disc in a few minutes.
+If BlueWake doesn't see your controller at all (a generic Bluetooth pad, for example), download
+`gamecontrollerdb.txt` from [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB), put it
+in the folder with your saves (`%APPDATA%\BlueWake` on Windows, or the `user` folder in portable mode;
+`~/Library/Application Support/BlueWake` on a Mac) and start BlueWake again.
 
-**The IPA you build contains code translated from your disc: it is yours alone. Never share or upload it.**
+</details>
 
-Step by step, with updating and troubleshooting: [Build your own BlueWake](docs/BUILD_YOUR_OWN.md).
-Signing with your own identity and other options: [docs/status/DEVICE_BUILD.md](docs/status/DEVICE_BUILD.md).
-For Apple TV, use [the tvOS build guide](docs/status/TVOS_BUILD.md); it builds and installs directly with `devicectl`.
+<details>
+<summary><strong>Does the Tingle Tuner work?</strong></summary>
 
-### Windows
+No. The Tingle Tuner needs a Game Boy Advance linked to the GameCube, and BlueWake doesn't emulate one,
+so its co-op features aren't available. Better Wind Waker's **Tingle Chests without the Tingle Tuner**
+(on by default, under Mods) lets you open Tingle Chests with ordinary bombs and shows them on the maps.
 
-**Download:** the ready-made Windows build is on the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest): unpack it, run
-`BlueWake.exe` and choose your `.iso` or `.gcm` disc image. It needs Windows 10 or 11, a Direct3D 12 GPU and a CPU
-with AVX2 (Intel Haswell from 2013, AMD Ryzen, or newer). To build it yourself instead:
+</details>
 
-BlueWake's Windows builder compiles and passes its automated checks, but a complete build from a disc on
-Windows has not been checked in BlueWake yet. To try it
-with Visual Studio's C++ workload and its Clang component, Python, Git, CMake and Ninja:
+<details>
+<summary><strong>Will updates keep my saves?</strong></summary>
 
-~~~bash
-python scripts/windows/build.py "D:\Games\The Legend of Zelda - The Wind Waker (USA).rvz"
-~~~
+Yes, as long as you install over the existing app. Back up your saves first, and never delete the app
+to update it.
 
-It accepts an `.iso` or a Dolphin `.rvz` and writes `build\windows\BlueWake\BlueWake.exe`, a personal build like
-the IPA: never share it. See [BlueWake on Windows](docs/WINDOWS.md), or
-[Windows launch troubleshooting](#bluewakeexe-does-nothing-when-i-open-it) below.
+</details>
 
-## Mods
+<details>
+<summary><strong>Can I use my Dolphin saves?</strong></summary>
 
-On iPhone/iPad, open **⋯ › Mods**; on Windows, press **F1** and open **Mods**.
-Each mod applies the next time BlueWake starts and never changes your saves.
+Yes, for USA (`GZLE01`) in-game saves; Dolphin save states are not supported. Export a `.gci` from
+Dolphin's **Tools › Memory Card Manager**.
 
-| Mod | What it does | How to add it |
-| --- | --- | --- |
-| **Widescreen 16:9** | A wider view with the HUD placed for 16:9 | Built in; turn it on |
-| **Widescreen 16:10** | A wider view sized for 16:10 displays | Built in; select it instead of 16:9 |
-| **HD Texture Pack** | Replaces the game's textures, for example with Hypatia's HD pack | See [texture-pack setup](#where-do-i-put-hypatias-texture-pack) below |
-| **Better Wind Waker** | Swift Sail, instant text, faster animations and other individual settings | Built into new personal modules; enable it and open **Better Wind Waker Settings** |
+- **iPhone and iPad:** copy the save to your device and open
+  **⋯ › Game Data & Saves › Import Dolphin Save…**. Pick the quest log and the BlueWake slot to put it
+  in; the app backs up your current card first. Dolphin `.raw` cards work too.
+- **Windows:** there is no import screen yet, and renaming a `.gci` to `.card` will not work.
+  Source users can use the [save-import helper](tests/dolphin_save_import_cli.c), which uses the same
+  importer as iOS. Close BlueWake, work on a copy of your card, then put the result at
+  `%APPDATA%\BlueWake\GZLE01.card`.
 
-Code mods cannot be applied to a statically recompiled game at runtime, so they are translated and built
-into the app. Details are in [docs/MODS.md](docs/MODS.md).
+</details>
 
-**Smooth Motion (Experimental)** adds in-between rendered frames while gameplay stays at 30 updates
-per second. It is off by default; see [how interpolation works](#how-does-smooth-motion-work).
-**⋯ › Gameplay** adds optional Jump & Sprint, Fast Transitions and Quick Doors.
-These apply at the next launch and start off. Jump and Run appear as editable touch buttons when
-movement extras are enabled; keyboards use Space and Shift, and controllers use the left bumper
-and left-stick click. Jump uses the game's ledge jump and respects its movement restrictions.
+<details>
+<summary><strong>Where do I put Hypatia's texture pack?</strong></summary>
 
-The rendering, camera, movement, transition and game-option additions come from
-[elliotttate's source fork](https://github.com/elliotttate/Wind-Waker-Recomp), with original commit
-authorship retained. [Integration status](docs/archive/FORK_INTEGRATION.md) distinguishes BlueWake's checks
-from the fork's reported measurements. Rebuild your personal game module for the new Better Wind
-Waker settings and 16:10 variants; an older module does not gain those variants from an app update.
+Extract the pack. Its **`GZL` folder holds the textures**; keep its subfolders and filenames as they are.
 
-## Your saves and game data
+- **Windows:** press **F1 › Mods › Open the texture folder** (or open
+  `%APPDATA%\BlueWake\Load\Textures\GZLE01`) and copy `GZL` into it.
+- **iPhone and iPad:** use **⋯ › Mods › Install Texture Pack…** and select `GZL` in Files.
 
-- Saves live in **GZLE01.card**: **On My iPad/iPhone › BlueWake › BlueWake** in Files, or
-  **`%APPDATA%\BlueWake`** on Windows (paste that path into File Explorer's address bar). For
-  everything in one folder on Windows, use [portable mode](docs/WINDOWS.md#your-saves-and-logs).
-- On iPhone/iPad, **⋯ › Game Data & Saves › Back Up Saves…** exports a copy; **Restore Saves…** brings one back and
-  keeps a copy of your current saves in a Backups folder first.
-- On Windows, close BlueWake before copying or replacing the card, and keep a backup outside its data folder.
-- Moving from Dolphin? See [Dolphin save import](#can-i-use-my-dolphin-saves) below; renaming a `.gci` is not conversion.
-- Install updates over the existing app. Deleting BlueWake deletes its saves, so back them up first.
-- **Remove Disc Image…** frees the space used by the disc and the files made from it. Saves, mods and
-  settings stay. You must import your disc again before playing.
+Then enable **HD Texture Pack** and restart BlueWake. Leave the pack's **Optional Textures** out
+unless you pick specific ones, since they compete with the main textures. You don't need its
+**WideScreen Patch**; use BlueWake's built-in widescreen. For a smaller pack on iPhone and iPad, see
+[Mods](docs/MODS.md#installing).
 
-## Known issues
+</details>
 
-- **Loading hitches.** Changing areas can briefly stall; remaining loading and rendering costs are
-  still being investigated.
-- **First visits to new areas.** A bundled cache covers the areas tested so far; elsewhere, some
-  objects may take a moment to appear the first time.
-- **Busy scenes on iPhone** drop below 30 FPS on chips older than the M-series iPads.
+<details>
+<summary><strong>BlueWake.exe does nothing when I open it</strong></summary>
 
-## Getting help
-
-- **Discord:** [discord.gg/xwHfUD2bxW](https://discord.gg/xwHfUD2bxW) for questions, testing and updates
-- **Bug reports:** **⋯ › Help & Feedback › Report a Problem on GitHub** opens a prefilled issue. Say
-  which device, where in the game it happened and what you saw, and attach the session log
-  (**Share Session Log**, same menu). Please do not attach game files or disc images.
-
-## Frequently asked questions
-
-### Can I download it?
-
-On Windows, yes: the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest) has a ready-made build that needs your own disc image.
-On Mac, iPhone and iPad, build a personal app from source with your own disc (see
-[Getting started](#getting-started)). Never share an app you build yourself: it contains translated game code. An app-only build without your module shows "Translated game code: Missing".
-
-### Why does it need my disc?
-
-The game's code is translated from your disc during the build, and the game's graphics, sound and
-world data are read from your disc on the device. Neither is included here.
-
-### Which version of the game works?
-
-Only the GameCube USA release, `GZLE01` revision 0. The build checks the disc and refuses others. The
-Wii U *Wind Waker HD* is a different game and cannot be used as the game disc.
-You can optionally [import its compatible textures from your own HD disc](docs/WWHD_TEXTURES.md)
-into a replacement pack while continuing to play from your GameCube disc.
-
-### Is this an emulator?
-
-Not in the usual sense. The game's code is translated to native arm64 ahead of time and there is no
-JIT; only a few rare instructions fall back to an interpreter. The hardware around the CPU (graphics, audio, memory
-card, timing) comes from a Dolphin-derived runtime.
-
-### Why 30 FPS?
-
-That is the game's own frame rate on the GameCube. BlueWake targets that frame rate at 100% game
-speed; raising the speed would make gameplay run faster too.
-
-### Where do I put Hypatia's texture pack?
-
-Extract the pack first. Its **`GZL` folder contains the textures**; keep the `tex1_…` PNG/DDS filenames
-and the subfolders inside it.
-
-- **Windows:** press **F1 › Mods › Open the texture folder**, or open
-  `%APPDATA%\BlueWake\Load\Textures\GZLE01`. Copy `GZL` into it, giving
-  `…\GZLE01\GZL\…\tex1_….dds` (or `.png`). Enable **HD texture pack** and restart BlueWake.
-- **iPhone/iPad:** use **⋯ › Mods › Install Texture Pack…** and select `GZL` in Files, then enable
-  **HD Texture Pack** and restart. For manual copying, put `GZL` under
-  **On My iPad/iPhone › BlueWake › BlueWake › Load › Textures › GZLE01**.
-
-Subfolders are searched recursively, so an extra `Hypatia WWHD Mod…` folder does not itself prevent
-loading. Keep unused **Optional Textures** outside the installed texture folder, though: they can
-contain competing replacements for the same texture. Add only the variants you choose. The pack's
-**WideScreen Patch** folder is not needed; use BlueWake's built-in widescreen setting.
-For a smaller pack on iPhone/iPad, see [Mods](docs/MODS.md#installing).
-
-### BlueWake.exe does nothing when I open it
-
-The most common cause is the processor. The Windows build needs a CPU with AVX2 (Intel Haswell from
-2013, AMD Ryzen, or newer). On an older CPU, such as an Intel Core i7 860, it stops before it can show
-any message. Check your CPU in **Settings › System › About**.
+The most common cause is an older processor. The Windows build needs a CPU with AVX2 (Intel Haswell
+from 2013, AMD Ryzen, or newer) and stops before showing any message without it. Check your CPU in
+**Settings › System › About**.
 
 If your CPU has AVX2:
 
-1. Run the executable from the **complete unpacked folder** (the download or your own build), not by
-   itself or from inside an archive. Keep the builder's runtime DLLs, `gGZLE01_recomp.dll` and `game` folder together.
-2. Open `%APPDATA%\BlueWake\logs` in File Explorer. Attach the newest `session-*.log` and, if present,
-   the matching `crash-*.log`. If no new log appears, say so; Windows may be failing before BlueWake's
-   logging starts. Include any Windows error message, your CPU/GPU and Windows version.
-3. Check the [Windows requirements](docs/WINDOWS.md#what-you-need). If Windows names a missing DLL,
-   restore the complete build output; do not collect DLLs from random download sites. A missing
-   `gGZLE01_recomp.dll` requires building your own game module from your disc.
+1. Run `BlueWake.exe` from the complete unpacked folder, not from inside the ZIP.
+2. Open `%APPDATA%\BlueWake\logs` and attach the newest `session-*.log` (and any `crash-*.log`) to
+   an issue, with your CPU, GPU and Windows version. If no new log appears, say so.
+3. If Windows names a missing DLL, unpack the complete download again; don't collect DLLs from other sites.
 
-Do not delete `%APPDATA%\BlueWake` to troubleshoot: it holds your saves and settings.
+Don't delete `%APPDATA%\BlueWake` to troubleshoot: it holds your saves and settings.
 
-### How does Smooth Motion work?
-
-BlueWake matches objects between consecutive game frames, interpolates their transforms and supported
-vertex motion, then renders extra views of the scene. **Game logic stays at 30 updates per second.**
-This is geometry-based rendering interpolation, in the same broad category as other Zelda ports'
-renderer interpolation; it does not mean their implementations are identical. BlueWake uses no AI
-image generation or NVIDIA DLSS, and it does not simply crossfade two finished screenshots.
-
-On iPhone/iPad, **⋯ › Display › Smooth Motion (Experimental)** offers 60 FPS and, on ProMotion screens,
-120 FPS. The desktop settings also offer **Match the display**, up to 240 FPS. These are presentation
-targets, not guarantees or faster game logic. Unmatched objects and camera cuts can skip interpolation.
-It is experimental and off by default; disable it if you see artifacts or worse performance.
-
-### Does it work on iPhone?
-
-Yes, on an A13 or newer. The touch controls sit in the black bars beside the picture. The busiest scenes
-dip below 30 FPS on an iPhone 14; see [Performance](#performance).
-
-### Is there a Linux version?
-
-Not yet. A native Linux port from the community is being brought over, and once it is ready BlueWake
-will offer a ready-made Linux build like the Windows one. Until then, some players run the Windows
-download on Linux and Steam Deck through Proton (add `BlueWake.exe` as a non-Steam game). We haven't
-tested that ourselves, so please share how it goes in [#56](https://github.com/chrissotraidis/bluewake/issues/56).
-
-### Do controllers work?
-
-Yes. On iPhone and iPad, controllers that iOS supports work, with camera inversion and button
-remapping under **⋯ › Controller**, and the game's rumble is passed to the controller. On Mac and
-Windows, Xbox, PlayStation, Switch Pro and other SDL controllers work; remap the six GameCube buttons
-under **Settings › Controls › Controller buttons** (F1 or Esc opens settings). Picking a button that
-is already used swaps the two.
-
-### Will updates keep my saves?
-
-Yes, as long as you install over the existing app. Use **Back Up Saves…** before anything else, and
-never delete the app to update it.
-
-### Can I use my Dolphin saves?
-
-Yes, for **USA (`GZLE01`) in-game saves**. Export a `.gci` from Dolphin's **Tools › Memory Card Manager**
-or use its existing `.gci` file. Dolphin save states are not supported by this importer.
-
-- **iPhone/iPad:** copy the save to your device and open
-  **⋯ › Game Data & Saves › Import Dolphin Save…**. Pick the source quest log and destination
-  BlueWake slot; the app backs up your current card first. The importer also accepts Dolphin `.raw` cards.
-- **Windows:** this port currently has no **Import Dolphin Save** screen. A `.gci` must be imported
-  into BlueWake's `GZLE01.card` container; renaming it to `.card` will not work. Source users can use
-  the repository's [save-import command-line helper](tests/dolphin_save_import_cli.c), which uses the
-  same importer as iOS. Community converters are separate tools, not required by the iOS app or
-  validated by this README.
-
-Always close BlueWake and back up the destination card before a manual import. Work on a copy, check
-the resulting quest logs, then put the converted card at `%APPDATA%\BlueWake\GZLE01.card` on Windows.
-Importing into an existing game save replaces only the selected slot; a card with no Wind Waker save
-receives the whole imported save, including all three slots.
+</details>
 
 ## Documentation
 
-- [Migration status](docs/MIGRATION_STATUS.md): the move from Wind-Waker-Recomp, and what is open
-- [Current status](docs/status/CURRENT.md): the engineering log, newest first
-- [Build your own BlueWake](docs/BUILD_YOUR_OWN.md): the player's guide
-- [BlueWake on Windows](docs/WINDOWS.md): building and playing on a Windows PC
-- [Apple TV build](docs/status/TVOS_BUILD.md): build and install the controller-first tvOS app
+- [Build your own BlueWake](docs/BUILD_YOUR_OWN.md): the player's guide for iPhone, iPad and Mac
+- [BlueWake on Windows](docs/WINDOWS.md): playing and building on Windows
+- [Apple TV build](docs/status/TVOS_BUILD.md) and [device build options](docs/status/DEVICE_BUILD.md)
+- [Mods](docs/MODS.md) and [Wind Waker HD textures](docs/WWHD_TEXTURES.md)
 - [The Builder](docs/BUILDER.md): how the build works, and reusing it for other ports
-- [Device build](docs/status/DEVICE_BUILD.md): signing, installing and build options
-- [Mods](docs/MODS.md): the three mods and how code mods are built
-- [History](docs/archive/HISTORY.md): the project's earlier README, from macOS prototype to iPad
-- [Porting history](docs/archive/PORTING_HISTORY.md) and [legal and provenance](docs/research/LEGAL_AND_PROVENANCE.md)
-
-## Community and support
-
-[Join the Discord](https://discord.gg/xwHfUD2bxW) for help and news. It is one
-community for BlueWake and its sibling projects, such as KartPad, MeleePad and
-SunPad: ask about setup, building with PadMint, and installing, share how it
-runs on your device, and hear about new releases first.
-
-Found a bug? [Open an issue](https://github.com/chrissotraidis/bluewake/issues)
-with your device, its OS version, and the steps that led to it.
+- [Migration status](docs/MIGRATION_STATUS.md) and the [engineering log](docs/status/CURRENT.md)
+- [History](docs/archive/HISTORY.md), [porting history](docs/archive/PORTING_HISTORY.md) and
+  [legal and provenance](docs/research/LEGAL_AND_PROVENANCE.md)
 
 ## Credits
 
-- [Dolphin](https://dolphin-emu.org/): the compatibility runtime, DSP audio and texture-pack format
-  come from it, and its GZLE01 game settings supply the widescreen code
+- [Elliott (@elliotttate)](https://github.com/elliotttate), co-maintainer, whose
+  [Wind Waker Recomp](https://github.com/elliotttate/Wind-Waker-Recomp) brought the Windows port and
+  the rendering, camera, gameplay and performance work now in BlueWake
+- [SunPad](https://github.com/chrissotraidis/sunpad), the Super Mario Sunshine port whose touch
+  controls BlueWake adapts
+- [Dolphin](https://dolphin-emu.org/), for the compatibility runtime, DSP audio, the texture-pack
+  format and the widescreen code
 - [RecompCore](https://github.com/chrissotraidis/RecompCore) and
   [DolRecomp](https://github.com/chrissotraidis/DolRecomp), forked for BlueWake, with the Aurora
   renderer and Dawn
@@ -372,16 +365,16 @@ with your device, its OS version, and the steps that led to it.
 - [Better Wind Waker](https://github.com/WideBoner/betterww) by WideBoner
 - HD texture pack authors, including
   [Hypatia](https://forums.dolphin-emu.org/Thread-hypatia-s-tloz-the-wind-waker-hd-pack-v2-0001a)
-- SunPad, whose touch control overlay BlueWake adapts
-- [Elliott (@elliotttate)](https://github.com/elliotttate), for the rendering, desktop, gameplay
-  and performance enhancements being consolidated into BlueWake from his Wind Waker fork
-- [Ian MacFarlane (@iannotian)](https://github.com/iannotian), for the controller-first Apple TV contribution
+- [Ian MacFarlane (@iannotian)](https://github.com/iannotian), for the Apple TV version
+
+BlueWake is developed with substantial AI assistance for code, testing, documentation and debugging.
+The [engineering log](docs/status/CURRENT.md) records what has been checked, and on what.
 
 ## License and legal
 
 BlueWake is licensed under the [GNU GPL, version 3 or later](LICENSE), the license its Dolphin-derived
-runtime and SunPad-derived touch controls allow together. See
-[RIGHTS_AND_LICENSES.md](RIGHTS_AND_LICENSES.md) for the details and for game content.
+runtime and [SunPad](https://github.com/chrissotraidis/sunpad)-derived touch controls allow together.
+See [RIGHTS_AND_LICENSES.md](RIGHTS_AND_LICENSES.md) for details and for game content.
 
 BlueWake is an independent fan project, not affiliated with or endorsed by Nintendo. *The Legend of
 Zelda*, *The Wind Waker* and GameCube are trademarks of Nintendo. You need your own legally obtained

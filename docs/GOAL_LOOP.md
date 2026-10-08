@@ -1,54 +1,54 @@
-# BlueWake goal loop
+# BlueWake goal loop: release 0.6.0
 
-## Current loop: cutscene audio, PadMint and fixes Windows can pick up, October 4, 2026
+Updated October 7, 2026. The previous loop (finding and fixing the post-0.5.0 bugs) is done and kept in
+[archive/GOAL_LOOP_2026-10-07.md](archive/GOAL_LOOP_2026-10-07.md). What to build after this release is in
+[PRIORITIES.md](PRIORITIES.md).
 
-Find out why cutscenes lose their music and sound effects without needing play sessions to do it,
-confirm that the PadMint path players are told to use works, and land small fixes that Elliott's Windows
-build gets just by building from `main`.
+## Goal
 
-### Limits
+Publish **BlueWake 0.6.0** from one frozen commit of `main`: the ready-made Windows build, the iPhone and iPad
+app without game code, the source zip and the PadMint recipe. Each fix below is checked on the platforms it ships to,
+as far as the hardware at hand allows, and the reporters are asked to confirm. PadMint picks up the new release by
+itself: it reads the latest release's `padmint.json` and app.
 
-- One Apple Silicon Mac. No Windows PC and no physical iPad in this loop. Anything that needs one goes
-  into [WINDOWS_TASKS.md](WINDOWS_TASKS.md) or is labeled `needs-device`.
-- No long play sessions. Short automated runs are fine to confirm that new log lines appear.
-- Follow [Keep Windows in step](../AGENTS.md#keep-windows-in-step): shared code first, both desktop menus,
-  Windows CI green, and the Windows check listed.
-- No new platforms or features beyond what players asked for. Anything risky is off by default.
+The code is done and merged. What is left is building, checking on real hardware and publishing.
 
-### Steps
+## What 0.6.0 contains
 
-| Step | Done when |
-| --- | --- |
-| 1. Audio logging | Every build (Mac, iPad, Windows) writes `[audio]` lines when something changes: whether a cutscene or event is running, the state and volume of the background music and the streamed track, how loud the output is, and samples the host dropped. An `[audio-lost]` line marks music or all sound going quiet while the game runs, with the scene and the game's speed. `scripts/triage_session_log.py` summarizes them. A short automated Mac run shows the lines and the Windows CI passes. |
-| 2. Audio code review | Each difference between Wind Waker Recomp 0.4.0 and `main` that can affect sound timing has been checked in the code: Smooth Motion's in-between frames, the experimental 60 Hz gameplay (in 0.4.0 only), the native function replacements, DSP and streamed-music handling, and slow frames. Any that can drop cutscene audio is fixed in shared code or turned off by default, or written up in WINDOWS_TASKS.md with the log lines that would confirm it. |
-| 3. PadMint confirmation | The player path, `padmint make bluewake ios` from the published release and a disc, runs on this Mac to a finished IPA that passes PadMint's audit. The time and result are in [PADMINT_HANDOFF.md](PADMINT_HANDOFF.md), and the README asks players to say whether it worked. Installing on an iPad waits for the iPad. |
-| 4. Small fixes | Each fix is in shared code or both menus, passes the Windows CI, is listed under "In `main`, waiting for a Windows build", and its issue is answered. First: portable mode for Windows (#64). |
-| 5. Linux | With Chris's go-ahead, the author of the native Linux port (Wind-Waker-Recomp PR #33) is invited to open it on BlueWake, and its release workflow follows the Linux rules in AGENTS.md (no disc in CI). |
-| 6. Issues and docs | Every pass: new issues and comments answered in Chris's voice and labeled, nothing closed without the reporter, and README, MIGRATION_STATUS.md and WINDOWS_TASKS.md match `main`. |
+| Change | Issue | Ships to | Checked so far | Still to check |
+| --- | --- | --- | --- | --- |
+| Dungeon maps draw their grid and rooms | #74 | All | Mac, iPad simulator | Windows |
+| Intro music after the title music | #97 | On by default: Mac, iPhone, iPad. Windows: step 4 decides | Mac (captured audio), physical iPad | Windows with the variable on |
+| A controller recognized late, or left as player 2, plays as player 1 | #61 | Mac, Windows | Unit test with real SDL and Aurora | A physical controller |
+| The Wind Waker baton is not mirrored | #156 | Mac, Windows | Live Mac run (the conducting flag) | Conducting with a controller |
+| No big dead zone or jump on the left stick | #138 | All controllers | Unit test, Windows compile | A physical controller |
+| Option: invert the left stick when aiming | #154 | Mac, Windows | Live Mac run (aiming detected) | Windows menu |
+| Touch controls released when Apple menus open | none | iPhone, iPad | Simulator | A physical device |
+| Clean quit (shutdown fix from the Linux port) | #56 | All | Mac quit with Smooth Motion on | Windows quit |
+| The session log names the controller mapping in use | #61 | Mac, Windows | Unit test | None |
+| Visual Studio 2022 builds from source | #153 | Windows builder | LLVM 18, 20 and 22 against the real profile | The reporter's build |
 
-### Each iteration
+Not in 0.6.0: the Linux build (#107), the performance work (PRIORITIES Tier 2), later cutscene sound (#65), the
+flicker (#136), HD pack shading (#80), the controller picker (#155). The Pictobox fallback stays opt-in.
 
-1. Pick the first step that isn't done and name what will close it.
-2. Prefer reading the code and adding logging over playing the game.
-3. Make the smallest change, run the host tests, and let the Windows CI build it.
-4. Update the issue, WINDOWS_TASKS.md and the progress below.
+## Steps
 
-Stop when steps 1 to 4 are done or blocked on hardware, and say which. Don't repeat runs that can't tell
-causes apart.
+| # | Step | Who | Done when |
+| --- | --- | --- | --- |
+| 1 | **Freeze.** `version.json` to 0.6.0 build 5, README download names, release notes in `docs/status/RELEASE_0.6.0.md`. Merge, and record the commit as the candidate. | Codex | CI green; candidate commit written in the notes |
+| 2 | **Apple.** From the candidate: `scripts/builder/build.sh --app-only --ipa BlueWake-v0.6.0-ios-unsigned.ipa`, PadMint's audit and `scripts/release/check_public_assets.sh`. Then a full PadMint build from the owned disc (the player's route), kept private. On the Mac and in the iOS Simulator: launch, wait for the title music and check the intro's captured audio, load a copied save, open a dungeon map, quit. | Codex, on Chris's Mac | Every check passes; logs and builds stay local. A physical iPhone or iPad only if Chris asks, with a backup and readback first |
+| 3 | **Windows build and checks.** Codex on Chris's PC follows [WINDOWS_BUILD_0.6.0.md](status/WINDOWS_BUILD_0.6.0.md) as its own loop: it builds #172's branch (the candidate with the intro fix on), walks Chris through the intro with and without the fix, a dungeon map from a test save made from his own card, save, load and quit, and the controller rows if a controller is at hand. | Codex on the PC, Chris plays | Results pull request opened |
+| 4 | **Windows intro default.** Decided by check a in that file. If it passes, the build already has the fix on and #172 merges. If it fails, the PC agent rebuilds the candidate with the fix off, and the notes document the variable. | Decided by the PC run; Codex on the Mac merges | The default and its evidence recorded |
+| 5 | **Package.** The PC agent packages and uploads the Windows zip to the **draft** release `v0.6.0`. On the Mac: download it, compare its SHA-256, `check_public_assets.sh` on every asset (for the Windows zip, `containsTranslatedGameCode: true` is the only accepted finding); source zip and IPA from the release commit, `padmint.json`, `SHA256SUMS`, the notes. | Codex on both machines | Draft release with five audited assets |
+| 6 | **Publish.** Chris publishes and tags. Then: PadMint's `doctor` and `plan` see 0.6.0; each issue above gets a note asking its reporter to confirm; PRIORITIES moves these rows to "shipped". | Chris publishes; Codex follows up | Release live; issues updated |
 
-### Progress
+## Rules for each turn
 
-- October 4: loop written. Done before it: controller button remapping on Mac and Windows (#66), Jump
-  and Sprint off by default everywhere (#71), #67 closed after the reporter confirmed 0.4.0 fixed it.
-- **1. Audio logging:** done. `runtime/host/src/audio_watch.c` writes `[demo]`, `[demo-sound]` and
-  `[audio-lost]` in every build; the triage script reports them. On the Mac, a new game to control logs
-  the opening cutscene as `cues=4 sounds=4 missing=0 silent=0.4s of 104.7s`. A test feeds it a
-  fake cutscene with a missing sound and silence.
-- **2. Audio code review:** done. The audio pacing settings are the same on every platform; only the
-  Windows 0.4.0 download has native math on, Smooth Motion on by default and the 60 Hz option. How to
-  read the new lines and where each points is in [WINDOWS_TASKS.md](WINDOWS_TASKS.md#reading-the-cutscene-sound-lines-65-97).
-  Confirming the cause needs a log from a Windows build of `main`.
-- **5. Linux:** the port's author was invited to open it on BlueWake without the disc in CI
-  ([comment](https://github.com/elliotttate/Wind-Waker-Recomp/pull/33#issuecomment-5979167274)).
-
-Earlier loops are in [the archive](archive/GOAL_LOOP_HISTORY.md).
+1. Read [AGENTS.md](../AGENTS.md), check `main`, open pull requests and new issue replies before acting.
+2. A problem found during the candidate gets its own small pull request. Then freeze again and rerun only the checks
+   it affects. Never move a passing result to a different build without saying so.
+3. Write what was run, on which device and from which commit in `docs/status/RELEASE_0.6.0.md`. A build that compiles
+   is not a game that plays; a simulator is not a device.
+4. Personal builds, game modules, discs, saves and logs stay private. Only the five public assets are uploaded.
+5. Ask Chris before publishing, deleting anything, or installing on his devices. Don't wait on him for anything else.
+6. If a step is blocked on hardware Chris has, say exactly what to run and keep going with the other steps.

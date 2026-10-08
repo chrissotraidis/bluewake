@@ -412,6 +412,31 @@ int main(void) {
 
     APP_PROFILE = ROOT / "windows/pgo/app.profdata"
 
+    def app_profile_readable(self):
+        """Whether this Visual Studio's clang can read the committed app profile.
+        It was recorded with clang 22; older clangs (Visual Studio 2022's 19.1,
+        2026 before 18.10) reject its format, and every compile, CMake's own
+        compiler check first, would fail (#153). Those build the app without it."""
+        if getattr(self, "_app_profile_readable", None) is None:
+            clang = getattr(self, "clang", None)
+            tool = Path(clang).with_name("llvm-profdata.exe") if clang else None
+            if tool is None or not tool.is_file():
+                readable, reason = False, "llvm-profdata.exe is not beside Visual Studio's clang"
+            else:
+                try:
+                    shown = subprocess.run([str(tool), "show", str(self.APP_PROFILE)], capture_output=True,
+                                           text=True, env=getattr(self, "env", None))
+                    lines = (shown.stderr or shown.stdout).strip().splitlines()
+                    readable, reason = shown.returncode == 0, (lines[-1] if lines else "unreadable")
+                except OSError as error:
+                    readable, reason = False, str(error)
+            if not readable:
+                print(f"note: building the app without its optimization profile ({reason}). The profile "
+                      "needs clang 22, which comes with Visual Studio 2026 18.10 or newer; the app works "
+                      "without it, its graphics thread a little slower.", flush=True)
+            self._app_profile_readable = readable
+        return self._app_profile_readable
+
     def configure_app(self, build=None, instrument=False):
         """The app's build, by default build/windows/app. With the committed
         profile of the app's own code (windows/pgo/app.profdata,
@@ -424,7 +449,8 @@ int main(void) {
         profile, link = "", ""
         if instrument:
             profile = link = "-fprofile-instr-generate"
-        elif self.APP_PROFILE.exists() and not getattr(self.args, "no_app_pgo", False):
+        elif (self.APP_PROFILE.exists() and not getattr(self.args, "no_app_pgo", False)
+              and self.app_profile_readable()):
             # Functions changed since the profile was recorded are compiled
             # without counts (the warnings say so; they are expected).
             profile = (f"-fprofile-instr-use={self.APP_PROFILE.as_posix()} -Wno-profile-instr-unprofiled "
@@ -725,7 +751,14 @@ int main(void) {
             flags = [f"-fprofile-instr-use={self.profile.as_posix()}", "-Wno-profile-instr-unprofiled",
                      "-Wno-profile-instr-out-of-date", "-Wno-backend-plugin"]
             print(f"with the optimization profile {self.profile.name}")
-        tiered = self.profile is not None and not getattr(self.args, "no_tiered", False)
+            if getattr(self.args, "no_cold", False):
+                # Code the training never ran (cutscenes, combat, bosses) is
+                # optimized for speed like the rest, not for size: profile-guided
+                # size optimization off, and every chunk at -O2 (docs/PERFORMANCE.md).
+                flags += ["-mllvm", "-pgso=false"]
+                print("--no-cold: code the training never ran is compiled for speed too")
+        tiered = (self.profile is not None and not getattr(self.args, "no_tiered", False)
+                  and not getattr(self.args, "no_cold", False))
         cold = self.cold_sources() if tiered else None
         return self.compile_composite(self.out / "composite", self.args.opt_level, flags, [], "composite", cold)
 
@@ -1031,6 +1064,7 @@ int main(void) {
             "composite_digest": (self.out / "composite-src.digest").read_text().strip(),
             "mods": bool(self.mods),
             "march": self.args.march,
+            "no_cold": getattr(self.args, "no_cold", False),
             "prepared_blocks": self.args.prepared_blocks,
             "fixed_cpu": self.args.fixed_cpu,
             "fixed_mem1": self.args.fixed_mem1,
@@ -1182,6 +1216,10 @@ def main():
     parser.add_argument("--no-tiered", action="store_true",
                         help="compile every chunk at -O2, not only those the optimization training ran "
                              "(a build about 25 minutes longer)")
+    parser.add_argument("--no-cold", action="store_true",
+                        help="compile code the optimization training never ran for speed, like the code it ran: "
+                             "implies --no-tiered and turns off profile-guided size optimization (a longer build; "
+                             "an experiment for scenes the training skips, docs/PERFORMANCE.md)")
     parser.add_argument("--no-mods", action="store_true", help="skip the widescreen and Better Wind Waker variants")
     parser.add_argument("--no-train", action="store_true",
                         help="skip local optimization training; compile without a profile")

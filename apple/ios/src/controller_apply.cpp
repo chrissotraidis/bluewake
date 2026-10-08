@@ -9,6 +9,7 @@
 
 #include <cstdio>
 
+#include "controller_ports.h"
 #include "controller_settings.h"
 
 namespace {
@@ -20,6 +21,7 @@ void apply_controller(const BWSettingsSnapshot& s) {
     // Start from the controller's own defaults (so a reset takes effect and a
     // GameCube adapter keeps its layout), then apply the player's choices.
     PADRestoreDefaultMapping(0);
+    bw_game_dead_zone(0);
     // Camera stick: GameCube +X/+Y from the gamepad's right stick, the sign
     // flipped when inverted (SDL's y axis points down, GameCube's up).
     const PADAxisMapping axes[4] = {

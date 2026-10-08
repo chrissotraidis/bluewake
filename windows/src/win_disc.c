@@ -309,23 +309,39 @@ static int choose(const char* why, char* out, size_t size) {
     const size_t length = strlen(folder);
     if (length > 3 && folder[length - 1] == '\\')
         folder[length - 1] = '\0';
+    // The release leaves nodtool.exe out (it embeds Wii keys), so only a
+    // self-built folder can unpack Dolphin's compressed images: offer them only then.
+    char tool[MAX_PATH * 4];
+    snprintf(tool, sizeof tool, "%snodtool.exe", g_exe);
+    const int can_unpack = is_file(tool);
     char text[2048];
-    snprintf(text, sizeof text,
-             "%s"
-             "BlueWake plays The Legend of Zelda: The Wind Waker from your own copy of the game: the "
-             "GameCube disc for the USA (GZLE01).\n\n"
-             "Choose your disc image next: an .iso or .gcm file, or a Dolphin .rvz. BlueWake checks it and "
-             "prepares it once (an .rvz is unpacked to an ISO in %s), then remembers it.",
-             why, folder);
+    if (can_unpack)
+        snprintf(text, sizeof text,
+                 "%s"
+                 "BlueWake plays The Legend of Zelda: The Wind Waker from your own copy of the game: the "
+                 "GameCube disc for the USA (GZLE01).\n\n"
+                 "Choose your disc image next: an .iso or .gcm file, or a Dolphin .rvz. BlueWake checks it and "
+                 "prepares it once (an .rvz is unpacked to an ISO in %s), then remembers it.",
+                 why, folder);
+    else
+        snprintf(text, sizeof text,
+                 "%s"
+                 "BlueWake plays The Legend of Zelda: The Wind Waker from your own copy of the game: the "
+                 "GameCube disc for the USA (GZLE01).\n\n"
+                 "Choose your disc image next: an .iso or .gcm file. BlueWake checks it and prepares it once, "
+                 "then remembers it.\n\n"
+                 "A Dolphin .rvz has to be converted first: in Dolphin, right-click the game, choose "
+                 "Convert File... and pick ISO.",
+                 why);
     wchar_t message[4096];
     wide(text, message, 4096);
     if (MessageBoxW(NULL, message, L"BlueWake: choose your disc", MB_OKCANCEL | MB_ICONINFORMATION) != IDOK)
         return 0;
     wchar_t file[MAX_PATH * 2] = L"";
     OPENFILENAMEW dialog = {sizeof dialog};
-    dialog.lpstrFilter =
-        L"GameCube disc images (*.iso, *.gcm, *.rvz, *.wia, *.gcz, *.ciso, *.nfs)\0"
-        L"*.iso;*.gcm;*.rvz;*.wia;*.gcz;*.ciso;*.nfs\0All files\0*.*\0";
+    dialog.lpstrFilter = can_unpack ? L"GameCube disc images (*.iso, *.gcm, *.rvz, *.wia, *.gcz, *.ciso, *.nfs)\0"
+                                      L"*.iso;*.gcm;*.rvz;*.wia;*.gcz;*.ciso;*.nfs\0All files\0*.*\0"
+                                    : L"GameCube disc images (*.iso, *.gcm)\0*.iso;*.gcm\0All files\0*.*\0";
     dialog.lpstrFile = file;
     dialog.nMaxFile = MAX_PATH * 2;
     dialog.lpstrTitle = L"Choose your Wind Waker disc image (GameCube, USA)";

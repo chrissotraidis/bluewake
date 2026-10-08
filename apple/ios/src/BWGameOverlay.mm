@@ -174,13 +174,15 @@ static CGRect BWFrameAtNormalizedCenter(CGRect safe, CGFloat x, CGFloat y, CGFlo
 
 // The ellipsis button; the game is held while its menu is on screen.
 @interface BWMenuButton : UIButton
+@property(nonatomic, copy) void (^willShowMenu)(void);
 @end
 @implementation BWMenuButton
 - (void)contextMenuInteraction:(UIContextMenuInteraction*)interaction
     willDisplayMenuForConfiguration:(UIContextMenuConfiguration*)configuration
                            animator:(id<UIContextMenuInteractionAnimating>)animator {
     [super contextMenuInteraction:interaction willDisplayMenuForConfiguration:configuration animator:animator];
-    bluewake_touch_clear();
+    if (self.willShowMenu)
+        self.willShowMenu();
     bluewake_pause_set(BLUEWAKE_PAUSE_MENU, true);
 }
 - (void)contextMenuInteraction:(UIContextMenuInteraction*)interaction
@@ -208,6 +210,7 @@ static CGRect BWFrameAtNormalizedCenter(CGRect safe, CGFloat x, CGFloat y, CGFlo
 - (void)hideSettingsPanel;
 - (void)beginLayoutEditing;
 - (void)endLayoutEditing;
+- (void)clearTouchInput;
 - (void)tapIdentifier:(NSString*)identifier holdSeconds:(double)hold;
 @end
 
@@ -344,7 +347,7 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
 }
 
 - (void)presentAlert:(UIAlertController*)alert {
-    bluewake_touch_clear();
+    [self clearTouchInput];
     bluewake_pause_set(BLUEWAKE_PAUSE_ALERT, true);
     [[self presenter] presentViewController:alert animated:YES completion:nil];
 }
@@ -362,6 +365,8 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
 
 - (void)buildMenuButton {
     _menuButton = [BWMenuButton buttonWithType:UIButtonTypeCustom];
+    __weak BWGameOverlay* weakSelf = self;
+    _menuButton.willShowMenu = ^{ [weakSelf clearTouchInput]; };
     UIImageSymbolConfiguration* symbol =
         [UIImageSymbolConfiguration configurationWithPointSize:19.0 weight:UIImageSymbolWeightBold];
     [_menuButton setImage:[UIImage systemImageNamed:@"ellipsis" withConfiguration:symbol]
@@ -783,7 +788,7 @@ static NSUInteger g_packFiles = NSNotFound;
     _pickHandler = [handler copy];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
-    bluewake_touch_clear();
+    [self clearTouchInput];
     bluewake_pause_set(BLUEWAKE_PAUSE_ALERT, true);
     [[self presenter] presentViewController:picker animated:YES completion:nil];
 }
@@ -809,7 +814,7 @@ static NSUInteger g_packFiles = NSNotFound;
               work:(void (^)(UIAlertController* wait))work done:(void (^)(void))done {
     UIAlertController* wait = [UIAlertController alertControllerWithTitle:title message:message
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    bluewake_touch_clear();
+    [self clearTouchInput];
     bluewake_pause_set(BLUEWAKE_PAUSE_ALERT, true);
     [[self presenter] presentViewController:wait animated:YES completion:^{
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -1351,7 +1356,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
         (void)type; (void)done; (void)items; (void)error;
         bluewake_pause_set(BLUEWAKE_PAUSE_ALERT, false);
     };
-    bluewake_touch_clear();
+    [self clearTouchInput];
     bluewake_pause_set(BLUEWAKE_PAUSE_ALERT, true);
     [[self presenter] presentViewController:share animated:YES completion:nil];
 }
@@ -1523,6 +1528,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
 }
 
 - (void)clearTouchInput {
+    // Clear the overlay's state too: the next touch republishes the whole pad.
     for (BWGameButton* button in _buttons)
         button.transform = CGAffineTransformIdentity;
     _pad = BlueWakeTouchPad{};
@@ -1910,7 +1916,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
     _hideSwitch.on = BWBoolDefault(kHideOnControllerKey, YES);
     _editSwitch.on = NO;
     _settingsPanel.hidden = NO;
-    bluewake_touch_clear();
+    [self clearTouchInput];
     bluewake_pause_set(BLUEWAKE_PAUSE_SETTINGS, true);
     [self setNeedsLayout];
 }

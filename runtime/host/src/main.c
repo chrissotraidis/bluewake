@@ -14,6 +14,7 @@
 #include "gxruntime/vi_clock.h"
 #include "gxruntime/aram.h"
 #include "core/cpu.h"
+#include "cache_flush_fallback.h"
 #include "StaticRecompABI.h"
 #include "../../../cmake/composite/module_cpu_contract.h"
 #include <stdatomic.h>
@@ -40,6 +41,7 @@
 #include "draw_tags.h"
 #include "mouse_camera.h"
 #include "callback_delivery.h"
+#include "dvd_completion.h"
 #include "cycle_domain.h"
 #include "interrupt_sources.h"
 #include "delivery_digest.h"
@@ -319,6 +321,7 @@ static bool g_name_character_jut_trigger_reported;
 static bool g_name_character_cpad_hold_reported;
 static bool g_name_character_cpad_trigger_reported;
 static BluewakePadEventSchedule g_title_pad_pulse;
+static u64 g_title_pad_delay;
 static BluewakePadEventSchedule g_title_confirm_pulse;
 static BluewakePadEventSchedule g_no_card_dismiss_pulse;
 static BluewakePadAxisEventSchedule g_no_save_left_pulse;
@@ -714,13 +717,14 @@ static u64 perf_now_us(clockid_t clock) {
 /* For the iOS shell's FPS display and per-second log: the guest retrace count
    (60 a second is full speed) and the emulation thread's CPU time. Read from
    the same thread that advances them. */
-// Windows builds prepare Wind Waker Recomp's optimization set by default
-// (scripts/windows/build.py), so there an optimization the module offers is used
-// unless its variable is 0; elsewhere it stays an opt-in (1). A module prepared
-// without one does not offer it and keeps the translated path.
+// Windows and Linux builds prepare Wind Waker Recomp's optimization set by
+// default (scripts/windows/build.py and scripts/linux/build.py), so there an
+// optimization the module offers is used unless its variable is 0; elsewhere it
+// stays an opt-in (1). A module prepared without one does not offer it and
+// keeps the translated path.
 static bool host_feature_wanted(const char* name) {
     const char* value = getenv(name);
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     if (value == NULL || value[0] == '\0')
         return true;
 #endif
@@ -1053,6 +1057,10 @@ static unsigned g_di_read_reports;
 static unsigned g_vi_ack_reports;
 static unsigned g_dvd_open_reports;
 static unsigned g_dvd_read_reports;
+static bool g_deferred_dvd_enabled;
+static bool g_cache_flush_fallback_enabled;
+static BluewakeDvdCompletions g_dvd_completions;
+static unsigned g_dvd_completion_reports;
 static unsigned g_archive_reports;
 static unsigned g_dynamic_load_reports;
 static bool g_dynamic_link_header_reported;
@@ -1150,6 +1158,7 @@ static unsigned g_audio_object_watch_reports;
 // scene's music started. GZLE01 revision 0: JAIZelBasic's zel_basic SDA slot,
 // the stream object's sound and id, and the stream path buffer.
 static unsigned g_music_stream_reports;
+static unsigned g_music_dvd_reports;
 static u32 g_music_stream_last_id;
 static u8 g_music_stream_last_state, g_music_stream_last_disabled;
 static char g_music_stream_last_path[64];
@@ -1176,8 +1185,20 @@ static void host_log_music_stream(CPUState* cpu) {
     if (id == g_music_stream_last_id && state == g_music_stream_last_state &&
         disabled == g_music_stream_last_disabled && strcmp(path, g_music_stream_last_path) == 0)
         return;
-    fprintf(stderr, "[music-stream] retrace=%llu path=\"%s\" id=0x%08X state=%u muted=%u\n",
-            (unsigned long long)g_host_retrace_count, path, id, state, disabled);
+    // A state-4 sample alone does not prove sustained music (#97). These
+    // StreamLib fields distinguish a stop/finish from a stalled load in the
+    // next state-change line. Read only on transitions, not on every sample.
+    // Addresses: tww config/GZLE01/symbols.txt (revision 0).
+    fprintf(stderr,
+            "[music-stream] retrace=%llu path=\"%s\" id=0x%08X state=%u muted=%u "
+            "sound=0x%08X stop=%u/%u play=%u/%u decoded=%u playback_samples=%u "
+            "buffer_state=%u dvd_pending=%u starting=%u dsp_finished=%u\n",
+            (unsigned long long)g_host_retrace_count, path, id, state, disabled, sound,
+            mem_read8(cpu, 0x803F768Cu), mem_read8(cpu, 0x803F768Du),
+            mem_read8(cpu, 0x803F768Eu), mem_read8(cpu, 0x803F768Fu),
+            mem_read32(cpu, 0x803F7680u), mem_read32(cpu, 0x803F767Cu),
+            mem_read32(cpu, 0x803F7684u), mem_read32(cpu, 0x803F76C4u),
+            mem_read32(cpu, 0x803F76C8u), mem_read8(cpu, 0x803F76DAu));
     g_music_stream_reports++;
     g_music_stream_last_id = id;
     g_music_stream_last_state = state;
@@ -1902,7 +1923,13 @@ static void host_actor_search_native(CPUState* cpu) {
     g_actor_search_native_runs++;
 }
 
-static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) {
+// The part of the full edge test that depends only on host state, not on the
+// address being dispatched. host_chassis_requires_full calls this first and
+// then the address-keyed checks; the direct-call skip path calls this alone
+// (see host_direct_can_skip), because the module has already proven the
+// address unwatched - and every address-keyed check below keys on an address
+// the watch list contains, so an unwatched address can never trip one.
+static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
     if (__builtin_expect(cpu == NULL || g_turn_census_enabled ||
                              g_boundary_census_enabled ||
                              g_chassis_service_each_block ||
@@ -1923,6 +1950,16 @@ static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) 
                 return true;
         }
     }
+    if ((cpu->msr & PPC_MSR_EE) != 0u &&
+        (g_guest_decrementer_pending ||
+         (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
+        return true;
+    return false;
+}
+
+static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) {
+    if (host_chassis_dynamic_requires_full(cpu))
+        return true;
     if (!g_new_game_intro_reported &&
         (address == 0x80018554u || address == 0x8001199Cu))
         return true;
@@ -1931,10 +1968,6 @@ static inline bool host_chassis_requires_full(const CPUState* cpu, u32 address) 
         return true;
     if ((g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) ||
         bluewake_edge_maybe_intercept(host_canonical_linked_pc(address)))
-        return true;
-    if ((cpu->msr & PPC_MSR_EE) != 0u &&
-        (g_guest_decrementer_pending ||
-         (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
         return true;
     return false;
 }
@@ -1961,7 +1994,27 @@ static bool host_can_skip_observation(void* user, const CPUState* cpu, u32 addre
 }
 
 static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
-    const bool allowed = host_can_skip_observation(user, cpu, address);
+    (void)user;
+#if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
+    (void)cpu; (void)address;
+    const bool allowed = false;
+#else
+    // The direct-call skip is only ever permitted for addresses the module's
+    // watch list has already rejected (bw_edge_unwatched gates every actual
+    // skip), and that list is a superset of the intercept table and of every
+    // feature-observation address below. So the address-keyed checks the full
+    // predicate adds cannot fire here; run the dynamic-only predicate, which
+    // skips the intercept-table walk on the hot path. The one address-keyed
+    // check that must stay is the module-1 raw alias: g_module1_raw_base is a
+    // runtime value, not a compile-time literal, so it is the one address the
+    // watch list cannot guarantee.
+    const bool allowed = !g_deadline_census_enabled && !g_delivery_safety_census_enabled &&
+           !g_guest_state_trace_enabled && !bluewake_jump_button_armed &&
+           !bluewake_feature_observes(address) &&
+           !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
+           !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
+           !host_chassis_dynamic_requires_full(cpu);
+#endif
     if (g_direct_call_trace) {
         g_direct_call_queries++;
         g_direct_call_allowed += allowed;
@@ -4769,17 +4822,27 @@ static bool host_graphics_guest_resolve_uncached(
     // d_a_majuu_flag in Hyrule, 0xC0B928C0) was read from unrelated RAM at
     // 0x80B928C0 and failed to parse. The CPU resolves those addresses through
     // the alias registry; resolve graphics reads the same way.
+    //
+    // A game that writes a vertex array's base itself passes it through
+    // OSCachedToPhysical, which subtracts 0x80000000, so a module's data at
+    // 0xC06B0DA0 arrives as 0x406B0DA0. Nothing lives there on a GameCube, so
+    // look it up at the linked address it came from: Molgera's sand floor
+    // (d_a_bwdg's GFSetArray of its texture coordinates) was skipped every
+    // frame and the arena had no floor (issue #126).
     {
+        const u32 linked = (address & 0xC0000000u) == 0x40000000u
+                               ? address | 0x80000000u
+                               : address;
         u8* alias = NULL;
         u32 alias_offset = 0u;
         // The translation worker's thread: see g_guest_alias_lock.
         pthread_mutex_lock(&g_guest_alias_lock);
-        const bool aliased = ppc_guest_alias_resolve(address, size, &alias, &alias_offset);
+        const bool aliased = ppc_guest_alias_resolve(linked, size, &alias, &alias_offset);
         // Whether an alias holds the address at all: if none does, none holds
         // a range from it of any size, and the result below is every size's.
         u8* held = NULL;
         u32 held_offset = 0u;
-        *any_size = !aliased && !ppc_guest_alias_resolve(address, 1u, &held, &held_offset);
+        *any_size = !aliased && !ppc_guest_alias_resolve(linked, 1u, &held, &held_offset);
         pthread_mutex_unlock(&g_guest_alias_lock);
         if (aliased && alias != NULL) {
             *data = alias;
@@ -5570,6 +5633,18 @@ static bool configure_virtual_pad(DolHeadlessBackend* backend) {
             return false;
         }
         char* end = NULL;
+        // Let a diagnostic route exercise title-music -> intro transitions.
+        // Zero preserves the existing immediate route; no live input changes.
+        const char* title_delay = getenv("BLUEWAKE_PAD_TITLE_DELAY");
+        if (title_delay != NULL && title_delay[0] != '\0') {
+            g_title_pad_delay = strtoull(title_delay, &end, 10);
+            if (title_delay[0] == '-' || end == title_delay || *end != '\0' ||
+                g_title_pad_delay > 3600u) {
+                fprintf(stderr, "invalid BLUEWAKE_PAD_TITLE_DELAY=%s (0..3600 retraces)\n",
+                        title_delay);
+                return false;
+            }
+        }
         u64 event_length = 2u;
         if (pulse_length != NULL && pulse_length[0] != '\0') {
             event_length = strtoull(pulse_length, &end, 0);
@@ -5619,8 +5694,9 @@ static bool configure_virtual_pad(DolHeadlessBackend* backend) {
         g_virtual_pad[0].button = 0u;
         fprintf(stderr,
                 "[pad] channel 0 pulse armed on title-ready length=%llu "
-                "buttons=0x%04X\n",
-                (unsigned long long)event_length, g_pad_pulse_buttons);
+                "buttons=0x%04X delay=%llu\n",
+                (unsigned long long)event_length, g_pad_pulse_buttons,
+                (unsigned long long)g_title_pad_delay);
     }
     // The in-game save route (P4 milestone 9). Its own schedules: START, A,
     // and the two stick axes it steps the pause menu's cursor with. Off unless
@@ -5808,6 +5884,8 @@ static bool configure_virtual_pad(DolHeadlessBackend* backend) {
 }
 
 static void instruction_fallback(CPUState* ctx, u32 raw, u32 cia) {
+    if (g_cache_flush_fallback_enabled && bluewake_cache_flush_fallback(ctx, raw, cia))
+        return;
     if ((raw >> 26) == 31u) {
         u32 xo = (raw >> 1) & 0x3FFu;
         u16 spr = (u16)(((raw >> 16) & 0x1Fu) | ((raw >> 6) & 0x3E0u));
@@ -6178,6 +6256,7 @@ static const BwStateField k_host_state_fields[] = {
     HS_FIELD(g_di.status), HS_FIELD(g_di.cover), HS_FIELD(g_di.command),
     HS_FIELD(g_di.dma_address), HS_FIELD(g_di.dma_length), HS_FIELD(g_di.control),
     HS_FIELD(g_di.immediate_data), HS_FIELD(g_di.config),
+    HS_FIELD(g_dvd_completions),
     // Guest time: the decrementer, the cycle domain and each device's cursor.
     HS_FIELD(g_guest_clock_decrementer), HS_FIELD(g_guest_clock_decrementer_valid),
     HS_FIELD(g_guest_clock_decrementer_expired), HS_FIELD(g_guest_clock_cycle_remainder),
@@ -6468,6 +6547,15 @@ static bool host_state_load(const char* path, CPUState* cpu,
         fprintf(stderr, "[state] %s: invalid host or alias chunk\n", path);
         goto done;
     }
+    BluewakeDvdCompletions saved_dvd = {0};
+    const BwStateField dvd_field = {"g_dvd_completions", &saved_dvd, sizeof(saved_dvd)};
+    uint32_t dvd_mismatched = 0;
+    if (!bw_state_fields_unpack(&dvd_field, 1u, vars->data, vars->size,
+                                NULL, NULL, &dvd_mismatched) || dvd_mismatched != 0u ||
+        saved_dvd.count > BLUEWAKE_DVD_COMPLETION_CAPACITY) {
+        fprintf(stderr, "[state] %s: invalid DVD completion queue\n", path);
+        goto done;
+    }
     {
         u32 count;
         memcpy(&count, aliases->data, sizeof count);
@@ -6552,6 +6640,8 @@ static bool host_state_load(const char* path, CPUState* cpu,
 
     chunk = bw_state_find(&reader, "HOSTVARS");
     uint32_t restored = 0u, missing = 0u, mismatched = 0u;
+    // Old states have no pending queue. Never retain completions from the future.
+    memset(&g_dvd_completions, 0, sizeof(g_dvd_completions));
     if (chunk == NULL ||
         !bw_state_fields_unpack(k_host_state_fields,
                                 (u32)(sizeof k_host_state_fields / sizeof k_host_state_fields[0]),
@@ -7306,6 +7396,22 @@ int main(int argc, char** argv) {
     g_di_read_reports = 0;
     g_dvd_open_reports = 0;
     g_dvd_read_reports = 0;
+    // Asynchronous disc reads complete after the caller returns, as on the
+    // hardware. Completing them inside the call left the music stream's load
+    // flag set, so the history intro after the title music played silently
+    // (#97). On by default everywhere since the Windows check for 0.6.0
+    // (docs/status/WINDOWS_BUILD_0.6.0.md). BLUEWAKE_DEFER_DVD_COMPLETION=0
+    // brings back the old path for a comparison.
+    const bool deferred_dvd_default = true;
+    const char* deferred_dvd = getenv("BLUEWAKE_DEFER_DVD_COMPLETION");
+    const bool deferred_dvd_set = deferred_dvd != NULL && deferred_dvd[0] != '\0';
+    g_deferred_dvd_enabled = deferred_dvd_set ? strcmp(deferred_dvd, "1") == 0 : deferred_dvd_default;
+    fprintf(stderr, "[dvd] deferred completion=%s (%s)\n", g_deferred_dvd_enabled ? "on" : "off",
+            deferred_dvd_set ? "BLUEWAKE_DEFER_DVD_COMPLETION" : "default");
+    const char* cache_flush = getenv("BLUEWAKE_CACHE_FLUSH_FALLBACK");
+    g_cache_flush_fallback_enabled = cache_flush != NULL && strcmp(cache_flush, "1") == 0;
+    fprintf(stderr, "[texture-cache] fallback writeback=%s\n",
+            g_cache_flush_fallback_enabled ? "on (experimental)" : "off");
     g_archive_reports = 0;
     g_dynamic_load_reports = 0;
     g_dynamic_link_header_reported = false;
@@ -10869,7 +10975,7 @@ int main(int argc, char** argv) {
                     mem_read32(&cpu, 0x803F7B3Cu), cpu.gpr[3],
                     (unsigned long long)blocks);
             if (bluewake_pad_event_schedule_trigger(
-                    &g_title_pad_pulse, g_host_retrace_count)) {
+                    &g_title_pad_pulse, g_host_retrace_count + g_title_pad_delay)) {
                 fprintf(stderr,
                         "[pad] title-ready pulse trigger start=%llu length=%llu "
                         "buttons=0x%04X\n",
@@ -11185,6 +11291,10 @@ int main(int argc, char** argv) {
             const u32 title_proc = mem_read32(&cpu, cpu.gpr[31] + 0x298u);
             if (title_proc >= 0x80000000u &&
                 mem_read32(&cpu, title_proc + 0x30u) == 1u &&
+                (g_title_pad_delay == 0u ||
+                 (g_host_retrace_count >= g_title_pad_pulse.start_retrace +
+                                             g_title_pad_pulse.length &&
+                  host_guest_cpad_a_released(&cpu))) &&
                 bluewake_pad_event_schedule_trigger(
                     &g_title_confirm_pulse, g_host_retrace_count)) {
                 fprintf(stderr,
@@ -12148,7 +12258,11 @@ int main(int argc, char** argv) {
             const u32 file_start = mem_read32(&cpu, file_info + DVD_FI_STARTADDR);
             const u32 file_length = mem_read32(&cpu, file_info + DVD_FI_LENGTH);
             const u32 callback_data = mem_read32(&cpu, file_info + 0x3Cu);
-            const bool valid = file_info != 0u && address != 0u &&
+            const bool defer = g_deferred_dvd_enabled && !synchronous;
+            if (defer && g_dvd_completions.count >= BLUEWAKE_DVD_COMPLETION_CAPACITY)
+                fprintf(stderr, "[dvd] async read rejected: completion queue full\n");
+            const bool valid = (!defer || g_dvd_completions.count < BLUEWAKE_DVD_COMPLETION_CAPACITY) &&
+                               file_info != 0u && address != 0u &&
                                offset <= file_length &&
                                length <= file_length - offset + DVD_MIN_TRANSFER_SIZE;
             const u64 read_end = (u64)address + (u64)length;
@@ -12174,12 +12288,26 @@ int main(int argc, char** argv) {
                         mem_read32(&cpu, 0x80AD2148u),
                         mem_read32(&cpu, 0x80AD214Cu));
             }
-            mem_write32(&cpu, file_info + DVD_CB_STATE, 0u);
-            mem_write32(&cpu, file_info + DVD_CB_CURRXFER, valid ? length : 0u);
-            mem_write32(&cpu, file_info + DVD_CB_XFERRED, valid ? length : 0u);
+            mem_write32(&cpu, file_info + DVD_CB_STATE, defer && valid ? 1u : 0u);
+            mem_write32(&cpu, file_info + DVD_CB_CURRXFER, valid && !defer ? length : 0u);
+            mem_write32(&cpu, file_info + DVD_CB_XFERRED, valid && !defer ? length : 0u);
             cpu.gpr[3] = synchronous ? (valid ? length : 0u) : (valid ? 1u : 0u);
             cpu.pc = cpu.lr & ~3u;
-            if (!synchronous && valid && callback != 0u) {
+            if (defer && valid) {
+                // A nonzero device latency prevents completion inside its caller.
+                // One guest millisecond is a compatibility floor, not a disc-speed model.
+                const BluewakeDvdCompletion completion = {
+                    .ready_cycle = g_cycle_domain.absolute_cycles + GUEST_CPU_CYCLES_PER_SECOND / 1000u,
+                    .callback = callback, .file_info = file_info, .length = length,
+                };
+                if (!bluewake_dvd_enqueue(&g_dvd_completions, completion))
+                    stop_reason = "DVD completion queue overflow";
+            } else if (!synchronous && valid && callback != 0u) {
+                const bool trace_music_read = callback == 0x8029D1C8u &&
+                                              g_music_dvd_reports < 4u;
+                const u32 music_pending_before = trace_music_read ?
+                    mem_read32(&cpu, 0x803F76C4u) : 0u;
+                const u32 callback_return = cpu.pc;
                 if (g_dvd_read_reports < 4u)
                     fprintf(stderr,
                             "[dvd] callback-enter callback=0x%08X result=%u "
@@ -12190,6 +12318,15 @@ int main(int argc, char** argv) {
                                                     length, file_info, 4096u,
                                                     host_prepare_guest_dispatch,
                                                     &g_cycle_domain);
+                if (trace_music_read) {
+                    fprintf(stderr,
+                            "[music-dvd] retrace=%llu callback=0x%08X return=0x%08X "
+                            "msr=0x%08X pending_before=%u pending_after=%u completed=%u\n",
+                            (unsigned long long)g_host_retrace_count, callback,
+                            callback_return, cpu.msr, music_pending_before,
+                            mem_read32(&cpu, 0x803F76C4u), delivery.completed ? 1u : 0u);
+                    g_music_dvd_reports++;
+                }
                 if (!delivery.completed) {
                     fprintf(stderr,
                             "[dvd] callback incomplete callback=0x%08X pc=0x%08X "
@@ -15181,6 +15318,32 @@ int main(int argc, char** argv) {
                 g_credit_lag_max = lag;
         }
         host_sync_cycle_devices_end_turn(&cpu);
+        BluewakeDvdCompletion completion;
+        if (g_dvd_completions.count != 0u &&
+            bluewake_dvd_take_ready(&g_dvd_completions, g_cycle_domain.absolute_cycles,
+                (cpu.msr & PPC_MSR_EE) != 0u && cpu.exception == 0u &&
+                bluewake_scheduler_interrupt_safe(cpu.pc), &completion)) {
+            mem_write32(&cpu, completion.file_info + DVD_CB_STATE, 0u);
+            mem_write32(&cpu, completion.file_info + DVD_CB_CURRXFER, completion.length);
+            mem_write32(&cpu, completion.file_info + DVD_CB_XFERRED, completion.length);
+            bool completed = true;
+            if (completion.callback != 0u) {
+                const BluewakeCallbackDeliveryResult delivery = bluewake_deliver_guest_callback(
+                    &cpu, mod, completion.callback, completion.length, completion.file_info,
+                    4096u, host_prepare_guest_dispatch, &g_cycle_domain);
+                // This callback runs after the regular end-of-turn flush.
+                // Account for its last block before begin_turn resets downcount.
+                (void)bluewake_cycle_domain_flush(&g_cycle_domain, &cpu);
+                host_sync_cycle_devices_end_turn(&cpu);
+                completed = delivery.completed;
+                if (!completed)
+                    stop_reason = "deferred DVD callback delivery";
+            }
+            if (g_dvd_completion_reports++ < 8u || !completed)
+                fprintf(stderr, "[dvd-completion] callback=0x%08X file=0x%08X bytes=%u "
+                        "completed=%u pending=%u\n", completion.callback, completion.file_info,
+                        completion.length, completed ? 1u : 0u, g_dvd_completions.count);
+        }
         if (g_delivery_safety_census_enabled) {
             if (g_guest_decrementer_pending) {
                 g_decrementer_pending_turns++;

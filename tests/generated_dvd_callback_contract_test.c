@@ -31,6 +31,7 @@ typedef const StaticRecompModuleDesc* (*GetModuleFn)(void);
 static void prepare_callback_dispatch(CPUState* cpu, void* user) {
     unsigned* calls = user;
     (*calls)++;
+    cpu->downcount = 0;
     cpu->cycle_budget = 37;
 }
 
@@ -39,6 +40,7 @@ static void dispatch_until(const StaticRecompModuleDesc* module, CPUState* cpu,
     unsigned dispatches = 0u;
     while (cpu->pc != stop_pc && dispatches < 10000u) {
         cpu->downcount = 0;
+        cpu->cycle_budget = 10000;
         if (module->dispatch(cpu, cpu->pc) != 1) {
             fprintf(stderr,
                     "uncovered pc=0x%08X dispatches=%u lr=0x%08X r1=0x%08X "
@@ -50,6 +52,9 @@ static void dispatch_until(const StaticRecompModuleDesc* module, CPUState* cpu,
         }
         dispatches++;
     }
+    if (cpu->pc != stop_pc)
+        fprintf(stderr, "callback test expected 0x%08X, stopped at 0x%08X after %u dispatches\n",
+                stop_pc, cpu->pc, dispatches);
     assert(cpu->pc == stop_pc);
 }
 

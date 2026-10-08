@@ -28,6 +28,8 @@ extern "C" {
 #include <aurora/imgui.h>
 #include <imgui.h>
 #include "button_remap.h"
+#include "input_remap.h"
+#include "option_notes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -61,8 +63,10 @@ const char* const kKeys[] = {
     "BLUEWAKE_FADE_FRAMES",     "BLUEWAKE_FAST_FORWARD",    "BLUEWAKE_QUICK_DOORS",
     "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_SWAP_XY", "BLUEWAKE_BUTTON_MAP",
     "BLUEWAKE_SPRINT_SPEED",    "BLUEWAKE_MOUSE_CAMERA",    "BLUEWAKE_MOUSE_SENSITIVITY",
-    "BLUEWAKE_MOUSE_INVERT_Y",  "BLUEWAKE_STICK_CAMERA",    "BLUEWAKE_STICK_CAMERA_SPEED",
+    "BLUEWAKE_MOUSE_INVERT_Y",  "BLUEWAKE_MOUSE_BUTTONS",   "BLUEWAKE_KEY_MAP",
+    "BLUEWAKE_STICK_CAMERA",    "BLUEWAKE_STICK_CAMERA_SPEED",
     "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_STICK_AIM_SPEED",
+    "BLUEWAKE_AIM_INVERT_Y",
     "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH", "BLUEWAKE_HAPTICS_TRIGGERS",
     "BLUEWAKE_CLIMB",           "BLUEWAKE_CLIMB_STAMINA",
     "BLUEWAKE_FOREST_WATER_KEEP_TREES", "BLUEWAKE_FOREST_WATER_30_MINUTES",
@@ -108,7 +112,15 @@ std::string default_path() {
     const char* home = std::getenv("HOME");
     if (home == nullptr || home[0] == '\0')
         return "";
+#if defined(__linux__)
+    // Freedesktop config dir: $XDG_CONFIG_HOME/BlueWake, else ~/.config/BlueWake.
+    const char* config = std::getenv("XDG_CONFIG_HOME");
+    if (config != nullptr && config[0] != '\0')
+        return std::string(config) + "/BlueWake/settings.ini";
+    return std::string(home) + "/.config/BlueWake/settings.ini";
+#else
     return std::string(home) + "/Library/Application Support/BlueWake/settings.ini";
+#endif
 }
 
 std::string trim(std::string text) {
@@ -353,6 +365,11 @@ void gameplay_tab() {
                 g_options[i].second = on;
                 g_dirty = g_restart_pending = true;
             }
+            if (const char* note = bw_option_note(g_options[i].first.c_str())) {
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+                ImGui::TextDisabled("%s", note);
+                ImGui::PopTextWrapPos();
+            }
         }
         ImGui::Unindent();
         ImGui::EndDisabled();
@@ -432,24 +449,48 @@ void gameplay_tab() {
 
 void apply_controller_swaps() {
     static SDL_JoystickID previous = 0;
-    static bool applied = false, last_ab = false, last_xy = false;
+    static bool applied = false, last_ab = false, last_xy = false, last_ix = false, last_iy = false;
     static std::string last_map;
     int index = PADGetIndexForPort(0);
     SDL_JoystickID connection = bw_controller_connection(0);
     bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = env_on("BLUEWAKE_PAD_SWAP_XY", false);
+    // The right stick's inversion reaches the game's own C-stick too, as on
+    // Windows, while the direct stick camera is on (otherwise the game's stick
+    // follows Better Wind Waker's "Invert camera", as the Controls tab says).
+    const bool stick = env_on("BLUEWAKE_STICK_CAMERA", true);
+    const bool ix = stick && env_on("BLUEWAKE_STICK_CAMERA_INVERT_X", false);
+    const bool iy = stick && env_on("BLUEWAKE_STICK_CAMERA_INVERT_Y", false);
     const std::string map_text = env("BLUEWAKE_BUTTON_MAP");
-    if (connection == previous && ab == last_ab && xy == last_xy && map_text == last_map) return;
-    previous = connection; last_ab = ab; last_xy = xy; last_map = map_text;
+    if (connection == previous && ab == last_ab && xy == last_xy && ix == last_ix && iy == last_iy &&
+        map_text == last_map)
+        return;
+    previous = connection; last_ab = ab; last_xy = xy; last_ix = ix; last_iy = iy; last_map = map_text;
     BwButtonMap map;
     const bool remapped = bw_button_map_parse(map_text, &map);
-    if (index < 0 || (!ab && !xy && !remapped && !applied)) return;
+    if (index < 0 || (!ab && !xy && !ix && !iy && !remapped && !applied)) return;
     PADRestoreDefaultMapping(0);
     // A custom layout replaces the swaps; otherwise the swaps as before.
     if (remapped)
         bw_apply_button_map(0, map);
     else
         bw_apply_face_swaps(0, ab, xy);
+    bw_apply_camera_axes(0, ix, iy);
     applied = true;
+}
+
+// The keyboard's keys for the GameCube buttons (BLUEWAKE_KEY_MAP), applied once
+// the pad's keyboard bindings exist and again whenever they change.
+void apply_key_map() {
+    static bool applied = false;
+    static std::string last;
+    const std::string text = env("BLUEWAKE_KEY_MAP");
+    if (applied && text == last) return;
+    BwKeyMap map;
+    bw_key_map_parse(text, &map);
+    if (bw_apply_key_map(0, map)) {
+        applied = true;
+        last = text;
+    }
 }
 
 void controls_tab() {
@@ -466,6 +507,13 @@ void controls_tab() {
                            "a custom layout." : "");
         if (bw_button_map_ui(&map))
             set_env("BLUEWAKE_BUTTON_MAP", bw_button_map_format(map));
+    }
+    if (ImGui::CollapsingHeader("Keyboard keys")) {
+        BwKeyMap keys;
+        bw_key_map_parse(env("BLUEWAKE_KEY_MAP"), &keys);
+        ImGui::TextWrapped("Choose the key for each GameCube button. Picking one that is already used swaps the two.");
+        if (bw_key_map_ui(&keys))
+            set_env("BLUEWAKE_KEY_MAP", bw_key_map_format(keys));
     }
     apply_controller_swaps();
     bool mouse = env_on("BLUEWAKE_MOUSE_CAMERA", true);
@@ -487,6 +535,18 @@ void controls_tab() {
     if (ImGui::Checkbox("Invert the mouse's up and down", &invert)) {
         set_env("BLUEWAKE_MOUSE_INVERT_Y", invert ? "1" : "0");
         bluewake_mouse_camera_reload();
+    }
+    if (ImGui::CollapsingHeader("Mouse buttons")) {
+        BwMouseMap buttons;
+        bw_mouse_map_parse(env("BLUEWAKE_MOUSE_BUTTONS").c_str(), &buttons);
+        ImGui::TextWrapped("What each mouse button presses while the mouse is the camera. The first left click "
+                           "only hands the mouse to the game.");
+        if (bw_mouse_map_ui(&buttons)) {
+            char text[64];
+            bw_mouse_map_format(&buttons, text, sizeof text);
+            set_env("BLUEWAKE_MOUSE_BUTTONS", text);
+            bluewake_mouse_camera_reload();
+        }
     }
     ImGui::EndDisabled();
 
@@ -527,6 +587,11 @@ void controls_tab() {
         bluewake_mouse_camera_reload();
     }
     ImGui::EndDisabled();
+    bool aim_invert = env_on("BLUEWAKE_AIM_INVERT_Y", false);
+    if (ImGui::Checkbox("Invert the left stick's up and down when aiming (first person, items)", &aim_invert)) {
+        set_env("BLUEWAKE_AIM_INVERT_Y", aim_invert ? "1" : "0");
+        bluewake_mouse_camera_reload();
+    }
     ImGui::PushTextWrapPos();
     ImGui::TextDisabled(stick ? "Click the right stick for first person. In the telescope and Picto Box, the left stick or D-pad zooms."
                               : "The game's right stick: its left and right follow Better Wind Waker's "
@@ -635,7 +700,22 @@ void load_mac_font() {
     g_font_dpi = window != nullptr ? std::max(1.f, SDL_GetWindowDisplayScale(window)) : 1.f;
     auto* atlas = new ImFontAtlas(); // Process lifetime; never mutate Aurora's live atlas.
     atlas->Flags |= ImFontAtlasFlags_NoMouseCursors;
-    ImFont* font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", 17.f * g_font_dpi);
+    ImFont* font = nullptr;
+#if defined(__linux__)
+    // A metric-compatible sans from common distro font packages; DejaVu first.
+    static const char* const kLinuxFonts[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    };
+    for (const char* path : kLinuxFonts) {
+        font = atlas->AddFontFromFileTTF(path, 17.f * g_font_dpi);
+        if (font != nullptr) break;
+    }
+#else
+    font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", 17.f * g_font_dpi);
+#endif
     if (font == nullptr) {
         ImFontConfig config;
         config.SizePixels = 17.f * g_font_dpi;
@@ -658,6 +738,7 @@ void draw(void*) {
     const Uint64 now = SDL_GetTicks();
     if (checked == 0 || now - checked >= 1000) { refresh_smooth_rate(); checked = now; }
     apply_controller_swaps();
+    apply_key_map();
     if (!g_font_ready) {
         load_mac_font();
         g_font_ready = true;

@@ -12,6 +12,13 @@ import hashlib
 import json
 from pathlib import Path
 
+def write_lf(path, text):
+    """Write text with LF line ends on every platform. Path.write_text's
+    newline argument needs Python 3.10, and macOS's own python3 is 3.9."""
+    with open(path, "w", newline="\n") as f:
+        f.write(text)
+
+
 # Fixed donor body hashes retained from scripts/windows/direct_calls.py.
 LEAVES = (
     (0x8030DCE0, 0x8030DD04, {"58694b1d26c00948de83054d0bf3be20e59c95bc45172aa813b04f5f45e3799f"}),
@@ -75,14 +82,14 @@ def prepare(root):
     for path, text in prepared.items():
         if path.read_text() != text:
             temporary = path.with_suffix('.c.tmp')
-            temporary.write_text(text, newline='\n')
+            write_lf(temporary, text)
             temporary.replace(path)
         files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     manifest = root / 'native_vec.json'
     data = json.dumps({'abi': 1, 'files': files}, indent=2) + '\n'
     if not manifest.exists() or manifest.read_text() != data:
         temporary = manifest.with_suffix('.json.tmp')
-        temporary.write_text(data, newline='\n')
+        write_lf(temporary, data)
         temporary.replace(manifest)
     if MARKER not in header.read_text():
         header.write_text(header.read_text() + '\n' + MARKER)
