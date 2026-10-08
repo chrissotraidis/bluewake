@@ -202,6 +202,16 @@ static void reset_host(void) {
     bw_host_pi_mask = &s_pi_mask;
 }
 
+/* The module's can-skip observation: refuse every direct-call skip, so the
+ * translation goes round the loop as the test's native reference does (the
+ * pre-migration v1 handshake returned 0, keeping direct calls off). The test
+ * compares a native run against the full-loop translation; direct-call skips
+ * would change cycle accounting and break that comparison. */
+static bool test_can_skip(void* user, const CPUState* cpu, u32 address) {
+    (void)user; (void)cpu; (void)address;
+    return false;
+}
+
 enum { F_STRCMP, F_ENTRY, F_LOOP, F_RESULT, F_STEP, F_COUNT };
 static const u32 FUNCTIONS[F_COUNT] = {BLUEWAKE_SEARCH_STRCMP, BLUEWAKE_SEARCH_STAGE_NAME, BLUEWAKE_SEARCH_NAME_LOOP,
                                        BLUEWAKE_SEARCH_NAME_RESULT, BLUEWAKE_SEARCH_NAME_STEP};
@@ -623,9 +633,9 @@ int main(int argc, char** argv) {
     s_guest_cpu = (CPUState * (*)(void))(void*)GetProcAddress(lib, "bluewake_composite_guest_cpu");
     void (*set_edge)(int (*)(void*, CPUState*, u32), void*) =
         (void (*)(int (*)(void*, CPUState*, u32), void*))(void*)GetProcAddress(lib, "bluewake_set_edge_service");
-    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*) =
-        (int (*)(bool, const bool*, const bool*, const u32*, const u32*))(void*)GetProcAddress(
-            lib, "bluewake_composite_direct_calls");
+    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*, bool (*)(void*, const CPUState*, u32), void*) =
+        (int (*)(bool, const bool*, const bool*, const u32*, const u32*, bool (*)(void*, const CPUState*, u32), void*))(void*)GetProcAddress(
+            lib, "bluewake_composite_direct_calls_v2");
     int (*filter)(bool) = (int (*)(bool))(void*)GetProcAddress(lib, "bluewake_composite_edge_filter");
     bool (*module_alias_add)(u32, u32, u8*) =
         (bool (*)(u32, u32, u8*))(void*)GetProcAddress(lib, "ppc_guest_alias_add_shared");
@@ -642,7 +652,7 @@ int main(int argc, char** argv) {
     /* The module as in play: quiet host flags, direct calls, its edge filter. */
     static const bool clear = false;
     static const u32 zero = 0u;
-    if (!direct(true, &clear, &clear, &zero, &zero) || !filter(true)) {
+    if (!direct(true, &clear, &clear, &zero, &zero, test_can_skip, NULL) || !filter(true)) {
         fprintf(stderr, "the module's direct calls or edge filter are unavailable\n");
         return 1;
     }
