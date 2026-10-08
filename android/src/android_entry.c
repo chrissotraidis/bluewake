@@ -242,7 +242,7 @@ static void check_better_wind_waker(const char* module) {
 }
 
 static void fatal_box(const char* message) {
-    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Wind Waker Recomp", message, NULL);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "BlueWake", message, NULL);
 }
 
 int main(int argc, char** argv) {
@@ -316,7 +316,7 @@ int main(int argc, char** argv) {
     if (missing != NULL) {
         char message[2048];
         snprintf(message, sizeof message,
-                 "Wind Waker Recomp cannot start: %s is missing.\n\n%s\n\n"
+                 "BlueWake cannot start: %s is missing.\n\n%s\n\n"
                  "Push the game files from your PC with\n"
                  "python scripts/android/install.py",
                  missing, missing_path);
@@ -333,7 +333,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[android] data=%s internal=%s module=%s disc=%s\n", g_data_dir, g_internal_dir,
             module, getenv("BLUEWAKE_DISC"));
     check_better_wind_waker(module);
-    SDL_SetAppMetadata("Wind Waker Recomp", "0.1", "dev.bluewake.BlueWake");
+    SDL_SetAppMetadata("BlueWake", "0.1", "dev.bluewake.BlueWake");
     // The Back button or gesture works the ⋯ menu (BlueWakeActivity takes it
     // before SDL); should one reach SDL, it does not close the game.
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
@@ -378,7 +378,7 @@ int main(int argc, char** argv) {
     fflush(stderr);
     if (status != 0) {
         char message[256];
-        snprintf(message, sizeof message, "Wind Waker Recomp stopped with an error (status %d).", status);
+        snprintf(message, sizeof message, "BlueWake stopped with an error (status %d).", status);
         fatal_box(message);
     }
     return status;

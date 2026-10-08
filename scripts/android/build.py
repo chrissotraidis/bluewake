@@ -48,7 +48,7 @@ die, step, sha256_file = wb.die, wb.step, wb.sha256_file
 MODULE = "libgGZLE01_recomp.so"
 # The Java activity (android/java); the application id and the label are options.
 ACTIVITY = "dev.bluewake.android.BlueWakeActivity"
-DEFAULT_LABEL = "Wind Waker Recomp"
+DEFAULT_LABEL = "BlueWake"
 MIN_SDK = 33  # execinfo backtrace() (the GX stall watchdog)
 TARGET_SDK = 35
 
