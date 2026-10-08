@@ -7,9 +7,9 @@ import android.os.Bundle;
 import android.os.PowerManager;
 import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.RelativeLayout;
 
 import org.libsdl.app.SDLActivity;
 
@@ -132,7 +132,28 @@ public class BlueWakeActivity extends SDLActivity implements InputManager.InputD
                 overlay.onBack();
             return true;
         }
+        if (overlay != null && fromController(event) && event.getAction() == KeyEvent.ACTION_DOWN)
+            overlay.onControllerInput();
         return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (overlay != null && controllerMoved(event))
+            overlay.onControllerInput();
+        return super.dispatchGenericMotionEvent(event);
+    }
+
+    /** A stick or the D-pad pushed well off center, not the drift some sticks report at rest. */
+    private static boolean controllerMoved(MotionEvent event) {
+        if ((event.getSource() & InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK)
+            return false;
+        final int[] axes = {MotionEvent.AXIS_X, MotionEvent.AXIS_Y, MotionEvent.AXIS_Z, MotionEvent.AXIS_RZ,
+                MotionEvent.AXIS_HAT_X, MotionEvent.AXIS_HAT_Y};
+        for (int axis : axes)
+            if (Math.abs(event.getAxisValue(axis)) > 0.5f)
+                return true;
+        return false;
     }
 
     private static boolean fromController(KeyEvent event) {
@@ -155,27 +176,6 @@ public class BlueWakeActivity extends SDLActivity implements InputManager.InputD
             return;
         attributes.preferredRefreshRate = rate;
         getWindow().setAttributes(attributes);
-    }
-
-    /**
-     * The game's surface, centered: width and height in pixels, or 0 for the
-     * whole screen (Overlay narrows it on a near-square screen to make room
-     * for the touch controls beside the picture).
-     */
-    void setSurfaceRoom(int width, int height) {
-        if (mSurface == null)
-            return;
-        final int w = width > 0 ? width : ViewGroup.LayoutParams.MATCH_PARENT;
-        final int h = height > 0 ? height : ViewGroup.LayoutParams.MATCH_PARENT;
-        ViewGroup.LayoutParams current = mSurface.getLayoutParams();
-        if (current != null && current.width == w && current.height == h)
-            return;
-        RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(w, h);
-        params.addRule(RelativeLayout.CENTER_IN_PARENT);
-        mSurface.setLayoutParams(params);
-        if (current != null && (current.width > 0 || width > 0))
-            Shell.log(width > 0 ? "[android] game surface " + width + "x" + height + " (room for the touch controls)"
-                                : "[android] game surface on the whole screen");
     }
 
     /** Hardware controllers connected (the built-in screen and keys are not). */

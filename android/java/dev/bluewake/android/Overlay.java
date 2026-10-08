@@ -46,10 +46,6 @@ import java.util.Map;
  * controls, the ⋯ menu with the same sections, names and order, the FPS label, the Touch Controls panel, the
  * layout editor, and the alerts. Each one holds the game while it is open, through the same pause reasons
  * (touch_controls.h).
- *
- * One thing the iPhone app does not need: on a near-square screen (a foldable's inner screen) the 4:3 picture
- * leaves no room beside it for the controls, so while they are shown the game's surface is narrowed until each
- * side has a column, and the controls never cover the picture or its HUD.
  */
 final class Overlay extends FrameLayout implements TouchControlsView.Listener, MenuView.Listener {
     static final String GITHUB_URL = "https://github.com/chrissotraidis/bluewake";
@@ -89,7 +85,8 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     private final float launchRatio;         // the picture's shape this launch (4:3, or a widescreen mod's)
     private final Map<String, Boolean> launchMods = new HashMap<>();  // mod switches as this launch read them
     private final RectF safe = new RectF(), picture = new RectF();
-    private boolean phone = true, controllerConnected, controllerHidden, settingsOpen, menuDumped, updatingSliders;
+    private boolean phone = true, controllerConnected, controllerHidden, touchRevealed, settingsOpen, menuDumped,
+            updatingSliders;
     private int alertDepth;
     private int packFiles = -1;
     private int panelMaxHeight;
@@ -388,9 +385,6 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         post(this::arrange);
     }
 
-    /** Whether the controls are on screen in play: then they get columns beside the picture. */
-    private boolean controlsShown() { return touch.visibleInPlay(); }
-
     /** Lays out everything for the current screen, as layoutSubviews does on the iPhone. */
     void arrange() {
         final int w = getWidth(), h = getHeight();
@@ -401,35 +395,28 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         if (root != null) in = root.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.systemBars());
         safe.set(in.left, in.top, w - in.right, h - in.bottom);
 
-        // Where the picture is. The original picture keeps its shape, centered; with the controls shown and no
-        // column's room beside it, the surface narrows until there is.
-        int roomW = 0, roomH = 0;
+        // Where the picture is: the original picture keeps its shape, centered. Where the bars beside it are wide
+        // enough (a phone), the controls sit in them; elsewhere they go over the picture, as on the iPad.
         if (launchAspectMode == 0) {
-            float pw = Math.min(w, h * launchRatio), ph = pw / launchRatio;
-            float bar = Math.min((w - pw) * 0.5f - safe.left, safe.right - (w + pw) * 0.5f) - 4f * dp;
-            if (bar < 84f * dp && controlsShown()) {
-                float margin = Math.max(safe.left, w - safe.right) + 4f * dp + 92f * dp;
-                float rw = w - 2f * margin, rh = rw / launchRatio;
-                if (rh >= 300f * dp && rh <= h) {
-                    pw = rw;
-                    ph = rh;
-                    roomW = Math.round(rw);
-                    roomH = Math.round(rh);
-                }
-            }
+            final float pw = Math.min(w, h * launchRatio), ph = pw / launchRatio;
             picture.set((w - pw) * 0.5f, (h - ph) * 0.5f, (w + pw) * 0.5f, (h + ph) * 0.5f);
         } else {
             picture.set(0, 0, w, h);
         }
-        activity.setSurfaceRoom(roomW, roomH);
         touch.configure(phone, safe, picture, launchAspectMode);
 
         place(menuButton, safe.right - 52f * dp, safe.top + 12f * dp, 40f * dp, 40f * dp);
-        // The FPS label sits at the top center rather than the iPhone app's top left, where the Start button is.
+        // The FPS label sits top left, as on the iPhone, except beside the columns, where Start is top left: then it
+        // sits top center.
         LayoutParams fpsParams = (LayoutParams) fpsLabel.getLayoutParams();
-        int fpsTop = Math.round(safe.top + 12f * dp);
-        if (fpsParams.topMargin != fpsTop) {
+        final int fpsTop = Math.round(safe.top + 12f * dp);
+        final boolean centered = touch.inColumns();
+        final int fpsGravity = Gravity.TOP | (centered ? Gravity.CENTER_HORIZONTAL : Gravity.START);
+        final int fpsLeft = centered ? 0 : Math.round(safe.left + 12f * dp);
+        if (fpsParams.topMargin != fpsTop || fpsParams.gravity != fpsGravity || fpsParams.leftMargin != fpsLeft) {
             fpsParams.topMargin = fpsTop;
+            fpsParams.gravity = fpsGravity;
+            fpsParams.leftMargin = fpsLeft;
             fpsLabel.setLayoutParams(fpsParams);
         }
         fpsLabel.setMaxWidth(Math.max(px(120), Math.round(safe.width() - 140f * dp)));
@@ -1072,9 +1059,35 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     void setControllerConnected(boolean connected) {
         final boolean arrived = connected && !controllerConnected;
         controllerConnected = connected;
-        controllerHidden = connected && settings.bool(Settings.HIDE_ON_CONTROLLER, true);
-        touch.setControllerHidden(controllerHidden);
+        if (arrived || !connected) touchRevealed = false;
+        updateControllerHidden();
         if (arrived) touch.clearTouchInput();
+        arrange();
+    }
+
+    private void updateControllerHidden() {
+        controllerHidden = controllerConnected && !touchRevealed && settings.bool(Settings.HIDE_ON_CONTROLLER, true);
+        touch.setControllerHidden(controllerHidden);
+    }
+
+    /**
+     * Android's own addition: a controller that is switched off can stay connected for a minute or more (Bluetooth
+     * notices late), and one left on the table still counts. A touch on the screen shows the controls again.
+     */
+    @Override
+    public void onTouchWhileControllerHidden() {
+        touchRevealed = true;
+        updateControllerHidden();
+        arrange();
+        Shell.log("[android] touch controls shown by a touch; the controller's next input hides them");
+    }
+
+    /** The controller was used: controls that a touch brought back hide again. */
+    void onControllerInput() {
+        if (!touchRevealed) return;
+        touchRevealed = false;
+        updateControllerHidden();
+        touch.clearTouchInput();
         arrange();
     }
 

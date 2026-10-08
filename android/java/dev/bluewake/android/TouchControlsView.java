@@ -31,6 +31,8 @@ public class TouchControlsView extends View {
     interface Listener {
         /** A control was selected in the layout editor (null: none); label is its name for the editor bar. */
         void onEditorSelection(String identifier, String label, float scale);
+        /** The screen was touched while a controller hides the controls. */
+        void onTouchWhileControllerHidden();
     }
 
     private static final int BUTTON = 0, STICK = 1, DPAD_GROUP = 2;
@@ -75,7 +77,7 @@ public class TouchControlsView extends View {
     private final RectF safe = new RectF();  // the view minus display cutouts
     private final RectF picture = new RectF(); // where the game's picture is, for the columns beside it
     private int launchAspectMode;            // the aspect the game started with
-    private boolean configured, controllerHidden, editing;
+    private boolean configured, controllerHidden, editing, inColumns;
     private Control selected;
 
     // Which control each pointer holds (Android's pointer ids are 0..31).
@@ -181,6 +183,9 @@ public class TouchControlsView extends View {
 
     boolean editing() { return editing; }
 
+    /** Whether the controls stand in two columns beside the picture (a phone with the original picture). */
+    boolean inColumns() { return inColumns; }
+
     /** Whether the controls are on screen (shown, no controller hiding them, or the editor is open). */
     boolean visibleInPlay() {
         return editing || (!controllerHidden && settings.bool(Settings.SHOW_TOUCH, true));
@@ -212,6 +217,7 @@ public class TouchControlsView extends View {
         final float large = (pad ? 104f : 78f * base) * size * dp;
         final float camera = (pad ? 112f : 86f * base) * size * dp;
         java.util.Map<String, RectF> columns = columnFrames(size);
+        inColumns = columns != null;
 
         place(move, columns, phone ? normalized(0.1234722222f, 0.7803490991f, stick, stick)
                 : pad ? normalized(0.1310395315f, 0.7905894519f, stick, stick)
@@ -436,6 +442,13 @@ public class TouchControlsView extends View {
         final int action = event.getActionMasked();
         final int index = event.getActionIndex();
         if (editing) return editTouch(event, action, index);
+        // A controller hides the controls; touching the screen brings them back (Overlay), and the controller's next
+        // input hides them again. The touch that brings them back goes no further.
+        if (controllerHidden && settings.bool(Settings.SHOW_TOUCH, true)) {
+            if (action != MotionEvent.ACTION_DOWN) return false;
+            if (listener != null) listener.onTouchWhileControllerHidden();
+            return true;
+        }
         if (!visibleInPlay()) return false;
         switch (action) {
             case MotionEvent.ACTION_DOWN:

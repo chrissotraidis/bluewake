@@ -179,11 +179,12 @@ same touch controls, the same settings under the same names.
   Game Data & Saves (Back Up Saves, Restore Saves, Import Dolphin Save, Where Are My Files?, Remove Disc Image) and
   Help & Feedback (Report a Problem on GitHub, Share Session Log). Back works the menu too: out of a submenu, and
   with nothing open it opens the menu. It never closes the game.
-- **Touch controls**: the iPhone app's buttons, colors and layouts, every GameCube button. With the original 4:3
-  picture they sit in two columns beside it, clear of the game's HUD; on a near-square screen (a foldable's inner
-  screen) the picture is narrowed to make that room while they are shown. The movement stick also floats: touch
-  anywhere on the left half. Move Controls drags and resizes each one; phones and tablets keep separate layouts.
-  They hide while a game controller is connected (Touch Control Settings > Hide with a controller).
+- **Touch controls**: the iPhone app's buttons, colors and layouts, every GameCube button. On a phone, with the
+  original 4:3 picture, they sit in two columns beside it, clear of the game's HUD; on a tablet or a foldable's
+  inner screen they go over the picture, as on the iPad. The movement stick also floats: touch anywhere on the left
+  half. Move Controls drags and resizes each one; phones and tablets keep separate layouts. They hide while a game
+  controller is connected (Touch Control Settings > Hide with a controller); touching the screen brings them back
+  until the controller is used again.
 - **Controllers**: through SDL, as a GameCube pad (as on Windows), with the menu's camera and button mapping.
 - The picture keeps the game's shape and renders at three times the GameCube's 480 lines by default; the mouse
   camera is off (touches would reach it as clicks).
