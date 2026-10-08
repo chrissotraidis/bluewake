@@ -327,9 +327,14 @@ class AndroidBuilder(wb.Builder):
         self.run("apk-javac", [jdk_bin / "javac.exe", "-nowarn", "-encoding", "UTF-8", "--release", "11",
                                "-classpath", self.android_jar, "-d", pkg / "classes", *java], env=os.environ)
         d8 = self.build_tools / "d8.bat"
-        classes = [str(p) for p in (pkg / "classes").rglob("*.class")]
+        # The classes go to d8 as one jar: named one by one, they no longer fit
+        # in a Windows command line (8191 characters).
+        classes_jar = pkg / "classes.jar"
+        with zipfile.ZipFile(classes_jar, "w", zipfile.ZIP_STORED) as jar:
+            for p in sorted((pkg / "classes").rglob("*.class")):
+                jar.write(p, p.relative_to(pkg / "classes").as_posix())
         self.run("apk-d8", [d8, "--release", "--min-api", str(MIN_SDK), "--lib", self.android_jar,
-                            "--output", pkg, *classes], env=dict(os.environ, JAVA_HOME=str(self.jdk)))
+                            "--output", pkg, classes_jar], env=dict(os.environ, JAVA_HOME=str(self.jdk)))
         manifest = (ROOT / "android/AndroidManifest.xml").read_text(encoding="utf-8")
         manifest = manifest.replace("@PACKAGE@", self.app_id).replace(
             "@LABEL@", xml_escape(self.args.label, {'"': "&quot;", "'": "&apos;"}))
