@@ -9,6 +9,9 @@ one, this one wins.
 - `README.md`: for players.
 - `AGENTS.md` (this file): the rules.
 - `docs/PRIORITIES.md`: the ranked list of bugs, performance work and requests. Start here.
+- `docs/PERFORMANCE.md`: the plan for frame rate and slowdowns, and how to measure a change.
+- `docs/DIRECTION.md`: where BlueWake is going: releases without game code, the same app on every platform
+  (Android matches the iPhone app), fast contributor reviews, measured performance.
 - `docs/MIGRATION_STATUS.md`: what is done and what is open. `docs/GOAL_LOOP.md`: the current work loop.
 - `docs/BUILD_YOUR_OWN.md`, `docs/BUILDER.md`, `docs/WINDOWS.md`, `docs/MODS.md`, `docs/WWHD_TEXTURES.md`:
   how things work.
@@ -73,6 +76,10 @@ The maintainers decided on October 4, 2026 to make two exceptions: BlueWake may 
 Every release artifact must pass `scripts/release/check_public_assets.sh <artifact>...`, which runs `python3 ~/.codex/release-gate/release_gate.py` on the maintainer's machine. For the Windows and Linux builds the only accepted finding is `containsTranslatedGameCode: true`. Any other failure is a stop, not a note: these builds must contain no disc data, game assets, saves, signing material or console keys (Elliott's `nodtool.exe` embeds Wii common keys, so it is left out).
 
 Build the Windows and Linux release builds on a maintainer's or contributor's own machine from their own disc. Never put a disc image, files from a disc, or keys in CI secrets, caches or artifacts.
+
+The goal is releases without game code on every platform, with the game built on the player's machine the first
+time it starts ([docs/DIRECTION.md](docs/DIRECTION.md)). The Windows and Linux exceptions above stand until that works
+on each platform.
 
 Only Chris publishes or changes releases.
 

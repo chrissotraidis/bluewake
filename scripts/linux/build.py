@@ -1,31 +1,34 @@
 #!/usr/bin/env python3
-"""BlueWake Builder for Windows: turn your own game disc into your own game, on your PC.
+"""BlueWake Builder for Linux: turn your own game disc into your own game, on your PC.
 
-    python scripts/windows/build.py DISC [--out build/windows] [options]
+    python scripts/linux/build.py DISC [--out build/linux] [options]
 
-DISC is your own The Wind Waker (GameCube, USA GZLE01 revision 0) image: an .iso or
-.gcm, or a Dolphin .rvz/.wia/.gcz/.ciso/.nfs image (converted to an ISO with
-nodtool, which is built from crates.io with Rust's cargo on first use).
+DISC is your own The Wind Waker (GameCube, USA GZLE01 revision 0) image, an
+uncompressed .iso or .gcm. (Compressed Dolphin images are not converted here;
+convert them to ISO in Dolphin first.)
 
-The Windows counterpart of scripts/builder/build.sh with the bluewake profile.
-It reads that profile's pins (RecompCore, DolRecomp) and verified source digest,
-so both builders translate the same code; docs/WINDOWS.md explains the port.
+The Linux counterpart of scripts/windows/build.py. It reads the bluewake
+profile's pins (RecompCore, DolRecomp) and verified source digest, so every
+builder translates the same code; docs/LINUX.md explains the port.
 
 Steps, each logged under OUT/logs:
-  1 tools        Visual Studio's clang and the Windows SDK, CMake 3.25+, Ninja, git
+  1 tools        clang + lld + llvm-profdata, CMake 3.25+, Ninja, git, Python 3.10+
   2 dependencies the pinned RecompCore and DolRecomp sources (ref/recompcore)
-  3 disc         check the disc; convert a compressed image to an ISO
-  4 extract      main.dol and the 415 RELs from the disc (the disc is verified)
+  3 disc         check the disc id and revision (the disc is verified on extract)
+  4 extract      main.dol and the 415 RELs from the disc
   5 translate    the game's PowerPC code to C (DolRecomp)
   6 generate     the composite source, compared with the verified digest
   7 mods         widescreen 16:9 and 16:10 and Better Wind Waker's options (--no-mods skips)
-  8 compile      the game module, gGZLE01_recomp.dll (the long step)
-  9 app          BlueWake.exe, Aurora (Direct3D 12 through Dawn), SDL3 and the DSP
- 10 package      the app folder OUT/BlueWake, ready to run
+  8 prepare      the certified native accelerators, fixed CPU, direct calls and
+                 gather pipe (--conservative skips them)
+  9 train        local optimization profile from headless playbacks (--no-train skips)
+ 10 compile      the game module, gGZLE01_recomp.so (the long step)
+ 11 app          bluewake, Aurora (Vulkan/OpenGL through Dawn), SDL3 and the DSP
+ 12 package      the app folder OUT/BlueWake, ready to run
 
 The app folder contains code translated from YOUR disc and a copy of the disc:
 it is yours alone. Never share or upload it. Your saves live in
-%APPDATA%\\BlueWake, outside the build, so rebuilding never touches them.
+~/.local/share/BlueWake, outside the build, so rebuilding never touches them.
 """
 import argparse
 import hashlib
@@ -42,11 +45,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / "scripts/builder/profiles/bluewake.sh"
-MODULE = "gGZLE01_recomp.dll"
-# nodtool (https://github.com/encounter/nod) converts Dolphin's compressed
-# formats to ISO and checks the result against Redump.
-NODTOOL_VERSION = "2.0.0-alpha.9"
-DISC_FORMATS = (".rvz", ".wia", ".gcz", ".ciso", ".nfs", ".wbfs", ".tgc")
+MODULE = "gGZLE01_recomp.so"
 GC_MAGIC = 0xC2339F3D
 
 
@@ -68,20 +67,12 @@ def default_jobs():
     kills the compiler ("LLVM ERROR: out of memory"; compile_module retries)."""
     cores = os.cpu_count() or 8
     try:
-        import ctypes
-
-        class MemoryStatus(ctypes.Structure):
-            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
-        status = MemoryStatus()
-        status.dwLength = ctypes.sizeof(MemoryStatus)
-        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-            available = min(status.ullAvailPhys, status.ullAvailPageFile)
-            return max(1, min(cores, int(available // (2.5 * 2**30))))
-    except (AttributeError, OSError):
+        with open("/proc/meminfo") as mem:
+            for line in mem:
+                if line.startswith("MemAvailable:"):
+                    available = int(line.split()[1]) * 1024
+                    return max(1, min(cores, int(available // (2.5 * 2**30))))
+    except OSError:
         pass
     return cores
 
@@ -118,6 +109,9 @@ def sync_tree(new, current):
         if (target.is_file() and target.stat().st_size == source.stat().st_size
                 and target.read_bytes() == source.read_bytes()):
             continue
+        if target.is_dir():
+            shutil.rmtree(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, target)
     for target in sorted(current.rglob("*"), reverse=True):
         if target.relative_to(current) not in wanted:
@@ -140,10 +134,13 @@ class Builder:
         self.args = args
         self.out = args.out
         self.logs = self.out / "logs"
-        self.env = None
+        self.env = os.environ
         self.recompcore = ROOT / "ref/recompcore"
         self.iso = None
         self.profile = None
+        self.clang = None
+        self.clang_version = None
+        self.llvm_profdata = None
 
     # --- helpers -------------------------------------------------------
     def run(self, name, command, *, env=None, cwd=None, ninja=False):
@@ -197,100 +194,64 @@ class Builder:
 
     # --- 1 tools -----------------------------------------------------
     def check_tools(self):
-        if platform.system() != "Windows":
-            die("this builder is for Windows; on a Mac use scripts/builder/build.sh")
-        if platform.machine().lower() not in ("amd64", "x86_64"):
-            die(f"an x86-64 PC is required (this is {platform.machine()})")
+        if platform.system() != "Linux":
+            die("this builder is for Linux; on Windows use scripts/windows/build.py")
+        if platform.machine().lower() not in ("x86_64", "amd64"):
+            die(f"an x86-64 Linux PC is required (this is {platform.machine()})")
         if sys.version_info < (3, 10):
             die("Python 3.10 or newer is required")
         for tool in ("git", "cmake", "ninja"):
             if shutil.which(tool) is None:
-                die(f"missing {tool}: install Git, CMake 3.25+ and Ninja (pip install cmake ninja)")
+                die(f"missing {tool}: install Git, CMake 3.25+ and Ninja "
+                    "(sudo apt install git cmake ninja-build)")
         version = subprocess.check_output(["cmake", "--version"], text=True).split()[2]
         if tuple(int(x) for x in version.split(".")[:2]) < (3, 25):
             die(f"CMake 3.25 or newer is required (found {version})")
-        self.env = self.visual_studio_env()
-        clang = shutil.which("clang", path=self.env["PATH"])
+        clang = shutil.which("clang")
         self.clang = clang
         if clang is None:
-            die("Visual Studio's clang is missing: in the Visual Studio Installer, add "
-                "'C++ Clang Compiler for Windows' (and 'MSBuild support for LLVM')")
-        clang_version = subprocess.check_output([clang, "--version"], text=True, env=self.env).splitlines()[0]
+            die("missing clang: the host and the game module need it (sudo apt install clang)")
+        clang_version = subprocess.check_output([clang, "--version"], text=True).splitlines()[0]
         major = int(re.search(r"version (\d+)", clang_version).group(1))
         if major < 17:
             die(f"clang 17 or newer is required ({clang_version})")
         self.clang_version = clang_version
+        # Prefer llvm-profdata beside clang (they travel together in a normal
+        # LLVM install), but fall back to PATH so distros that package it
+        # separately (NixOS, Homebrew, split distro packages) work unchanged.
+        self.llvm_profdata = shutil.which("llvm-profdata")
+        beside = str(Path(clang).with_name("llvm-profdata"))
+        if self.llvm_profdata is None and Path(beside).is_file():
+            self.llvm_profdata = beside
+        if self.llvm_profdata is None:
+            die("llvm-profdata is missing; install it (sudo apt install llvm) "
+                "or explicitly use --no-train for an untrained build")
         self.check_march()
-        print(f"{clang_version}; cmake {version}; ninja {subprocess.check_output(['ninja', '--version'], text=True).strip()}; "
+        print(f"{clang_version}; cmake {version}; ninja "
+              f"{subprocess.check_output(['ninja', '--version'], text=True).strip()}; "
               f"{self.args.jobs} jobs; -march={self.args.march}")
-
-    def visual_studio_env(self):
-        """The x64 developer environment of the newest Visual Studio with clang."""
-        vswhere = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / \
-            "Microsoft Visual Studio/Installer/vswhere.exe"
-        if not vswhere.exists():
-            die("Visual Studio 2022 or newer with the C++ workload is required (vswhere.exe not found)")
-        found = json.loads(subprocess.check_output(
-            [str(vswhere), "-all", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-             "-format", "json", "-utf8"], text=True, encoding="utf-8"))
-        candidates = [Path(v["installationPath"]) for v in found
-                      if (Path(v["installationPath"]) / "VC/Tools/Llvm/x64/bin/clang.exe").exists()]
-        if not candidates:
-            die("no Visual Studio with the C++ workload and its clang was found: in the Visual Studio "
-                "Installer, add 'Desktop development with C++' and 'C++ Clang Compiler for Windows'")
-        install = sorted(candidates, key=lambda p: [v for v in found if Path(v["installationPath"]) == p][0]
-                         .get("installationVersion", ""))[-1]
-        vcvars = install / "VC/Auxiliary/Build/vcvars64.bat"
-        # vcvars fails on quoted PATH entries or ones with parentheses (some
-        # SDK installers add them); keep the clean ones for the build.
-        path = [p.strip('"') for p in os.environ.get("PATH", "").split(os.pathsep)]
-        base = dict(os.environ, PATH=os.pathsep.join(p for p in path if p and "(" not in p and ")" not in p))
-        output = subprocess.run(f'cmd /d /c ""{vcvars}" >nul 2>&1 && set"', capture_output=True, text=True,
-                                env=base, shell=False)
-        if output.returncode != 0 or "INCLUDE=" not in output.stdout:
-            die(f"{vcvars} failed; open a 'x64 Native Tools Command Prompt' and rerun from there")
-        env = {}
-        for line in output.stdout.splitlines():
-            key, sep, value = line.partition("=")
-            if sep and key:
-                env[key] = value
-        env["PATH"] = str(install / "VC/Tools/Llvm/x64/bin") + os.pathsep + env.get("PATH", "")
-        print(f"Visual Studio: {install}")
-        return env
 
     def check_march(self):
         """The game module is compiled for --march; refuse a level this CPU lacks."""
         levels = {"x86-64": set(), "x86-64-v2": {"sse4.2", "popcnt"},
-                  "x86-64-v3": {"sse4.2", "popcnt", "avx", "avx2", "fma", "bmi1", "bmi2", "movbe", "lzcnt"}}
+                  "x86-64-v3": {"sse4.2", "popcnt", "avx", "avx2", "fma", "bmi", "bmi2", "movbe", "lzcnt"}}
         if self.args.march not in levels:
             return
-        # CPUID and XGETBV directly (__builtin_cpu_supports needs compiler-rt,
-        # which the MSVC target does not link); AVX also needs the OS to save
-        # the YMM state.
         probe = self.out / "tools/march_probe.c"
         probe.parent.mkdir(parents=True, exist_ok=True)
-        probe.write_text(r"""#include <immintrin.h>
-#include <intrin.h>
-#include <stdio.h>
+        probe.write_text(r"""#include <stdio.h>
 int main(void) {
-    int r[4];
-    __cpuid(r, 1);
-    const int ecx1 = r[2];
-    __cpuidex(r, 7, 0);
-    const int ebx7 = r[1];
-    __cpuid(r, 0x80000001);
-    const int ecx81 = r[2];
-    const int os_avx = ((ecx1 >> 27) & 1) && (_xgetbv(0) & 6) == 6;
-    printf("sse4.2=%d popcnt=%d movbe=%d fma=%d avx=%d avx2=%d bmi1=%d bmi2=%d lzcnt=%d\n",
-           (ecx1 >> 20) & 1, (ecx1 >> 23) & 1, (ecx1 >> 22) & 1, ((ecx1 >> 12) & 1) && os_avx,
-           ((ecx1 >> 28) & 1) && os_avx, ((ebx7 >> 5) & 1) && os_avx, (ebx7 >> 3) & 1,
-           (ebx7 >> 8) & 1, (ecx81 >> 5) & 1);
+    printf("sse4.2=%d popcnt=%d movbe=%d fma=%d avx=%d avx2=%d bmi=%d bmi2=%d lzcnt=%d\n",
+           __builtin_cpu_supports("sse4.2"), __builtin_cpu_supports("popcnt"),
+           __builtin_cpu_supports("movbe"), __builtin_cpu_supports("fma"),
+           __builtin_cpu_supports("avx"), __builtin_cpu_supports("avx2"),
+           __builtin_cpu_supports("bmi"), __builtin_cpu_supports("bmi2"),
+           __builtin_cpu_supports("lzcnt"));
     return 0;
 }
 """)
-        exe = probe.with_suffix(".exe")
-        subprocess.run([self.clang, "-O1", "-mxsave", str(probe), "-o", str(exe)], env=self.env, check=True,
-                       capture_output=True)
+        exe = probe.with_suffix("")
+        subprocess.run([self.clang, "-O1", str(probe), "-o", str(exe)], check=True, capture_output=True)
         report = subprocess.check_output([str(exe)], text=True).split()
         have = {name for name, bit in (item.split("=") for item in report) if bit == "1"}
         if not levels[self.args.march] <= have:
@@ -310,11 +271,6 @@ int main(void) {
                 die(f"{rc} exists but is not a git checkout: move it aside and rerun")
             rc.mkdir(parents=True, exist_ok=True)
             subprocess.check_call(["git", "init", "-q"], cwd=rc)
-            # A new checkout gets the sources as committed (LF), whatever the
-            # global core.autocrlf says; an existing one keeps its own setting,
-            # which its clean status below depends on.
-            subprocess.check_call(["git", "config", "core.autocrlf", "false"], cwd=rc)
-            subprocess.check_call(["git", "config", "core.longpaths", "true"], cwd=rc)
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=rc, capture_output=True, text=True).stdout.strip()
         if head != sha:
             if self.git("status", "--porcelain", "--untracked-files=no", cwd=rc):
@@ -322,7 +278,8 @@ int main(void) {
             print(f"fetching RecompCore {sha}")
             subprocess.run(["git", "remote", "remove", "bluewake"], cwd=rc, capture_output=True)
             subprocess.check_call(["git", "remote", "add", "bluewake", url], cwd=rc)
-            self.run("recompcore-fetch", ["git", "-C", rc, "fetch", "--recurse-submodules=no", "--depth", "1", "bluewake", sha], env=os.environ)
+            self.run("recompcore-fetch", ["git", "-C", rc, "fetch", "--recurse-submodules=no", "--depth", "1",
+                                          "bluewake", sha])
             subprocess.check_call(["git", "checkout", "-q", "--detach", "FETCH_HEAD"], cwd=rc)
         if self.git("rev-parse", "HEAD", cwd=rc) != sha:
             die(f"{rc} is not at {sha}")
@@ -331,14 +288,8 @@ int main(void) {
         current = subprocess.run(["git", "rev-parse", "HEAD"], cwd=sub, capture_output=True, text=True).stdout.strip() \
             if (sub / ".git").exists() else ""
         if current != dolrecomp_sha:
-            # The submodule follows its parent's line endings.
-            lf = subprocess.run(["git", "config", "--local", "core.autocrlf"], cwd=rc, capture_output=True,
-                                text=True).stdout.strip() == "false"
-            self.run("dolrecomp-fetch", ["git", "-C", rc, *(["-c", "core.autocrlf=false"] if lf else []),
-                                         "submodule", "update", "--init", "--depth", "1", "--", "DolRecomp"],
-                     env=os.environ)
-            if lf:
-                subprocess.check_call(["git", "config", "core.autocrlf", "false"], cwd=sub)
+            self.run("dolrecomp-fetch", ["git", "-C", rc, "submodule", "update", "--init", "--depth", "1", "--",
+                                         "DolRecomp"])
         if self.git("rev-parse", "HEAD", cwd=sub) != dolrecomp_sha:
             die(f"{sub} is not at {dolrecomp_sha}")
         if self.git("status", "--porcelain", "--untracked-files=no", cwd=rc) or \
@@ -351,157 +302,61 @@ int main(void) {
         source = self.args.disc.resolve()
         if not source.is_file():
             die(f"disc image not found: {source}")
-        if source.suffix.lower() in DISC_FORMATS:
-            iso = self.out / "disc/GZLE01.iso"
-            stamp = self.out / "disc/source.json"
-            key = {"source": str(source), "size": source.stat().st_size, "mtime": source.stat().st_mtime_ns,
-                   "nodtool": NODTOOL_VERSION}
-            if iso.exists() and stamp.exists() and json.loads(stamp.read_text()) == key:
-                print(f"reusing {iso}")
-            else:
-                nodtool = self.nodtool()
-                iso.parent.mkdir(parents=True, exist_ok=True)
-                pending = iso.with_name("GZLE01.pending.iso")  # nodtool picks the format by extension
-                self.run("disc-convert", [nodtool, "--no-color", "convert", source, pending], env=os.environ)
-                log = (self.logs / "disc-convert.log").read_text(encoding="utf-8", errors="replace")
-                if "Redump:" in log and "\u2705" not in log.split("Redump:")[1].splitlines()[0]:
-                    print("warning: nodtool did not match this image to a Redump entry")
-                os.replace(pending, iso)
-                stamp.write_text(json.dumps(key))
-            self.iso = iso
-        else:
-            self.iso = source
-        with open(self.iso, "rb") as disc:
+        if source.suffix.lower() not in (".iso", ".gcm"):
+            die(f"this builder reads an uncompressed .iso or .gcm; convert {source.name} "
+                "to ISO in Dolphin first (right-click the game, Convert File -> ISO)")
+        with open(source, "rb") as disc:
             header = disc.read(0x20)
         if len(header) < 0x20 or int.from_bytes(header[0x1C:0x20], "big") != GC_MAGIC:
-            die(f"{self.iso} is not a GameCube disc image")
+            die(f"{source} is not a GameCube disc image")
         if header[:6] != b"GZLE01":
             die(f"this is a GameCube disc, but not The Wind Waker (USA, GZLE01): its id is "
                 f"{header[:6].decode(errors='replace')}")
         if header[7] != 0:
             die(f"this is GZLE01 revision {header[7]}; BlueWake supports revision 0 only")
+        self.iso = source
         print(f"disc: {self.iso} (GZLE01 revision 0)")
-
-    def nodtool(self):
-        root = ROOT / "build/tools/nodtool"
-        exe = root / "bin/nodtool.exe"
-        if exe.exists():
-            return exe
-        if shutil.which("cargo") is None:
-            die("this disc image is compressed; converting it needs Rust's cargo (https://rustup.rs) "
-                "to build nodtool, or convert it to .iso yourself (Dolphin: right-click the game, "
-                "Convert File..., format ISO) and pass the .iso")
-        print(f"building nodtool {NODTOOL_VERSION} from crates.io (once)")
-        self.run("nodtool-install", ["cargo", "install", "nodtool", "--version", NODTOOL_VERSION, "--locked",
-                                     "--root", root], env=os.environ)
-        return exe
 
     # --- tools built from source ---------------------------------------
     def build_dolrecomp(self):
         build = self.out / "dolrecomp"
-        # binmode.obj: the CRT opens files in binary mode by default, so the
-        # translator writes the same bytes (LF) as on macOS and the generated
-        # source matches the verified digest.
         self.run("dolrecomp-configure", ["cmake", "-S", self.recompcore / "DolRecomp", "-B", build, "-G", "Ninja",
-                                         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_C_COMPILER=clang-cl",
-                                         "-DDOLRECOMP_WARNINGS_AS_ERRORS=OFF",
-                                         "-DCMAKE_EXE_LINKER_FLAGS=binmode.obj"])
+                                         "-DCMAKE_BUILD_TYPE=Release", "-DDOLRECOMP_WARNINGS_AS_ERRORS=OFF"])
         self.run("dolrecomp-build", ["cmake", "--build", build, "--target", "dolrecomp", "-j", self.args.jobs],
                  ninja=True)
-        return build / "dolrecomp.exe"
+        return build / "dolrecomp"
 
-    APP_PROFILE = ROOT / "windows/pgo/app.profdata"
-
-    def app_profile_readable(self):
-        """Whether this Visual Studio's clang can read the committed app profile.
-        It was recorded with clang 22; older clangs (Visual Studio 2022's 19.1,
-        2026 before 18.10) reject its format, and every compile, CMake's own
-        compiler check first, would fail (#153). Those build the app without it."""
-        if getattr(self, "_app_profile_readable", None) is None:
-            clang = getattr(self, "clang", None)
-            tool = Path(clang).with_name("llvm-profdata.exe") if clang else None
-            if tool is None or not tool.is_file():
-                readable, reason = False, "llvm-profdata.exe is not beside Visual Studio's clang"
-            else:
-                try:
-                    shown = subprocess.run([str(tool), "show", str(self.APP_PROFILE)], capture_output=True,
-                                           text=True, env=getattr(self, "env", None))
-                    lines = (shown.stderr or shown.stdout).strip().splitlines()
-                    readable, reason = shown.returncode == 0, (lines[-1] if lines else "unreadable")
-                except OSError as error:
-                    readable, reason = False, str(error)
-            if not readable:
-                print(f"note: building the app without its optimization profile ({reason}). The profile "
-                      "needs clang 22, which comes with Visual Studio 2026 18.10 or newer; the app works "
-                      "without it, its graphics thread a little slower.", flush=True)
-            self._app_profile_readable = readable
-        return self._app_profile_readable
-
-    def configure_app(self, build=None, instrument=False):
-        """The app's build, by default build/windows/app. With the committed
-        profile of the app's own code (windows/pgo/app.profdata,
-        scripts/windows/train_app_profile.py) it is compiled with it and with
-        ThinLTO: on four of the i9's E-cores that took the GX worker's CPU per
-        game frame from 16.6-17.2 ms to 13.8-14.3 and the game thread's from
-        23.9-24.3 to 22.4-23.2 (2026-10-02). `instrument` builds it to record
-        such a profile instead."""
+    def configure_app(self, build=None):
+        """The app (host) build: Aurora on Dawn (Vulkan/OpenGL) with vendored SDL3,
+        compiled with clang at the same CPU level as the game module (the FIFO
+        worker's matrix work for Smooth Motion needs AVX2 and FMA to keep up)."""
         self.app_build = build or self.out / "app"
-        profile, link = "", ""
-        if instrument:
-            profile = link = "-fprofile-instr-generate"
-        elif (self.APP_PROFILE.exists() and not getattr(self.args, "no_app_pgo", False)
-              and self.app_profile_readable()):
-            # Functions changed since the profile was recorded are compiled
-            # without counts (the warnings say so; they are expected).
-            profile = (f"-fprofile-instr-use={self.APP_PROFILE.as_posix()} -Wno-profile-instr-unprofiled "
-                       "-Wno-profile-instr-out-of-date -Wno-backend-plugin -flto=thin")
-            link = "-flto=thin"
-        # The app for the same CPU level as the game module: the FIFO worker's
-        # matrix work for Smooth Motion needs AVX2 and FMA to keep up (at the
-        # baseline level it held the game below 30 FPS on Outset, 2026-09-29).
         self.run("app-configure", [
-            "cmake", "-S", ROOT / "windows", "-B", self.app_build, "-G", "Ninja",
-            "-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++", "-DCMAKE_BUILD_TYPE=Release",
-            # Debug information in a PDB beside the build's BlueWake.exe (the
-            # package copies only the exe and DLLs), so a crash address names its
-            # function; /OPT:REF,ICF keep the code what it is without /DEBUG.
-            f"-DCMAKE_C_FLAGS=-march={self.args.march} -g -gcodeview {profile}",
-            f"-DCMAKE_CXX_FLAGS=-march={self.args.march} -g -gcodeview {profile}",
-            "-DBUILD_TESTING=OFF", f"-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,/DEBUG -Wl,/OPT:REF -Wl,/OPT:ICF {link}",
-            f"-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld {link}",
-            f"-DBLUEWAKE_WINDOWS_CONSOLE={'ON' if self.args.console else 'OFF'}"])
+            "cmake", "-S", ROOT / "linux", "-B", self.app_build, "-G", "Ninja",
+            "-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++",
+            "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_TESTING=OFF",
+            f"-DCMAKE_C_FLAGS=-march={self.args.march} -g",
+            f"-DCMAKE_CXX_FLAGS=-march={self.args.march} -g",
+            "-DAURORA_DAWN_PROVIDER=package", "-DAURORA_DAWN_LINKAGE=static",
+            "-DAURORA_SDL3_PROVIDER=vendor", "-DAURORA_SDL3_LINKAGE=static"])
 
-    # --- 4 extract ---------------------------------------------------------
-    def extract(self, iso, game, accept_sha1=None):
+    # --- 4 extract -------------------------------------------------------
+    def extract(self, iso, game):
         self.run("disc-extract-build", ["cmake", "--build", self.app_build, "--target", "bluewake_disc_extract"],
                  ninja=True)
-        env = dict(self.env)
-        if accept_sha1:
-            env["BLUEWAKE_ACCEPT_DOL_SHA1"] = accept_sha1
-        # disc_extract checks the disc id (GZLE01) and the executable's hash
-        # (revision 0) and refuses anything else.
-        self.run(f"disc-extract{'-' + game.parent.name if accept_sha1 else ''}",
-                 [self.app_build / "bluewake_disc_extract.exe", iso, game], env=env)
+        self.run("disc-extract", [self.app_build / "bluewake_disc_extract", iso, game])
         rels = len(list((game / "rels").glob("*.rel")))
         if rels != 415:
             die(f"expected 415 RELs in {game / 'rels'}, found {rels}")
 
     # --- 5 translate -------------------------------------------------------
     def translate(self, dol, out, rels=None, name="translate", sites=()):
-        """DolRecomp over main.dol (and the RELs); `sites` is --option-sites FILE
-        for Better Wind Waker's options (scripts/mods/build_mods.sh)."""
         pending = out.with_name(out.name + ".new")
         shutil.rmtree(pending, ignore_errors=True)
         pending.mkdir(parents=True)
         self.run(f"{name}-dol", [self.dolrecomp, "--gamecube", "--backend", "c", "--cpu", "gekko",
-                                 "--partition-instructions", "4096", *sites, dol, pending / "dol",
-                                 "-j", self.args.jobs])
+                                 "--partition-instructions", "4096", *sites, dol, pending / "dol", "-j", self.args.jobs])
         if rels is not None:
-            # With option sites, name the RELs' folder with "/" and a trailing
-            # "/": DolRecomp matches a REL's sites (d_a_ship.rel+0x...) to the
-            # file name after the last "/" of its path, and on Windows it joins
-            # a folder and a file with "\" unless the folder already ends in a
-            # separator, so the sites in the RELs would never match.
             rels_arg = rels.as_posix().rstrip("/") + "/" if sites else rels
             self.run(f"{name}-rels", [self.dolrecomp, "--gamecube", "--backend", "c", "--cpu", "gekko",
                                       "--rel-base", "0xC0400000", *sites, rels_arg, pending / "rels",
@@ -531,7 +386,8 @@ int main(void) {
             die(f"composite source digest {digest} differs from the verified {expected} (wrong disc revision "
                 f"or translator?); --accept-new-composite overrides")
         # Keep an identical tree in place: rewriting 750 files would make the
-        # compile start over. Mods are part of the recorded inputs.
+        # compile start over. Mods and the prepared optimizations are part of
+        # the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
                        f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
@@ -546,25 +402,22 @@ int main(void) {
                      ROOT / "cmake/composite/native_j3d.c", ROOT / "cmake/composite/native_j3d.h",
                      ROOT / "cmake/composite/native_vec.c", ROOT / "cmake/composite/native_vec.h",
                      ROOT / "scripts/windows/native_game_math.py", ROOT / "cmake/composite/native_game_math.c",
-                     ROOT / "cmake/composite/native_game_math.h", ROOT / "scripts/windows/native_skin.py", ROOT / "cmake/composite/native_skin.c",
-                     ROOT / "cmake/composite/native_skin.h", ROOT / "cmake/composite/native_math.c", ROOT / "cmake/composite/native_math.h",
+                     ROOT / "cmake/composite/native_game_math.h", ROOT / "scripts/windows/native_skin.py",
+                     ROOT / "cmake/composite/native_skin.c", ROOT / "cmake/composite/native_skin.h",
+                     ROOT / "cmake/composite/native_math.c", ROOT / "cmake/composite/native_math.h",
                      ROOT / "cmake/composite/native_work_pool.c", ROOT / "cmake/composite/native_work_pool.h",
                      ROOT / "scripts/windows/inline_save_restore_gpr.py",
-                     ROOT / "cmake/composite/native_fifo.c",
-                     ROOT / "cmake/composite/native_fifo.h",
-                     ROOT / "cmake/composite/native_bg.c",
-                     ROOT / "cmake/composite/native_bg.h",
-                     ROOT / "cmake/composite/native_mtxcalc.c",
-                     ROOT / "cmake/composite/native_mtxcalc.h",
-                     ROOT / "cmake/composite/native_search.c",
-                     ROOT / "cmake/composite/native_search.h",
+                     ROOT / "cmake/composite/native_fifo.c", ROOT / "cmake/composite/native_fifo.h",
+                     ROOT / "cmake/composite/native_bg.c", ROOT / "cmake/composite/native_bg.h",
+                     ROOT / "cmake/composite/native_mtxcalc.c", ROOT / "cmake/composite/native_mtxcalc.h",
+                     ROOT / "cmake/composite/native_search.c", ROOT / "cmake/composite/native_search.h",
                      ROOT / "scripts/windows/native_entries.py",
                      ROOT / "scripts/windows/lean_memory.py", Path(__file__)]):
             if f.is_file():
                 inputs.update(f.read_bytes())
         if self.args.direct_calls or self.args.native_game_math:
             # The source-derived watch list is part of the prepared module.
-            for folder in ("runtime/host/src", "windows/src"):
+            for folder in ("runtime/host/src", "linux/src"):
                 for path in sorted((ROOT / folder).rglob("*")):
                     if path.suffix in (".c", ".h", ".cpp", ".mm", ".m"):
                         inputs.update(str(path.relative_to(ROOT)).encode())
@@ -589,100 +442,58 @@ int main(void) {
 
     # --- 7 mods --------------------------------------------------------------
     def build_mods(self):
-        """Widescreen 16:9 and 16:10, Better Wind Waker's options, and each
-        widescreen with them, as variants compiled into the same module: the
-        steps of scripts/mods/build_mods.sh (docs/MODS.md)."""
-        o, m = self.out, self.out / "mods"
-        m.mkdir(parents=True, exist_ok=True)
-        options = ROOT / "mods/betterww/options.txt"
-        # The site list DolRecomp reads, with LF line ends (Python's stdout
-        # writes CRLF on Windows).
-        listed = subprocess.run([sys.executable, ROOT / "scripts/mods/game_options.py", "sites", options],
-                                capture_output=True, check=True).stdout
-        (m / "option-sites.txt").write_bytes(listed.replace(b"\r\n", b"\n"))
-        sites = ("--option-sites", m / "option-sites.txt")
-
-        for name, gecko in (("widescreen", "GZLE01.gecko"), ("widescreen1610", "GZLE01-16x10.gecko")):
-            print(name)
-            (m / name).mkdir(exist_ok=True)
-            self.run(f"mods-{name}-gecko", [sys.executable, ROOT / "scripts/mods/gecko_apply.py",
-                                           ROOT / "mods/widescreen" / gecko, o / "game/main.dol",
-                                           m / name / "main.dol", m / name / "runtime.json"])
-            self.translate(m / name / "main.dol", m / name / "translated", name=f"mods-{name}-translate")
-            self.composite(m / name / "translated/dol/generated", o / "translated/rels/generated/rels",
-                           o / "game/rels", m / name / "main.dol", m / name / "composite-src",
-                           f"mods-{name}-composite")
-
-        # The game's own executable and modules translated with the option
-        # sites; the variants are the chunks that hold a site.
-        print("Better Wind Waker options")
-        (m / "betterww").mkdir(exist_ok=True)
-        self.translate(o / "game/main.dol", m / "betterww/translated", o / "game/rels",
-                       name="mods-betterww-translate", sites=sites)
-        self.composite(m / "betterww/translated/dol/generated", m / "betterww/translated/rels/generated/rels",
-                       o / "game/rels", o / "game/main.dol", m / "betterww/composite-src", "mods-betterww-composite")
-
-        for combo, widescreen in (("combo", "widescreen"), ("combo1610", "widescreen1610")):
-            print(f"{widescreen} + Better Wind Waker options")
-            (m / combo).mkdir(exist_ok=True)
-            self.translate(m / widescreen / "main.dol", m / combo / "translated", name=f"mods-{combo}-translate",
-                           sites=sites)
-            self.composite(m / combo / "translated/dol/generated", m / "betterww/translated/rels/generated/rels",
-                           o / "game/rels", m / widescreen / "main.dol", m / combo / "composite-src",
-                           f"mods-{combo}-composite")
-
-        print("variants into the composite source")
-        base = m / "composite-src.base"
-        self.composite(o / "translated/dol/generated", o / "translated/rels/generated/rels", o / "game/rels",
-                       o / "game/main.dol", base, "mods-base-composite")
-        # The --mod and --combo specs are colon-separated, and a Windows path
-        # has a colon after its drive letter: run in the build directory and
-        # name the mod trees relative to it. The mods keep build_mods.sh's
-        # order, which numbers them.
-        self.run("mods-variants", [
-            sys.executable, ROOT / "scripts/mods/build_mod_variants.py", "--composite-src", base,
-            "--base-dol", o / "game/main.dol",
-            "--mod", "widescreen:mods/widescreen/composite-src:mods/widescreen/main.dol:mods/widescreen/runtime.json",
-            "--mod", "betterww:mods/betterww/composite-src:game/main.dol",
-            "--mod", "widescreen1610:mods/widescreen1610/composite-src:mods/widescreen1610/main.dol:"
-                     "mods/widescreen1610/runtime.json",
-            "--combo", "widescreen+betterww:mods/combo/composite-src",
-            "--combo", "widescreen1610+betterww:mods/combo1610/composite-src",
-            "--exclusive", "widescreen,widescreen1610",
-            "--options", options, "--rels-bin-dir", o / "game/rels"], cwd=o)
-        dst = o / "composite-src"
-        if (base / "generated.h").read_bytes() != (dst / "generated.h").read_bytes():
-            die(f"{dst} was generated from other inputs; rebuild it first")
-        # The base tree plus the variants: only the variant chunks and the
-        # files that list them change.
-        sync_tree(base, dst)
-        (o / "composite-final.digest").write_text(tree_digest(dst) + "\n")
+        self.run("mods", ["bash", ROOT / "scripts/mods/build_mods.sh", self.out, self.iso])
+        o = self.out
+        (o / "composite-final.digest").write_text(tree_digest(o / "composite-src") + "\n")
         (o / "mods.done").write_text("complete\n")
 
+    # --- 8 prepare the accelerators ---------------------------------------
     def prepare_blocks(self):
         """Explicit generic optimization, after variants and before compilation.
 
         generate() verifies both the input fingerprint and final tree digest.
         Interrupted/edited preparation cannot be mistaken for finished work.
+        Each script is portable Python and changes only what it can prove, so
+        the unmodified translation remains wherever a native guard declines.
         """
         o = self.out
         script = ROOT / "scripts/windows/fast_blocks.py"
         cpu_script = ROOT / "scripts/windows/global_guest_cpu.py"
+        # The accelerator scripts re-verify their certified fragments against
+        # the source before rewriting it, so they are NOT safe to re-run on an
+        # already-prepared tree: fast_blocks.py changes the bodies
+        # native_game_math.py certifies, and a second pass fails the hash. The
+        # receipt's final_digest is the tree after every enabled accelerator,
+        # so if it matches the current tree under the same option set the phase
+        # is already done -- skip it.
+        receipt_path = o / "prepared-blocks.json"
+        if receipt_path.exists():
+            try:
+                receipt = json.loads(receipt_path.read_text())
+            except ValueError:
+                receipt = {}
+            option_names = ("enabled", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe",
+                            "direct_calls", "inline_gpr", "native_j3d", "native_vec", "native_math",
+                            "native_skin", "native_game_math", "lean_memory", "native_entries")
+            arg_names = ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe",
+                         "direct_calls", "inline_gpr", "native_j3d", "native_vec", "native_math",
+                         "native_skin", "native_game_math", "lean_memory", "native_entries")
+            options_match = all(receipt.get(name) == bool(getattr(self.args, arg))
+                                for name, arg in zip(option_names, arg_names))
+            if options_match and receipt.get("final_digest") == tree_digest(o / "composite-src"):
+                print("the existing composite source is already prepared")
+                return
         if self.args.native_game_math:
             self.run("native-game-math", [sys.executable, ROOT / "scripts/windows/native_game_math.py",
                                           o / "composite-src"])
         if self.args.native_j3d:
-            self.run("native-j3d", [sys.executable, ROOT / "scripts/mods/prepare_native_j3d.py",
-                                     o / "composite-src"])
+            self.run("native-j3d", [sys.executable, ROOT / "scripts/mods/prepare_native_j3d.py", o / "composite-src"])
         if self.args.native_vec:
-            self.run("native-vec", [sys.executable, ROOT / "scripts/mods/prepare_native_vec.py",
-                                     o / "composite-src"])
+            self.run("native-vec", [sys.executable, ROOT / "scripts/mods/prepare_native_vec.py", o / "composite-src"])
         if self.args.native_math:
-            self.run("native-math", [sys.executable, ROOT / "scripts/mods/prepare_native_math.py",
-                                     o / "composite-src"])
+            self.run("native-math", [sys.executable, ROOT / "scripts/mods/prepare_native_math.py", o / "composite-src"])
         if self.args.native_skin:
-            self.run("native-skin", [sys.executable, ROOT / "scripts/windows/native_skin.py",
-                                      o / "composite-src"])
+            self.run("native-skin", [sys.executable, ROOT / "scripts/windows/native_skin.py", o / "composite-src"])
         if self.args.fixed_cpu:
             self.run("fixed-cpu", [sys.executable, cpu_script, o / "composite-src"])
         if self.args.inline_fp or self.args.gather_pipe:
@@ -698,15 +509,13 @@ int main(void) {
         if self.args.prepared_blocks:
             self.run("prepared-blocks", [sys.executable, script, o / "composite-src"])
         if self.args.direct_calls:
-            self.run("direct-calls", [sys.executable, ROOT / "scripts/windows/direct_calls.py",
-                                       o / "composite-src"])
+            self.run("direct-calls", [sys.executable, ROOT / "scripts/windows/direct_calls.py", o / "composite-src"])
         # Elliott Tate's Windows steps, off by default. Each changes only what it
         # can prove: lean_memory.py needs the prepaid copies' deadline test, and
         # native_entries.py hooks a native only where the translation hashes to the
         # one its comparison test was run on (it reports the rest as not hooked).
         if self.args.lean_memory:
-            self.run("lean-memory", [sys.executable, ROOT / "scripts/windows/lean_memory.py",
-                                      o / "composite-src"])
+            self.run("lean-memory", [sys.executable, ROOT / "scripts/windows/lean_memory.py", o / "composite-src"])
         if self.args.native_entries:
             self.run("native-entries", [sys.executable, ROOT / "scripts/windows/native_entries.py",
                                          o / "composite-src"])
@@ -740,7 +549,7 @@ int main(void) {
         pending.write_text(digest + "\n")
         os.replace(pending, o / "composite-final.digest")
 
-    # --- 8 compile -----------------------------------------------------------
+    # --- 9 compile -----------------------------------------------------------
     def compile_module(self):
         flags = []
         if self.profile is not None:
@@ -765,12 +574,8 @@ int main(void) {
     def cold_sources(self):
         """The chunks whose function the training never ran, listed for
         cmake/composite to compile at -O1 without GVN's memory dependence
-        analysis (the module's longest passes on its largest functions), as
-        DeepSea compiles its cold actor code: the module compiles in about 15
-        minutes instead of 39, and Gohma's room, which no training visits, ran
-        as fast as with the whole module at -O2 (2026-10-02; the profile had
-        already compiled those chunks for size). --no-tiered compiles them all
-        at -O2. A chunk is one function, named func_<its file's address>."""
+        analysis (the module's longest passes on its largest functions). A chunk
+        is one function, named func_<its file's address>."""
         stats = subprocess.run([self.llvm_profdata, "show", "--all-functions", self.profile], capture_output=True,
                                text=True).stdout
         counts = {name.upper(): int(count) for name, count in
@@ -788,6 +593,24 @@ int main(void) {
 
     def compile_composite(self, build, opt_level, extra_flags, extra_link_flags, name, cold=None):
         rc = self.recompcore
+        # The build directory may hold a stale configure from an earlier
+        # builder (the old Linux builder compiled the module with gcc). CMake
+        # cannot switch compilers in place: it reconfigures against the stale
+        # cache and the Threads probe (and friends) fail with a confusing
+        # "Could NOT find Threads". Wipe a build dir whose cached compiler is
+        # not clang, or whose cache is gone but its ninja file remains.
+        cache = build / "CMakeCache.txt"
+        stale = False
+        if cache.exists():
+            cached = re.search(r"^CMAKE_C_COMPILER:FILEPATH=(.*)$", cache.read_text(), re.M)
+            if cached and "clang" not in cached.group(1):
+                print(f"  {build} was configured with {cached.group(1)}; removing it for clang")
+                stale = True
+        elif (build / "build.ninja").exists():
+            print(f"  {build} has no CMake cache; removing the stale tree for a clean configure")
+            stale = True
+        if stale:
+            shutil.rmtree(build)
         # Each chunk is one very large function, and two LLVM passes are
         # superlinear on it (clang 22, x86-64, measured with -ftime-report):
         # - the SLP vectorizer took 92 percent of a typical large chunk's time;
@@ -838,27 +661,14 @@ int main(void) {
         return module
 
     # --- local optimization training ---------------------------------------
-    # The counterpart of scripts/builder/train_local_pgo.py: the game module is
+    # The counterpart of scripts/windows/build.py's training: the game module is
     # compiled with LLVM's instrumentation, the normal app plays the opening to
     # player control headless with it, and the counts it records guide the
     # optimized compile. The profile is made from the game, so it is private and
-    # stays in the build directory. Adapted from Elliott Tate's Windows builder
-    # (4fbcc7f and follow-ups through 7ca0cb9). Unlike the Mac, the
-    # bundled Apple-silicon profiles are not used: this one covers the runtime
-    # in the module too, from this compiler.
+    # stays in the build directory. Adapted from Elliott Tate's Windows builder.
     TRAINING_VERSION = "bluewake-2"  # the tour of the game (Elliott Tate's TRAINING_VERSION 4)
     TRAINING_RETRACES = 23000
-    # After player control (retrace 20,257 on the lookout), Link runs - off the
-    # lookout, around Outset, turning - instead of standing until the end: the
-    # collision, movement and animation code that play spends its time in is
-    # then trained hot, not compiled cold for size. retrace:buttons:length:x:y.
     TRAINING_RUN = ["20400:0:700:0:127", "21100:0:500:90:110", "21600:0:500:-90:110", "22100:0:900:0:127"]
-    # Then the plain playback tours the game (BLUEWAKE_TEST_WARP, a scene change
-    # as a door makes it): towns, islands, dungeons, the sea from the boat. The
-    # opening and Outset alone left most of the game's code untrained (288 of
-    # 813 translated functions ran), so a dungeon's or the sea's code was
-    # compiled cold, for size. Each stop: the scene loads, then Link runs,
-    # turns and runs on. stage:room:point.
     TRAINING_TOUR = ["sea:11:1",        # Windfall Island
                      "sea:13:0",        # Dragon Roost Island
                      "M_NewD2:0:0",     # Dragon Roost Cavern
@@ -895,7 +705,7 @@ int main(void) {
                                "runtime": self.git("-C", str(self.recompcore), "rev-parse", "HEAD"),
                                "source": tree_digest(self.out / "composite-src")},
                               sort_keys=True).encode())
-        for folder in ("cmake/composite", "runtime/host/src", "windows/src"):
+        for folder in ("cmake/composite", "runtime/host/src", "linux/src"):
             for path in sorted((ROOT / folder).rglob("*")):
                 if path.is_file():
                     key.update(path.relative_to(ROOT).as_posix().encode())
@@ -958,8 +768,7 @@ int main(void) {
         """One headless playback of the opening: boot, A at the title, the
         opening cutscene's text confirmed, player control on Outset, and with
         `tour` the tour of the game after it. A new card in its own folder; the
-        player's saves are never touched. headless=False draws it in a window
-        (the app's own training, scripts/windows/train_app_profile.py)."""
+        player's saves are never touched."""
         warps, tour_moves, tour_end = self.training_tour() if tour else ([], [], self.TRAINING_RETRACES)
         run.mkdir(parents=True)
         env = {k: v for k, v in (self.env or os.environ).items() if not k.startswith(("BLUEWAKE_", "DOL_", "LLVM_PROFILE_"))}
@@ -973,7 +782,7 @@ int main(void) {
             "BLUEWAKE_MAX_RETRACES": str(tour_end), "BLUEWAKE_WALL_PACE": "0",
             "BLUEWAKE_PLAYER_PROBE": "1", "BLUEWAKE_PAD_BUTTONS": "0x0100",
             # The player-control milestone below waits on the overlap phase
-            # this observation latches; the Windows app turns it off for play.
+            # this observation latches; the app turns it off for play.
             "BLUEWAKE_OVERLAP_OBSERVATION": "1",
             "BLUEWAKE_PAD_PULSE_ON_TITLE_READY": "1", "BLUEWAKE_PAD_PULSE_LENGTH": "2",
             "BLUEWAKE_PAD_CONFIRM_EVENT": "any",
@@ -1012,42 +821,28 @@ int main(void) {
             shutil.copy2(profile, target)
         return target
 
-    # --- 9 app ---------------------------------------------------------------
+    # --- 10 app ---------------------------------------------------------------
     def build_app(self):
-        self.run("app-build", ["cmake", "--build", self.app_build, "--target", "BlueWake", "-j", self.args.jobs],
+        self.run("app-build", ["cmake", "--build", self.app_build, "--target", "bluewake", "-j", self.args.jobs],
                  ninja=True)
-        exe = self.app_build / "BlueWake.exe"
+        exe = self.app_build / "bluewake"
         if not exe.exists():
-            die("BlueWake.exe was not produced")
+            die("bluewake was not produced")
         return exe
 
-    # --- 10 package ----------------------------------------------------------
+    # --- 11 package ----------------------------------------------------------
     def package(self, module):
         app = self.out / "BlueWake"
         (app / "game").mkdir(parents=True, exist_ok=True)
         (app / "dsp").mkdir(exist_ok=True)
-        copied = []
         for f in sorted(self.app_build.iterdir()):
-            if f.suffix.lower() in (".exe", ".dll") and f.name != "bluewake_disc_extract.exe" or \
-                    f.name == "initial_pipeline_cache.db":
+            if f.is_file() and f.name in ("bluewake", "bluewake_disc_extract"):
                 shutil.copy2(f, app / f.name)
-                copied.append(f.name)
-        nodtool = ROOT / "build/tools/nodtool/bin/nodtool.exe"
-        if nodtool.is_file():
-            shutil.copy2(nodtool, app / "nodtool.exe")
-            copied.append("nodtool.exe")
+            elif f.is_file() and f.name == "initial_pipeline_cache.db":
+                shutil.copy2(f, app / f.name)
+            elif f.is_file() and (f.name.startswith("libSDL3") or f.name.startswith("libwebgpu_dawn")):
+                shutil.copy2(f, app / f.name)
         shutil.copy2(module, app / MODULE)
-        # The Visual C++ runtime, app-local, so the folder also runs on a PC
-        # without the redistributable installed (the UCRT ships with Windows).
-        redist = Path(self.env.get("VCToolsRedistDir", "")) / "x64"
-        crt = sorted(redist.glob("Microsoft.VC*.CRT")) if redist.is_dir() else []
-        if crt:
-            for name in ("msvcp140.dll", "msvcp140_atomic_wait.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
-                if (crt[-1] / name).exists():
-                    shutil.copy2(crt[-1] / name, app / name)
-        else:
-            print("note: the Visual C++ runtime DLLs were not found to copy; the app needs the "
-                  "Visual C++ Redistributable on other PCs")
         shutil.copy2(self.out / "game/main.dol", app / "game/main.dol")
         rels = app / "game/rels"
         shutil.rmtree(rels, ignore_errors=True)
@@ -1057,7 +852,7 @@ int main(void) {
         self.place(self.iso, app / "game/GZLE01.iso")
         dirty = bool(self.git("status", "--porcelain"))
         provenance = {
-            "profile": "bluewake-windows",
+            "profile": "bluewake-linux",
             "containsTranslatedGameCode": True,
             "source_commit": self.git("rev-parse", "HEAD"),
             "source_modified": dirty,
@@ -1107,7 +902,8 @@ int main(void) {
         args = self.args
         self.mods = not args.no_mods
         self.mods_pending = self.mods
-        print(f"Building The Legend of Zelda: The Wind Waker (GameCube USA GZLE01 rev 0) for Windows from {args.disc}")
+        print(f"Building The Legend of Zelda: The Wind Waker (GameCube USA GZLE01 rev 0) "
+              f"for Linux from {args.disc}")
         step("1/10 tools")
         self.check_tools()
         step("2/10 dependencies")
@@ -1149,10 +945,6 @@ int main(void) {
             self.build_mods()
         self.prepare_blocks()
         if not (args.no_train or args.no_pgo):
-            self.llvm_profdata = str(Path(self.clang).with_name("llvm-profdata.exe"))
-            if not Path(self.llvm_profdata).is_file():
-                die("llvm-profdata.exe is missing beside Visual Studio's clang; install its LLVM tools "
-                    "or explicitly use --no-train for an untrained build")
             step("local optimization training (instrumented module and private opening playbacks)")
             self.profile = self.train()
         else:
@@ -1167,18 +959,18 @@ int main(void) {
         step("10/10 package")
         app = self.package(module)
         print(f"\nBlueWake: {app}")
-        print(f"  run {app / 'BlueWake.exe'}")
+        print(f"  run {app / 'bluewake'}")
         print("  It contains game code translated from your disc and a copy of the disc: keep it for yourself.")
-        print("  Saves: %APPDATA%\\BlueWake (outside the build).")
+        print("  Saves: ~/.local/share/BlueWake (outside the build).")
 
 
-README = """BlueWake for Windows: The Legend of Zelda: The Wind Waker (GameCube USA),
-statically recompiled from your own disc. See docs/WINDOWS.md in the source.
+README = """BlueWake for Linux: The Legend of Zelda: The Wind Waker (GameCube USA),
+statically recompiled from your own disc. See docs/LINUX.md in the source.
 
-This folder is a personal build: gGZLE01_recomp.dll is code translated from
-your disc and game\\ holds your disc image. Never share or upload it.
+This folder is a personal build: gGZLE01_recomp.so is code translated from
+your disc and game/ holds your disc image. Never share or upload it.
 
-Run BlueWake.exe. Options (BlueWake.exe --help lists them all):
+Run ./bluewake. Options (./bluewake --help lists them all):
   --widescreen    16:9 (--aspect 16:10 for 16:10)
   --smooth        Smooth Motion: 60 FPS with in-between frames
   --betterww      Better Wind Waker's settings (--options to change them)
@@ -1189,24 +981,26 @@ H/F/T/G C-stick, E/R L/R, Q Z, Return START. Game controllers work too.
 Mouse: click the game and move the mouse to turn the camera; Esc releases it.
 F11 fullscreen, F10 Smooth Motion, F9 frame rate.
 
-Saves, settings and session logs: %APPDATA%\\BlueWake
+Saves, settings and session logs: ~/.local/share/BlueWake
 """
 
 
 # The optimizations Wind Waker Recomp's Windows builder always prepares (fixed
 # CPU and RAM storage, inline floating point and gather-pipe writes, inlined
 # register saves, prepaid blocks, direct calls and the certified natives). The
-# app enables each one only where the module it loads was prepared with it.
-WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
-                                 "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
-                                 "native_skin", "native_game_math")
+# Linux builder matches that by default so a Linux build behaves the same as a
+# Windows one; --conservative builds the plain translation. The app enables each
+# one only where the module it loads was prepared with it.
+LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
+                               "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
+                               "native_skin", "native_game_math")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("disc", type=Path, help="your GZLE01 revision 0 disc image (.iso, .gcm, .rvz, ...)")
-    parser.add_argument("--out", type=Path, default=ROOT / "build/windows",
-                        help="build directory (default build/windows; must be git-ignored inside the checkout)")
+    parser.add_argument("disc", type=Path, help="your GZLE01 revision 0 disc image (.iso or .gcm)")
+    parser.add_argument("--out", type=Path, default=ROOT / "build/linux",
+                        help="build directory (default build/linux; must be git-ignored inside the checkout)")
     parser.add_argument("--jobs", type=int, default=None,
                         help="parallel compile jobs (default: the cores, limited by free memory)")
     parser.add_argument("--march", default="x86-64-v3",
@@ -1226,7 +1020,7 @@ def main():
     parser.add_argument("--no-pgo", action="store_true", help="alias for --no-train")
     parser.add_argument("--retrain", action="store_true", help="record a new local profile instead of reusing one")
     parser.add_argument("--prepared-blocks", action="store_true",
-                        help="opt into experimental prepaid-block optimization (off by default; Windows timing pending)")
+                        help="opt into experimental prepaid-block optimization (off by default; timing pending)")
     parser.add_argument("--fixed-cpu", action="store_true",
                         help="opt into experimental fixed-address CPU state; requires a supporting app")
     parser.add_argument("--fixed-mem1", action="store_true",
@@ -1255,12 +1049,9 @@ def main():
     parser.add_argument("--native-entries", action="store_true",
                         help="Wind Waker Recomp's certified native entries, second and third sets (off by default; "
                              "needs --direct-calls, --gather-pipe and --native-vec)")
-    parser.add_argument("--console", action="store_true", help="build BlueWake.exe as a console program")
     parser.add_argument("--conservative", action="store_true",
                         help="build the plain translation, without the optimizations prepared by default "
                              "(the individual --... options then add them one at a time)")
-    parser.add_argument("--no-app-pgo", action="store_true",
-                        help="build the app without its committed optimization profile and ThinLTO")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
     parser.add_argument("--source-only", action="store_true",
@@ -1270,7 +1061,7 @@ def main():
     # Wind Waker Recomp's Windows builds prepare all of these every time; BlueWake
     # matches that by default. --conservative builds the plain translation.
     if not args.conservative:
-        for name in WINDOWS_DEFAULT_OPTIMIZATIONS:
+        for name in LINUX_DEFAULT_OPTIMIZATIONS:
             setattr(args, name, True)
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
@@ -1291,10 +1082,10 @@ def main():
         rel = None
     if rel is not None:
         if str(rel) == ".":
-            parser.error("--out must not be the checkout itself; use build/windows")
+            parser.error("--out must not be the checkout itself; use build/linux")
         ignored = subprocess.run(["git", "check-ignore", "-q", str(args.out) + os.sep], cwd=ROOT).returncode == 0
         if not ignored:
-            parser.error("--out inside this checkout must be git-ignored; use build/windows")
+            parser.error("--out inside this checkout must be git-ignored; use build/linux")
     args.out.mkdir(parents=True, exist_ok=True)
     try:
         Builder(args).build()

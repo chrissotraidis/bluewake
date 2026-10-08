@@ -58,6 +58,41 @@
       "hosts": {
         "macos-arm64": "planned"
       }
+    },
+    "linux": {
+      "hosts": {
+        "linux-x86_64": "experimental"
+      },
+      "tools": [
+        "git",
+        "cmake",
+        "ninja",
+        "cc",
+        "clang"
+      ],
+      "command": [
+        "{python}",
+        "{repo}/scripts/linux/build.py",
+        "{disc}",
+        "--out",
+        "{work}",
+        "--jobs",
+        "{jobs}"
+      ],
+      "modes": {
+        "full": [],
+        "source-only": [
+          "--source-only"
+        ]
+      },
+      "options": {
+        "no-mods": [
+          "--no-mods"
+        ]
+      },
+      "output": "folder",
+      "folder": "{work}/BlueWake",
+      "check": "none"
     }
   },
   "requirements": {
@@ -105,6 +140,32 @@
         ],
         "player": true,
         "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough."
+      },
+      {
+        "name": "cc",
+        "label": "C compiler",
+        "version_args": [
+          "--version"
+        ],
+        "player": true,
+        "hosts": [
+          "linux-x86_64",
+          "linux-arm64"
+        ],
+        "note": "Install a C compiler for the disc tool, for example: sudo apt install build-essential"
+      },
+      {
+        "name": "clang",
+        "label": "Clang C/C++ compiler",
+        "version_args": [
+          "--version"
+        ],
+        "player": true,
+        "hosts": [
+          "linux-x86_64",
+          "linux-arm64"
+        ],
+        "note": "The host (Aurora/SDL3) build needs clang: install it, for example: sudo apt install clang"
       }
     ]
   },

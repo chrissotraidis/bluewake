@@ -5,7 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <bcrypt.h>
-#else
+#elif defined(__APPLE__)
 #include <CommonCrypto/CommonDigest.h>
 #endif
 #include <dirent.h>
@@ -99,6 +99,78 @@ bad:
     return NULL;
 }
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+// Self-contained SHA-1 (FIPS 180-1), so the Linux build needs no crypto
+// library for the one hash this importer computes (main.dol's revision-0
+// SHA-1). macOS uses CommonCrypto above; Windows uses BCrypt above.
+static uint32_t rol32(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
+
+static void sha1_transform(uint32_t state[5], const uint8_t block[64]) {
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4];
+    uint32_t w[80];
+    for (int i = 0; i < 16; i++)
+        w[i] = ((uint32_t)block[i * 4] << 24) | ((uint32_t)block[i * 4 + 1] << 16) |
+               ((uint32_t)block[i * 4 + 2] << 8) | (uint32_t)block[i * 4 + 3];
+    for (int i = 16; i < 80; i++)
+        w[i] = rol32(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    for (int i = 0; i < 80; i++) {
+        uint32_t f, k;
+        if (i < 20) {
+            f = (b & c) | (~b & d);
+            k = 0x5A827999u;
+        } else if (i < 40) {
+            f = b ^ c ^ d;
+            k = 0x6ED9EBA1u;
+        } else if (i < 60) {
+            f = (b & c) | (b & d) | (c & d);
+            k = 0x8F1BBCDCu;
+        } else {
+            f = b ^ c ^ d;
+            k = 0xCA62C1D6u;
+        }
+        uint32_t t = rol32(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = rol32(b, 30);
+        b = a;
+        a = t;
+    }
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+}
+
+static void sha1(const uint8_t* data, size_t size, uint8_t digest[20]) {
+    uint32_t state[5] = {0x67452301u, 0xEFCDAB89u, 0x98BADCFEu, 0x10325476u, 0xC3D2E1F0u};
+    uint64_t bitlen = (uint64_t)size * 8u;
+    uint8_t block[64];
+    size_t i = 0;
+    while (size - i >= 64) {
+        sha1_transform(state, data + i);
+        i += 64;
+    }
+    memset(block, 0, sizeof block);
+    size_t rem = size - i;
+    memcpy(block, data + i, rem);
+    block[rem] = 0x80u;
+    if (rem >= 56) {
+        sha1_transform(state, block);
+        memset(block, 0, sizeof block);
+    }
+    for (int j = 0; j < 8; j++)
+        block[56 + j] = (uint8_t)(bitlen >> (56 - j * 8));
+    sha1_transform(state, block);
+    for (int j = 0; j < 5; j++) {
+        digest[j * 4] = (uint8_t)(state[j] >> 24);
+        digest[j * 4 + 1] = (uint8_t)(state[j] >> 16);
+        digest[j * 4 + 2] = (uint8_t)(state[j] >> 8);
+        digest[j * 4 + 3] = (uint8_t)state[j];
+    }
+}
+#endif
+
 static void sha1_hex(const uint8_t* data, size_t size, char out[41]) {
 #if defined(_WIN32)
     uint8_t digest[20];
@@ -107,13 +179,18 @@ static void sha1_hex(const uint8_t* data, size_t size, char out[41]) {
         memset(digest, 0, sizeof digest);
     for (int i = 0; i < (int)sizeof digest; ++i)
         snprintf(out + i * 2, 3, "%02x", digest[i]);
-#else
+#elif defined(__APPLE__)
     uint8_t digest[CC_SHA1_DIGEST_LENGTH];
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     CC_SHA1(data, (CC_LONG)size, digest);
 #pragma clang diagnostic pop
     for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; ++i)
+        snprintf(out + i * 2, 3, "%02x", digest[i]);
+#else
+    uint8_t digest[20];
+    sha1(data, size, digest);
+    for (int i = 0; i < 20; ++i)
         snprintf(out + i * 2, 3, "%02x", digest[i]);
 #endif
 }

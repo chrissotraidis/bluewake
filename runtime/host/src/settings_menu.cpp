@@ -111,7 +111,15 @@ std::string default_path() {
     const char* home = std::getenv("HOME");
     if (home == nullptr || home[0] == '\0')
         return "";
+#if defined(__linux__)
+    // Freedesktop config dir: $XDG_CONFIG_HOME/BlueWake, else ~/.config/BlueWake.
+    const char* config = std::getenv("XDG_CONFIG_HOME");
+    if (config != nullptr && config[0] != '\0')
+        return std::string(config) + "/BlueWake/settings.ini";
+    return std::string(home) + "/.config/BlueWake/settings.ini";
+#else
     return std::string(home) + "/Library/Application Support/BlueWake/settings.ini";
+#endif
 }
 
 std::string trim(std::string text) {
@@ -684,7 +692,22 @@ void load_mac_font() {
     g_font_dpi = window != nullptr ? std::max(1.f, SDL_GetWindowDisplayScale(window)) : 1.f;
     auto* atlas = new ImFontAtlas(); // Process lifetime; never mutate Aurora's live atlas.
     atlas->Flags |= ImFontAtlasFlags_NoMouseCursors;
-    ImFont* font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", 17.f * g_font_dpi);
+    ImFont* font = nullptr;
+#if defined(__linux__)
+    // A metric-compatible sans from common distro font packages; DejaVu first.
+    static const char* const kLinuxFonts[] = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    };
+    for (const char* path : kLinuxFonts) {
+        font = atlas->AddFontFromFileTTF(path, 17.f * g_font_dpi);
+        if (font != nullptr) break;
+    }
+#else
+    font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", 17.f * g_font_dpi);
+#endif
     if (font == nullptr) {
         ImFontConfig config;
         config.SizePixels = 17.f * g_font_dpi;

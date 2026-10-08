@@ -110,6 +110,10 @@ audible music, the new-file route, dungeon interaction and controller behavior a
 | d. Controller | Not run; controller availability and the listed behaviors were not confirmed. |
 | Zip SHA-256, uploaded to the v0.6.0 draft | `ed94d759a1908059b47f3df242d99421b74971166dfb45ec4d9b8dd6a188f6d8` — `BlueWake-v0.6.0-windows-x64.zip`, uploaded to the draft only. |
 
+Checks b, c and d, a listening check of a, and five cutscenes were run afterwards on a second Windows PC
+from the same commit: [Windows checks for 0.6.0 on a second PC](WINDOWS_CHECKS_0.6.0_2026-10-07.md). That
+run found that the controller changes in 0.6.0 skip a controller connected at launch.
+
 ### Build and package notes
 
 - Device: AMD Ryzen 7 5700U with Radeon Graphics, Windows build 26300; 960 x 720 framebuffer,

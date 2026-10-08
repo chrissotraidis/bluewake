@@ -1,0 +1,59 @@
+name: Linux source-only host
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake ninja-build \
+            libwayland-dev libxkbcommon-dev libx11-xcb-dev \
+            libx11-dev libxrandr-dev libxext-dev libxi-dev \
+            libxcursor-dev libgl1-mesa-dev libvulkan-dev \
+            libasound2-dev libpulse-dev libxss-dev libxtst-dev
+      - name: Fetch the pinned public runtime
+        run: |
+          set -euo pipefail
+          lock=config/dependencies.lock.json
+          url=$(python3 -c "import json;print([d['url'] for d in json.load(open('$lock'))['dependencies'] if d['id']=='recompcore'][0])")
+          sha=$(python3 -c "import json;print([d['sha'] for d in json.load(open('$lock'))['dependencies'] if d['id']=='recompcore'][0])")
+          git init ref/recompcore
+          git -C ref/recompcore fetch --depth 1 --no-tags --recurse-submodules=no "$url" "$sha"
+          git -C ref/recompcore checkout --detach FETCH_HEAD
+      - name: Compile and link the host without a disc or game module
+        run: |
+          set -euo pipefail
+          cmake -S linux -B build/linux-host -G Ninja \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DBLUEWAKE_LINUX_REGRESSION_TESTS=ON \
+            -DAURORA_DAWN_PROVIDER=package -DAURORA_SDL3_PROVIDER=vendor
+          cmake --build build/linux-host --target bluewake bluewake_disc_extract \
+            bluewake_fast_blocks_test bluewake_cycle_domain_test \
+            bluewake_interrupt_sources_test bluewake_delivery_digest_test \
+            bluewake_composite_dispatch_loop_test bluewake_edge_intercepts_test \
+            bluewake_linux_disc_test bluewake_crash_text_test \
+            bluewake_launch_marker_test bluewake_settings_state_test \
+            bluewake_save_state_test bluewake_restart_request_test \
+            bluewake_dvd_completion_test bluewake_cache_flush_fallback_test --parallel 2
+          test -f build/linux-host/bluewake
+          if find build/linux-host -name 'gGZLE01_recomp*' | grep -q .; then
+            echo 'Unexpected personal game module'; exit 1
+          fi
+          ctest --test-dir build/linux-host --output-on-failure -R '^bluewake_'
+          # No artifacts are uploaded and no release is created: the disc, the
+          # extracted files and the game module never enter CI. The release
+          # build is made on a personal machine from the owner's disc and
+          # attached to the release by hand.
