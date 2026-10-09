@@ -234,8 +234,8 @@ whose reports it answers (#137, #159, #86, #59, the Steam Deck users on #107), w
 
 ## How to test without the long loop
 
-The slow part is compiling the game module (about 14 to 17 minutes on a desktop, longer on a laptop). Everything
-else is minutes.
+The slow part is compiling the game module (17 to 45 minutes on a desktop, longer on a laptop). Everything else is
+minutes.
 
 - **Measure with a script, not by playing.** `scripts/bench_tour.py` (to write) uses pieces the builders already
   have. It copies the tester's own memory card and places a save on Outset (`scripts/card_set_restart.py`), then

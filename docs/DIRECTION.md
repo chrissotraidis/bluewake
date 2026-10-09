@@ -38,9 +38,8 @@ the player's machine the first time it starts, no terminal.**
 | iPhone and iPad | PadMint on a Mac adds the game to the app | PadMint stays: iOS can't compile on the device |
 | Android | #93 builds an APK from the player's disc | A build tool on the computer, like PadMint, until a phone can build it |
 
-The obstacle is build time. A full build takes about 37 minutes on a Windows desktop (an i5-12600KF from an empty
-folder, with the parallel training of #202), 90 to 105 minutes on an M3 Max and three hours on a MacBook Air, much
-of it the local training run. Shipping a reviewed optimization
+The obstacle is build time. A full build takes 17 to 45 minutes on a Windows desktop, 90 to 105 minutes on an
+M3 Max and three hours on a MacBook Air, much of it the local training run. Shipping a reviewed optimization
 profile, so players skip training (PRIORITIES Tier 2, rank 4), comes first.
 
 The October 4 exceptions in [AGENTS.md](../AGENTS.md) (ready-made Windows and Linux builds) stay until the
