@@ -229,8 +229,8 @@ class AndroidBuilder(wb.Builder):
             f"-DGXRUNTIME_DIR={(rc / 'GXRuntime').as_posix()}",
             f"-DABI_DIR={(rc / 'Source/Core/Core/PowerPC/StaticRecomp').as_posix()}", *self.module_switches(),
             f"-DCOMPOSITE_COLD_SOURCES_FILE={cold.as_posix() if cold is not None else ''}", *extra_cmake])
-        gb_per_job = 1.0 if opt_level == "0" else 1.25
-        jobs = wb.default_jobs(gb_per_job) if self.args.jobs_auto else self.args.jobs
+        # The Windows builder's count, from the cores and the free memory (wb.default_jobs takes no size).
+        jobs = wb.default_jobs() if self.args.jobs_auto else self.args.jobs
         print(f"  {jobs} parallel compiles")
         crashes = 0
         while True:
