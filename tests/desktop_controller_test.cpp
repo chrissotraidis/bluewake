@@ -136,6 +136,20 @@ int main() {
     aurora::input::remove_controller(second);
     SDL_CloseJoystick(second_joystick); assert(SDL_DetachVirtualJoystick(second));
     assert(!bw_claim_player_one());                        // nothing connected: nothing to claim
+    bw_handoff_connected_controllers();                    // nor anything to hand over
+
+    // #138: a controller connected at launch. Aurora adds it while it starts, before the
+    // event observer exists, so no SDL_EVENT_GAMEPAD_ADDED reaches the handoff: it plays
+    // as player 1 but keeps Aurora's dead zone until the launch handoff runs.
+    SDL_JoystickID at_launch = SDL_AttachVirtualJoystick(&desc); assert(at_launch);
+    joystick = SDL_OpenJoystick(at_launch); assert(joystick);
+    assert(aurora::input::add_controller(at_launch) == at_launch);
+    assert(PADGetDeadZones(0) != nullptr && PADGetDeadZones(0)->useDeadzones);   // the bug
+    bw_handoff_connected_controllers();
+    assert(bw_controller_connection(0) == at_launch);
+    assert(PADGetDeadZones(0) != nullptr && !PADGetDeadZones(0)->useDeadzones);
+    aurora::input::remove_controller(at_launch);
+    SDL_CloseJoystick(joystick); assert(SDL_DetachVirtualJoystick(at_launch));
 
     // #138: the stick's scale. Aurora's cutoff dropped everything below 8000 of 32767 and then
     // jumped to 31; with the game's own dead zone, the full travel is a GameCube stick's 100.

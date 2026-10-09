@@ -32,6 +32,8 @@ from pathlib import Path
 
 MARK = "/* bluewake: lean memory accesses in prepaid copies (scripts/windows/lean_memory.py) */\n"
 FAST_MARK = "/* bluewake: prepaid block copies (scripts/windows/fast_blocks.py) */\n"
+# fast_blocks.py --lean (Elliott Tate's original copies, --lean-blocks) marks its chunks this way.
+LEAN_FAST_MARK = "/* bluewake: lean prepaid block copies (scripts/windows/fast_blocks.py --lean) */\n"
 COPY = re.compile(r"^bwfast_(\d+):$")
 END = re.compile(r"^    goto bwend_(\d+);$")
 PC = re.compile(r"^    ctx->pc = 0x([0-9A-F]{8})u;$")
@@ -166,7 +168,8 @@ def lean_copy(lines, first_addr):
 def transform(text):
     if MARK in text:
         return text, 0
-    if FAST_MARK not in text:
+    fast = next((mark for mark in (FAST_MARK, LEAN_FAST_MARK) if mark in text), None)
+    if fast is None:
         return text, 0
     lines = text.split("\n")
     out, i, total = [], 0, 0
@@ -192,7 +195,7 @@ def transform(text):
         i = j + 1
     converted = "\n".join(out)
     if total:
-        converted = converted.replace(FAST_MARK, FAST_MARK + MARK, 1)
+        converted = converted.replace(fast, fast + MARK, 1)
     return converted, total
 
 

@@ -19,5 +19,8 @@ void bluewake_fast_load_retrace(unsigned long long cpu_us);
 bool bluewake_fast_load_fast_forward(void);
 // Reads BLUEWAKE_FADE_FRAMES and BLUEWAKE_FAST_FORWARD again (the options menu).
 void bluewake_fast_load_reload(void);
+// A loaded state's retrace count, so test warps keep the game's numbering
+// (warps before it are skipped).
+void bluewake_fast_load_set_retrace(unsigned long long retrace);
 
 #endif

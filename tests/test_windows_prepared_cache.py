@@ -76,6 +76,35 @@ class PreparedBlockSelectionTest(unittest.TestCase):
                                        unsupported + "    ctx->gpr[4] += 1u;")
                 self.assertEqual(fast.transform(source), (source, 0))
 
+    def test_lean_mode_copies_refund_blocks_and_leaves_through_the_original(self):
+        refund = """    if (cycle_block_prepaid &&
+        ctx->cycle_deadline_budget > 0 &&
+        (s64)ctx->cycle_observation_suffix > ctx->cycle_deadline_budget) {
+        ctx->downcount += (s64)ctx->cycle_observation_suffix;
+        cycle_block_prepaid = false;
+    }
+"""
+        source = CHUNK.replace("    ctx->gpr[3] += 1u;\n", "    ctx->gpr[3] += 1u;\n" + refund)
+        self.assertEqual(fast.transform(source), (source, 0))   # conservative: no copy
+        converted, blocks = fast.transform(source, lean=True)
+        self.assertEqual(blocks, 1)
+        self.assertIn(fast.LEAN_MARK, converted)
+        self.assertNotIn(fast.MARK, converted)
+        copy = converted[converted.index("bwfast_0:"):]
+        # The refund leaves the copy for the original block's next instruction.
+        self.assertIn("goto bwslow_0_1;", copy)
+        self.assertIn("bwslow_0_1: ;", converted[:converted.index("bwfast_0:")])
+        self.assertNotIn("cycle_block_prepaid ?", copy)
+        self.assertEqual(fast.transform(converted, lean=True), (converted, 0))   # repeatable
+
+    def test_a_chunk_prepared_in_one_mode_is_refused_by_the_other(self):
+        conservative, _ = fast.transform(CHUNK)
+        lean, _ = fast.transform(CHUNK, lean=True)
+        with self.assertRaises(ValueError):
+            fast.transform(conservative, lean=True)
+        with self.assertRaises(ValueError):
+            fast.transform(lean)
+
 
 class PreparedCacheTest(unittest.TestCase):
     def setUp(self):
@@ -358,6 +387,21 @@ label_80004004:
         self.cycle()
         self.assertEqual(self.chunk().read_text(), CHUNK)
         self.assertFalse(json.loads((self.out / "prepared-blocks.json").read_text())["enabled"])
+
+    def test_lean_blocks_switch_regenerates_in_the_chosen_mode(self):
+        self.args.prepared_blocks = True
+        self.cycle()
+        self.assertIn(MARK, self.chunk().read_text())
+        self.args.lean_blocks = True
+        self.cycle()
+        text = self.chunk().read_text()
+        self.assertIn(fast.LEAN_MARK, text)
+        self.assertNotIn(MARK, text)
+        self.assertTrue(json.loads((self.out / "prepared-blocks.json").read_text())["lean_blocks"])
+        self.args.lean_blocks = False
+        self.cycle()
+        self.assertIn(MARK, self.chunk().read_text())
+        self.assertNotIn(fast.LEAN_MARK, self.chunk().read_text())
 
     def test_fixed_cpu_can_be_selected_combined_reused_and_disabled(self):
         self.cycle()

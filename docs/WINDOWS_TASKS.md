@@ -83,6 +83,7 @@ Merged after `0d1f821`, so 0.5.0 doesn't have them. Check only these on the next
 | Left stick: the game's own dead zone, no jump, full tilt at full travel (RecompCore patch 0159) | #138 | With an Xbox or other controller: tilt the left stick slowly from the center. Link starts to walk smoothly, with no sudden jump; full run comes near the end of the stick's travel; small diagonals aren't snapped to straight lines; Link stands still with the stick at rest. The session log has `[pad] player 1: the game's own stick dead zone`. | Not built yet |
 | Dungeon maps draw their grid and rooms (eight texgens, sixteen TEV stages; RecompCore patch 0157) | #74 | Open the map in any dungeon you've reached (or a copy of a save moved into Dragon Roost Cavern with `scripts/save_set_restart.py IN.gci OUT.gci M_NewD2 0 0`): the grid and the rooms you've seen are drawn, not only the door marker. The session log's `[gx-core] shutdown` line has `unsupported_texgen=0` and `tev_stages_over=0`. A first launch logs `Seeded pipeline cache` and little shader compiling (`pipelines_made` in `[perf-summary]`) in places played before. | Not built yet |
 | Portable mode keeps controller remaps, keyboard bindings and `imgui.ini` in the `user` folder (RecompCore patch 0160) | #64 | With `portable.txt` beside `BlueWake.exe`: remap a controller button and change a keyboard key, quit, start again. The remaps are kept, the `user` folder has `imgui.ini` and a `*.controller` file, and no new `imgui.ini` or `*.controller` appears in `%APPDATA%\BlueWake`. If `%APPDATA%\BlueWake` already had remaps, the first portable launch logs `[portable] copied ...` and keeps them. Without `portable.txt`, remaps made before still work. | Not built yet |
+| The window opens in place: centred the first time, then where you left it, without appearing first and then jumping (RecompCore patch 0161) | #89 | Start BlueWake windowed: the window appears once, centred. Move it, quit, start again: it opens where you left it. Move it to a second monitor, quit, unplug that monitor, start: it opens centred, and the log says `[windows] window centred: ... is no longer on a monitor`. Fullscreen still starts fullscreen on its display. | Not built yet |
 
 ### Flickering capture (#136)
 
@@ -140,12 +141,7 @@ instead of nothing, and a normal launch (and `sde64 -hsw -- BlueWake.exe`) is un
 
 ## 3. Opening the window in place (PR #89)
 
-**Why:** the window appears and then jumps to its saved position. saulob's PR fixes that but needs
-`window_pos_x` and `window_pos_y` in `AuroraBackendConfig` (RecompCore,
-`GXRuntime/include/gxruntime/aurora_backend.h`), passed on to Aurora's `windowPosX` and `windowPosY`.
-
-**Done when:** that runtime change is merged into RecompCore `bluewake-next`, pinned here, and #89 builds
-and opens the window in place.
+Done in `main` (RecompCore patch 0161, saulob's change); its Windows check is in the table above.
 
 ## 4. Elliott's native functions and lean memory
 
@@ -153,9 +149,10 @@ and opens the window in place.
 The natives hook only where the translated code matches what Wind Waker Recomp's builder produces (0 of 15
 match today), and lean memory needs the deadline test in Wind Waker Recomp's newer `fast_blocks.py`.
 
-1. Bring Wind Waker Recomp's `fast_blocks.py` and its step order into `scripts/windows/build.py`.
-2. Build with both options and check the `native-entries` log for how many certify.
-3. Compare speed in the same scenes with and without them.
+1. Done October 9: `--lean-blocks` brings Elliott's original copies back as an option.
+2. Build with `--lean-blocks` and compare speed with the default build in the same states
+   ([PERFORMANCE.md](PERFORMANCE.md), phase 4, step 3). Then add `--lean-memory`, then `--native-entries` and
+   check its log for how many certify.
 
 **Done when:** the natives certify, the speedup is measured, and the defaults are decided from the numbers.
 

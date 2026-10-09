@@ -109,8 +109,10 @@ Options (`--help` lists all):
 | `--retrain` | Record a new local profile instead of reusing a matching one |
 | `--no-mods` | Skip the mods (widescreen 16:9 and 16:10, Better Wind Waker's options) |
 | `--conservative` | Build the plain translation. By default the builder prepares the same optimizations as Wind Waker Recomp's builds (prepaid blocks, fixed CPU and RAM storage, inline floating point and memory access, direct calls, register inlining, and the certified native J3D, vector, game-math, skinning and matrix functions); with `--conservative`, each `--...` option adds one back |
-| `--native-entries` | Elliott Tate's second and third native sets; off by default. They apply only where the translation matches what his builder produces, which BlueWake's does not yet |
-| `--lean-memory` | Elliott Tate's lean loads and stores in prepaid copies; off by default, and it changes nothing until BlueWake's prepaid copies carry his deadline test |
+| `--lean-blocks` | Elliott Tate's original prepaid block copies, as Wind Waker Recomp's builds make them; off by default, an experiment being measured ([PERFORMANCE.md](PERFORMANCE.md), phase 4) |
+| `--native-entries` | Elliott Tate's second and third native sets; off by default. They apply only where the translation matches what his builder produces, so they need `--lean-blocks` |
+| `--lean-memory` | Elliott Tate's lean loads and stores in prepaid copies; off by default. It changes nothing without `--lean-blocks`, and needs `--gather-pipe` (on by default) |
+| `--no-cold` | Compile code the training never ran for speed too; slower in every test so far, so off |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |

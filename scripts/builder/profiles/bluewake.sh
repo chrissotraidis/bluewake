@@ -34,10 +34,10 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 
 # RecompCore: chrissotraidis/RecompCore candidate branch codex/bluewake-mem1-alias-parity, which is
 # elliotttate/RecompCore's windows-release 9618e9d (chrissotraidis 2d60636 plus
-# patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0130, reconciliation patches 0131-0139, logging patches 0140 and 0142, pacing patch 0141 and Elliott Tate's post-0.4.0 runtime 0143-0150, the FPS overlay fix 0151, and Elliott Tate's October 3 runtime 0152-0155, module display list textures 0156, the hardware's texgen and TEV stage counts 0157, the Linux port's shutdown fix 0158 (James Koehler-Killeen), the GameCube stick scale 0159, and Aurora's user folder 0160. DolRecomp: elliotttate's copy of
+# patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0130, reconciliation patches 0131-0139, logging patches 0140 and 0142, pacing patch 0141 and Elliott Tate's post-0.4.0 runtime 0143-0150, the FPS overlay fix 0151, and Elliott Tate's October 3 runtime 0152-0155, module display list textures 0156, the hardware's texgen and TEV stage counts 0157, the Linux port's shutdown fix 0158 (James Koehler-Killeen), the GameCube stick scale 0159, Aurora's user folder 0160, the window's position at creation 0161, and the FPS overlay's position 0162 (saulob). DolRecomp: elliotttate's copy of
 # chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=132a8d7a33444c29044c7f1e5cd23c5a1f36471c
+RECOMPCORE_SHA=34fe2c18db4cd06bbf1b6d6d2b760be88a5c104c
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

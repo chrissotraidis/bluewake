@@ -166,6 +166,12 @@ static void shorten_fade(CPUState* cpu, u32 request) {
 
 bool bluewake_fast_load_fast_forward(void) { return g_ff; }
 
+void bluewake_fast_load_set_retrace(unsigned long long retrace) {
+    g_retrace = retrace;
+    while (g_warp_next < g_warp_count && g_warps[g_warp_next].retrace <= retrace)
+        g_warp_next++;
+}
+
 void bluewake_fast_load_retrace(unsigned long long cpu_us) {
     ++g_retrace;
     CPUState* cpu = g_cpu;
