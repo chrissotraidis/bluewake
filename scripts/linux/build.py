@@ -31,6 +31,7 @@ it is yours alone. Never share or upload it. Your saves live in
 ~/.local/share/BlueWake, outside the build, so rebuilding never touches them.
 """
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -391,7 +392,8 @@ int main(void) {
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
                        f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
-                       f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n").encode())
+                       f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
+                       + ("lean_blocks\n" if getattr(self.args, "lean_blocks", False) else "")).encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
                   + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py",
                      ROOT / "scripts/windows/global_guest_cpu.py", ROOT / "scripts/windows/chunk_headers.py",
@@ -474,11 +476,11 @@ int main(void) {
                 receipt = {}
             option_names = ("enabled", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe",
                             "direct_calls", "inline_gpr", "native_j3d", "native_vec", "native_math",
-                            "native_skin", "native_game_math", "lean_memory", "native_entries")
+                            "native_skin", "native_game_math", "lean_memory", "native_entries", "lean_blocks")
             arg_names = ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe",
                          "direct_calls", "inline_gpr", "native_j3d", "native_vec", "native_math",
-                         "native_skin", "native_game_math", "lean_memory", "native_entries")
-            options_match = all(receipt.get(name) == bool(getattr(self.args, arg))
+                         "native_skin", "native_game_math", "lean_memory", "native_entries", "lean_blocks")
+            options_match = all(receipt.get(name) == bool(getattr(self.args, arg, False))
                                 for name, arg in zip(option_names, arg_names))
             if options_match and receipt.get("final_digest") == tree_digest(o / "composite-src"):
                 print("the existing composite source is already prepared")
@@ -507,7 +509,8 @@ int main(void) {
             self.run("inline-gpr", [sys.executable, ROOT / "scripts/windows/inline_save_restore_gpr.py",
                                      o / "composite-src"])
         if self.args.prepared_blocks:
-            self.run("prepared-blocks", [sys.executable, script, o / "composite-src"])
+            self.run("prepared-blocks", [sys.executable, script, o / "composite-src"]
+                     + (["--lean"] if getattr(self.args, "lean_blocks", False) else []))
         if self.args.direct_calls:
             self.run("direct-calls", [sys.executable, ROOT / "scripts/windows/direct_calls.py", o / "composite-src"])
         # Elliott Tate's Windows steps, off by default. Each changes only what it
@@ -533,6 +536,7 @@ int main(void) {
                    "native_skin": self.args.native_skin,
                    "native_game_math": self.args.native_game_math,
                    "lean_memory": self.args.lean_memory,
+                   "lean_blocks": getattr(self.args, "lean_blocks", False),
                    "native_entries": self.args.native_entries,
                    "gather_sha256": {name: sha256_file(ROOT / "cmake/composite" / name)
                                      for name in ("gather_pipe.h", "gather_pipe.c", "gather_pipe_batch.h")},
@@ -681,15 +685,25 @@ int main(void) {
                      "sea:44:0"]        # back to Outset
     TOUR_START = 23200
     TOUR_STOP = 1500  # retraces at each stop
+    # The opening plays once: the plain playback saves a state just before the
+    # tour, and the tour's stops then play from it in several playbacks at once,
+    # alongside the mods playback. Each playback is one game thread.
+    TOUR_STATE_AT = TOUR_START - 100
 
-    def training_tour(self):
-        """The tour's warps, its runs at each stop, and the retraces it ends at."""
+    def training_tour(self, places):
+        """The warps to `places` from TOUR_START, the runs at each stop, and the retraces it ends at."""
         warps, moves = [], []
-        for i, place in enumerate(self.TRAINING_TOUR):
+        for i, place in enumerate(places):
             at = self.TOUR_START + i * self.TOUR_STOP
             warps.append(f"{at}:{place}")
             moves += [f"{at + 450}:0:300:0:127", f"{at + 780}:0:300:110:60", f"{at + 1110}:0:300:-110:60"]
-        return warps, moves, self.TOUR_START + len(self.TRAINING_TOUR) * self.TOUR_STOP + 300
+        return warps, moves, self.TOUR_START + len(places) * self.TOUR_STOP + 300
+
+    def tour_groups(self):
+        """The tour's stops split over the playbacks this PC can run at once."""
+        playbacks = getattr(self.args, "tour_playbacks", None) or (os.cpu_count() or 4) // 3
+        playbacks = max(1, min(len(self.TRAINING_TOUR), playbacks))
+        return [self.TRAINING_TOUR[i::playbacks] for i in range(playbacks)]
 
     def training_fingerprint(self):
         """Bind local counts to actual prepared source, compiler and playback code."""
@@ -697,11 +711,11 @@ int main(void) {
         key.update(json.dumps({"recipe": self.TRAINING_VERSION,
                                "compiler": self.clang_version, "march": self.args.march,
                                "mods": self.mods,
-                               "options": {name: getattr(self.args, name) for name in
+                               "options": {name: getattr(self.args, name, False) for name in
                                            ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp",
                                             "gather_pipe", "direct_calls", "inline_gpr", "native_j3d",
                                             "native_vec", "native_math", "native_skin", "native_game_math",
-                                            "lean_memory", "native_entries")},
+                                            "lean_memory", "native_entries", "lean_blocks")},
                                "runtime": self.git("-C", str(self.recompcore), "rev-parse", "HEAD"),
                                "source": tree_digest(self.out / "composite-src")},
                               sort_keys=True).encode())
@@ -734,15 +748,25 @@ int main(void) {
                                         ["-fprofile-instr-generate"], "training-composite")
         print(f"instrumented game module built ({int(time.monotonic() - start) // 60} min)")
         attempt = Path(tempfile.mkdtemp(prefix="attempt-", dir=work))
-        raw = []
+        state = attempt / "tour-start.bwstate"
+        start = time.monotonic()
         # The opening as a new player plays it, then again with widescreen and
         # Better Wind Waker's options, so the chunks those mods replace are
-        # optimized for play too rather than as code that never ran.
-        runs = [("plain", None)]
-        if self.mods:
-            runs.append(("mods", "widescreen,betterww"))
-        for name, mods in runs:
-            raw += self.training_run(exe, module, attempt / f"run-{name}", mods, tour=name == "plain")
+        # optimized for play too rather than as code that never ran. The plain
+        # one saves the state the tour starts from; the tour's playbacks start
+        # as soon as it has.
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            plain = pool.submit(self.training_run, exe, module, attempt / "run-plain", None, save_state=state)
+            mods = pool.submit(self.training_run, exe, module, attempt / "run-mods", "widescreen,betterww") \
+                if self.mods else None
+            raw = plain.result()
+            tours = [pool.submit(self.training_run, exe, module, attempt / f"run-tour{i + 1}", None,
+                                 places=places, load_state=state)
+                     for i, places in enumerate(self.tour_groups())]
+            for job in tours + ([mods] if mods else []):
+                raw += job.result()
+        print(f"training playbacks done ({int(time.monotonic() - start) // 60} min, "
+              f"{len(tours)} tour playbacks at once)")
         candidate = attempt / "composite.profdata"
         self.run("training-merge", [self.llvm_profdata, "merge", "-o", candidate, *raw])
         shown = subprocess.run([self.llvm_profdata, "show", "--all-functions", candidate], capture_output=True,
@@ -764,12 +788,20 @@ int main(void) {
         os.replace(pending, receipt)
         return self.hashed_profile(profile)
 
-    def training_run(self, exe, module, run, mods, tour=False, headless=True):
+    def training_run(self, exe, module, run, mods, tour=False, headless=True, places=None, save_state=None,
+                     load_state=None):
         """One headless playback of the opening: boot, A at the title, the
         opening cutscene's text confirmed, player control on Outset, and with
         `tour` the tour of the game after it. A new card in its own folder; the
-        player's saves are never touched."""
-        warps, tour_moves, tour_end = self.training_tour() if tour else ([], [], self.TRAINING_RETRACES)
+        player's saves are never touched. `save_state` ends the opening at
+        TOUR_STATE_AT in a state, and `load_state` with `places` plays those
+        stops of the tour from it."""
+        if tour:
+            places = self.TRAINING_TOUR
+        warps, tour_moves, tour_end = self.training_tour(places) if places else ([], [], self.TRAINING_RETRACES)
+        if save_state:
+            tour_end = self.TOUR_STATE_AT + 2
+        opening = [] if load_state else [f"{n}:0x0100:2" for n in range(17800, 22001, 150)] + self.TRAINING_RUN
         run.mkdir(parents=True)
         env = {k: v for k, v in (self.env or os.environ).items() if not k.startswith(("BLUEWAKE_", "DOL_", "LLVM_PROFILE_"))}
         env.update({
@@ -786,8 +818,7 @@ int main(void) {
             "BLUEWAKE_OVERLAP_OBSERVATION": "1",
             "BLUEWAKE_PAD_PULSE_ON_TITLE_READY": "1", "BLUEWAKE_PAD_PULSE_LENGTH": "2",
             "BLUEWAKE_PAD_CONFIRM_EVENT": "any",
-            "BLUEWAKE_PAD_SCRIPT": ",".join([f"{n}:0x0100:2" for n in range(17800, 22001, 150)] + self.TRAINING_RUN +
-                                            tour_moves),
+            "BLUEWAKE_PAD_SCRIPT": ",".join(opening + tour_moves),
         })
         env["DOL_AURORA_FRAME_INTERP"] = "0"
         for option, name in (("direct_calls", "BLUEWAKE_DIRECT_CALLS"),
@@ -804,10 +835,19 @@ int main(void) {
             env["BLUEWAKE_RENDERER"] = "headless"
         if mods:
             env["BLUEWAKE_MODS"] = mods
+        if save_state:
+            env["BLUEWAKE_SAVE_STATE"] = f"{save_state}@{self.TOUR_STATE_AT}"
+        if load_state:
+            env["BLUEWAKE_LOAD_STATE"] = str(load_state)
         log = self.run(f"training-playback-{run.name[4:]}", [exe, "--module", module], env=env)
         text = log.read_text(errors="replace")
-        if "[player-milestone] control-admitted" not in text:
+        if load_state:
+            if "[state] loaded" not in text:
+                die(f"the training tour could not load the state the opening saved; profile rejected (see {log})")
+        elif "[player-milestone] control-admitted" not in text:
             die(f"the training playback did not reach player control; profile rejected (see {log})")
+        if save_state and not Path(save_state).exists():
+            die(f"the training playback saved no state for the tour; profile rejected (see {log})")
         raw = sorted(run.glob("*.profraw"))
         if not raw:
             die(f"the training playback wrote no profile (see {log})")
@@ -860,6 +900,7 @@ int main(void) {
             "mods": bool(self.mods),
             "march": self.args.march,
             "no_cold": getattr(self.args, "no_cold", False),
+            "lean_blocks": getattr(self.args, "lean_blocks", False),
             "prepared_blocks": self.args.prepared_blocks,
             "fixed_cpu": self.args.fixed_cpu,
             "fixed_mem1": self.args.fixed_mem1,
@@ -1019,6 +1060,8 @@ def main():
                         help="skip local optimization training; compile without a profile")
     parser.add_argument("--no-pgo", action="store_true", help="alias for --no-train")
     parser.add_argument("--retrain", action="store_true", help="record a new local profile instead of reusing one")
+    parser.add_argument("--tour-playbacks", type=int, default=None,
+                        help="training: how many playbacks play the tour at once (default: logical CPUs / 3)")
     parser.add_argument("--prepared-blocks", action="store_true",
                         help="opt into experimental prepaid-block optimization (off by default; timing pending)")
     parser.add_argument("--fixed-cpu", action="store_true",
@@ -1043,6 +1086,10 @@ def main():
                         help="certify and enable optional native skinning preparation (off by default)")
     parser.add_argument("--native-math", action="store_true",
                         help="prepare certified native matrix functions; off by default, compatible host opt-in required")
+    parser.add_argument("--lean-blocks", action="store_true",
+                        help="Elliott Tate's original prepaid block copies, as Wind Waker Recomp's builds make them: "
+                             "every block, fewer pc stores (implies --prepared-blocks; off by default; a measured "
+                             "experiment, docs/PERFORMANCE.md phase 4)")
     parser.add_argument("--lean-memory", action="store_true",
                         help="Wind Waker Recomp's lean loads and stores in prepaid copies (off by default; "
                              "needs --prepared-blocks)")
@@ -1067,8 +1114,12 @@ def main():
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:
         parser.error("--fixed-mem1 requires --fixed-cpu")
+    if args.lean_blocks:
+        args.prepared_blocks = True
     if args.lean_memory and not args.prepared_blocks:
         parser.error("--lean-memory requires --prepared-blocks")
+    if args.lean_memory and not args.gather_pipe:
+        parser.error("--lean-memory requires --gather-pipe (its accesses call gather_pipe.h's helpers)")
     if args.native_entries and not (args.direct_calls and args.gather_pipe and args.native_vec):
         parser.error("--native-entries requires --direct-calls, --gather-pipe and --native-vec")
     if args.jobs is None:

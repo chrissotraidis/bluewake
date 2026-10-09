@@ -359,6 +359,7 @@ void bluewake_mouse_camera_install(void) {
     g_latency_log = latency != NULL && latency[0] == '1';
     load_gamepad_mappings();
     dol_aurora_set_event_observer(observe, NULL);
+    bw_handoff_connected_controllers();
     if (g_enabled)
         fprintf(stderr, "[mouse] click the game to turn the camera with the mouse\n");
 #endif

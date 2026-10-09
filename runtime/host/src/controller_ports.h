@@ -68,3 +68,16 @@ static inline void bw_game_dead_zone(unsigned port) {
         fprintf(stderr, "[pad] player %u: the game's own stick dead zone\n", port + 1u);
     }
 }
+
+// The same handoff for controllers connected at launch (#138): Aurora adds them
+// while it starts, before the event observer is installed, so the observer never
+// sees them arrive and player 1 kept Aurora's dead zone. Call once it is installed.
+static inline void bw_handoff_connected_controllers(void) {
+    int connected = 0;
+    SDL_JoystickID* pads = SDL_GetGamepads(&connected);
+    for (int i = 0; i < connected; i++)
+        bw_log_gamepad_mapping(pads[i]);
+    SDL_free(pads);
+    bw_claim_player_one();
+    bw_game_dead_zone(0);
+}

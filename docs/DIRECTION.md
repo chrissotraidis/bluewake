@@ -127,5 +127,6 @@ What Wind Waker HD Recomp players get that BlueWake players ask for, in rough or
 
 Wind Waker HD Recomp implements the Wii U's graphics library directly on Metal and Vulkan, and its main thread
 needs about 4 ms a frame on an M3. BlueWake converts the GameCube's drawing commands on the CPU, which is where
-much of its time goes (PRIORITIES Tier 2). Replacing that with native rendering, piece by piece, is the long-term
-answer, not a quick port of their renderer.
+much of its time goes (PERFORMANCE.md, lever 5). Replacing that with native rendering, piece by piece, is the long-term
+answer, not a quick port of their renderer. How to get there, step by step as the decompilation fills in, is in
+[PERFORMANCE.md](PERFORMANCE.md#the-plan).
