@@ -189,6 +189,20 @@ same touch controls, the same settings under the same names.
 - The picture keeps the game's shape and renders at three times the GameCube's 480 lines by default; the mouse
   camera is off (touches would reach it as clicks).
 
+## Measure
+
+```bash
+python scripts/android/measure.py --card-on-device /sdcard/Android/data/<id>/files/GZLE01.card --cool --label NAME
+```
+
+loads a save from a copy of that card, waits for retrace 3000, then counts the game thread's instructions and cycles
+for 60 seconds with `simpleperf` and reads the `[perf]` lines over the same window. It prints the speed, how busy the
+game thread was, and instructions and cycles per retrace, and writes them with the session log to
+`build/android/measure`. Instructions per retrace is the number to compare between builds: it holds while the phone
+heats and throttles. `--cool` waits for the phone to cool to under 34 °C at full clocks first; `--apk` installs a
+build first; `--headless` measures without drawing or pacing; `--env` adds launch settings (a test warp, the
+player's display settings). The card is only read.
+
 ## Files
 
 | | |
@@ -199,7 +213,7 @@ same touch controls, the same settings under the same names.
 | `android/src/profile_flush.c` | Compiled into training modules only |
 | `android/java/dev/bluewake/android/` | The activity (SDL's, a 60 Hz display request), the ⋯ menu, touch controls and panels (`Overlay`, `MenuView`, `TouchControlsView`), the settings (`Settings`), saves and texture packs (`GameData`), and the log share (`LogProvider`) |
 | `android/AndroidManifest.xml`, `android/res/` | The manifest and the icon (the iOS app's) |
-| `scripts/android/build.py`, `install.py` | The builder (on top of `scripts/windows/build.py`) and the installer |
+| `scripts/android/build.py`, `install.py`, `measure.py` | The builder (on top of `scripts/windows/build.py`), the installer, and the speed measurement |
 
 Outside these, the port changes a few lines of shared code: Android leaves out the desktop options menu as iOS
 does (`runtime/host/src/settings_menu.h`), `cmake/composite` accepts extra sources for the training module, and
