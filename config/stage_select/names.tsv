@@ -1,0 +1,511 @@
+# group<TAB>room (- for the group's name)<TAB>name<TAB>stage<TAB>room number<TAB>point<TAB>layer<TAB>spawn ids<TAB>note
+# Our own names, translated from the menu's labels (/res/Menu/Menu1.dat). Place codes and spawn ids are the
+# menu entry's and the room's own (PLYR); a note is shown after the name: (before)/(after) rescue, (crash), (hangs).
+0	-	Test maps
+1	-	Forsaken Fort. 1
+2	-	Forsaken Fort. 2
+3	-	Forsaken Fort. 3
+4	-	Dragon Roost Cav.
+5	-	Forbidden Woods
+6	-	Tower of Gods
+7	-	Earth Temple
+8	-	Wind Temple
+9	-	Ganon's Tower
+10	-	Ganon maze
+11	-	Ganon boss rooms
+12	-	Sub-dungeons
+13	-	Sub-dungeons new
+14	-	Savage Labyrinth
+15	-	Sea 01-07
+16	-	Sea 08-0E
+17	-	Sea 0F-15
+18	-	Sea 16-1C
+19	-	Sea 1D-23
+20	-	Sea 24-2A
+21	-	Sea 2B-31
+22	-	Outset places
+23	-	Windfall places
+24	-	Dragon Roost pl.
+25	-	Forest Haven pl.
+26	-	Private Oasis in
+27	-	Pirate ship tour
+28	-	Pirate ship in
+29	-	Ship interiors
+30	-	Hyrule Castle
+31	-	E3 demo
+32	-	Cutscenes
+33	-	Movie
+34	-	Test areas
+35	-	Enemy rooms
+36	-	Shop ship tests
+37	-	Townsfolk test
+38	-	Sub-dungeon tests
+39	-	Great Sea
+0	0	Test (Ganon room)	GanonM	1	0	-1	0
+0	1	Link test	I_TestM	-1	0	-1	0
+0	2	Link + Tetra demo	I_TestM	0	0	8	0,1,2
+0	3	Objects 1	K_Test2	0	0	-1	0,1,2
+0	4	Objects 2	K_Test5	0	0	-1	0
+0	5	Objects 3	K_Test9	0	0	-1	0
+0	6	Objects 4	K_Testa	0	0	-1	0
+0	7	NPCs	K_Test3	0	0	-1	0
+0	8	NPCs 2	K_Test6	0	0	-1	0
+0	9	Enemies	K_Test4	0	0	-1	0
+0	10	Enemies 2	K_Test8	0	0	-1	0
+0	11	Sea minigame test	E3ROOP	0	1	-1	0,1	hangs
+0	12	Sea battle test	Kaisen	-1	0	-1		hangs
+0	13	Event camera test	H_test	0	0	-1	0
+0	14	Enemy plaza	KATA_HB	0	0	-1	0
+0	15	Enemy room	KATA_RM	0	0	-1	0
+0	16	Smoke test	Msmoke	0	0	-1	0	hangs
+0	17	Small Armos water	Amos_T	0	0	0	0,1,2
+0	18	Objects 5	K_Testc	0	0	-1	0
+0	19	Objects 6	K_Testd	0	0	-1	0
+0	20	Objects 7	K_Teste	0	0	-1	0
+1	0	Entrance (night)	MajyuE	0	0	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+1	1	Pirate ship (night)	MajyuE	0	18	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+1	2	Outside A (night)	MajyuE	0	8	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+1	3	Outside B (night)	MajyuE	0	12	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+1	4	Outside C (night)	MajyuE	0	14	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+1	5	Outside D (night)	MajyuE	0	3	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+1	6	Outside E (night)	MajyuE	0	10	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+1	7	Tower (cutscene)	Mjtower	0	16	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,30	before
+1	8	Outside the tower	Mjtower	0	30	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,30
+1	9	Inside A (R02)	majroom	2	15	-1	12,13,15,16,17,19,20
+1	10	Inside B (R01)	majroom	1	2	-1	2,14
+1	11	Inside C (R00)	majroom	0	4	-1	0,1,3,4,18
+1	12	Inside D (R04)	majroom	4	5	-1	5,6,7
+1	13	Inside E (R03)	majroom	3	10	-1	8,9,10,11,21
+2	0	Inside R00	ma2room	0	4	-1	0,1,3,4,18
+2	1	Inside R01	ma2room	1	2	-1	2,14
+2	2	Inside R02	ma2room	2	15	-1	12,13,15,16,17,19,20
+2	3	Inside R03	ma2room	3	10	-1	8,9,10,11,21
+2	4	Inside R04	ma2room	4	5	-1	5,6,7
+2	5	Tower (cutscene)	M2tower	0	16	1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,30	before
+2	6	Tower (no cutscene)	M2tower	0	20	3	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,30
+2	7	Ganon room (cutscene)	M2ganon	0	0	-1	0,223
+2	8	Ganon room (no cutscene)	M2ganon	0	223	-1	0,223
+3	0	Inside R00	ma3room	0	4	-1	0,1,3,4,18
+3	1	Inside R01	ma3room	1	2	-1	2,14
+3	2	Inside R02	ma3room	2	15	-1	12,13,15,16,17,19,20
+3	3	Inside R03	ma3room	3	10	-1	8,9,10,11,21
+3	4	Inside R04	ma3room	4	5	-1	5,6,7
+4	0	1F room 0	M_NewD2	0	0	-1	0,5
+4	1	1F room 1	M_NewD2	1	20	-1	20
+4	2	1F room 2	M_NewD2	2	1	-1	1,5,8
+4	3	2F room 2	M_NewD2	2	8	-1	1,5,8
+4	4	1F room 3	M_NewD2	3	6	-1	6
+4	5	2F room 4	M_NewD2	4	7	-1	7
+4	6	2F room 6	M_NewD2	6	9	-1	9
+4	7	3F room 7	M_NewD2	7	0	-1	0
+4	8	3F room 8	M_NewD2	8	14	-1	14
+4	9	3F room 10	M_NewD2	10	15	-1	0,5,15
+4	10	1F room 11	M_NewD2	11	2	-1	2
+4	11	1F room 12	M_NewD2	12	3	-1	3
+4	12	1F room 13	M_NewD2	13	4	-1	4
+4	13	1F room 14	M_NewD2	14	5	-1	5
+4	14	1F room 15	M_NewD2	15	18	-1	18
+4	15	R09 mini-boss	M_Dra09	9	0	-1	0,1
+4	16	Boss (Gohma)	M_DragB	0	0	-1	0,1
+5	0	R00	kindan	0	0	-1	0,1,2
+5	1	R01	kindan	1	0	-1	0
+5	2	R02	kindan	2	0	-1	0
+5	3	R03	kindan	3	0	-1	0
+5	4	R04	kindan	4	0	-1	0
+5	5	R05	kindan	5	0	-1	0,1
+5	6	R06	kindan	6	0	-1	0
+5	7	R07	kindan	7	0	-1	0
+5	8	R08	kindan	8	0	-1	0
+5	9	R09	kindan	9	0	-1	0,1
+5	10	R0a mini-boss	kinMB	10	0	-1	0
+5	11	R0b	kindan	11	0	-1	0
+5	12	R0c	kindan	12	0	-1	0
+5	13	R0d	kindan	13	0	-1	0
+5	14	R0e	kindan	14	0	-1	0
+5	15	R0f	kindan	15	0	-1	0
+5	16	R10	kindan	16	0	-1	0,1,2
+5	17	Boss (Kalle Demos)	kinBOSS	0	0	-1	0,1
+6	0	R00	Siren	0	0	-1	0
+6	1	R01	Siren	1	0	-1	0
+6	2	R02	Siren	2	0	-1	0
+6	3	R03	Siren	3	0	-1	0
+6	4	R04	Siren	4	0	-1	0
+6	5	R05	Siren	5	0	-1	0
+6	6	R06	Siren	6	0	-1	0
+6	7	R07	Siren	7	0	-1	0
+6	8	R08	Siren	8	0	-1	0
+6	9	R09	Siren	9	0	-1	0
+6	10	R0a	Siren	10	0	-1	0
+6	11	R0b	Siren	11	0	-1	0
+6	12	R0d statue room	Siren	13	0	-1	0
+6	13	R0e	Siren	14	0	-1	0,1
+6	14	R10	Siren	16	0	-1	0
+6	15	R11 2F	Siren	17	0	-1	0
+6	16	R12 sky corridor	Siren	18	0	-1	0
+6	17	R15	Siren	21	0	-1	0
+6	18	R16	Siren	22	0	-1	0
+6	19	Mini-boss	SirenMB	23	0	-1	0
+6	20	Boss (Gohdan)	SirenB	0	0	-1	0,1
+7	0	Entrance	Edaichi	0	0	-1	0,1,2,226
+7	1	R00	M_Dai	0	0	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	2	R01	M_Dai	1	1	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	3	R02	M_Dai	2	2	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	4	R03	M_Dai	3	3	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	5	R04	M_Dai	4	5	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	6	R05	M_Dai	5	6	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	7	R06	M_Dai	6	7	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	8	R07	M_Dai	7	8	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	9	R08	M_Dai	8	10	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	10	R09	M_Dai	9	11	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	11	R0a	M_Dai	10	12	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	12	R0b	M_Dai	11	13	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	13	R0d	M_Dai	13	14	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	14	R0e	M_Dai	14	15	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	15	R0f	M_Dai	15	16	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	16	R10	M_Dai	16	18	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	17	R11	M_Dai	17	19	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	18	R12	M_Dai	18	20	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	19	R13	M_Dai	19	25	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25
+7	20	Mini-boss	M_DaiMB	12	0	-1	0
+7	21	Boss (Jalhalla)	M_DaiB	-1	0	-1	0,1,228
+7	22	Boss (cutscene)	M_DaiB	-1	228	8	0,1,228
+8	0	Entrance	Ekaze	0	0	-1	0,1,2,229
+8	1	R0f below entrance	kaze	15	15	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	2	R00	kaze	0	0	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	3	R01	kaze	1	1	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	4	R02	kaze	2	2	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	5	R03	kaze	3	3	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	6	R04	kaze	4	4	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24	crash
+8	7	R05	kaze	5	5	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	8	R07	kaze	7	7	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	9	R08	kaze	8	8	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24	crash
+8	10	R09	kaze	9	9	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	11	R0a	kaze	10	10	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	12	R0b	kaze	11	11	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	13	R0c	kaze	12	12	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	14	R10	kaze	16	19	-1	0,1,2,3,4,5,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+8	15	Mini-boss	kazeMB	6	0	-1	0
+8	16	Boss (Molgera)	kazeB	0	0	-1	0,1,231
+8	17	Makar kidnap test	Cave08	3	3	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,15,16,17,18,19,20,22,23,24
+9	0	A R00 entrance	GanonA	0	0	-1	0
+9	1	A R01 bosses door	GanonA	1	0	-1	0,1,2,3,4,5,6
+9	2	B before dragon boss	GanonB	0	0	-1	0,1
+9	3	C before wind boss	GanonC	0	0	-1	0,1
+9	4	D before forest boss	GanonD	0	0	-1	0,1
+9	5	E before earth boss	GanonE	0	0	-1	0,1
+9	6	N stairs A-M	GanonN	0	0	-1	0,1
+9	7	M Phantom Ganon	GanonM	0	0	-1	0,1,2,3,4
+9	8	M warp to maze	GanonM	1	0	-1	0
+9	9	M warp to Fortress	GanonM	2	0	-1	0,1
+9	10	L stairs M-bedroom	GanonL	0	0	-1	0,1
+10	0	R00 wrong way	GanonJ	0	0	-1	0
+10	1	R01 start	GanonJ	1	0	-1	0
+10	2	R02 checkpoint 1	GanonJ	2	0	-1	0
+10	3	R03 wrong way	GanonJ	3	0	-1	0
+10	4	R04 checkpoint 2	GanonJ	4	0	-1	0
+10	5	R06 wrong way	GanonJ	6	0	-1	0
+10	6	R07 checkpoint 4	GanonJ	7	0	-1	0
+10	7	R08 checkpoint 3	GanonJ	8	0	-1	0
+10	8	R09 wrong way	GanonJ	9	0	-1	0
+10	9	R0a wrong way	GanonJ	10	0	-1	0
+10	10	R0b checkpoint 5	GanonJ	11	0	-1	0
+10	11	R0d goal	GanonJ	13	0	-1	0
+11	0	Dragon boss (Gohma)	Xboss0	0	0	-1	0
+11	1	Forest boss (Kalle)	Xboss1	0	0	-1	0
+11	2	Earth boss (Jalhalla)	Xboss2	0	0	-1	0,228
+11	3	Wind boss (Molgera)	Xboss3	0	0	-1	0,231
+11	4	Bedroom (Puppet Ganon)	GanonK	0	1	1	0,1,2,3,4
+11	5	Rooftop (final)	GTower	0	1	1	0,1,2
+12	0	Mini volcano	MiniKaz	0	0	-1	0
+12	1	Mini iceberg	MiniHyo	0	0	-1	0
+12	2	ChuChu island	TyuTyu	0	0	-1	0
+12	3	Warp maze	WarpD	0	0	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+12	4	Sneak in by ship	ShipD	0	0	-1	0
+12	5	Cave 1 (Magtail)	Cave01	0	0	-1	0
+12	6	Cave 1 (Magtail 2)	Cave01	1	0	-1	0
+12	7	Cave 2 (behind fall)	Cave02	0	0	-1	0
+12	8	Cave 3 (pass-through)	Cave03	0	0	-1	0,1
+12	9	Cave 4 (small)	Cave04	0	0	-1	0
+12	10	Triforce cave 1	TF_01	0	0	-1	0
+12	11	Triforce cave 2	TF_02	0	0	-1	0
+12	12	Triforce cave 3	TF_03	0	0	-1	0
+12	13	Fairy fountain A	Fairy01	0	0	-1	0
+12	14	Fairy fountain B	Fairy02	0	0	-1	0
+12	15	Fairy fountain C	Fairy03	0	0	-1	0
+12	16	Fairy fountain D	Fairy04	0	0	-1	0
+12	17	Fairy fountain E	Fairy05	0	0	-1	0
+12	18	Fairy fountain F	Fairy06	0	0	-1	0
+12	19	Under the villa	TF_04	0	0	-1	0
+12	20	Ghost ship 1	PShip	0	0	-1	0
+12	21	Ghost ship 2	PShip	1	0	-1	0
+12	22	Ghost ship 3	PShip	2	0	-1	0
+12	23	Cave 5 (Mothulas)	Cave05	0	0	-1	0
+13	0	Summon battle	Cave07	0	0	-1	0
+13	1	Mysterious room	TF_06	0	0	-1	0,1
+13	2	Ice forest museum	ITest62	0	0	-1	0
+13	3	About 100 enemies	ITest63	0	0	-1	0
+13	4	Tag with ogres	SubD71	0	0	-1	0
+13	5	Push-pull blocks	SubD43	0	0	-1	0,1,2,3
+13	6	Golgo 13 (sniping)	SubD42	0	0	-1	0
+14	0	Floor 0	Cave09	0	0	-1	0,1
+14	1	Floor 1	Cave09	1	0	-1	0
+14	2	Floor 5	Cave09	5	0	-1	0
+14	3	Floor 6	Cave09	11	0	-1	0
+14	4	Floor 10	Cave09	15	0	-1	0
+14	5	Floor 11	Cave10	1	0	-1	0
+14	6	Floor 15	Cave10	5	0	-1	0
+14	7	Floor 16	Cave10	11	0	-1	0
+14	8	Floor 20	Cave10	15	0	-1	0
+14	9	Floor 21	Cave09	6	0	-1	0
+14	10	Floor 25	Cave09	10	0	-1	0
+14	11	Floor 26	Cave09	16	0	-1	0
+14	12	Floor 29	Cave09	19	0	-1	0
+14	13	Floor 30	Cave09	20	0	-1	0
+14	14	Floor 31	Cave11	1	0	-1	0
+14	15	Floor 34	Cave11	4	0	-1	0
+14	16	Floor 35	Cave11	5	0	-1	0
+14	17	Floor 36	Cave11	11	0	-1	0
+14	18	Floor 38	Cave11	13	0	-1	0
+14	19	Floor 40	Cave11	15	0	-1	0
+14	20	Floor 41	Cave10	6	0	-1	0
+14	21	Floor 45	Cave10	10	0	-1	0
+14	22	Floor 46	Cave10	16	0	-1	0
+14	23	Floor 47	Cave10	17	0	-1	0
+14	24	Floor 48	Cave10	18	0	-1	0
+14	25	Floor 49	Cave10	19	0	-1	0
+14	26	Floor 50	Cave10	20	0	-1	0
+15	0	Sector 01 Fortress 2nd	sea	1	0	1	0,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,99,100,101,102,103
+15	1	Sector 01 Fortress warp	sea	1	99	1	0,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,99,100,101,102,103
+15	2	Sector 01 Fortress 3rd	sea	1	0	2	0,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,99,100,101,102,103
+15	3	Sector 02 Star Island	sea	2	0	-1	0,1,100,101,102,103
+15	4	Sector 03 Fairy fountain	sea	3	0	-1	0,1,10,100,101,102,103
+15	5	Sector 04 Wind Temple	sea	4	0	-1	0,1,100,101,102,103,231,232
+15	6	Sector 04 Wind Temple	sea	4	232	-1	0,1,100,101,102,103,231,232
+15	7	Sector 05	sea	5	0	-1	0,100,101,102,103
+15	8	Sector 06	sea	6	0	-1	0,100,101,102,103
+15	9	Sector 07 HS idea	sea	7	0	-1	0,1,100,101,102,103
+16	0	Sector 0B Windfall day 0	sea	11	0	0	0,1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,20,99,100,101,102,103,128,200
+16	1	Sector 0B Windfall night 0	sea	11	0	1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,20,99,100,101,102,103,128,200
+16	2	Sector 0B Windfall pirates	sea	11	0	3	0,1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,20,99,100,101,102,103,128,200
+16	3	Sector 0B Windfall day 2	sea	11	0	4	0,1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,20,99,100,101,102,103,128,200
+16	4	Sector 0B Windfall night 2	sea	11	0	5	0,1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,20,99,100,101,102,103,128,200
+16	5	Sector 0C ChuChu isle	sea	12	0	-1	0,1,5,100,101,102,103
+16	6	Sector 0D Dragon Roost day	sea	13	0	0	0,1,2,5,99,100,101,102,103,210,211,212,227
+16	7	Sector 0D Dragon Roost night	sea	13	0	1	0,1,2,5,99,100,101,102,103,210,211,212,227
+16	8	Sector 0E Bird-Man Contest	sea	14	0	-1	0,1,100,101,102,103
+16	9	Sector 0E Contest start	sea	14	1	2	0,1,100,101,102,103
+16	10	Sector 08	sea	8	0	-1	0,100,101,102,103
+16	11	Sector 09 Shop ship C	sea	9	0	-1	0,1,2,99,100,101,102,103,225,226
+16	12	Sector 09 Great fairy isle	sea	9	99	-1	0,1,2,99,100,101,102,103,225,226
+16	13	Sector 0A	sea	10	0	-1	0,100,101,102,103
+17	0	Sector 14 Fire Mountain	sea	20	0	-1	0,1,2,100,101,102,103
+17	1	Sector 15	sea	21	0	-1	0,100,101,102,103
+17	2	Sector 0F Fairy fountain	sea	15	0	-1	0,1,10,100,101,102,103
+17	3	Sector 10	sea	16	0	-1	0,1,100,101,102,103
+17	4	Sector 11 Tingle Tower	sea	17	0	-1	0,99,100,101,102,103
+17	5	Sector 11 Tingle warp	sea	17	99	-1	0,99,100,101,102,103
+17	6	Sector 12 Statue isle 1	sea	18	0	-1	0,100,101,102,103
+17	7	Sector 13	sea	19	0	-1	0,1,10,100,101,102,103
+18	0	Sector 17 Fish island	sea	23	0	-1	0,99,100,101,102,103
+18	1	Sector 18	sea	24	0	-1	0,100,101,102,103
+18	2	Sector 19	sea	25	0	-1	0,100,101,102,103
+18	3	Sector 1A Tower of the Gods	sea	26	0	-1	0,1,2,99,100,101,102,103,200,201
+18	4	Sector 1A Tower, by the bell	ADMumi	0	200	9	0,1,2,100,200,201,232,244
+18	5	Sector 1A Tower of the Gods	sea	26	1	-1	0,1,2,99,100,101,102,103,200,201
+18	6	Sector 1B Statue isle 2	sea	27	0	-1	0,100,101,102,103
+18	7	Sector 1C	sea	28	0	-1	0,1,10,100,101,102,103
+18	8	Sector 16	sea	22	0	-1	0,100,101,102,103
+19	0	Sector 21 Private Oasis	sea	33	0	-1	0,1,100,101,102,103
+19	1	Sector 22 Shop ship A	sea	34	0	-1	0,1,100,101,102,103
+19	2	Sector 23	sea	35	0	-1	0,1,100,101,102,103
+19	3	Sector 1D	sea	29	0	-1	0,5,100,101,102,103
+19	4	Sector 1E	sea	30	0	-1	0,1,100,101,102,103
+19	5	Sector 1F	sea	31	0	-1	0,1,100,101,102,103
+19	6	Sector 20 Statue isle 3	sea	32	0	-1	0,100,101,102,103
+20	0	Sector 29 Forest Haven	sea	41	0	-1	0,1,2,3,4,5,6,7,8,9,10,99,100,101,102,103,230
+20	1	Sector 2A	sea	42	0	-1	0,1,2,100,101,102,103
+20	2	Sector 24	sea	36	0	-1	0,1,100,101,102,103
+20	3	Sector 25	sea	37	0	-1	0,100,101,102,103
+20	4	Sector 26 Cyclone	sea	38	0	-1	0,5,99,100,101,102,103
+20	5	Sector 27 Fairy fountain	sea	39	0	-1	0,1,99,100,101,102,103
+20	6	Sector 27 Fairy fountain warp	sea	39	99	-1	0,1,99,100,101,102,103
+20	7	Sector 28 Ice Ring Isle	sea	40	0	-1	0,1,2,100,101,102,103
+21	0	Sector 2C Outset	sea	44	0	0	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+21	1	Sector 2C Outset day 1	sea	44	0	2	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+21	2	Sector 2C Outset day 2	sea	44	0	4	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+21	3	Sector 2C Outset night 2	sea	44	0	5	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+21	4	Sector 2D Earth Temple	sea	45	0	-1	0,1,100,101,102,103,228,229
+21	5	Sector 2E	sea	46	0	-1	0,100,101,102,103
+21	6	Sector 2F push-pull idea	sea	47	0	-1	0,5,100,101,102,103
+21	7	Sector 30	sea	48	0	-1	0,1,5,100,101,102,103
+21	8	Sector 31	sea	49	0	-1	0,100,101,102,103
+21	9	Sector 2B	sea	43	0	-1	0,5,100,101,102,103
+22	0	Link's house	LinkRM	0	1	-1	0,1,200,201,202
+22	1	Sword dojo	Ojhous	0	0	-1	0
+22	2	Dojo 2F	Ojhous2	1	0	-1	0
+22	3	Mesa's house	Omasao	0	0	-1	0
+22	4	Pig house (Abe)	Onobuta	0	0	-1	0,1
+22	5	Forest of Fairies	A_mori	0	0	0	0,1,2,202
+22	6	Jabun's cave	Pjavdou	0	0	-1	0,1,200
+22	7	Forest of Fairies 2	A_mori	0	0	3	0,1,2,202
+22	8	Under Link's house	LinkUG	0	0	-1	0,1
+22	9	Dojo 2F (unused)	Ojhous	1	0	-1	0
+23	0	Rich man's house	Orichh	0	0	-1	0,1,5
+23	1	Photo studio	Ocmera	0	0	-1	0,1
+23	2	Photo studio back	Ocmera	0	1	-1	0,1
+23	3	Tingle's cell	Pnezumi	0	0	-1	0
+23	4	Bomb shop	Obombh	0	0	-1	0,1,200
+23	5	Potion shop	Pdrgsh	0	0	0	0,1
+23	6	Sploosh Kaboom	Kaisen	0	0	-1	0,1
+23	7	Cafe bar (day)	Opub	0	0	-1	0
+23	8	Cafe bar (night)	Opub	0	0	1	0
+23	9	Mila's school	Nitiyou	0	0	1	0
+24	0	Rito aerie	Atorizk	0	0	-1	0,1,2,3,4,209,210
+24	1	Before the dungeon	Adanmae	0	0	-1	0,1,2,3,100
+24	2	Komali's room	Comori	0	0	-1	0
+25	0	Korok potion shop	Ocrogh	0	0	-1	0
+25	1	Forest Haven inside	Omori	0	5	0	0,1,2,3,4,5,6,213,214,215
+25	2	Inside (night)	Omori	0	5	1	0,1,2,3,4,5,6,213,214,215
+25	3	Inside (warp out)	Omori	0	215	-1	0,1,2,3,4,5,6,213,214,215
+25	4	Deku leaf tag test	sea	41	2	-1	0,1,2,3,4,5,6,7,8,9,10,99,100,101,102,103,230
+25	5	Behind the waterfall	Otkura	0	0	-1	0,230
+25	6	Gallery hall	Pfigure	0	0	-1	0,1,2,3,4,5,6,7
+25	7	Gallery A	figureA	0	0	-1	0
+25	8	Gallery B	figureB	0	0	-1	0
+25	9	Gallery C	figureC	0	0	-1	0
+25	10	Gallery D	figureD	0	0	-1	0
+25	11	Gallery E	figureE	0	0	-1	0
+25	12	Gallery F	figureF	0	0	-1	0
+25	13	Gallery G	figureG	0	0	-1	0
+26	0	Private Oasis inside	Abesso	0	0	-1	0,1
+27	0	Pirate ship tour	A_umikz	0	204	-1	0,1,204
+28	0	Pirate ship (1)	Asoko	0	0	0	0,255
+28	1	Pirate ship (2)	Asoko	0	0	2	0,255
+29	0	Beedle back shop	Obshop	1	0	-1	0
+29	1	Beedle (Outset)	Obshop	2	0	-1	0
+29	2	Beedle (Windfall)	Obshop	3	0	-1	0
+29	3	Beedle (Dragon R.)	Obshop	4	0	-1	0
+29	4	Submarine 0	Abship	0	0	-1	0
+29	5	Submarine 1	Abship	1	0	-1	0
+29	6	Submarine 2	Abship	2	0	-1	0
+29	7	Submarine 3	Abship	3	0	-1	0
+29	8	Submarine 4	Abship	4	0	-1	0
+29	9	Submarine 5	Abship	5	0	-1	0
+29	10	Submarine 6	Abship	6	0	-1	0
+29	11	Submarine 7	Abship	7	0	-1	0
+30	0	Warp arrival	Hyrule	0	219	-1	0,1,2,3,4,200,201,219,233,235
+30	1	Outside (day 0)	Hyrule	0	0	0	0,1,2,3,4,200,201,219,233,235
+30	2	Outside (day 1)	Hyrule	0	0	2	0,1,2,3,4,200,201,219,233,235
+30	3	Outside (day 2)	Hyrule	0	0	4	0,1,2,3,4,200,201,219,233,235
+30	4	Inside (day 0)	Hyroom	0	0	0	0,1,2,10,248
+30	5	Inside (day 1)	Hyroom	0	0	2	0,1,2,10,248
+30	6	Sword room (day 0)	kenroom	0	0	0	0,1,10,200,201,249
+30	7	Sword room (night 0)	kenroom	0	0	1	0,1,10,200,201,249
+30	8	Sword room (day 1)	kenroom	0	0	2	0,1,10,200,201,249
+30	9	Sword room (night 1)	kenroom	0	0	3	0,1,10,200,201,249
+30	10	Sword room (day 2)	kenroom	0	0	4	0,1,10,200,201,249
+30	11	Sword room (night 2)	kenroom	0	0	5	0,1,10,200,201,249
+30	12	Sword room (day 3)	kenroom	0	0	6	0,1,10,200,201,249
+30	13	Sword room (night 3)	kenroom	0	0	7	0,1,10,200,201,249
+31	0	E3 boat race	Ocean	0	0	-1	0,1,2,10
+32	0	Title background	sea_T	44	0	0	0
+32	1	New opening	sea	44	206	0	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+32	2	Grandma's clothes	LinkRM	0	200	8	0,1,200,201,202
+32	3	Grandma's clothes 2	LinkRM	0	202	8	0,1,200,201,202
+32	4	Outset: giant bird	sea	44	201	0	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+32	5	Tetra falls	A_mori	0	202	8	0,1,2,202
+32	6	Aryll kidnapped	sea	44	203	9	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+32	7	After kidnapping	sea	44	204	2	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+32	8	Setting sail	sea	44	205	10	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+32	9	Sneak into Fortress	MajyuE	0	1	0	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21
+32	10	Meet Aryll again	Mjtower	0	16	-1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,30	before
+32	11	Boat on Windfall	sea	11	200	8	0,1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,20,99,100,101,102,103,128,200
+32	12	Dragon Roost story	Atorizk	0	0	0	0,1,2,3,4,209,210
+32	13	Dragon Roost Island	sea	13	210	9	0,1,2,5,99,100,101,102,103,210,211,212,227	before
+32	14	Meet Deku Tree	Omori	0	213	8	0,1,2,3,4,5,6,213,214,215
+32	15	Deku Tree pearl	Omori	0	214	9	0,1,2,3,4,5,6,213,214,215
+32	16	Bomb shop break-in	Obombh	0	200	0	0,1,200
+32	17	Jabun's pearl	Pjavdou	0	200	8	0,1,200	before
+32	18	Tower rises D	ADMumi	0	0	8	0,1,2,100,200,201,232,244
+32	19	Tower rises F	ADMumi	0	1	8	0,1,2,100,200,201,232,244
+32	20	Tower rises N	ADMumi	0	2	8	0,1,2,100,200,201,232,244
+32	21	Warp to Hyrule in	ADMumi	0	201	9	0,1,2,100,200,201,232,244	before
+32	22	Before Master Sword	kenroom	0	200	8	0,1,10,200,201,249
+32	23	Rescue Aryll	M2tower	0	16	1	0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,30	before
+32	24	Storm Ganon (fail)	M2ganon	0	0	8	0,223	after
+32	25	Zelda awakens	kenroom	0	201	9	0,1,10,200,201,249	after
+32	26	Fire+ice arrows	sea	9	225	8	0,1,2,99,100,101,102,103,225,226	after
+32	27	Extra great fairy	sea	9	226	8	0,1,2,99,100,101,102,103,225,226	after
+32	28	Zora song (Medli)	Edaichi	0	226	8	0,1,2,226	after
+32	29	Zora sage awakens	sea	13	227	8	0,1,2,5,99,100,101,102,103,210,211,212,227
+32	30	Zora prayer	M_DaiB	-1	228	8	0,1,228
+32	31	Kokiri song (Makar)	Ekaze	0	229	8	0,1,2,229
+32	32	Kokiri sage awakens	Otkura	0	230	8	0,230
+32	33	Kokiri prayer	kazeB	0	231	8	0,1,231	after
+32	34	Warp hole appears	ADMumi	0	232	10	0,1,2,100,200,201,232,244	after
+32	35	Sword breaks barrier	Hyrule	0	233	9	0,1,2,3,4,200,201,219,233,235
+32	36	Bedroom Ganon before	GanonK	0	0	8	0,1,2,3,4	after
+32	37	Bedroom Ganon after	GanonK	0	4	9	0,1,2,3,4	after
+32	38	Valoo roars	Adanmae	0	100	8	0,1,2,3,100
+32	39	Before final Ganon	GTower	0	0	8	0,1,2	after
+32	40	After final Ganon	GTower	0	2	9	0,1,2	after
+32	41	Warp out of Hyrule	Hyrule	0	200	8	0,1,2,3,4,200,201,219,233,235
+32	42	Storm Ganon part 2	ADMumi	0	244	11	0,1,2,100,200,201,232,244	after
+32	43	Epilogue	sea_E	44	0	0	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+32	44	Grandma's shield	LinkRM	0	201	9	0,1,200,201,202
+32	45	Taking Master Sword	Hyroom	0	248	8	0,1,2,10,248
+32	46	After Master Sword	kenroom	0	249	10	0,1,10,200,201,249
+32	47	Ending	ENDumi	0	0	8	0	after
+33	0	Ending	ENDING	0	0	0
+34	0	Effects test	I_TestR	-1	0	-1	0
+34	1	Sky box test	VrTest	0	0	-1	0
+34	2	Wave test island	A_nami	0	0	-1	0
+34	3	Private room	TEST	0	0	-1	0
+34	4	Room 0 test	A_R00	0	0	-1	0	hangs
+34	5	Outset load check	sea	44	0	6	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+34	6	Room 2C test	sea	44	0	7	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+35	0	Moblin	KATA_RM	1	0	-1	0
+35	1	Bokoblin	KATA_RM	2	0	-1	0
+35	2	Magtail	KATA_RM	3	0	-1	0
+35	3	Keese (ceiling)	KATA_RM	4	0	-1	0
+35	4	Keese (flying)	KATA_RM	5	0	-1	0
+35	5	Fire Keese	KATA_RM	6	0	-1	0
+35	6	Peahat	KATA_RM	7	0	-1	0
+35	7	Kurobo (roaming)	KATA_RM	8	0	-1	0
+35	8	Kurobo (guarding)	KATA_RM	9	0	-1	0
+35	9	Bubble	KATA_RM	10	0	-1	0
+35	10	Stalfos	KATA_RM	11	0	-1	0
+35	11	Armos	KATA_RM	12	0	-1	0
+35	12	ChuChu	KATA_RM	13	0	-1	0
+35	13	Boko Baba	KATA_RM	14	0	-1	0
+35	14	Rat	KATA_RM	15	0	-1	0
+35	15	Kargaroc	KATA_RM	16	0	-1	0
+35	16	Darknut	KATA_RM	17	0	-1	0
+35	17	Floormaster	KATA_RM	18	0	-1	0,1
+35	18	Bombchu	KATA_RM	19	0	-1	0
+35	19	Mothula	KATA_RM	20	0	-1	0
+35	20	Small Armos	KATA_RM	22	0	-1	0
+35	21	Floormaster+ test	KATA_RM	21	0	-1	0
+35	22	Floormaster+ test 2	KATA_RM	23	0	-1	0
+35	23	Phantom Ganon	KATA_RM	24	0	-1	0
+35	24	Poe	KATA_RM	25	0	-1	0
+35	25	Phantom Ganon 2	KATA_RM	26	0	-1	0
+35	26	ReDead	KATA_RM	27	0	-1	0
+35	27	Wizzrobe	KATA_RM	30	0	-1	0
+35	28	Wizzrobe (summon)	KATA_RM	28	0	-1	0
+35	29	Ganondorf	KATA_RM	29	0	-1	0
+35	30	Miniblin	KATA_RM	31	0	-1	0
+36	0	Outset	sea	44	0	4	0,1,2,3,4,5,6,7,8,9,10,11,99,100,101,102,103,128,151,201,203,204,205,206
+36	1	Forest Haven	sea	41	0	-1	0,1,2,3,4,5,6,7,8,9,10,99,100,101,102,103,230
+36	2	Dragon Roost	sea	13	0	-1	0,1,2,5,99,100,101,102,103,210,211,212,227
+37	0	Townsfolk test	K_Testb	0	0	-1	0
+38	0	SubD42	SubD42	0	0	-1	0
+38	1	SubD43	SubD43	0	0	-1	0,1,2,3
+38	2	SubD44	SubD44	0	0	-1	0
+38	3	SubD45	SubD45	0	0	-1	0
+38	4	SubD51	SubD51	1	0	-1	0
+38	5	SubD61	ITest61	1	0	-1	0
+38	6	SubD62	ITest62	0	0	-1	0
+38	7	SubD71	SubD71	0	0	-1	0
+39	0	Test	sea	0	0	-1	0
+39	1	Open sea	sea	0	0	-1	0

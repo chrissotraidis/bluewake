@@ -2030,6 +2030,8 @@ static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
     host_trace_bgm_stream(cpu, address);
 #endif
     bluewake_feature_dispatch(cpu, address);
+    if (bluewake_stage_select_redirect(cpu, address))
+        return true;
     if (bluewake_jump_button_dispatch(cpu, address))
         return true;
     if (host_chassis_requires_full(cpu, address))
@@ -3568,6 +3570,8 @@ static u32 si_load_be32(const u8* bytes, u32 offset) {
 static u16 host_pad_buttons(u32 channel, u16 fallback) {
     if (g_live_takeover)
         return fallback;
+    if (channel == 0u)
+        fallback = bluewake_stage_select_pad_buttons(g_host_retrace_count, fallback);
     if (channel == 0u && g_title_pad_pulse.configured)
         fallback = bluewake_pad_event_schedule_sample(
             &g_title_pad_pulse, g_host_retrace_count, fallback);
@@ -7892,6 +7896,7 @@ int main(int argc, char** argv) {
     bluewake_fps_watch_attach(&cpu);
     bluewake_fast_load_attach(&cpu);
     bluewake_quick_doors_attach(&cpu);
+    bluewake_stage_select_attach();
     bluewake_draw_tags_attach(&cpu);
     bluewake_haptics_attach(&cpu);
 
@@ -8252,6 +8257,7 @@ int main(int argc, char** argv) {
         g_current_host_block = blocks;
         bluewake_cycle_domain_begin_turn(&g_cycle_domain, &cpu);
         if (dol_platform_should_quit()) { stop_reason = "quit"; break; }
+        if (bluewake_stage_select_stop) { stop_reason = "warp-arrived"; break; }
         bluewake_card_runtime_service_callback(&cpu);
         bluewake_card_runtime_dispatch(&cpu);
         bluewake_forest_water_dispatch(&cpu, cpu.pc);

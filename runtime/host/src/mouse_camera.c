@@ -5,6 +5,7 @@
 #include "jump_button.h"
 #include "settings_menu.h"
 #include "save_state.h"
+#include "stage_select_key.h"
 #include "mouse_motion.h"
 
 #include "gxruntime/aurora_backend.h"
@@ -264,6 +265,9 @@ static void observe(const void* sdl_event, void* user) {
     if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat &&
         (event->key.scancode == SDL_SCANCODE_F5 || event->key.scancode == SDL_SCANCODE_F9))
         bluewake_save_state_hotkey(event->key.scancode == SDL_SCANCODE_F9);
+    // The stage select (BLUEWAKE_STAGE_SELECT=1): F7 opens it from play and goes back.
+    if (event->type == SDL_EVENT_KEY_DOWN && !event->key.repeat && event->key.scancode == SDL_SCANCODE_F7)
+        bluewake_stage_select_hotkey();
     if (!g_enabled)
         return;
     switch (event->type) {
