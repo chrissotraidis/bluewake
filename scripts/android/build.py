@@ -395,6 +395,7 @@ class AndroidBuilder(wb.Builder):
             "source_modified": bool(self.git("status", "--porcelain")),
             "composite_digest": (self.out / "composite-src.digest").read_text().strip(),
             "mods": bool(self.mods),
+            "lean_blocks": getattr(self.args, "lean_blocks", False),
             "cpu": self.args.cpu,
             "local_training": self.profile is not None,
             "compiler": self.clang_version,
@@ -727,7 +728,7 @@ def main():
     parser.add_argument("--conservative", action="store_true",
                         help="build the plain translation, without the Windows builder's default source "
                              "optimizations (its --fixed-cpu, --direct-calls, ... options then add them one at a time)")
-    for name in (*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_memory", "native_entries"):
+    for name in (*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_blocks", "lean_memory", "native_entries"):
         parser.add_argument("--" + name.replace("_", "-"), action="store_true",
                             help="as in scripts/windows/build.py")
     parser.add_argument("--profile", type=Path, help="an optimization profile (.profdata) for the game module")
@@ -759,8 +760,12 @@ def main():
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:
         parser.error("--fixed-mem1 requires --fixed-cpu")
+    if args.lean_blocks:
+        args.prepared_blocks = True
     if args.lean_memory and not args.prepared_blocks:
         parser.error("--lean-memory requires --prepared-blocks")
+    if args.lean_memory and not args.gather_pipe:
+        parser.error("--lean-memory requires --gather-pipe (its accesses call gather_pipe.h's helpers)")
     if args.native_entries and not (args.direct_calls and args.gather_pipe and args.native_vec):
         parser.error("--native-entries requires --direct-calls, --gather-pipe and --native-vec")
     args.jobs_auto = args.jobs is None
