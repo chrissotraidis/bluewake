@@ -9,7 +9,8 @@ own scene changes and writes English over the menu's Japanese text while the men
 
 ## Turning it on
 
-Set two environment variables before starting BlueWake:
+Set two environment variables before starting BlueWake. There's no switch in the settings (F1) menu or
+`settings.ini` yet; a future version may add a toggle there.
 
 ```
 BLUEWAKE_STAGE_SELECT=1
@@ -17,6 +18,24 @@ BLUEWAKE_STAGE_SELECT_NAMES=<repository>/config/stage_select
 ```
 
 Without the second one the menu works with its Japanese names.
+
+**Windows:** put a small `.bat` file next to `BlueWake.exe` and start BlueWake with it:
+
+```bat
+@echo off
+set BLUEWAKE_STAGE_SELECT=1
+set BLUEWAKE_STAGE_SELECT_NAMES=C:\path\to\bluewake\config\stage_select
+start "" BlueWake.exe
+```
+
+Or set both once under System Properties › Environment Variables, so they apply every time.
+
+**Mac and Linux:** start BlueWake from a terminal with the variables in front of the command. On a Mac that's
+the executable inside the app (`BlueWake.app/Contents/MacOS/`); starting it from Finder doesn't pass them.
+
+```sh
+BLUEWAKE_STAGE_SELECT=1 BLUEWAKE_STAGE_SELECT_NAMES=~/bluewake/config/stage_select ./BlueWake
+```
 
 Then:
 
