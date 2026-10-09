@@ -17,7 +17,8 @@ below was done on a Steam Deck (VanGogh, 4 cores / 8 threads, Zen 2) running Ste
 
 - A Steam Deck with BlueWake installed (the AppImage).
 - A save state that drops you straight into the heavy scene. The Outset Island (sea/44)
-  state `quick-26502.bwstate` in `~/.local/share/BlueWake/states/` is the one used below.
+  state `quick-26502.bwstate` in `~/.local/share/BlueWake/` (the state dir is the data dir
+  root, or `$BLUEWAKE_STATE_DIR` when set) is the one used below.
   `BLUEWAKE_LOAD_STATE` is the reliable way to reproduce a scene; `BLUEWAKE_TEST_WARP` is
   the fallback if you have no state.
 - `perf`. It ships with the Deck and works without root, because
@@ -33,7 +34,7 @@ If you have done this before, this is the whole thing in order:
 # 1. Launch headless into the slow scene, detached so it survives SSH close:
 cd /run/media/deck/GF8S5/BlueWake
 BLUEWAKE_RENDERER=headless BLUEWAKE_WALL_PACE=0 \
-  BLUEWAKE_LOAD_STATE=/home/deck/.local/share/BlueWake/states/quick-26502.bwstate \
+  BLUEWAKE_LOAD_STATE=/home/deck/.local/share/BlueWake/quick-26502.bwstate \
   BLUEWAKE_FPS_WATCH=0 BLUEWAKE_MAX_RETRACES=600000 \
   setsid bash -c './BlueWake-x86_64.AppImage </dev/null >/tmp/bw_profile.log 2>&1' & disown
 
@@ -48,6 +49,19 @@ perf report -i /tmp/bw.perf.data --stdio --no-children | head -60
 
 The rest of this page explains each step and how to read what you get back.
 
+All of this is scripted in `scripts/linux/profile_deck.sh`, which launches the game,
+finds its PID, runs the perf capture, and writes the flat report plus a copy of the
+newest session log:
+
+```sh
+scripts/linux/profile_deck.sh --seconds 30
+scripts/linux/profile_deck.sh --rendered --state /home/deck/.local/share/BlueWake/quick-26502.bwstate
+```
+
+Run it on the Deck (or any Linux host with the AppImage and a state). It defaults to
+headless; `--rendered` produces the `[fps-dip]` / `[perf-summary]` numbers, which the
+headless run cannot (an unpaced run is skipped by the fps watcher).
+
 ## Step 1 — Reach the slow scene without a display or controller
 
 The game reads a set of environment variables at startup, so you can launch a profiling
@@ -59,7 +73,7 @@ cd /run/media/deck/GF8S5/BlueWake        # wherever the AppImage lives
 
 export BLUEWAKE_RENDERER=headless        # skip Aurora/SDL entirely
 export BLUEWAKE_WALL_PACE=0              # run unpaced: the game thread goes flat-out
-export BLUEWAKE_LOAD_STATE=/home/deck/.local/share/BlueWake/states/quick-26502.bwstate
+export BLUEWAKE_LOAD_STATE=/home/deck/.local/share/BlueWake/quick-26502.bwstate
 export BLUEWAKE_FPS_WATCH=0              # keep [fps-dip] out of the log so it stays readable
 export BLUEWAKE_MAX_RETRACES=600000      # a large bound; see the gotchas below
 
