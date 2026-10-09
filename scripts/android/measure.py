@@ -81,8 +81,11 @@ def main():
         return adb_run("shell", command, check=check)
 
     def skin_temperature():
-        """The hottest SKIN reading Android's thermal service reports, in C."""
-        temps = [float(m) for m in re.findall(r"mValue=([\d.]+), mType=3,", shell("dumpsys thermalservice", False))]
+        """The hottest SKIN reading the thermal HAL reports now, in C (not the service's cached list, which can
+        lag by many minutes)."""
+        dump = shell("dumpsys thermalservice", False)
+        current = dump.split("Current temperatures from HAL:", 1)[-1].split("Current cooling devices", 1)[0]
+        temps = [float(m) for m in re.findall(r"mValue=([\d.]+), mType=3,", current)]
         return max(temps) if temps else None
 
     def clocks_at_full():
