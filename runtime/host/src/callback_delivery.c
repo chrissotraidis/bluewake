@@ -85,6 +85,11 @@ BluewakeCallbackDeliveryResult bluewake_deliver_guest_callback(
     const u32 scheduler_depth = mem_read32(cpu, OS_RESCHEDULE);
     mem_write32(cpu, OS_RESCHEDULE, scheduler_depth + 1u);
 
+    /* As the OS's interrupt handlers do (stwu r1,-8(r1) before dispatching):
+     * the callback's prologue stores its LR at 4(r1), which a function
+     * interrupted between its own LR store and its stwu still needs. */
+    cpu->gpr[1] = interrupted.gpr[1] - 8u;
+    mem_write32(cpu, cpu->gpr[1], interrupted.gpr[1]);
     cpu->gpr[3] = arg0;
     cpu->gpr[4] = arg1;
     cpu->lr = CALLBACK_RETURN_SENTINEL;
