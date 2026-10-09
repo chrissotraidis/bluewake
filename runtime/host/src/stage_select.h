@@ -44,6 +44,11 @@
 #define BLUEWAKE_STAGE_SELECT_SAVE_TIME 0x803C4C2Cu   // dSv_player_status_b_c::mTime (degrees, 15 an hour)
 
 static bool bluewake_stage_select_armed;
+// True only when the stage select can do anything this run (BLUEWAKE_STAGE_SELECT=1 or a
+// BLUEWAKE_WARP), decided once at attach. host_chassis_edge_service runs once per guest
+// block, so the per-block hooks below test this one flag first and cost a single
+// predicted branch when the stage select is off.
+static bool bluewake_stage_select_live;
 
 // BLUEWAKE_STAGE_SELECT_NAMES=path: names for the menu's lines in place of
 // the Japanese ones in Menu1.dat, written over them in memory each time the
@@ -357,6 +362,7 @@ static inline void bluewake_stage_select_attach(void) {
     }
     if (bluewake_stage_select_armed && !bluewake_warp_set)
         fprintf(stderr, "[stage-select] hold R while starting a file to open the developers' stage select\n");
+    bluewake_stage_select_live = bluewake_stage_select_armed || warp_asked || bluewake_warp_file_pending;
 }
 
 // Controller 1's buttons while BLUEWAKE_WARP_FILE presses for the player: A
@@ -419,7 +425,7 @@ static inline void bluewake_stage_select_key_take(void) {
     atomic_store_explicit(&bluewake_stage_select_key_presses, 0u, memory_order_relaxed);
 }
 
-static inline bool bluewake_stage_select_observes(u32 address) {
+static __attribute__((noinline)) bool bluewake_stage_select_observes_body(u32 address) {
     return ((bluewake_stage_select_armed || bluewake_warp_set || bluewake_warp_file_pending) &&
             address == BLUEWAKE_STAGE_SELECT_CHANGE) ||
            (bluewake_stage_select_armed &&
@@ -647,7 +653,7 @@ static inline void bluewake_stage_select_warp(CPUState* cpu) {
 
 // The play scene's execute, with F7 pressed: the tail call to the scene change
 // (r3, the scene, stays; lr goes back to execute's caller). True: pc changed.
-static inline bool bluewake_stage_select_redirect(CPUState* cpu, u32 address) {
+static __attribute__((noinline)) bool bluewake_stage_select_redirect_body(CPUState* cpu, u32 address) {
     if (__builtin_expect(address != BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE || !bluewake_stage_select_key_pending(), 1))
         return false;
     bluewake_stage_select_key_take();
@@ -708,8 +714,8 @@ static inline void bluewake_stage_select_go_back(CPUState* cpu) {
             (s8)bluewake_stage_select_kept_place[10]);
 }
 
-static inline void bluewake_stage_select_dispatch(CPUState* cpu, u32 address) {
-    if (__builtin_expect(!bluewake_stage_select_observes(address), 1))
+static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUState* cpu, u32 address) {
+    if (__builtin_expect(!bluewake_stage_select_observes_body(address), 1))
         return;
     if (address == BLUEWAKE_STAGE_SELECT_EXECUTE) {
         if (!bluewake_stage_select_texts_done)
@@ -773,6 +779,20 @@ static inline void bluewake_stage_select_dispatch(CPUState* cpu, u32 address) {
     if (!told)
         fprintf(stderr, "[stage-select] R held: the file's start goes to the stage select\n");
     told = true;
+}
+
+
+// The per-block entry points: only the flag test is inline in the hot path; the
+// bodies stay out of line so they don't add to host_chassis_edge_service's size.
+static inline bool bluewake_stage_select_observes(u32 address) {
+    return __builtin_expect(bluewake_stage_select_live, 0) && bluewake_stage_select_observes_body(address);
+}
+static inline bool bluewake_stage_select_redirect(CPUState* cpu, u32 address) {
+    return __builtin_expect(bluewake_stage_select_live, 0) && bluewake_stage_select_redirect_body(cpu, address);
+}
+static inline void bluewake_stage_select_dispatch(CPUState* cpu, u32 address) {
+    if (__builtin_expect(bluewake_stage_select_live, 0))
+        bluewake_stage_select_dispatch_body(cpu, address);
 }
 
 #endif
