@@ -278,6 +278,31 @@ label_80004004:
         self.assertNotIn('BLUEWAKE_NATIVE_GAME_MATH_PREPARED', (source.parent.parent / 'generated.h').read_text())
         self.assertFalse((source.parent.parent / 'native_game_math.json').exists())
 
+    def test_rebuild_into_a_prepared_folder_keeps_it(self):
+        # A second build into the same folder with the same options: generate() finds the prepared tree
+        # current, and preparation must not run again on it. native_game_math.py refuses its own hooks
+        # once a later step has rewritten the chunk (here the prepaid block copies).
+        body = '\nlabel_80000100:\n    ctx->gpr[3] = 1;\n'
+        digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+        script = self.root / "scripts/windows/native_game_math.py"
+        text = script.read_text()
+        begin = text.index('FRAGMENTS = {')
+        end = text.index('def canonical(', begin)
+        script.write_text(text[:begin] + f"FRAGMENTS = {{'fixture': (0x80000100, 0x80000100, 0x80000104, '{digest}')}}\n"
+                          "ENTRIES = {0x80000100: ('fixture',)}\n\n" + text[end:], newline="\n")
+        (self.base / 'chunks_dol/chunk_80000100.c').write_text(
+            '#include "../generated.h"\n' + body + '\nlabel_80000104:\n\nreturn_dispatch_80000100:\n' + CHUNK,
+            newline="\n")
+        self.digest = bw.tree_digest(self.base)
+        self.args.native_game_math = self.args.prepared_blocks = True
+        self.cycle()
+        source = self.out / 'composite-src/chunks_dol/chunk_80000100.c'
+        self.assertIn('bluewake_native_game_math_try', source.read_text())
+        self.assertIn(MARK, source.read_text())
+        before = bw.tree_digest(self.out / "composite-src")
+        self.cycle()
+        self.assertEqual(before, bw.tree_digest(self.out / "composite-src"))
+
     def test_native_skin_reuse_and_disable(self):
         body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'
         digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()

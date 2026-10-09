@@ -434,6 +434,10 @@ int main(void) {
             print("the existing composite source is current")
             self.mods_pending = (o / "mods.done").read_text().strip() != "complete" \
                 if (o / "mods.done").exists() else self.mods
+            # Its final digest is written after preparation, so with the mods in
+            # place it is already prepared: running the steps again would touch
+            # chunks a later step rewrote (native_game_math.py refuses them).
+            self.prepared_current = not (self.mods and self.mods_pending)
         else:
             sync_tree(new, current)
             (o / "composite-src.digest").write_text(digest + "\n")
@@ -441,6 +445,7 @@ int main(void) {
             (o / "composite-final.digest").write_text(digest + "\n")
             (o / "mods.done").write_text("pending\n")
             self.mods_pending = self.mods
+            self.prepared_current = False
 
     # --- 7 mods --------------------------------------------------------------
     def build_mods(self):
@@ -458,6 +463,9 @@ int main(void) {
         Each script is portable Python and changes only what it can prove, so
         the unmodified translation remains wherever a native guard declines.
         """
+        if getattr(self, "prepared_current", False):
+            print("the composite source is already prepared for these options")
+            return
         o = self.out
         script = ROOT / "scripts/windows/fast_blocks.py"
         cpu_script = ROOT / "scripts/windows/global_guest_cpu.py"
