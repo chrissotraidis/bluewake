@@ -9,33 +9,15 @@ own scene changes and writes English over the menu's Japanese text while the men
 
 ## Turning it on
 
-Set two environment variables before starting BlueWake. There's no switch in the settings (F1) menu or
-`settings.ini` yet; a future version may add a toggle there.
+In the settings (F1): **Developers' stage select (F7)**, under **Gameplay** on Mac and Linux and under
+**Mods** on Windows. It's off by default and takes effect the next time BlueWake starts.
 
-```
-BLUEWAKE_STAGE_SELECT=1
-BLUEWAKE_STAGE_SELECT_NAMES=<repository>/config/stage_select
-```
+The Linux and Windows builders put the English names in a `stage_select` folder beside the app, and
+BlueWake finds them there. On a Mac, set `BLUEWAKE_STAGE_SELECT_NAMES=<repository>/config/stage_select`
+for them; without it the menu shows its Japanese names.
 
-Without the second one the menu works with its Japanese names.
-
-**Windows:** put a small `.bat` file next to `BlueWake.exe` and start BlueWake with it:
-
-```bat
-@echo off
-set BLUEWAKE_STAGE_SELECT=1
-set BLUEWAKE_STAGE_SELECT_NAMES=C:\path\to\bluewake\config\stage_select
-start "" BlueWake.exe
-```
-
-Or set both once under System Properties › Environment Variables, so they apply every time.
-
-**Mac and Linux:** start BlueWake from a terminal with the variables in front of the command. On a Mac that's
-the executable inside the app (`BlueWake.app/Contents/MacOS/`); starting it from Finder doesn't pass them.
-
-```sh
-BLUEWAKE_STAGE_SELECT=1 BLUEWAKE_STAGE_SELECT_NAMES=~/bluewake/config/stage_select ./BlueWake
-```
+`BLUEWAKE_STAGE_SELECT=1` in the environment still turns it on, whatever the toggle says, so existing
+launch commands and `.bat` files keep working.
 
 Then:
 

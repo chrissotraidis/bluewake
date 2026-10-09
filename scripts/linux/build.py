@@ -889,6 +889,9 @@ int main(void) {
         shutil.copytree(self.out / "game/rels", rels)
         for name in ("dsp_rom.bin", "dsp_coef.bin"):
             shutil.copy2(self.recompcore / "Data/Sys/GC" / name, app / "dsp" / name)
+        # The stage select's English names; the app finds them beside itself (linux_entry.c).
+        shutil.rmtree(app / "stage_select", ignore_errors=True)
+        shutil.copytree(ROOT / "config/stage_select", app / "stage_select")
         self.place(self.iso, app / "game/GZLE01.iso")
         dirty = bool(self.git("status", "--porcelain"))
         provenance = {

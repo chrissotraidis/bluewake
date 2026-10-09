@@ -300,8 +300,11 @@ static inline const BluewakeStageSelectName* bluewake_stage_select_find(const ch
 }
 
 static inline void bluewake_stage_select_attach(void) {
+    // On from the launch environment, or from the settings toggle (Mac and Linux save it under its
+    // own key, so a saved setting never overrides BLUEWAKE_STAGE_SELECT=1 on the command line).
     const char* on = getenv("BLUEWAKE_STAGE_SELECT");
-    bluewake_stage_select_armed = on != NULL && on[0] == '1';
+    const char* toggle = getenv("BLUEWAKE_STAGE_SELECT_TOGGLE");
+    bluewake_stage_select_armed = (on != NULL && on[0] == '1') || (toggle != NULL && toggle[0] == '1');
     const char* warp = getenv("BLUEWAKE_WARP");
     const bool warp_asked = warp != NULL && warp[0] != '\0';
     const char* names = getenv("BLUEWAKE_STAGE_SELECT_NAMES");
