@@ -51,6 +51,22 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | Oct 8 | `--no-cold` | i5-12600KF, 4 E-cores | Tower room 0 | 46.7 | 45.3 (−2.9%) | Yes |
 | Oct 8 | `--no-cold` | Ryzen 9 5900X, Linux (jkoehler11) | Bird scene, 2,000 retraces unpaced | 26.27 s | 26.86 s (−2.2%) | Yes, identical blocks and checkpoints |
 | Oct 8 | Wind Waker Recomp's lean copies vs BlueWake 0.6.0 (reference) | Galaxy Z Fold 7 (LiquidAzir) | Outset pier, cool | BlueWake 69%, 173 M instr./retrace | WWR port 100%, 110 M | Different builds |
+| Oct 8 | `--lean-blocks` | i5-12600KF, Windows (pdale-boop), game pinned to the 6 P-cores | Outset, the dock facing the sea; headless / rendered | 111.1 / 100.9 | 116.6 / 106.3 (+5.0% / +5.4%) | Yes: boot milestones identical; 15½ min of play (below) |
+| Oct 8 | `--lean-blocks` | i5-12600KF, 4 E-cores | Outset, the dock facing the sea; headless | 64.2 | 69.5 (+8.3%) | Yes |
+| Oct 8 | `--lean-blocks` | i5-12600KF, 6 P-cores | Bird scene; headless / rendered | 84.8 / 75.7 | 90.9 / 80.8 (+7.2% / +6.7%) | Yes |
+| Oct 8 | `--lean-blocks` | i5-12600KF, 6 P-cores | Tower of the Gods room 0, Link in his boat; headless / rendered | 119.6 / 108.4 | 128.8 / 116.9 (+7.7% / +7.8%) | Yes |
+| Oct 8 | `--lean-blocks` | i5-12600KF, 6 P-cores | Tower room 0, Link swimming until he drowns and is put back in the boat (the heaviest state measured); headless / rendered | 85.1 / 75.8 | 91.0 / 81.1 (+6.9% / +7.0%) | Yes |
+| Oct 8 | `--lean-blocks` | i5-12600KF, 6 P-cores; 4 E-cores | Outset, in a text box with Tetra; headless / rendered; E-cores headless | 111.8 / 99.4; 61.5, 60.8 | 119.4 / 106.3 (+6.8% / +6.9%); 67.9, 67.2 (+10.5%) | Yes |
+| Oct 8 | `--lean-blocks`, its cost | i5-12600KF, 16 jobs | The build | Module 370.8 MB; compile 14:08; full build 36 min | 469.5 MB (+27%); 20:53 (+48%); 41 min | |
+
+The `--lean-blocks` rows: both builds from `acfaf32` with the parallel training (#202), each in a fresh `--out`
+folder, built and measured from the desktop session. Unpaced, Smooth Motion off, medians of three runs, builds
+alternated; headless runs pinned to one thread per core. The play on the lean build: Link's room
+cutscene with music, Orca's training, the bird scene (full game speed throughout), Dragon Roost and its cavern with
+a fight, sailing, drowning at sea, and save, quit to the title and load at each switch; no `[audio-lost]`, no fatal
+lines, and only two seconds below 70% game speed, both while the first scene loaded. Tower room 0 in the
+`--no-cold` rows above is the swimming and drowning state: a card restarted there puts Link in his boat, and the
+continue route's last A presses, after he has control at about retrace 833, make him jump out.
 
 ## The runbook
 
@@ -70,7 +86,7 @@ phases. Each one ends in a pull request, a row in "Results" above, and the row m
 - **Hardware.** This Mac (M3 Max) has the Wind Waker ISO at `~/GitHub/bluewakearchive/ref/`, a Mac module at
   `build/macos-main/composite-macos/gGZLE01_recomp.dylib` and the game files at `build/macos-main/game/`. It
   can develop and check the benchmark, but x86 numbers come from Windows or Linux: Chris's PC (Ryzen 7 5700U),
-  or contributors (pdale-boop, i5-12600KF, Windows, builds in about 17 minutes; jkoehler11, Ryzen 9 5900X
+  or contributors (pdale-boop, i5-12600KF, Windows, builds in about 37 minutes; jkoehler11, Ryzen 9 5900X
   and a Steam Deck, Linux). Ask them on the issue for the phase, with exact commands.
 - **Stop rules.** Two experiments in a row that tell you nothing new: stop and write down why. A result that
   needs a build you can't run: post the exact commands, move to the next phase, and come back.
@@ -218,8 +234,8 @@ whose reports it answers (#137, #159, #86, #59, the Steam Deck users on #107), w
 
 ## How to test without the long loop
 
-The slow part is compiling the game module (17 to 45 minutes on a desktop, longer on a laptop). Everything else is
-minutes.
+The slow part is compiling the game module (about 14 to 17 minutes on a desktop, longer on a laptop). Everything
+else is minutes.
 
 - **Measure with a script, not by playing.** `scripts/bench_tour.py` (to write) uses pieces the builders already
   have. It copies the tester's own memory card and places a save on Outset (`scripts/card_set_restart.py`), then
@@ -239,9 +255,14 @@ minutes.
   it at 55% of a P-core). They show code-layout effects more clearly than a fast core.
 - **Benchmarking a Windows PC remotely:** start rendered runs in the desktop session (a scheduled task with `/IT`);
   from SSH they run in session 0, without a real display, at 40 to 52 retraces a second whatever the scene.
+- **Start builds from a window.** On a hybrid Intel CPU, Windows runs the compiles of a build started without a
+  window (SSH, a background shell, an agent's commands) on the efficiency cores: on the i5-12600KF the P-cores
+  stayed 4 to 14% busy and the E-cores 90%, and the module took 46 to 47 minutes to compile with 8 or 16 jobs,
+  against 14 to 17 from a terminal on the desktop. Game playbacks, training included, get the P-cores either way.
 - **Runtime and host changes** (levers 3, 4 and 6) rebuild the app without recompiling the game module.
 - **Build-flag changes** (levers 1 and 2) are one unattended build each, on the fastest machine available: pdale-boop's
-  i5-12600KF builds in about 17 minutes, jkoehler11's Ryzen 9 5900X on Linux.
+  i5-12600KF builds in about 37 minutes from an empty folder (17 of them compiling), jkoehler11's Ryzen 9 5900X on
+  Linux.
 - **One change per build,** and its result written in "Results".
 
 ## Background
