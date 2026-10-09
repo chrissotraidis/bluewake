@@ -67,9 +67,9 @@ goes straight to a place:
 | `BLUEWAKE_WARP_STOP_AFTER` | End the run that many play frames after Link appears (for sweeping many places) |
 
 Every place in the menu was warped to this way, headless, on Windows, from a late-game file: 451 of 468
-arrive. The rest are the places with notes above, plus a few that crash by chance through a host bug in
-how a finished disc read calls back into the game (the run stops at `pc=0x8180FFF0`). Which places that
-bug hits changes with timing; it needs its own fix.
+arrive. The rest are the places with notes above, plus a few that crash at `pc=0x8180FFF0` through a host
+bug in how a finished disc read calls back into the game. A given build crashes the same way every time,
+but which places it hits moves when the host code changes; it needs its own fix.
 
 ## Names files
 
