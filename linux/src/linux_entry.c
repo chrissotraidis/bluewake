@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -33,6 +34,7 @@
 
 #include "linux_disc.h"
 #include "linux_crash.h"
+#include "linux_setup.h"
 #include "launch_marker.h"
 
 int bluewake_host_main(int argc, char** argv);
@@ -212,7 +214,7 @@ static void start_session_log(void) {
 
 static void usage(void) {
     fprintf(stderr,
-            "usage: bluewake [options]\n"
+            "usage: bluewake [options] [DISC.iso]\n"
             "  --widescreen       16:9 (the widescreen mod: a wider camera and HUD)\n"
             "  --aspect A         4:3 (the game's own), 16:10 or 16:9\n"
             "  --smooth           Smooth Motion (experimental): 60 FPS with in-between\n"
@@ -230,7 +232,9 @@ static void usage(void) {
             "  --hle-audio        Fast audio for this session\n"
             "  --lle-audio        run the DSP's own microcode instead of the HLE ucode\n"
             "  --mods LIST        mods compiled into the module, by name\n"
-            "  --disc FILE        the disc image to read (default game/GZLE01.iso)\n"
+            "  --setup            configure the disc, texture pack and app launchers\n"
+            "  --iso              choose and remember a disc with the simple file picker\n"
+            "  --disc FILE        the disc image to read (a bare .iso/.gcm path also works)\n"
             "  --module FILE      the translated game module (default gGZLE01_recomp.so)\n"
             "Keyboard: arrows D-pad, J A, K B, U X, I Y, W/A/S/D stick,\n"
             "H/F/T/G C-stick, E/R L/R, Q Z, Return START. Game controllers work too.\n"
@@ -244,20 +248,37 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++)
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) { usage(); return 0; }
     resolve_dirs();
+    SDL_SetAppMetadata("BlueWake", "0.1", "dev.bluewake.BlueWake");
     if (getenv("BLUEWAKE_SESSION_LOG") == NULL || strcmp(getenv("BLUEWAKE_SESSION_LOG"), "0") != 0)
         start_session_log();
 
     const char* module_arg = NULL;
+    int setup_requested = 0;
+    int iso_picker_requested = 0;
     char mods[256] = "";
     for (int i = 1; i < argc; i++) {
         const char* a = argv[i];
         const int more = i + 1 < argc;
         if (strcmp(a, "--disc") == 0 && more) {
             setenv("BLUEWAKE_DISC", argv[++i], 1);
+        } else if (a[0] != '-' &&
+                   (getenv("BLUEWAKE_DISC") == NULL || getenv("BLUEWAKE_DISC")[0] == '\0')) {
+            const char* dot = strrchr(a, '.');
+            if (dot != NULL && (strcasecmp(dot, ".iso") == 0 || strcasecmp(dot, ".gcm") == 0))
+                setenv("BLUEWAKE_DISC", a, 1);
+            else {
+                fprintf(stderr, "BlueWake: unknown option %s\n", a);
+                usage();
+                return 2;
+            }
         } else if (strcmp(a, "--module") == 0 && more) {
             module_arg = argv[++i];
         } else if (strcmp(a, "--mods") == 0 && more) {
             snprintf(mods + strlen(mods), sizeof mods - strlen(mods), "%s%s", mods[0] ? "," : "", argv[++i]);
+        } else if (strcmp(a, "--setup") == 0) {
+            setup_requested = 1;
+        } else if (strcmp(a, "--iso") == 0) {
+            iso_picker_requested = 1;
         } else if (strcmp(a, "--betterww") == 0) {
             snprintf(mods + strlen(mods), sizeof mods - strlen(mods), "%sbetterww", mods[0] ? "," : "");
         } else if (strcmp(a, "--options") == 0 && more) {
@@ -305,6 +326,27 @@ int main(int argc, char** argv) {
     if (mods[0] != '\0')
         setenv("BLUEWAKE_MODS", mods, 1);
 
+    const char* appimage = getenv("APPIMAGE");
+    const char* explicit_disc = getenv("BLUEWAKE_DISC");
+    const int has_explicit_disc = explicit_disc != NULL && explicit_disc[0] != '\0';
+    // A downloaded AppImage guides a first-time player through disc selection,
+    // optional textures and shortcut installation. Once its remembered disc is
+    // usable, an ordinary launch goes straight to the game. --setup always
+    // reopens the populated window; --iso preserves the former simple picker.
+    const int use_setup = setup_requested ||
+        (!iso_picker_requested && !has_explicit_disc && appimage != NULL && appimage[0] != '\0' &&
+         !bw_disc_has_usable_source(g_exe_dir, g_data_dir));
+    const int use_iso_picker = iso_picker_requested && !use_setup;
+    if (use_setup) {
+        char selected_disc[4096] = "";
+        if (explicit_disc != NULL)
+            snprintf(selected_disc, sizeof selected_disc, "%s", explicit_disc);
+        const int setup = bw_linux_setup(g_data_dir, selected_disc, sizeof selected_disc);
+        if (setup <= 0)
+            return setup < 0 ? 1 : 0;
+        setenv("BLUEWAKE_DISC", selected_disc, 1);
+    }
+
     // The play configuration as the iOS/Windows apps: one perf line a second,
     // wall-clock pacing, Dolphin's HLE Zelda ucode, the real clock, and the
     // console's SRAM kept with the saves.
@@ -336,7 +378,7 @@ int main(int argc, char** argv) {
                 "Keep that personal build local.\n");
         return 1;
     }
-    const int disc_status = bw_disc_setup(g_exe_dir, g_data_dir);
+    const int disc_status = bw_disc_setup(g_exe_dir, g_data_dir, use_setup, use_iso_picker);
     if (disc_status != 0) return disc_status < 0 ? 1 : 0;
     bw_default_path("BLUEWAKE_DOL", g_exe_dir, "game/main.dol");
     bw_default_path("BLUEWAKE_RELS_DIR", g_exe_dir, "game/rels");
@@ -371,7 +413,6 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[linux] app=%s data=%s module=%s disc=%s\n", g_exe_dir, g_data_dir, module,
             getenv("BLUEWAKE_DISC"));
     bw_crash_install(g_data_dir);
-    SDL_SetAppMetadata("BlueWake", "0.1", "dev.bluewake.BlueWake");
     char* host_argv[3] = {argv[0], module, NULL};
     char launch_marker[4096];
     snprintf(launch_marker, sizeof launch_marker, "%slaunch.pending", g_data_dir);
