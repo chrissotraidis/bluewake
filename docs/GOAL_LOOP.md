@@ -45,7 +45,7 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
   "holds 30"). LiquidAzir has been asked to merge `main` with #242, turn hidden symbols off for Android and measure.
 - **New reports:** a 2-core A6 laptop that can't hold 30 at sea, game thread (#246); D-pad in the item screens (#245);
   the screen recorder losing the Vulkan device on Android (#238). The flicker's two earlier switches are ruled out (#136).
-- **Release gate added to AGENTS.md:** before announcing a release PadMint builds on a Mac, PadMint's
+- **A new release gate (Chris):** before announcing a release PadMint builds on a Mac, PadMint's
   `scripts/player-check.sh` passes, on the clean checkout before tagging and again after publishing.
 
 ## Next: the next release
