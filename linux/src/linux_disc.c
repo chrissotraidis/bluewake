@@ -128,18 +128,26 @@ static int needs_unpacking(const char* path) {
 
 typedef struct {
     char result[4096];
-    volatile bool done;
+    char error[1024];
+    bool failed;
+    SDL_AtomicInt done;
 } ChooseState;
 
 static void SDLCALL choose_callback(void* userdata, const char* const* filelist, int filter) {
+    (void)filter;
     ChooseState* state = (ChooseState*)userdata;
-    if (filelist != NULL && filelist[0] != NULL)
+    if (filelist == NULL) {
+        state->failed = true;
+        snprintf(state->error, sizeof state->error, "%s", SDL_GetError());
+    } else if (filelist[0] != NULL) {
         snprintf(state->result, sizeof state->result, "%s", filelist[0]);
-    state->done = true;
+    }
+    SDL_SetAtomicInt(&state->done, 1);
 }
 
 // The explanation goes to stderr (the session log); the picker is SDL's.
-// 1 and the chosen path, or 0 when the player cancels.
+// 1 and the chosen path, 0 when the player cancels, or -1 when no dialog
+// backend is available.
 static int choose(const char* why, char* out, size_t size) {
     const char* testing = getenv("BLUEWAKE_DISC_CHOICE");
     if (testing != NULL) {
@@ -148,6 +156,11 @@ static int choose(const char* why, char* out, size_t size) {
     }
     if (getenv("BLUEWAKE_NO_DIALOG") != NULL)
         return 0;
+    if ((SDL_WasInit(SDL_INIT_EVENTS) & SDL_INIT_EVENTS) == 0 &&
+        !SDL_InitSubSystem(SDL_INIT_EVENTS)) {
+        fprintf(stderr, "[disc] could not initialize the file chooser: %s\n", SDL_GetError());
+        return -1;
+    }
     fprintf(stderr,
             "%sBlueWake plays The Legend of Zelda: The Wind Waker from your own "
             "copy of the game: the GameCube disc for the USA (GZLE01).\n\n"
@@ -157,33 +170,66 @@ static int choose(const char* why, char* out, size_t size) {
         {"GameCube disc images", "iso;gcm"},
         {"All files", "*"},
     };
-    ChooseState state = {{0}, false};
+    ChooseState state = {0};
+    SDL_ClearError();
     SDL_ShowOpenFileDialog(choose_callback, &state, NULL, filters,
                            (int)(sizeof filters / sizeof filters[0]), NULL, false);
     // Pump until the callback fires (the dialog is modal and asynchronous).
-    while (!state.done)
+    while (!SDL_GetAtomicInt(&state.done)) {
         SDL_PumpEvents();
+        SDL_Delay(10);
+    }
+    if (state.failed) {
+        fprintf(stderr,
+                "[disc] the file chooser could not open: %s\n"
+                "[disc] Install an XDG desktop portal backend or Zenity, or start "
+                "BlueWake with --disc FILE.\n",
+                state.error[0] != '\0' ? state.error : "no supported Linux dialog backend");
+        return -1;
+    }
     if (state.result[0] == '\0')
         return 0;
     snprintf(out, size, "%s", state.result);
     return 1;
 }
 
-int bw_disc_setup(const char* exe_dir, const char* data_dir) {
+int bw_disc_has_usable_source(const char* exe_dir, const char* data_dir) {
+    const char* given_dol = getenv("BLUEWAKE_DOL");
+    if (given_dol != NULL && given_dol[0] != '\0')
+        return 1;
+    const char* given = getenv("BLUEWAKE_DISC");
+    if (given != NULL && given[0] != '\0')
+        return is_file(given);
+
+    char app_disc[4096], app_dol[4096], app_rels[4096];
+    snprintf(app_disc, sizeof app_disc, "%sgame/GZLE01.iso", exe_dir);
+    snprintf(app_dol, sizeof app_dol, "%sgame/main.dol", exe_dir);
+    snprintf(app_rels, sizeof app_rels, "%sgame/rels", exe_dir);
+    if (is_file(app_disc) && prepared_ready(app_dol, app_rels))
+        return 1;
+
+    char remembered_path[4096], remembered_disc[4096];
+    snprintf(remembered_path, sizeof remembered_path, "%sdisc.txt", data_dir);
+    return read_line(remembered_path, remembered_disc, sizeof remembered_disc) &&
+           is_file(remembered_disc);
+}
+
+int bw_disc_setup(const char* exe_dir, const char* data_dir,
+                  int remember_explicit_disc, int force_picker) {
     g_exe = exe_dir;
     g_data = data_dir;
     const char* given_dol = getenv("BLUEWAKE_DOL");
-    if (given_dol != NULL && given_dol[0] != '\0')
+    if (!force_picker && given_dol != NULL && given_dol[0] != '\0')
         return 0;
     char path[4096];
     const char* given = getenv("BLUEWAKE_DISC");
-    const int explicit_disc = given != NULL && given[0] != '\0';
+    const int explicit_disc = !force_picker && given != NULL && given[0] != '\0';
     // A folder the builder made from the player's disc has it all beside the app.
     char app_disc[4096], app_dol[4096], app_rels[4096];
     snprintf(app_disc, sizeof app_disc, "%sgame/GZLE01.iso", exe_dir);
     snprintf(app_dol, sizeof app_dol, "%sgame/main.dol", exe_dir);
     snprintf(app_rels, sizeof app_rels, "%sgame/rels", exe_dir);
-    if (!explicit_disc && is_file(app_disc) && prepared_ready(app_dol, app_rels))
+    if (!force_picker && !explicit_disc && is_file(app_disc) && prepared_ready(app_dol, app_rels))
         return 0;
 
     char remembered[4096], game[900], game_record[4096], dol[4096], rels[4096], stamp_path[4096];
@@ -195,7 +241,9 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir) {
     snprintf(rels, sizeof rels, "%s/rels", game);
     snprintf(stamp_path, sizeof stamp_path, "%s/prepared.txt", game);
     char disc[4096] = "";
-    if (explicit_disc)
+    if (force_picker)
+        disc[0] = '\0';
+    else if (explicit_disc)
         snprintf(disc, sizeof disc, "%s", given);
     else
         read_line(remembered, disc, sizeof disc);
@@ -209,7 +257,10 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir) {
     const int scripted = getenv("BLUEWAKE_DISC_CHOICE") != NULL;
     for (;;) {
         if (disc[0] == '\0' || !is_file(disc)) {
-            if (!choose(why, path, sizeof path)) {
+            const int chosen = choose(why, path, sizeof path);
+            if (chosen < 0)
+                return -1;
+            if (chosen == 0) {
                 fprintf(stderr, "[disc] no disc image chosen\n");
                 return 1;
             }
@@ -262,7 +313,7 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir) {
         }
         break;
     }
-    if (!explicit_disc && !write_line(remembered, disc)) {
+    if ((!explicit_disc || remember_explicit_disc) && !write_line(remembered, disc)) {
         fprintf(stderr, "[disc] could not remember this disc\n");
         return -1;
     }

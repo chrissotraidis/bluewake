@@ -49,6 +49,20 @@ Useful options:
 
     build/linux/BlueWake/bluewake
 
+On an AppImage's first launch, **BlueWake Setup** opens automatically when no
+usable disc has been remembered. Choose the USA revision-0 disc image and,
+optionally, a Dolphin-format HD texture-pack folder, then press **Start
+BlueWake**. Display, gameplay, controls and other preferences remain in the
+shared F1/Esc settings menu used on every desktop platform. The setup file and
+folder buttons use SDL's native dialog through an XDG
+portal or Zenity. Dragging an ISO/GCM onto the setup window and entering paths
+directly also work.
+
+Later AppImage launches start the game directly. Use `--setup` to reopen the
+populated setup window, or `--iso` to replace the remembered disc using only
+the native file picker. A development-folder build keeps the simple picker as
+its default when its disc is missing.
+
 `--help` lists the options (widescreen, Smooth Motion, Better Wind Waker, fullscreen,
 disc and module paths). Keyboard: arrows D-pad, J/K/U/I face buttons, W/A/S/D stick,
 H/F/T/G C-stick, E/R L/R, Q Z, Return START; game controllers work. Mouse: click the
@@ -71,26 +85,125 @@ upload it.
 ## The AppImage
 
 `scripts/linux/make_appimage.sh` packages the built app folder as an AppImage
-(the default `build/linux/BlueWake-x86_64.AppImage` plus its `.zsync` for delta
-auto-update). It bundles the host, the translated game module, the DSP roms and
-every shared library the host links except the glibc/libstdc++ baseline, so the
-image runs on any x86-64 desktop. The player's disc is not bundled: on first run
+(the default `build/linux/BlueWake-x86_64.AppImage` plus its `.zsync` metadata
+for delta-capable update tools). It bundles the host, the translated game
+module, the DSP roms and every shared library the host links except the
+glibc/libstdc++ baseline. Build release artifacts on a suitably conservative
+Linux system: like other AppImages, compatibility is limited by the glibc and
+CPU baseline of the build host. The player's disc is not bundled: on first run
 the launcher asks for it and prepares it into the data dir (a disc and files
-extracted from it are never distributed). Needs appimagetool, desktop-file-utils
-and zsync-curl on the build host.
+extracted from it are never distributed).
+
+### Build the AppImage
+
+These are packaging-only dependencies; end users do not need them. The build
+machine needs the [current `appimagetool`](https://github.com/AppImage/appimagetool/releases),
+`desktop-file-validate` (usually from `desktop-file-utils`), `zsyncmake`
+(usually from `zsync` or `zsync-curl`) and ImageMagick on `PATH`. Do not use
+the obsolete tool from the old AppImageKit release page; it embeds a legacy
+runtime that requires FUSE 2. After creating the Linux build from your disc as
+described above, run:
+
+    scripts/linux/make_appimage.sh
+
+The outputs are:
+
+    build/linux/BlueWake-x86_64.AppImage
+    build/linux/BlueWake-x86_64.AppImage.zsync
+
+To use another build directory or output name:
+
+    scripts/linux/make_appimage.sh BUILD_DIR OUT.AppImage
+
+These are generated artifacts and are ignored by Git. Do not commit them. The
+AppImage contains the translated game module, so only a maintainer may publish
+it under the Linux release exception, after it passes the release asset check:
+
+    scripts/release/check_public_assets.sh build/linux/BlueWake-x86_64.AppImage
+
+### Run the downloaded AppImage
+
+1. Make the download executable (you only need to do this once):
+
+       chmod +x BlueWake-x86_64.AppImage
+
+2. Double-click or run the AppImage. If BlueWake does not have a usable
+   remembered disc, it opens the graphical setup automatically:
+
+       ./BlueWake-x86_64.AppImage
+
+3. In **BlueWake Setup**:
+
+   - Select your USA GZLE01 revision-0 `.iso` or `.gcm` with **Browse disc...**,
+     by typing its path, or by dragging it onto the window.
+   - To use an HD texture pack, enable it and select the pack's `GZL` or
+     `GZLE01` folder with **Browse textures...**.
+   - Leave **Add or update application-menu and Desktop shortcuts** enabled if
+     you want both launchers. The application-menu entry also gets a
+     **Configure BlueWake** action that reopens this window.
+   - Once every enabled selection validates, select **Start BlueWake** to save
+     the choices, install the requested launchers, and start the game. The
+     launchers point to this AppImage, so keep it at the same path afterward.
+
+4. On later launches, BlueWake remembers these choices. Start it normally from
+   either installed launcher, by double-clicking the AppImage, or by running:
+
+       ./BlueWake-x86_64.AppImage
+
+To change the saved setup later, reopen the same window; its disc and texture
+fields are filled with the current remembered values:
+
+    ./BlueWake-x86_64.AppImage --setup
+
+To use the former standalone ISO picker instead:
+
+    ./BlueWake-x86_64.AppImage --iso
+
+You can also bypass setup and supply a disc for only this launch:
+
+    ./BlueWake-x86_64.AppImage --disc "/path/to/Wind Waker.iso"
+
+If your system cannot mount AppImages with FUSE, open setup in extract-and-run
+mode instead. Launchers installed during this run remember the fallback:
+
+    APPIMAGE_EXTRACT_AND_RUN=1 ./BlueWake-x86_64.AppImage --setup
+
+#### End-user dependencies
+
+The setup feature adds no mandatory runtime library to the AppImage: SDL and
+Dear ImGui are bundled. Its **Browse** buttons use one of these system
+file-dialog providers when available:
+
+- an XDG desktop portal plus a backend for your desktop (for example,
+  `xdg-desktop-portal` and `xdg-desktop-portal-gtk`); or
+- Zenity.
+
+Most desktop Linux installations already provide an XDG portal. The provider
+is optional because paths can also be typed or dragged into the setup window.
+If the buttons do not open, install the appropriate backend or use either of
+those alternatives. FUSE is also optional; use
+`APPIMAGE_EXTRACT_AND_RUN=1` as shown above when it is unavailable.
+
+### Steam Deck
+
+Run the AppImage setup in Steam Deck's Desktop Mode. It creates application-menu
+and Desktop launchers there; if extract-and-run mode was needed during setup,
+the generated launchers preserve that fallback. This improves Desktop Mode
+installation but does not add BlueWake to Steam's Gaming Mode library.
 
 ## Releases
 
-A ready-made Linux build that includes the game code is published the same way as
-Windows: it is made on a personal machine from the owner's disc and attached to the
-release by hand. The disc, files extracted from it, and console keys never enter
-GitHub or CI (a secret could not hold a 1.4 GB disc, and must not). CI builds and
-tests everything that does not need the disc (`.github/workflows/linux-host.yml`).
-The same Ubuntu 24.04 (`glibc 2.39`) job runs the host tests, then uses a synthetic
-empty module to exercise AppImage packaging, recursively audit every ELF's ABI,
-and smoke-test the image. That non-playable fixture is never uploaded. A playable
-release still comes from a permitted personal build, and every published artifact
-passes `scripts/release/check_public_assets.sh`.
+When a ready-made Linux build is published, it follows the same exception as
+Windows: it is made on a maintainer's or contributor's personal machine from
+their disc and attached to the release by hand. The disc, files extracted from
+it, and console keys never enter GitHub or CI (a secret could not hold a 1.4 GB
+disc, and must not). CI builds and tests everything that does not need the disc
+(`.github/workflows/linux-host.yml`). The same Ubuntu 24.04 (`glibc 2.39`) job
+runs the host tests, then uses a synthetic empty module to exercise AppImage
+packaging, recursively audit every ELF's ABI, and smoke-test the image. That
+non-playable fixture is never uploaded. A playable release still comes from a
+permitted personal build, and every published artifact passes
+`scripts/release/check_public_assets.sh`.
 
 ## Why clang
 

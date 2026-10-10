@@ -1,12 +1,12 @@
 # BlueWake
 
 <p align="center">
-  <strong>The Legend of Zelda: The Wind Waker, running natively on iPhone, iPad, Mac and Windows.</strong><br>
+  <strong>The Legend of Zelda: The Wind Waker, running natively on iPhone, iPad, Mac, Windows and Linux.</strong><br>
   A static recompilation of the GameCube original, with touch controls, controller support and mods.
 </p>
 
 <p align="center">
-  <img alt="iPhone, iPad, Mac and Windows" src="https://img.shields.io/badge/platform-iPhone%20%7C%20iPad%20%7C%20Mac%20%7C%20Windows-0A84FF?logo=apple">
+  <img alt="iPhone, iPad, Mac, Windows and Linux" src="https://img.shields.io/badge/platform-iPhone%20%7C%20iPad%20%7C%20Mac%20%7C%20Windows%20%7C%20Linux-0A84FF">
   <img alt="Ahead-of-time static recompilation" src="https://img.shields.io/badge/PowerPC-static%20recompilation-FF9F0A">
   <img alt="Developer build: 30 FPS on iPad Pro M2" src="https://img.shields.io/badge/developer%20build%20(M2)-30%20FPS-30D158">
   <img alt="Game data not included" src="https://img.shields.io/badge/game%20data-not%20included-FF453A">
@@ -30,9 +30,9 @@
 | **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/status/TVOS_BUILD.md) (experimental) |
-| **Linux** | Not yet; see [the FAQ](#frequently-asked-questions) |
+| **Linux** (x86-64) | [Build the native version](docs/LINUX.md); a ready-made download is not published yet |
 
-On Mac, iPhone and iPad, the app you build contains code translated from your disc. **It is yours
+On Mac, iPhone, iPad and Linux, the app you build contains code translated from your disc. **It is yours
 alone: never share or upload it.**
 
 **Questions or bugs?** Ask on [Discord](https://discord.gg/xwHfUD2bxW) or
@@ -66,6 +66,14 @@ What is done and what is still open: [migration status](docs/MIGRATION_STATUS.md
 You need a Direct3D 12 GPU and a CPU with AVX2 (Intel Haswell from 2013, AMD Ryzen, or newer). If
 nothing happens when you open it, see the FAQ below. To build it yourself from your disc instead, see
 [BlueWake on Windows](docs/WINDOWS.md).
+
+### Linux
+
+The native x86-64 Linux source build is available now; a ready-made AppImage has
+not been published yet. Build it from your disc, optionally package the
+AppImage, and open its graphical setup with `--setup`. See
+[BlueWake on Linux](docs/LINUX.md) for the commands, dependencies and AppImage
+instructions.
 
 ### iPhone and iPad
 
@@ -125,15 +133,16 @@ This writes `build/macos/packaged/BlueWake.app`, which you can move anywhere. Sa
 | Older devices | A13 or newer is required; slower chips have not been measured |
 
 30 FPS is the game's own frame rate. These numbers come from the developer build; frame-rate tests of
-player-built apps on iPad are still to come. The Mac, Windows and Apple TV versions remain experimental.
+player-built apps on iPad are still to come. The Mac, Windows, Linux and Apple TV versions remain
+experimental.
 
 **Known issues:** changing areas can briefly stall, some objects can take a moment to appear the first
 time you visit an untested area, and busy scenes on iPhone drop below 30 FPS.
 
 ## Mods
 
-Open **⋯ › Mods** on iPhone and iPad, or press **F1 › Mods** on Windows. Mods apply the next time
-BlueWake starts and never change your saves.
+Open **⋯ › Mods** on iPhone and iPad, or press **F1 › Mods** on Windows and Linux. Mods apply the next
+time BlueWake starts and never change your saves.
 
 | Mod | What it does |
 | --- | --- |
@@ -147,8 +156,8 @@ Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.m
 
 ## Your saves
 
-- Saves are in **GZLE01.card**: in Files under **On My iPhone/iPad › BlueWake › BlueWake**, or in
-  **`%APPDATA%\BlueWake`** on Windows. Windows also has a
+- Saves are in **GZLE01.card**: in Files under **On My iPhone/iPad › BlueWake › BlueWake**,
+  **`%APPDATA%\BlueWake`** on Windows, or **`~/.local/share/BlueWake`** on Linux. Windows also has a
   [portable mode](docs/WINDOWS.md#your-saves-and-logs).
 - On iPhone and iPad, **⋯ › Game Data & Saves › Back Up Saves…** exports a copy, and
   **Restore Saves…** brings one back.
@@ -168,9 +177,10 @@ Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.m
 <summary><strong>Can I download it?</strong></summary>
 
 On Windows, yes: the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest) has a
-ready-made build that needs your own disc image. On Mac, iPhone and iPad, you build your own app from
-your disc (see [Install](#install)). The app on the Releases page holds no game code by itself; if it
-says "Translated game code: Missing", add your game with PadMint.
+ready-made build that needs your own disc image. The native Linux source build is available, but a
+ready-made Linux download has not been published yet. On Mac, iPhone and iPad, you build your own app
+from your disc (see [Install](#install)); if an app-only download says "Translated game code:
+Missing", add your game with PadMint.
 
 </details>
 
@@ -248,11 +258,9 @@ scenes dip below 30 FPS on an iPhone 14.
 <details>
 <summary><strong>Is there a Linux version?</strong></summary>
 
-Not yet. A native Linux port from the community is in review
-([#107](https://github.com/chrissotraidis/bluewake/pull/107)), and once it is ready BlueWake will offer
-a ready-made Linux build like the Windows one. Until then, some players run the Windows build on Linux
-and Steam Deck through Proton (add `BlueWake.exe` as a non-Steam game). We haven't tested that
-ourselves, so please share how it goes in [#56](https://github.com/chrissotraidis/bluewake/issues/56).
+Yes. The native x86-64 Linux port was merged in
+[#107](https://github.com/chrissotraidis/bluewake/pull/107) and can be built from your own disc by
+following [the Linux guide](docs/LINUX.md). A ready-made Linux download has not been published yet.
 
 </details>
 
@@ -260,14 +268,15 @@ ourselves, so please share how it goes in [#56](https://github.com/chrissotraidi
 <summary><strong>Do controllers work?</strong></summary>
 
 Yes. On iPhone and iPad, any controller iOS supports works, with rumble, camera inversion and button
-remapping under **⋯ › Controller**. On Mac and Windows, Xbox, PlayStation, Switch Pro and other SDL
-controllers work; remap buttons under **Settings › Controls › Controller buttons** (F1 or Esc opens
-settings). The same tab changes what the mouse buttons and keyboard keys press.
+remapping under **⋯ › Controller**. On Mac, Windows and Linux, Xbox, PlayStation, Switch Pro and other
+SDL controllers work; remap buttons under **Settings › Controls › Controller buttons** (F1 or Esc
+opens settings). The same tab changes what the mouse buttons and keyboard keys press.
 
 If BlueWake doesn't see your controller at all (a generic Bluetooth pad, for example), download
 `gamecontrollerdb.txt` from [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB), put it
 in the folder with your saves (`%APPDATA%\BlueWake` on Windows, or the `user` folder in portable mode;
-`~/Library/Application Support/BlueWake` on a Mac) and start BlueWake again.
+`~/Library/Application Support/BlueWake` on a Mac; `~/.local/share/BlueWake` on Linux) and start
+BlueWake again.
 
 </details>
 

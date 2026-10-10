@@ -63,6 +63,7 @@ set(BLUEWAKE_HOST_SOURCES
 add_executable(bluewake
     src/linux_entry.c
     src/linux_disc.c
+    src/linux_setup.cpp
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
     src/linux_crash.cpp
     ${BLUEWAKE_HOST_SOURCES})
