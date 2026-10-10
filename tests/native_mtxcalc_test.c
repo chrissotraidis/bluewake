@@ -188,6 +188,17 @@ static void reset_host(void) {
     bw_host_pi_mask = &s_pi_mask;
 }
 
+/* The module's can-skip observation, as the host's is: allow a direct-call
+ * skip wherever the host's interrupt sources are clean and no interrupt the
+ * guest would take is pending. The test has no feature dispatch. */
+static bool test_can_skip(void* user, const CPUState* cpu, u32 address) {
+    /* Refuse every direct-call skip: the test compares a native run against the
+     * full-loop translation, and skips would change cycle accounting (the old v1
+     * handshake returned 0, keeping direct calls off). */
+    (void)user; (void)cpu; (void)address;
+    return false;
+}
+
 static const u32 FUNCTIONS[] = {BLUEWAKE_MTXCALC_BASIC, BLUEWAKE_MTXCALC_SOFTIMAGE, BLUEWAKE_MTXCALC_MAYA};
 static const char* const NAMES[] = {"J3DMtxCalcBasic", "J3DMtxCalcSoftimage", "J3DMtxCalcMaya"};
 
@@ -401,9 +412,9 @@ int main(int argc, char** argv) {
     CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))(void*)GetProcAddress(lib, "bluewake_composite_guest_cpu");
     void (*set_edge)(int (*)(void*, CPUState*, u32), void*) =
         (void (*)(int (*)(void*, CPUState*, u32), void*))(void*)GetProcAddress(lib, "bluewake_set_edge_service");
-    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*) =
-        (int (*)(bool, const bool*, const bool*, const u32*, const u32*))(void*)GetProcAddress(
-            lib, "bluewake_composite_direct_calls");
+    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*, bool (*)(void*, const CPUState*, u32), void*) =
+        (int (*)(bool, const bool*, const bool*, const u32*, const u32*, bool (*)(void*, const CPUState*, u32), void*))(void*)GetProcAddress(
+            lib, "bluewake_composite_direct_calls_v2");
     int (*filter)(bool) = (int (*)(bool))(void*)GetProcAddress(lib, "bluewake_composite_edge_filter");
     if (get == NULL || guest_cpu == NULL || set_edge == NULL || direct == NULL || filter == NULL) {
         fprintf(stderr, "not a BlueWake Windows module\n");
@@ -416,7 +427,7 @@ int main(int argc, char** argv) {
     }
     static const bool clear = false;
     static const u32 zero = 0u;
-    if (!direct(true, &clear, &clear, &zero, &zero) || !filter(true)) {
+    if (!direct(true, &clear, &clear, &zero, &zero, test_can_skip, NULL) || !filter(true)) {
         fprintf(stderr, "the module's direct calls or edge filter are unavailable\n");
         return 1;
     }
