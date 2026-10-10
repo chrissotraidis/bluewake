@@ -6921,6 +6921,14 @@ int main(int argc, char** argv) {
     // The options menu's saved choices, before anything reads the environment.
     bluewake_settings_load();
     host_apply_aspect();
+#if !defined(_WIN32)
+    // Draw fusion (RecompCore patch 0166, Elliott Tate): a display list's strips
+    // as one draw, a tenth of the draws. Tested on Windows; elsewhere off until
+    // it has been played there. DOL_GX_FUSE=1 turns it on, 0 off, everywhere.
+    setenv("DOL_GX_FUSE", "0", 0);
+#endif
+    fprintf(stderr, "[gx] draw fusion %s\n",
+            getenv("DOL_GX_FUSE") != NULL && getenv("DOL_GX_FUSE")[0] == '0' ? "off" : "on");
     const char* host_root = host_resolve_root();
     char dylib_scratch[4096 + 128];
     g_host_packaged_app = host_bundle_defaults(dylib_scratch, sizeof dylib_scratch);
