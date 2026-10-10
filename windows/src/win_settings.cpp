@@ -53,6 +53,7 @@
 
 #include "gxruntime/aurora_backend.h"
 #include "save_state.h"
+#include "stage_select_key.h"
 #include "desktop_theme.h"
 #include <aurora/gfx.h>
 
@@ -830,7 +831,10 @@ void tab_enhancements() {
         changed();
     restart_note(d.stage_select != g_launched.stage_select);
     ImGui::TextDisabled("    F7 during play opens the menu the developers used to jump to any room, from your");
-    ImGui::TextDisabled("    own file; F7 in the menu goes back.");
+    ImGui::TextDisabled("    own file; F7 in the menu goes back. On a controller, Back (View on Xbox, Share or");
+    ImGui::TextDisabled("    Create on PlayStation) opens these settings and the button below does the same.");
+    if (bw_stage_select_button())
+        set_menu_open(false);
 }
 
 void tab_game() {

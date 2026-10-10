@@ -414,10 +414,19 @@ static u32 bluewake_stage_select_kept_time;
 static u16 bluewake_stage_select_kept_date;
 static bool bluewake_stage_select_going_back;
 static bool bluewake_stage_select_restore_time;
+static atomic_bool bluewake_stage_select_menu_open; // from its execute to its delete
 
 void bluewake_stage_select_hotkey(void) {
     if (bluewake_stage_select_armed)
         atomic_fetch_add_explicit(&bluewake_stage_select_key_presses, 1u, memory_order_relaxed);
+}
+
+int bluewake_stage_select_state(void) {
+    if (!bluewake_stage_select_armed)
+        return BW_STAGE_SELECT_OFF;
+    if (atomic_load_explicit(&bluewake_stage_select_menu_open, memory_order_relaxed))
+        return bluewake_stage_select_kept ? BW_STAGE_SELECT_BACK : BW_STAGE_SELECT_PICK;
+    return bluewake_stage_select_in_game ? BW_STAGE_SELECT_OPEN : BW_STAGE_SELECT_NO_FILE;
 }
 
 static inline bool bluewake_stage_select_key_pending(void) {
@@ -721,6 +730,7 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
     if (__builtin_expect(!bluewake_stage_select_observes_body(address), 1))
         return;
     if (address == BLUEWAKE_STAGE_SELECT_EXECUTE) {
+        atomic_store_explicit(&bluewake_stage_select_menu_open, true, memory_order_relaxed);
         if (!bluewake_stage_select_texts_done)
             bluewake_stage_select_translate(cpu);
         if (bluewake_stage_select_name_count != 0u) {
@@ -732,6 +742,7 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
         return;
     }
     if (address == BLUEWAKE_STAGE_SELECT_MENU_DELETE) {
+        atomic_store_explicit(&bluewake_stage_select_menu_open, false, memory_order_relaxed);
         // The next menu loads its list again, often at the same address.
         bluewake_stage_select_named_list = 0u;
         if (bluewake_stage_select_restore_time) {
@@ -760,6 +771,14 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
     }
     if (address != BLUEWAKE_STAGE_SELECT_CHANGE)
         return;
+    if (cpu->gpr[4] != BLUEWAKE_STAGE_SELECT_PLAY && cpu->gpr[4] != BLUEWAKE_STAGE_SELECT_MENU &&
+        cpu->gpr[4] != BLUEWAKE_STAGE_SELECT_OPEN) {
+        // The title, file select or a reset: play has ended. The title runs on
+        // the play scene's code (d_s_play), so F7 there must not count as play,
+        // and the next file must not go back to this one's room.
+        bluewake_stage_select_in_game = false;
+        bluewake_stage_select_kept = false;
+    }
     if (cpu->lr == BLUEWAKE_STAGE_SELECT_MENU_RETURN && cpu->gpr[4] == BLUEWAKE_STAGE_SELECT_PLAY) {
         if (bluewake_stage_select_going_back)
             bluewake_stage_select_go_back(cpu);
@@ -770,6 +789,7 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
         return;
     bluewake_warp_file_pending = false;
     bluewake_stage_select_in_game = true;
+    bluewake_stage_select_kept = false; // a place kept on another file is not this one's way back
     if (bluewake_warp_set) {
         bluewake_stage_select_warp(cpu);
         return;

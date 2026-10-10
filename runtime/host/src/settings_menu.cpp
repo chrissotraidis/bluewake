@@ -30,6 +30,7 @@ extern "C" {
 #include "button_remap.h"
 #include "input_remap.h"
 #include "option_notes.h"
+#include "stage_select_key.h"
 
 #include <algorithm>
 #include <cmath>
@@ -384,7 +385,10 @@ void gameplay_tab() {
     }
     restart_note();
     ImGui::TextWrapped("F7 during play opens the menu the developers used to jump to any room, from your own "
-                       "file; F7 in the menu goes back. Off by default.");
+                       "file; F7 in the menu goes back. On a controller, Back (View on Xbox, Share or Create on "
+                       "PlayStation) opens these settings and the button below does the same. Off by default.");
+    if (bw_stage_select_button())
+        close_menu();
 
     ImGui::Separator();
     ImGui::TextUnformatted("Forest Water Challenge");

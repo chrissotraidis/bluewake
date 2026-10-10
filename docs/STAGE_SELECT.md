@@ -26,6 +26,13 @@ Then:
 - **F7 during play** opens it from wherever you are. **F7 in the menu** takes you back: to the entrance
   of the room you were in, with your time of day and day of the week. The game does not keep Link's exact
   position.
+- **On a controller**, Back (View on Xbox, Share or Create on PlayStation, ⧉ on the Steam Deck) opens
+  BlueWake's settings, and the button under the stage select's toggle does what F7 does: **Go to the stage
+  select** in play, **Back to where I was** in the menu. Before a file has started it is greyed out: hold R
+  as you start one instead.
+
+The stage select is in the desktop apps (Mac, Linux, Windows and the Steam Deck). The iPhone and iPad app
+doesn't have it.
 
 ## Controls
 
