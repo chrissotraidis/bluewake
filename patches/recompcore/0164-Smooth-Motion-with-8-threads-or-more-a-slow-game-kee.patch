@@ -1,15 +1,15 @@
-From b348e7f9ebd527a4a45fabb6712f9388e3c76b8a Mon Sep 17 00:00:00 2001
+From 29a1755d6d647482d43dcd730c0e3347c9c18ee5 Mon Sep 17 00:00:00 2001
 From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
 Date: Sat, 10 Oct 2026 10:01:52 +0900
 Subject: [PATCH 164/164] Smooth Motion: with 8 threads or more, a slow game
  keeps its in-between frames
 
 ---
- .../graphics/aurora/lib/gfx/frame_interp.cpp  | 21 +++++++++++++++++--
- 1 file changed, 19 insertions(+), 2 deletions(-)
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 20 +++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
 
 diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
-index e053868..caa8b7b 100644
+index e053868..0fcb44b 100644
 --- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
 +++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
 @@ -1,5 +1,6 @@
@@ -19,7 +19,7 @@ index e053868..caa8b7b 100644
  #include <algorithm>
  #include <bit>
  #include <array>
-@@ -2196,8 +2197,24 @@ static void pace_steps() {
+@@ -2196,8 +2197,23 @@ static void pace_steps() {
    const int wanted = g_steps.load(std::memory_order_relaxed);
    const bool pacing = setting == 1 || (setting < 0 && wanted < 3);
    // The game running slow counts at any number of in-between frames (slow
@@ -36,8 +36,7 @@ index e053868..caa8b7b 100644
 +  static const bool spare_threads = [] {
 +    const unsigned threads = std::thread::hardware_concurrency();
 +    const bool spare = threads >= 8 && setting != 1;
-+    std::fprintf(stderr, "[interp-pace] %u threads: %s
-+", threads,
++    std::fprintf(stderr, "[interp-pace] %u threads: %s\n", threads,
 +                 spare ? "a slow game keeps its in-between frames"
 +                       : "a slow game drops in-between frames");
 +    return spare;
