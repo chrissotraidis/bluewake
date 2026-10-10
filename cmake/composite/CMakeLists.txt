@@ -247,6 +247,19 @@ if(WIN32)
 else()
   target_link_libraries(${MODULE_NAME} PRIVATE m)
 endif()
+# ELF (Linux, Steam Deck, Android): the module is a shared object built -fPIC,
+# and the chunks declared each other's symbols with default visibility, so every
+# reference was an address loaded from the GOT that then stayed live in a
+# register across the chunk's one large function. That doubled the register
+# allocator's work: a chunk took 11.7 s here against 5.9 s for the same source
+# compiled for Windows, whose DLLs have no GOT. hidden_externs.h declares the
+# module's own symbols hidden, so each reference is a direct PC-relative operand.
+if(NOT WIN32 AND NOT APPLE)
+  set(CHUNK_C_SOURCES ${CHUNK_INPUTS})
+  list(FILTER CHUNK_C_SOURCES INCLUDE REGEX "\\.c$")
+  set_property(SOURCE ${CHUNK_C_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
+      -include "${CMAKE_CURRENT_SOURCE_DIR}/hidden_externs.h")
+endif()
 target_compile_options(${MODULE_NAME} PRIVATE -O${COMPOSITE_OPTIMIZATION_LEVEL} -ffp-contract=off)
 
 # The builder's --tiered: chunks the optimization training never ran, one
