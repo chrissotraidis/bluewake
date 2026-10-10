@@ -32,7 +32,7 @@ Check each line; if one fails, stop and ask Chris.
 
 | Check | How | Passes when |
 | --- | --- | --- |
-| The commit | `git fetch origin`, `git checkout --detach c6094ec76c82700d5a56a28bf627c8179f686542`, `git status --short` | HEAD is `c6094ec`, the tree is clean, and `version.json` says 0.7.0 build 6. This is the "Candidate commit" in [RELEASE_0.7.0.md](RELEASE_0.7.0.md). |
+| The commit | `git fetch origin`, `git checkout --detach origin/main`, `git status --short`, then `git diff --stat c6094ec76c82700d5a56a28bf627c8179f686542 HEAD -- runtime windows linux cmake scripts config patches version.json` | The tree is clean, the diff prints nothing (`main` after the candidate changed only docs, so this file stays the current one), and `version.json` says 0.7.0 build 6. Write `git rev-parse HEAD` in the results. If the diff lists files, stop. |
 | The tools | `python --version`, `clang --version`, `cmake --version`, `ninja --version`, `gh auth status` | Python 3.10+, clang 22 or newer (0.6.0 used 22.1.3 from Visual Studio 2026), CMake and Ninja on PATH, and `gh` logged in with access to chrissotraidis/bluewake. |
 | The disc | `C:\BlueWake-private\GZLE01.iso`, `%APPDATA%\BlueWake\GZLE01.iso`, or the `game\GZLE01.iso` of the 0.6.0 build folder | One exists. Otherwise ask Chris for the path. The builder checks it is GZLE01 revision 0. |
 | Disk space | `Get-PSDrive C` | At least 40 GB free. |
