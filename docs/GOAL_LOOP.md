@@ -1,7 +1,7 @@
 # What we're doing
 
-The dated plan. Ask "what are we doing on October 10?" and the answer is that day's section below. Owner: Chris.
-Updated October 10, 2026 (evening).
+The dated plan. Ask "what are we doing on October 11?" and the answer is that day's section below. Owner: Chris.
+Updated October 11, 2026.
 
 **The aim for the next versions:** BlueWake runs faster and steadier, the bugs players reported are fixed, Linux
 becomes a download, and Android gets to the iPhone app's standard. Most of the speed is already written, by Elliott
@@ -31,34 +31,28 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
 | 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
 
-## Where things stand on October 10
+## Where things stand on October 11
 
-- **Decided by Chris:** performance changes count when the game plays the same; lean block copies on by default;
-  Linux as an AppImage download; Android offered as "build it yourself, experimental". The next release is 0.7.0.
-- **Merged today:** lean blocks on by default (#220), the controller zoom (#221, cforain), the AppImage CI for
-  SteamOS (#217, cforain), and from October 9's review: the crash fix (#211), the Linux compile fix (#218), FPS
-  position (#106) and five more contributor pull requests.
-- **In CI, to merge for 0.7.0:** player 1 follows the controller you press, rumble on player 1 only (#222);
-  the Pictobox stick (#223); Smooth Motion on 8+ threads and the renderer's name (#224, RecompCore #21); Elliott's
-  draw fusion (#225, RecompCore #22); the AppImage first-run setup (#226, cforain); Elliott's `lfs` fast path (#228, 0 mismatches
-  over all 2^32 patterns on this Mac).
-- **Found today:** Elliott's `windows-release` has three days of speed work BlueWake doesn't: draw fusion (now in
-  #225), faster loads, natives rounds 4 to 7 and a much smaller upload. It roughly accounts for the gap to his
-  builds. His builder work has to be ported by hand (no shared history). The table is in
-  [PERFORMANCE.md](PERFORMANCE.md#the-plan).
+- **0.7.0 is out** (October 10, from `66b33be`): Windows zip, the app-only IPA, source and the PadMint recipe. Linux builds
+  from source; the AppImage was not in it and still needs a contributor's own-disc build (#56). Each issue in its
+  release record was told to try it. The Mayflash adapter (#155) is confirmed fixed and closed.
+- **Merged today:** pdale-boop's #242 (the host's per-block checks do less: 7% fewer instructions, 5 to 8% faster on
+  slow x86 CPUs, identical game state) and #210 (the developers' stage select and `BLUEWAKE_WARP`, off by default and
+  costing nothing when off). Reviewed: every diagnostic switch is set before #242's summary flags, the module already
+  runs the interrupt test in `bw_host_quiet`, and the Mac and iPhone builder uses the same `direct_calls.py` watch list.
+- **In CI:** draw fusion on for Linux (#247, from jkoehler11's Steam Deck run on #215) and Swap L and R (#248, #244).
+- **Android (#93):** every item on its merge checklist is done; speed is the gate (Outset 67 to 80% on the Fold 7 against
+  "holds 30"). LiquidAzir has been asked to merge `main` with #242, turn hidden symbols off for Android and measure.
+- **New reports:** a 2-core A6 laptop that can't hold 30 at sea, game thread (#246); D-pad in the item screens (#245);
+  the screen recorder losing the Vulkan device on Android (#238). The flicker's two earlier switches are ruled out (#136).
+- **A new release gate (Chris):** before announcing a release PadMint builds on a Mac, PadMint's
+  `scripts/player-check.sh` passes, on the clean checkout before tagging and again after publishing.
 
-## Next: release 0.7.0
+## Next: the next release
 
-**Goal:** 0.7.0 out from one commit of `main`. Its contents and checks are in [RELEASE_0.7.0.md](status/RELEASE_0.7.0.md).
-
-| # | Step | Who | Done when |
-| --- | --- | --- | --- |
-| 1 | **Merge** #222, #223, #224 (after RecompCore #21 is fast-forwarded onto `bluewake-next`), #225 (after #22), #226 and #228 (Elliott's `lfs` fast path), each with green CI. | Codex | **Done October 10** |
-| 2 | **Freeze.** `version.json` to 0.7.0 build 6; the commit in the release record. | Codex | **Done October 10** (the commit is in the release record) |
-| 3 | **Done October 10:** 92 minutes; zip on the draft, gate passed on the Mac (#237). **Windows build** on Chris's PC: tell its agent "Pull the latest chrissotraidis/bluewake and follow docs/status/WINDOWS_BUILD_0.7.0.md as a goal loop until its hand-off is done." 2 to 3 hours of building on the Ryzen 7 5700U (with `--jobs 6`; 0.6.0 took 4 hours on one job), then about 30 minutes of Chris playing and looking. | Chris's PC | The zip on the v0.7.0 draft, results in a pull request |
-| 4 | **Linux AppImage** from a contributor's own disc: `python3 scripts/linux/build.py DISC`, then `scripts/linux/make_appimage.sh` and `check_appimage_abi.py`. Asked on #56 of pdale-boop, cforain or jkoehler11. | A contributor; Chris receives it privately | The AppImage passes `check_public_assets.sh` |
-| 5 | **Apple assets done October 10** (IPA, source, recipe after the #239 fix); Mac play not done. **Mac and Apple.** Ten minutes of Mac play with a controller connected at launch; the app-only IPA, PadMint's `audit`, the release check. | Codex, on this Mac | Every check passes |
-| 6 | **Draft ready October 10** with four assets, `SHA256SUMS` and the notes, targeting `66b33be`; the AppImage is added when it arrives. **Release.** Draft with all assets, `SHA256SUMS` and the notes; Chris publishes; each issue in the release record is told to try it. | Codex prepares, Chris publishes | Release live, issues told |
+Not dated yet. It carries #242, #210, #247 and #248, plus whatever of row 0 below is ready. Before the freeze: the
+468-place sweep on the candidate (row 8), Forest Haven played with fusion on Linux, the Linux AppImage from a
+contributor's own disc, and `player-check.sh`. Chris decides when to freeze.
 
 ## After 0.7.0: catch up with Elliott, then the decompilation
 
@@ -68,16 +62,16 @@ result in PERFORMANCE.md's "Results". Elliott's `windows-release` is cloned at
 
 | # | Step | Who | Done when |
 | --- | --- | --- | --- |
-| 0 | **The host's per-call checks** (new, October 10, the biggest lead). LiquidAzir's profile on the Fold 7 (#93): per retrace, the host and runtime cost 40 M instructions in BlueWake against 7 M in Wind Waker Recomp's build, and `host_direct_can_skip` alone is 23 M. Every direct call leaves the module through a function pointer and runs about ten host checks (`cmake/composite/direct_calls.h`, `runtime/host/src/main.c`). First measure its share on x86 with `perf`; then have the host keep one "may skip" flag up to date when its inputs change, which the module reads inline, keeping the checks that depend on guest memory. Behind a switch, checked with "plays the same". | Codex; jkoehler11 or pdale-boop for x86 numbers | x86 share measured; a pull request with a "Results" row |
-| 1 | **Fusion on Mac and Linux.** Play Forest Haven with `DOL_GX_FUSE=1` on this Mac and on a Linux PC; if both are clean, drop the host's off switch. | Codex on the Mac; pdale-boop or jkoehler11 on Linux | Merged, a "Results" row |
+| 0 | **The host's per-call checks** (October 10, the biggest lead). LiquidAzir's profile on the Fold 7 (#93): per retrace, the host and runtime cost 40 M instructions in BlueWake against 7 M in Wind Waker Recomp's build, and `host_direct_can_skip` alone is 23 M. **First part merged October 11: #242** (pdale-boop), 7% fewer instructions on x86, identical game state. Next: the phone and the Deck remeasured on `main`; then the host keeps one "may skip" flag current when its inputs change, which the module reads inline (`cmake/composite/direct_calls.h`), keeping the checks that depend on guest memory. Behind a switch, checked with "plays the same". | Codex; LiquidAzir and jkoehler11 for numbers | #242's share on ARM measured; the inline flag in a pull request with a "Results" row |
+| 1 | **Fusion on Mac and Linux.** **Linux in #247** (October 11), from jkoehler11's Deck run on #215: a tenth of the draws, nothing missing, the frame rate unchanged because the game thread sets it. Still to do: Forest Haven played on Linux, and on this Mac. | Codex on the Mac; jkoehler11 or cforain on Linux | Linux merged; the Mac played or left off with a reason |
 | 2 | **Merged October 10 after the hand-off (#234, #235).** **Early return dispatch and the watch-list fix** (his `return_ranges.py` from `7aca42a`, and `5edeacc`). The `lfs` half of `7aca42a` is #228. **Ported October 10: #235 and #234**, checked on the prepared lean source (811 of 811 dispatches, repeatable, syntax-clean) and by the tests. Held until the Windows 0.7.0 hand-off, so `main`'s code stays the candidate's while it builds. | Codex; a contributor's build | Merged after the hand-off; 2 to 3% on the game thread, plays the same |
 | 3 | **Natives round 5** (the GX SDK's FIFO writers, `native_gx_gen.py`) and **round 4** (animation, collision setup, colour), with his comparison tests. First rerun #179's certification on a lean build with jkoehler11's Linux loader (#194): it should certify now. | Codex; jkoehler11 | Certified counts in the build log; 2 to 6% |
 | 4 | **Natives round 7** (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py`. | Codex | Certified; about 4 points at Forest Haven |
 | 5 | **His upload and vertex changes** (RecompCore `6f52a68` to `400728a`), merged by hand with patch 0157. Check dungeon maps (#74), HD packs and lava colours before and after. | Codex | Merged on `bluewake-next`; maps and packs unchanged |
 | 6 | **A native from the decompilation's source:** `__ieee754_fmod` from `e_fmod.c` against his replayed one, on the benchmark ([PERFORMANCE.md](PERFORMANCE.md#the-plan)). | Codex | A "Results" row; a yes or no for doing more |
-| 7 | **Android:** LiquidAzir rebuilds #93 on `main` (lean blocks, hidden symbols, fusion) and measures Outset on the Fold 7 against the 110 M of Wind Waker Recomp's build. | LiquidAzir | Numbers on #93; merged as experimental when it holds 30 |
-| 8 | **Crash sweep and benchmark tour:** #210's stage select once it costs nothing when off; warp to all 468 places on every release candidate; `bench_tour.py` on `BLUEWAKE_WARP`. | pdale-boop, Codex | Merged; a sweep in the next release record |
-| 9 | **Flicker** (#136): the reporters' two switch runs name the patch. | Reporters, then Codex | Cause named |
+| 7 | **Android:** every merge-checklist item is done (October 10). LiquidAzir merges `main` (#242), turns hidden symbols off for Android (`NOT ANDROID`, 9 M a retrace on ARM64) and measures the pier from a cool start against the 110 M of Wind Waker Recomp's build. | LiquidAzir | Outset holds 30 when cool: merged as "build it yourself, experimental" |
+| 8 | **Crash sweep and benchmark tour:** **#210 merged October 11** (no cost when off). Warp to all 468 places on every release candidate; `bench_tour.py` on `BLUEWAKE_WARP`. | pdale-boop, Codex | A sweep in the next release record |
+| 9 | **Flicker** (#136): the two earlier switches are ruled out on 0.7.0 (Muyfa666). Next, `DOL_AURORA_UBERSHADER=0` and a 120 FPS log, then 0.4.0's Smooth Motion against 0.5.0's. | Reporters, then Codex | Cause named |
 | 10 | **Linux video** for social media, shot list on #56, once the 0.7.0 AppImage exists. | cforain or jkoehler11; Chris posts | A clip in hand |
 
 ## Late October and November: 0.8
