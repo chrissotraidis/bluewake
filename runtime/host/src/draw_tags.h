@@ -55,6 +55,15 @@ void bluewake_draw_tags_attach(CPUState* cpu);
 // the guest's state is not changed.
 extern bool bluewake_draw_tags_enabled;
 void bluewake_draw_tags_enter(CPUState* cpu, u32 address);
+// Only the ranges: the host's direct-call skip already knows every single
+// address here is watched (the builder's list names the ranges' ends only).
+static inline bool bluewake_draw_tags_observes_range(u32 address) {
+    return bluewake_draw_tags_enabled &&
+           (address - BLUEWAKE_PARTICLE_DRAW_FIRST <=
+                BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST ||
+            address - BLUEWAKE_WAKE_DRAW_FIRST <=
+                BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST);
+}
 static inline bool bluewake_draw_tags_observes(u32 address) {
     return bluewake_draw_tags_enabled &&
            (address - BLUEWAKE_PARTICLE_DRAW_FIRST <=

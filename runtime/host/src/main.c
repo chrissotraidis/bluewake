@@ -2041,14 +2041,15 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
     // address that list lacks: draw tags' ranges (it names their ends only) and
     // Forest Water's tree-timer check, a linked address supplied at load. Each
     // reads its live switch, so a feature turned on in game is still observed.
+    // The native actor search's filter (BW_SEARCH_JUDGE_FILTER) is a literal,
+    // so it is watched too.
     // The module asks only once bw_host_quiet has passed: the interrupt sources
     // are clean (it reads these flags, passed in direct_calls_v2) and no
     // interrupt the guest would take is pending. Of the dynamic test that leaves
     // the scene's overlap phase; the diagnostics are in g_diagnostics_block_skip.
     const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
-           !bluewake_draw_tags_observes(address) &&
+           !bluewake_draw_tags_observes_range(address) &&
            !(bluewake_forest_water_enabled && address == bluewake_forest_water_tree_timer_check) &&
-           !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
            !host_chassis_overlap_requires_full();
 #endif

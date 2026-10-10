@@ -2,6 +2,9 @@
 """Synthetic preparation checks; no game input or generated game source."""
 import importlib.util
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -57,6 +60,48 @@ def convert(source, watched=()):
                             {0x80004000: 0, 0x80006000: 1}, set(watched))
 
 
+# Every address a feature hook observes, for every combination of the features'
+# switches, is one the builder's watch list holds or one host_direct_can_skip
+# still checks itself (draw tags' ranges, Forest Water's load-time address).
+SKIP_HARNESS = r"""
+#include <assert.h>
+#include <stdio.h>
+#include "feature_dispatch.h"
+#include "bw_edge_watch.inc"
+bool bluewake_climb_on, bluewake_quick_doors_armed, bluewake_draw_tags_enabled;
+bool bluewake_forest_water_enabled;
+u32 bluewake_forest_water_tree_timer_check;
+static unsigned char watched[0x01800000u / 4u];
+int main(void) {
+    for (unsigned i = 0; i < sizeof bw_edge_watch_list / sizeof bw_edge_watch_list[0]; ++i)
+        if (bw_edge_watch_list[i] - 0x80000000u < 0x01800000u)
+            watched[(bw_edge_watch_list[i] - 0x80000000u) / 4u] = 1;
+    unsigned long checked = 0;
+    for (unsigned flags = 0; flags < 16; ++flags) {
+        bluewake_climb_on = flags & 1;
+        bluewake_quick_doors_armed = (flags & 2) != 0;
+        bluewake_draw_tags_enabled = (flags & 4) != 0;
+        bluewake_forest_water_enabled = (flags & 8) != 0;
+        /* Anywhere in MEM1, so a timer address the list lacks is covered too. */
+        bluewake_forest_water_tree_timer_check = 0x80001234u;
+        for (u32 address = 0x80000000u; address < 0x81800000u; address += 4) {
+            if (!bluewake_feature_observes(address))
+                continue;
+            const bool host_checks = bluewake_draw_tags_observes_range(address) ||
+                (bluewake_forest_water_enabled && address == bluewake_forest_water_tree_timer_check);
+            if (!watched[(address - 0x80000000u) / 4u] && !host_checks) {
+                fprintf(stderr, "0x%08X observed but neither watched nor checked\n", (unsigned)address);
+                return 1;
+            }
+            ++checked;
+        }
+    }
+    printf("%lu\n", checked);
+    return 0;
+}
+"""
+
+
 class DirectPreparationTests(unittest.TestCase):
     def test_direct_and_fixed_cpu_calls_keep_both_boundary_queries(self):
         for source in (CALL, CALL.replace('CPUState* ctx)', 'CPUState* ctx_param)')):
@@ -107,6 +152,32 @@ class DirectPreparationTests(unittest.TestCase):
             before = (root / 'bw_edge_watch.inc').read_bytes()
             direct.write_watch_list(root, {0xC0004000, 0x80004000})
             self.assertEqual(before, (root / 'bw_edge_watch.inc').read_bytes())
+
+
+    @unittest.skipUnless(shutil.which('cc'), 'needs a C compiler')
+    def test_direct_call_skip_sees_every_feature_address(self):
+        src = ROOT / 'runtime/host/src'
+        main_c = (src / 'main.c').read_text()
+        watched = direct.watched_addresses()
+        # Checks host_direct_can_skip leaves to the watch list.
+        judge = int(re.search(r'#define BW_SEARCH_JUDGE_FILTER (0x[0-9A-Fa-f]+)u', main_c).group(1), 16)
+        self.assertIn(judge, watched)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            direct.write_watch_list(root, watched)
+            # The feature headers only pass these types through.
+            (root / 'core').mkdir()
+            (root / 'core/cpu.h').write_text(
+                '#include <stdint.h>\ntypedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32;\n'
+                'typedef uint64_t u64; typedef struct CPUState CPUState;\n')
+            (root / 'gxruntime').mkdir()
+            (root / 'gxruntime/platform.h').write_text('typedef struct DolPadState DolPadState;\n')
+            (root / 'harness.c').write_text(SKIP_HARNESS)
+            subprocess.run(['cc', '-std=c11', '-O1', '-I', str(root), '-I', str(src), '-o',
+                            str(root / 'harness'), str(root / 'harness.c')], check=True)
+            run = subprocess.run([str(root / 'harness')], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertGreater(int(run.stdout), 0)
 
 
 if __name__ == '__main__':
