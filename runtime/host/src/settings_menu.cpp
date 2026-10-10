@@ -62,7 +62,8 @@ const char* const kKeys[] = {
     "DOL_AURORA_FORCE_ANISO",
     "DOL_AURORA_TEXTURE_PACK",  "BLUEWAKE_MODS",            "BLUEWAKE_OPTIONS",
     "BLUEWAKE_FADE_FRAMES",     "BLUEWAKE_FAST_FORWARD",    "BLUEWAKE_QUICK_DOORS",
-    "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_SWAP_XY", "BLUEWAKE_BUTTON_MAP",
+    "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_SWAP_XY", "BLUEWAKE_PAD_SWAP_LR",
+    "BLUEWAKE_BUTTON_MAP",
     "BLUEWAKE_SPRINT_SPEED",    "BLUEWAKE_MOUSE_CAMERA",    "BLUEWAKE_MOUSE_SENSITIVITY",
     "BLUEWAKE_MOUSE_INVERT_Y",  "BLUEWAKE_MOUSE_BUTTONS",   "BLUEWAKE_KEY_MAP",
     "BLUEWAKE_STICK_CAMERA",    "BLUEWAKE_STICK_CAMERA_SPEED",
@@ -464,11 +465,12 @@ void gameplay_tab() {
 
 void apply_controller_swaps() {
     static SDL_JoystickID previous = 0;
-    static bool applied = false, last_ab = false, last_xy = false, last_ix = false, last_iy = false;
+    static bool applied = false, last_ab = false, last_xy = false, last_lr = false, last_ix = false, last_iy = false;
     static std::string last_map;
     int index = PADGetIndexForPort(0);
     SDL_JoystickID connection = bw_controller_connection(0);
     bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = env_on("BLUEWAKE_PAD_SWAP_XY", false);
+    const bool lr = env_on("BLUEWAKE_PAD_SWAP_LR", false);
     // The right stick's inversion reaches the game's own C-stick too, as on
     // Windows, while the direct stick camera is on (otherwise the game's stick
     // follows Better Wind Waker's "Invert camera", as the Controls tab says).
@@ -476,13 +478,14 @@ void apply_controller_swaps() {
     const bool ix = stick && env_on("BLUEWAKE_STICK_CAMERA_INVERT_X", false);
     const bool iy = stick && env_on("BLUEWAKE_STICK_CAMERA_INVERT_Y", false);
     const std::string map_text = env("BLUEWAKE_BUTTON_MAP");
-    if (connection == previous && ab == last_ab && xy == last_xy && ix == last_ix && iy == last_iy &&
-        map_text == last_map)
+    if (connection == previous && ab == last_ab && xy == last_xy && lr == last_lr && ix == last_ix &&
+        iy == last_iy && map_text == last_map)
         return;
-    previous = connection; last_ab = ab; last_xy = xy; last_ix = ix; last_iy = iy; last_map = map_text;
+    previous = connection; last_ab = ab; last_xy = xy; last_lr = lr; last_ix = ix; last_iy = iy;
+    last_map = map_text;
     BwButtonMap map;
     const bool remapped = bw_button_map_parse(map_text, &map);
-    if (index < 0 || (!ab && !xy && !ix && !iy && !remapped && !applied)) return;
+    if (index < 0 || (!ab && !xy && !lr && !ix && !iy && !remapped && !applied)) return;
     PADRestoreDefaultMapping(0);
     // A custom layout replaces the swaps; otherwise the swaps as before.
     if (remapped)
@@ -490,6 +493,7 @@ void apply_controller_swaps() {
     else
         bw_apply_face_swaps(0, ab, xy);
     bw_apply_camera_axes(0, ix, iy);
+    bw_apply_trigger_swap(0, lr);
     applied = true;
 }
 
@@ -516,6 +520,8 @@ void controls_tab() {
     if (ImGui::Checkbox("Swap A and B", &swap_ab)) set_env("BLUEWAKE_PAD_SWAP_AB", swap_ab ? "1" : "0");
     if (ImGui::Checkbox("Swap X and Y", &swap_xy)) set_env("BLUEWAKE_PAD_SWAP_XY", swap_xy ? "1" : "0");
     ImGui::EndDisabled();
+    bool swap_lr = env_on("BLUEWAKE_PAD_SWAP_LR", false);
+    if (ImGui::Checkbox("Swap L and R (the triggers)", &swap_lr)) set_env("BLUEWAKE_PAD_SWAP_LR", swap_lr ? "1" : "0");
     if (ImGui::CollapsingHeader("Controller buttons")) {
         ImGui::TextWrapped("Choose which controller button presses each GameCube button. Picking one that is "
                            "already used swaps the two.%s", remapped ? " The swaps above are off while you use "

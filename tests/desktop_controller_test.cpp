@@ -61,6 +61,21 @@ int main() {
     assert(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false));
     assert(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, false));
     SDL_UpdateJoysticks(); SDL_UpdateGamepads(); PADRead(status);
+    // #244: with L and R swapped, the left trigger pulled all the way presses R (its
+    // pull and its click) and L stays released, on top of a custom layout.
+    PADRestoreDefaultMapping(0); bw_apply_button_map(0, map); bw_apply_trigger_swap(0, true);
+    assert(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 32767));
+    assert(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, -32768));
+    SDL_UpdateJoysticks(); SDL_UpdateGamepads(); PADRead(status);
+    assert((status[0].button & (PAD_TRIGGER_L | PAD_TRIGGER_R)) == PAD_TRIGGER_R);
+    assert(status[0].triggerRight > 150 && status[0].triggerLeft == 0);
+    assert(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true));  // the layout is kept
+    SDL_UpdateJoysticks(); SDL_UpdateGamepads(); PADRead(status);
+    assert((status[0].button & (PAD_BUTTON_A | PAD_BUTTON_B)) == PAD_BUTTON_B);
+    assert(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false));
+    assert(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 0));
+    assert(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 0));
+    SDL_UpdateJoysticks(); SDL_UpdateGamepads(); PADRead(status);
     PADRestoreDefaultMapping(0);
     assert(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true));
     assert(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 24000));
