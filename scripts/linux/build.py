@@ -434,6 +434,10 @@ int main(void) {
             print("the existing composite source is current")
             self.mods_pending = (o / "mods.done").read_text().strip() != "complete" \
                 if (o / "mods.done").exists() else self.mods
+            # Its final digest is written after preparation, so with the mods in
+            # place it is already prepared: running the steps again would touch
+            # chunks a later step rewrote (native_game_math.py refuses them).
+            self.prepared_current = not (self.mods and self.mods_pending)
         else:
             sync_tree(new, current)
             (o / "composite-src.digest").write_text(digest + "\n")
@@ -441,6 +445,7 @@ int main(void) {
             (o / "composite-final.digest").write_text(digest + "\n")
             (o / "mods.done").write_text("pending\n")
             self.mods_pending = self.mods
+            self.prepared_current = False
 
     # --- 7 mods --------------------------------------------------------------
     def build_mods(self):
@@ -458,6 +463,9 @@ int main(void) {
         Each script is portable Python and changes only what it can prove, so
         the unmodified translation remains wherever a native guard declines.
         """
+        if getattr(self, "prepared_current", False):
+            print("the composite source is already prepared for these options")
+            return
         o = self.out
         script = ROOT / "scripts/windows/fast_blocks.py"
         cpu_script = ROOT / "scripts/windows/global_guest_cpu.py"
@@ -1034,7 +1042,7 @@ Saves, settings and session logs: ~/.local/share/BlueWake
 # one only where the module it loads was prepared with it.
 LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
                                "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
-                               "native_skin", "native_game_math")
+                               "native_skin", "native_game_math", "lean_blocks")
 
 
 def main():
@@ -1088,8 +1096,11 @@ def main():
                         help="prepare certified native matrix functions; off by default, compatible host opt-in required")
     parser.add_argument("--lean-blocks", action="store_true",
                         help="Elliott Tate's original prepaid block copies, as Wind Waker Recomp's builds make them: "
-                             "every block, fewer pc stores (implies --prepared-blocks; off by default; a measured "
-                             "experiment, docs/PERFORMANCE.md phase 4)")
+                             "every block, fewer pc stores (implies --prepared-blocks; on by default since October 10, "
+                             "5 to 12%% faster in docs/PERFORMANCE.md)")
+    parser.add_argument("--no-lean-blocks", action="store_true",
+                        help="BlueWake's conservative prepaid block copies instead: a smaller module and a shorter "
+                             "compile, about 5 to 12%% slower")
     parser.add_argument("--lean-memory", action="store_true",
                         help="Wind Waker Recomp's lean loads and stores in prepaid copies (off by default; "
                              "needs --prepared-blocks)")
@@ -1110,6 +1121,8 @@ def main():
     if not args.conservative:
         for name in LINUX_DEFAULT_OPTIMIZATIONS:
             setattr(args, name, True)
+    if args.no_lean_blocks:
+        args.lean_blocks = False
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:

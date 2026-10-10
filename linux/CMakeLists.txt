@@ -63,6 +63,7 @@ set(BLUEWAKE_HOST_SOURCES
 add_executable(bluewake
     src/linux_entry.c
     src/linux_disc.c
+    src/linux_setup.cpp
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
     src/linux_crash.cpp
     ${BLUEWAKE_HOST_SOURCES})
@@ -190,6 +191,7 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
 
     add_executable(bluewake_settings_state_test ${BLUEWAKE_REPO_ROOT}/tests/settings_state_test.cpp)
     target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
+    target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
     add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
 
     add_executable(bluewake_save_state_test ${BLUEWAKE_REPO_ROOT}/tests/save_state_test.c ${BLUEWAKE_HOST_SRC}/save_state.c)

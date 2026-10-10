@@ -133,6 +133,20 @@ int main() {
     assert(PADGetIndexForPort(0) < 0);
     assert(bw_claim_player_one() && bw_controller_connection(0) == second);
     assert(!bw_claim_player_one());
+
+    // #155: an adapter reports its empty ports as controllers, and an empty one can hold
+    // player 1. A press on another controller takes player 1 while player 1 has had no
+    // press; after that, a press elsewhere changes nothing.
+    SDL_JoystickID third = SDL_AttachVirtualJoystick(&desc); assert(third);
+    SDL_Joystick* third_joystick = SDL_OpenJoystick(third); assert(third_joystick);
+    assert(aurora::input::add_controller(third) == third);
+    aurora::input::set_player_index(third, 1);
+    bw_player_one_button(third);
+    assert(bw_controller_connection(0) == third);
+    bw_player_one_button(second);
+    assert(bw_controller_connection(0) == third);
+    aurora::input::remove_controller(third);
+    SDL_CloseJoystick(third_joystick); assert(SDL_DetachVirtualJoystick(third));
     aurora::input::remove_controller(second);
     SDL_CloseJoystick(second_joystick); assert(SDL_DetachVirtualJoystick(second));
     assert(!bw_claim_player_one());                        // nothing connected: nothing to claim

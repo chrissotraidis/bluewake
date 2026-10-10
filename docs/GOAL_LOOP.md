@@ -1,10 +1,11 @@
 # What we're doing
 
 The dated plan. Ask "what are we doing on October 10?" and the answer is that day's section below. Owner: Chris.
-Updated October 9, 2026.
+Updated October 10, 2026 (evening).
 
 **The aim for the next versions:** BlueWake runs faster and steadier, the bugs players reported are fixed, Linux
-becomes a download, and Android gets to the iPhone app's standard. The ranked backlog is
+becomes a download, and Android gets to the iPhone app's standard. Most of the speed is already written, by Elliott
+Tate after October 3 and by contributors, so bringing it in, measured, comes first. The ranked backlog is
 [PRIORITIES.md](PRIORITIES.md), the speed strategy and its runbook are [PERFORMANCE.md](PERFORMANCE.md), and the
 standards everything is held to are in [DIRECTION.md](DIRECTION.md).
 
@@ -13,7 +14,8 @@ standards everything is held to are in [DIRECTION.md](DIRECTION.md).
 Every session, by a person or a bot, runs the same five steps:
 
 1. **Read** today's section, then check `main`, open pull requests and new issue replies.
-2. **Do** the first row that isn't done and isn't waiting on someone.
+2. **Do** the first row that isn't done and isn't waiting on someone. Before writing anything new, check whether an
+   open pull request, or Elliott's `windows-release`, already does it.
 3. **Prove** it. Say what ran, on what device, from which commit. A build that compiles is not a game that plays.
 4. **Record** it. Mark the row done here, add numbers to [PERFORMANCE.md](PERFORMANCE.md#results), and tell the
    reporters on their issues, in Chris's voice.
@@ -25,71 +27,70 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 
 | Horizon | When | What | Gate |
 | --- | --- | --- | --- |
-| 1. Lean what we have | 0.6.1 and 0.7.0 (days) | Lean block copies, Smooth Motion pacing, the renderer fallback notice | Outset at least 10% faster and the game plays the same |
+| 1. Lean what we have, and catch up with Elliott | 0.7.0 and the next two weeks | Lean block copies (default since today), draw fusion, his faster loads and natives rounds 4, 5 and 7, his upload changes, hidden symbols, Smooth Motion pacing | Faster on the benchmark, and the game plays the same |
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
-| 3. Follow the decompilation | Months | Drawing at the GX/J3D API level, then matched scenes ported from source | Each piece checked against the recompilation |
+| 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
 
-## Saturday, October 10: build day
+## Where things stand on October 10
 
-**Goal:** release 0.6.1 and find out whether lean blocks close the speed gap, both built from one commit of `main`.
-What 0.6.1 contains and its checks are in [RELEASE_0.6.1.md](status/RELEASE_0.6.1.md).
+- **Decided by Chris:** performance changes count when the game plays the same; lean block copies on by default;
+  Linux as an AppImage download; Android offered as "build it yourself, experimental". The next release is 0.7.0.
+- **Merged today:** lean blocks on by default (#220), the controller zoom (#221, cforain), the AppImage CI for
+  SteamOS (#217, cforain), and from October 9's review: the crash fix (#211), the Linux compile fix (#218), FPS
+  position (#106) and five more contributor pull requests.
+- **In CI, to merge for 0.7.0:** player 1 follows the controller you press, rumble on player 1 only (#222);
+  the Pictobox stick (#223); Smooth Motion on 8+ threads and the renderer's name (#224, RecompCore #21); Elliott's
+  draw fusion (#225, RecompCore #22); the AppImage first-run setup (#226, cforain); Elliott's `lfs` fast path (#228, 0 mismatches
+  over all 2^32 patterns on this Mac).
+- **Found today:** Elliott's `windows-release` has three days of speed work BlueWake doesn't: draw fusion (now in
+  #225), faster loads, natives rounds 4 to 7 and a much smaller upload. It roughly accounts for the gap to his
+  builds. His builder work has to be ported by hand (no shared history). The table is in
+  [PERFORMANCE.md](PERFORMANCE.md#the-plan).
 
-| # | Step | Who | Done when |
-| --- | --- | --- | --- |
-| 1 | **Freeze.** Set `version.json` to 0.6.1 build 6. Merge #106 only if saulob has brought it up to date and CI is green. Write the commit in the release record. | Codex | CI green, commit recorded |
-| 2 | **Windows 0.6.1.** `python scripts\windows\build.py DISC` from that commit. Check a controller connected at launch, portable remaps and the window opening in place ([WINDOWS_TASKS.md](WINDOWS_TASKS.md)). | Chris's PC or a tester | Build made, three checks recorded |
-| 3 | **Lean build.** Same commit and machine, `build.py DISC --lean-blocks --out build\windows-lean`. Always use a fresh `--out` folder (#59). | Same machine | Build made, build time recorded |
-| 4 | **Measure.** Both builds from save states: Outset, the bird scene, Tower room 0; headless and rendered, unpaced; Outset also on four E-cores. Then 30 minutes of play on the lean build: Outset, a cutscene with music, Dragon Roost Cavern, sailing, a fight. | Chris, or pdale-boop and jkoehler11 (offered); LiquidAzir on his phone (#93) | Rows in PERFORMANCE.md "Results" |
-| 5 | **Apple.** App-only IPA, PadMint's `audit`, `scripts/release/check_public_assets.sh`. | Codex, on the Mac | Every check passes |
-| 6 | **Release.** Draft with `SHA256SUMS` and the notes; Chris publishes; each issue in the release record is told to try it. | Codex prepares, Chris publishes | Release live, issues told |
-| 7 | **Dungeon maps.** bessian checks #74 on his save. | bessian | Reply on #74; closed if confirmed |
+## Next: release 0.7.0
 
-Not in 0.6.1: lean blocks on by default, the Smooth Motion changes, Android.
-
-## Sunday, October 11: decide lean blocks, start 0.7.0
-
-**Goal:** turn Saturday's numbers into a decision, and land the runtime fixes that make the game feel smoother.
-
-| # | Step | Who | Done when |
-| --- | --- | --- | --- |
-| 1 | **Lean blocks.** If Outset is at least 10% faster and the play was clean, Chris accepts "plays the same" and decides whether 0.7.0 turns `--lean-blocks` on for Windows and Linux. Under 10%: record it and try lean copies only in the hot chunks (runbook phase 4). | Chris, with Elliott | Written in PERFORMANCE.md "Decisions" |
-| 2 | **Renderer fallback notice** (runbook 2a): a `dol_aurora_backend()` getter in RecompCore, one log line and one notice on screen. | Codex | Merged, Linux CI green |
-| 3 | **Smooth Motion keeps its frames** on 8 threads or more and comes back in about a second (2b). | Codex; checked on Chris's PC | Merged; the benchmark shows no game-speed loss |
-| 4 | **Smooth Motion off by default** on 4 threads or fewer (2c). | Codex | Merged, settings tests pass |
-| 5 | **Small bugs:** the Pictobox stick prompt (#191), rumble only to player 1 (#190). | Codex | Merged, Windows CI green |
-
-## October 12 to 16: 0.7.0
-
-**Goal:** a release that is measurably faster than 0.6.1, with Linux as a download and Android buildable.
+**Goal:** 0.7.0 out from one commit of `main`. Its contents and checks are in [RELEASE_0.7.0.md](status/RELEASE_0.7.0.md).
 
 | # | Step | Who | Done when |
 | --- | --- | --- | --- |
-| 1 | **The benchmark tour,** `scripts/bench_tour.py` (runbook phase 1), so every later change is one command to measure. | Codex | Merged; two runs of one build agree within 3% |
-| 2 | **Lean blocks on by default,** if October 11 said yes; then measure `--lean-memory` as a second step. | Codex; builds by testers | Merged with Chris's approval |
-| 3 | **Linux download.** cforain's AppImage (#200), narrowed to the disc chooser and the package; the release check; a Steam Deck run. | cforain, Codex; Chris approves | `check_public_assets.sh` passes |
-| 4 | **Linux video** for social media: the Linux build running well with the HD pack and mods, shot list on #56. | cforain or jkoehler11; Chris posts | A clip in hand |
-| 5 | **Android** (#93) built with lean blocks and measured on the Fold 7; the label decided (below). | LiquidAzir; Chris decides | Decision recorded; the PR merged or given a short list |
-| 6 | **Flicker** (#136): the reporters' two switch runs name the patch. | Reporters, then Codex | Cause named |
-| 7 | **0.7.0 build day,** the same steps as October 10. | Chris | Release live |
+| 1 | **Merge** #222, #223, #224 (after RecompCore #21 is fast-forwarded onto `bluewake-next`), #225 (after #22), #226 and #228 (Elliott's `lfs` fast path), each with green CI. | Codex | **Done October 10** |
+| 2 | **Freeze.** `version.json` to 0.7.0 build 6; the commit in the release record. | Codex | **Done October 10** (the commit is in the release record) |
+| 3 | **Windows build** on Chris's PC: tell its agent "Pull the latest chrissotraidis/bluewake and follow docs/status/WINDOWS_BUILD_0.7.0.md as a goal loop until its hand-off is done." 2 to 3 hours of building on the Ryzen 7 5700U (with `--jobs 6`; 0.6.0 took 4 hours on one job), then about 30 minutes of Chris playing and looking. | Chris's PC | The zip on the v0.7.0 draft, results in a pull request |
+| 4 | **Linux AppImage** from a contributor's own disc: `python3 scripts/linux/build.py DISC`, then `scripts/linux/make_appimage.sh` and `check_appimage_abi.py`. Asked on #56 of pdale-boop, cforain or jkoehler11. | A contributor; Chris receives it privately | The AppImage passes `check_public_assets.sh` |
+| 5 | **Mac and Apple.** Ten minutes of Mac play with a controller connected at launch; the app-only IPA, PadMint's `audit`, the release check. | Codex, on this Mac | Every check passes |
+| 6 | **Release.** Draft with all assets, `SHA256SUMS` and the notes; Chris publishes; each issue in the release record is told to try it. | Codex prepares, Chris publishes | Release live, issues told |
+
+## After 0.7.0: catch up with Elliott, then the decompilation
+
+While a release build is running on someone's PC, don't merge code into `main` (docs are fine): the build's check compares `main`'s code with the candidate. One pull request per row, measured on the benchmark (headless, unpaced, from save states) on an x86 PC, each row's
+result in PERFORMANCE.md's "Results". Elliott's `windows-release` is cloned at
+`~/.codex/work-bluewake-mac-loop/research/Wind-Waker-Recomp`; his reports are in its `docs/status/CURRENT.md`.
+
+| # | Step | Who | Done when |
+| --- | --- | --- | --- |
+| 1 | **Fusion on Mac and Linux.** Play Forest Haven with `DOL_GX_FUSE=1` on this Mac and on a Linux PC; if both are clean, drop the host's off switch. | Codex on the Mac; pdale-boop or jkoehler11 on Linux | Merged, a "Results" row |
+| 2 | **Early return dispatch and the watch-list fix** (his `return_ranges.py` from `7aca42a`, and `5edeacc`). The `lfs` half of `7aca42a` is #228. **Ported October 10: #235 and #234**, checked on the prepared lean source (811 of 811 dispatches, repeatable, syntax-clean) and by the tests. Held until the Windows 0.7.0 hand-off, so `main`'s code stays the candidate's while it builds. | Codex; a contributor's build | Merged after the hand-off; 2 to 3% on the game thread, plays the same |
+| 3 | **Natives round 5** (the GX SDK's FIFO writers, `native_gx_gen.py`) and **round 4** (animation, collision setup, colour), with his comparison tests. First rerun #179's certification on a lean build with jkoehler11's Linux loader (#194): it should certify now. | Codex; jkoehler11 | Certified counts in the build log; 2 to 6% |
+| 4 | **Natives round 7** (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py`. | Codex | Certified; about 4 points at Forest Haven |
+| 5 | **His upload and vertex changes** (RecompCore `6f52a68` to `400728a`), merged by hand with patch 0157. Check dungeon maps (#74), HD packs and lava colours before and after. | Codex | Merged on `bluewake-next`; maps and packs unchanged |
+| 6 | **A native from the decompilation's source:** `__ieee754_fmod` from `e_fmod.c` against his replayed one, on the benchmark ([PERFORMANCE.md](PERFORMANCE.md#the-plan)). | Codex | A "Results" row; a yes or no for doing more |
+| 7 | **Android:** LiquidAzir rebuilds #93 on `main` (lean blocks, hidden symbols, fusion) and measures Outset on the Fold 7 against the 110 M of Wind Waker Recomp's build. | LiquidAzir | Numbers on #93; merged as experimental when it holds 30 |
+| 8 | **Crash sweep and benchmark tour:** #210's stage select once it costs nothing when off; warp to all 468 places on every release candidate; `bench_tour.py` on `BLUEWAKE_WARP`. | pdale-boop, Codex | Merged; a sweep in the next release record |
+| 9 | **Flicker** (#136): the reporters' two switch runs name the patch. | Reporters, then Codex | Cause named |
+| 10 | **Linux video** for social media, shot list on #56, once the 0.7.0 AppImage exists. | cforain or jkoehler11; Chris posts | A clip in hand |
 
 ## Late October and November: 0.8
 
 Horizon 2, one pull request and one "Results" row each, off by default until tested on its platform: measure the
-bookkeeping left after lean blocks; try charging cycles per block with interrupts at block boundaries; natives for
-the loops that cross chunks most (collision and J3D drawing first, named with the decompilation); cache converted
-static display lists. Then the graphics thread on four-core CPUs (runbook phase 5).
+bookkeeping left after Elliott's work (a fifth of the module's time lands at block starts, by his profile); try
+charging cycles per block with interrupts at block boundaries; natives for the loops that cross chunks most; cache
+converted static display lists. Then the graphics thread on four-core CPUs (runbook phase 5).
 
 ## On the first of every month
 
 Add a row to PERFORMANCE.md's decompilation table from [decomp.dev](https://decomp.dev/zeldaret/tww). Profile the
-benchmark, list the hot functions the decompilation has matched since last month, and pick the next natives from
-them. When the actor modules pass about 90% of code matched, revisit porting scenes from source.
-
-## Decisions waiting for Chris
-
-| Decision | Recommendation | Needed by |
-| --- | --- | --- |
-| Performance changes count when the game "plays the same", while correctness fixes keep the strict comparison | Accept: it is how Wind Waker Recomp's builds were judged, and every horizon depends on it | October 11 |
-| Linux as a ready-made download in 0.7.0 | Yes, once the package passes the release check (the October 4 exception allows it) | 0.7.0 |
-| How Android is offered | "Build it yourself, experimental" in the README and on #93, with no download until its speed and menu match the iPhone app | 0.7.0 |
+benchmark, name the hot functions with the decompilation's `symbols.txt`, list the ones matched since last month,
+and pick the next natives from them: replayed from the translation where exactness matters, compiled from source
+where step 6 showed it pays. When the actor modules pass about 90% of code matched, revisit porting scenes from
+source.
 

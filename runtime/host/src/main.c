@@ -6921,6 +6921,14 @@ int main(int argc, char** argv) {
     // The options menu's saved choices, before anything reads the environment.
     bluewake_settings_load();
     host_apply_aspect();
+#if !defined(_WIN32)
+    // Draw fusion (RecompCore patch 0166, Elliott Tate): a display list's strips
+    // as one draw, a tenth of the draws. Tested on Windows; elsewhere off until
+    // it has been played there. DOL_GX_FUSE=1 turns it on, 0 off, everywhere.
+    setenv("DOL_GX_FUSE", "0", 0);
+#endif
+    fprintf(stderr, "[gx] draw fusion %s\n",
+            getenv("DOL_GX_FUSE") != NULL && getenv("DOL_GX_FUSE")[0] == '0' ? "off" : "on");
     const char* host_root = host_resolve_root();
     char dylib_scratch[4096 + 128];
     g_host_packaged_app = host_bundle_defaults(dylib_scratch, sizeof dylib_scratch);
@@ -7254,6 +7262,17 @@ int main(int argc, char** argv) {
             bluewake_settings_menu_install();
             fprintf(stderr, "[host] renderer=aurora window=%ux%u\n",
                     aurora_config.window_width, aurora_config.window_height);
+            // Which graphics API Aurora chose: OpenGL on a desktop is a fallback
+            // (Linux without its Vulkan loader ran the bird scene at 4%, #56).
+            const char* api = dol_aurora_backend_name();
+            fprintf(stderr, "[renderer] %s\n", api != NULL ? api : "unknown");
+#if !defined(__APPLE__)
+            if (api != NULL && strncmp(api, "OpenGL", 6) == 0)
+                fprintf(stderr,
+                        "[renderer] fell back to %s, which is much slower: install Vulkan (on Linux the "
+                        "Vulkan loader, libvulkan1 or vulkan-loader, and your GPU's Vulkan driver)\n",
+                        api);
+#endif
         } else if (renderer_requested) {
             fprintf(stderr, "[host] Aurora renderer initialization failed\n");
             return 1;

@@ -2,6 +2,7 @@
 // environment, in a window over the paused game, saved to a settings file.
 #include "settings_menu.h"
 #include "smooth_rate.h"
+#include "fps_position.h"
 #include "controller_face_swap.h"
 #include "atomic_file.h"
 
@@ -23,6 +24,7 @@ extern "C" {
 #include "desktop_theme.h"
 
 #include <SDL3/SDL.h>
+#include <aurora/aurora.h>
 #include <aurora/imgui.h>
 #include <imgui.h>
 #include "button_remap.h"
@@ -55,7 +57,8 @@ namespace {
 // the menu does not show) is kept as it was.
 const char* const kKeys[] = {
     "BLUEWAKE_ASPECT",          "DOL_AURORA_FULLSCREEN",    "DOL_AURORA_RENDER_SCALE",
-    "DOL_AURORA_FRAME_INTERP",  "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_SHOW_FPS", "DOL_AURORA_FORCE_ANISO",
+    "DOL_AURORA_FRAME_INTERP",  "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_SHOW_FPS", "DOL_AURORA_FPS_POSITION",
+    "DOL_AURORA_FORCE_ANISO",
     "DOL_AURORA_TEXTURE_PACK",  "BLUEWAKE_MODS",            "BLUEWAKE_OPTIONS",
     "BLUEWAKE_FADE_FRAMES",     "BLUEWAKE_FAST_FORWARD",    "BLUEWAKE_QUICK_DOORS",
     "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_SWAP_XY", "BLUEWAKE_BUTTON_MAP",
@@ -63,7 +66,7 @@ const char* const kKeys[] = {
     "BLUEWAKE_MOUSE_INVERT_Y",  "BLUEWAKE_MOUSE_BUTTONS",   "BLUEWAKE_KEY_MAP",
     "BLUEWAKE_STICK_CAMERA",    "BLUEWAKE_STICK_CAMERA_SPEED",
     "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_STICK_AIM_SPEED",
-    "BLUEWAKE_AIM_INVERT_Y",
+    "BLUEWAKE_STICK_ZOOM",      "BLUEWAKE_STICK_ZOOM_SPEED", "BLUEWAKE_AIM_INVERT_Y",
     "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH", "BLUEWAKE_HAPTICS_TRIGGERS",
     "BLUEWAKE_CLIMB",           "BLUEWAKE_CLIMB_STAMINA",
     "BLUEWAKE_FOREST_WATER_KEEP_TREES", "BLUEWAKE_FOREST_WATER_30_MINUTES",
@@ -312,6 +315,13 @@ void display_tab() {
         set_env("DOL_AURORA_SHOW_FPS", fps ? "1" : "0");
         aurora_set_fps_overlay(fps);
     }
+    ImGui::BeginDisabled(!fps);
+    int position = bw_fps_position(env("DOL_AURORA_FPS_POSITION").c_str());
+    if (combo("FPS position", &position, kBwFpsPositionNames, BW_FPS_POSITIONS)) {
+        set_env("DOL_AURORA_FPS_POSITION", kBwFpsPositionValues[position]);
+        aurora_set_fps_overlay_position(static_cast<AuroraFpsOverlayPosition>(position));
+    }
+    ImGui::EndDisabled();
 
     static const char* const kAniso[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
     static const unsigned kAnisoValues[] = {1, 2, 4, 8, 16};
@@ -566,6 +576,22 @@ void controls_tab() {
         set_env("BLUEWAKE_STICK_AIM_SPEED", text);
         bluewake_mouse_camera_reload();
     }
+    bool stick_zoom = env_on("BLUEWAKE_STICK_ZOOM", false);
+    if (ImGui::Checkbox("Hold the right-stick click and move it up/down to zoom", &stick_zoom)) {
+        set_env("BLUEWAKE_STICK_ZOOM", stick_zoom ? "1" : "0");
+        bluewake_mouse_camera_reload();
+    }
+    ImGui::BeginDisabled(!stick_zoom);
+    float zoom_speed = static_cast<float>(std::atof(env("BLUEWAKE_STICK_ZOOM_SPEED", "1.275").c_str()));
+    if (!(zoom_speed > 0.f))
+        zoom_speed = 1.275f;
+    if (slider("Controller zoom speed", &zoom_speed, 0.25f, 2.f, "%.3fx")) {
+        char text[16];
+        std::snprintf(text, sizeof text, "%.3f", zoom_speed);
+        set_env("BLUEWAKE_STICK_ZOOM_SPEED", text);
+        bluewake_mouse_camera_reload();
+    }
+    ImGui::EndDisabled();
     bool invert_x = env_on("BLUEWAKE_STICK_CAMERA_INVERT_X", false);
     if (ImGui::Checkbox("Invert the right stick's left and right", &invert_x)) {
         set_env("BLUEWAKE_STICK_CAMERA_INVERT_X", invert_x ? "1" : "0");
@@ -583,7 +609,7 @@ void controls_tab() {
         bluewake_mouse_camera_reload();
     }
     ImGui::PushTextWrapPos();
-    ImGui::TextDisabled(stick ? "Click the right stick for first person. In the telescope and Picto Box, the left stick or D-pad zooms."
+    ImGui::TextDisabled(stick ? "Click the right stick for first person. When controller zoom is on, hold it and move the stick up/down. In the telescope and Picto Box, the left stick or D-pad zooms."
                               : "The game's right stick: its left and right follow Better Wind Waker's "
                                 "\"Invert camera\" (Gameplay).");
 
@@ -626,6 +652,7 @@ void controls_tab() {
     ImGui::TextUnformatted("Controller");
     ImGui::BulletText("Left bumper jump, left stick click sprint (until Link stops), Back this menu");
     ImGui::BulletText("Right stick: turns the camera and aims; its click is first person (and back out)");
+    ImGui::BulletText("Optional camera zoom: hold the right-stick click and move it up/down");
     ImGui::BulletText("Telescope and Picto Box: the right stick aims, the left stick (or D-pad) zooms");
     ImGui::PopTextWrapPos();
 }
@@ -723,6 +750,26 @@ void load_mac_font() {
     }
 }
 
+// For the first 20 seconds, when Aurora fell back to OpenGL: it runs at a
+// fraction of Vulkan's speed, and the only sign was the frame rate (#56).
+void draw_renderer_notice(Uint64 now) {
+#if !defined(__APPLE__)
+    static const char* api = dol_aurora_backend_name();
+    if (api == nullptr || std::strncmp(api, "OpenGL", 6) != 0 || now - g_installed_ms > 20000)
+        return;
+    ImGui::SetNextWindowPos(ImVec2(12.f, 12.f));
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    ImGui::Begin("##renderer-notice", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                     ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+    ImGui::Text("Running on %s, which is much slower than Vulkan.", api);
+    ImGui::TextUnformatted("Install the Vulkan loader (libvulkan1 or vulkan-loader) and your GPU's Vulkan driver.");
+    ImGui::End();
+#else
+    (void)now;
+#endif
+}
+
 void draw(void*) {
     static Uint64 checked;
     const Uint64 now = SDL_GetTicks();
@@ -736,6 +783,7 @@ void draw(void*) {
     }
     test_hook();
     draw_climb_wheel();
+    draw_renderer_notice(now);
     if (!g_open)
         return;
     ImGuiIO& io = ImGui::GetIO();

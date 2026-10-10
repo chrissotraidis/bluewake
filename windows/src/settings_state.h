@@ -13,6 +13,7 @@ struct Settings {
     bool smooth_motion = false;  // experimental: off unless the player turns it on
     int smooth_steps = 1; // 60 FPS; 3: 120; -1: match the display, up to 240.
     bool show_fps = false;
+    int fps_position = 0;  // where the frame rate is (fps_position.h); 0: the top center
     bool pause_unfocused = false;
     // At start, the game waits until the saved and bundled pipelines are compiled.
     bool shaders_first = false;
@@ -32,6 +33,8 @@ struct Settings {
     bool stick_camera = true;
     int stick_speed = 360;      // degrees a second at full tilt
     int stick_aim_speed = 180;  // the same when aiming
+    bool stick_zoom = false;    // off until the R3 gesture has been hardware-tested
+    double stick_zoom_speed = 1.275; // control scale; 1.0 is two distance units a second
     bool aim_invert_y = false;  // the left stick's up and down the other way when aiming (#154)
     bool climb = false;         // climb any wall on a stamina wheel (climb.h)
     int climb_stamina = 12;     // seconds of climbing on a full wheel
@@ -75,6 +78,7 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.smooth_motion != session.smooth_motion) saved.smooth_motion = session.smooth_motion;
     if (before.smooth_steps != session.smooth_steps) saved.smooth_steps = session.smooth_steps;
     if (before.show_fps != session.show_fps) saved.show_fps = session.show_fps;
+    if (before.fps_position != session.fps_position) saved.fps_position = session.fps_position;
     if (before.pause_unfocused != session.pause_unfocused) saved.pause_unfocused = session.pause_unfocused;
     if (before.shaders_first != session.shaders_first) saved.shaders_first = session.shaders_first;
     if (before.mouse_camera != session.mouse_camera) saved.mouse_camera = session.mouse_camera;
@@ -85,6 +89,8 @@ inline void bw_settings_keep_edits(Settings& saved, const Settings& before, cons
     if (before.stick_camera != session.stick_camera) saved.stick_camera = session.stick_camera;
     if (before.stick_speed != session.stick_speed) saved.stick_speed = session.stick_speed;
     if (before.stick_aim_speed != session.stick_aim_speed) saved.stick_aim_speed = session.stick_aim_speed;
+    if (before.stick_zoom != session.stick_zoom) saved.stick_zoom = session.stick_zoom;
+    if (before.stick_zoom_speed != session.stick_zoom_speed) saved.stick_zoom_speed = session.stick_zoom_speed;
     if (before.aim_invert_y != session.aim_invert_y) saved.aim_invert_y = session.aim_invert_y;
     if (before.climb != session.climb) saved.climb = session.climb;
     if (before.climb_stamina != session.climb_stamina) saved.climb_stamina = session.climb_stamina;
