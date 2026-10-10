@@ -125,7 +125,7 @@ class PreparedCacheTest(unittest.TestCase):
                        "scripts/mods/prepare_native_math.py", "cmake/composite/native_math.c", "cmake/composite/native_math.h",
                        "cmake/composite/native_work_pool.c", "cmake/composite/native_work_pool.h",
                        "scripts/windows/lean_memory.py", "scripts/windows/native_entries.py",
-                       "scripts/windows/return_ranges.py"):
+                       "scripts/windows/return_ranges.py", "scripts/windows/chunk_pool.py"):
             dst = self.root / script
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / script, dst)

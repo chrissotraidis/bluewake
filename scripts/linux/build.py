@@ -170,6 +170,24 @@ def watched_inputs():
     return digest.digest()
 
 
+def saved_times(path):
+    """The times file_times() recorded before an unfinished regeneration, or None."""
+    try:
+        data = json.loads(path.read_text())
+        return {Path(rel): (bytes.fromhex(digest), int(mtime)) for rel, (digest, mtime) in data.items()}
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def save_times(path, times):
+    """Kept on disk until keep_unchanged_times() has used them: if a build stops
+    between regenerating the source and that, the next one still restores the
+    unchanged files' times instead of recompiling them all."""
+    pending = path.with_name(path.name + ".tmp")
+    pending.write_text(json.dumps({rel.as_posix(): [digest.hex(), mtime] for rel, (digest, mtime) in times.items()}))
+    os.replace(pending, path)
+
+
 def tree_digest(root):
     """scripts/ios/composite_manifest.py's digest of a generated tree."""
     out = subprocess.check_output([sys.executable, str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
@@ -482,8 +500,12 @@ int main(void) {
             # place it is already prepared: running the steps again would touch
             # chunks a later step rewrote (native_game_math.py refuses them).
             self.prepared_current = not (self.mods and self.mods_pending)
+            # A build that stopped before restoring the unchanged files' times
+            # left them here: restore them now (build()).
+            self.source_times = saved_times(o / "composite-src.times.json")
         else:
-            self.source_times = file_times(current)
+            self.source_times = saved_times(o / "composite-src.times.json") or file_times(current)
+            save_times(o / "composite-src.times.json", self.source_times)
             sync_tree(new, current)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
@@ -1080,6 +1102,7 @@ int main(void) {
         self.prepare_blocks()
         if getattr(self, "source_times", None):
             changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
+            (self.out / "composite-src.times.json").unlink(missing_ok=True)
             print(f"composite source: {changed} of {total} files changed since the last build")
         if args.host_only:
             step("local optimization training: kept from the last build (--host-only)")
@@ -1238,6 +1261,8 @@ def main():
         args.jobs = default_jobs()
     if args.jobs < 1:
         parser.error("--jobs must be positive")
+    # The preparation steps rewrite the chunks on as many processes (chunk_pool.py).
+    os.environ.setdefault("BLUEWAKE_PREP_JOBS", str(args.jobs))
     args.out = args.out.resolve()
     try:
         rel = args.out.relative_to(ROOT)

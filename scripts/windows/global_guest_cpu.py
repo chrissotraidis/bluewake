@@ -21,6 +21,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import chunk_pool  # noqa: E402
+
 MARK = "/* bluewake: the guest CPU at a fixed address (cmake/composite/guest_cpu.c) */\n"
 DEFINE = MARK + "extern CPUState bw_guest_cpu;\n#define ctx (&bw_guest_cpu)\n"
 INCLUDE = '#include "../generated.h"\n'
@@ -37,22 +40,21 @@ def transform(text, path):
     return text.replace(INCLUDE, INCLUDE + DEFINE, 1)
 
 
+def _transform_chunk(text, path):
+    converted = transform(text, path)
+    return converted, converted != text
+
+
+def _one(path):
+    return chunk_pool.rewrite(path, lambda text: _transform_chunk(text, path), changed=bool)
+
+
 def main():
     root = Path(sys.argv[1])
-    changed = 0
     chunks = sorted(root.glob("chunks_*/*.c"))
     if not chunks:
         sys.exit(f"no chunks under {root}")
-    for path in chunks:
-        with open(path, encoding="utf-8", newline="") as file:
-            original = file.read()
-        converted = transform(original, path)
-        if converted != original:
-            temporary = path.with_suffix(".c.tmp")
-            with open(temporary, "w", encoding="utf-8", newline="") as file:
-                file.write(converted)
-            temporary.replace(path)
-            changed += 1
+    changed = sum(chunk_pool.map_chunks(_one, chunks))
     print(f"guest CPU at a fixed address: {changed} of {len(chunks)} chunks rewritten")
 
 

@@ -176,6 +176,24 @@ def watched_inputs():
     return digest.digest()
 
 
+def saved_times(path):
+    """The times file_times() recorded before an unfinished regeneration, or None."""
+    try:
+        data = json.loads(path.read_text())
+        return {Path(rel): (bytes.fromhex(digest), int(mtime)) for rel, (digest, mtime) in data.items()}
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def save_times(path, times):
+    """Kept on disk until keep_unchanged_times() has used them: if a build stops
+    between regenerating the source and that, the next one still restores the
+    unchanged files' times instead of recompiling them all."""
+    pending = path.with_name(path.name + ".tmp")
+    pending.write_text(json.dumps({rel.as_posix(): [digest.hex(), mtime] for rel, (digest, mtime) in times.items()}))
+    os.replace(pending, path)
+
+
 def tree_digest(root):
     """scripts/ios/composite_manifest.py's digest of a generated tree."""
     out = subprocess.check_output([sys.executable, str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
@@ -238,6 +256,12 @@ class Builder:
         if elapsed >= 60:
             print(f"  {name}: done in {elapsed // 60}m {elapsed % 60:02d}s", flush=True)
         return log
+
+    def together(self, *steps):
+        """Independent steps at once, each with its own logs; the first failure stops the build."""
+        with concurrent.futures.ThreadPoolExecutor(len(steps)) as pool:
+            for future in [pool.submit(step) for step in steps]:
+                future.result()
 
     def git(self, *args, cwd=None):
         return subprocess.check_output(["git", *args], cwd=cwd or ROOT, text=True,
@@ -629,8 +653,12 @@ int main(void) {
             # place it is already prepared: running the steps again would touch
             # chunks a later step rewrote (native_game_math.py refuses them).
             self.prepared_current = not (self.mods and self.mods_pending)
+            # A build that stopped before restoring the unchanged files' times
+            # left them here: restore them now (build()).
+            self.source_times = saved_times(o / "composite-src.times.json")
         else:
-            self.source_times = file_times(current)
+            self.source_times = saved_times(o / "composite-src.times.json") or file_times(current)
+            save_times(o / "composite-src.times.json", self.source_times)
             sync_tree(new, current)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
@@ -654,7 +682,7 @@ int main(void) {
         (m / "option-sites.txt").write_bytes(listed.replace(b"\r\n", b"\n"))
         sites = ("--option-sites", m / "option-sites.txt")
 
-        for name, gecko in (("widescreen", "GZLE01.gecko"), ("widescreen1610", "GZLE01-16x10.gecko")):
+        def widescreen(name, gecko):
             print(name)
             (m / name).mkdir(exist_ok=True)
             self.run(f"mods-{name}-gecko", [sys.executable, ROOT / "scripts/mods/gecko_apply.py",
@@ -665,16 +693,18 @@ int main(void) {
                            o / "game/rels", m / name / "main.dol", m / name / "composite-src",
                            f"mods-{name}-composite")
 
-        # The game's own executable and modules translated with the option
-        # sites; the variants are the chunks that hold a site.
-        print("Better Wind Waker options")
-        (m / "betterww").mkdir(exist_ok=True)
-        self.translate(o / "game/main.dol", m / "betterww/translated", o / "game/rels",
-                       name="mods-betterww-translate", sites=sites)
-        self.composite(m / "betterww/translated/dol/generated", m / "betterww/translated/rels/generated/rels",
-                       o / "game/rels", o / "game/main.dol", m / "betterww/composite-src", "mods-betterww-composite")
+        def betterww():
+            # The game's own executable and modules translated with the option
+            # sites; the variants are the chunks that hold a site.
+            print("Better Wind Waker options")
+            (m / "betterww").mkdir(exist_ok=True)
+            self.translate(o / "game/main.dol", m / "betterww/translated", o / "game/rels",
+                           name="mods-betterww-translate", sites=sites)
+            self.composite(m / "betterww/translated/dol/generated", m / "betterww/translated/rels/generated/rels",
+                           o / "game/rels", o / "game/main.dol", m / "betterww/composite-src",
+                           "mods-betterww-composite")
 
-        for combo, widescreen in (("combo", "widescreen"), ("combo1610", "widescreen1610")):
+        def combo(combo, widescreen):
             print(f"{widescreen} + Better Wind Waker options")
             (m / combo).mkdir(exist_ok=True)
             self.translate(m / widescreen / "main.dol", m / combo / "translated", name=f"mods-{combo}-translate",
@@ -683,10 +713,19 @@ int main(void) {
                            o / "game/rels", m / widescreen / "main.dol", m / combo / "composite-src",
                            f"mods-{combo}-composite")
 
-        print("variants into the composite source")
         base = m / "composite-src.base"
-        self.composite(o / "translated/dol/generated", o / "translated/rels/generated/rels", o / "game/rels",
-                       o / "game/main.dol", base, "mods-base-composite")
+
+        def base_tree():
+            self.composite(o / "translated/dol/generated", o / "translated/rels/generated/rels", o / "game/rels",
+                           o / "game/main.dol", base, "mods-base-composite")
+
+        # The trees are independent but for the combos, which need their
+        # widescreen's main.dol and Better Wind Waker's RELs: two rounds at once.
+        self.together(lambda: widescreen("widescreen", "GZLE01.gecko"),
+                      lambda: widescreen("widescreen1610", "GZLE01-16x10.gecko"), betterww, base_tree)
+        self.together(lambda: combo("combo", "widescreen"), lambda: combo("combo1610", "widescreen1610"))
+
+        print("variants into the composite source")
         # The --mod and --combo specs are colon-separated, and a Windows path
         # has a colon after its drive letter: run in the build directory and
         # name the mod trees relative to it. The mods keep build_mods.sh's
@@ -1284,6 +1323,7 @@ int main(void) {
         self.prepare_blocks()
         if getattr(self, "source_times", None):
             changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
+            (self.out / "composite-src.times.json").unlink(missing_ok=True)
             print(f"composite source: {changed} of {total} files changed since the last build")
         if not (args.no_train or args.no_pgo):
             self.llvm_profdata = str(Path(self.clang).with_name("llvm-profdata.exe"))
@@ -1448,6 +1488,8 @@ def main():
         args.jobs = default_jobs()
     if args.jobs < 1:
         parser.error("--jobs must be positive")
+    # The preparation steps rewrite the chunks on as many processes (chunk_pool.py).
+    os.environ.setdefault("BLUEWAKE_PREP_JOBS", str(args.jobs))
     args.out = args.out.resolve()
     try:
         rel = args.out.relative_to(ROOT)

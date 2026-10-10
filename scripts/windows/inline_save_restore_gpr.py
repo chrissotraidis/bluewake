@@ -45,6 +45,9 @@ import sys
 import hashlib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import chunk_pool  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 MARK = "/* bluewake: _savegpr/_restgpr inline (scripts/windows/inline_save_restore_gpr.py) */\n"
 SAVE, RESTORE = 0x80328F04, 0x80328F50
@@ -176,6 +179,18 @@ def validate_helpers(root):
                 raise ValueError(f"changed GPR helper {start:08X} in {path}")
 
 
+_WATCHED = set()
+
+
+def _start(watched):
+    global _WATCHED
+    _WATCHED = watched
+
+
+def _one(path):
+    return chunk_pool.rewrite(path, lambda text: transform(text, _WATCHED), changed=bool)
+
+
 def main():
     root = Path(sys.argv[1])
     chunks = sorted(root.glob("chunks_*/*.c"))
@@ -183,18 +198,8 @@ def main():
         sys.exit(f"no chunks under {root}")
     validate_helpers(root)
     watched = watched_addresses()
-    sites = files = 0
-    for path in chunks:
-        with open(path, encoding="utf-8", newline="") as file:
-            original = file.read()
-        converted, count = transform(original, watched)
-        if count:
-            temporary = path.with_suffix(".c.tmp")
-            with open(temporary, "w", encoding="utf-8", newline="") as file:
-                file.write(converted)
-            temporary.replace(path)
-            sites += count
-            files += 1
+    counts = chunk_pool.map_chunks(_one, chunks, _start, (watched,))
+    sites, files = sum(counts), sum(1 for count in counts if count)
     print(f"register save and restore inline: {sites} calls in {files} chunks")
 
 
