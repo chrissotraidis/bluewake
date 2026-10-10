@@ -23,6 +23,7 @@ and remaining defects are tracked in [TECH_DEBT.md](TECH_DEBT.md). New unrelease
 | Swap A and B, Swap X and Y | #55 | F1 › Controls; the swap takes effect at once. | Not tested |
 | Camera no longer flips direction in water | #73 | Swim and turn the camera with the stick and the mouse. | Not tested |
 | Controller button remapping | #66 | F1 › Controls › Controller buttons: change a button, confirm the game follows it, restart, confirm it was kept. | Not tested (no controller) |
+| Developers' stage select toggle | #210 | F1 › Mods › Developers' stage select (F7), then restart: holding R while starting a file opens the stage select with English names, and F7 opens it from play. | Not tested |
 | Portable mode: `portable.txt` beside `BlueWake.exe` keeps saves, settings and logs in a `user` folder beside it | #64 | With `portable.txt`, the log's `[windows] ... data=` line points to the `user` folder and saves land there; without it, `%APPDATA%\BlueWake` as before. | Partial: Aurora's caches and `imgui.ini` still go to `%APPDATA%\BlueWake` |
 | Jump and Run off by default (0.4.0 has them always on) | #71 | A new install has no jump on Space or the left bumper; F1 › Mods › Jump and Run turns both on after a restart. | Default off; not pressed live |
 | Smooth Motion off by default, and the "Smooth Motion paused" counter | #79 | A new install runs at 30 FPS; turning Smooth Motion on shows the counter when it pauses. | 30 FPS by default; counter not tested |

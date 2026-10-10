@@ -167,6 +167,7 @@ void load_file() {
         else if (k == "movement_extras") d.movement_extras = parse_bool(v);
         else if (k == "fast_transitions") d.fast_transitions = parse_bool(v);
         else if (k == "quick_doors") d.quick_doors = parse_bool(v);
+        else if (k == "stage_select") d.stage_select = parse_bool(v);
     }
     std::fclose(f);
 }
@@ -216,6 +217,7 @@ void save_file() {
         std::fprintf(f, "option.%s=%d\n", name.c_str(), on);
     std::fprintf(f, "movement_extras=%d\nfast_transitions=%d\nquick_doors=%d\n",
                  d.movement_extras, d.fast_transitions, d.quick_doors);
+    std::fprintf(f, "stage_select=%d\n", d.stage_select);
     const bool ok = bw_atomic_finish_dirty(f, pending, g_path.c_str(), &g_dirty);
     free(pending);
     if (!ok) std::fprintf(stderr, "[settings] save failed; previous file kept, retry pending\n");
@@ -512,7 +514,7 @@ bool needs_restart() {
            a.options != b.options || a.hd_textures != b.hd_textures || a.texture_pack != b.texture_pack ||
            a.lle_audio != b.lle_audio ||
            a.movement_extras != b.movement_extras || a.fast_transitions != b.fast_transitions ||
-           a.quick_doors != b.quick_doors;
+           a.quick_doors != b.quick_doors || a.stage_select != b.stage_select;
 }
 
 void restart_note(bool differs) {
@@ -823,6 +825,12 @@ void tab_enhancements() {
         }
         ImGui::Unindent();
     }
+    ImGui::Spacing();
+    if (ImGui::Checkbox("Developers' stage select (F7)", &d.stage_select))
+        changed();
+    restart_note(d.stage_select != g_launched.stage_select);
+    ImGui::TextDisabled("    F7 during play opens the menu the developers used to jump to any room, from your");
+    ImGui::TextDisabled("    own file; F7 in the menu goes back.");
 }
 
 void tab_game() {
@@ -1218,6 +1226,7 @@ extern "C" void bw_settings_load(const char* data_dir) {
             g_saved.movement_extras = false;
             g_saved.fast_transitions = false;
             g_saved.quick_doors = false;
+            g_saved.stage_select = false;
             g_dirty = true;
             save_file();
         }
@@ -1252,6 +1261,21 @@ extern "C" void bw_settings_apply_launch(void) {
     env_default("BLUEWAKE_FAST_FORWARD", d.fast_transitions ? "1" : "0");
     env_default("BLUEWAKE_FADE_FRAMES", d.fast_transitions ? "6" : "0");
     env_default("BLUEWAKE_QUICK_DOORS", d.quick_doors ? "1" : "0");
+    if (env_set("BLUEWAKE_STAGE_SELECT"))
+        d.stage_select = std::getenv("BLUEWAKE_STAGE_SELECT")[0] == '1';
+    env_default("BLUEWAKE_STAGE_SELECT", d.stage_select ? "1" : "0");
+    // The stage select's English names, which the builder installs beside BlueWake.exe.
+    {
+        char exe[MAX_PATH];
+        const DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
+        if (n > 0 && n < MAX_PATH) {
+            std::string names(exe, n);
+            names = names.substr(0, names.find_last_of("\\/") + 1) + "stage_select";
+            const DWORD attributes = GetFileAttributesA(names.c_str());
+            if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
+                env_default("BLUEWAKE_STAGE_SELECT_NAMES", names);
+        }
+    }
     if (env_set("DOL_AURORA_RENDER_SCALE"))
         d.render_scale = std::clamp(std::atoi(std::getenv("DOL_AURORA_RENDER_SCALE")), 0, 4);
     if (env_set("DOL_AURORA_FORCE_ANISO"))

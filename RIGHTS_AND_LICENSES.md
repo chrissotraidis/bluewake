@@ -63,6 +63,22 @@ vendored Wii U surface address library is AboodXD's BFRES-Tool addrlib under
 GPL-3.0-or-later; its license, copyright and pinned source are recorded in
 `scripts/wwhd/vendor/`. Format reader attribution is in `docs/WWHD_TEXTURES.md`.
 
+## Stage select names
+
+`config/stage_select/` holds English names for the developers' stage select that is still on the disc
+([docs/STAGE_SELECT.md](docs/STAGE_SELECT.md)). The menu's own Japanese labels stay on the player's disc;
+none of these files copies them.
+
+- `names.tsv` is BlueWake's own: short descriptive names for each menu line, plus the place each
+  line goes to (stage, room, spawn point and layer) and the spawn points that room has.
+- `names-randomizer.tsv` names dungeon rooms after their item locations in the
+  [Wind Waker Randomizer](https://github.com/LagoLunatic/wwrando) (LagoLunatic, MIT). Its license and
+  copyright are in `config/stage_select/NOTICE-randomizer`.
+- `names-decomp.tsv` names other rooms after the actors in them, as described in zeldaret/tww's actor
+  sources at revision
+  [342d447](https://github.com/zeldaret/tww/blob/342d447b6b6b3bafe7a0dc42d6b1e36b2de172e0/LICENSE)
+  (CC0-1.0).
+
 ## Runtime metadata
 
 `apple/ios/resources/initial_pipeline_cache.db` contains Aurora rendering-pipeline descriptions

@@ -1,0 +1,60 @@
+# Names from the zeldaret/tww decompilation (CC0): each room's actors, described by the actor sources' headers.
+1	9	Inside A (R02): Moblins
+1	13	Inside E (R03): Moblins
+2	2	Inside R02: Moblins
+2	3	Inside R03: Moblins
+3	2	Inside R02: Keese
+3	3	Inside R03: Keese
+4	2	1F room 2: Keese
+4	3	2F room 2: Keese
+4	8	3F room 8: Magtail
+4	10	1F room 11: ChuChus
+4	14	1F room 15: Keese
+4	15	R09 mini-boss: Bokoblins
+5	2	R02
+5	4	R04
+5	5	R05: Baba Buds
+5	6	R06: ChuChus, Morths
+5	8	R08: Peahats
+5	11	R0b: ChuChus, Morths
+5	12	R0c: Dexivines, ChuChus
+5	15	R0f: Mothula
+5	16	R10: Morths, ChuChus
+6	2	R02: ChuChus
+6	4	R04: ChuChu
+6	6	R06: Armos, Rats, Beamos
+6	7	R07
+6	8	R08: Armos, Keese, Wizzrobe
+6	10	R0a: Beamos
+6	11	R0b: Armos, ChuChus, Wizzrobe
+6	12	R0d statue room
+6	13	R0e: Armos, Bubbles, Eye switch
+6	14	R10
+6	16	R12 sky corridor: Beamos
+7	1	R00
+7	2	R01: Moblins
+7	4	R03: Face statue
+7	6	R05: ChuChus
+7	10	R09: Bubbles, Floormasters
+7	11	R0a: ReDeads
+7	15	R0f: Floormasters
+7	18	R12
+7	19	R13: Stalfos
+8	1	R0f below entrance
+8	5	R03: Dexivines, Floormasters
+8	12	R0b: Dexivines, Bokoblins
+8	13	R0c: Blade Traps
+8	14	R10: Bubbles, Dexivines
+9	0	A R00 entrance
+9	1	A R01 bosses door: Bokoblins
+10	0	R00 wrong way: Moblins
+10	1	R01 start: Phantom Ganon
+10	2	R02 checkpoint 1: Phantom Ganon
+10	3	R03 wrong way: Bokoblins
+10	4	R04 checkpoint 2: Phantom Ganon
+10	5	R06 wrong way: Darknuts
+10	6	R07 checkpoint 4: Phantom Ganon
+10	7	R08 checkpoint 3: Phantom Ganon
+10	8	R09 wrong way: Miniblins
+10	9	R0a wrong way: Bokoblin
+10	10	R0b checkpoint 5: Phantom Ganon

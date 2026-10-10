@@ -7,6 +7,7 @@
 #include "forest_water.h"
 #include "mouse_camera.h"
 #include "quick_doors.h"
+#include "stage_select.h"
 
 /* These hooks only run at fixed GZLE01 addresses in this interval. Reject
  * addresses outside it before checking each hook's addresses/armed flags.
@@ -14,13 +15,15 @@
 static inline bool bluewake_feature_observes(u32 address) {
     return bluewake_mouse_camera_observes(address) || bluewake_climb_observes(address) ||
            bluewake_quick_doors_observes(address) || bluewake_draw_tags_observes(address) ||
-           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address);
+           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address) ||
+           bluewake_stage_select_observes(address);
 }
 
 static inline void bluewake_feature_dispatch(CPUState* cpu, u32 address) {
-    // Forest Water's and the audio watch's hooks are outside the interval below.
+    // Forest Water's, the audio watch's and the stage select's hooks are outside the interval below.
     bluewake_forest_water_dispatch(cpu, address);
     bluewake_audio_watch_dispatch(cpu, address);
+    bluewake_stage_select_dispatch(cpu, address); // fopScnM_ChangeReq is below the interval
     if (address - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE >
         BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE)
         return;
