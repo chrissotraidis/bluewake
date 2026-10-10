@@ -21,7 +21,8 @@ Steps, each logged under OUT/logs:
   7 mods         widescreen 16:9 and 16:10 and Better Wind Waker's options (--no-mods skips)
   8 prepare      the certified native accelerators, fixed CPU, direct calls and
                  gather pipe (--conservative skips them)
-  9 train        local optimization profile from headless playbacks (--no-train skips)
+  9 train        local optimization profile from headless playbacks (--no-train skips;
+                 --host-only keeps the last build's)
  10 compile      the game module, gGZLE01_recomp.so (the long step)
  11 app          bluewake, Aurora (Vulkan/OpenGL through Dawn), SDL3 and the DSP
  12 package      the app folder OUT/BlueWake, ready to run
@@ -721,6 +722,39 @@ int main(void) {
         playbacks = max(1, min(len(self.TRAINING_TOUR), playbacks))
         return [self.TRAINING_TOUR[i::playbacks] for i in range(playbacks)]
 
+    def kept_profile(self):
+        """--host-only: the profile the last build in --out compiled with, whatever has changed since.
+        The app's code is part of the training's fingerprint (the playbacks run it), so an app change
+        would train again; the game code the profile counts is the same, so it still fits the module."""
+        work = self.out / "pgo-local"
+        profile = work / "composite.profdata"
+        receipt = work / "training.json"
+        packaged = self.out / "BlueWake" / MODULE
+        if not packaged.exists():
+            die(f"--host-only needs an earlier full build in {self.out}; there is no {packaged}")
+        if profile.exists() and receipt.exists():
+            print(f"keeping the optimization profile of the last build ({profile})")
+            return self.hashed_profile(profile)
+        try:
+            provenance = json.loads((self.out / "BlueWake/BuilderProvenance.json").read_text())
+        except (OSError, ValueError):
+            provenance = {}
+        if provenance.get("local_training") is False:
+            print("the last build had no optimization profile (--no-train); none is used now either")
+            return None
+        die(f"--host-only: no optimization profile in {work}; run a full build first")
+
+    def report_recompiled(self):
+        """How much of the game module --host-only recompiled: Ninja's last [done/total] is the
+        number of steps it had to run (a full build is one per chunk, about 830)."""
+        log = self.logs / "composite-build.log"
+        steps = re.findall(rb"\[(\d+)/(\d+)\]", log.read_bytes()) if log.exists() else []
+        ran = int(steps[-1][1]) if steps else 0
+        if ran == 0:
+            print("game module: unchanged; nothing recompiled")
+        else:
+            print(f"game module: {ran} build steps (the chunks the change reaches, and the link)")
+
     def training_fingerprint(self):
         """Bind local counts to actual prepared source, compiler and playback code."""
         key = hashlib.sha256()
@@ -1001,7 +1035,10 @@ int main(void) {
         else:
             self.build_mods()
         self.prepare_blocks()
-        if not (args.no_train or args.no_pgo):
+        if args.host_only:
+            step("local optimization training: kept from the last build (--host-only)")
+            self.profile = self.kept_profile()
+        elif not (args.no_train or args.no_pgo):
             step("local optimization training (instrumented module and private opening playbacks)")
             self.profile = self.train()
         else:
@@ -1010,6 +1047,8 @@ int main(void) {
         start = time.monotonic()
         module = self.compile_module()
         print(f"game module: {module} ({int(time.monotonic() - start) // 60} min)")
+        if args.host_only:
+            self.report_recompiled()
         step("9/10 build the app")
         exe = self.build_app()
         print(f"app: {exe}")
@@ -1076,6 +1115,10 @@ def main():
                         help="skip local optimization training; compile without a profile")
     parser.add_argument("--no-pgo", action="store_true", help="alias for --no-train")
     parser.add_argument("--retrain", action="store_true", help="record a new local profile instead of reusing one")
+    parser.add_argument("--host-only", action="store_true",
+                        help="after a change to the app's own code (runtime/host/src, linux/src): keep the "
+                             "optimization profile of the last build in --out instead of training again, so the "
+                             "game module recompiles only what the change touches and the app is rebuilt")
     parser.add_argument("--tour-playbacks", type=int, default=None,
                         help="training: how many playbacks play the tour at once (default: logical CPUs / 3)")
     parser.add_argument("--prepared-blocks", action="store_true",
@@ -1131,6 +1174,8 @@ def main():
             setattr(args, name, True)
     if args.no_lean_blocks:
         args.lean_blocks = False
+    if args.host_only and (args.retrain or args.no_train or args.no_pgo):
+        parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:
