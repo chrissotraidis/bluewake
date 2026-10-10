@@ -10,7 +10,7 @@ became the default, the release was more than fixes.
 | | |
 | --- | --- |
 | Version | 0.7.0, build 6 (`version.json`, set at the freeze) |
-| Candidate commit | not yet |
+| Candidate commit | `c6094ec76c82700d5a56a28bf627c8179f686542` (#229, October 10) |
 | RecompCore | `ddd031b2a7f45fcbda37a49daac9b308b8d95da1` (patches 0160 to 0168) |
 | Previous release | 0.6.0, October 8 |
 
@@ -69,7 +69,7 @@ Thanks to Elliott Tate, pdale-boop, jkoehler11, cforain, saulob and LiquidAzir.
 | Windows controllers: at launch, rumble, Pictobox prompt, zoom | | | not yet |
 | Linux AppImage from a contributor's own disc, then the release check | | | not yet |
 | Mac: ten minutes of play with a controller connected at launch | | | not yet |
-| App-only IPA, PadMint audit, release check | | | not yet |
+| App-only IPA, PadMint audit, release check | Mac (M3 Max) | `c6094ec` (built from #229's branch, the same tree) | Pass: `BlueWake-v0.7.0-ios-unsigned.ipa` (5.4 MB, SHA-256 `8395fa00…61bf4`) reports 0.7.0 build 6 and holds no game module; PadMint 0.4.9 `audit` (0 address-named functions) and `check_public_assets.sh` pass. Uploaded to the v0.7.0 draft. |
 | Source zip and recipe | | | not yet |
 | `check_public_assets.sh` on every asset | | | not yet |
 
