@@ -1333,6 +1333,10 @@ static bool g_player_route_waiting;
 // same guest-state fingerprint at the same guest cycle in both configurations, so
 // the two runs can be compared to first difference instead of to first log line.
 static bool g_guest_state_trace_enabled;
+// The diagnostic switches above are set once at startup (main) and never change, so the
+// per-block checks read these two summaries instead of every switch on every block.
+static bool g_diagnostics_need_full;   // turn census, boundary census or service each block
+static bool g_diagnostics_block_skip;  // any diagnostic switch at all
 static u64 g_guest_state_trace_next = 100000ull;
 static unsigned g_guest_state_trace_reports;
 static u32 g_guest_checkpoint_interval;
@@ -1953,11 +1957,7 @@ static void host_actor_search_native(CPUState* cpu) {
 // address unwatched - and every address-keyed check below keys on an address
 // the watch list contains, so an unwatched address can never trip one.
 static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
-    if (__builtin_expect(cpu == NULL || g_turn_census_enabled ||
-                             g_boundary_census_enabled ||
-                             g_chassis_service_each_block ||
-                             g_interrupt_sources_dirty,
-                         0))
+    if (__builtin_expect(cpu == NULL || g_diagnostics_need_full || g_interrupt_sources_dirty, 0))
         return true;
     if (g_name_scene_object >= 0x80000000u &&
         (g_file_start_pulse.triggered || !g_file_start_pulse.configured)) {
@@ -2007,8 +2007,7 @@ static bool host_can_skip_observation(void* user, const CPUState* cpu, u32 addre
     (void)cpu; (void)address;
     return false;
 #else
-    const bool allowed = !g_deadline_census_enabled && !g_delivery_safety_census_enabled &&
-           !g_guest_state_trace_enabled && !bluewake_jump_button_armed &&
+    const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
            !bluewake_feature_observes(address) &&
            !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !host_chassis_requires_full(cpu, address);
@@ -2031,8 +2030,7 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
     // check that must stay is the module-1 raw alias: g_module1_raw_base is a
     // runtime value, not a compile-time literal, so it is the one address the
     // watch list cannot guarantee.
-    const bool allowed = !g_deadline_census_enabled && !g_delivery_safety_census_enabled &&
-           !g_guest_state_trace_enabled && !bluewake_jump_button_armed &&
+    const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
            !bluewake_feature_observes(address) &&
            !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
@@ -7983,6 +7981,9 @@ int main(int argc, char** argv) {
         getenv("BLUEWAKE_DELIVERY_SAFETY_CENSUS") != NULL;
     g_guest_state_trace_enabled =
         getenv("BLUEWAKE_GUEST_STATE_TRACE") != NULL;
+    g_diagnostics_need_full = g_turn_census_enabled || g_boundary_census_enabled || g_chassis_service_each_block;
+    g_diagnostics_block_skip = g_diagnostics_need_full || g_deadline_census_enabled ||
+                               g_delivery_safety_census_enabled || g_guest_state_trace_enabled;
 #ifdef BLUEWAKE_HAS_DSP_ADAPTER
     {
         const char* dsp_rate_env = getenv("BLUEWAKE_DSP_RATE");
