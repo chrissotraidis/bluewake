@@ -30,6 +30,7 @@ extern "C" {
 #include "button_remap.h"
 #include "input_remap.h"
 #include "option_notes.h"
+#include "stage_select_key.h"
 
 #include <algorithm>
 #include <cmath>
@@ -70,6 +71,7 @@ const char* const kKeys[] = {
     "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH", "BLUEWAKE_HAPTICS_TRIGGERS",
     "BLUEWAKE_CLIMB",           "BLUEWAKE_CLIMB_STAMINA",
     "BLUEWAKE_FOREST_WATER_KEEP_TREES", "BLUEWAKE_FOREST_WATER_30_MINUTES",
+    "BLUEWAKE_STAGE_SELECT_TOGGLE",
 };
 
 std::string g_path;                          // the settings file ("" when none)
@@ -374,6 +376,19 @@ void gameplay_tab() {
         ImGui::Unindent();
         ImGui::EndDisabled();
     }
+
+    ImGui::Separator();
+    bool stage_select = env_on("BLUEWAKE_STAGE_SELECT_TOGGLE", false);
+    if (ImGui::Checkbox("Developers' stage select (F7)", &stage_select)) {
+        set_env("BLUEWAKE_STAGE_SELECT_TOGGLE", stage_select ? "1" : "0");
+        g_dirty = g_restart_pending = true;
+    }
+    restart_note();
+    ImGui::TextWrapped("F7 during play opens the menu the developers used to jump to any room, from your own "
+                       "file; F7 in the menu goes back. On a controller, Back (View on Xbox, Share or Create on "
+                       "PlayStation) opens these settings and the button below does the same. Off by default.");
+    if (bw_stage_select_button())
+        close_menu();
 
     ImGui::Separator();
     ImGui::TextUnformatted("Forest Water Challenge");

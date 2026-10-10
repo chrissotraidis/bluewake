@@ -361,6 +361,12 @@ int main(int argc, char** argv) {
     bw_default_path("BLUEWAKE_SRAM", g_data_dir, "sram.bin");
     bw_default_path("BLUEWAKE_CARD_PATH", g_data_dir, "GZLE01.card");
     bw_default("BLUEWAKE_STATE_DIR", g_data_dir);
+    // The stage select's English names, which the builder installs beside the executable.
+    char stage_names[4096];
+    snprintf(stage_names, sizeof stage_names, "%sstage_select", g_exe_dir);
+    struct stat stage_names_dir;
+    if (stat(stage_names, &stage_names_dir) == 0 && S_ISDIR(stage_names_dir.st_mode))
+        bw_default("BLUEWAKE_STAGE_SELECT_NAMES", stage_names);
 
     char module[4096];
     const char* module_env = getenv("BLUEWAKE_COMPOSITE");
