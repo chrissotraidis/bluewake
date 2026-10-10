@@ -9,7 +9,7 @@ the commit and what was seen. A row stays "not yet" until someone runs it.
 | --- | --- |
 | Version | 0.6.1, build 6 (`version.json`, set at the freeze) |
 | Candidate commit | not yet |
-| RecompCore | `34fe2c18db4cd06bbf1b6d6d2b760be88a5c104c` (patches 0160 to 0162) once #199 merges; `de9d15d` (0160 and 0161) without it |
+| RecompCore | `34fe2c18db4cd06bbf1b6d6d2b760be88a5c104c` (patches 0160 to 0162) |
 | Previous release | 0.6.0, October 8 |
 
 ## What it contains
@@ -19,11 +19,14 @@ the commit and what was seen. A row stays "not yet" until someone runs it.
 | Controllers plugged in at launch get the smooth stick and play as player 1 (pdale-boop, #195) | #138, #155 | Windows, Mac, Linux | pdale-boop on Windows with two controllers; a test in CI | Mac with a controller at launch |
 | Portable mode keeps controller remaps, keyboard bindings and `imgui.ini` in the `user` folder (#184) | #64 | Windows | CI | A Windows PC ([WINDOWS_TASKS.md](../WINDOWS_TASKS.md)) |
 | The window opens in place: centred, then where you left it (saulob, #197; RecompCore patch 0161) | #89 | Windows | CI (merged October 9) | A Windows PC |
-| Optional: the FPS counter's position under Display (saulob, #106; runtime in #199, patch 0162) | none | Windows, Mac | Windows 11 by saulob | Only if #106 is ready by the freeze |
+| The FPS counter's position under Display (saulob, #106; runtime in #199, patch 0162) | none | Windows, Mac, Linux | Windows 11 by saulob; CI | Mac menu |
+| A rare crash that stopped the game with `unmapped pc=0x8180fff0` when a disc read finished at the wrong moment (pdale-boop, #211) | none | Every platform | Windows: the crashing save runs, and the stage select's places that crashed run | Mac play; a long session |
+| A second build into the same folder works instead of failing at `native-game-math` (pdale-boop, #209) | #59 | Windows and Linux builders | Tests; a real rerun on Windows | None |
+| Linux: the game module compiles about twice as fast, and runs up to 10% faster on slower CPUs (pdale-boop, #218) | #215 | Linux builder | i5-12600KF: identical checkpoints at all 468 places | Steam Deck; an older 4-core PC |
 | Linux builds from source (jkoehler11, #107) | #56 | Linux | Two laptops and a Steam Deck | A package audit before any Linux download |
 | Building your own copy is faster: training takes about 12 minutes instead of 30 (pdale-boop, #202) | none | Windows and Linux builders | i5-12600KF and i5-6500, matched speeds and checkpoints | The build-day builds themselves |
 
-Not in 0.6.1: `--lean-blocks` on by default (it needs the measurement and Chris's decision), the Smooth Motion
+Not in 0.6.1: `--lean-blocks` on by default (measured in #208, waiting for Chris's decision), the Smooth Motion
 pacing and renderer-fallback fixes (the October 11 plan), Android (#93).
 
 ## Release notes (draft, for the release page)
@@ -37,11 +40,15 @@ from source. Every version needs your own USA (GZLE01) disc image. Nothing from 
   Thanks to saulob (#89).
 - Windows portable mode keeps controller remaps, keyboard bindings and window layout in the `user` folder, so
   nothing is written to `%APPDATA%\BlueWake` anymore (#64).
+- Fixed a rare crash (`unmapped pc=0x8180fff0`) that could stop the game anywhere when a disc read finished at
+  exactly the wrong moment. Thanks to pdale-boop, who tracked it down (#211).
+- You can choose where the FPS counter sits, under Display. Thanks to saulob (#106).
 - Building your own copy is faster: the optimization training now plays the tour of the game in parallel, about 12
   minutes instead of 30 on a 16-thread PC, with the same speed afterwards. Thanks to pdale-boop (#202).
 - Linux: BlueWake builds and runs natively from your own disc, with saves, controllers, settings and HD packs
   (#107). Thanks to jkoehler11 (KongMing), and to fehnomenal and the Steam Deck testers. The steps are in
-  `docs/LINUX.md`. Make sure Vulkan is installed: without it, BlueWake falls back to a much slower renderer.
+  `docs/LINUX.md`. The game module now compiles about twice as fast on Linux and runs up to 10% faster on slower
+  CPUs (pdale-boop, #218). Make sure Vulkan is installed: without it, BlueWake falls back to a much slower renderer.
 
 Speed is the next big focus. The plan, and how it's being measured, is in `docs/PERFORMANCE.md`.
 
@@ -59,11 +66,7 @@ Speed is the next big focus. The plan, and how it's being measured, is in `docs/
 
 ## The lean-blocks measurement (not released)
 
-| State | Mode | 0.6.1 build | `--lean-blocks` build | Change |
-| --- | --- | --- | --- | --- |
-| Outset | headless | | | |
-| Outset | rendered | | | |
-| Bird scene | headless | | | |
-| Tower room 0 | headless | | | |
-
-30-minute play on the lean build: not yet.
+Done a day early by pdale-boop, from `acfaf32` on Windows and `9285e07` on Linux, so no lean build is needed on
+build day. The rows are in [PERFORMANCE.md](../PERFORMANCE.md#results) (#208): 5 to 8% faster on an i5-12600KF's
+P-cores, 8 to 10.5% on its E-cores, 10.6 to 12.4% on an i5-6500 under Linux with 9.9% fewer instructions, and 15½
+minutes of play with no audio loss or fatal lines.
