@@ -7002,10 +7002,12 @@ int main(int argc, char** argv) {
     // The options menu's saved choices, before anything reads the environment.
     bluewake_settings_load();
     host_apply_aspect();
-#if !defined(_WIN32)
+#if defined(__APPLE__) || defined(__ANDROID__)
     // Draw fusion (RecompCore patch 0166, Elliott Tate): a display list's strips
-    // as one draw, a tenth of the draws. Tested on Windows; elsewhere off until
-    // it has been played there. DOL_GX_FUSE=1 turns it on, 0 off, everywhere.
+    // as one draw, a tenth of the draws. On for Windows and Linux, where it has
+    // been played (Linux: a Steam Deck, #215); off on the Mac and iPhone until
+    // it has been played there, and on Android, where it halves the draws but
+    // not the game thread's work (#93). DOL_GX_FUSE=1 turns it on, 0 off, everywhere.
     setenv("DOL_GX_FUSE", "0", 0);
 #endif
     fprintf(stderr, "[gx] draw fusion %s\n",

@@ -72,7 +72,7 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | Performance changes are accepted when the game "plays the same" (phase 4, step 4), not only when cycle-exact. Correctness fixes keep the strict comparison. | **Accepted by Chris, October 10.** | Chris |
 | `--no-cold` or a longer training tour | **Decided by the numbers, October 8: neither.** `--no-cold` is slower; the tour stays. | |
 | `--lean-blocks` on by default for Windows and Linux (and Android, which uses the Windows defaults) | **Accepted by Chris, October 10,** on #208's numbers: 5 to 8% on fast cores, 8 to 12% on slow and four-core CPUs, played the same. `--no-lean-blocks` builds the conservative copies. | Chris |
-| Draw fusion (RecompCore patch 0166) on by default | **On for Windows** (Elliott tested it there); off on Mac, Linux and iPhone until played on each, then flipped (`DOL_GX_FUSE`). | Chris, October 10 |
+| Draw fusion (RecompCore patch 0166) on by default | **On for Windows** (Elliott tested it there) **and Linux** (jkoehler11 on a Steam Deck, #215: a tenth of the draws, the GX worker from 45% to 24%, nothing missing on screen; the Deck's frame rate is set by the game thread, so it stays about 27); off on Mac and iPhone until played on each, and on Android, where it halves the draws but not the game thread's work (#93). `DOL_GX_FUSE` overrides it. | Chris, October 10; Linux October 11 |
 
 ## Results
 
