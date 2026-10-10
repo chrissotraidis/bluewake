@@ -53,8 +53,8 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 
 | # | Step | Who | Done when |
 | --- | --- | --- | --- |
-| 1 | **Merge** #222, #223, #224 (after RecompCore #21 is fast-forwarded onto `bluewake-next`), #225 (after #22), #226 and #228 (Elliott's `lfs` fast path), each with green CI. | Codex | All merged |
-| 2 | **Freeze.** `version.json` to 0.7.0 build 6; the commit in the release record. | Codex | CI green, commit recorded |
+| 1 | **Merge** #222, #223, #224 (after RecompCore #21 is fast-forwarded onto `bluewake-next`), #225 (after #22), #226 and #228 (Elliott's `lfs` fast path), each with green CI. | Codex | **Done October 10** |
+| 2 | **Freeze.** `version.json` to 0.7.0 build 6; the commit in the release record. | Codex | **Done October 10** (the commit is in the release record) |
 | 3 | **Windows build** on Chris's PC: tell its agent "Pull the latest chrissotraidis/bluewake and follow docs/status/WINDOWS_BUILD_0.7.0.md as a goal loop until its hand-off is done." About 40 minutes of building, then about 20 minutes of Chris playing and looking. | Chris's PC | The zip on the v0.7.0 draft, results in a pull request |
 | 4 | **Linux AppImage** from a contributor's own disc: `python3 scripts/linux/build.py DISC`, then `scripts/linux/make_appimage.sh` and `check_appimage_abi.py`. Asked on #56 of pdale-boop, cforain or jkoehler11. | A contributor; Chris receives it privately | The AppImage passes `check_public_assets.sh` |
 | 5 | **Mac and Apple.** Ten minutes of Mac play with a controller connected at launch; the app-only IPA, PadMint's `audit`, the release check. | Codex, on this Mac | Every check passes |
