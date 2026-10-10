@@ -20,6 +20,7 @@ became the default, the release was more than fixes.
 | --- | --- | --- | --- | --- |
 | **Faster:** lean block copies on by default, 5 to 12% (Elliott Tate's original, #196, #220; measured by pdale-boop, #208) | #59, #137, #159 | Windows, Linux builders | Windows: 15½ min of play; Linux i5-6500: 9.9% fewer instructions | The release build |
 | **Faster:** draw fusion, a tenth of the draws (Elliott Tate, #225, patch 0166) | #86, #137 | Windows (on); Mac, Linux (off until played) | Elliott on Windows: 30 to 60% more frames on four E-cores, positions identical | The release build played |
+| **Faster:** single-precision loads take the hardware's widening for normal floats (Elliott Tate, #228) | #59 | Windows, Linux builders | 0 mismatches over all 2^32 patterns (x86 by Elliott, arm64 here) | The release build |
 | **Faster on Linux:** the module compiles twice as fast and runs up to 10% faster on slow cores (pdale-boop, #218) | #215 | Linux builder | Identical checkpoints at 468 places | Steam Deck |
 | Smooth Motion keeps its frames on CPUs with 8 threads or more (#224, patch 0164) | #137 | Every desktop | CI | Smooth Motion at 120 on an 8-thread PC |
 | The log names the renderer; Linux says when it fell back to slow OpenGL (#224, patch 0163) | #56 | Every desktop | CI | Linux without Vulkan |

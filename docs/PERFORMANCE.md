@@ -27,7 +27,7 @@ four E-cores, the slow-CPU stand-in. It is the cheapest speed BlueWake can get, 
 | Change | Where | His result | In BlueWake |
 | --- | --- | --- | --- |
 | Draw fusion: a display list's strips as one draw | RecompCore `d687c69` | 8.8 M draws to 0.87 M over Outset; Forest Haven 30.6 → 40.5 game FPS, the Earth Temple's boss 40.6 → 59.1, Hyrule 45.7 → 59.8 (the game thread stopped waiting for the GX worker) | Pinned in #225 (patch 0166): on for Windows; Mac and Linux once played |
-| Faster single loads (`lfs`), early return dispatch, fifth natives round (the GX SDK's FIFO writers) | builder `7aca42a`, `56dcd70`, `5edeacc` | Game thread 4.5 to 7% faster at six places | Not yet: port |
+| Faster single loads (`lfs`), early return dispatch, fifth natives round (the GX SDK's FIFO writers) | builder `7aca42a`, `56dcd70`, `5edeacc` | Game thread 4.5 to 7% faster at six places | `lfs` in #228; the rest to port |
 | Fourth natives round (animation, collision setup, colour) | builder, October 4 | 1 to 3%, 6% in Hyrule Castle's room | Not yet: port |
 | Seventh natives round (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py` | builder `95f1db7`, `a5ecd96` | About 3.8 points of the game thread at Forest Haven | Not yet: port |
 | Sixth natives round (particle draws, the sea's waves) | builder `a8bda26` | About 5% at the sea, but he took it back out of the default | Skip for now |

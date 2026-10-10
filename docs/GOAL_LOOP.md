@@ -40,7 +40,8 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
   position (#106) and five more contributor pull requests.
 - **In CI, to merge for 0.7.0:** player 1 follows the controller you press, rumble on player 1 only (#222);
   the Pictobox stick (#223); Smooth Motion on 8+ threads and the renderer's name (#224, RecompCore #21); Elliott's
-  draw fusion (#225, RecompCore #22); the AppImage first-run setup (#226, cforain).
+  draw fusion (#225, RecompCore #22); the AppImage first-run setup (#226, cforain); Elliott's `lfs` fast path (#228, 0 mismatches
+  over all 2^32 patterns on this Mac).
 - **Found today:** Elliott's `windows-release` has three days of speed work BlueWake doesn't: draw fusion (now in
   #225), faster loads, natives rounds 4 to 7 and a much smaller upload. It roughly accounts for the gap to his
   builds. His builder work has to be ported by hand (no shared history). The table is in
@@ -52,7 +53,7 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 
 | # | Step | Who | Done when |
 | --- | --- | --- | --- |
-| 1 | **Merge** #222, #223, #224 (after RecompCore #21 is fast-forwarded onto `bluewake-next`), #225 (after #22), #226, each with green CI. | Codex | All merged |
+| 1 | **Merge** #222, #223, #224 (after RecompCore #21 is fast-forwarded onto `bluewake-next`), #225 (after #22), #226 and #228 (Elliott's `lfs` fast path), each with green CI. | Codex | All merged |
 | 2 | **Freeze.** `version.json` to 0.7.0 build 6; the commit in the release record. | Codex | CI green, commit recorded |
 | 3 | **Windows build** on Chris's PC: tell its agent "Pull the latest chrissotraidis/bluewake and follow docs/status/WINDOWS_BUILD_0.7.0.md as a goal loop until its hand-off is done." About 40 minutes of building, then about 20 minutes of Chris playing and looking. | Chris's PC | The zip on the v0.7.0 draft, results in a pull request |
 | 4 | **Linux AppImage** from a contributor's own disc: `python3 scripts/linux/build.py DISC`, then `scripts/linux/make_appimage.sh` and `check_appimage_abi.py`. Asked on #56 of pdale-boop, cforain or jkoehler11. | A contributor; Chris receives it privately | The AppImage passes `check_public_assets.sh` |
@@ -68,7 +69,7 @@ result in PERFORMANCE.md's "Results". Elliott's `windows-release` is cloned at
 | # | Step | Who | Done when |
 | --- | --- | --- | --- |
 | 1 | **Fusion on Mac and Linux.** Play Forest Haven with `DOL_GX_FUSE=1` on this Mac and on a Linux PC; if both are clean, drop the host's off switch. | Codex on the Mac; pdale-boop or jkoehler11 on Linux | Merged, a "Results" row |
-| 2 | **Faster single loads and early return dispatch** (his `7aca42a`: `inline_fp.h`'s `lfs` fast path with its 2^32-pattern test, `return_ranges.py`), and the watch-list fix (`5edeacc`). | Codex; a contributor's build | 4 to 5% on the game thread, plays the same |
+| 2 | **Early return dispatch and the watch-list fix** (his `return_ranges.py` from `7aca42a`, and `5edeacc`), a builder step each, with the preparation cache in mind (#209). The `lfs` half of `7aca42a` is #228. | Codex; a contributor's build | 2 to 3% on the game thread, plays the same |
 | 3 | **Natives round 5** (the GX SDK's FIFO writers, `native_gx_gen.py`) and **round 4** (animation, collision setup, colour), with his comparison tests. First rerun #179's certification on a lean build with jkoehler11's Linux loader (#194): it should certify now. | Codex; jkoehler11 | Certified counts in the build log; 2 to 6% |
 | 4 | **Natives round 7** (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py`. | Codex | Certified; about 4 points at Forest Haven |
 | 5 | **His upload and vertex changes** (RecompCore `6f52a68` to `400728a`), merged by hand with patch 0157. Check dungeon maps (#74), HD packs and lava colours before and after. | Codex | Merged on `bluewake-next`; maps and packs unchanged |
