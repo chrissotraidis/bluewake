@@ -218,6 +218,12 @@ if(BLUEWAKE_FIXED_MEM1)
 endif()
 
 set_target_properties(${MODULE_NAME} PROPERTIES PREFIX "" OUTPUT_NAME "${MODULE_NAME}" UNITY_BUILD OFF C_VISIBILITY_PRESET hidden)
+# Extra sources a builder adds (the Android builder's training-module profile
+# flush, android/src/profile_flush.c); empty otherwise.
+set(COMPOSITE_EXTRA_SOURCES "" CACHE STRING "Extra sources compiled into the module")
+if(COMPOSITE_EXTRA_SOURCES)
+  target_sources(${MODULE_NAME} PRIVATE ${COMPOSITE_EXTRA_SOURCES})
+endif()
 target_compile_definitions(${MODULE_NAME} PRIVATE MODULE_GAME_ID="${GAME_ID}" DOLRECOMP_CPU_HEADER="core/cpu.h")
 target_include_directories(${MODULE_NAME} PRIVATE "${COMPOSITE_DIR}" "${GXRUNTIME_DIR}/include" "${ABI_DIR}")
 if(APPLE)
