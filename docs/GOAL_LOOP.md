@@ -81,7 +81,7 @@ buildable.
 | 4 | **Linux download.** #217 (AppImage CI with a glibc 2.39 ceiling, so it runs on SteamOS), then #200 (first-run disc setup), then a contributor builds the AppImage from their own disc; the release check; a Steam Deck run with lean blocks and #218 (#215). | cforain, jkoehler11; Chris approves | `check_public_assets.sh` passes, Deck numbers on #215 |
 | 5 | **Crash sweep.** #210's stage select merged once it costs nothing when off; then every release candidate warps to all 468 places and any crash becomes an issue. #211 was found this way. | pdale-boop, Codex | Merged; a sweep recorded in the release record |
 | 6 | **The benchmark tour** on #210's `BLUEWAKE_WARP` instead of the card route (runbook phase 1). | Codex | Two runs of one build agree within 3% |
-| 7 | **Controller zoom** (#213): first check whether the fast right-stick camera removed the game's own zoom. If it did, restore that; if not, merge #213 off by default. | Codex, cforain | Decided on #213 |
+| 7 | **Controller zoom** (#213). The fast right-stick camera uses up and down to tilt the view, so the follow camera lost the C-stick's distance control; #213 puts it on R3 plus the stick, sharing the mouse wheel's zoom. Review with its CI, check it on Windows, merge off by default. | Codex, cforain | Merged, a row in WINDOWS_TASKS.md |
 | 8 | **Flicker** (#136): the reporters' two switch runs name the patch. | Reporters, then Codex | Cause named |
 | 9 | **Linux video** for social media, shot list on #56. | cforain or jkoehler11; Chris posts | A clip in hand |
 | 10 | **0.7.0 build day,** the same steps as October 10. | Chris | Release live |
