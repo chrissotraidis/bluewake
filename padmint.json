@@ -66,9 +66,7 @@
       "tools": [
         "git",
         "cmake",
-        "ninja",
-        "cc",
-        "clang"
+        "ninja"
       ],
       "command": [
         "{python}",
