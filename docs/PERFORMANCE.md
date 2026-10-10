@@ -40,9 +40,9 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 
 | Decision | Status | Who |
 | --- | --- | --- |
-| Performance changes are accepted when the game "plays the same" (phase 4, step 4), not only when cycle-exact. Correctness fixes keep the strict comparison. | **Proposed October 8, waiting for Chris.** Phases 1 to 4 can build and measure behind flags without it; only turning `--lean-blocks` on by default needs it. | Chris, with Elliott |
+| Performance changes are accepted when the game "plays the same" (phase 4, step 4), not only when cycle-exact. Correctness fixes keep the strict comparison. | **Accepted by Chris, October 10.** | Chris |
 | `--no-cold` or a longer training tour | **Decided by the numbers, October 8: neither.** `--no-cold` is slower; the tour stays. | |
-| `--lean-blocks` on by default for Windows and Linux in 0.7.0 | **Measured October 8 and 9 (#208):** 5 to 8% on fast cores, 8 to 12% on slow and four-core CPUs, played the same. Under the 10% gate on a fast core, over it where players are slow. Recommended yes; decided October 11 ([GOAL_LOOP.md](GOAL_LOOP.md)). Needs the first decision. | Chris |
+| `--lean-blocks` on by default for Windows and Linux (and Android, which uses the Windows defaults) | **Accepted by Chris, October 10,** on #208's numbers: 5 to 8% on fast cores, 8 to 12% on slow and four-core CPUs, played the same. `--no-lean-blocks` builds the conservative copies. | Chris |
 
 ## Results
 

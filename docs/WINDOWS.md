@@ -109,9 +109,9 @@ Options (`--help` lists all):
 | `--retrain` | Record a new local profile instead of reusing a matching one |
 | `--no-mods` | Skip the mods (widescreen 16:9 and 16:10, Better Wind Waker's options) |
 | `--conservative` | Build the plain translation. By default the builder prepares the same optimizations as Wind Waker Recomp's builds (prepaid blocks, fixed CPU and RAM storage, inline floating point and memory access, direct calls, register inlining, and the certified native J3D, vector, game-math, skinning and matrix functions); with `--conservative`, each `--...` option adds one back |
-| `--lean-blocks` | Elliott Tate's original prepaid block copies, as Wind Waker Recomp's builds make them; off by default, an experiment being measured ([PERFORMANCE.md](PERFORMANCE.md), phase 4) |
-| `--native-entries` | Elliott Tate's second and third native sets; off by default. They apply only where the translation matches what his builder produces, so they need `--lean-blocks` |
-| `--lean-memory` | Elliott Tate's lean loads and stores in prepaid copies; off by default. It changes nothing without `--lean-blocks`, and needs `--gather-pipe` (on by default) |
+| `--no-lean-blocks` | BlueWake's conservative prepaid block copies instead of Elliott Tate's lean ones (on by default since October 10, as Wind Waker Recomp's builds make them). The module is about a quarter smaller and compiles faster, and the game runs 5 to 12% slower ([PERFORMANCE.md](PERFORMANCE.md#results)) |
+| `--native-entries` | Elliott Tate's second and third native sets; off by default. They apply only where the translation matches what his builder produces, so they need the lean copies (the default) |
+| `--lean-memory` | Elliott Tate's lean loads and stores in prepaid copies; off by default. It changes nothing with `--no-lean-blocks`, and needs `--gather-pipe` (on by default) |
 | `--no-cold` | Compile code the training never ran for speed too; slower in every test so far, so off |
 | `--jobs N` | Parallel compile jobs (default: the cores, as far as free memory allows) |
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
