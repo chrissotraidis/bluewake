@@ -143,6 +143,7 @@ void load_file() {
         else if (k == "mouse_buttons") d.mouse_buttons = v;
         else if (k == "key_map") d.key_map = v;
         else if (k == "controller_swap_xy") d.controller_swap_xy = parse_bool(v);
+        else if (k == "controller_swap_lr") d.controller_swap_lr = parse_bool(v);
         else if (k == "controller_invert_x") d.pad_invert_x = parse_bool(v);
         else if (k == "controller_invert_y") d.pad_invert_y = parse_bool(v);
         else if (k == "stick_camera") d.stick_camera = parse_bool(v);
@@ -193,6 +194,7 @@ void save_file() {
     std::fprintf(f, "mouse_camera=%d\nmouse_sensitivity=%.2f\nmouse_invert_y=%d\n", d.mouse_camera,
                  d.mouse_sensitivity, d.mouse_invert_y);
     std::fprintf(f, "controller_swap_ab=%d\ncontroller_swap_xy=%d\n", d.controller_swap_ab, d.controller_swap_xy);
+    std::fprintf(f, "controller_swap_lr=%d\n", d.controller_swap_lr);
     if (!d.button_map.empty())
         std::fprintf(f, "button_map=%s\n", d.button_map.c_str());
     if (!d.mouse_buttons.empty())
@@ -352,8 +354,8 @@ void apply_controller() {
     const Settings& d = g_session;
     BwButtonMap map;
     const bool remapped = bw_button_map_parse(d.button_map, &map);
-    if (!d.pad_invert_x && !d.pad_invert_y && !d.controller_swap_ab && !d.controller_swap_xy && !remapped &&
-        !g_pad_applied)
+    if (!d.pad_invert_x && !d.pad_invert_y && !d.controller_swap_ab && !d.controller_swap_xy &&
+        !d.controller_swap_lr && !remapped && !g_pad_applied)
         return;
     if (PADGetIndexForPort(0) < 0)
         return;
@@ -364,6 +366,7 @@ void apply_controller() {
     else
         bw_apply_face_swaps(0, d.controller_swap_ab, d.controller_swap_xy);
     bw_apply_camera_axes(0, d.pad_invert_x, d.pad_invert_y);
+    bw_apply_trigger_swap(0, d.controller_swap_lr);
     g_pad_applied = true;
 }
 
@@ -651,6 +654,7 @@ void tab_controls() {
     pad |= ImGui::Checkbox("Swap A and B", &d.controller_swap_ab);
     pad |= ImGui::Checkbox("Swap X and Y", &d.controller_swap_xy);
     ImGui::EndDisabled();
+    pad |= ImGui::Checkbox("Swap L and R (the triggers)", &d.controller_swap_lr);
     if (ImGui::CollapsingHeader("Controller buttons")) {
         ImGui::TextWrapped("Choose which controller button presses each GameCube button. Picking one that is "
                            "already used swaps the two.%s", remapped ? " The swaps above are off while you use "
