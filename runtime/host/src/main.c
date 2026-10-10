@@ -2,6 +2,7 @@
 #include "gxruntime/aurora_backend.h"
 #include "gxruntime/headless_backend.h"
 #include "feature_dispatch.h"
+#include "stage_select.h"
 #include "gxruntime/guest_memory_dirty.h"
 #include "gxruntime/loader.h"
 #include "gxruntime/platform.h"
@@ -2009,24 +2010,40 @@ static u64 g_direct_call_queries, g_direct_call_allowed;
 /* Read-only handshake for direct calls. Use the same dynamic predicate as
  * ordinary edges, including overlap-phase changes that interrupt flags alone
  * do not describe. Feature ranges and an armed jump must retain their hooks. */
-static bool host_can_skip_observation(void* user, const CPUState* cpu, u32 address) {
-    (void)user;
+typedef bool (*CanSkipObservationFn)(void*, const CPUState*, u32);
+
+static inline __attribute__((always_inline)) bool host_can_skip_observation_body(
+    const CPUState* cpu, u32 address, bool stage_select) {
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
-    (void)cpu; (void)address;
+    (void)cpu; (void)address; (void)stage_select;
     return false;
 #else
     const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
            !bluewake_feature_observes(address) &&
+           !(stage_select && bluewake_stage_select_observes(address)) &&
            !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !host_chassis_requires_full(cpu, address);
     return allowed;
 #endif
 }
 
-static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
+// The stage select is chosen at startup (its toggle takes a restart), so the
+// host registers this pair only when it is on and the usual pair otherwise:
+// with it off, nothing on the per-block path reads it.
+static bool host_can_skip_observation(void* user, const CPUState* cpu, u32 address) {
     (void)user;
+    return host_can_skip_observation_body(cpu, address, false);
+}
+
+static bool host_can_skip_observation_stage_select(void* user, const CPUState* cpu, u32 address) {
+    (void)user;
+    return host_can_skip_observation_body(cpu, address, true);
+}
+
+static inline __attribute__((always_inline)) bool host_direct_can_skip_with(
+    const CPUState* cpu, u32 address, bool stage_select) {
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
-    (void)cpu; (void)address;
+    (void)cpu; (void)address; (void)stage_select;
     const bool allowed = false;
 #else
     // The direct-call skip is only ever permitted for addresses the module's
@@ -2047,7 +2064,10 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
     // are clean (it reads these flags, passed in direct_calls_v2) and no
     // interrupt the guest would take is pending. Of the dynamic test that leaves
     // the scene's overlap phase; the diagnostics are in g_diagnostics_block_skip.
+    // The stage select is checked here too when it is on: it is installed
+    // as a host-only change onto a module whose watch list may predate it.
     const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
+           !(stage_select && bluewake_stage_select_observes(address)) &&
            !bluewake_draw_tags_observes_range(address) &&
            !(bluewake_forest_water_enabled && address == bluewake_forest_water_tree_timer_check) &&
            !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
@@ -2060,13 +2080,27 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
     return allowed;
 }
 
-static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
+static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
+    (void)user;
+    return host_direct_can_skip_with(cpu, address, false);
+}
+
+static bool host_direct_can_skip_stage_select(void* user, const CPUState* cpu, u32 address) {
+    (void)user;
+    return host_direct_can_skip_with(cpu, address, true);
+}
+
+static inline __attribute__((always_inline)) bool host_chassis_edge_service_with(
+    void* user, CPUState* cpu, u32 address, bool stage_select) {
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING
     host_trace_bgm_stream(cpu, address);
 #endif
     bluewake_feature_dispatch(cpu, address);
-    if (bluewake_stage_select_redirect(cpu, address))
-        return true;
+    if (stage_select) {
+        bluewake_stage_select_dispatch(cpu, address);
+        if (bluewake_stage_select_redirect(cpu, address))
+            return true;
+    }
     if (bluewake_jump_button_dispatch(cpu, address))
         return true;
     if (host_chassis_requires_full(cpu, address))
@@ -2074,6 +2108,14 @@ static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
     if (address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native)
         host_actor_search_native(cpu);
     return false;
+}
+
+static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
+    return host_chassis_edge_service_with(user, cpu, address, false);
+}
+
+static bool host_chassis_edge_service_stage_select(void* user, CPUState* cpu, u32 address) {
+    return host_chassis_edge_service_with(user, cpu, address, true);
 }
 
 // Host-only CPU state has no representation in the retail OSContext image.
@@ -7856,6 +7898,11 @@ int main(int argc, char** argv) {
     // host_chassis_edge_service. BLUEWAKE_PER_BLOCK_TURNS=1 restores one turn
     // per block for a regression. (BLUEWAKE_CHASSIS_BUDGET is still honoured so
     // existing scripts keep working.)
+    // Before the per-block hooks are registered: they include the stage
+    // select's only when it is on (BLUEWAKE_STAGE_SELECT, its toggle or a warp).
+    bluewake_stage_select_attach();
+    CanSkipObservationFn skip_observation =
+        bluewake_stage_select_live ? host_can_skip_observation_stage_select : host_can_skip_observation;
     if (getenv("BLUEWAKE_PER_BLOCK_TURNS") == NULL) {
         g_chassis_service_each_block =
             getenv("BLUEWAKE_CHASSIS_SERVICE") != NULL;
@@ -7866,7 +7913,8 @@ int main(int argc, char** argv) {
         if (g_chassis_service_each_block)
             fprintf(stderr, "[chassis] service-each-block=on\n");
         if (set_edge_service)
-            set_edge_service(host_chassis_edge_service, &cpu);
+            set_edge_service(bluewake_stage_select_live ? host_chassis_edge_service_stage_select
+                                                        : host_chassis_edge_service, &cpu);
     }
     {
         typedef bool (*CanSkipFn)(void*, const CPUState*, u32);
@@ -7883,7 +7931,8 @@ int main(int argc, char** argv) {
                           dlsym(lib, "bluewake_set_edge_service") != NULL;
         const bool enabled = direct_calls != NULL && direct_calls(
             want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
-            &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL);
+            &g_interrupts.pi_cause, &g_interrupts.pi_mask,
+            bluewake_stage_select_live ? host_direct_can_skip_stage_select : host_direct_can_skip, NULL);
         typedef int (*EdgeFilterFn)(bool);
         EdgeFilterFn edge_filter = (EdgeFilterFn)
             dlsym(lib, "bluewake_composite_edge_filter");
@@ -7895,35 +7944,35 @@ int main(int argc, char** argv) {
         typedef int (*NativeJ3DFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
         NativeJ3DFn native_j3d = (NativeJ3DFn)dlsym(lib, "bluewake_composite_native_j3d_v1");
         const bool want = host_feature_wanted("BLUEWAKE_NATIVE_J3D");
-        const bool enabled = native_j3d != NULL && native_j3d(want, host_can_skip_observation, NULL);
+        const bool enabled = native_j3d != NULL && native_j3d(want, skip_observation, NULL);
         fprintf(stderr, "[chassis] native-j3d=%s\n", enabled ? "on" : "off");
     }
     {
         typedef int (*NativeGameMathFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
         NativeGameMathFn native_game_math = (NativeGameMathFn)dlsym(lib, "bluewake_composite_native_game_math_v1");
         const bool want = host_feature_wanted("BLUEWAKE_NATIVE_GAME_MATH");
-        const bool enabled = native_game_math != NULL && native_game_math(want, host_can_skip_observation, NULL);
+        const bool enabled = native_game_math != NULL && native_game_math(want, skip_observation, NULL);
         fprintf(stderr, "[chassis] native-game-math=%s\n", enabled ? "on" : "off");
     }
     {
         typedef int (*NativeSkinFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
         NativeSkinFn native_skin = (NativeSkinFn)dlsym(lib, "bluewake_composite_native_skin_v1");
         const bool want = host_feature_wanted("BLUEWAKE_NATIVE_SKIN");
-        const bool enabled = native_skin != NULL && native_skin(want, host_can_skip_observation, NULL);
+        const bool enabled = native_skin != NULL && native_skin(want, skip_observation, NULL);
         fprintf(stderr, "[chassis] native-skin=%s\n", enabled ? "on" : "off");
     }
     {
         typedef int (*NativeVecFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
         NativeVecFn native_vec = (NativeVecFn)dlsym(lib, "bluewake_composite_native_vec_v1");
         const bool want = host_feature_wanted("BLUEWAKE_NATIVE_VEC");
-        const bool enabled = native_vec != NULL && native_vec(want, host_can_skip_observation, NULL);
+        const bool enabled = native_vec != NULL && native_vec(want, skip_observation, NULL);
         fprintf(stderr, "[chassis] native-vec=%s\n", enabled ? "on" : "off");
     }
     {
         typedef int (*NativeMathFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
         NativeMathFn native_math = (NativeMathFn)dlsym(lib, "bluewake_composite_native_math_v1");
         const bool want = host_feature_wanted("BLUEWAKE_NATIVE_MATH");
-        const bool enabled = native_math != NULL && native_math(want, host_can_skip_observation, NULL);
+        const bool enabled = native_math != NULL && native_math(want, skip_observation, NULL);
         fprintf(stderr, "[chassis] native-math=%s\n", enabled ? "on" : "off");
     }
     BluewakeSetGatherWord set_gather_word = (BluewakeSetGatherWord)
@@ -7950,7 +7999,6 @@ int main(int argc, char** argv) {
     bluewake_fps_watch_attach(&cpu);
     bluewake_fast_load_attach(&cpu);
     bluewake_quick_doors_attach(&cpu);
-    bluewake_stage_select_attach();
     bluewake_draw_tags_attach(&cpu);
     bluewake_haptics_attach(&cpu);
 
