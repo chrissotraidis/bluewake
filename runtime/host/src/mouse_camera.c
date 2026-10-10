@@ -626,8 +626,11 @@ void bluewake_mouse_camera_pad(DolPadState* pad) {
         bw_stick_tap_update(&g_enter_from, g_retrace, first_person_tap, g_first_person, 30u);
     if (zoom_action == BW_STICK_ZOOM_FINISHED)
         fprintf(stderr, "[stick] camera distance x%.2f\n", g_zoom);
-    if (g_stick_zooms && sqrt(left_x * left_x + left_y * left_y) > kStickInUse)
-        pad->stick_x = pad->stick_y = 0; // it zooms (aim_frame), so it does not also aim
+    // Pushed mostly up or down it zooms (aim_frame), so it does not also aim.
+    // Mostly left or right it is the game's: "keep this picture?" and the
+    // gallery choose with it, and the zoom flag stays set there (#191).
+    if (g_stick_zooms && sqrt(left_x * left_x + left_y * left_y) > kStickInUse && fabs(left_y) >= fabs(left_x))
+        pad->stick_x = pad->stick_y = 0;
     g_stick_click_down = click;
     if (g_stick_owns || g_stick_aims) {
         // view_frame turns the view by the stick, and aim_frame aims by it:
@@ -812,7 +815,7 @@ static void aim_frame(CPUState* cpu, u32 player) {
         stick_turn(x, y, kGameFrameSeconds, g_stick_aim_speed, &stick_yaw, &stick_pitch);
         // The left stick's up zooms in, as far as it is pushed (past the
         // dead zone); the D-pad at full speed.
-        double push = -left_y;
+        double push = fabs(left_y) >= fabs(left_x) ? -left_y : 0.0; // sideways is the game's (#191)
         push = fabs(push) <= kStickDeadZone ? 0.0 : (push - copysign(kStickDeadZone, push)) / (1.0 - kStickDeadZone);
         if (zoom != 0)
             push = zoom;
