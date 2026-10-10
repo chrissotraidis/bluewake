@@ -159,6 +159,23 @@ def keep_unchanged_times(root, before):
     return changed, total
 
 
+def watched_inputs():
+    """What the prepared composite source takes from the app's own code: the
+    guest addresses it names, as the preparation scripts read them
+    (direct_calls.py, which native_entries.py and native_game_math.py share,
+    and inline_save_restore_gpr.py). An app change that names no new address
+    leaves the source as it is, so --host-only goes straight to compiling."""
+    import importlib.util
+    digest = hashlib.sha256()
+    for name in ("direct_calls", "inline_save_restore_gpr"):
+        spec = importlib.util.spec_from_file_location(f"bw_{name}", ROOT / "scripts/windows" / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        addresses = ",".join(f"{a:08X}" for a in sorted(module.watched_addresses()))
+        digest.update(f"{name}:{addresses};".encode())
+    return digest.digest()
+
+
 def tree_digest(root):
     """scripts/ios/composite_manifest.py's digest of a generated tree."""
     out = subprocess.check_output([sys.executable, str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
@@ -595,13 +612,9 @@ int main(void) {
                      ROOT / "scripts/windows/lean_memory.py", Path(__file__)]):
             if f.is_file():
                 inputs.update(f.read_bytes())
-        if self.args.direct_calls or self.args.native_game_math:
-            # The source-derived watch list is part of the prepared module.
-            for folder in ("runtime/host/src", "windows/src"):
-                for path in sorted((ROOT / folder).rglob("*")):
-                    if path.suffix in (".c", ".h", ".cpp", ".mm", ".m"):
-                        inputs.update(str(path.relative_to(ROOT)).encode())
-                        inputs.update(path.read_bytes())
+        if self.args.direct_calls or self.args.native_game_math or getattr(self.args, "native_entries", False):
+            # The source-derived watch lists are part of the prepared module.
+            inputs.update(watched_inputs())
         inputs = inputs.hexdigest()
         current = o / "composite-src"
         saved = (o / "composite-final.digest").read_text().strip() if (o / "composite-final.digest").exists() else ""
