@@ -44,6 +44,18 @@ Useful options:
     --no-mods      skip the widescreen and Better Wind Waker variants
     --opt-level 1  faster to compile, a little slower in game
     --jobs N       parallel compile jobs (default: all cores, limited by memory)
+    --host-only    after pulling a change to the app's own code (runtime/host/src,
+                   linux/src): keep the last build's optimization profile instead
+                   of training again, so only what the change reaches recompiles
+
+A rebuild recompiles only the parts of the game module whose source changed.
+After a change to the app alone, such as a new setting or mod hook, a normal
+rebuild still trains again (the training plays the game with the app), which takes
+most of the time; `--host-only` skips that. On an i5-12600KF the stage select's
+hooks went in this way in 3½ minutes instead of 33: 16 of the 825 source files
+changed, and the game module those steps make is byte-identical to a full
+build's from the same profile. Run it from the same checkout and `--out` as the
+build it updates.
 
 ## Play
 

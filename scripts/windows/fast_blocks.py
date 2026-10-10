@@ -44,6 +44,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import chunk_pool  # noqa: E402
+
 # Keep the four SDK leaves reserved by the donor's optional native-math
 # certification unchanged. The generic transform does not require importing
 # native replacements or enabling them in a player build.
@@ -304,6 +307,18 @@ def transform(text, lean=False):
     return converted, blocks
 
 
+_LEAN = False
+
+
+def _start(lean):
+    global _LEAN
+    _LEAN = lean
+
+
+def _one(path):
+    return chunk_pool.rewrite(path, lambda text: transform(text, _LEAN), changed=bool)
+
+
 def main():
     args = sys.argv[1:]
     lean = "--lean" in args
@@ -314,18 +329,8 @@ def main():
     chunks = sorted(root.glob("chunks_*/*.c"))
     if not chunks:
         sys.exit(f"no chunks under {root}")
-    blocks = files = 0
-    for path in chunks:
-        with open(path, encoding="utf-8", newline="") as file:
-            original = file.read()
-        converted, count = transform(original, lean)
-        if count:
-            temporary = path.with_suffix(".c.tmp")
-            with open(temporary, "w", encoding="utf-8", newline="") as file:
-                file.write(converted)
-            temporary.replace(path)
-            blocks += count
-            files += 1
+    counts = chunk_pool.map_chunks(_one, chunks, _start, (lean,))
+    blocks, files = sum(counts), sum(1 for count in counts if count)
     print(f"{'lean ' if lean else ''}prepaid block copies: {blocks} blocks in {files} chunks")
 
 

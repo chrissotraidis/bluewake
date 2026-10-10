@@ -19,6 +19,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import chunk_pool  # noqa: E402
+
 MARK = "/* bluewake: return dispatch range tests (scripts/windows/return_ranges.py) */\n"
 INCLUDE = '#include "../generated.h"\n'
 DISPATCH = re.compile(r"^return_dispatch_[0-9A-F]{8}:$")
@@ -53,23 +56,17 @@ def transform(text):
     return "\n".join(out).replace(INCLUDE, INCLUDE + MARK, 1), done
 
 
+def _one(path):
+    return chunk_pool.rewrite(path, transform, changed=bool)
+
+
 def main():
     root = Path(sys.argv[1])
     chunks = sorted(root.glob("chunks_*/*.c"))
     if not chunks:
         sys.exit(f"no chunks under {root}")
-    dispatches = files = 0
-    for path in chunks:
-        with open(path, encoding="utf-8", newline="") as file:
-            original = file.read()
-        converted, count = transform(original)
-        if count:
-            temporary = path.with_suffix(".c.tmp")
-            with open(temporary, "w", encoding="utf-8", newline="") as file:
-                file.write(converted)
-            temporary.replace(path)
-            dispatches += count
-            files += 1
+    counts = chunk_pool.map_chunks(_one, chunks)
+    dispatches, files = sum(counts), sum(1 for count in counts if count)
     print(f"return dispatch range tests: {dispatches} in {files} chunks")
 
 

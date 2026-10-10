@@ -35,49 +35,60 @@ composite() {  # DOL_DIR RELS_DIR RELS_BIN MAIN_DOL OUT
         --main-dol "$4" --output-dir "$5" | tail -1
 }
 
-echo "==> widescreen"
-mkdir -p "$M/widescreen"
-python3 "$root/scripts/mods/gecko_apply.py" "$root/mods/widescreen/GZLE01.gecko" "$B/game/main.dol" \
-    "$M/widescreen/main.dol" "$M/widescreen/runtime.json"
-translate "$M/widescreen/main.dol" "$M/widescreen/translated"
-composite "$M/widescreen/translated/dol/generated" "$B/translated/rels/generated/rels" "$B/game/rels" \
-    "$M/widescreen/main.dol" "$M/widescreen/composite-src"
+widescreen() {
+    echo "==> widescreen"
+    mkdir -p "$M/widescreen"
+    python3 "$root/scripts/mods/gecko_apply.py" "$root/mods/widescreen/GZLE01.gecko" "$B/game/main.dol"         "$M/widescreen/main.dol" "$M/widescreen/runtime.json"
+    translate "$M/widescreen/main.dol" "$M/widescreen/translated"
+    composite "$M/widescreen/translated/dol/generated" "$B/translated/rels/generated/rels" "$B/game/rels"         "$M/widescreen/main.dol" "$M/widescreen/composite-src"
+}
 
-echo "==> widescreen 16:10"
-# Derived from the 16:9 code; see scripts/mods/widescreen_aspect.py.
-mkdir -p "$M/widescreen1610"
-python3 "$root/scripts/mods/gecko_apply.py" "$root/mods/widescreen/GZLE01-16x10.gecko" "$B/game/main.dol" \
-    "$M/widescreen1610/main.dol" "$M/widescreen1610/runtime.json"
-translate "$M/widescreen1610/main.dol" "$M/widescreen1610/translated"
-composite "$M/widescreen1610/translated/dol/generated" "$B/translated/rels/generated/rels" "$B/game/rels" \
-    "$M/widescreen1610/main.dol" "$M/widescreen1610/composite-src"
+widescreen1610() {
+    echo "==> widescreen 16:10"
+    mkdir -p "$M/widescreen1610"
+    python3 "$root/scripts/mods/gecko_apply.py" "$root/mods/widescreen/GZLE01-16x10.gecko" "$B/game/main.dol"         "$M/widescreen1610/main.dol" "$M/widescreen1610/runtime.json"
+    translate "$M/widescreen1610/main.dol" "$M/widescreen1610/translated"
+    composite "$M/widescreen1610/translated/dol/generated" "$B/translated/rels/generated/rels" "$B/game/rels"         "$M/widescreen1610/main.dol" "$M/widescreen1610/composite-src"
+}
 
-echo "==> Better Wind Waker options"
-# The game's own executable and modules, translated with the option sites; the
-# variants are the chunks that hold a site (docs/MODS.md).
-sites=(--option-sites "$M/option-sites.txt")
-mkdir -p "$M/betterww"
-translate "$B/game/main.dol" "$M/betterww/translated" "$B/game/rels"
-composite "$M/betterww/translated/dol/generated" "$M/betterww/translated/rels/generated/rels" \
-    "$B/game/rels" "$B/game/main.dol" "$M/betterww/composite-src"
+betterww() {
+    echo "==> Better Wind Waker options"
+    # The game's own executable and modules translated with the option sites;
+    # the variants are the chunks that hold a site.
+    sites=(--option-sites "$M/option-sites.txt")
+    mkdir -p "$M/betterww"
+    translate "$B/game/main.dol" "$M/betterww/translated" "$B/game/rels"
+    composite "$M/betterww/translated/dol/generated" "$M/betterww/translated/rels/generated/rels"         "$B/game/rels" "$B/game/main.dol" "$M/betterww/composite-src"
+}
 
-echo "==> widescreen + Better Wind Waker options"
-mkdir -p "$M/combo"
-translate "$M/widescreen/main.dol" "$M/combo/translated"
-composite "$M/combo/translated/dol/generated" "$M/betterww/translated/rels/generated/rels" \
-    "$B/game/rels" "$M/widescreen/main.dol" "$M/combo/composite-src"
+combo() {  # NAME WIDESCREEN: a widescreen with the options (its main.dol, Better Wind Waker's RELs)
+    echo "==> $2 + Better Wind Waker options"
+    sites=(--option-sites "$M/option-sites.txt")
+    mkdir -p "$M/$1"
+    translate "$M/$2/main.dol" "$M/$1/translated"
+    composite "$M/$1/translated/dol/generated" "$M/betterww/translated/rels/generated/rels"         "$B/game/rels" "$M/$2/main.dol" "$M/$1/composite-src"
+}
 
-echo "==> widescreen 16:10 + Better Wind Waker options"
-mkdir -p "$M/combo1610"
-translate "$M/widescreen1610/main.dol" "$M/combo1610/translated"
-composite "$M/combo1610/translated/dol/generated" "$M/betterww/translated/rels/generated/rels" \
-    "$B/game/rels" "$M/widescreen1610/main.dol" "$M/combo1610/composite-src"
-sites=()
+base() {
+    composite "$B/translated/dol/generated" "$B/translated/rels/generated/rels" "$B/game/rels"         "$B/game/main.dol" "$M/composite-src.base"
+}
+
+# The trees are independent but for the combos, which need their widescreen's
+# main.dol and Better Wind Waker's RELs: two rounds of jobs at once (each runs
+# in its own subshell, so the option sites stay its own).
+together() {  # COMMAND...: each command at once; stop when any of them fails
+    local pids=() command status=0
+    for command in "$@"; do $command & pids+=($!); done
+    for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+    if [ "$status" != 0 ]; then
+        echo "build_mods: a variant failed (see the logs beside it in $M)" >&2
+        exit 1
+    fi
+}
+together widescreen widescreen1610 betterww base
+together "combo combo widescreen" "combo combo1610 widescreen1610"
 
 echo "==> variants into $B/composite-src"
-python3 "$root/scripts/generate_composite.py" --dol-dir "$B/translated/dol/generated" \
-    --rels-dir "$B/translated/rels/generated/rels" --rels-bin-dir "$B/game/rels" --main-dol "$B/game/main.dol" \
-    --output-dir "$M/composite-src.base" | tail -1
 python3 "$root/scripts/mods/build_mod_variants.py" --composite-src "$M/composite-src.base" --base-dol "$B/game/main.dol" \
     --mod "widescreen:$M/widescreen/composite-src:$M/widescreen/main.dol:$M/widescreen/runtime.json" \
     --mod "betterww:$M/betterww/composite-src:$B/game/main.dol" \
