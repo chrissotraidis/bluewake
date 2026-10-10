@@ -98,6 +98,9 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | Oct 9 | Hidden symbols on ELF (#218, merged) | i5-12600KF, Arch Linux (pdale-boop) | Outset, 2,400 retraces; P-cores | 276.5 G instructions | 254.9 G (−7.8%; cycles −1.4%) | Yes: identical checkpoints at all 468 stage-select places |
 | Oct 9 | Hidden symbols on ELF | i5-12600KF, 4 E-cores | Bird scene / Outset / Tower of the Gods in the boat; headless | 47.4 / 64.6 / 69.9 | 51.6 / 70.9 / 77.0 (+8.9 / +9.8 / +10.2%) | Yes |
 | Oct 9 | Hidden symbols on ELF, the build | i5-12600KF, clang 23 | Module compile; full build | 27:17; 44:06; 446.0 MB | 11:35; 28:08; 419.9 MB | |
+| Oct 9 | Hidden symbols on ELF | i5-6500 (4 cores), Debian 13, clang 19 (pdale-boop) | Bird scene / Outset, free play / Tower of the Gods in the boat; headless | 45.4 / 65.2 / 69.3 | 48.4 / 70.8 / 75.3 (+6.6 / +8.6 / +8.7%) | Yes, identical checkpoints |
+| Oct 9 | Hidden symbols on ELF, `perf stat` | i5-6500, Debian 13 | Outset, 2,400 retraces | 275.3 G instructions, 133.9 G cycles | 251.4 G (−8.7%), 124.2 G (−7.3%) | |
+| Oct 9 | Hidden symbols on ELF, the build | i5-6500, clang 19 | Module compile; full build | 90:05; 2 h 14 min; 440.5 MB | 54:21 (−40%); 1 h 37 min; 415.2 MB | |
 | Oct 10 | Profile of the game thread, lean 0.7.0 vs Wind Waker Recomp's port (LiquidAzir, #93) | Galaxy Z Fold 7 | Outset pier | BlueWake: translated module 120 M, host and runtime 40 M instr./retrace (`host_direct_can_skip` 23 M, edge service 8 M, GX writes 8 M, `bw_direct_call_ready` 7 M) | WWR: module 102 M, host 7 M | Different builds. Hidden symbols cost about 9 M on ARM64 (module 121 M without, 129 M with) while halving the compile; fusion halves draws there (3,059 to 1,338) without changing the game thread |
 
 The `--lean-blocks` rows: both builds from `acfaf32` with the parallel training (#202), each in a fresh `--out`
@@ -113,6 +116,11 @@ The Linux rows: both builds from `main` at `9285e07` with `--tour-playbacks 3`, 
 after the other and measured headless and unpaced, medians of three runs with the builds alternated, no core pinning.
 Each build's three runs give identical guest checkpoints (hashes of the CPU and all of main memory every 600 retraces); default and lean differ from the first one, as expected when lean copies change the cycle bookkeeping, so the hashes can't show whether play is the same. `perf stat` counted the whole process over 600 and 2,400
 retraces, twice per build; the 2,400-retrace counts are shown, and the repeats agree to within 0.2%.
+
+The i5-6500 hidden-symbol rows: `main` at `9285e07` and the same commit with #218 (`f0636c0`), clang 19.1.7,
+`--tour-playbacks 3`, each in a fresh `--out` folder, built one after the other. Measured the same way as the Linux rows
+above, in one sitting with the builds alternated and pinned to the four cores; `main` repeats its earlier rows there
+within a third of a percent. The two builds' guest checkpoints are identical at every state.
 
 ## The runbook
 

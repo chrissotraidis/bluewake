@@ -396,6 +396,7 @@ int main(void) {
                        + ("lean_blocks\n" if getattr(self.args, "lean_blocks", False) else "")).encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
                   + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py",
+                     ROOT / "scripts/windows/return_ranges.py",
                      ROOT / "scripts/windows/global_guest_cpu.py", ROOT / "scripts/windows/chunk_headers.py",
                      ROOT / "cmake/composite/inline_fp.h", ROOT / "cmake/composite/gather_pipe.h",
                      ROOT / "cmake/composite/gather_pipe.c", ROOT / "cmake/composite/gather_pipe_batch.h",
@@ -527,6 +528,12 @@ int main(void) {
         # one its comparison test was run on (it reports the rest as not hooked).
         if self.args.lean_memory:
             self.run("lean-memory", [sys.executable, ROOT / "scripts/windows/lean_memory.py", o / "composite-src"])
+        # A return into another chunk leaves the return dispatch before its switch
+        # (Elliott Tate's 7aca42a): with direct calls, as both shape how a chunk is
+        # left. Only the dispatch after the last label, which no native hash covers.
+        if self.args.direct_calls:
+            self.run("return-ranges", [sys.executable, ROOT / "scripts/windows/return_ranges.py",
+                                        o / "composite-src"])
         if self.args.native_entries:
             self.run("native-entries", [sys.executable, ROOT / "scripts/windows/native_entries.py",
                                          o / "composite-src"])
@@ -552,6 +559,7 @@ int main(void) {
                    "inline_fp_header_sha256": sha256_file(ROOT / "cmake/composite/inline_fp.h"),
                    "fixed_cpu_script_sha256": sha256_file(cpu_script),
                    "script_sha256": sha256_file(script),
+                   "return_ranges_sha256": sha256_file(ROOT / "scripts/windows/return_ranges.py"),
                    "base_digest": (o / "composite-src.digest").read_text().strip(),
                    "final_digest": digest}
         pending = o / "prepared-blocks.json.tmp"
