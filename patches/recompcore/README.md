@@ -117,3 +117,9 @@ player's last spot or `SDL_WINDOWPOS_CENTERED`.
 Patch 0162 is saulob's FPS overlay position (his RecompCore #12, carried onto `bluewake-next` as #20): the counter
 at the top center as before, or in a corner, set with `aurora_set_fps_overlay_position` or `DOL_AURORA_FPS_POSITION`.
 BlueWake's menus use it in pull request #106.
+
+Patch 0163 adds `dol_aurora_backend_name()`, the graphics API Aurora actually chose. The host logs it as
+`[renderer] NAME`, and on Linux and Windows says when it fell back to OpenGL, which is much slower than Vulkan (#56).
+Patch 0164 keeps Smooth Motion's in-between frames when the game runs slow on a CPU with 8 threads or more, where
+they don't compete with the game thread (#137); GPU overloads still drop them, and smaller CPUs keep the old rule
+(RecompCore #21).
