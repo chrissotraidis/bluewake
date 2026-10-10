@@ -10,7 +10,8 @@ became the default, the release was more than fixes.
 | | |
 | --- | --- |
 | Version | 0.7.0, build 6 (`version.json`, set at the freeze) |
-| Candidate commit | `c6094ec76c82700d5a56a28bf627c8179f686542` (#229, October 10) |
+| Candidate commit | `c6094ec76c82700d5a56a28bf627c8179f686542` (#229, October 10): what the Windows build and the IPA were built from |
+| Release commit | `66b33becc84edc425fd6185ec22bd0b0e3673afb` (#239): the candidate's code plus the fixed PadMint recipe and docs. The draft targets it. |
 | RecompCore | `ddd031b2a7f45fcbda37a49daac9b308b8d95da1` (patches 0160 to 0168) |
 | Previous release | 0.6.0, October 8 |
 
@@ -64,12 +65,13 @@ Thanks to Elliott Tate, pdale-boop, jkoehler11, cforain, saulob and LiquidAzir.
 
 | Check | Platform and device | Commit | Result |
 | --- | --- | --- | --- |
-| Windows build from the commit ([WINDOWS_BUILD_0.7.0.md](WINDOWS_BUILD_0.7.0.md)) | | | not yet |
-| Windows play: Outset, Forest Haven, Dragon Roost, with fusion on (and `DOL_GX_FUSE=0` for comparison) | | | not yet |
-| Windows controllers: at launch, rumble, Pictobox prompt, zoom | | | not yet |
+| Windows build from the commit ([WINDOWS_BUILD_0.7.0.md](WINDOWS_BUILD_0.7.0.md)) | Ryzen 7 5700U, Windows (Chris's PC) | `9422bd4` (code = `c6094ec`) | Pass: 92 minutes with 6 jobs (0.6.0: 4 hours), clang 22.1.3, `lean prepaid block copies: 443155 blocks in 813 chunks`. A 27-minute title session with `[gx] draw fusion on`, `[renderer] D3D12`, 102 million draws fused and no fatal lines. |
+| Windows play: Outset, Forest Haven, Dragon Roost, with fusion on (and `DOL_GX_FUSE=0` for comparison) | | | Not run (skipped at Chris's direction). Not a pass. |
+| Windows controllers: at launch, rumble, Pictobox prompt, zoom | | | Not run. |
 | Linux AppImage from a contributor's own disc, then the release check | | | not yet |
 | Mac: ten minutes of play with a controller connected at launch | | | not yet |
 | App-only IPA, PadMint audit, release check | Mac (M3 Max) | `c6094ec` (built from #229's branch, the same tree) | Pass: `BlueWake-v0.7.0-ios-unsigned.ipa` (5.4 MB, SHA-256 `8395fa00…61bf4`) reports 0.7.0 build 6 and holds no game module; PadMint 0.4.9 `audit` (0 address-named functions) and `check_public_assets.sh` pass. Uploaded to the v0.7.0 draft. |
-| Source zip and recipe | | | not yet |
-| `check_public_assets.sh` on every asset | | | not yet |
+| Source zip and recipe | Mac | `66b33be` | Pass (above). |
+| `check_public_assets.sh` on every asset | Mac (M3 Max) | `66b33be` | Pass. Windows zip: SHA-256 matches the PC (`1880822f…3957c`); 33 files, the same layout as 0.6.0; the gate's only finding is `containsTranslatedGameCode: true`, the accepted one. IPA, source zip (1,006 files) and recipe pass. All five files and `SHA256SUMS` are on the v0.7.0 **draft**; GitHub's digests match. |
+| PadMint recipe | Mac, PadMint 0.4.12 and 0.4.10 | `66b33be` | Pass after #239. At `c6094ec` every PadMint refused it ("needs a newer PadMint (it uses cc)"): the Linux target listed host compilers PadMint doesn't provide, which would have stopped every iPhone and iPad build. |
 
