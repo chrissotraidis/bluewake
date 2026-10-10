@@ -62,14 +62,14 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 
 ## After 0.7.0: catch up with Elliott, then the decompilation
 
-One pull request per row, measured on the benchmark (headless, unpaced, from save states) on an x86 PC, each row's
+While a release build is running on someone's PC, don't merge code into `main` (docs are fine): the build's check compares `main`'s code with the candidate. One pull request per row, measured on the benchmark (headless, unpaced, from save states) on an x86 PC, each row's
 result in PERFORMANCE.md's "Results". Elliott's `windows-release` is cloned at
 `~/.codex/work-bluewake-mac-loop/research/Wind-Waker-Recomp`; his reports are in its `docs/status/CURRENT.md`.
 
 | # | Step | Who | Done when |
 | --- | --- | --- | --- |
 | 1 | **Fusion on Mac and Linux.** Play Forest Haven with `DOL_GX_FUSE=1` on this Mac and on a Linux PC; if both are clean, drop the host's off switch. | Codex on the Mac; pdale-boop or jkoehler11 on Linux | Merged, a "Results" row |
-| 2 | **Early return dispatch and the watch-list fix** (his `return_ranges.py` from `7aca42a`, and `5edeacc`), a builder step each, with the preparation cache in mind (#209). The `lfs` half of `7aca42a` is #228. | Codex; a contributor's build | 2 to 3% on the game thread, plays the same |
+| 2 | **Early return dispatch and the watch-list fix** (his `return_ranges.py` from `7aca42a`, and `5edeacc`). The `lfs` half of `7aca42a` is #228. **Ported October 10: #235 and #234**, checked on the prepared lean source (811 of 811 dispatches, repeatable, syntax-clean) and by the tests. Held until the Windows 0.7.0 hand-off, so `main`'s code stays the candidate's while it builds. | Codex; a contributor's build | Merged after the hand-off; 2 to 3% on the game thread, plays the same |
 | 3 | **Natives round 5** (the GX SDK's FIFO writers, `native_gx_gen.py`) and **round 4** (animation, collision setup, colour), with his comparison tests. First rerun #179's certification on a lean build with jkoehler11's Linux loader (#194): it should certify now. | Codex; jkoehler11 | Certified counts in the build log; 2 to 6% |
 | 4 | **Natives round 7** (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py`. | Codex | Certified; about 4 points at Forest Haven |
 | 5 | **His upload and vertex changes** (RecompCore `6f52a68` to `400728a`), merged by hand with patch 0157. Check dungeon maps (#74), HD packs and lava colours before and after. | Codex | Merged on `bluewake-next`; maps and packs unchanged |
