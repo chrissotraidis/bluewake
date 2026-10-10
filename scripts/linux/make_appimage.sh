@@ -22,7 +22,7 @@
 # instead of downloading one.
 set -euo pipefail
 
-for tool in appimagetool desktop-file-validate zsyncmake; do
+for tool in "${APPIMAGETOOL:-appimagetool}" desktop-file-validate zsyncmake; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "make_appimage: $tool not found on PATH" >&2
         exit 1
