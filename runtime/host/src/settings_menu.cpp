@@ -66,7 +66,7 @@ const char* const kKeys[] = {
     "BLUEWAKE_MOUSE_INVERT_Y",  "BLUEWAKE_MOUSE_BUTTONS",   "BLUEWAKE_KEY_MAP",
     "BLUEWAKE_STICK_CAMERA",    "BLUEWAKE_STICK_CAMERA_SPEED",
     "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_STICK_AIM_SPEED",
-    "BLUEWAKE_AIM_INVERT_Y",
+    "BLUEWAKE_STICK_ZOOM",      "BLUEWAKE_STICK_ZOOM_SPEED", "BLUEWAKE_AIM_INVERT_Y",
     "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH", "BLUEWAKE_HAPTICS_TRIGGERS",
     "BLUEWAKE_CLIMB",           "BLUEWAKE_CLIMB_STAMINA",
     "BLUEWAKE_FOREST_WATER_KEEP_TREES", "BLUEWAKE_FOREST_WATER_30_MINUTES",
@@ -576,6 +576,22 @@ void controls_tab() {
         set_env("BLUEWAKE_STICK_AIM_SPEED", text);
         bluewake_mouse_camera_reload();
     }
+    bool stick_zoom = env_on("BLUEWAKE_STICK_ZOOM", false);
+    if (ImGui::Checkbox("Hold the right-stick click and move it up/down to zoom", &stick_zoom)) {
+        set_env("BLUEWAKE_STICK_ZOOM", stick_zoom ? "1" : "0");
+        bluewake_mouse_camera_reload();
+    }
+    ImGui::BeginDisabled(!stick_zoom);
+    float zoom_speed = static_cast<float>(std::atof(env("BLUEWAKE_STICK_ZOOM_SPEED", "1.275").c_str()));
+    if (!(zoom_speed > 0.f))
+        zoom_speed = 1.275f;
+    if (slider("Controller zoom speed", &zoom_speed, 0.25f, 2.f, "%.3fx")) {
+        char text[16];
+        std::snprintf(text, sizeof text, "%.3f", zoom_speed);
+        set_env("BLUEWAKE_STICK_ZOOM_SPEED", text);
+        bluewake_mouse_camera_reload();
+    }
+    ImGui::EndDisabled();
     bool invert_x = env_on("BLUEWAKE_STICK_CAMERA_INVERT_X", false);
     if (ImGui::Checkbox("Invert the right stick's left and right", &invert_x)) {
         set_env("BLUEWAKE_STICK_CAMERA_INVERT_X", invert_x ? "1" : "0");
@@ -593,7 +609,7 @@ void controls_tab() {
         bluewake_mouse_camera_reload();
     }
     ImGui::PushTextWrapPos();
-    ImGui::TextDisabled(stick ? "Click the right stick for first person. In the telescope and Picto Box, the left stick or D-pad zooms."
+    ImGui::TextDisabled(stick ? "Click the right stick for first person. When controller zoom is on, hold it and move the stick up/down. In the telescope and Picto Box, the left stick or D-pad zooms."
                               : "The game's right stick: its left and right follow Better Wind Waker's "
                                 "\"Invert camera\" (Gameplay).");
 
@@ -636,6 +652,7 @@ void controls_tab() {
     ImGui::TextUnformatted("Controller");
     ImGui::BulletText("Left bumper jump, left stick click sprint (until Link stops), Back this menu");
     ImGui::BulletText("Right stick: turns the camera and aims; its click is first person (and back out)");
+    ImGui::BulletText("Optional camera zoom: hold the right-stick click and move it up/down");
     ImGui::BulletText("Telescope and Picto Box: the right stick aims, the left stick (or D-pad) zooms");
     ImGui::PopTextWrapPos();
 }
