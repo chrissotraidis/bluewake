@@ -750,6 +750,26 @@ void load_mac_font() {
     }
 }
 
+// For the first 20 seconds, when Aurora fell back to OpenGL: it runs at a
+// fraction of Vulkan's speed, and the only sign was the frame rate (#56).
+void draw_renderer_notice(Uint64 now) {
+#if !defined(__APPLE__)
+    static const char* api = dol_aurora_backend_name();
+    if (api == nullptr || std::strncmp(api, "OpenGL", 6) != 0 || now - g_installed_ms > 20000)
+        return;
+    ImGui::SetNextWindowPos(ImVec2(12.f, 12.f));
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    ImGui::Begin("##renderer-notice", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                     ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+    ImGui::Text("Running on %s, which is much slower than Vulkan.", api);
+    ImGui::TextUnformatted("Install the Vulkan loader (libvulkan1 or vulkan-loader) and your GPU's Vulkan driver.");
+    ImGui::End();
+#else
+    (void)now;
+#endif
+}
+
 void draw(void*) {
     static Uint64 checked;
     const Uint64 now = SDL_GetTicks();
@@ -763,6 +783,7 @@ void draw(void*) {
     }
     test_hook();
     draw_climb_wheel();
+    draw_renderer_notice(now);
     if (!g_open)
         return;
     ImGuiIO& io = ImGui::GetIO();

@@ -7254,6 +7254,17 @@ int main(int argc, char** argv) {
             bluewake_settings_menu_install();
             fprintf(stderr, "[host] renderer=aurora window=%ux%u\n",
                     aurora_config.window_width, aurora_config.window_height);
+            // Which graphics API Aurora chose: OpenGL on a desktop is a fallback
+            // (Linux without its Vulkan loader ran the bird scene at 4%, #56).
+            const char* api = dol_aurora_backend_name();
+            fprintf(stderr, "[renderer] %s\n", api != NULL ? api : "unknown");
+#if !defined(__APPLE__)
+            if (api != NULL && strncmp(api, "OpenGL", 6) == 0)
+                fprintf(stderr,
+                        "[renderer] fell back to %s, which is much slower: install Vulkan (on Linux the "
+                        "Vulkan loader, libvulkan1 or vulkan-loader, and your GPU's Vulkan driver)\n",
+                        api);
+#endif
         } else if (renderer_requested) {
             fprintf(stderr, "[host] Aurora renderer initialization failed\n");
             return 1;
