@@ -19,7 +19,8 @@ Steps, each logged under OUT/logs:
   5 translate    the game's PowerPC code to C (DolRecomp)
   6 generate     the composite source, compared with the verified digest
   7 mods         widescreen 16:9 and 16:10 and Better Wind Waker's options (--no-mods skips)
-  8 compile      the game module, gGZLE01_recomp.dll (the long step)
+  8 compile      the game module, gGZLE01_recomp.dll (the long step), after training a
+                 local optimization profile (--no-train skips; --host-only keeps the last build's)
   9 app          BlueWake.exe, Aurora (Direct3D 12 through Dawn), SDL3 and the DSP
  10 package      the app folder OUT/BlueWake, ready to run
 
@@ -127,6 +128,35 @@ def sync_tree(new, current):
             else:
                 target.unlink()
     shutil.rmtree(new)
+
+
+def file_times(root):
+    """Each file's content hash and modification time under `root` (see keep_unchanged_times)."""
+    times = {}
+    if root.exists():
+        for path in root.rglob("*"):
+            if path.is_file():
+                times[path.relative_to(root)] = (hashlib.sha256(path.read_bytes()).digest(), path.stat().st_mtime_ns)
+    return times
+
+
+def keep_unchanged_times(root, before):
+    """Give every file whose content is what it was before regenerating its old
+    modification time back. The composite source is regenerated whole and then
+    rewritten by the mods and the prepared optimizations, so every file is new on
+    disk even when its final content is not; Ninja then recompiles only the files
+    that really changed. Returns (changed, total)."""
+    changed = total = 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        total += 1
+        old = before.get(path.relative_to(root))
+        if old is not None and hashlib.sha256(path.read_bytes()).digest() == old[0]:
+            os.utime(path, ns=(path.stat().st_atime_ns, old[1]))
+        else:
+            changed += 1
+    return changed, total
 
 
 def tree_digest(root):
@@ -587,6 +617,7 @@ int main(void) {
             # chunks a later step rewrote (native_game_math.py refuses them).
             self.prepared_current = not (self.mods and self.mods_pending)
         else:
+            self.source_times = file_times(current)
             sync_tree(new, current)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
@@ -1060,6 +1091,39 @@ int main(void) {
             die(f"the training playback wrote no profile (see {log})")
         return raw
 
+    def kept_profile(self):
+        """--host-only: the profile the last build in --out compiled with, whatever has changed since.
+        The app's code is part of the training's fingerprint (the playbacks run it), so an app change
+        would train again; the game code the profile counts is the same, so it still fits the module."""
+        work = self.out / "pgo-local"
+        profile = work / "composite.profdata"
+        receipt = work / "training.json"
+        packaged = self.out / "BlueWake" / MODULE
+        if not packaged.exists():
+            die(f"--host-only needs an earlier full build in {self.out}; there is no {packaged}")
+        if profile.exists() and receipt.exists():
+            print(f"keeping the optimization profile of the last build ({profile})")
+            return self.hashed_profile(profile)
+        try:
+            provenance = json.loads((self.out / "BlueWake/BuilderProvenance.json").read_text())
+        except (OSError, ValueError):
+            provenance = {}
+        if provenance.get("local_training") is False:
+            print("the last build had no optimization profile (--no-train); none is used now either")
+            return None
+        die(f"--host-only: no optimization profile in {work}; run a full build first")
+
+    def report_recompiled(self):
+        """How much of the game module --host-only recompiled: Ninja's last [done/total] is the
+        number of steps it had to run (a full build is one per chunk, about 830)."""
+        log = self.logs / "composite-build.log"
+        steps = re.findall(rb"\[(\d+)/(\d+)\]", log.read_bytes()) if log.exists() else []
+        ran = int(steps[-1][1]) if steps else 0
+        if ran == 0:
+            print("game module: unchanged; nothing recompiled")
+        else:
+            print(f"game module: {ran} build steps (the chunks the change reaches, and the link)")
+
     def hashed_profile(self, profile):
         folder = self.out / "profiles"
         folder.mkdir(exist_ok=True)
@@ -1205,19 +1269,28 @@ int main(void) {
         else:
             self.build_mods()
         self.prepare_blocks()
+        if getattr(self, "source_times", None):
+            changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
+            print(f"composite source: {changed} of {total} files changed since the last build")
         if not (args.no_train or args.no_pgo):
             self.llvm_profdata = str(Path(self.clang).with_name("llvm-profdata.exe"))
             if not Path(self.llvm_profdata).is_file():
                 die("llvm-profdata.exe is missing beside Visual Studio's clang; install its LLVM tools "
                     "or explicitly use --no-train for an untrained build")
-            step("local optimization training (instrumented module and private opening playbacks)")
-            self.profile = self.train()
+            if args.host_only:
+                step("local optimization training: kept from the last build (--host-only)")
+                self.profile = self.kept_profile()
+            else:
+                step("local optimization training (instrumented module and private opening playbacks)")
+                self.profile = self.train()
         else:
             print("local training skipped: compiling without an optimization profile")
         step(f"8/10 compile the game module (-O{args.opt_level}, -march={args.march}; this is the long step)")
         start = time.monotonic()
         module = self.compile_module()
         print(f"game module: {module} ({int(time.monotonic() - start) // 60} min)")
+        if args.host_only:
+            self.report_recompiled()
         step("9/10 build the app")
         exe = self.build_app()
         print(f"app: {exe}")
@@ -1282,6 +1355,10 @@ def main():
                         help="skip local optimization training; compile without a profile")
     parser.add_argument("--no-pgo", action="store_true", help="alias for --no-train")
     parser.add_argument("--retrain", action="store_true", help="record a new local profile instead of reusing one")
+    parser.add_argument("--host-only", action="store_true",
+                        help="after a change to the app's own code (runtime/host/src, windows/src): keep the "
+                             "optimization profile of the last build in --out instead of training again, so the "
+                             "game module recompiles only what the change touches and the app is rebuilt")
     parser.add_argument("--tour-playbacks", type=int, default=None,
                         help="training: how many playbacks play the tour at once (default: logical CPUs / 3)")
     parser.add_argument("--prepared-blocks", action="store_true",
@@ -1340,6 +1417,8 @@ def main():
             setattr(args, name, True)
     if args.no_lean_blocks:
         args.lean_blocks = False
+    if args.host_only and (args.retrain or args.no_train or args.no_pgo):
+        parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:

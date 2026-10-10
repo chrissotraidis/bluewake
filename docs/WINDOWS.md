@@ -107,6 +107,7 @@ Options (`--help` lists all):
 | `--source-only` | Stop after generating the source: checks your tools, disc and translation in a few minutes |
 | `--no-train` / `--no-pgo` | Explicitly skip local training and compile without a profile |
 | `--retrain` | Record a new local profile instead of reusing a matching one |
+| `--host-only` | After pulling a change to the app's own code (`runtime/host/src`, `windows/src`): keep the last build's optimization profile instead of training again, so only what the change reaches recompiles |
 | `--no-mods` | Skip the mods (widescreen 16:9 and 16:10, Better Wind Waker's options) |
 | `--conservative` | Build the plain translation. By default the builder prepares the same optimizations as Wind Waker Recomp's builds (prepaid blocks, fixed CPU and RAM storage, inline floating point and memory access, direct calls, register inlining, and the certified native J3D, vector, game-math, skinning and matrix functions); with `--conservative`, each `--...` option adds one back |
 | `--no-lean-blocks` | BlueWake's conservative prepaid block copies instead of Elliott Tate's lean ones (on by default since October 10, as Wind Waker Recomp's builds make them). The module is about a quarter smaller and compiles faster, and the game runs 5 to 12% slower ([PERFORMANCE.md](PERFORMANCE.md#results)) |
@@ -117,6 +118,11 @@ Options (`--help` lists all):
 | `--march LEVEL` | CPU level for the game module (default `x86-64-v3`) |
 | `--console` | Build `BlueWake.exe` as a console program |
 | `--out DIR` | Build directory (default `build\windows`) |
+
+A rebuild recompiles only the parts of the game module whose source changed. After a change to the app alone,
+such as a new setting or mod hook, a normal rebuild still trains again (the training plays the game with the
+app), which takes most of the time; `--host-only` skips that. Run it from the same checkout and `--out` as the
+build it updates.
 
 Local profiles stay inside the private build directory. Training uses new isolated
 data folders, original 30 Hz gameplay and interpolation off; it never uses the
