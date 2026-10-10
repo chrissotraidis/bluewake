@@ -281,6 +281,26 @@ BLUEWAKE_TRACE_STORAGE(g_rel_destructors_trace);
 BLUEWAKE_TRACE_STORAGE(g_rel_lifecycle_trace);
 BLUEWAKE_TRACE_STORAGE(g_rel_calls_trace);
 BLUEWAKE_TRACE_STORAGE(g_gx_entry_trace);
+// The GX entries BLUEWAKE_TRACE_GX_ENTRY reports (GXBegin, GXCopyDisp, GXLoadTexObj,
+// GXCallDisplayList, each up to the next function; Elliott Tate's 5edeacc). Only that
+// trace reads them, and builds with the trace never skip the chassis for a direct call
+// (host_direct_can_skip), so the builders' watch list (scripts/windows/direct_calls.py)
+// leaves them out: in release builds calls to them no longer go round the chassis loop.
+// bluewake-unwatched-begin
+static const u32 g_gx_entry_trace_ranges[][2] = {
+    {0x803230C4u, 0x803231B4u},
+    {0x80323D50u, 0x80323EACu},
+    {0x80324EE8u, 0x80324F3Cu},
+    {0x80326B80u, 0x80326BF0u},
+};
+// bluewake-unwatched-end
+
+static bool host_gx_entry_traced(u32 pc) {
+    for (size_t i = 0; i < sizeof g_gx_entry_trace_ranges / sizeof g_gx_entry_trace_ranges[0]; ++i)
+        if (pc >= g_gx_entry_trace_ranges[i][0] && pc < g_gx_entry_trace_ranges[i][1])
+            return true;
+    return false;
+}
 BLUEWAKE_TRACE_STORAGE(g_dispatch_terminal_trace);
 BLUEWAKE_TRACE_STORAGE(g_alarm_state_trace);
 static u32 g_pad_si_data_watch;
@@ -13721,10 +13741,7 @@ int main(int argc, char** argv) {
             bg_postmethod_trace_reports++;
         }
         if (g_gx_entry_trace && gx_entry_trace_reports < 64u &&
-            ((dispatch_input_pc >= 0x803230C4u && dispatch_input_pc < 0x803231B4u) ||
-             (dispatch_input_pc >= 0x80323D50u && dispatch_input_pc < 0x80323EACu) ||
-             (dispatch_input_pc >= 0x80324EE8u && dispatch_input_pc < 0x80324F3Cu) ||
-             (dispatch_input_pc >= 0x80326B80u && dispatch_input_pc < 0x80326BF0u))) {
+            host_gx_entry_traced(dispatch_input_pc)) {
             fprintf(stderr,
                     "[gx-entry] pc=0x%08X lr=0x%08X r3=0x%08X r4=0x%08X "
                     "r5=0x%08X r6=0x%08X blocks=%llu\n",
