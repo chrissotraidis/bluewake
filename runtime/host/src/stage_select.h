@@ -396,6 +396,7 @@ static inline u16 bluewake_stage_select_pad_buttons(u64 retrace, u16 buttons) {
 #define BLUEWAKE_STAGE_SELECT_LINK 0x803CA754u         // play.mpPlayerPtr[0]
 #define BLUEWAKE_STAGE_SELECT_MENU_DELETE 0x8022F320u  // dScnMenu_Delete
 #define BLUEWAKE_STAGE_SELECT_MENU_RETURN 0x8022F078u  // after dScnMenu_Execute's change to the play scene
+#define BLUEWAKE_STAGE_SELECT_AUDIO_LOAD_TIMER 0x803F687Bu // mDoAud_zelAudio_c::mLoadTimer (u8, r13 - 30821)
 #define BLUEWAKE_STAGE_SELECT_CUR_STAGE 0x803C9D3Cu    // play.mCurStage, laid out as mNextStage's first 12 bytes
 #define BLUEWAKE_STAGE_SELECT_SAVE_DATE 0x803C4C30u    // dSv_player_status_b_c::mDate
 #define BLUEWAKE_STAGE_SELECT_PAD1_TRIG 0x803A4E22u    // g_mDoCPd_cpadInfo[0].mButtonTrig
@@ -780,6 +781,11 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
         bluewake_stage_select_kept = false;
     }
     if (cpu->lr == BLUEWAKE_STAGE_SELECT_MENU_RETURN && cpu->gpr[4] == BLUEWAKE_STAGE_SELECT_PLAY) {
+        // The menu names the chosen place for the music right after this
+        // (mDoAud_setSceneName), which is ignored while the audio load timer
+        // is set; only the play scene's loading clears it. Clear it here, so
+        // the place picked is the one the music hears about.
+        mem_write8(cpu, BLUEWAKE_STAGE_SELECT_AUDIO_LOAD_TIMER, 0u);
         if (bluewake_stage_select_going_back)
             bluewake_stage_select_go_back(cpu);
         return;
@@ -798,6 +804,11 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
         (mem_read16(cpu, BLUEWAKE_STAGE_SELECT_PAD1_HOLD) & BLUEWAKE_STAGE_SELECT_PAD_R) == 0u)
         return;
     cpu->gpr[4] = BLUEWAKE_STAGE_SELECT_MENU;
+    // changeGameScene names the save's own place for the music next, and the
+    // first name the music hears is the one it plays: with it, the first place
+    // picked in the menu had Outset's music. A set load timer makes the game
+    // ignore that call; the menu's change to the play scene clears it again.
+    mem_write8(cpu, BLUEWAKE_STAGE_SELECT_AUDIO_LOAD_TIMER, 2u);
     static bool told;
     if (!told)
         fprintf(stderr, "[stage-select] R held: the file's start goes to the stage select\n");
