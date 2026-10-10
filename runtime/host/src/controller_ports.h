@@ -69,6 +69,30 @@ static inline void bw_game_dead_zone(unsigned port) {
     }
 }
 
+// Player 1 to the controller you press a button on, while player 1 has never
+// been pressed (#155). An adapter such as Mayflash's reports all four of its
+// ports as controllers, and the first, which takes player 1, may be empty. A
+// player 1 that has been pressed keeps it, so a second controller never takes
+// over by accident. Call on every SDL_EVENT_GAMEPAD_BUTTON_DOWN.
+static inline void bw_player_one_button(SDL_JoystickID which) {
+    static SDL_JoystickID pressed; // the player 1 that has had a press
+    SDL_Gamepad* one = SDL_GetGamepadFromPlayerIndex(0);
+    const SDL_JoystickID one_id = one != NULL ? SDL_GetGamepadID(one) : 0;
+    if (which == one_id) {
+        pressed = which;
+        return;
+    }
+    if (one_id != 0 && pressed == one_id)
+        return;
+    SDL_Gamepad* pad = SDL_GetGamepadFromID(which);
+    if (pad == NULL || !SDL_SetGamepadPlayerIndex(pad, 0))
+        return;
+    pressed = which;
+    const char* name = SDL_GetGamepadName(pad);
+    fprintf(stderr, "[pad] '%s' is player 1 (pressed while player 1 was idle)
+", name ? name : "controller");
+}
+
 // The same handoff for controllers connected at launch (#138): Aurora adds them
 // while it starts, before the event observer is installed, so the observer never
 // sees them arrive and player 1 kept Aurora's dead zone. Call once it is installed.

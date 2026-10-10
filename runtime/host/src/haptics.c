@@ -224,7 +224,8 @@ static void dualsense_triggers(SDL_Gamepad* pad, SDL_JoystickID id, double level
     if (previous != 0) SDL_RemoveTimer(previous);
 }
 
-// Every open controller gets the same levels (0-1, before strength).
+// Player 1's controller gets the levels (0-1, before strength); the others stay
+// still (#190). With no controller in player 1's slot, every one does, as before.
 static void send(double heavy, double light, double trigger, Uint64 now) {
     const Uint16 low = (Uint16)lround(fmin(heavy * g_strength, 1.0) * 65535.0);
     const Uint16 high = (Uint16)lround(fmin(light * g_strength, 1.0) * 65535.0);
@@ -237,9 +238,10 @@ static void send(double heavy, double light, double trigger, Uint64 now) {
         return;
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_Gamepad* one = SDL_GetGamepadFromPlayerIndex(0);
     for (int i = 0; ids != NULL && i < count; i++) {
         SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
-        if (pad == NULL)
+        if (pad == NULL || (one != NULL && pad != one))
             continue;
         SDL_RumbleGamepad(pad, low, high, kExpiryMs);
         const SDL_PropertiesID props = SDL_GetGamepadProperties(pad);
