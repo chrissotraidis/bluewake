@@ -89,8 +89,7 @@ static inline void bw_player_one_button(SDL_JoystickID which) {
         return;
     pressed = which;
     const char* name = SDL_GetGamepadName(pad);
-    fprintf(stderr, "[pad] '%s' is player 1 (pressed while player 1 was idle)
-", name ? name : "controller");
+    fprintf(stderr, "[pad] '%s' is player 1 (pressed while player 1 was idle)\n", name ? name : "controller");
 }
 
 // The same handoff for controllers connected at launch (#138): Aurora adds them
