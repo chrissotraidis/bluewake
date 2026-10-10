@@ -2,6 +2,7 @@
 // environment, in a window over the paused game, saved to a settings file.
 #include "settings_menu.h"
 #include "smooth_rate.h"
+#include "fps_position.h"
 #include "controller_face_swap.h"
 #include "atomic_file.h"
 
@@ -23,6 +24,7 @@ extern "C" {
 #include "desktop_theme.h"
 
 #include <SDL3/SDL.h>
+#include <aurora/aurora.h>
 #include <aurora/imgui.h>
 #include <imgui.h>
 #include "button_remap.h"
@@ -55,7 +57,8 @@ namespace {
 // the menu does not show) is kept as it was.
 const char* const kKeys[] = {
     "BLUEWAKE_ASPECT",          "DOL_AURORA_FULLSCREEN",    "DOL_AURORA_RENDER_SCALE",
-    "DOL_AURORA_FRAME_INTERP",  "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_SHOW_FPS", "DOL_AURORA_FORCE_ANISO",
+    "DOL_AURORA_FRAME_INTERP",  "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_SHOW_FPS", "DOL_AURORA_FPS_POSITION",
+    "DOL_AURORA_FORCE_ANISO",
     "DOL_AURORA_TEXTURE_PACK",  "BLUEWAKE_MODS",            "BLUEWAKE_OPTIONS",
     "BLUEWAKE_FADE_FRAMES",     "BLUEWAKE_FAST_FORWARD",    "BLUEWAKE_QUICK_DOORS",
     "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_SWAP_XY", "BLUEWAKE_BUTTON_MAP",
@@ -312,6 +315,13 @@ void display_tab() {
         set_env("DOL_AURORA_SHOW_FPS", fps ? "1" : "0");
         aurora_set_fps_overlay(fps);
     }
+    ImGui::BeginDisabled(!fps);
+    int position = bw_fps_position(env("DOL_AURORA_FPS_POSITION").c_str());
+    if (combo("FPS position", &position, kBwFpsPositionNames, BW_FPS_POSITIONS)) {
+        set_env("DOL_AURORA_FPS_POSITION", kBwFpsPositionValues[position]);
+        aurora_set_fps_overlay_position(static_cast<AuroraFpsOverlayPosition>(position));
+    }
+    ImGui::EndDisabled();
 
     static const char* const kAniso[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
     static const unsigned kAnisoValues[] = {1, 2, 4, 8, 16};
