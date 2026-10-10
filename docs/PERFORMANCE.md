@@ -8,12 +8,14 @@ says which step is being done on which day. Owner: Chris. Updated October 9, 202
 Almost every slow second in players' logs is the **game thread**: the translated game code plus the bookkeeping
 around it. Resolution and GPU settings don't change it. On the same phone at the same spot on Outset, Wind Waker
 Recomp's translation runs at 100% speed with 110 M instructions a retrace, and BlueWake 0.6.0 at 69% with 173 M.
-Turning on every other BlueWake option moved that by nothing. So the plan is to take work off the game thread,
+Turning on every other BlueWake option moved that by nothing. By October 10 two changes are measured: lean block
+copies take 9.9% of the instructions off and hidden symbols on Linux 7.8% ("Results"), so most of the gap is still
+unexplained, and the next test is both on the phone. So the plan is to take work off the game thread,
 biggest cut first, and to measure every change the same way.
 
 | Horizon | When | Change | Expected | Gate |
 | --- | --- | --- | --- | --- |
-| **1. Lean what we have** | 0.6.1 and 0.7.0, days | Lean block copies (`--lean-blocks`). Smooth Motion keeps its frames on big CPUs and recovers in a second, starts off on four threads or fewer. Say when the renderer falls back. | 10 to 30% less game-thread work; fewer visible drops | Outset at least 10% faster, and the game plays the same |
+| **1. Lean what we have** | 0.6.1 and 0.7.0, days | Lean block copies (`--lean-blocks`). Hidden symbols in the game module (Linux in #218; Android gets it too; Mac and iPhone to try). Smooth Motion keeps its frames on big CPUs and recovers in a second, starts off on four threads or fewer. Say when the renderer falls back. | Measured: 5 to 12% faster from lean blocks, 9 to 10% on slow Linux cores from hidden symbols; fewer visible drops | Outset at least 10% faster, and the game plays the same |
 | **2. Behavior, not cycles** | 0.8, weeks | Charge cycles per block and deliver interrupts at block or function boundaries. Natives for the loops that cross chunks most (collision, J3D drawing, particles). Cache converted static display lists. The graphics thread on four-core CPUs. | Not measured yet; one native that removed round trips saved 21.9% in a heavy view | The benchmark, and plays the same; off by default until tested |
 | **3. Follow the decompilation** | Months | Drawing at the GX/J3D API level through Aurora, then matched scenes ported from source | The largest; the HD project's draw batching alone was worth 47 to 53% | Each piece checked against the recompilation |
 
@@ -40,7 +42,7 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | --- | --- | --- |
 | Performance changes are accepted when the game "plays the same" (phase 4, step 4), not only when cycle-exact. Correctness fixes keep the strict comparison. | **Proposed October 8, waiting for Chris.** Phases 1 to 4 can build and measure behind flags without it; only turning `--lean-blocks` on by default needs it. | Chris, with Elliott |
 | `--no-cold` or a longer training tour | **Decided by the numbers, October 8: neither.** `--no-cold` is slower; the tour stays. | |
-| `--lean-blocks` on by default for Windows and Linux in 0.7.0 | **Waiting for the October 10 numbers;** decided October 11 ([GOAL_LOOP.md](GOAL_LOOP.md)). Needs the first decision. | Chris |
+| `--lean-blocks` on by default for Windows and Linux in 0.7.0 | **Measured October 8 and 9 (#208):** 5 to 8% on fast cores, 8 to 12% on slow and four-core CPUs, played the same. Under the 10% gate on a fast core, over it where players are slow. Recommended yes; decided October 11 ([GOAL_LOOP.md](GOAL_LOOP.md)). Needs the first decision. | Chris |
 
 ## Results
 
@@ -63,6 +65,9 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | Oct 9 | `--lean-blocks` | i5-6500, Debian 13 | Tower of the Gods room 0, Link in his boat; headless | 69.2 | 77.8 (+12.4%) | Same as above |
 | Oct 9 | `--lean-blocks`, `perf stat` | i5-6500, Debian 13 | Outset, 2,400 retraces | 275.3 G instructions, 133.8 G cycles | 248.0 G (−9.9%), 121.2 G (−9.4%) | |
 | Oct 9 | `--lean-blocks`, its cost | i5-6500, 4 cores | The build | Module 440.5 MB; full build 2 h 13 min | 534.7 MB (+21%); 3 h 26 min (+55%) | |
+| Oct 9 | Hidden symbols on ELF (#218, merged) | i5-12600KF, Arch Linux (pdale-boop) | Outset, 2,400 retraces; P-cores | 276.5 G instructions | 254.9 G (−7.8%; cycles −1.4%) | Yes: identical checkpoints at all 468 stage-select places |
+| Oct 9 | Hidden symbols on ELF | i5-12600KF, 4 E-cores | Bird scene / Outset / Tower of the Gods in the boat; headless | 47.4 / 64.6 / 69.9 | 51.6 / 70.9 / 77.0 (+8.9 / +9.8 / +10.2%) | Yes |
+| Oct 9 | Hidden symbols on ELF, the build | i5-12600KF, clang 23 | Module compile; full build | 27:17; 44:06; 446.0 MB | 11:35; 28:08; 419.9 MB | |
 
 The `--lean-blocks` rows: both builds from `acfaf32` with the parallel training (#202), each in a fresh `--out`
 folder, built and measured from the desktop session. Unpaced, Smooth Motion off, medians of three runs, builds
@@ -196,7 +201,8 @@ copies; that is why they change 0 accesses and certify 0 of 15 today (#179).
    then the builders' order (inline helpers, lean copies, direct calls with 235,556 calls, lean memory with
    501,016 accesses), and every one of the 813 chunks passes a syntax-only compile. Not checked: a full compile,
    a run, and `native_entries.py` on a source with the Windows native preparations.
-3. **Build and measure, in this order**, on one x86 machine and commit, each against the default build:
+3. **Build and measure. Done for `--lean-blocks` alone on October 8 and 9** ("Results", #208); the steps are kept
+   for `--lean-memory` and `--native-entries`. In this order, on one x86 machine and commit, each against the default build:
    - `--lean-blocks` alone. This is what Wind Waker Recomp ships, and it should close most of the gap.
    - `--lean-blocks --lean-memory`, a second step only if the first holds.
    - `--native-entries` with both: its log says how many of the 15 certify. With jkoehler11's Linux loader
@@ -316,7 +322,8 @@ The runbook's phases refer to these numbers.
 started cool, `simpleperf`), the Wind Waker Recomp port runs at 100% speed with 110 M instructions a retrace and
 BlueWake 0.6.0 at 69% with 173 M. Turning on direct calls, the gather pipe and the natives moved BlueWake from
 172.7 M to 173.2 M. His WWR build uses Elliott's lean block copies and neither lean memory nor native entries, so
-the copies are the gap. Elliott's builder makes lean copies of almost every block (443,166) and drops the
+the copies looked like the gap. Measured on x86 since, they remove 9.9% of the instructions, about a third of it
+("Results"). Elliott's builder makes lean copies of almost every block (443,166) and drops the
 bookkeeping stores of plain loads and stores; BlueWake's conservative copies skip nearly every block that touches
 memory. *Why it isn't on:* on October 2 Elliott's version passed 30,000 function comparisons but differed in
 BlueWake's strict boot-route comparison (the final PC and 22 of 600 samples). Dropping the bookkeeping stores moves
