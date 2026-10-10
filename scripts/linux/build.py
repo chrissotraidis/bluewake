@@ -1042,7 +1042,7 @@ Saves, settings and session logs: ~/.local/share/BlueWake
 # one only where the module it loads was prepared with it.
 LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
                                "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
-                               "native_skin", "native_game_math")
+                               "native_skin", "native_game_math", "lean_blocks")
 
 
 def main():
@@ -1096,8 +1096,11 @@ def main():
                         help="prepare certified native matrix functions; off by default, compatible host opt-in required")
     parser.add_argument("--lean-blocks", action="store_true",
                         help="Elliott Tate's original prepaid block copies, as Wind Waker Recomp's builds make them: "
-                             "every block, fewer pc stores (implies --prepared-blocks; off by default; a measured "
-                             "experiment, docs/PERFORMANCE.md phase 4)")
+                             "every block, fewer pc stores (implies --prepared-blocks; on by default since October 10, "
+                             "5 to 12%% faster in docs/PERFORMANCE.md)")
+    parser.add_argument("--no-lean-blocks", action="store_true",
+                        help="BlueWake's conservative prepaid block copies instead: a smaller module and a shorter "
+                             "compile, about 5 to 12%% slower")
     parser.add_argument("--lean-memory", action="store_true",
                         help="Wind Waker Recomp's lean loads and stores in prepaid copies (off by default; "
                              "needs --prepared-blocks)")
@@ -1118,6 +1121,8 @@ def main():
     if not args.conservative:
         for name in LINUX_DEFAULT_OPTIMIZATIONS:
             setattr(args, name, True)
+    if args.no_lean_blocks:
+        args.lean_blocks = False
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:
