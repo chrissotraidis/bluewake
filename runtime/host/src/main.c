@@ -2029,9 +2029,13 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
     // skips the intercept-table walk on the hot path. The one address-keyed
     // check that must stay is the module-1 raw alias: g_module1_raw_base is a
     // runtime value, not a compile-time literal, so it is the one address the
-    // watch list cannot guarantee.
+    // watch list cannot guarantee. Of the feature checks, only two can see an
+    // address that list lacks: draw tags' ranges (it names their ends only) and
+    // Forest Water's tree-timer check, a linked address supplied at load. Each
+    // reads its live switch, so a feature turned on in game is still observed.
     const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
-           !bluewake_feature_observes(address) &&
+           !bluewake_draw_tags_observes(address) &&
+           !(bluewake_forest_water_enabled && address == bluewake_forest_water_tree_timer_check) &&
            !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
            !host_chassis_dynamic_requires_full(cpu);
