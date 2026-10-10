@@ -27,7 +27,9 @@
 // Its click is first person (and back out). In first person and when aiming an
 // item it aims, as the mouse does; in the telescope and the Picto Box the left
 // stick's up and down (or the D-pad's) zoom. Z-targeting and cutscenes keep the
-// game's C-stick.
+// game's C-stick. The optional controller zoom keeps a click as first person,
+// but holding it while moving the right stick up or down changes the normal
+// follow camera's distance.
 //
 //   BLUEWAKE_MOUSE_CAMERA=0              off
 //   BLUEWAKE_MOUSE_SENSITIVITY=1.0       degrees per point of mouse travel, scaled
@@ -40,6 +42,8 @@
 //   BLUEWAKE_STICK_CAMERA=0              the game's own right stick (C-stick) instead
 //   BLUEWAKE_STICK_CAMERA_SPEED=360      its turn at full tilt, degrees a second
 //   BLUEWAKE_STICK_AIM_SPEED=180         the same when aiming
+//   BLUEWAKE_STICK_ZOOM=1                hold its click and move it up/down to zoom the follow camera
+//   BLUEWAKE_STICK_ZOOM_SPEED=1.275      zoom speed scale (1.0: two distance units a second)
 //   BLUEWAKE_STICK_CAMERA_INVERT_X=1, _INVERT_Y=1  reverse its left and right, up and down
 //   BLUEWAKE_STICK_TEST=r:x:y:n[:click[:zoom[:left_y]]],...  testing: the sticks and D-pad from r for n
 

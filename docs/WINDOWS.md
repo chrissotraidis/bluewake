@@ -186,7 +186,9 @@ Run `build\windows\BlueWake\BlueWake.exe`.
 
 Game controllers work through SDL (Xbox, PlayStation, Switch Pro and others). The title screen wants A to reach
 the file menu. To choose which controller button presses each GameCube button, open settings and use
-**Controls › Controller buttons** (builds from `main` after October 4, 2026). The mouse turns the game's own camera around Link and tilts it, and a left click is A; a
+**Controls › Controller buttons** (builds from `main` after October 4, 2026). The optional controller zoom is
+also under **Controls**: when enabled, hold the right-stick click and move that stick up or down; a tap still
+enters or leaves first person. The mouse turns the game's own camera around Link and tilts it, and a left click is A; a
 cutscene, door, Z-target or first-person view takes the camera back.
 **Controls › Mouse buttons** sets what the left, middle, right and side buttons press, and **Keyboard keys for
 the GameCube buttons** changes their keys (builds from `main` after October 5, 2026). A controller SDL doesn't

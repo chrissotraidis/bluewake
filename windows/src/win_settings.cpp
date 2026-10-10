@@ -147,6 +147,8 @@ void load_file() {
         else if (k == "stick_camera") d.stick_camera = parse_bool(v);
         else if (k == "stick_camera_speed") d.stick_speed = std::clamp(std::atoi(v.c_str()), 60, 1080);
         else if (k == "stick_aim_speed") d.stick_aim_speed = std::clamp(std::atoi(v.c_str()), 30, 720);
+        else if (k == "stick_zoom") d.stick_zoom = parse_bool(v);
+        else if (k == "stick_zoom_speed") d.stick_zoom_speed = std::clamp(std::atof(v.c_str()), 0.25, 2.0);
         else if (k == "aim_invert_y") d.aim_invert_y = parse_bool(v);
         else if (k == "climb") d.climb = parse_bool(v);
         else if (k == "climb_stamina") d.climb_stamina = std::clamp(std::atoi(v.c_str()), 4, 30);
@@ -198,6 +200,7 @@ void save_file() {
     std::fprintf(f, "controller_invert_x=%d\ncontroller_invert_y=%d\n", d.pad_invert_x, d.pad_invert_y);
     std::fprintf(f, "stick_camera=%d\nstick_camera_speed=%d\nstick_aim_speed=%d\n", d.stick_camera, d.stick_speed,
                  d.stick_aim_speed);
+    std::fprintf(f, "stick_zoom=%d\nstick_zoom_speed=%.3f\n", d.stick_zoom, d.stick_zoom_speed);
     std::fprintf(f, "aim_invert_y=%d\n", d.aim_invert_y);
     std::fprintf(f, "climb=%d\nclimb_stamina=%d\n", d.climb, d.climb_stamina);
     std::fprintf(f, "forest_water_keep_trees=%d\nforest_water_30_minutes=%d\n", d.forest_keep_trees,
@@ -410,6 +413,8 @@ void apply_stick() {
     _putenv_s("BLUEWAKE_STICK_CAMERA", d.stick_camera ? "1" : "0");
     _putenv_s("BLUEWAKE_STICK_CAMERA_SPEED", std::to_string(d.stick_speed).c_str());
     _putenv_s("BLUEWAKE_STICK_AIM_SPEED", std::to_string(d.stick_aim_speed).c_str());
+    _putenv_s("BLUEWAKE_STICK_ZOOM", d.stick_zoom ? "1" : "0");
+    _putenv_s("BLUEWAKE_STICK_ZOOM_SPEED", std::to_string(d.stick_zoom_speed).c_str());
     _putenv_s("BLUEWAKE_STICK_CAMERA_INVERT_X", d.pad_invert_x ? "1" : "0");
     _putenv_s("BLUEWAKE_STICK_CAMERA_INVERT_Y", d.pad_invert_y ? "1" : "0");
     _putenv_s("BLUEWAKE_AIM_INVERT_Y", d.aim_invert_y ? "1" : "0");
@@ -625,6 +630,14 @@ void tab_controls() {
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16);
     stick |= ImGui::SliderInt("Right-stick aim speed (first person, items)", &d.stick_aim_speed, 60, 480,
                               "%d degrees a second");
+    stick |= ImGui::Checkbox("Hold the right-stick click and move it up/down to zoom", &d.stick_zoom);
+    ImGui::BeginDisabled(!d.stick_zoom);
+    float zoom_speed = static_cast<float>(d.stick_zoom_speed);
+    if (ImGui::SliderFloat("Controller zoom speed", &zoom_speed, 0.25f, 2.0f, "%.3fx")) {
+        d.stick_zoom_speed = zoom_speed;
+        stick = true;
+    }
+    ImGui::EndDisabled();
     ImGui::EndDisabled();
     bool pad = ImGui::Checkbox("Controller: camera stick left and right inverted", &d.pad_invert_x);
     pad |= ImGui::Checkbox("Controller: camera stick up and down inverted", &d.pad_invert_y);

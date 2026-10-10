@@ -6,6 +6,7 @@
 #include "settings_menu.h"
 #include "save_state.h"
 #include "mouse_motion.h"
+#include "stick_zoom.h"
 
 #include "gxruntime/aurora_backend.h"
 
@@ -186,6 +187,10 @@ static unsigned long long g_test_item_retrace = 900;
 static bool g_stick_on;
 static double g_stick_speed = 360.0;     // degrees a second at full tilt, left and right
 static double g_stick_aim_speed = 180.0; // the same when aiming (first person and items)
+static bool g_stick_zoom_on;             // R3 + right-stick up/down changes the follow-camera distance
+static double g_stick_zoom_speed = 1.275; // control scale; 1.0 is two distance units a second at full tilt
+static double g_stick_zoom_axis;
+static BwStickZoomGesture g_stick_zoom_gesture;
 static double g_stick_invert_x = 1.0, g_stick_invert_y = 1.0;
 // Tilt (0..1) inside which the stick does nothing, and from which it turns at
 // full speed; up and down turn at this share of left and right's speed.
@@ -199,6 +204,7 @@ static const double kGameFrameSeconds = 1.0 / 29.97;
 static bool g_stick_owns;       // the last camera_draw was the follow camera, the player in control
 static bool g_stick_aims;       // ... or an aiming view: the stick aims, as the mouse does (aim_frame)
 static bool g_stick_zooms;      // ... one that zooms (telescope, Picto Box): the left stick zooms
+static bool g_stick_can_zoom;   // ... and the current engine is a normal follow camera
 // Held on a controller's D-pad in the telescope or the Picto Box (whose zoom
 // the C-stick's up and down were), or the left stick pushed all the way: this
 // much of their 1x-9x zoom a second.
@@ -208,6 +214,7 @@ static bool g_aiming;     // first person or an item's aim, the player in contro
 static bool g_aim_invert_y; // BLUEWAKE_AIM_INVERT_Y: the left stick's up and down the other way there (#154)
 static bool g_conducting; // the Wind Waker is out: its C-stick picks the notes (#156)
 static bool g_stick_click_down; // the stick's click, as last read
+static unsigned long long g_enter_from; // a released R3 tap holds C-stick up until first person takes it
 static unsigned long long g_exit_from; // retrace a click in first person started its push down
 static int g_subject_step;             // first person's push-down step (subjectCamera's m3C4), or -1
 
@@ -402,6 +409,7 @@ static bool env_is(const char* name, char value) {
 
 static void read_stick_settings(void) {
     g_aim_invert_y = env_is("BLUEWAKE_AIM_INVERT_Y", '1');
+    g_stick_zoom_on = env_is("BLUEWAKE_STICK_ZOOM", '1');
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     // Not tried with the touch controls yet: off unless asked for.
     g_stick_on = env_is("BLUEWAKE_STICK_CAMERA", '1');
@@ -412,11 +420,20 @@ static void read_stick_settings(void) {
     g_stick_speed = speed != NULL && atof(speed) > 0.0 ? atof(speed) : 360.0;
     const char* aim = getenv("BLUEWAKE_STICK_AIM_SPEED");
     g_stick_aim_speed = aim != NULL && atof(aim) > 0.0 ? atof(aim) : 180.0;
+    const char* zoom = getenv("BLUEWAKE_STICK_ZOOM_SPEED");
+    g_stick_zoom_speed = zoom != NULL && atof(zoom) > 0.0 ? atof(zoom) : 1.275;
     g_stick_invert_x = env_is("BLUEWAKE_STICK_CAMERA_INVERT_X", '1') ? -1.0 : 1.0;
     g_stick_invert_y = env_is("BLUEWAKE_STICK_CAMERA_INVERT_Y", '1') ? -1.0 : 1.0;
+    if (!g_stick_zoom_on) {
+        g_stick_zoom_axis = 0.0;
+        g_stick_zoom_gesture = (BwStickZoomGesture){0};
+        g_enter_from = 0;
+    }
     if (!g_stick_on) {
-        g_stick_owns = g_stick_aims = g_stick_zooms = g_first_person = g_conducting = false;
-        g_exit_from = 0;
+        g_stick_owns = g_stick_aims = g_stick_zooms = g_stick_can_zoom = g_first_person = g_conducting = false;
+        g_stick_zoom_axis = 0.0;
+        g_stick_zoom_gesture = (BwStickZoomGesture){0};
+        g_enter_from = g_exit_from = 0;
     }
 }
 
@@ -447,8 +464,9 @@ void bluewake_mouse_camera_attach(CPUState* cpu) {
     if (g_stick_on)
         fprintf(stderr,
                 "[stick] the right stick turns the camera directly (%.0f degrees a second) and aims (%.0f); its "
-                "click is first person; the left stick zooms the telescope and the Picto Box\n",
-                g_stick_speed, g_stick_aim_speed);
+                "click is first person; the left stick zooms the telescope and the Picto Box%s\n",
+                g_stick_speed, g_stick_aim_speed,
+                g_stick_zoom_on ? "; hold its click and move it up/down for the follow-camera distance" : "");
     const char* stick_test = getenv("BLUEWAKE_STICK_TEST");
     for (const char* p = stick_test; p != NULL && *p != '\0' && g_stick_test_count < 16u;) {
         TestStick move = {0};
@@ -597,6 +615,17 @@ void bluewake_mouse_camera_pad(DolPadState* pad) {
     bool click;
     read_stick_left(&x, &y, &click, NULL, &left_x, &left_y);
     const bool pressed = click && !g_stick_click_down;
+    double zoom_axis = 0.0;
+    const BwStickZoomAction zoom_action = bw_stick_zoom_update(
+        &g_stick_zoom_gesture, g_stick_zoom_on && g_stick_can_zoom, click, x, y, kStickDeadZone, &zoom_axis);
+    g_stick_zoom_axis = zoom_action == BW_STICK_ZOOM_ACTIVE ? zoom_axis : 0.0;
+    const bool first_person_tap = zoom_action == BW_STICK_ZOOM_TAP;
+    if (first_person_tap)
+        fprintf(stderr, "[stick] first-person tap\n");
+    const BwStickTapAction tap_action =
+        bw_stick_tap_update(&g_enter_from, g_retrace, first_person_tap, g_first_person, 30u);
+    if (zoom_action == BW_STICK_ZOOM_FINISHED)
+        fprintf(stderr, "[stick] camera distance x%.2f\n", g_zoom);
     if (g_stick_zooms && sqrt(left_x * left_x + left_y * left_y) > kStickInUse)
         pad->stick_x = pad->stick_y = 0; // it zooms (aim_frame), so it does not also aim
     g_stick_click_down = click;
@@ -617,9 +646,16 @@ void bluewake_mouse_camera_pad(DolPadState* pad) {
         // the view, and flipping it mirrored every song (#156).
         pad->substick_x = pad->substick_x == -128 ? 127 : (s8)-pad->substick_x;
     }
-    if (g_stick_owns && click) {
+    if (g_stick_owns && !g_stick_zoom_on && click) {
         pad->substick_x = 0; // the click is the push up: first person
         pad->substick_y = 127;
+    }
+    if (tap_action == BW_STICK_TAP_HOLD) {
+        pad->substick_x = 0;
+        pad->substick_y = 127;
+    } else if (tap_action == BW_STICK_TAP_ACCEPTED || tap_action == BW_STICK_TAP_TIMED_OUT) {
+        fprintf(stderr, "[stick] first-person tap %s\n",
+                tap_action == BW_STICK_TAP_ACCEPTED ? "accepted" : "timed out");
     } else if (g_first_person && pressed && g_exit_from == 0) {
         g_exit_from = g_retrace;
     }
@@ -884,6 +920,13 @@ static void aim_frame(CPUState* cpu, u32 player) {
 // when the follow camera comes back it starts at its own and the scale comes
 // back in smoothly.
 static void zoom_frame(CPUState* cpu, u32 camera, bool player_camera) {
+    const u32 style = camera_style(cpu, camera);
+    const u32 engine = style_engine(cpu, style);
+    const bool follow_camera = player_camera && (engine == (u32)kEngineFollow || engine == (u32)kEngineFollow2);
+    if (follow_camera && g_stick_zoom_on && g_stick_zoom_axis != 0.0) {
+        g_zoom = bw_stick_zoom_advance(g_zoom, g_stick_zoom_axis, g_stick_zoom_speed * 2.0, kGameFrameSeconds,
+                                       kZoomMin, kZoomMax);
+    }
     if (g_wheel != 0.0) {
         g_zoom /= pow(kZoomStep, g_wheel);
         g_zoom = g_zoom < kZoomMin ? kZoomMin : g_zoom > kZoomMax ? kZoomMax : g_zoom;
@@ -892,10 +935,7 @@ static void zoom_frame(CPUState* cpu, u32 camera, bool player_camera) {
         g_wheel = 0.0;
         fprintf(stderr, "[mouse] camera distance x%.2f\n", g_zoom);
     }
-    const u32 style = camera_style(cpu, camera);
-    const u32 engine = style_engine(cpu, style);
-    if (!player_camera || (engine != (u32)kEngineFollow && engine != (u32)kEngineFollow2) ||
-        mem_read8(cpu, camera + kReady) == 0u) {
+    if (!follow_camera || mem_read8(cpu, camera + kReady) == 0u) {
         g_zoom_live = 1.0; // the follow camera's entry starts from its own distances
         return;
     }
@@ -958,6 +998,10 @@ static void view_frame(CPUState* cpu, u32 camera) {
         double x, y;
         bool click;
         read_stick(&x, &y, &click, NULL);
+        if (g_stick_zoom_on && g_stick_zoom_gesture.down)
+            x = y = 0.0;
+        else if (g_stick_zoom_on && g_stick_zoom_gesture.block_camera)
+            x = y = 0.0;
         stick_turn(x, y, kGameFrameSeconds, g_stick_speed, &stick_yaw, &stick_pitch);
     }
     if (g_sum_x == 0.0 && g_sum_y == 0.0 && stick_yaw == 0.0 && stick_pitch == 0.0 && !g_held)
@@ -990,12 +1034,14 @@ static void camera_frame(CPUState* cpu, u32 process) {
     const u32 camera = process + kCameraBody;
     const bool aiming = aiming_view(cpu, camera);
     const u32 style = camera_style(cpu, camera);
+    const u32 engine = style_engine(cpu, style);
     g_first_person = aiming && style != 0u && mem_read32(cpu, style) == 0x53533031u; // 'SS01'
     // procTactWait_init and procTactPlay_init set it (USA 8014DF4C..5C stores
     // into 0x803C4C08 + 0x5CCC); the next proc's commonProcInit clears it.
     g_conducting = (mem_read32(cpu, kPlayerStatus1) & kStatus1Conduct) != 0u;
     g_subject_step = g_first_person ? (int)mem_read32(cpu, camera + kSubjectStep) : -1;
     g_stick_owns = false;
+    g_stick_can_zoom = false;
     g_aiming = aiming && player_in_control(cpu);
     g_stick_aims = g_aiming && g_stick_on;
     g_stick_zooms = g_stick_aims && (mem_read16(cpu, style + kStyleFlags) & kStyleZoom) != 0u;
@@ -1024,6 +1070,7 @@ static void camera_frame(CPUState* cpu, u32 process) {
     // The mouse's and the stick's view went in at bumpCheck (view_frame);
     // the stick is the camera's until the next draw says otherwise.
     g_stick_owns = g_stick_on;
+    g_stick_can_zoom = g_stick_on && (engine == (u32)kEngineFollow || engine == (u32)kEngineFollow2);
 }
 
 // Testing only: gives the player an item (BLUEWAKE_MOUSE_TEST_ITEM) on X.
