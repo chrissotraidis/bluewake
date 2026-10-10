@@ -123,3 +123,10 @@ Patch 0163 adds `dol_aurora_backend_name()`, the graphics API Aurora actually ch
 Patch 0164 keeps Smooth Motion's in-between frames when the game runs slow on a CPU with 8 threads or more, where
 they don't compete with the game thread (#137); GPU overloads still drop them, and smaller CPUs keep the old rule
 (RecompCore #21).
+
+Patches 0165 to 0168 are Elliott Tate's October 4 runtime from his `windows-release` (RecompCore #22): the present
+log's per-frame bytes and draws, **draw fusion** (a display list's strips as one draw: over an Outset run 8.8 million
+draws became 0.87 million, and on four E-cores Forest Haven went from 30.6 to 40.5 game frames a second), and the GPU
+profiler (`DOL_AURORA_GPU_PROF=1`). Fusion is on for Windows, where he tested it; the host turns it off elsewhere
+until it has been played there (`DOL_GX_FUSE=1` turns it on). His later commits (the compact vertex layout and the
+upload changes) conflict with patch 0157 and are not here yet.
