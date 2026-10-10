@@ -11,10 +11,21 @@ folder you run with `./bluewake`.
 - Your own GZLE01 revision 0 disc image, as an uncompressed `.iso` or `.gcm`.
   (A Dolphin-compressed image like `.rvz`/`.wia` is not converted here; convert
   it in Dolphin: right-click the game, Convert File, format ISO.)
-- clang (with lld and llvm-profdata), CMake 3.25+, Ninja, Python 3.10+, git:
-  `sudo apt install clang lld llvm cmake ninja-build git` (or your distro's
-  equivalent). Vulkan drivers for your GPU. The host and the game module both
-  build with clang, matching the Windows build's optimization pipeline.
+- clang (with lld and llvm-profdata), CMake 3.25+, Ninja, Python 3.10+, git,
+  and the development files SDL3 and the host build against (X11, Wayland,
+  Vulkan, ALSA, PulseAudio). On Debian and Ubuntu, the same packages the Linux
+  CI installs:
+
+      sudo apt install clang lld llvm cmake ninja-build git build-essential \
+        libwayland-dev libxkbcommon-dev libx11-xcb-dev libx11-dev libxrandr-dev \
+        libxext-dev libxi-dev libxcursor-dev libgl1-mesa-dev libvulkan-dev \
+        libasound2-dev libpulse-dev libxss-dev libxtst-dev
+
+  (or your distro's equivalent). Without them the build stops at
+  `app-configure` with SDL's "Couldn't find dependency package for …", which
+  names the one missing. Vulkan drivers for your GPU. The host and the game
+  module both build with clang, matching the Windows build's optimization
+  pipeline.
 
 ## Build
 
