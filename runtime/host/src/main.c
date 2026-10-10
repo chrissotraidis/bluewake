@@ -1956,9 +1956,9 @@ static void host_actor_search_native(CPUState* cpu) {
 // (see host_direct_can_skip), because the module has already proven the
 // address unwatched - and every address-keyed check below keys on an address
 // the watch list contains, so an unwatched address can never trip one.
-static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
-    if (__builtin_expect(cpu == NULL || g_diagnostics_need_full || g_interrupt_sources_dirty, 0))
-        return true;
+// The scene part of the dynamic test: an overlap phase change interrupt flags
+// alone do not describe.
+static inline bool host_chassis_overlap_requires_full(void) {
     if (g_name_scene_object >= 0x80000000u &&
         (g_file_start_pulse.triggered || !g_file_start_pulse.configured)) {
         if (g_ppc_guest_alias_generation != g_overlap_cached_alias_state ||
@@ -1973,6 +1973,14 @@ static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
                 return true;
         }
     }
+    return false;
+}
+
+static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
+    if (__builtin_expect(cpu == NULL || g_diagnostics_need_full || g_interrupt_sources_dirty, 0))
+        return true;
+    if (host_chassis_overlap_requires_full())
+        return true;
     if ((cpu->msr & PPC_MSR_EE) != 0u &&
         (g_guest_decrementer_pending ||
          (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
@@ -2033,12 +2041,16 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
     // address that list lacks: draw tags' ranges (it names their ends only) and
     // Forest Water's tree-timer check, a linked address supplied at load. Each
     // reads its live switch, so a feature turned on in game is still observed.
+    // The module asks only once bw_host_quiet has passed: the interrupt sources
+    // are clean (it reads these flags, passed in direct_calls_v2) and no
+    // interrupt the guest would take is pending. Of the dynamic test that leaves
+    // the scene's overlap phase; the diagnostics are in g_diagnostics_block_skip.
     const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
            !bluewake_draw_tags_observes(address) &&
            !(bluewake_forest_water_enabled && address == bluewake_forest_water_tree_timer_check) &&
            !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
-           !host_chassis_dynamic_requires_full(cpu);
+           !host_chassis_overlap_requires_full();
 #endif
     if (g_direct_call_trace) {
         g_direct_call_queries++;
