@@ -85,8 +85,12 @@ A ready-made Linux build that includes the game code is published the same way a
 Windows: it is made on a personal machine from the owner's disc and attached to the
 release by hand. The disc, files extracted from it, and console keys never enter
 GitHub or CI (a secret could not hold a 1.4 GB disc, and must not). CI builds and
-tests everything that does not need the disc (`.github/workflows/linux-host.yml`),
-and every published artifact passes `scripts/release/check_public_assets.sh`.
+tests everything that does not need the disc (`.github/workflows/linux-host.yml`).
+The same Ubuntu 24.04 (`glibc 2.39`) job runs the host tests, then uses a synthetic
+empty module to exercise AppImage packaging, recursively audit every ELF's ABI,
+and smoke-test the image. That non-playable fixture is never uploaded. A playable
+release still comes from a permitted personal build, and every published artifact
+passes `scripts/release/check_public_assets.sh`.
 
 ## Why clang
 

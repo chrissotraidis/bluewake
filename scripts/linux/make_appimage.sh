@@ -16,6 +16,8 @@
 #
 # Requirements on the build host: appimagetool, desktop-file-validate and
 # zsyncmake on PATH (pacman -S appimagetool desktop-file-utils zsync-curl).
+# APPIMAGETOOL may name another appimagetool executable. APPIMAGE_RUNTIME_FILE
+# may name a pinned Type 2 runtime to embed instead of downloading one.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -105,7 +107,12 @@ ln -sf usr/bin/bluewake "$appdir/bluewake"
 ln -sf usr/share/icons/hicolor/256x256/apps/BlueWake.png "$appdir/.DirIcon"
 
 echo "make_appimage: squashing $out"
-ARCH=x86_64 appimagetool "$appdir" "$out"
+appimagetool=${APPIMAGETOOL:-appimagetool}
+runtime_args=()
+if [ -n "${APPIMAGE_RUNTIME_FILE:-}" ]; then
+    runtime_args=(--runtime-file "$APPIMAGE_RUNTIME_FILE")
+fi
+ARCH=x86_64 "$appimagetool" "${runtime_args[@]}" "$appdir" "$out"
 
 # zsync metadata for delta auto-update.
 zsyncmake -u "$(basename "$out")" -o "$out.zsync" "$out"
