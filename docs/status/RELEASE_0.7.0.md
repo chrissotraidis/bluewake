@@ -1,0 +1,74 @@
+# BlueWake 0.7.0 release record
+
+The working record for 0.7.0. The steps are in [GOAL_LOOP.md](../GOAL_LOOP.md); the Windows build is
+[WINDOWS_BUILD_0.7.0.md](WINDOWS_BUILD_0.7.0.md). Fill in each check with the device, the commit and what was seen. A
+row stays "not yet" until someone runs it. 0.7.0 replaces the 0.6.1 planned for October 9: once lean block copies
+became the default, the release was more than fixes.
+
+## Candidate
+
+| | |
+| --- | --- |
+| Version | 0.7.0, build 6 (`version.json`, set at the freeze) |
+| Candidate commit | not yet |
+| RecompCore | `ddd031b2a7f45fcbda37a49daac9b308b8d95da1` (patches 0160 to 0168) |
+| Previous release | 0.6.0, October 8 |
+
+## What it contains
+
+| Change | Issue | Ships to | Checked so far | Still to check |
+| --- | --- | --- | --- | --- |
+| **Faster:** lean block copies on by default, 5 to 12% (Elliott Tate's original, #196, #220; measured by pdale-boop, #208) | #59, #137, #159 | Windows, Linux builders | Windows: 15½ min of play; Linux i5-6500: 9.9% fewer instructions | The release build |
+| **Faster:** draw fusion, a tenth of the draws (Elliott Tate, #225, patch 0166) | #86, #137 | Windows (on); Mac, Linux (off until played) | Elliott on Windows: 30 to 60% more frames on four E-cores, positions identical | The release build played |
+| **Faster on Linux:** the module compiles twice as fast and runs up to 10% faster on slow cores (pdale-boop, #218) | #215 | Linux builder | Identical checkpoints at 468 places | Steam Deck |
+| Smooth Motion keeps its frames on CPUs with 8 threads or more (#224, patch 0164) | #137 | Every desktop | CI | Smooth Motion at 120 on an 8-thread PC |
+| The log names the renderer; Linux says when it fell back to slow OpenGL (#224, patch 0163) | #56 | Every desktop | CI | Linux without Vulkan |
+| A rare crash (`unmapped pc=0x8180fff0`) fixed (pdale-boop, #211) | none | Every platform | Windows: the crashing save and the stage select's places run | A long session |
+| Controllers plugged in at launch get the smooth stick and player 1 (pdale-boop, #195) | #138, #155 | Windows, Mac, Linux | pdale-boop, two controllers | Mac |
+| Player 1 goes to the controller you press while player 1 is idle (an adapter's empty ports) (#222) | #155 | Windows, Mac, Linux | CI test | A Mayflash adapter |
+| Rumble only on player 1's controller (#222) | #190 | Windows, Mac, Linux | CI | Two controllers |
+| Pictobox: the left stick works at "keep this picture?" and in the gallery (#223) | #191, #13 | Windows, Mac, Linux | CI | A photo with a controller |
+| Optional controller camera zoom: hold the right-stick click and move it up or down (cforain, #221) | #203 | Windows, Mac, Linux | cforain on Linux | Windows |
+| The FPS counter's position under Display (saulob, #106) | none | Windows, Mac, Linux | Windows 11 by saulob | Mac menu |
+| Windows: the window opens in place (saulob, #197); portable mode keeps remaps in `user` (#184) | #89, #64 | Windows | CI | A Windows PC |
+| Building your own copy: training 30 → 12 minutes (pdale-boop, #202); a second build into the same folder works (#209) | #59 | Windows, Linux builders | i5-12600KF, i5-6500 | The release build |
+| Linux: an AppImage with a first-run disc setup (cforain, #226), checked for SteamOS's glibc in CI (#217) | #56, #214 | Linux | cforain on Gentoo and a Steam Deck | A contributor's release AppImage |
+
+Not in 0.7.0: draw fusion on Mac and Linux by default (until played there), Elliott's other work since October 3
+(being ported, [PERFORMANCE.md](../PERFORMANCE.md#the-plan)), Android (#93).
+
+## Release notes (draft, for the release page)
+
+BlueWake 0.7.0 is faster, especially on older and smaller CPUs, and fixes several controller problems. Every version
+needs your own USA (GZLE01) disc image. Nothing from the game is included except in the ready-made Windows and Linux
+builds.
+
+- **Faster.** Elliott Tate's lean block copies are now the default: 5 to 12% more speed, most on slower CPUs (measured
+  by pdale-boop). On Windows, his draw fusion sends a tenth as many draws, so the game no longer waits on graphics in
+  busy places like Forest Haven and Hyrule.
+- **Smoother.** With Smooth Motion on, CPUs with 8 threads or more no longer drop to 30 for seconds after a hitch.
+- **Controllers.** A controller already plugged in at launch gets the smooth stick (#138). With a GameCube adapter,
+  press a button on your controller and it becomes player 1, even if it's not in port 1 (#155). Rumble only shakes the
+  controller you're playing with (#190). The left stick works at the Pictobox's "keep this picture?" (#191). New,
+  optional: hold the right-stick click and move it up or down to zoom the camera (thanks to cforain).
+- **Fixed:** a rare crash that could stop the game anywhere (`unmapped pc=0x8180fff0`), tracked down by pdale-boop.
+- **Windows:** the window opens where you left it (thanks to saulob), portable mode keeps everything in its folder,
+  and you can place the FPS counter in a corner.
+- **Linux:** an AppImage that asks for your disc the first time and can add itself to your menu (thanks to cforain
+  and jkoehler11). If you build your own, the game compiles about twice as fast now (thanks to pdale-boop).
+
+Thanks to Elliott Tate, pdale-boop, jkoehler11, cforain, saulob and LiquidAzir.
+
+## Checks
+
+| Check | Platform and device | Commit | Result |
+| --- | --- | --- | --- |
+| Windows build from the commit ([WINDOWS_BUILD_0.7.0.md](WINDOWS_BUILD_0.7.0.md)) | | | not yet |
+| Windows play: Outset, Forest Haven, Dragon Roost, with fusion on (and `DOL_GX_FUSE=0` for comparison) | | | not yet |
+| Windows controllers: at launch, rumble, Pictobox prompt, zoom | | | not yet |
+| Linux AppImage from a contributor's own disc, then the release check | | | not yet |
+| Mac: ten minutes of play with a controller connected at launch | | | not yet |
+| App-only IPA, PadMint audit, release check | | | not yet |
+| Source zip and recipe | | | not yet |
+| `check_public_assets.sh` on every asset | | | not yet |
+

@@ -9,23 +9,52 @@ Almost every slow second in players' logs is the **game thread**: the translated
 around it. Resolution and GPU settings don't change it. On the same phone at the same spot on Outset, Wind Waker
 Recomp's translation runs at 100% speed with 110 M instructions a retrace, and BlueWake 0.6.0 at 69% with 173 M.
 Turning on every other BlueWake option moved that by nothing. By October 10 two changes are measured: lean block
-copies take 9.9% of the instructions off and hidden symbols on Linux 7.8% ("Results"), so most of the gap is still
-unexplained, and the next test is both on the phone. So the plan is to take work off the game thread,
+copies take 9.9% of the instructions off and hidden symbols on Linux 7.8% ("Results"), and Elliott's work since
+October 3 (below) covers most of the rest: draw fusion, faster loads and four more rounds of natives. So the plan is to take work off the game thread,
 biggest cut first, and to measure every change the same way.
 
 | Horizon | When | Change | Expected | Gate |
 | --- | --- | --- | --- | --- |
-| **1. Lean what we have** | 0.6.1 and 0.7.0, days | Lean block copies (`--lean-blocks`). Hidden symbols in the game module (Linux in #218; Android gets it too; Mac and iPhone to try). Smooth Motion keeps its frames on big CPUs and recovers in a second, starts off on four threads or fewer. Say when the renderer falls back. | Measured: 5 to 12% faster from lean blocks, 9 to 10% on slow Linux cores from hidden symbols; fewer visible drops | Outset at least 10% faster, and the game plays the same |
+| **1. Lean what we have** | 0.6.1 and 0.7.0, days | Lean block copies (`--lean-blocks`, on by default). Elliott's work since October 3: draw fusion, faster single loads and return dispatch, natives rounds 4, 5 and 7. Hidden symbols in the game module (Linux in #218; Android gets it too; Mac and iPhone to try). Smooth Motion keeps its frames on big CPUs and recovers in a second, starts off on four threads or fewer. Say when the renderer falls back. | Measured: 5 to 12% faster from lean blocks, 9 to 10% on slow Linux cores from hidden symbols; fewer visible drops | Outset at least 10% faster, and the game plays the same |
 | **2. Behavior, not cycles** | 0.8, weeks | Charge cycles per block and deliver interrupts at block or function boundaries. Natives for the loops that cross chunks most (collision, J3D drawing, particles). Cache converted static display lists. The graphics thread on four-core CPUs. | Not measured yet; one native that removed round trips saved 21.9% in a heavy view | The benchmark, and plays the same; off by default until tested |
 | **3. Follow the decompilation** | Months | Drawing at the GX/J3D API level through Aurora, then matched scenes ported from source | The largest; the HD project's draw batching alone was worth 47 to 53% | Each piece checked against the recompilation |
 
-**The decompilation ratchet.** The Wind Waker decompilation ([zeldaret/tww](https://github.com/zeldaret/tww)) has
-79.1% of its code matched (October 9) and keeps growing. A function compiled from its source costs 6 to 30 times
-fewer host instructions than the same function translated. So BlueWake can get faster as the decompilation does, a
-piece at a time and without a rewrite: each month, profile the benchmark, list the hot functions the decompilation
-has matched, and replace the ones that cost the most (above all those that cross chunks often), each with a
-comparison test against the translated version. The recompilation stays the reference and the fallback throughout.
-Wind Waker HD Recomp uses the same decompilation the same way, to name and find its hot code.
+**Elliott's work since October 3 comes first.** Elliott Tate kept optimizing Wind Waker Recomp's `windows-release`
+after BlueWake last took his work (`74cb4c3` for the builder, his October 3 runtime for RecompCore). All of it is
+exact by his checks (Link's position identical at all 621 probes of the Outset route), and all of it is measured on
+four E-cores, the slow-CPU stand-in. It is the cheapest speed BlueWake can get, because it is already written:
+
+| Change | Where | His result | In BlueWake |
+| --- | --- | --- | --- |
+| Draw fusion: a display list's strips as one draw | RecompCore `d687c69` | 8.8 M draws to 0.87 M over Outset; Forest Haven 30.6 → 40.5 game FPS, the Earth Temple's boss 40.6 → 59.1, Hyrule 45.7 → 59.8 (the game thread stopped waiting for the GX worker) | Pinned in #225 (patch 0166): on for Windows; Mac and Linux once played |
+| Faster single loads (`lfs`), early return dispatch, fifth natives round (the GX SDK's FIFO writers) | builder `7aca42a`, `56dcd70`, `5edeacc` | Game thread 4.5 to 7% faster at six places | Not yet: port |
+| Fourth natives round (animation, collision setup, colour) | builder, October 4 | 1 to 3%, 6% in Hyrule Castle's room | Not yet: port |
+| Seventh natives round (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py` | builder `95f1db7`, `a5ecd96` | About 3.8 points of the game thread at Forest Haven | Not yet: port |
+| Sixth natives round (particle draws, the sea's waves) | builder `a8bda26` | About 5% at the sea, but he took it back out of the default | Skip for now |
+| Compact vertex layout, vertex decode fast path, vertices the GPU holds not re-sent, constants as immediate data | RecompCore `6f52a68` to `400728a` | Upload 87 to 93% smaller; render encoding 14 to 30% faster | Not yet: conflicts with patch 0157 (the dungeon map fix); a careful merge |
+
+His builder work can't be cherry-picked: the two repositories share no history (BlueWake imported his work as
+patches), so it is ported file by file, 103 commits and 186 files since `74cb4c3`, mostly generated native code. His
+natives are certified against his lean block copies, which BlueWake now builds by default, so they should certify
+here too. The order is in [GOAL_LOOP.md](GOAL_LOOP.md).
+
+**The decompilation, three ways.** The Wind Waker decompilation ([zeldaret/tww](https://github.com/zeldaret/tww)) has
+79.1% of its code matched (October 9) and keeps growing.
+
+1. **Names, now.** Its `config/GZLE01/symbols.txt` names 24,000 functions by address, so a profile of the translated
+   module reads as game functions (`__ieee754_fmod`, `MakeBlckMinMax__4cBgWFiP4cXyzP4cXyz`, JASystem's channels)
+   instead of chunk offsets. Every natives round above was chosen this way.
+2. **Which functions to make native, now.** Elliott's natives are replayed from the translation, exact to the cycle,
+   and gain 1.3 to 3.6 times per call. The decompilation says which hot functions are leaf code worth that and whether
+   their source is matched. All three biggest in his seventh round are: `e_fmod.c`, the collision blocks, `JASChannel.cpp`.
+3. **Natives compiled from its source, next.** A function compiled from the decompilation's source costs 6 to 30
+   times fewer host instructions than its translation, but isn't cycle-exact. Now that performance changes are judged
+   by "plays the same", that is allowed for leaf code. The first experiment: `__ieee754_fmod` (1.09 points of the game
+   thread at Forest Haven) compiled from `e_fmod.c` with a big-endian shim, against Elliott's replayed native, on the
+   benchmark. If it's clearly faster and plays the same, do the same for the matched leaf functions the profile names,
+   one group at a time, each month as more is matched. The recompilation stays the reference and the fallback.
+
+Wind Waker HD Recomp uses the decompilation the same way: to name and find its hot code.
 
 **What we take from Wind Waker HD Recomp** (details under "Background"): it emulates behavior instead of cycles,
 keeping timing at vsync, flips and GPU completion; it draws at the graphics API level instead of parsing a command
@@ -43,6 +72,7 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | Performance changes are accepted when the game "plays the same" (phase 4, step 4), not only when cycle-exact. Correctness fixes keep the strict comparison. | **Accepted by Chris, October 10.** | Chris |
 | `--no-cold` or a longer training tour | **Decided by the numbers, October 8: neither.** `--no-cold` is slower; the tour stays. | |
 | `--lean-blocks` on by default for Windows and Linux (and Android, which uses the Windows defaults) | **Accepted by Chris, October 10,** on #208's numbers: 5 to 8% on fast cores, 8 to 12% on slow and four-core CPUs, played the same. `--no-lean-blocks` builds the conservative copies. | Chris |
+| Draw fusion (RecompCore patch 0166) on by default | **On for Windows** (Elliott tested it there); off on Mac, Linux and iPhone until played on each, then flipped (`DOL_GX_FUSE`). | Chris, October 10 |
 
 ## Results
 
