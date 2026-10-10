@@ -1333,6 +1333,10 @@ static bool g_player_route_waiting;
 // same guest-state fingerprint at the same guest cycle in both configurations, so
 // the two runs can be compared to first difference instead of to first log line.
 static bool g_guest_state_trace_enabled;
+// The diagnostic switches above are set once at startup (main) and never change, so the
+// per-block checks read these two summaries instead of every switch on every block.
+static bool g_diagnostics_need_full;   // turn census, boundary census or service each block
+static bool g_diagnostics_block_skip;  // any diagnostic switch at all
 static u64 g_guest_state_trace_next = 100000ull;
 static unsigned g_guest_state_trace_reports;
 static u32 g_guest_checkpoint_interval;
@@ -1952,13 +1956,9 @@ static void host_actor_search_native(CPUState* cpu) {
 // (see host_direct_can_skip), because the module has already proven the
 // address unwatched - and every address-keyed check below keys on an address
 // the watch list contains, so an unwatched address can never trip one.
-static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
-    if (__builtin_expect(cpu == NULL || g_turn_census_enabled ||
-                             g_boundary_census_enabled ||
-                             g_chassis_service_each_block ||
-                             g_interrupt_sources_dirty,
-                         0))
-        return true;
+// The scene part of the dynamic test: an overlap phase change interrupt flags
+// alone do not describe.
+static inline bool host_chassis_overlap_requires_full(void) {
     if (g_name_scene_object >= 0x80000000u &&
         (g_file_start_pulse.triggered || !g_file_start_pulse.configured)) {
         if (g_ppc_guest_alias_generation != g_overlap_cached_alias_state ||
@@ -1973,6 +1973,14 @@ static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
                 return true;
         }
     }
+    return false;
+}
+
+static inline bool host_chassis_dynamic_requires_full(const CPUState* cpu) {
+    if (__builtin_expect(cpu == NULL || g_diagnostics_need_full || g_interrupt_sources_dirty, 0))
+        return true;
+    if (host_chassis_overlap_requires_full())
+        return true;
     if ((cpu->msr & PPC_MSR_EE) != 0u &&
         (g_guest_decrementer_pending ||
          (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u))
@@ -2007,8 +2015,7 @@ static bool host_can_skip_observation(void* user, const CPUState* cpu, u32 addre
     (void)cpu; (void)address;
     return false;
 #else
-    const bool allowed = !g_deadline_census_enabled && !g_delivery_safety_census_enabled &&
-           !g_guest_state_trace_enabled && !bluewake_jump_button_armed &&
+    const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
            !bluewake_feature_observes(address) &&
            !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
            !host_chassis_requires_full(cpu, address);
@@ -2030,13 +2037,21 @@ static bool host_direct_can_skip(void* user, const CPUState* cpu, u32 address) {
     // skips the intercept-table walk on the hot path. The one address-keyed
     // check that must stay is the module-1 raw alias: g_module1_raw_base is a
     // runtime value, not a compile-time literal, so it is the one address the
-    // watch list cannot guarantee.
-    const bool allowed = !g_deadline_census_enabled && !g_delivery_safety_census_enabled &&
-           !g_guest_state_trace_enabled && !bluewake_jump_button_armed &&
-           !bluewake_feature_observes(address) &&
-           !(address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native) &&
+    // watch list cannot guarantee. Of the feature checks, only two can see an
+    // address that list lacks: draw tags' ranges (it names their ends only) and
+    // Forest Water's tree-timer check, a linked address supplied at load. Each
+    // reads its live switch, so a feature turned on in game is still observed.
+    // The native actor search's filter (BW_SEARCH_JUDGE_FILTER) is a literal,
+    // so it is watched too.
+    // The module asks only once bw_host_quiet has passed: the interrupt sources
+    // are clean (it reads these flags, passed in direct_calls_v2) and no
+    // interrupt the guest would take is pending. Of the dynamic test that leaves
+    // the scene's overlap phase; the diagnostics are in g_diagnostics_block_skip.
+    const bool allowed = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
+           !bluewake_draw_tags_observes_range(address) &&
+           !(bluewake_forest_water_enabled && address == bluewake_forest_water_tree_timer_check) &&
            !(g_module1_raw_base != 0u && address == g_module1_raw_base + 0xD4u) &&
-           !host_chassis_dynamic_requires_full(cpu);
+           !host_chassis_overlap_requires_full();
 #endif
     if (g_direct_call_trace) {
         g_direct_call_queries++;
@@ -7983,6 +7998,9 @@ int main(int argc, char** argv) {
         getenv("BLUEWAKE_DELIVERY_SAFETY_CENSUS") != NULL;
     g_guest_state_trace_enabled =
         getenv("BLUEWAKE_GUEST_STATE_TRACE") != NULL;
+    g_diagnostics_need_full = g_turn_census_enabled || g_boundary_census_enabled || g_chassis_service_each_block;
+    g_diagnostics_block_skip = g_diagnostics_need_full || g_deadline_census_enabled ||
+                               g_delivery_safety_census_enabled || g_guest_state_trace_enabled;
 #ifdef BLUEWAKE_HAS_DSP_ADAPTER
     {
         const char* dsp_rate_env = getenv("BLUEWAKE_DSP_RATE");
