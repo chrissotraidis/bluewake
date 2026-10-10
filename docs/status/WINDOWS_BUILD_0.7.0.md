@@ -120,17 +120,43 @@ also writes stay on this PC; the Mac makes the release's own.
 
 ## Results
 
+I am handing this build to the Mac for draft-release finalization without manual Windows visual checks,
+as requested on October 10, 2026. The unperformed checks below are not passes. The release stays a draft.
+
 | | |
 | --- | --- |
-| Commit built | |
-| Build time, jobs, clang | |
-| Lean copies line | |
-| Module SHA-256 | |
-| a. Start and look (fusion on) | |
-| b. Game rate with and without fusion | |
-| c. Dragon Roost, map, Outset, save and reload | |
-| d. Controllers | |
-| e. Smooth Motion at 120 | |
-| f. Window, portable, FPS counter | |
-| Zip SHA-256, uploaded to the v0.7.0 draft | |
+| Commit built | `9422bd4eb26253408aafd2d63a43eeb2f9565b7d`; clean source, version 0.7.0 build 6; code matches candidate `c6094ec76c82700d5a56a28bf627c8179f686542`. |
+| Build time, jobs, clang | 92.19 minutes, 6 jobs, clang 22.1.3; exit 0 on an AMD Ryzen 7 5700U with Radeon Graphics (Windows build 26300). Built from desktop PowerShell in a local checkout, with the app optimization profile and local game-module training enabled. |
+| Lean copies line | `lean prepaid block copies: 443155 blocks in 813 chunks` |
+| Module SHA-256 | `9897d598f4299a0a7f7fca212c286fcc431867539b4e830f1c33b145473a2106` (matches BuilderProvenance.json and the module inside the ZIP). |
+| a. Start and look (fusion on) | Launch and shutdown evidence only: the title/history loop ran for 27.2 minutes, with `[gx] draw fusion on`, `[renderer] D3D12`, zero fatal lines, and `draws fused onto the draw before: 102400090` at exit. Forest Haven visual gameplay was not checked. |
+| b. Game rate with and without fusion | Not run: no matched gameplay comparison with fusion off. The idle title/history session is not a gameplay benchmark. |
+| c. Dragon Roost, map, Outset, save and reload | Not run. No dungeon/map, save/reload, F1 Quit or clean-relaunch acceptance. The idle session closed with Alt+F4 and logged normal shutdown. The test card was a copy; its source remains unchanged. |
+| d. Controllers | Not run; no physical-controller validation. |
+| e. Smooth Motion at 120 | Not run; the recorded launch had Smooth Motion off. |
+| f. Window, portable, FPS counter | Partial: the launch used the portable user folder, and AppData file names, sizes and modification times remained unchanged after shutdown. Window position, restart and FPS-corner checks were not run. |
+| Zip SHA-256, uploaded to the v0.7.0 draft | `1880822f29b5607bd0f4b2db8ab794a6b8cb7dd07ccd7f8ed6442dbf1903957c` — `BlueWake-v0.7.0-windows-x64.zip`; draft transfer only, pending the Mac content gate below. |
 
+### Package checks
+
+- The packager's allowlist and imported-DLL checks passed: 33 files, about 220 MiB compressed and
+  499 MiB unpacked. ZIP integrity, private-file exclusions, source provenance and the embedded module hash
+  were checked again before upload.
+- The portable marker and test card were removed from the app folder before packaging. The disc, saves,
+  session logs, local source ZIP and local `SHA256SUMS` stay on this PC. Only the Windows ZIP is transferred.
+- `scripts/audit_repo.sh` and `git diff --check` passed. Hosted checks on the results pull request provide
+  the source-only Windows host and regression results; those do not establish gameplay acceptance.
+- The external `release_gate.py` is not installed in this PC's Windows or WSL home. The draft transfer is
+  proceeding at my request so the Mac can finish. The package checks above do **not** replace the content gate.
+
+### Mac hand-off: before publication
+
+1. Download `BlueWake-v0.7.0-windows-x64.zip` from the existing v0.7.0 draft and compare its SHA-256 with the
+   Results table. Keep the existing app-only IPA and keep the release a draft while checking.
+2. Run `scripts/release/check_public_assets.sh` on that ZIP using the maintainer's existing release gate.
+   The only accepted finding is `containsTranslatedGameCode: true`. Any other finding stops publication.
+   Record the actual gate result; it has not run on this PC.
+3. Retain the unverified Windows gameplay checks in the release record and make the release-readiness
+   decision with those gaps explicit. No visual result from this Windows hand-off is being claimed.
+4. Finish the Linux AppImage, Apple assets, release-wide `SHA256SUMS` and notes from
+   [RELEASE_0.7.0.md](RELEASE_0.7.0.md). Publication remains Chris's decision.
