@@ -728,9 +728,12 @@ def main():
     parser.add_argument("--conservative", action="store_true",
                         help="build the plain translation, without the Windows builder's default source "
                              "optimizations (its --fixed-cpu, --direct-calls, ... options then add them one at a time)")
-    for name in (*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_blocks", "lean_memory", "native_entries"):
+    for name in (*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_memory", "native_entries"):
         parser.add_argument("--" + name.replace("_", "-"), action="store_true",
                             help="as in scripts/windows/build.py")
+    parser.add_argument("--no-lean-blocks", action="store_true",
+                        help="BlueWake's conservative prepaid block copies instead of the lean ones (as in "
+                             "scripts/windows/build.py)")
     parser.add_argument("--profile", type=Path, help="an optimization profile (.profdata) for the game module")
     parser.add_argument("--device", metavar="SERIAL",
                         help="train the optimization profile on this adb device (the phone the game is for)")
@@ -760,6 +763,8 @@ def main():
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:
         parser.error("--fixed-mem1 requires --fixed-cpu")
+    if args.no_lean_blocks:
+        args.lean_blocks = False
     if args.lean_blocks:
         args.prepared_blocks = True
     if args.lean_memory and not args.prepared_blocks:
