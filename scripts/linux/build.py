@@ -124,6 +124,35 @@ def sync_tree(new, current):
     shutil.rmtree(new)
 
 
+def file_times(root):
+    """Each file's content hash and modification time under `root` (see keep_unchanged_times)."""
+    times = {}
+    if root.exists():
+        for path in root.rglob("*"):
+            if path.is_file():
+                times[path.relative_to(root)] = (hashlib.sha256(path.read_bytes()).digest(), path.stat().st_mtime_ns)
+    return times
+
+
+def keep_unchanged_times(root, before):
+    """Give every file whose content is what it was before regenerating its old
+    modification time back. The composite source is regenerated whole and then
+    rewritten by the mods and the prepared optimizations, so every file is new on
+    disk even when its final content is not; Ninja then recompiles only the files
+    that really changed. Returns (changed, total)."""
+    changed = total = 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        total += 1
+        old = before.get(path.relative_to(root))
+        if old is not None and hashlib.sha256(path.read_bytes()).digest() == old[0]:
+            os.utime(path, ns=(path.stat().st_atime_ns, old[1]))
+        else:
+            changed += 1
+    return changed, total
+
+
 def tree_digest(root):
     """scripts/ios/composite_manifest.py's digest of a generated tree."""
     out = subprocess.check_output([sys.executable, str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
@@ -441,6 +470,7 @@ int main(void) {
             # chunks a later step rewrote (native_game_math.py refuses them).
             self.prepared_current = not (self.mods and self.mods_pending)
         else:
+            self.source_times = file_times(current)
             sync_tree(new, current)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
@@ -1035,6 +1065,9 @@ int main(void) {
         else:
             self.build_mods()
         self.prepare_blocks()
+        if getattr(self, "source_times", None):
+            changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
+            print(f"composite source: {changed} of {total} files changed since the last build")
         if args.host_only:
             step("local optimization training: kept from the last build (--host-only)")
             self.profile = self.kept_profile()
