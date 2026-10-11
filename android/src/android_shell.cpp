@@ -34,6 +34,7 @@ extern "C" {
 }
 #include "controller_settings.h"
 #include "dolphin_save_import.h"
+#include "disc_import.h"
 #include "touch_controls.h"
 
 // runtime/host/src/dpad_menus.h, declared here: that header brings in the
@@ -345,6 +346,32 @@ JNIEXPORT jbyteArray SHELL(nativeCardImport)(JNIEnv* env, jclass, jbyteArray car
     env->SetByteArrayRegion(out, 0, (jsize)result_size, (const jbyte*)result);
     std::free(result);
     return out;
+}
+
+// First-run disc import: extract main.dol and rels/ from the player's own
+// GZLE01 ISO into the game dir, as the iOS first-run screen does on the device
+// (apple/ios/src/disc_import.c). Returns null on success, or a sentence for
+// the user. Progress reports as {fraction 0..1000, stage} through progress.
+JNIEXPORT jstring SHELL(nativeDiscPrepare)(JNIEnv* env, jclass, jstring iso, jstring game_dir) {
+    const char* iso_path = utf(env, iso);
+    const char* dir_path = utf(env, game_dir);
+    const char* reason = nullptr;
+    if (iso_path == nullptr || dir_path == nullptr) {
+        reason = "The disc image could not be read.";
+    } else {
+        char err[512] = {0};
+        if (bluewake_disc_check(iso_path, err, sizeof err) != 0) {
+            reason = err;
+        } else if (bluewake_disc_prepare(iso_path, dir_path, nullptr, nullptr, err, sizeof err) != 0) {
+            reason = err;
+        }
+    }
+    if (iso_path != nullptr) env->ReleaseStringUTFChars(iso, iso_path);
+    if (dir_path != nullptr) env->ReleaseStringUTFChars(game_dir, dir_path);
+    // null on success; the reason on failure (the Java caller checks null).
+    if (reason != nullptr)
+        return env->NewStringUTF(reason);
+    return nullptr;
 }
 
 }  // extern "C"
