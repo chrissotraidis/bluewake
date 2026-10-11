@@ -42,6 +42,8 @@ final class Shell {
     /** Rows "empty\tchecksum_ok\tmax_life\trupees\tname" for each quest log, or null with error[0] set. */
     static native String[] nativeQuestLogs(byte[] bytes, boolean dolphin, String[] error);
     static native byte[] nativeCardImport(byte[] card, byte[] save, int source, int destination, String[] error);
+    /** Extract main.dol and rels/ from the disc into the game dir; null = success, else the reason. */
+    static native String nativeDiscPrepare(String iso, String gameDir);
 
     static void log(String line) {
         try {

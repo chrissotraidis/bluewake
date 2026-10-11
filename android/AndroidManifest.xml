@@ -31,6 +31,18 @@
         <profileable android:shell="true" />
 
         <activity
+            android:name="dev.bluewake.android.FirstRunActivity"
+            android:exported="true"
+            android:label="@LABEL@"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name="dev.bluewake.android.BlueWakeActivity"
             android:exported="true"
             android:label="@LABEL@"
@@ -40,10 +52,6 @@
             android:resizeableActivity="true"
             android:preferMinimalPostProcessing="true"
             android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation|density">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
         </activity>
 
         <!-- Help & Feedback > Share Session Log: the newest two session logs, read-only, to the app they are shared with. -->

@@ -313,14 +313,12 @@ int main(int argc, char** argv) {
         missing_path = getenv("BLUEWAKE_DISC");
     }
     if (missing != NULL) {
-        char message[2048];
-        snprintf(message, sizeof message,
-                 "BlueWake cannot start: %s is missing.\n\n%s\n\n"
-                 "Push the game files from your PC with\n"
-                 "python scripts/android/install.py",
-                 missing, missing_path);
-        fprintf(stderr, "[android] %s\n", message);
-        fatal_box(message);
+        // The launcher activity shows the first-run screen for this (FirstRunActivity.java):
+        // it copies the player's disc and extracts main.dol + rels on the device.
+        // Return quietly so the screen owns the flow rather than a native dialog.
+        fprintf(stderr, "[android] %s is missing at %s; the first-run screen will import the disc\n",
+                missing, missing_path);
+        finish_session_log();
         return 1;
     }
 
