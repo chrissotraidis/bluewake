@@ -356,52 +356,136 @@ the platform commands in [`docs/BUILD_YOUR_OWN.md`](../BUILD_YOUR_OWN.md).
 
 ## 4. Translate
 
-> **TBD — work in progress:** Sections 4–7 continue in the
-> [follow-up draft PR][build-details-follow-up]. Their headings remain here to
-> preserve the end-to-end build outline while that material is reviewed.
+The builder compiles pinned DolRecomp, then runs its GameCube C backend over
+the DOL and each REL. The result preserves PowerPC operations and guest
+addresses; it is not reconstructed Nintendo source code.
+
+The builder checks out the
+[pinned DolRecomp revision](https://github.com/elliotttate/DolRecomp/commit/b8b534591cba8ca7cd43943a655ee6e2591cf5de)
+under `ROOT/ref/recompcore/DolRecomp`. Each platform builder records its invocation
+in the build log.
 
 ## 5. Compose and prepare
 
-TBD — see the [follow-up draft PR][build-details-follow-up].
-
 ### Generate the composite source
 
-TBD.
+[`scripts/generate_composite.py`](../../scripts/generate_composite.py) combines
+the DOL and REL translations with shared dispatch and module metadata. The
+result can address code across the original executable and REL boundaries.
+
+[`scripts/audit_composite_provenance.py`](../../scripts/audit_composite_provenance.py)
+and the profile digest verify the generated base. Unexpected input stops the
+normal build instead of silently producing a different module.
 
 ### Apply mods and optimizations
 
-TBD.
+[`scripts/mods/build_mod_variants.py`](../../scripts/mods/build_mod_variants.py)
+adds selected widescreen and Better Wind Waker variants. The builder applies
+selected guarded preparations through
+[`scripts/builder/module_optimizations.py`](../../scripts/builder/module_optimizations.py).
+
+Preparations verify the source shape or digest they expect. If a guard fails,
+the original translated implementation remains in place.
 
 ## 6. Train
 
-TBD — see the [follow-up draft PR][build-details-follow-up].
+When enabled, the [Linux builder](../../scripts/linux/build.py) and
+[Windows builder](../../scripts/windows/build.py) run their platform training
+flows directly; the Apple builder uses
+[`train_local_pgo.py`](../../scripts/builder/train_local_pgo.py). Each builds
+an instrumented module, runs headless playbacks, and merges the results with
+`llvm-profdata` for the final compile.
+
+Fingerprints prevent reuse with incompatible inputs. Training output stays in
+the private build directory and is not a public artifact.
 
 ## 7. Compile and package
 
-TBD — see the [follow-up draft PR][build-details-follow-up].
+CMake and Ninja compile the prepared composite into a native game module. A
+separate build produces the shared host, runtime, renderer, audio, input,
+storage, and platform entry code.
+
+Packaging arranges those outputs and support files for the target. Platform
+SDKs, signing, and final artifact formats diverge here.
 
 ### Linux (x86-64)
 
-TBD.
+[`scripts/linux/build.py`](../../scripts/linux/build.py) uses Clang, LLD,
+CMake, and Ninja. [`linux/CMakeLists.txt`](../../linux/CMakeLists.txt) builds
+the host; [`scripts/linux/make_appimage.sh`](../../scripts/linux/make_appimage.sh)
+optionally creates the AppImage.
+
+| Artifact | Location relative to `OUT` |
+| --- | --- |
+| Host | `BlueWake/bluewake` |
+| Game module | `BlueWake/gGZLE01_recomp.so` |
+| App folder | `BlueWake/` |
+| Optional AppImage | `BlueWake-x86_64.AppImage` |
+
+`--ci-container` uses the shared
+[`scripts/linux/Dockerfile`](../../scripts/linux/Dockerfile) environment.
 
 ### Windows (x86-64)
 
-TBD.
+[`scripts/windows/build.py`](../../scripts/windows/build.py) uses Visual Studio
+LLVM/Clang, CMake, and Ninja. [`windows/CMakeLists.txt`](../../windows/CMakeLists.txt)
+adds the Windows entry, settings, crash handling, resources, and compatibility
+layer.
+
+| Artifact | Location relative to `OUT` |
+| --- | --- |
+| Host | `BlueWake/BlueWake.exe` |
+| Game module | `BlueWake/gGZLE01_recomp.dll` |
+| App folder | `BlueWake/` |
+
+[`scripts/windows/package_release.py`](../../scripts/windows/package_release.py)
+assembles the distributable folder and runtime DLLs.
 
 ### macOS (Apple silicon)
 
-TBD.
+[`scripts/builder/build.sh`](../../scripts/builder/build.sh) with `--platform
+macos` uses Apple Clang and the macOS SDK.
+[`scripts/builder/package_macos.py`](../../scripts/builder/package_macos.py)
+creates and signs the app bundle.
+
+| Artifact | Location relative to `OUT` |
+| --- | --- |
+| App | `packaged/BlueWake.app` |
+| Game module | `packaged/BlueWake.app/Contents/Frameworks/gGZLE01_recomp.dylib` |
+| Personal game inputs | `packaged/BlueWake.app/Contents/Resources/Game/` |
 
 ### iPhone and iPad (iOS/iPadOS, arm64)
 
-TBD.
+The default [`scripts/builder/build.sh`](../../scripts/builder/build.sh) target
+uses Apple Clang and the iPhoneOS SDK.
+[`apple/ios/CMakeLists.txt`](../../apple/ios/CMakeLists.txt) adds UIKit, touch,
+controller, and mobile services.
+
+| Artifact | Location relative to `OUT` | Role |
+| --- | --- | --- |
+| App | `app/BlueWake.app` | Signed or ad-hoc app bundle |
+| Game module | `app/BlueWake.app/Frameworks/gGZLE01_recomp.dylib` | Translated game module |
+| Optional IPA | `BlueWake.ipa` when requested with `--ipa OUT/BlueWake.ipa` | Unsigned package for sideloading |
+
+The IPA path excludes disc and extracted game data. PadMint can add the
+player's module to an app-only build.
 
 ### Apple TV (tvOS, arm64; experimental)
 
-TBD.
+[`scripts/tvos/build_device.sh`](../../scripts/tvos/build_device.sh) selects
+the tvOS branch of the Apple builder. It creates a controller-first app and
+can install, transfer the disc, and launch through `devicectl`.
+
+| Artifact | Location relative to `OUT` |
+| --- | --- |
+| App | `app-tvos/BlueWake.app` |
+| Game module | `app-tvos/BlueWake.app/Frameworks/gGZLE01_recomp.dylib` |
+
+The current Dawn archive bridge remains experimental. See the
+[tvOS build guide](../status/TVOS_BUILD.md).
 
 ### Android (in progress)
 
-TBD.
-
-[build-details-follow-up]: FOLLOW_UP_PR_URL
+Android arm64 support is under development in
+[PR #93](https://github.com/chrissotraidis/bluewake/pull/93). It is not yet a
+current build path, so its proposed artifacts are not included above.
