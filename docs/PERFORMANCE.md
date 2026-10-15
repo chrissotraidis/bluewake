@@ -164,8 +164,8 @@ phases. Each one ends in a pull request, a row in "Results" above, and the row m
   new replies on #59, #93, #137, #159 and #179: a contributor may already have answered a question below.
 - **Rules that bind every phase.** Branches and pull requests only. Runtime (RecompCore) changes go to
   `chrissotraidis/RecompCore` branch `bluewake-next` by pull request first, then get pinned here and exported as
-  `patches/recompcore/NNNN-*.patch` (see #184 for the pattern). A setting goes in both menus
-  (`runtime/host/src/settings_menu.cpp` and `windows/src/win_settings.cpp`). Anything that changes gameplay,
+  `patches/recompcore/NNNN-*.patch` (see #184 for the pattern). A desktop setting is a row in
+  `runtime/host/src/settings_table.h`, drawn by the one desktop menu (`runtime/host/src/desktop_menu.cpp`). Anything that changes gameplay,
   timing or rendering is off by default until it has been tested on the platform it affects. Never commit or
   attach a disc, game files, a card, a save state, a session log or a built module.
 - **Hardware.** This Mac (M3 Max) has the Wind Waker ISO at `~/GitHub/bluewakearchive/ref/`, a Mac module at

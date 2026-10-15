@@ -28,6 +28,23 @@ inline bool bw_menu_combo(const char* label, int* index, const char* const* item
     return changed;
 }
 
+inline int bw_menu_slider_nudge();  // defined below, with the rest of the controller's keys
+
+// A slider with its name above it and the bar the full width, which a
+// controller nudges left and right a twentieth of its range at a time.
+inline bool bw_menu_slider(const char* label, float* value, float low, float high, const char* format) {
+    ImGui::PushID(label);
+    ImGui::TextWrapped("%s", label);
+    ImGui::SetNextItemWidth(-1.f);
+    bool changed = ImGui::SliderFloat("##value", value, low, high, format);
+    if (const int step = bw_menu_slider_nudge()) {
+        *value = std::clamp(*value + static_cast<float>(step) * (high - low) / 20.f, low, high);
+        changed = true;
+    }
+    ImGui::PopID();
+    return changed;
+}
+
 // A checkbox whose label wraps when the window is too narrow for it; clicking
 // the wrapped label toggles it too.
 inline bool bw_menu_checkbox(const char* label, bool* value) {

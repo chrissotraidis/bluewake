@@ -245,7 +245,10 @@ clang (GNU driver, MSVC ABI) from Visual Studio.
   was, by module and offset, charging time in system code to the BlueWake function that called it.
 
 The Windows overlay saves display, camera, mod and audio choices in `settings.ini`; mods and audio mode
-apply after restart. Touch-layout editing and save-management screens remain iOS-specific.
+apply after restart. The file uses the same `KEY=VALUE` names as the Mac and Linux one (`BLUEWAKE_ASPECT=21:9`,
+listed in `runtime/host/src/settings_table.h`). A file from before that (`aspect=`, `option.NAME=`...) is read
+and converted once, and the old one is kept beside it as `settings.ini.before-shared-menu`. Launch options and
+variables set before BlueWake starts still win for that session. Touch-layout editing and save-management screens remain iOS-specific.
 What each Windows release build was checked for is in [Windows tasks](WINDOWS_TASKS.md).
 
 The prepaid-block candidate has bounded correctness evidence on an M3 Max:

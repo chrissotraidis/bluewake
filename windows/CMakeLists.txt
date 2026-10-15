@@ -79,6 +79,8 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/fps_watch.c
     ${BLUEWAKE_HOST_SRC}/game_options.c
+    ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c)
 
 # The manifest (DPI awareness, long paths, UTF-8 code page) is merged into the
@@ -478,9 +480,13 @@ set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)
 
 
 add_executable(bluewake_settings_state_test ${BLUEWAKE_REPO_ROOT}/tests/settings_state_test.cpp)
-target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
+target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_20)
 target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
+# The settings core writes its file through atomic_file.h, whose rename is the
+# compat layer's atomic replace on Windows, as in the app.
+target_compile_options(bluewake_settings_state_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+target_link_libraries(bluewake_settings_state_test PRIVATE bluewake_posix_compat)
 
 add_executable(bluewake_settings_table_test ${BLUEWAKE_REPO_ROOT}/tests/settings_table_test.cpp)
 target_compile_features(bluewake_settings_table_test PRIVATE cxx_std_20)
