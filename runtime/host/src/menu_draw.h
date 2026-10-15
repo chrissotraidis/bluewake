@@ -104,14 +104,18 @@ inline void draw_control(const bw_settings::Setting& s) {
     case bw_settings::Control::Slider:
         edited = draw_slider(s);
         break;
-    case bw_settings::Control::Dropdown: {
+    case bw_settings::Control::Chooser: {
         const char* const* shown = nullptr;
         const char* const* stored = nullptr;
         int count = 0;
         if (!choices(s.key, &shown, &stored, &count) || count <= 0)
             break;
+        // A value that is none of the choices reads as the default.
         const std::string now = get(s.key, bw_settings::fallback_for(s));
         int index = 0;
+        for (int i = 0; i < count; ++i)
+            if (std::string(bw_settings::fallback_for(s)) == stored[i])
+                index = i;
         for (int i = 0; i < count; ++i)
             if (now == stored[i])
                 index = i;

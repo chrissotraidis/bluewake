@@ -19,11 +19,12 @@
 namespace bw_settings {
 
 enum class Kind { Bool, Int, Float, Choice, Text };
-// How a tab draws the setting. Switch, Slider and Dropdown are drawn by the
-// shared draw_tab; Custom names a drawing function of its own (Smooth Motion's
-// rate, the texture pack, the remaps, Better Wind Waker's options, the
-// keyboard and controller tables); None is not drawn on its own at all.
-enum class Control { None, Switch, Slider, Dropdown, Custom };
+// How a tab draws the setting. Switch, Slider and Chooser (a list's choices
+// as a row of cells, menu_shared.h's bw_menu_combo) are drawn by the shared
+// draw_tab; Custom names a drawing function of its own (Smooth Motion's
+// rate, the FPS position, the texture pack, the remaps, Better Wind Waker's
+// options, the keyboard and controller tables); None is not drawn on its own at all.
+enum class Control { None, Switch, Slider, Chooser, Custom };
 enum class Tab { Display, Gameplay, Mods, Controls, SoundFiles };
 
 // A set of platforms, a bit each.
@@ -87,7 +88,8 @@ inline constexpr Setting kSettings[] = {
     {.key = "DOL_AURORA_FULLSCREEN", .old_windows = "fullscreen", .kind = Kind::Bool,
      .label = "Start in fullscreen", .control = Control::Custom, .next_launch = Os::All},
     {.key = "DOL_AURORA_RENDER_SCALE", .old_windows = "render_scale", .kind = Kind::Int, .fallback = "0",
-     .high = 4.f, .label = "Render resolution", .control = Control::Dropdown},
+     .high = 4.f, .label = "Render resolution", .control = Control::Chooser,
+     .note = "Each step draws the game's own picture that many times larger. Window follows the window's pixels."},
     {.key = "DOL_AURORA_FRAME_INTERP", .old_windows = "smooth_motion", .kind = Kind::Bool,
      .label = "Smooth Motion (experimental)   (F10)", .control = Control::Custom,
      .note = "The game runs at 30; display changes and overloads can lower the presentation rate."},
@@ -96,9 +98,9 @@ inline constexpr Setting kSettings[] = {
     {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
      .label = "Show the frame rate   (F9)", .control = Control::Switch},
     {.key = "DOL_AURORA_FPS_POSITION", .old_windows = "fps_position", .kind = Kind::Choice,
-     .label = "FPS position", .control = Control::Dropdown, .needs = "DOL_AURORA_SHOW_FPS"},
+     .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_FORCE_ANISO", .old_windows = "anisotropy", .kind = Kind::Int, .fallback = "1", .low = 1.f,
-     .high = 16.f, .label = "Texture filtering", .control = Control::Dropdown, .fill = Os::None},
+     .high = 16.f, .label = "Texture filtering", .control = Control::Chooser, .fill = Os::None},
     {.key = "BLUEWAKE_MODS", .old_windows = "betterww", .label = "Better Wind Waker", .tab = Tab::Mods,
      .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_OPTIONS", .tab = Tab::Mods, .next_launch = Os::All}, // Windows: option.NAME

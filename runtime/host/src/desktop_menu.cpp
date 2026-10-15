@@ -82,14 +82,24 @@ double g_test_open_at = -1.0, g_test_open_for = 0.0;
 bool g_test_done = false;
 
 // What the lists of choices offer (bw_menu::choices): shown, and stored.
-const char* const kScaleShown[] = {"The window's pixels", "1x (480 lines)", "2x (960)", "3x (1440)", "4x (1920)"};
+// Render resolution by its multiple, not by pixels: the size the game asks
+// for is its own (a GameCube mode is not always 480 lines), and the width
+// comes from the widescreen mod when there is one and from the window when
+// there is not, so any width by height here would be a guess.
+const char* const kScaleShown[] = {"Window", "1x", "2x", "3x", "4x"};
 const char* const kScaleStored[] = {"0", "1", "2", "3", "4"};
 const char* const kAnisoShown[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
 const char* const kAnisoStored[] = {"1", "2", "4", "8", "16"};
 
+// Beside the control when it fits there. A list or a slider fills its line,
+// and after one the note went past the edge and, wrapped to nothing there, was
+// a column of letters nobody could see: an empty space under the control.
 void restart_note() {
-    ImGui::SameLine();
-    ImGui::TextDisabled("(next launch)");
+    const char* const note = "(next launch)";
+    const float room = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x - ImGui::GetItemRectMax().x;
+    if (room >= ImGui::GetStyle().ItemSpacing.x + ImGui::CalcTextSize(note).x)
+        ImGui::SameLine();
+    ImGui::TextDisabled("%s", note);
 }
 
 // --- settings that apply at once ----------------------------------------------
@@ -352,21 +362,41 @@ bool draw_custom(const bw_settings::Setting& s) {
         return true;
     }
     if (std::strcmp(s.key, "DOL_AURORA_FRAME_INTERP") == 0) {
-        // The switch and its rate are one dropdown.
-        static const char* const kSmooth[] = {"Off (30, the game's)", "60 frames a second",
-                                              "120 frames a second (120 Hz displays)",
-                                              "Match the display (up to 240)"};
+        // The switch and its rate are one list. The display's choice is named
+        // Display, not its rate, which can be one of the fixed choices (120 Hz);
+        // the line under it says what the chosen one comes to here, a whole
+        // number of frames to each of the game's (up to 180 FPS on 200 Hz).
+        const float refresh = display_refresh();
+        const char* const kSmooth[] = {"Off (30 FPS)", "60 FPS", "120 FPS", "Display"};
         const int requested = smooth_requested();
         int smooth = !env_on(s.key, false) ? 0 : requested == -1 ? 3 : requested >= 3 ? 2 : 1;
         if (bw_menu_combo(s.label, &smooth, kSmooth, 4))
             set_smooth_motion(smooth == 0 ? nullptr : smooth == 3 ? "display" : smooth == 2 ? "3" : "1");
-        // What that comes to on this display.
-        const float refresh = display_refresh();
-        ImGui::TextDisabled("    Target: %d FPS on this %.0f Hz display; pacing may reduce it.",
-                            env_on(s.key, false) ? (bw_smooth_steps(smooth_requested(), refresh) + 1) * 30 : 30,
-                            refresh);
+        const int most = env_on(s.key, false) ? (bw_smooth_steps(smooth_requested(), refresh) + 1) * 30 : 30;
+        if (refresh > 0.f)
+            ImGui::TextDisabled("    Up to %d FPS on this %.0f Hz display; pacing may reduce it.", most, refresh);
+        else
+            ImGui::TextDisabled("    Up to %d FPS; the display's rate isn't known yet.", most);
         if (s.note != nullptr)
             ImGui::TextDisabled("%s", s.note);
+        return true;
+    }
+    if (std::strcmp(s.key, "DOL_AURORA_FPS_POSITION") == 0) {
+        // On a picture of the screen, in the menu's order (fps_position.h).
+        const char* names[BW_FPS_POSITIONS];
+        ImVec2 spots[BW_FPS_POSITIONS];
+        const int position = bw_fps_position(env(s.key).c_str());
+        int at = 0;
+        for (int i = 0; i < BW_FPS_POSITIONS; ++i) {
+            names[i] = kBwFpsPositionNames[kBwFpsPositionOrder[i]];
+            spots[i] = ImVec2(kBwFpsPositionSpot[i][0], kBwFpsPositionSpot[i][1]);
+            if (kBwFpsPositionOrder[i] == position)
+                at = i;
+        }
+        if (bw_menu_spot_chooser(s.label, &at, names, spots, BW_FPS_POSITIONS)) {
+            set_env(s.key, kBwFpsPositionValues[kBwFpsPositionOrder[at]]);
+            apply_fps_position();
+        }
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_BUTTON_MAP") == 0) {
@@ -500,13 +530,13 @@ bool draw_custom(const bw_settings::Setting& s) {
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_DSP_MODE") == 0) {
-        // Two ways to make the sound, as a pair of choices rather than a switch.
-        int exact = env(s.key, bw_settings::fallback_for(s)) == "lle" ? 1 : 0;
-        bool picked = ImGui::RadioButton("Fast (Dolphin's high-level Zelda sound)", &exact, 0);
-        picked |= ImGui::RadioButton("Exact (the sound chip's own program; slower)", &exact, 1);
-        if (picked)
+        // Two ways to make the sound: a switch, not a list of two.
+        bool exact = env(s.key, bw_settings::fallback_for(s)) == "lle";
+        if (bw_menu_checkbox("Exact sound (the sound chip's own program)", &exact))
             set_env(s.key, exact ? "lle" : "hle");
         restart_note();
+        ImGui::TextDisabled("Off: Dolphin's high-level Zelda sound, which is faster. On: the chip's own "
+                            "program, which is slower but exact.");
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_STAGE_SELECT_TOGGLE") == 0) {
@@ -590,12 +620,6 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *shown = bw_desktop::kAnisoShown;
         *stored = bw_desktop::kAnisoStored;
         *count = 5;
-        return true;
-    }
-    if (std::strcmp(key, "DOL_AURORA_FPS_POSITION") == 0) {
-        *shown = kBwFpsPositionNames;
-        *stored = kBwFpsPositionValues;
-        *count = BW_FPS_POSITIONS;
         return true;
     }
     return false;
@@ -980,7 +1004,7 @@ void draw_menu(const bw_platform::Look& look) {
         case BW_MENU_NONE:
             break;
         }
-        // The game's B ends an edit, closes a dropdown, or closes the menu (menu_shared.h).
+        // The game's B ends an edit, or closes the menu (menu_shared.h).
         if (bw_menu_back(pad.back))
             open = false;
     }
