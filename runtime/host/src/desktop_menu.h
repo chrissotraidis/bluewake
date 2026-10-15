@@ -100,9 +100,6 @@ Look look(SDL_Window* window);
 void frame(SDL_Window* window, unsigned long long now_ms);
 // The menu opened or closed: what the game's input does meanwhile.
 void menu_opened(bool open);
-// Whether the game waits while the menu is open (Mac and Linux), or runs on
-// with its input kept from it (Windows).
-bool pauses_game();
 // The folder HD textures turn on with when none was chosen before; "" opens
 // the folder picker instead.
 std::string default_pack_folder();

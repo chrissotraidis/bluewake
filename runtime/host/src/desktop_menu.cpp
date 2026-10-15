@@ -69,6 +69,9 @@ namespace bw_desktop {
 namespace {
 
 bool g_open = false;
+// Whether the game waits while the menu is open (BLUEWAKE_MENU_PAUSES), read
+// at the first frame and when the player changes it.
+bool g_menu_pauses = false;
 bw_texture_pack::Counter g_pack_count; // textures in the pack, counted once per opening
 bool g_stage_select_question = false;  // the menu shows only the stage select's question
 Uint64 g_safe_mode_since = 0;
@@ -196,7 +199,13 @@ void apply_key_map() {
 
 // Every setting the game and Aurora read while they run, from the variables:
 // the first frame, once the launch has filled them in.
+void read_menu_pauses() {
+    g_menu_pauses =
+        env_on("BLUEWAKE_MENU_PAUSES", bw_settings::default_on(bw_menu::setting("BLUEWAKE_MENU_PAUSES")));
+}
+
 void apply_live() {
+    read_menu_pauses();
     aurora_set_frame_buffer_scale(static_cast<float>(env_int("DOL_AURORA_RENDER_SCALE", 0)));
     aurora_set_forced_anisotropy(static_cast<unsigned>(env_int("DOL_AURORA_FORCE_ANISO", 1)));
     refresh_smooth_rate();
@@ -225,6 +234,8 @@ void apply_now(const bw_settings::Setting& s) {
         return;
     if (std::strcmp(key, "BLUEWAKE_HD_LOOK") == 0)
         bluewake_hd_look_reload();
+    else if (std::strcmp(key, "BLUEWAKE_MENU_PAUSES") == 0)
+        read_menu_pauses();
     else if (std::strcmp(key, "DOL_AURORA_SHOW_FPS") == 0)
         aurora_set_fps_overlay(value != "0");
     else if (std::strcmp(key, "DOL_AURORA_FPS_POSITION") == 0)
@@ -688,9 +699,9 @@ bool shader_wait_holds() {
     return true;
 }
 
-// The game waits while the shaders compile, and while the menu is open where
-// the platform pauses for it.
-bool hold(void*) { return (g_open && bw_platform::pauses_game()) || shader_wait_holds(); }
+// The game waits while the shaders compile, and while the menu is open if
+// the player has it pause.
+bool hold(void*) { return (g_open && g_menu_pauses) || shader_wait_holds(); }
 
 constexpr ImGuiWindowFlags kNotice = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
                                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
@@ -1045,7 +1056,7 @@ void open_menu() {
     g_open = true;
     bluewake_haptics_block(true);
     bw_platform::menu_opened(true);
-    std::fprintf(stderr, "[settings] menu open%s\n", bw_platform::pauses_game() ? " (the game is paused)" : "");
+    std::fprintf(stderr, "[settings] menu open%s\n", g_menu_pauses ? " (the game is paused)" : "");
 }
 
 void close_menu() {

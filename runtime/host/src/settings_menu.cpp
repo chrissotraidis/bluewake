@@ -146,13 +146,11 @@ Look look(SDL_Window*) {
 
 void frame(SDL_Window*, unsigned long long now_ms) { draw_renderer_notice(now_ms); }
 
-// The game is paused under the menu (pauses_game); the mouse is handed back.
+// The mouse is handed back while the menu is open.
 void menu_opened(bool open) {
     if (open)
         bluewake_mouse_camera_release();
 }
-
-bool pauses_game() { return true; }
 
 std::string default_pack_folder() {
     std::error_code error;

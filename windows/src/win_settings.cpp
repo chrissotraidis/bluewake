@@ -305,15 +305,14 @@ void frame(SDL_Window* window, unsigned long long now_ms) {
     draw_hint(window);
 }
 
-// The game keeps running under the menu; its keys, pad and mouse are kept
-// from it meanwhile, so the menu's clicks and keys do not move Link.
+// The game's keys, pad and mouse are kept from it while the menu is open, so
+// the menu's clicks and keys do not move Link (the game may run on under it:
+// BLUEWAKE_MENU_PAUSES).
 void menu_opened(bool open) {
     PADBlockInput(open);
     PADSetKeyboardActive(0, open ? FALSE : TRUE);
     bluewake_mouse_camera_block(open);
 }
-
-bool pauses_game() { return false; }
 
 std::string default_pack_folder() { return ::default_pack_folder(); }
 

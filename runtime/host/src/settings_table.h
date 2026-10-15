@@ -211,6 +211,12 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_DSP_MODE", .old_windows = "lle_audio", .kind = Kind::Choice, .fallback = "hle",
      .tab = Tab::SoundFiles, .control = Control::Custom, .group = "Sound", .next_launch = Os::All,
      .fill = Os::All},
+    // The game waits while the menu is open, or runs on with its input kept from
+    // it. Off on Windows until a paused game is checked there: its picture behind
+    // the menu needs RecompCore's held-frame fix (fix/held-frame-black).
+    {.key = "BLUEWAKE_MENU_PAUSES", .kind = Kind::Bool, .on = Os::Linux | Os::Mac,
+     .label = "Pause the game while the menu is open", .tab = Tab::SoundFiles, .control = Control::Switch,
+     .group = "The menu"},
     // Not drawn: the texture pack's folder while HD textures are off, so they come back to it.
     {.key = "BLUEWAKE_TEXTURE_PACK_FOLDER", .tab = Tab::Mods, .fill = Os::None},
     // Windows only, not drawn: the window's size and place as the player left them, checked at launch.
