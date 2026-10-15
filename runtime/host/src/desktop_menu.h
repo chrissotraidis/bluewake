@@ -58,7 +58,7 @@ const std::string& settings_path();
 void save();
 // A change is still to be written (the last save failed, or none yet).
 bool unsaved();
-// The saves and session logs' folder, for Sound and files.
+// The saves and session logs' folder, for the Config tab.
 void set_data_dir(const std::string& dir);
 const std::string& data_dir();
 

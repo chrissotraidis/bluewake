@@ -47,7 +47,7 @@ bool bluewake_settings_menu_event(const void* sdl_event);
 // True once the menu's Restart now quit the game: linux_entry.c starts it
 // again, with the environment it began with, after a clean exit.
 bool bluewake_settings_restart_requested(void);
-// The folder with the saves and session logs, for Sound and files (linux_entry.c
+// The folder with the saves and session logs, for the Config tab (linux_entry.c
 // sets it; otherwise it's the settings file's folder).
 void bluewake_settings_set_data_dir(const char* dir);
 #endif

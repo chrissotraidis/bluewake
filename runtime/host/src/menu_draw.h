@@ -9,6 +9,7 @@
 #pragma once
 #include <imgui.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include "menu_shared.h"
@@ -71,9 +72,22 @@ inline bool draw_slider(const bw_settings::Setting& s) {
 
 inline void draw_control(const bw_settings::Setting& s);
 
+// Why the row just drawn (a group) is greyed, for the pointer over it: a
+// greyed item takes no hovering of its own, so an invisible button over the
+// row does. A pad and the keyboard skip greyed rows; the switch that turns
+// one on is beside it.
+inline void greyed_why(const char* why) {
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    ImGui::SetCursorScreenPos(a);
+    ImGui::InvisibleButton("##why", ImVec2(std::max(1.f, b.x - a.x), std::max(1.f, b.y - a.y)));
+    if (ImGui::IsItemHovered())
+        bw_menu_tooltip(why);
+}
+
 // One row: the control the table asks for, its next-launch note and its quiet
-// line. A setting nobody can change right now is drawn greyed, as both menus
-// have always drawn it.
+// line. A setting nobody can change right now is drawn greyed, so the tab
+// keeps its shape and the setting can be found; the pointer over it says
+// what turns it on (or what it is off for).
 inline void draw_setting(const bw_settings::Setting& s) {
     if (s.control == bw_settings::Control::None)
         return;
@@ -83,9 +97,21 @@ inline void draw_setting(const bw_settings::Setting& s) {
     const bool overridden = s.dead_when != nullptr && !get(s.dead_when, "").empty();
     if (s.group != nullptr)
         s.group[0] == '\0' ? ImGui::Separator() : ImGui::SeparatorText(s.group);
+    ImGui::BeginGroup();
     ImGui::BeginDisabled(waiting || overridden);
     draw_control(s);
     ImGui::EndDisabled();
+    ImGui::EndGroup();
+    if (waiting || overridden) {
+        char why[160];
+        if (waiting)
+            std::snprintf(why, sizeof why, "Turn on \"%s\" to change this.", setting(s.needs).label);
+        else
+            std::snprintf(why, sizeof why, "Off while \"%s\" is set.", setting(s.dead_when).label);
+        ImGui::PushID(s.key);
+        greyed_why(why);
+        ImGui::PopID();
+    }
 }
 
 // The row's control itself, its note and what a change does.

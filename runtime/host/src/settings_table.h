@@ -25,7 +25,7 @@ enum class Kind { Bool, Int, Float, Choice, Text };
 // rate, the FPS position, the texture pack, the remaps, Better Wind Waker's
 // options, the keyboard and controller tables); None is not drawn on its own at all.
 enum class Control { None, Switch, Slider, Chooser, Custom };
-enum class Tab { Display, Gameplay, Mods, Controls, SoundFiles };
+enum class Tab { Display, Gameplay, Mods, Controls, Config };
 
 // A set of platforms, a bit each.
 enum class Os : unsigned { None = 0, Windows = 1, Linux = 2, Mac = 4, All = 7 };
@@ -84,6 +84,17 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_HD_LOOK", .old_windows = "hd_look", .kind = Kind::Bool, .label = "Wind Waker HD look   (F2)",
      .control = Control::Switch,
      .note = "The HD release's look, rebuilt piece by piece. So far: islands on the horizon from further away, soft shading, sun and cloud shadows and edge light outdoors, torch light, a soft distance and bloom. Off by default."},
+    {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
+     .label = "Show the frame rate   (F9)", .control = Control::Switch},
+    {.key = "DOL_AURORA_ASPECT_FIT", .old_windows = "keep_aspect", .kind = Kind::Bool, .on = Os::Windows,
+     .label = "Keep the picture's shape (black bars rather than stretching)", .control = Control::Custom,
+     .next_launch = Os::All},
+    {.key = "BLUEWAKE_PAUSE_UNFOCUSED", .old_windows = "pause_unfocused", .kind = Kind::Bool,
+     .label = "Pause while the window is in the background", .control = Control::Switch},
+    {.key = "BLUEWAKE_SHADERS_FIRST", .old_windows = "compile_shaders_first", .kind = Kind::Bool,
+     .label = "Compile shaders before playing", .control = Control::Switch,
+     .note = "At start, wait until the shaders from earlier play are ready, so nothing is missing from the picture the first time it is drawn. Otherwise they are made while you play.",
+     .next_launch = Os::All},
     // Custom: the button that goes fullscreen now is drawn above the switch.
     {.key = "DOL_AURORA_FULLSCREEN", .old_windows = "fullscreen", .kind = Kind::Bool,
      .label = "Start in fullscreen", .control = Control::Custom, .next_launch = Os::All},
@@ -95,8 +106,6 @@ inline constexpr Setting kSettings[] = {
      .note = "The game runs at 30; display changes and overloads can lower the presentation rate."},
     {.key = "DOL_AURORA_FRAME_INTERP_STEPS", .old_windows = "smooth_motion_fps", .kind = Kind::Choice,
      .fallback = "1"},
-    {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
-     .label = "Show the frame rate   (F9)", .control = Control::Switch},
     {.key = "DOL_AURORA_FPS_POSITION", .old_windows = "fps_position", .kind = Kind::Choice,
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_FORCE_ANISO", .old_windows = "anisotropy", .kind = Kind::Int, .fallback = "1", .low = 1.f,
@@ -149,9 +158,9 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_DPAD_MENUS", .old_windows = "dpad_menus", .kind = Kind::Bool,
      .label = "D-pad moves the cursor in Items and Quest Status", .tab = Tab::Controls,
      .control = Control::Switch},
-    {.key = "BLUEWAKE_BUTTON_MAP", .old_windows = "button_map", .label = "Controller buttons",
+    {.key = "BLUEWAKE_BUTTON_MAP", .old_windows = "button_map", .label = "Controller button mapping",
      .tab = Tab::Controls, .control = Control::Custom},
-    {.key = "BLUEWAKE_KEY_MAP", .old_windows = "key_map", .label = "Keyboard keys", .tab = Tab::Controls,
+    {.key = "BLUEWAKE_KEY_MAP", .old_windows = "key_map", .label = "Keyboard mapping", .tab = Tab::Controls,
      .control = Control::Custom},
     {.key = "BLUEWAKE_MOUSE_CAMERA", .old_windows = "mouse_camera", .kind = Kind::Bool, .on = Os::All,
      .label = "Mouse camera (click the game to use it)", .tab = Tab::Controls, .control = Control::Switch},
@@ -161,7 +170,7 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_MOUSE_INVERT_Y", .old_windows = "mouse_invert_y", .kind = Kind::Bool,
      .label = "Invert the mouse's up and down", .tab = Tab::Controls, .control = Control::Switch,
      .needs = "BLUEWAKE_MOUSE_CAMERA"},
-    {.key = "BLUEWAKE_MOUSE_BUTTONS", .old_windows = "mouse_buttons", .label = "Mouse buttons",
+    {.key = "BLUEWAKE_MOUSE_BUTTONS", .old_windows = "mouse_buttons", .label = "Mouse button mapping",
      .tab = Tab::Controls, .control = Control::Custom, .needs = "BLUEWAKE_MOUSE_CAMERA"},
     {.key = "BLUEWAKE_STICK_CAMERA", .old_windows = "stick_camera", .kind = Kind::Bool, .on = Os::All,
      .label = "Direct right-stick camera and aiming", .tab = Tab::Controls, .control = Control::Switch,
@@ -201,24 +210,29 @@ inline constexpr Setting kSettings[] = {
      .high = 100.f, .label = "Vibration strength", .tab = Tab::Controls},
     {.key = "BLUEWAKE_HAPTICS_TRIGGERS", .old_windows = "haptics_triggers", .kind = Kind::Bool, .on = Os::All,
      .label = "Trigger feedback (Xbox impulse triggers, DualSense trigger vibration)", .tab = Tab::Controls},
-    {.key = "DOL_AURORA_ASPECT_FIT", .old_windows = "keep_aspect", .kind = Kind::Bool, .on = Os::Windows,
-     .label = "Keep the picture's shape (black bars rather than stretching)", .control = Control::Custom,
-     .next_launch = Os::All},
-    {.key = "BLUEWAKE_PAUSE_UNFOCUSED", .old_windows = "pause_unfocused", .kind = Kind::Bool,
-     .label = "Pause while the window is in the background", .control = Control::Switch},
-    {.key = "BLUEWAKE_SHADERS_FIRST", .old_windows = "compile_shaders_first", .kind = Kind::Bool,
-     .label = "Compile shaders before playing", .control = Control::Switch,
-     .note = "At start, wait until the shaders from earlier play are ready, so nothing is missing from the picture the first time it is drawn. Otherwise they are made while you play.",
-     .next_launch = Os::All},
     {.key = "BLUEWAKE_DSP_MODE", .old_windows = "lle_audio", .kind = Kind::Choice, .fallback = "hle",
-     .tab = Tab::SoundFiles, .control = Control::Custom, .group = "Sound", .next_launch = Os::All,
+     .tab = Tab::Config, .control = Control::Custom, .group = "Sound", .next_launch = Os::All,
      .fill = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game is checked there: its picture behind
     // the menu needs RecompCore's held-frame fix (fix/held-frame-black).
     {.key = "BLUEWAKE_MENU_PAUSES", .kind = Kind::Bool, .on = Os::Linux | Os::Mac,
-     .label = "Pause the game while the menu is open", .tab = Tab::SoundFiles, .control = Control::Switch,
+     .label = "Pause the game while the menu is open", .tab = Tab::Config, .control = Control::Switch,
      .group = "The menu"},
+    // The menu's text, larger or smaller than the display's own size for it
+    // (desktop_theme.h, read every frame).
+    {.key = "BLUEWAKE_MENU_TEXT_SIZE", .kind = Kind::Choice, .fallback = "1", .label = "Menu text size",
+     .tab = Tab::Config, .control = Control::Chooser},
+    // How far the menu's panels, outlines and quiet text stand off its background
+    // (desktop_theme.h, read every frame). Its own range, as it is the menu's.
+    {.key = "BLUEWAKE_MENU_CONTRAST", .kind = Kind::Float, .fallback = "1.0", .low = 0.6f, .high = 1.8f,
+     .label = "Menu contrast", .tab = Tab::Config, .control = Control::Slider,
+     .note = "How far this menu's panels, outlines and quiet text stand off its background. It changes as you move it.",
+     .shown = "%.2fx", .stored = "%.2f"},
+    // Not drawn: where in the game's window the menu was left (its middle, as a
+    // share of the window) and the size it was left at, so it opens that way.
+    {.key = "BLUEWAKE_MENU_PLACE", .tab = Tab::Config, .fill = Os::None},
+    {.key = "BLUEWAKE_MENU_SIZE", .tab = Tab::Config, .fill = Os::None},
     // Not drawn: the texture pack's folder while HD textures are off, so they come back to it.
     {.key = "BLUEWAKE_TEXTURE_PACK_FOLDER", .tab = Tab::Mods, .fill = Os::None},
     // Windows only, not drawn: the window's size and place as the player left them, checked at launch.

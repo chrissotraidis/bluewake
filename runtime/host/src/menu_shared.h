@@ -11,6 +11,7 @@
 #include <utility>
 #include <string>
 #include "button_remap.h"
+#include "desktop_theme.h"
 
 inline int bw_menu_slider_nudge(); // below: a controller's left and right on a slider
 
@@ -223,13 +224,46 @@ inline bool bw_menu_spot_chooser(const char* label, int* index, const char* cons
     return changed;
 }
 
+// A pane that opens and closes under its name: a button as wide as the name
+// and a little room after it, not a bar across the menu. True while it is open.
+inline bool bw_menu_pane(const char* label) {
+    const std::string shown = std::string(label) + "    ###" + label;
+    return ImGui::TreeNodeEx(shown.c_str(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanLabelWidth |
+                                                ImGuiTreeNodeFlags_NoTreePushOnOpen);
+}
+
+// A tooltip at the size of the text it is for. A tooltip is a window of its
+// own, so the menu's window scale (each platform's, times the menu text size)
+// doesn't reach it, and it came out at the font's own size whatever the
+// player chose.
+inline void bw_menu_tooltip(const char* text) {
+    const float size = ImGui::GetFontSize();
+    if (!ImGui::BeginTooltip())
+        return;
+    // Against the font's own size: the tooltip window keeps its scale from one
+    // frame to the next.
+    ImGui::SetWindowFontScale(size / ImGui::GetCurrentContext()->FontBaseSize);
+    ImGui::PushTextWrapPos(size * 30.f);
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
 // A slider with its name above it and the bar the full width, which a
 // controller nudges left and right a twentieth of its range at a time.
 inline bool bw_menu_slider(const char* label, float* value, float low, float high, const char* format) {
     ImGui::PushID(label);
     ImGui::TextWrapped("%s", label);
     ImGui::SetNextItemWidth(-1.f);
+    // The pad's cursor on it lights it as the pointer over it does: ImGui
+    // lights a slider only for the pointer.
+    const bool cursor_on = ImGui::GetFocusID() == ImGui::GetID("##value") &&
+                           ImGui::GetCurrentContext()->NavCursorVisible;
+    if (cursor_on)
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered));
     bool changed = ImGui::SliderFloat("##value", value, low, high, format);
+    if (cursor_on)
+        ImGui::PopStyleColor();
     if (const int step = bw_menu_slider_nudge()) {
         *value = std::clamp(*value + static_cast<float>(step) * (high - low) / 20.f, low, high);
         changed = true;
@@ -276,7 +310,7 @@ struct BwMenuPad {
 
 // Call it once a frame while the menu is open, before its window. The game's A
 // and B are where the player put them: a custom layout (Controls › Controller
-// buttons; "" is the controller's own), else Swap A and B, as the game reads them.
+// button mapping; "" is the controller's own), else Swap A and B, as the game reads them.
 inline BwMenuPad bw_menu_controller(const std::string& button_map, bool swap_ab) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
@@ -438,7 +472,7 @@ inline BwMenuButton bw_menu_footer_buttons(const char* settings_path) {
         if (ImGui::Button(kBwMenuButtons[i]))
             pressed = static_cast<BwMenuButton>(i + 1);
         if (i == 0 && settings_path != nullptr && settings_path[0] != '\0' && ImGui::IsItemHovered())
-            ImGui::SetTooltip("Preferences are saved when you resume:\n%s", settings_path);
+            bw_menu_tooltip((std::string("Preferences are saved when you resume:\n") + settings_path).c_str());
     }
     return pressed;
 }

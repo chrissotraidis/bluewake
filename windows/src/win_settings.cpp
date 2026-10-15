@@ -32,6 +32,7 @@
 #include <dolphin/pad.h>
 #include <imgui.h>
 #include "desktop_menu.h"
+#include "desktop_theme.h"
 #include "gxruntime/aurora_backend.h"
 #include "save_state.h"
 
@@ -71,6 +72,10 @@ std::vector<wchar_t> g_environment;  // as BlueWake was started, for Restart
 RestartRequest g_restart;
 Uint64 g_first_frame_at;
 float g_font_scale = 1.0f;  // the scale the UI font was drawn at (see load_font)
+// The menu's own font: the UI font drawn kTextLargest times larger (desktop_theme.h),
+// so the menu's largest text size is still sharp; nullptr while it is ImGui's.
+ImFont* g_menu_font = nullptr;
+float g_menu_font_larger = 1.0f;
 
 // The keys come on the game thread; what they do is done on the main thread,
 // in the frame, where the menu and its settings live.
@@ -193,12 +198,16 @@ void load_font(SDL_Window* w) {
     auto* atlas = new ImFontAtlas();  // for the life of the process
     atlas->Flags |= ImFontAtlasFlags_NoMouseCursors;
     ImFont* font = nullptr;
+    ImFont* menu = nullptr;
     char fonts[MAX_PATH];
     const UINT length = GetWindowsDirectoryA(fonts, MAX_PATH);
     if (length > 0 && length < MAX_PATH - 32) {
         const std::string path = std::string(fonts) + "\\Fonts\\segoeui.ttf";
         if (GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES)
             font = atlas->AddFontFromFileTTF(path.c_str(), std::round(15.0f * scale), nullptr, ranges);
+        if (font != nullptr)
+            menu = atlas->AddFontFromFileTTF(path.c_str(), std::round(15.0f * scale * bluewake_ui::kTextLargest),
+                                             nullptr, ranges);
     }
     if (font == nullptr) {
         // ImGui's own, at a whole multiple so its pixels stay square.
@@ -217,6 +226,8 @@ void load_font(SDL_Window* w) {
     atlas->SetTexID(aurora_imgui_add_texture(static_cast<uint32_t>(width), static_cast<uint32_t>(height), pixels));
     atlas->ClearTexData();
     ImGui::GetIO().FontDefault = font;
+    g_menu_font = menu;
+    g_menu_font_larger = menu != nullptr ? bluewake_ui::kTextLargest : 1.0f;
     ImGui::GetStyle().ScaleAllSizes(scale);
     g_font_scale = scale;
     std::fprintf(stderr, "[windows] UI scale %.2f (font atlas %dx%d)\n", scale, width, height);
@@ -280,7 +291,8 @@ bool ready(SDL_Window* window) {
 Look look(SDL_Window* window) {
     Look look;
     look.scale = ui_scale(window);
-    look.font_scale = look.scale / g_font_scale;
+    look.font = g_menu_font;
+    look.font_scale = look.scale / (g_font_scale * g_menu_font_larger);
     return look;
 }
 

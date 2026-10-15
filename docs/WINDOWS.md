@@ -154,11 +154,11 @@ A few words at the bottom left say what each key did.
 
 Game controllers work through SDL (Xbox, PlayStation, Switch Pro and others). The title screen wants A to reach
 the file menu. To choose which controller button presses each GameCube button, open settings and use
-**Controls › Controller buttons**. The optional controller zoom is
+**Controls › Controller button mapping**. The optional controller zoom is
 also under **Controls**: when enabled, hold the right-stick click and move that stick up or down; a tap still
 enters or leaves first person. The mouse turns the game's own camera around Link and tilts it, and a left click is A; a
 cutscene, door, Z-target or first-person view takes the camera back.
-**Controls › Mouse buttons** sets what the left, middle, right and side buttons press, and **Keyboard keys**
+**Controls › Mouse button mapping** sets what the left, middle, right and side buttons press, and **Keyboard mapping**
 changes the GameCube buttons' keys. A controller SDL doesn't
 recognise works once its mapping is in a `gamecontrollerdb.txt` (from
 [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB)) beside your saves; the session log's

@@ -4,6 +4,7 @@
 // events), Linux's OpenGL notice, and Linux's Restart now.
 #include "settings_menu.h"
 #include "desktop_menu.h"
+#include "desktop_theme.h"
 
 // The host's modules are C.
 extern "C" {
@@ -64,8 +65,11 @@ std::string importer_pack_folder() {
 float g_font_dpi = 1.f;
 ImFont* g_menu_font = nullptr;
 
+// The menu's font, drawn at the display's scale times the largest text size
+// (desktop_theme.h) and shown smaller, so every text size is sharp.
 void load_font(SDL_Window* window) {
     g_font_dpi = window != nullptr ? std::max(1.f, SDL_GetWindowDisplayScale(window)) : 1.f;
+    const float font_px = 17.f * g_font_dpi * bluewake_ui::kTextLargest;
     auto* atlas = new ImFontAtlas(); // Process lifetime; never mutate Aurora's live atlas.
     atlas->Flags |= ImFontAtlasFlags_NoMouseCursors;
     ImFont* font = nullptr;
@@ -78,15 +82,15 @@ void load_font(SDL_Window* window) {
         "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     };
     for (const char* path : kLinuxFonts) {
-        font = atlas->AddFontFromFileTTF(path, 17.f * g_font_dpi);
+        font = atlas->AddFontFromFileTTF(path, font_px);
         if (font != nullptr) break;
     }
 #else
-    font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", 17.f * g_font_dpi);
+    font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", font_px);
 #endif
     if (font == nullptr) {
         ImFontConfig config;
-        config.SizePixels = 17.f * g_font_dpi;
+        config.SizePixels = font_px;
         font = atlas->AddFontDefault(&config);
     }
     unsigned char* pixels = nullptr;
@@ -139,7 +143,7 @@ bool ready(SDL_Window* window) {
 
 Look look(SDL_Window*) {
     Look look;
-    look.font_scale = 1.f / g_font_dpi;
+    look.font_scale = g_menu_font != nullptr ? 1.f / (g_font_dpi * bluewake_ui::kTextLargest) : 1.f;
     look.font = g_menu_font;
     return look;
 }
