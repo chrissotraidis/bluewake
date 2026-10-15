@@ -482,6 +482,15 @@ target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
 target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
 
+add_executable(bluewake_settings_table_test ${BLUEWAKE_REPO_ROOT}/tests/settings_table_test.cpp)
+target_compile_features(bluewake_settings_table_test PRIVATE cxx_std_20)
+add_test(NAME bluewake_settings_table_test COMMAND bluewake_settings_table_test)
+
+add_executable(bluewake_settings_file_test ${BLUEWAKE_REPO_ROOT}/tests/settings_file_test.cpp)
+target_compile_features(bluewake_settings_file_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_settings_file_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
+add_test(NAME bluewake_settings_file_test COMMAND bluewake_settings_file_test)
+
 
 add_executable(bluewake_launch_marker_test ${BLUEWAKE_REPO_ROOT}/tests/launch_marker_test.c)
 target_include_directories(bluewake_launch_marker_test PRIVATE ${BLUEWAKE_HOST_SRC})
