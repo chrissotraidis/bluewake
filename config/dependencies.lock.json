@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "77d4717d868cec8b4014932bb22978c284a535a7",
+      "sha": "3b727a7ef0e48a0b86556466cb939fbe9658c5a3",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -599,9 +599,11 @@
         "picto_actor_id": {
           "runtime": "5423b269e01d629fd3668c822887a6d54b620c79",
           "tracked_patches": [
-            "patches/recompcore/0177-answer-picto-actor-id-from-current-efb.patch"
+            "patches/recompcore/0177-answer-picto-actor-id-from-current-efb.patch",
+            "patches/recompcore/0181-wait-for-alpha-only-pipelines.patch"
           ],
-          "evidence": "Mac M3 Max Metal: clear Lenzo subject 94/detail 0; empty-wall subject 0 with normal warm-cache rendering. Copied card unchanged. Contributors confirmed Linux/M4 Pro and all three Lenzo photos plus bad-photo rejection on Windows. Cold first-use alpha-only draws can still be skipped while pipelines compile; RecompCore#39 is a separate Mac-tested follow-up awaiting Windows/Linux gameplay checks."
+          "evidence": "Mac M3 Max Metal: clear Lenzo subject 94/detail 0; empty-wall subject 0 with normal warm-cache rendering. Copied card unchanged. Contributors confirmed Linux/M4 Pro and all three Lenzo photos plus bad-photo rejection on Windows. Cold first-use alpha-only draws can still be skipped while pipelines compile; RecompCore#39 is a separate Mac-tested follow-up awaiting Windows/Linux gameplay checks.",
+          "cold_cache_followup": "3b727a7ef0e48a0b86556466cb939fbe9658c5a3"
         },
         "vulkan_resize": {
           "runtime": "f647d03d3886eb2357950190fe1cba3fa3d10242",

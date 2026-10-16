@@ -40,12 +40,46 @@ and actor-id pass, so the first readback can contain ordinary scene alpha.
 [RecompCore#39](https://github.com/chrissotraidis/RecompCore/pull/39) waits for
 alpha-only pipelines, keeping ordinary color draws asynchronous. On the Mac it
 produces the expected alpha values on the first cold-cache photo and passes the
-Lenzo/empty-wall pair. It is **not in this pin**: Windows/Linux gameplay checks
+Lenzo/empty-wall pair. This draft proposes its pin for validation only. Windows/Linux gameplay checks
 remain before adopting the follow-up. The source-only integration CI does not
 replace those checks. iPhone/iPad and Android recognition remain unchecked.
 
-Issue #267 stays open for its reporter. The opt-in photo crop (#338 / RecompCore#37)
-still needs Mac validation and a separate runtime decision.
+Issue #267 stays open for its reporter. The opt-in photo crop (#338, RecompCore#37,
+merged October 17) is separate from actor recognition.
+
+## First-use regression fixture
+
+`bluewake_gxcore_picto_peek_pixels_test` uses generated rectangles and no game data.
+With global synchronous compilation disabled and an empty cache, it checks alpha
+IDs 252, 4 and 8 before the first present, snapshot reuse within a frame, and a
+new frame returning ID 12. On M3 Max/Metal it fails against the original pipeline
+code (reads alpha 255) and passes with RecompCore#39. Source CI builds it on
+Windows and Linux; running it requires a graphics device and is manual.
+
+After configuring the relevant host with its regression tests enabled:
+
+```sh
+cmake --build build/linux-host --target bluewake_gxcore_picto_peek_pixels_test
+picto_dir=$(mktemp -d)
+DOL_AURORA_USER_DIR="$picto_dir/user" DOL_AURORA_CACHE_DIR="$picto_dir/cache" \
+AURORA_SYNC_PIPELINES=0 build/linux-host/bluewake_gxcore_picto_peek_pixels_test
+```
+
+On Windows PowerShell, using the Windows host build directory:
+
+```powershell
+cmake --build build/windows-host --target bluewake_gxcore_picto_peek_pixels_test
+$pictoDir = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+$env:DOL_AURORA_USER_DIR = Join-Path $pictoDir 'user'
+$env:DOL_AURORA_CACHE_DIR = Join-Path $pictoDir 'cache'
+$env:AURORA_SYNC_PIPELINES = '0'
+& build/windows-host/bluewake_gxcore_picto_peek_pixels_test.exe
+```
+
+Use a fresh directory for every run; the fixture rejects a nonempty cache. Record
+the renderer and PASS/FAIL, then check a first good and bad game photo using a copy
+of a card. Run in a separate shell so the fixture environment does not carry into
+normal play.
 
 ## Gallery alignment
 

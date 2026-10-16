@@ -72,7 +72,7 @@ jobs:
                 bluewake_linux_disc_test bluewake_crash_text_test \
                 bluewake_launch_marker_test bluewake_settings_state_test \
                 bluewake_save_state_test bluewake_host_state_save_failure_test bluewake_restart_request_test \
-                bluewake_dvd_completion_test bluewake_cache_flush_fallback_test --parallel 2
+                bluewake_dvd_completion_test bluewake_cache_flush_fallback_test bluewake_gxcore_picto_peek_pixels_test --parallel 2
               test -f build/linux-host/bluewake
               if find build/linux-host -name "gGZLE01_recomp*" | grep -q .; then
                 echo "Unexpected personal game module"; exit 1

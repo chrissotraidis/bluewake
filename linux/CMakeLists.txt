@@ -148,6 +148,7 @@ add_executable(bluewake_disc_extract
 target_include_directories(bluewake_disc_extract PRIVATE ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
 
 if(BLUEWAKE_LINUX_REGRESSION_TESTS)
+    include("${BLUEWAKE_REPO_ROOT}/cmake/picto_peek_test.cmake")
     enable_testing()
     add_executable(bluewake_fast_blocks_test EXCLUDE_FROM_ALL ${BLUEWAKE_REPO_ROOT}/tests/fast_blocks_test.c)
     target_include_directories(bluewake_fast_blocks_test PRIVATE

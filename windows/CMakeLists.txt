@@ -198,6 +198,7 @@ target_compile_options(bluewake_disc_extract PRIVATE ${BLUEWAKE_COMPAT_FORCE_INC
 target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt)
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
+    include("${BLUEWAKE_REPO_ROOT}/cmake/picto_peek_test.cmake")
     # Run manually against two private own-disc modules; no game code in CI.
     add_executable(bluewake_fast_blocks_test EXCLUDE_FROM_ALL ${BLUEWAKE_REPO_ROOT}/tests/fast_blocks_test.c)
     target_include_directories(bluewake_fast_blocks_test PRIVATE

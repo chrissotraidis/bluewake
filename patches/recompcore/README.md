@@ -133,7 +133,8 @@ upload changes) conflict with patch 0157 and are not here yet.
 
 Patch 0177 is jslay88's RecompCore #36: the Picto Box reads its actor ids from the current EFB instead of
 receiving zero for every pixel. It needs BlueWake's host MMIO handler from #334. Cold-cache alpha-only
-pipeline compilation remains a separate follow-up (RecompCore#39), not part of this pin.
+pipeline compilation is covered by the proposed patch 0181 (RecompCore#39): wait for
+alpha-only pipelines before recording the pass. Its pin stays draft until platform checks pass.
 Mac recognition and remaining checks: [Picto validation](../../docs/status/PICTO_RECOGNITION_2026-10-15.md).
 
 Patch 0178 is pdale-boop's RecompCore #38, for BlueWake #325: on Vulkan, a resized window keeps its surface and keeps

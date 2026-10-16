@@ -1,0 +1,30 @@
+From 3b727a7ef0e48a0b86556466cb939fbe9658c5a3 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 01:07:45 +0900
+Subject: [PATCH] Wait for alpha-only pipelines used for gameplay readback
+
+---
+ GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
+index 4686ffdb9a..0feedf8438 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
+@@ -1335,7 +1335,12 @@ PipelineRef find_pipeline(ShaderType type, const rmlui::PipelineConfig& config,
+ template <>
+ PipelineRef find_pipeline(ShaderType type, const gxcore::PipelineConfig& config, NewPipelineCallback&& cb) {
+   bool queuedNew = false;
+-  const PipelineRef ref = find_pipeline_impl(type, config, std::move(cb), PipelinePriority::Normal, std::nullopt,
++  // Alpha-only passes can carry data the guest reads back immediately (the
++  // Picto Box's actor ids and their clear). Skipping them on a cold cache
++  // changes gameplay, so wait for these pipelines before recording the draw.
++  const bool alphaOnly = config.key.color_update == 0 && config.key.alpha_update != 0;
++  const auto priority = alphaOnly ? PipelinePriority::Blocking : PipelinePriority::Normal;
++  const PipelineRef ref = find_pipeline_impl(type, config, std::move(cb), priority, std::nullopt,
+                                              &queuedNew);
+   if (queuedNew) {
+     note_gxcore_shader(config, true);
+-- 
+2.46.0
+

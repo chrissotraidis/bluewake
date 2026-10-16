@@ -615,6 +615,8 @@ target_include_directories(bluewake_gxcore_dstalpha_pixels_test PRIVATE
 target_link_libraries(bluewake_gxcore_dstalpha_pixels_test PRIVATE
     GXRuntime::aurora GXRuntime::gxcore)
 
+include("${BLUEWAKE_REPO_ROOT}/cmake/picto_peek_test.cmake")
+
 # Manual GPU oracle: proves GXSetZCompLoc writes depth before a failing alpha
 # test, so a same-depth draw using a strict comparison remains occluded.
 add_executable(bluewake_gxcore_early_depth_pixels_test
