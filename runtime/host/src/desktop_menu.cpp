@@ -977,10 +977,14 @@ void draw_menu(const bw_platform::Look& look) {
     if (ImGui::Begin("BlueWake settings", &open,
                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::SetWindowFontScale(look.font_scale * bluewake_ui::text_size());
-        // Esc normally closes it before it gets here (each platform's keys);
-        // one that reaches ImGui closes it too.
+#if defined(_WIN32)
+        // Esc closes it in the keyboard hook (bw_settings_key), which keeps the
+        // key from SDL; one that reaches ImGui instead closes it too. Not on Mac
+        // and Linux: ImGui sees the same Esc that opened the menu (SDL hands it
+        // to both), and would close it again that frame.
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
             open = false;
+#endif
         // The bumpers switch tabs. Each tab's body scrolls on its own but is
         // flattened for navigation, so the D-pad moves from the tabs through the
         // options to the buttons below without A to enter it and B to leave it.
