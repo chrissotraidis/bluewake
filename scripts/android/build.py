@@ -413,6 +413,9 @@ class AndroidBuilder(wb.Builder):
         assets = pkg / "assets"
         assets.mkdir()
         shutil.copy2(ROOT / "apple/ios/resources/initial_pipeline_cache.db", assets / "initial_pipeline_cache.db")
+        licenses = assets / "licenses"
+        licenses.mkdir()
+        shutil.copy2(self.recompcore / "Externals/mbedtls/LICENSE", licenses / "mbedtls-LICENSE.txt")
         unsigned = pkg / "unsigned.apk"
         self.run("apk-aapt2-link", [self.build_tools / "aapt2.exe", "link", "-o", unsigned, "-A", assets, "-0", "db",
                                     "--manifest", pkg / "AndroidManifest.xml", "-I", self.android_jar,

@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.bluewake.hdinputs.test">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
+    <application android:label="Generated HD input tests" android:debuggable="true" android:allowBackup="false">
+        <provider android:name="dev.bluewake.android.HDImportInputsTest$Provider"
+            android:authorities="dev.bluewake.hdinputs.test.documents" android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+    <instrumentation android:name="dev.bluewake.android.HDImportInputsTest"
+        android:targetPackage="dev.bluewake.hdinputs.test" />
+</manifest>

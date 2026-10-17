@@ -59,13 +59,23 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     final class Wait {
         private final AlertDialog dialog;
         Wait(AlertDialog dialog) { this.dialog = dialog; }
-        void setMessage(String message) { post(() -> dialog.setMessage(message)); }
-        void dismiss() { post(dialog::dismiss); }
+        private void onMain(Runnable update) {
+            if (Looper.myLooper() == Looper.getMainLooper()) update.run();
+            else handler.post(update);
+        }
+        void setMessage(String message) { onMain(() -> dialog.setMessage(message)); }
+        void dismiss() { onMain(dialog::dismiss); }
+        void cancelling() {
+            dialog.setMessage("Cancelling… Waiting for the current read and cleanup to finish.");
+            if (dialog.getButton(AlertDialog.BUTTON_NEGATIVE) != null)
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+        }
     }
 
     private final BlueWakeActivity activity;
     private final Settings settings;
     private final GameData data;
+    private final HDImport hdImport;
     private final Context themed;
     private final float dp;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -84,11 +94,13 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     private final int launchAspectMode;      // the aspect the renderer started with
     private final float launchRatio;         // the picture's shape this launch (4:3, or a widescreen mod's)
     private final Map<String, Boolean> launchMods = new HashMap<>();  // mod switches as this launch read them
+    private final String launchPackFolder;
     private final RectF safe = new RectF(), picture = new RectF();
     private boolean phone = true, controllerConnected, controllerHidden, touchRevealed, settingsOpen, menuDumped,
             updatingSliders;
     private int alertDepth;
     private int packFiles = -1;
+    private String countedPackFolder;
     private int panelMaxHeight;
     private boolean fpsWasPaused;
     private long fpsPauseEnded;
@@ -108,6 +120,8 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         themed = new ContextThemeWrapper(activity, android.R.style.Theme_DeviceDefault_NoActionBar);
         dp = getResources().getDisplayMetrics().density;
         data = new GameData(activity, this, settings);
+        hdImport = new HDImport(activity, this, settings);
+        launchPackFolder = settings.texturePackDirectory().getAbsolutePath();
         launchAspectMode = settings.integer(Settings.ASPECT_MODE, 0);
         launchRatio = settings.bool(Settings.MOD_WIDESCREEN_1610, false) ? 1.6f
                 : settings.bool(Settings.MOD_WIDESCREEN, false) ? 16f / 9f : 4f / 3f;
@@ -555,6 +569,15 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         return new Wait(dialog);
     }
 
+    Wait wait(String title, String message, Runnable cancel) {
+        AlertDialog dialog = builder().setTitle(title).setMessage(message).setCancelable(false)
+                .setNegativeButton("Cancel", null).create();
+        present(dialog);
+        // Cancellation does not dismiss the progress screen or release the pause.
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> cancel.run());
+        return new Wait(dialog);
+    }
+
     /** Offers to switch a mod on after its files were installed (offerToTurnOn). */
     void offerToTurnOn(String key, String title, String message) {
         if (settings.bool(key, false)) {
@@ -584,7 +607,7 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         if (request != pickerRequest) return false;
         pickerRequest = -1;
         alertEnd();
-        return data.onActivityResult(request, result, intent);
+        return hdImport.onActivityResult(request, result, intent) || data.onActivityResult(request, result, intent);
     }
 
     /**
@@ -775,7 +798,11 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
 
     /** Texture count for the menu, counted once per launch (a pack holds thousands of files) and after an install. */
     private int countPackFiles() {
-        if (packFiles < 0) packFiles = countTextures(settings.texturePackDirectory());
+        File folder = settings.texturePackDirectory();
+        if (packFiles < 0 || !folder.getAbsolutePath().equals(countedPackFolder)) {
+            packFiles = countTextures(folder);
+            countedPackFolder = folder.getAbsolutePath();
+        }
         return packFiles;
     }
 
@@ -801,11 +828,19 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
 
     private MenuView.Item modsMenu() {
         int pack = countPackFiles();
-        String packDetail = pack > 0 ? pack + " textures installed" : "No pack installed yet";
+        String packDetail = pack > 0 ? pack + " textures in folder" : "No textures in folder";
+        String folder = settings.texturePackDirectory().getName();
+        boolean changed = !launchPackFolder.equals(settings.texturePackDirectory().getAbsolutePath());
+        MenuView.Item selected = MenuView.Item.action("Selected folder: " + folder, null)
+                .subtitle(changed ? "Applies after restart" : "Texture files on this device");
+        selected.enabled = false;
         List<MenuView.Item> children = new ArrayList<>();
         // Wind Waker HD textures first, as in the iPhone app and the desktop menus (#314).
         children.add(MenuView.Item.inline("Wind Waker HD Textures", new ArrayList<>(Arrays.asList(
                 modToggle("HD Textures", packDetail, Settings.MOD_HD_TEXTURES),
+                selected,
+                action("Import from Wind Waker HD…", hdImport::choose)
+                        .subtitle("Make a pack from your own HD dump"),
                 action("Install Texture Pack…", data::chooseTexturePack)
                         .subtitle("Pick a folder of PNG or DDS textures")))));
         children.add(MenuView.Item.inline(new ArrayList<>(Arrays.asList(
@@ -1102,5 +1137,8 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     /** Every held touch lets go when the app stops being active. */
     void clearTouchInput() { touch.clearTouchInput(); }
 
-    void onDestroy() { handler.removeCallbacks(fpsTick); }
+    void onResume() { hdImport.onResume(); }
+    void onPause() { hdImport.onPause(); }
+    void onStop() { hdImport.onStop(); }
+    void onDestroy() { hdImport.onDestroy(); handler.removeCallbacks(fpsTick); }
 }
