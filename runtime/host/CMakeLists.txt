@@ -48,6 +48,8 @@ add_executable(bluewake_host
     src/jump_button.c
     src/climb.c
     src/settings_menu.cpp
+    src/desktop_menu.cpp
+    src/desktop_settings.cpp
     src/texture_pack_menu.cpp
     src/wwhd/formats.cpp
     src/wwhd/addrlib.cpp
@@ -842,7 +844,7 @@ target_include_directories(bluewake_launch_marker_test PRIVATE ${CMAKE_CURRENT_S
 add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)
 
 add_executable(bluewake_settings_state_test ../../tests/settings_state_test.cpp)
-target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
+target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_20)
 target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
 if(UNIX)

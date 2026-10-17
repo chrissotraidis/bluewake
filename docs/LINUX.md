@@ -187,9 +187,11 @@ that are new on Linux are off until you turn them on. The widescreen choice is u
 textures. Under **Gameplay**, Jump & Sprint (with a **Sprint speed**) and Fast transitions are one
 switch each, as on the iPad.
 
-**Sound and files** is the last tab, as on Windows: the sound (**Fast**, Dolphin's high-level Zelda sound,
-the default, or **Exact**, the sound chip's own program, slower; next launch), and where your saves and
-session logs are, with buttons that open the folder and the logs. The menu's buttons are the same on every
+**Config** is the last tab: **Exact sound** (off: Dolphin's high-level Zelda sound, the default and faster;
+on: the sound chip's own program, slower; next launch), the menu's own settings (**Pause the game while the
+menu is open**, **Menu text size** and **Menu contrast**), and where your saves and session logs are, with
+buttons that open
+the folder and the logs. The menu opens at the size and place you left it. The menu's buttons are the same on every
 desktop build: Resume, Save state (F5), Load latest state (F8) and Quit the game.
 
 A setting that applies at the next launch shows **Restart now** beside its note: BlueWake saves your

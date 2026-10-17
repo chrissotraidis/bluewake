@@ -281,7 +281,7 @@ for news.
 
 Yes. On iPhone and iPad, any controller iOS supports works, with rumble, camera inversion and button
 remapping under **⋯ › Controller**. Mac, Windows and Linux work with Xbox, PlayStation, Switch Pro and
-other SDL controllers; remap buttons under **Settings › Controls › Controller buttons** (F1 or Esc
+other SDL controllers; remap buttons under **Settings › Controls › Controller button mapping** (F1 or Esc
 opens settings). The same tab changes what the mouse buttons and keyboard keys press.
 The settings menu works with a controller too: the D-pad or left stick moves, the game's A chooses, its B
 closes, LB and RB change tabs and the right stick scrolls.
