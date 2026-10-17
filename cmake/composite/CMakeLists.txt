@@ -332,6 +332,15 @@ int main(void) { return 0; }" BLUEWAKE_GLIBC_HAS_DT_RELR)
   endif()
 endif()
 target_compile_options(${MODULE_NAME} PRIVATE -O${COMPOSITE_OPTIMIZATION_LEVEL} -ffp-contract=off)
+# Each translated chunk is one huge function, and two LLVM passes are
+# superlinear on it. The SLP vectorizer and the register coalescer are what
+# made a Mac module compile take over an hour; the Windows and Linux builders
+# already pass these. -fno-slp-vectorize has to come after -O. Apple Clang
+# turns the SLP vectorizer back on when -O2 or -O3 follows it. Upstream Clang
+# does not, which is why the same flag in CMAKE_C_FLAGS is enough there.
+target_compile_options(${MODULE_NAME} PRIVATE
+  -fno-slp-vectorize
+  -mllvm -large-interval-freq-threshold=10)
 
 # The builder's --tiered: chunks the optimization training never ran, one
 # composite-relative path a line, compiled at -O1 without GVN's memory
@@ -343,7 +352,7 @@ if(COMPOSITE_OPTIMIZATION_LEVEL STREQUAL "2" AND COMPOSITE_COLD_SOURCES_FILE)
   foreach(COLD_SOURCE IN LISTS COLD_SOURCES)
     set(COLD_PATH "${COMPOSITE_DIR}/${COLD_SOURCE}")
     if(EXISTS "${COLD_PATH}")
-      set_property(SOURCE "${COLD_PATH}" APPEND PROPERTY COMPILE_OPTIONS -O1 -mllvm -enable-gvn-memdep=false)
+      set_property(SOURCE "${COLD_PATH}" APPEND PROPERTY COMPILE_OPTIONS -O1 -mllvm -enable-gvn-memdep=false -fno-slp-vectorize)
     endif()
   endforeach()
   message(STATUS "Tiered: ${COLD_COUNT} cold chunks at O1")
@@ -359,7 +368,7 @@ if(COMPOSITE_OPTIMIZATION_LEVEL STREQUAL "2")
     if(FALLBACK_INDEX EQUAL -1)
       message(FATAL_ERROR "O1 fallback is not a generated chunk: ${FALLBACK_PATH}")
     endif()
-    set_property(SOURCE "${FALLBACK_PATH}" APPEND PROPERTY COMPILE_OPTIONS -O1)
+    set_property(SOURCE "${FALLBACK_PATH}" APPEND PROPERTY COMPILE_OPTIONS -O1 -fno-slp-vectorize)
     message(STATUS "O1 optimizer fallback: ${FALLBACK_SOURCE}")
   endforeach()
 endif()
