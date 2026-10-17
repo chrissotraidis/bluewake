@@ -80,6 +80,7 @@ void bluewake_hd_look_reload(void);
 // dpad_menus.h: BLUEWAKE_DPAD_MENUS read again.
 void bluewake_dpad_menus_reload(void);
 void bluewake_haptics_block(bool blocked);
+void bluewake_haptics_preview(void);
 const char* bluewake_game_options_describe(uint32_t position, const char** title, bool* default_on, bool* on);
 // climb.h: the stamina wheel's state for the HUD.
 bool bluewake_climb_hud(float* fraction, bool* exhausted, float* x, float* y, float* aspect, float* alpha);
@@ -789,7 +790,8 @@ void tab_controls() {
                                            "Enhanced (shaped, with the triggers)"};
     bool haptics = bw_menu_combo("Controller vibration", &d.haptics, kHaptics, IM_ARRAYSIZE(kHaptics));
     ImGui::BeginDisabled(d.haptics != 2);
-    haptics |= slider_int("Vibration strength", &d.haptics_strength, 0, 100, "%d%%");
+    const bool strength_moved = slider_int("Vibration strength", &d.haptics_strength, 0, 100, "%d%%");
+    haptics |= strength_moved;
     ImGui::EndDisabled();
     ImGui::BeginDisabled(d.haptics != 2);
     haptics |= bw_menu_checkbox("Trigger feedback (Xbox impulse triggers, DualSense trigger vibration)",
@@ -800,34 +802,15 @@ void tab_controls() {
                                          : "    No vibration. (The game's own Vibration option turns it off too.)");
     if (haptics) {
         apply_haptics();
+        if (strength_moved)
+            bluewake_haptics_preview(); // a buzz at the new strength
         changed();
     }
 
     ImGui::SeparatorText("Keyboard");
-    char face[96], shoulder[96];
-    std::snprintf(face, sizeof face, "%s  %s  %s  %s", bw_key_name(keys.scancode[0]), bw_key_name(keys.scancode[1]),
-                  bw_key_name(keys.scancode[2]), bw_key_name(keys.scancode[3]));
-    std::snprintf(shoulder, sizeof shoulder, "%s  %s  %s", bw_key_name(keys.scancode[5]),
-                  bw_key_name(keys.scancode[6]), bw_key_name(keys.scancode[4]));
-    if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_SizingFixedFit)) {
-        const char* const rows[][2] = {
-            {"Control stick", "W A S D"}, {"C-stick", "T F G H"}, {"D-pad", "Arrow keys"},
-            {"A  B  X  Y", face}, {"L  R  Z", shoulder}, {"START", bw_key_name(keys.scancode[7])},
-            {"Jump", "Space (controller: left bumper)"}, {"Sprint", "Shift (controller: click the left stick)"},
-            {"Camera zoom", "Mouse wheel, while the mouse is the camera"},
-            {"Settings", "F1 or Esc"}, {"HD look", "F2"}, {"Save state / load it", "F5 / F8"},
-            {"Stage select", "F7"}, {"Frame rate", "F9"}, {"Smooth Motion", "F10"},
-            {"Fullscreen", "F11 or Alt+Enter"},
-        };
-        for (const auto& row : rows) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(row[0]);
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", row[1]);
-        }
-        ImGui::EndTable();
-    }
+    bw_keyboard_table(keys);
+    ImGui::SeparatorText("Controller");
+    bw_controller_table();
     ImGui::TextDisabled("Game controllers work as they are plugged in (Xbox, PlayStation, Switch Pro, ...).");
 }
 

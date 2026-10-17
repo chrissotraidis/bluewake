@@ -947,15 +947,12 @@ void controls_tab() {
         bluewake_haptics_reload();
     }
     ImGui::BeginDisabled(haptics != 2);
-    int strength = std::atoi(env("BLUEWAKE_HAPTICS_STRENGTH", "80").c_str());
-    bool strength_changed = ImGui::SliderInt("Vibration strength", &strength, 0, 100, "%d%%");
-    if (const int step = bw_menu_slider_nudge()) {
-        strength = std::clamp(strength + step * 5, 0, 100);
-        strength_changed = true;
-    }
-    if (strength_changed) {
-        set_env("BLUEWAKE_HAPTICS_STRENGTH", std::to_string(strength));
+    // Its label above it, at full width, as the other sliders.
+    float strength = static_cast<float>(std::clamp(std::atoi(env("BLUEWAKE_HAPTICS_STRENGTH", "80").c_str()), 0, 100));
+    if (slider("Vibration strength", &strength, 0.f, 100.f, "%.0f%%")) {
+        set_env("BLUEWAKE_HAPTICS_STRENGTH", std::to_string(static_cast<int>(std::lround(strength))));
         bluewake_haptics_reload();
+        bluewake_haptics_preview();
     }
     ImGui::EndDisabled();
     ImGui::BeginDisabled(haptics != 2);
@@ -969,19 +966,16 @@ void controls_tab() {
                         : haptics == 1 ? "The motor on and off, as a GameCube controller's."
                                        : "No vibration. (The game's own Vibration option turns it off too.)");
 
+    // The keys as they are now (a remapped key shows its new name), in the same
+    // table as on Windows; then the mouse and the controller, wrapped to fit.
     ImGui::SeparatorText("Keyboard");
-    ImGui::BulletText("WASD move, arrows the D-pad, T F G H the C-stick");
-    ImGui::BulletText("J  A     K  B     U  X     I  Y     Q  Z     E  L     R  R     Enter  Start");
-    ImGui::BulletText("Space jump, Shift (held) sprint");
-    ImGui::BulletText("F1 or Esc this menu, F2 the HD look, F5 save state, F8 load it, F7 the stage select,");
-    ImGui::BulletText("F9 the frame rate, F10 Smooth Motion, F11 or Alt+Enter fullscreen");
-    ImGui::BulletText("Mouse: click the game, then move to turn the camera and aim; left click is A,");
-    ImGui::BulletText("the wheel zooms; Esc gives the mouse back, and Esc again opens this menu");
-    ImGui::TextUnformatted("Controller");
-    ImGui::BulletText("Left bumper jump, left stick click sprint (until Link stops), Back this menu");
-    ImGui::BulletText("Right stick: turns the camera and aims; its click is first person (and back out)");
-    ImGui::BulletText("Optional camera zoom: hold the right-stick click and move it up/down");
-    ImGui::BulletText("Telescope and Picto Box: the right stick aims, the left stick (or D-pad) zooms");
+    BwKeyMap keys;
+    bw_key_map_parse(env("BLUEWAKE_KEY_MAP"), &keys);
+    bw_keyboard_table(keys);
+    ImGui::TextWrapped("Mouse: click the game, then move it to turn the camera and aim; left click is A and the "
+                       "wheel zooms. Esc gives the mouse back, and Esc again opens this menu.");
+    ImGui::SeparatorText("Controller");
+    bw_controller_table();
     ImGui::PopTextWrapPos();
 }
 
@@ -1213,13 +1207,19 @@ void draw(void*) {
     const ImVec2 largest(std::max(1.f, display.x - 24.f), std::max(1.f, display.y - 24.f));
     ImGui::SetNextWindowSizeConstraints(
         ImVec2(std::min(420.f, largest.x), std::min(300.f, largest.y)), largest, [](ImGuiSizeCallbackData* data) {
-            // Growing stops at the edge; a menu already past it (moved there) isn't shrunk.
+            // Growing stops at the edge it is dragged towards: the room right of the
+            // left edge (dragging the right one) or left of the right edge (dragging
+            // the left one), whichever is larger, as the callback isn't told which;
+            // a menu that goes past an edge is moved back in before Begin below. A
+            // menu already past it (moved there) isn't shrunk.
             const ImVec2 screen = ImGui::GetIO().DisplaySize;
             const auto limit = [](float desired, float current, float room) {
                 return desired <= room ? desired : std::max(room, std::min(current, desired));
             };
-            data->DesiredSize.x = limit(data->DesiredSize.x, data->CurrentSize.x, screen.x - 12.f - data->Pos.x);
-            data->DesiredSize.y = limit(data->DesiredSize.y, data->CurrentSize.y, screen.y - 12.f - data->Pos.y);
+            const ImVec2 room(std::max(screen.x - 12.f - data->Pos.x, data->Pos.x + data->CurrentSize.x - 12.f),
+                              std::max(screen.y - 12.f - data->Pos.y, data->Pos.y + data->CurrentSize.y - 12.f));
+            data->DesiredSize.x = limit(data->DesiredSize.x, data->CurrentSize.x, room.x);
+            data->DesiredSize.y = limit(data->DesiredSize.y, data->CurrentSize.y, room.y);
         });
     ImGui::SetNextWindowBgAlpha(0.94f);
     bluewake_ui::begin_theme();
