@@ -94,6 +94,8 @@ profile_dependencies() {
     mkdir -p "$deps"
     # Desktop Aurora resolves its pinned macOS Dawn package itself.
     [ "$platform" != macos ] || return 0
+    # Only the app needs Dawn; source preparation for PadMint's module build does not.
+    [ "$source_only" -eq 0 ] || return 0
     local dawn_tar=$deps/dawn-ios-arm64.tar.gz
     if [ ! -f "$dawn_tar" ] || [ "$(shasum -a 256 "$dawn_tar" | awk '{print $1}')" != "$DAWN_SHA256" ]; then
         run dawn-download curl -fL -o "$dawn_tar" "$DAWN_URL"
@@ -121,7 +123,7 @@ profile_dependencies() {
 
 profile_extract() {
     mkdir -p "$out/tools"
-    run disc-extract-build clang -O2 -o "$out/tools/disc_extract" scripts/ios/disc_extract.c \
+    run disc-extract-build "$host_cc" -O2 -o "$out/tools/disc_extract" scripts/ios/disc_extract.c \
         apple/ios/src/disc_import.c -Iapple/ios/src
     # disc_extract checks the disc ID (GZLE01) and the executable's hash
     # (revision 0) and refuses anything else.
