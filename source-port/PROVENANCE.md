@@ -43,7 +43,7 @@ No disc data, no game assets, no saves and no binaries: the source repository tr
 
 ## Local changes vs upstream
 
-Two changes so far, on top of the exact copy (both in `native/cmake/GameConfig.cmake`, both for
+Three changes so far, on top of the exact copy (all in `native/cmake/GameConfig.cmake`, all for
 the GCC host the smoke build runs on; the upstream build is written for clang):
 
 - `-ferror-limit=50` is gated on Clang/AppleClang, because GCC rejects it (its equivalent is
@@ -51,10 +51,14 @@ the GCC host the smoke build runs on; the upstream build is written for clang):
 - `-Wno-changes-meaning` is added for GNU compilers, because the decompiled code names union
   members after their types (`JAISequenceMgr.h`'s `PortArg`) and GCC 14+ diagnoses that as an
   error where clang accepts it.
+- `-Wno-narrowing` is added for GNU compilers, because `-sizeof(...)` in a template argument
+  (`JUTConsole.h`'s `ConsoleList`) narrows `unsigned long` to `int`; clang's
+  `-Wno-c++11-narrowing` suppresses it and GCC's flag is `-Wno-narrowing` (a `-Woverflow` warning
+  remains, which is not fatal).
 
 Upstream hash as imported:
 `d43c94d1b9acf40edcf2a15280123b1cfed1c62b7459eda2bbbd211eea3975f6`; current:
-`efd733a47c2bb242f8b324d416eeabe0abf720a77b6819c726e468d1e21cf00a`. The manifest entry records
+`12888b67f766fa649dfe2c38b172335f7bfe7cded0bff0eba3a2d5a49be4371a`. The manifest entry records
 the current hash.
 
 ## Attribution
