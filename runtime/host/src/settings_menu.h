@@ -17,9 +17,11 @@ extern "C" {
 // saved in a settings file and applied at the next launch, and most of them
 // at once.
 //
-//   BLUEWAKE_SETTINGS=path|none   the settings file (default ~/Library/
-//                                 Application Support/Wind Waker Recomp/
-//                                 settings.ini); none: neither read nor written
+//   BLUEWAKE_SETTINGS=path|none   the settings file (default: Mac ~/Library/
+//                                 Application Support/BlueWake/settings.ini,
+//                                 Linux ~/.config/BlueWake/settings.ini; the
+//                                 keys are in settings_table.h); none: neither
+//                                 read nor written
 
 #if (defined(__APPLE__) && TARGET_OS_IPHONE) || defined(_WIN32) || defined(__ANDROID__)
 // The iOS, Windows and Android apps have their own menus.

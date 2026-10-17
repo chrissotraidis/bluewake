@@ -12,6 +12,7 @@ void bluewake_haptics_retrace(void) {}
 void bluewake_haptics_shutdown(void) {}
 void bluewake_haptics_reload(void) {}
 void bluewake_haptics_block(bool blocked) { (void)blocked; }
+void bluewake_haptics_preview(void) {}
 bool bluewake_haptics_forward_motor(void) { return true; }
 
 #else
@@ -274,6 +275,25 @@ void bluewake_haptics_block(bool blocked) {
         silence(SDL_GetTicksNS());
     }
     g_blocked = blocked;
+}
+
+void bluewake_haptics_preview(void) {
+    static Uint64 last;
+    const Uint64 now = SDL_GetTicksNS();
+    if (g_mode != MODE_ENHANCED || now - last < 120000000ull)
+        return;
+    last = now;
+    // A firm hit on both motors, as strong as a shock the game would send.
+    const Uint16 level = (Uint16)lround(fmin(0.7 * g_strength, 1.0) * 65535.0);
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_Gamepad* one = SDL_GetGamepadFromPlayerIndex(0);
+    for (int i = 0; ids != NULL && i < count; i++) {
+        SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
+        if (pad != NULL && (one == NULL || pad == one))
+            SDL_RumbleGamepad(pad, level, level, 150);
+    }
+    SDL_free(ids);
 }
 
 static SDL_JoystickID g_virtual_id;

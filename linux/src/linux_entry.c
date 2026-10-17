@@ -465,7 +465,7 @@ int main(int argc, char** argv) {
     }
 
     // The play configuration as the iOS/Windows apps: one perf line a second,
-    // wall-clock pacing, Dolphin's HLE Zelda ucode, the real clock, and the
+    // wall-clock pacing, the real clock, and the
     // console's SRAM kept with the saves.
     bw_default("BLUEWAKE_PERF_LOG", "1");
     bw_default("BLUEWAKE_WALL_PACE", "1");
@@ -473,7 +473,8 @@ int main(int argc, char** argv) {
     bw_default("BLUEWAKE_RENDERER", "aurora");
     bw_default("BLUEWAKE_CYCLE_CAP", "16384");
     bw_default("BLUEWAKE_MAX_BLOCKS", "100000000000");
-    bw_default("BLUEWAKE_DSP_MODE", "hle");
+    // Fast sound (BLUEWAKE_DSP_MODE=hle) is the settings loader's default, so the
+    // settings file's choice isn't taken for a launch option (settings_menu.cpp).
     bw_default("BLUEWAKE_CLOCK", "now");
     bw_default_path("BLUEWAKE_SRAM", g_data_dir, "sram.bin");
     bw_default_path("BLUEWAKE_CARD_PATH", g_data_dir, "GZLE01.card");
