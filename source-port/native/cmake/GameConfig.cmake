@@ -166,7 +166,8 @@ set(COS_GAME_COMPILE_OPTIONS
         # long on MWCC: next_msgStatus(unsigned long*) did not override fopNpc_npc_c's, and five
         # NPCs' talks ended after one message) is an error with clang (Mac, Linux).
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang,AppleClang>>:-Werror=overloaded-virtual>
-        -ferror-limit=50)
+        # Clang-only: GCC's equivalent is -fmax-errors=N.
+        $<$<CXX_COMPILER_ID:Clang,AppleClang>:-ferror-limit=50>)
 
 # Phase 4 inventory (docs/NATIVE_PORT_PHASE4_6.md, step 4.0a): the 64-bit and missing-return
 # diagnostics, appended after the shared flags so no -Wno-... above can hide them. Turning the

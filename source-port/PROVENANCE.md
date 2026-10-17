@@ -39,6 +39,17 @@ documents and CI. None of it is needed for the host build or the planned Vita wo
 No disc data, no game assets, no saves and no binaries: the source repository tracks none
 (checked), and the import script refuses any file outside its list.
 
+## Local changes vs upstream
+
+One change so far, on top of the exact copy:
+
+- `native/cmake/GameConfig.cmake`: `-ferror-limit=50` is now gated on Clang/AppleClang, because GCC
+  rejects it (its equivalent is `-fmax-errors=N`) and the host smoke build runs GCC on a machine
+  with no clang. Upstream hash as imported:
+  `d43c94d1b9acf40edcf2a15280123b1cfed1c62b7459eda2bbbd211eea3975f6`; current:
+  `ba3735b648b9ec755634d04b969074f78651acc5da75bf2f68d3609988a98d4e`. The manifest entry records
+  the current hash.
+
 ## Attribution
 
 Human authorship only. The imported files contain no AI attribution lines (grep for
