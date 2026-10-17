@@ -10,8 +10,9 @@ one, this one wins.
 - `AGENTS.md` (this file): the rules.
 - `docs/GOAL_LOOP.md`: what we're doing, day by day, and the five-step loop every session follows. Start here.
 - `docs/PRIORITIES.md`: the ranked backlog of bugs, performance work and requests, with the evidence.
-- `docs/PERFORMANCE.md`: the speed strategy (three horizons, following the decompilation), the runbook, and how
-  to measure a change.
+- `docs/PERFORMANCE.md`: the current speed strategy (three horizons, following the decompilation) and its results.
+- `docs/performance/` (start with `Overview.md`): how to measure, investigate and validate performance changes;
+  keep the current strategy in `docs/PERFORMANCE.md` so the two do not drift.
 - `docs/DIRECTION.md`: where BlueWake is going: releases without game code, the same app on every platform
   (Android matches the iPhone app), fast contributor reviews, measured performance.
 - `docs/MIGRATION_STATUS.md`: how Wind Waker Recomp became BlueWake, and what is left of that move.

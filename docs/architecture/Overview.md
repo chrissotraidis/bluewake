@@ -160,3 +160,7 @@ and a concrete contributing PR: [host data](Host.md#artifact-to-game-examples),
 
 For the complete component map, interaction boundaries, and links to each
 entity's internals, continue to [Runtime](Runtime.md).
+
+To measure these build and runtime components, identify a bottleneck, and
+validate an optimization, continue to the
+[performance overview](../performance/Overview.md).
