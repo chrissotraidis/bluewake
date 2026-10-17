@@ -236,15 +236,30 @@ class Builder:
         self.profile = None
 
     # --- helpers -------------------------------------------------------
+    def report(self, name, event, started, **fields):
+        """One progress event in OUT/logs/progress.jsonl, as scripts/builder/run_stage.py
+        writes on the Mac: PadMint shows them while the build runs."""
+        record = dict(schema_version=1, event=event, stage=name,
+                      elapsed_seconds=round(time.monotonic() - started), **fields)
+        with open(self.logs / "progress.jsonl", "a") as stream:
+            stream.write(json.dumps(record) + "\n")
+
     def run(self, name, command, *, env=None, cwd=None, ninja=False):
         """Run a command with a complete log and progress every 15 seconds."""
         self.logs.mkdir(parents=True, exist_ok=True)
         log = self.logs / f"{name}.log"
         environment = dict(env or self.env or os.environ)
+        command = list(command)
+        if command[:1] == ["cmake"] and "-S" in command and platform.machine().lower() == "arm64":
+            # Windows on ARM builds the x64 game: say so, or CMake takes this ARM64 PC's
+            # processor for the target and libraries pick ARM code for the x64 compiler
+            # (libpng: "NEON intrinsics not available").
+            command += ["-DCMAKE_SYSTEM_NAME=Windows", "-DCMAKE_SYSTEM_PROCESSOR=AMD64"]
         if ninja:
             environment["NINJA_STATUS"] = "[%f/%t] "
         start = time.monotonic()
         print(f"  {name} (log: {log})", flush=True)
+        self.report(name, "stage_started", start)
         with open(log, "wb") as stream:
             process = subprocess.Popen([str(c) for c in command], cwd=cwd or ROOT, stdout=stream,
                                        stderr=subprocess.STDOUT, env=environment)
@@ -268,14 +283,19 @@ class Builder:
                             units = re.findall(rb"\[(\d+/\d+)\]", recent.read())
                         if units:
                             detail = f", {units[-1].decode()}"
+                            done, total = units[-1].decode().split("/")
+                            self.report(name, "stage_progress", start, completed=int(done), total=int(total),
+                                        unit="build steps")
                     except OSError:
                         pass
                     elapsed = int(now - start)
                     print(f"  {name}: {elapsed // 60}m {elapsed % 60:02d}s{detail}", flush=True)
         if status != 0:
+            self.report(name, "stage_failed", start, exit_code=status)
             tail = log.read_bytes()[-4000:].decode(errors="replace")
             print(tail, file=sys.stderr)
             die(f"{name} failed (exit {status}); full log {log}")
+        self.report(name, "stage_completed", start)
         elapsed = int(time.monotonic() - start)
         if elapsed >= 60:
             print(f"  {name}: done in {elapsed // 60}m {elapsed % 60:02d}s", flush=True)
@@ -295,8 +315,13 @@ class Builder:
     def check_tools(self):
         if platform.system() != "Windows":
             die("this builder is for Windows; on a Mac use scripts/builder/build.sh")
-        if platform.machine().lower() not in ("amd64", "x86_64"):
-            die(f"an x86-64 PC is required (this is {platform.machine()})")
+        machine = platform.machine().lower()
+        if machine not in ("amd64", "x86_64", "arm64"):
+            die(f"an x86-64 or ARM64 Windows PC is required (this is {platform.machine()})")
+        if machine == "arm64":
+            # Windows on ARM runs x64 programs: the same x64 tools and game as on an x64 PC,
+            # under Windows' x64 emulation (slower to build and play than native x64).
+            print("Windows on ARM: building the x64 game, which runs under Windows' x64 emulation")
         if sys.version_info < (3, 10):
             die("Python 3.10 or newer is required")
         for tool in ("git", "cmake", "ninja"):
