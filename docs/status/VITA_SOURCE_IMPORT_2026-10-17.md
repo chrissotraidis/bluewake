@@ -21,8 +21,8 @@ No push, no pull request; step 7 (independent review) and step 9 (merge) are sep
   `source-port/game/` and `source-port/native/**` — so the port's own `CMakeLists.txt`, `cmake/`
   and `tools/` work unchanged (`COS_ROOT` is `../game` from `native/`; `gen_assets.sh` reads
   `../../game/UPSTREAM`). `PROVENANCE.md` and `IMPORT_MANIFEST.sha256` sit at its root.
-- Size: 2 582 files (2 263 in `game/`, 319 in `native/`), 36 MB; manifest sha256
-  `b3ac87325993554807152caaa1009292ab2dd2c32f1848e6e554f9405088779e`
+- Size: 2 584 files (2 263 in `game/`, 321 in `native/`), 36 MB; manifest sha256
+  `33b22f660f833fd007f4c419e2182033d47ed580a15247c34faa1872f266b3b4`
   (`cd source-port && sha256sum -c IMPORT_MANIFEST.sha256`).
 - Licenses: `game/` CC0-1.0; `native/` MIT; `native/include/helpers/` and `native/src/helpers/`
   CC0-1.0 (Dusklight at `40457c6`); `native/dsp_hle/` GPL-2.0-or-later (decision D2=A);
@@ -48,7 +48,9 @@ No push, no pull request; step 7 (independent review) and step 9 (merge) are sep
 
 ## Host smoke (PLAN_IMPORT step 6)
 
-Machine: aarch64 Linux, GCC 16.2.1, CMake 4.4.3, ninja 1.13, Python 3.14; no clang installed.
+Machine: aarch64 Linux, GCC 16.2.1, CMake 4.4.3, ninja 1.13, Python 3.14. The smoke ran with GCC
+only: no clang is installed on this machine, and GCC prints "unrecognized command-line option
+'-Wno-…'" notes for the clang-only flags in the port's list, which are not fatal.
 
 ```sh
 # resource index headers (no disc; the decomp fork is fetched at b09eebc)
@@ -90,6 +92,14 @@ performance.
 - No line was added to `PRIORITIES.md` or `GOAL_LOOP.md`: both are the ranked, player-facing plan
   for the current releases, and this import is an internal step of the Vita track; it is recorded
   here and in `source-port/PROVENANCE.md` instead.
+
+## Review corrections
+
+The independent review of this branch (CHANGES REQUIRED: B1 plus hygiene O1-O5) is applied in a
+follow-up commit: B1 (PROVENANCE header refreshed from the regenerated manifest, with the refresh
+rule), O1 (`RIGHTS_AND_LICENSES.md` no longer says the files are unmodified), O2/O3
+(`native/README.md` and `native/LICENSE` imported and manifested), O4 (`LC_ALL=C sort` in the
+import script) and O5 (the GCC-only note above).
 
 ## Commits on this branch
 

@@ -48,8 +48,11 @@ Vita source-port work. It is not part of the app or any release build.
   are TwilitRealm/Dusklight helpers, **CC0-1.0**; `native/dsp_hle/` is **GPL-2.0-or-later**
   (adapted from this repository's own DSP HLE lineage over Dolphin's DSP HLE).
 
-The files are unmodified, the imported license files are kept verbatim, and no AI attribution
-lines are present (checked with the repository's `scripts/check_attribution.py` and by grep).
+The files are unmodified except the three documented GCC flag gates in
+`native/cmake/GameConfig.cmake` (the upstream build is written for clang; see
+[source-port/PROVENANCE.md](source-port/PROVENANCE.md)); the imported license files are kept
+verbatim, and no AI attribution lines are present (checked with the repository's
+`scripts/check_attribution.py` and by grep).
 Provenance, scope and the sorted manifest (`sha256sum -c`) are in
 [source-port/PROVENANCE.md](source-port/PROVENANCE.md) and
 `source-port/IMPORT_MANIFEST.sha256`. The import contains no disc data, game assets or binaries.

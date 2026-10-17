@@ -15,6 +15,10 @@
 # The destination mirrors the upstream repository root for the imported trees: game/ and
 # native/ keep their names, so the port's own CMakeLists.txt, cmake/ and tools/ keep working
 # unchanged (COS_ROOT is ../game from native/, gen_assets.sh reads ../../game/UPSTREAM).
+#
+# The manifest records the current file hashes (destination-relative, LC_ALL=C sorted). One
+# imported file carries documented local changes (native/cmake/GameConfig.cmake: three GCC flag
+# gates, see source-port/PROVENANCE.md), so its manifest hash is not the upstream one.
 
 set -euo pipefail
 
@@ -52,6 +56,7 @@ status="$(git -C "$clone" status --porcelain)"
 groups=(
     game
     native/CMakeLists.txt
+    native/README.md
     native/cmake
     native/sdk
     native/include/sdk
@@ -64,11 +69,15 @@ groups=(
     native/dsp_hle
     native/patches/aurora
 )
+# Files copied under a different name: "upstream path:destination path".
+mappings=(
+    "LICENSE:native/LICENSE"
+)
 list="$(mktemp)"
 trap 'rm -f "$list"' EXIT
 for g in "${groups[@]}"; do
     git -C "$clone" ls-files -- "$g"
-done | grep -v '^native/tools/dksh_cache/' | sort -u > "$list"
+done | grep -v '^native/tools/dksh_cache/' | LC_ALL=C sort -u > "$list"
 
 [ -s "$list" ] || die "empty file list"
 if grep -Eq '^(switch/|native/data/|native/tools/dksh_cache/|docs/|scripts/|mods/)' "$list"; then
@@ -79,10 +88,18 @@ bad_patches="$(grep -E '^native/patches/' "$list" | grep -v '^native/patches/aur
 if grep -Eq '\.(iso|gcm|rvz|dol|rel|gci|nro|nsp|elf|bin)$' "$list"; then
     die "the file list contains a binary or disc-derived file"
 fi
+for m in "${mappings[@]}"; do
+    src="${m%%:*}"
+    git -C "$clone" ls-files --error-unmatch "$src" >/dev/null 2>&1 || die "$src is not tracked upstream"
+done
 
 files="$(wc -l < "$list")"
+mapped="${#mappings[@]}"
 bytes="$(while IFS= read -r p; do stat -c %s "$clone/$p"; done < "$list" | awk '{s+=$1} END {print s}')"
-echo "import_switchwaker: ${files} files, ${bytes} bytes, clone ${head:0:12}, dest $dest"
+for m in "${mappings[@]}"; do
+    bytes=$((bytes + $(stat -c %s "$clone/${m%%:*}") ))
+done
+echo "import_switchwaker: ${files} files + ${mapped} mapped, ${bytes} bytes, clone ${head:0:12}, dest $dest"
 if [ "$dry_run" = 1 ]; then
     echo "import_switchwaker: dry run; nothing copied"
     exit 0
@@ -99,9 +116,16 @@ while IFS= read -r p; do
     cp -p "$clone/$p" "$dest/$p"
     printf '%s  %s\n' "$(sha256sum "$clone/$p" | cut -d' ' -f1)" "$p" >> "$manifest"
 done < "$list"
-sort -k2 -o "$manifest" "$manifest"
+for m in "${mappings[@]}"; do
+    src="${m%%:*}"
+    dst="${m##*:}"
+    mkdir -p "$dest/$(dirname "$dst")"
+    cp -p "$clone/$src" "$dest/$dst"
+    printf '%s  %s\n' "$(sha256sum "$clone/$src" | cut -d' ' -f1)" "$dst" >> "$manifest"
+done
+LC_ALL=C sort -k2 -o "$manifest" "$manifest"
 chmod 644 "$manifest"
 
 copied="$(find "$dest" -type f ! -name IMPORT_MANIFEST.sha256 | wc -l)"
-[ "$copied" = "$files" ] || die "copied $copied files, expected $files"
+[ "$copied" = "$((files + mapped))" ] || die "copied $copied files, expected $((files + mapped))"
 echo "import_switchwaker: copied ${copied} files; manifest $(sha256sum "$manifest" | cut -d' ' -f1)"

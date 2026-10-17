@@ -2,12 +2,16 @@
 
 - Repository: https://github.com/centollOS/SwitchWaker
 - Commit: `04372277d03f934e1e563ae302bba9f565c5cb5d` (`main`, 2026-10-13)
-- Method: file copy (no Git history imported), exact pin, no modifications
+- Method: file copy (no Git history imported), exact pin, no modifications except the three
+  documented GCC flag gates in `native/cmake/GameConfig.cmake` (see "Local changes vs upstream")
 - Import date: 2026-10-17
 - Imported by: `scripts/source_port/import_switchwaker.sh` (this repository)
-- Manifest: `source-port/IMPORT_MANIFEST.sha256` (sorted, `sha256sum -c` format,
-  2 561 files, 30 585 827 bytes; manifest sha256
-  `9cb738d8b71c51db2b9cfffe31e9f3929209a37f4d11aa4a609ec2cf8c8e781f`)
+- Manifest: `source-port/IMPORT_MANIFEST.sha256` (LC_ALL=C sorted, `sha256sum -c` format,
+  2 584 files, 30 874 913 bytes as committed; manifest sha256
+  `33b22f660f833fd007f4c419e2182033d47ed580a15247c34faa1872f266b3b4`)
+- Rule: refresh this header (file count, bytes, manifest sha256) whenever the manifest is
+  regenerated; the manifest records the current hashes, so it must be regenerated after any
+  change to an imported file.
 
 ## What is here
 
@@ -15,6 +19,7 @@
 | --- | --- | --- |
 | `game/` | the Wind Waker decompilation (`snrubrm/tww` fork plus the port's `TARGET_PC` hunks and the `zeldaret/tww` convergence) | CC0-1.0 (`game/LICENSE`) |
 | `native/CMakeLists.txt`, `native/cmake/` | the port's build system | MIT (`LICENSE` in the repository root of the source) |
+| `native/README.md`, `native/LICENSE` | the port's native-build documentation and the upstream repository's MIT license text, copied to `native/LICENSE` | MIT |
 | `native/sdk/`, `native/include/sdk/`, `native/include/pc/`, `native/check/`, `native/tools/`, `native/src/pc/` | the game-specific SDK over Aurora and its run harness | MIT |
 | `native/include/helpers/`, `native/src/helpers/` | big-endian/offset-pointer helpers, from Dusklight at `40457c6` | CC0-1.0 |
 | `native/patches/aurora/` | the Aurora patch set (0001-0021) the port's harness and renderer need | MIT, as Aurora |
@@ -25,11 +30,16 @@ The destination mirrors the upstream repository root for the imported trees (`ga
 unchanged (`COS_ROOT` is `../game` from `native/`; `native/tools/gen_assets.sh` reads
 `../../game/UPSTREAM`).
 
-Three groups beyond `PLAN_IMPORT.md`'s group list are imported because the build system and the
-harness require them, as the host smoke proved: `native/CMakeLists.txt` (the project root the
-CMake modules hang from), `native/src/pc/` (the run harness `cos_pc`, globbed by
-`native/cmake/executable.cmake` and linked by `cos_pc_tests`) and `native/patches/aurora/`
-(the harness calls Aurora APIs the patch set adds, e.g. `AuroraSetContentScale`).
+Beyond `PLAN_IMPORT.md`'s group list, the build system, the harness and the review require:
+`native/CMakeLists.txt` (the project root the CMake modules hang from), `native/src/pc/` (the run
+harness `cos_pc`, globbed by `native/cmake/executable.cmake` and linked by `cos_pc_tests`),
+`native/patches/aurora/` (the harness calls Aurora APIs the patch set adds, e.g.
+`AuroraSetContentScale`), `native/README.md` (referenced by six imported files) and
+`native/LICENSE` (the upstream MIT text, copied from the repository root).
+
+`native/README.md` mentions that the decompilation fork completes its remaining functions "with AI
+assistance" in its prose; that is upstream provenance, not an attribution line, and the file is
+kept verbatim.
 
 ## What is not here
 
