@@ -59,9 +59,10 @@ just by building from `main`:
 
 - Put game, audio, timing and logging changes in shared code (`runtime/host/src`, or RecompCore for the
   runtime). The Windows build compiles the same files.
-- A desktop setting goes in both menus: `runtime/host/src/settings_menu.cpp` (Mac) and
-  `windows/src/win_settings.cpp` (Windows). Share a header between them when you can, as
-  `runtime/host/src/button_remap.h` does.
+- A desktop setting is a row in `runtime/host/src/settings_table.h`. Mac, Linux and Windows draw one menu from
+  it (`runtime/host/src/desktop_menu.cpp`, with the settings file in `desktop_settings.cpp`); a setting with a
+  control of its own is drawn there too. `runtime/host/src/settings_menu.cpp` (Mac and Linux) and
+  `windows/src/win_settings.cpp` hold only each platform's plumbing.
 - The Windows CI ("host" job) must pass before merging.
 - If the change still needs a check on a Windows PC, add it to "In `main`, for the next Windows build"
   in [docs/WINDOWS_TASKS.md](docs/WINDOWS_TASKS.md) in the same pull request.

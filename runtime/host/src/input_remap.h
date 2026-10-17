@@ -270,5 +270,57 @@ inline bool bw_mouse_map_ui(BwMouseMap* map) {
     }
     return changed;
 }
+
+// Two columns, what and how, unwrapped: in a tab that wraps its text, columns
+// that fit their text otherwise shrink to a letter each.
+template <size_t N>
+inline void bw_controls_table(const char* id, const char* const (&rows)[N][2]) {
+    ImGui::PushTextWrapPos(-1.0f);
+    if (ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingFixedFit)) {
+        for (const auto& row : rows) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(row[0]);
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%s", row[1]);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::PopTextWrapPos();
+}
+
+// A controller's own controls (beside the game's), for both desktop menus.
+inline void bw_controller_table() {
+    static const char* const rows[][2] = {
+        {"Jump", "Left bumper"},
+        {"Sprint", "Click the left stick (until Link stops)"},
+        {"Camera and aiming", "Right stick"},
+        {"First person", "Click the right stick (again to come back out)"},
+        {"Camera zoom", "Hold the right-stick click and move it up or down (if it's on above)"},
+        {"Telescope, Picto Box", "Right stick aims; left stick or D-pad zooms"},
+        {"Settings", "Back (View on Xbox, Share or Create on PlayStation)"},
+    };
+    bw_controls_table("controller", rows);
+}
+
+// The keyboard's controls with the keys as they are now (a remapped GameCube
+// button shows its new key), for both desktop menus' Controls tab.
+inline void bw_keyboard_table(const BwKeyMap& keys) {
+    char face[96], shoulder[96];
+    std::snprintf(face, sizeof face, "%s  %s  %s  %s", bw_key_name(keys.scancode[0]), bw_key_name(keys.scancode[1]),
+                  bw_key_name(keys.scancode[2]), bw_key_name(keys.scancode[3]));
+    std::snprintf(shoulder, sizeof shoulder, "%s  %s  %s", bw_key_name(keys.scancode[5]),
+                  bw_key_name(keys.scancode[6]), bw_key_name(keys.scancode[4]));
+    const char* const rows[][2] = {
+        {"Control stick", "W A S D"}, {"C-stick", "T F G H"}, {"D-pad", "Arrow keys"},
+        {"A  B  X  Y", face}, {"L  R  Z", shoulder}, {"START", bw_key_name(keys.scancode[7])},
+        {"Jump", "Space"}, {"Sprint", "Shift (held)"},
+        {"Camera zoom", "Mouse wheel, while the mouse is the camera"},
+        {"Settings", "F1 or Esc"}, {"HD look", "F2"}, {"Save state / load it", "F5 / F8"},
+        {"Stage select", "F7"}, {"Frame rate", "F9"}, {"Smooth Motion", "F10"},
+        {"Fullscreen", "F11 or Alt+Enter"},
+    };
+    bw_controls_table("keys", rows);
+}
 #endif  // IMGUI_VERSION
 #endif  // __cplusplus
