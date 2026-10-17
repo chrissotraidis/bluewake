@@ -99,6 +99,16 @@ scripted 100-second runs from copied cards, Dragon Roost Cavern (code the traini
 by Outset both kept full speed, and the game thread was as busy as before: 52.1 and 52.2% against 51.9
 and 51.8% in the cavern, 80.9% against 81.3% at Outset. `--no-tiered` compiles every chunk at `-O2`.
 
+The module compile passes the same two flags the Windows and Linux builders do:
+`-fno-slp-vectorize` and `-mllvm -large-interval-freq-threshold=10`. On Apple Clang
+those have to come after `-O2` or `-O3`. An earlier `-fno-slp-vectorize` is undone
+when the optimization level follows it, and the SLP vectorizer stays on. Upstream
+Clang does not do that. On the M4 Pro Mac Mini (14 cores, 48 GB, Apple Clang 21),
+the October 14 module compile took 77 minutes. With the flags after `-O2`, the same
+module compiled in 45 minutes. The movie-player chunk went from 23 minutes to 84
+seconds on its own. The slowest chunk, an auction actor, went from 29 minutes to
+about two minutes on its own, and to 7.7 minutes inside that 14-wide compile.
+
 ## Optimization profiles
 
 The game module and the app are compiled with LLVM profile-guided optimization (PGO) when profiles are
