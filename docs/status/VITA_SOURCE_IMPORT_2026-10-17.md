@@ -110,3 +110,4 @@ import script) and O5 (the GCC-only note above).
 | `e114843` | import the Aurora patch set the harness needs; `-Wno-changes-meaning` for GCC |
 | `bdd8b4b` | build glue: `-Wno-narrowing` for GCC |
 | (this file) | the journal |
+| `251c58c` | review corrections: `native/README.md` and `native/LICENSE` imported, manifest and PROVENANCE header refreshed (B1, O1-O5) |
