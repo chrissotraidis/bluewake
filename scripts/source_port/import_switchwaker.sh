@@ -62,6 +62,7 @@ groups=(
     native/check
     native/tools
     native/dsp_hle
+    native/patches/aurora
 )
 list="$(mktemp)"
 trap 'rm -f "$list"' EXIT
@@ -70,9 +71,11 @@ for g in "${groups[@]}"; do
 done | grep -v '^native/tools/dksh_cache/' | sort -u > "$list"
 
 [ -s "$list" ] || die "empty file list"
-if grep -Eq '^(switch/|native/data/|native/patches/|native/tools/dksh_cache/|docs/|scripts/|mods/)' "$list"; then
+if grep -Eq '^(switch/|native/data/|native/tools/dksh_cache/|docs/|scripts/|mods/)' "$list"; then
     die "the file list contains an excluded group"
 fi
+bad_patches="$(grep -E '^native/patches/' "$list" | grep -v '^native/patches/aurora/' || true)"
+[ -z "$bad_patches" ] || die "the file list contains a patch outside native/patches/aurora/"
 if grep -Eq '\.(iso|gcm|rvz|dol|rel|gci|nro|nsp|elf|bin)$' "$list"; then
     die "the file list contains a binary or disc-derived file"
 fi

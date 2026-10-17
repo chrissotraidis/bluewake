@@ -17,6 +17,7 @@
 | `native/CMakeLists.txt`, `native/cmake/` | the port's build system | MIT (`LICENSE` in the repository root of the source) |
 | `native/sdk/`, `native/include/sdk/`, `native/include/pc/`, `native/check/`, `native/tools/`, `native/src/pc/` | the game-specific SDK over Aurora and its run harness | MIT |
 | `native/include/helpers/`, `native/src/helpers/` | big-endian/offset-pointer helpers, from Dusklight at `40457c6` | CC0-1.0 |
+| `native/patches/aurora/` | the Aurora patch set (0001-0021) the port's harness and renderer need | MIT, as Aurora |
 | `native/dsp_hle/` | Dolphin's DSP HLE behind `cos_sdk`, adapted from this repository's own `runtime/host/src/dsp_hle_backend.cpp` and `runtime/host/src/dsp_common_shim.cpp` lineage | GPL-2.0-or-later (`native/dsp_hle/LICENSE`, SPDX headers) |
 
 The destination mirrors the upstream repository root for the imported trees (`game/` and
@@ -24,31 +25,37 @@ The destination mirrors the upstream repository root for the imported trees (`ga
 unchanged (`COS_ROOT` is `../game` from `native/`; `native/tools/gen_assets.sh` reads
 `../../game/UPSTREAM`).
 
-Two files beyond `PLAN_IMPORT.md`'s group list are imported because the build system requires
-them: `native/CMakeLists.txt` (the project root the CMake modules hang from) and
-`native/src/pc/` (the run harness `cos_pc`, globbed by `native/cmake/executable.cmake` and
-linked by `cos_pc_tests`).
+Three groups beyond `PLAN_IMPORT.md`'s group list are imported because the build system and the
+harness require them, as the host smoke proved: `native/CMakeLists.txt` (the project root the
+CMake modules hang from), `native/src/pc/` (the run harness `cos_pc`, globbed by
+`native/cmake/executable.cmake` and linked by `cos_pc_tests`) and `native/patches/aurora/`
+(the harness calls Aurora APIs the patch set adds, e.g. `AuroraSetContentScale`).
 
 ## What is not here
 
 `switch/` (the Switch platform layer, deko3d renderer, uam), `native/data/`
-(`initial_pipeline_cache.db`), `native/tools/dksh_cache/`, the Switch Aurora patches
-(`native/patches/aurora/`, `switch/native/aurora/patches/`), their `docs/`, `scripts/`, root
-documents and CI. None of it is needed for the host build or the planned Vita work.
+(`initial_pipeline_cache.db`), `native/tools/dksh_cache/`, the Switch-only Aurora patches
+(`switch/native/aurora/patches/`), their `docs/`, `scripts/`, root documents and CI. None of it
+is needed for the host build or the planned Vita work.
 
 No disc data, no game assets, no saves and no binaries: the source repository tracks none
 (checked), and the import script refuses any file outside its list.
 
 ## Local changes vs upstream
 
-One change so far, on top of the exact copy:
+Two changes so far, on top of the exact copy (both in `native/cmake/GameConfig.cmake`, both for
+the GCC host the smoke build runs on; the upstream build is written for clang):
 
-- `native/cmake/GameConfig.cmake`: `-ferror-limit=50` is now gated on Clang/AppleClang, because GCC
-  rejects it (its equivalent is `-fmax-errors=N`) and the host smoke build runs GCC on a machine
-  with no clang. Upstream hash as imported:
-  `d43c94d1b9acf40edcf2a15280123b1cfed1c62b7459eda2bbbd211eea3975f6`; current:
-  `ba3735b648b9ec755634d04b969074f78651acc5da75bf2f68d3609988a98d4e`. The manifest entry records
-  the current hash.
+- `-ferror-limit=50` is gated on Clang/AppleClang, because GCC rejects it (its equivalent is
+  `-fmax-errors=N`).
+- `-Wno-changes-meaning` is added for GNU compilers, because the decompiled code names union
+  members after their types (`JAISequenceMgr.h`'s `PortArg`) and GCC 14+ diagnoses that as an
+  error where clang accepts it.
+
+Upstream hash as imported:
+`d43c94d1b9acf40edcf2a15280123b1cfed1c62b7459eda2bbbd211eea3975f6`; current:
+`efd733a47c2bb242f8b324d416eeabe0abf720a77b6819c726e468d1e21cf00a`. The manifest entry records
+the current hash.
 
 ## Attribution
 

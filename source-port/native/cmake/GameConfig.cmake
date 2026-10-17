@@ -161,6 +161,9 @@ set(COS_GAME_COMPILE_OPTIONS
         -Wno-pointer-sign
         -Wno-ignored-attributes
         -Wno-writable-strings
+        # GCC-only: the decompiled code names union members after their types (JAISequenceMgr.h's
+        # PortArg); GCC 14+ diagnoses that as an error, clang accepts it.
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-changes-meaning>
         # 64-bit diagnostics (int-to-pointer-cast, ...) stay visible on purpose: phase 4 input.
         # A derived method that only hides a virtual one (u32 is unsigned int on the host, unsigned
         # long on MWCC: next_msgStatus(unsigned long*) did not override fopNpc_npc_c's, and five
