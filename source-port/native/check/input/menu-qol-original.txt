@@ -1,0 +1,27 @@
+# COS_SMOKE=options-menu (native/src/pc/features/pc_menu.cpp), with --stage sea:11:0 (Windfall): the menu's
+# Calidad de vida tab, "Experiencia BetterWW" (A on the first row) and then "Valores originales" (down once, A):
+# every QoL row is off again, saved so (docs/QOL_PLAN.md).
+#expect opened 1
+#expect setting COS_QOL_INSTANT_TEXT 0
+#expect setting COS_QOL_SAIL 0
+#expect setting COS_QOL_SKIP_INTRO 0
+#expect setting COS_QOL_FIX_BUGS 0
+#expect setting COS_QOL_NO_SONG_REPLAY 0
+#expect saved COS_QOL_SAIL=0
+#expect saved COS_QOL_FIX_BUGS=0
+#expect end 560
+# frame buttons stickX stickY
+400 L+R+Z 0 0
+403 - 0 0
+410 R 0 0
+412 - 0 0
+416 R 0 0
+418 - 0 0
+422 A 0 0
+424 - 0 0
+430 DOWN 0 0
+432 - 0 0
+436 A 0 0
+438 - 0 0
+444 B 0 0
+446 - 0 0

@@ -1,0 +1,8 @@
+# Layout checks known to fail on the host (docs/NATIVE_PORT_PHASE4_6.md, step 4.0c).
+#
+# One entry per line: <struct> xfails the whole struct (at least one of its checks must still
+# fail), <struct>.<field> or <struct>.sizeof a single check. The list is strict: an entry whose
+# checks all hold fails cos_layout_check ("XPASS"), so the format step that fixes a struct
+# removes it here in the same commit. Every failure below comes from a pointer the file stores
+# as a 32-bit offset (8 bytes on the host); none is an endian problem, which offsets cannot see.
+# Current failures with the host offsets: native/tools/layout_check.py --discover

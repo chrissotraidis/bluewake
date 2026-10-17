@@ -1,0 +1,42 @@
+# COS_SMOKE=options-menu (native/src/pc/features/pc_menu.cpp), with --stage sea:11:0 (Windfall). Opens the menu
+# with L+R+Z, R twice to Calidad de vida; A on its first row, "Experiencia BetterWW", sets every QoL row to
+# BetterWW's defaults (docs/QOL_PLAN.md) and saves them; down three times (past "Valores originales" and
+# "Texto instantáneo") to "Voltereta más rápida", A turns it off by hand (the rows stay editable), B closes.
+#expect opened 1
+#expect setting COS_QOL_INSTANT_TEXT 1
+#expect setting COS_QOL_FAST_ROLL 0
+#expect setting COS_QOL_FAST_BLOCKS 1
+#expect setting COS_QOL_FAST_GRAPPLE 1
+#expect setting COS_QOL_FAST_CLIMB 1
+#expect setting COS_QOL_FAST_BALLAD 1
+#expect setting COS_QOL_SKIP_INTRO 1
+#expect setting COS_QOL_REVEAL_CHART 0
+#expect setting COS_QOL_TINGLE_CHESTS 1
+#expect setting COS_QOL_SAIL swift
+#expect setting COS_QOL_FREE_BOAT 0
+#expect setting COS_QOL_SWING_TURN 1
+#expect setting COS_QOL_NO_SONG_REPLAY 1
+#expect setting COS_QOL_FIX_BUGS 1
+#expect saved COS_QOL_SAIL=swift
+#expect saved COS_QOL_FAST_ROLL=0
+#expect saved COS_QOL_FIX_BUGS=1
+#expect end 560
+# frame buttons stickX stickY
+400 L+R+Z 0 0
+403 - 0 0
+410 R 0 0
+412 - 0 0
+416 R 0 0
+418 - 0 0
+422 A 0 0
+424 - 0 0
+430 DOWN 0 0
+432 - 0 0
+436 DOWN 0 0
+438 - 0 0
+442 DOWN 0 0
+444 - 0 0
+448 A 0 0
+450 - 0 0
+456 B 0 0
+458 - 0 0

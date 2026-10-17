@@ -33,6 +33,27 @@ ready-made Windows build on the Releases page, as Wind Waker Recomp did. It cont
 from the game but no disc image, game assets, saves or console keys, and it needs the player's own
 disc. It will be taken down if the rights holder asks.
 
+## Imported source base (`source-port/`)
+
+`source-port/` holds a source base imported from
+[centollOS/SwitchWaker](https://github.com/centollOS/SwitchWaker) at the pinned commit
+`04372277d03f934e1e563ae302bba9f565c5cb5d` (2026-10-13), by file copy (no Git history), for the
+Vita source-port work. It is not part of the app or any release build.
+
+- `game/` — the Wind Waker decompilation (`zeldaret/tww` contributors and the `snrubrm/tww` fork
+  that completes the remaining functions), **CC0-1.0** (`game/LICENSE`); upstream pins in
+  `game/UPSTREAM`.
+- `native/` — the port's build system, SDK-over-Aurora layer and run harness (Pulpparty, depende3000
+  and the SwitchWaker contributors), **MIT**; `native/include/helpers/` and `native/src/helpers/`
+  are TwilitRealm/Dusklight helpers, **CC0-1.0**; `native/dsp_hle/` is **GPL-2.0-or-later**
+  (adapted from this repository's own DSP HLE lineage over Dolphin's DSP HLE).
+
+The files are unmodified, the imported license files are kept verbatim, and no AI attribution
+lines are present (checked with the repository's `scripts/check_attribution.py` and by grep).
+Provenance, scope and the sorted manifest (`sha256sum -c`) are in
+[source-port/PROVENANCE.md](source-port/PROVENANCE.md) and
+`source-port/IMPORT_MANIFEST.sha256`. The import contains no disc data, game assets or binaries.
+
 ## Game content
 
 BlueWake is an independent, unofficial project, not affiliated with or endorsed by Nintendo. *The

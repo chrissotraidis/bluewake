@@ -1,0 +1,65 @@
+#ifndef M_DO_M_DO_MEMCARDRWMNG_H
+#define M_DO_M_DO_MEMCARDRWMNG_H
+
+#include "d/d_save.h"
+#include "dolphin/types.h"
+#include "helpers/endian.h"
+
+typedef struct CARDFileInfo CARDFileInfo;
+
+struct mDoMemCdRWm_HeaderData
+{
+    /* 0x0000 */ u8 banner[0x0E00];
+    /* 0x0E00 */ u8 icon[0x0E00];
+    /* 0x1C00 */ char comment[32];
+    /* 0x1C20 */ char info[32];
+};  // Size: 0x1C40
+
+struct card_pictdata
+{
+    /* 0x0000 */ u8 tex_buffer[0x1EE0]; // Holds the texture data for one 152x104 CMPR texture
+    /* 0x1EE0 */ BE(u32) snap_result; // Photo index
+    /* 0x1EE4 */ u8 snap_result_detail;
+    /* 0x1EE5 */ u8 capture_format; // The format the capture was done in (not the same as the format of tex_buffer)
+    /* 0x1EE6 */ u8 field_0x1EE6[0x1FFE - 0x1EE6];
+    /* 0x1FFE */ BE(u16) csum;
+};  // Size: 0x2000
+
+STATIC_ASSERT(sizeof(card_pictdata) == 0x2000);
+
+struct card_gamedata
+{
+    /* 0x000 */ u8 data[sizeof(dSv_save_c_PACKED)];
+    /* 0x768 */ BE(u64) csum;
+};  // Size: 0x770
+
+struct card_savedata
+{
+    /* 0x0000 */ BE(u32) save_count;
+    /* 0x0004 */ BE(u32) data_version;
+    /* 0x0008 */ card_gamedata gamedata[3];
+    /* 0x1658 */ u8 field_0x1658[0x1FFC - 0x1658];
+    /* 0x1FFC */ BE(u32) csum;
+};  // Size: 0x2000
+
+STATIC_ASSERT(sizeof(card_savedata) == 0x2000);
+
+STATIC_ASSERT(sizeof(card_pictdata) == sizeof(card_savedata));
+
+s32 mDoMemCdRWm_Store(CARDFileInfo* card, void* data, u32 size);
+s32 mDoMemCdRWm_Restore(CARDFileInfo* card, void* dst, u32 size);
+#if VERSION == VERSION_PAL
+s32 mDoMemCdRWm_Restore2(CARDFileInfo*);
+#endif
+void mDoMemCdRWm_BuildHeader(mDoMemCdRWm_HeaderData*);
+void mDoMemCdRWm_SetCardStat(CARDFileInfo*);
+BOOL mDoMemCdRWm_CheckCardStat(CARDFileInfo*);
+u32 mDoMemCdRWm_CalcCheckSum(void*, u32 size);
+u16 mDoMemCdRWm_CalcCheckSumPictData(void*, u32 size);
+BOOL mDoMemCdRWm_TestCheckSumPictData(void*);
+void mDoMemCdRWm_SetCheckSumPictData(u8*);
+u64 mDoMemCdRWm_CalcCheckSumGameData(void*, u32 size);
+BOOL mDoMemCdRWm_TestCheckSumGameData(void*);
+void mDoMemCdRWm_SetCheckSumGameData(u8*, u8);
+
+#endif /* M_DO_M_DO_MEMCARDRWMNG_H */

@@ -1,0 +1,10 @@
+# Controller script of the sun-glare sail check (issue #7, the glare with the sun behind the sail; syntax in
+# native/src/pc/harness/pc_input.cpp, the last two columns are the C stick): <frame> <buttons> <stickX>
+# <stickY> [<cX> <cY>], each line holding until the next. Run with --preset sailing (on the boat at
+# sea:11:102) and COS_BOOT_TIME=17.0: X raises the sail at frame 650 (the sail is on X in the preset), the
+# stick held left from 800 turns the boat in circles; at about frame 935 the low sun is near the centre of
+# the view on the sky and from 940 the sail sweeps over it (COS_SUN_GLARE_CHECK=sail, pc_sun_glare.cpp).
+0   - 0    0 0 0
+650 X 0    0 0 0
+656 - 0    0 0 0
+800 - -127 0 0 0

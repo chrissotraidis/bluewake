@@ -4,6 +4,8 @@ local-research/
 generated/
 /build*/
 game/
+# source-port/ imports the Wind Waker decompilation under this name; the rule above would hide it
+!source-port/game/
 
 # Disc images and extracted game data
 *.iso

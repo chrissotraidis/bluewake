@@ -1,0 +1,136 @@
+#ifndef _global_h_
+#define _global_h_
+
+#if TARGET_PC
+// A quoted include looks next to this file first, so it would reach game/include/dolphin
+// even when the SDK headers come from Aurora (COS_SDK_HEADERS=aurora); <> follows the -I order.
+#include <dolphin/types.h>
+#else
+#include "dolphin/types.h"
+#endif
+
+#define ARRAY_SIZE(o) (sizeof(o) / sizeof(o[0]))
+#define ARRAY_SSIZE(o) ((int)(sizeof(o) / sizeof(o[0])))
+
+// Align X to the previous N bytes (N must be power of two)
+#define ALIGN_PREV(X, N) ((X) & ~((N)-1))
+// Align X to the next N bytes (N must be power of two)
+#define ALIGN_NEXT(X, N) ALIGN_PREV(((X) + (N-1)), N)
+#define IS_ALIGNED(X, N) (((X) & ((N)-1)) == 0)
+#define IS_NOT_ALIGNED(X, N) (((X) & ((N)-1)) != 0)
+
+// Silence unused parameter warnings.
+// TP debug suggests the original devs used something like this.
+#define UNUSED(x) ((void)(x))
+
+#define JUT_EXPECT(...)
+#if TARGET_PC
+// Aurora's <dolphin/os.h> defines ASSERT(cond) as ASSERTLINE, which is (void)0 without DEBUG,
+// as this one is. Whichever header comes last wins; undefine first so either order is silent.
+#ifdef ASSERT
+#undef ASSERT
+#endif
+#endif
+#define ASSERT(...)
+#define LOGF(FMT, ...)
+
+#define _SDA_BASE_(dummy) 0
+#define _SDA2_BASE_(dummy) 0
+
+#ifndef offsetof
+#define offsetof(type, member) ((size_t) & (((type*)0)->member))
+#endif
+
+#define SQUARE(x) ((x) * (x))
+
+#if defined(__cplusplus) && __cplusplus >= 201103L
+#define COMPOUND_LITERAL(x)
+#else
+#define COMPOUND_LITERAL(x) (x)
+#endif
+
+#ifdef __MWERKS__
+#define GLUE(a, b) a##b
+#define GLUE2(a, b) GLUE(a, b)
+#define STATIC_ASSERT(cond) typedef char GLUE2(static_assertion_failed, __LINE__)[(cond) ? 1 : -1]
+#define ALIGN_DECL(alignment, decl) decl ATTRIBUTE_ALIGN(alignment)
+#define SECTION_DATA __declspec(section ".data")
+#define SECTION_INIT __declspec(section ".init")
+#define ASM asm
+#define WEAKFUNC __declspec(weak)
+#else
+#define STATIC_ASSERT(...)
+#if TARGET_PC
+// The asset headers native/tools/gen_assets.sh generates with snrubrm's converters still write the
+// one-argument form after the declarator (`static u8 l_matDL[] ALIGN_DECL(32) = {`): take both.
+#define ALIGN_DECL_1_(alignment) ATTRIBUTE_ALIGN(alignment)
+#define ALIGN_DECL_2_(alignment, decl) ATTRIBUTE_ALIGN(alignment) decl
+#define ALIGN_DECL_PICK_(_1, _2, NAME, ...) NAME
+#define ALIGN_DECL(...) ALIGN_DECL_PICK_(__VA_ARGS__, ALIGN_DECL_2_, ALIGN_DECL_1_)(__VA_ARGS__)
+#else
+#define ALIGN_DECL(alignment, decl) ATTRIBUTE_ALIGN(alignment) decl
+#endif
+#define SECTION_DATA
+#define SECTION_INIT
+#define ASM
+#define WEAKFUNC
+#endif
+
+// Intrinsics
+#if !TARGET_PC
+extern int __cntlzw(uint);
+extern int __rlwimi(int, int, int, int, int);
+extern void __dcbz(void*, int);
+extern void __sync();
+#else
+// The native build defines portable versions in native/include/pc/cos_pc_config.h.
+#endif
+
+#define VERSION_DEMO 0
+#define VERSION_JPN 1
+#define VERSION_USA 2
+#define VERSION_PAL 3
+
+#if VERSION == VERSION_DEMO
+    #define VERSION_SELECT(DEMO, JPN, USA, PAL) (DEMO)
+    #define DEMO_SELECT(DEMO, RETAIL) (DEMO)
+#elif VERSION <= VERSION_JPN
+    #define VERSION_SELECT(DEMO, JPN, USA, PAL) (JPN)
+    #define DEMO_SELECT(DEMO, RETAIL) (RETAIL)
+#elif VERSION == VERSION_USA
+    #define VERSION_SELECT(DEMO, JPN, USA, PAL) (USA)
+    #define DEMO_SELECT(DEMO, RETAIL) (RETAIL)
+#elif VERSION == VERSION_PAL
+    #define VERSION_SELECT(DEMO, JPN, USA, PAL) (PAL)
+    #define DEMO_SELECT(DEMO, RETAIL) (RETAIL)
+#endif
+
+#ifdef __MWERKS__
+#define SJIS(character, value) character
+#else
+#define SJIS(character, value) ((u32)value)
+#endif
+
+// Hack to make strings with no references appear in the string pool for matching.
+#define DEAD_STRING(s) OSReport(s)
+
+// Hack to trick the compiler into not inlining functions that use this macro.
+#define FORCE_DONT_INLINE \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; \
+    (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0; (void*)0;
+
+#endif

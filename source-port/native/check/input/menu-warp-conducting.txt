@@ -1,0 +1,27 @@
+# COS_SMOKE=options-menu with --preset sailing (on the boat in Windfall's sea room, the wind baton on Y).
+# Y takes out the Wind Waker: while it waits for the first beat its metronome, drone and pulse loop
+# (JAIZelInst::metronomePlay, judge). The menu opens with L+R+Z, L (the tabs wrap) to Depuración, A on
+# "Viajar", down twice to Windfall, A: a warp in the middle of conducting. Those loops have no actor
+# position, so the scene change does not end them; the warp stops them as the end of conducting does
+# (pc_menu.cpp stopUnownedLoops). Before that they sounded on at Windfall for good. Checked at
+# frame 1100: the player is at Windfall and JAudio has none of them registered.
+#expect opened 1
+#expect stage sea 11
+#expect no-se 0887,0888,08ed,08ee,0893,0894,0895,2868,2880,2881
+#expect alloc-failures 0
+#expect end 1100
+# frame buttons stickX stickY
+600 Y 0 0
+604 - 0 0
+760 L+R+Z 0 0
+763 - 0 0
+766 L 0 0
+768 - 0 0
+772 A 0 0
+774 - 0 0
+778 DOWN 0 0
+780 - 0 0
+784 DOWN 0 0
+786 - 0 0
+792 A 0 0
+794 - 0 0

@@ -1,0 +1,9 @@
+# Controller script of the sun-glare check (issue #7; syntax in native/src/pc/harness/pc_input.cpp, the last
+# two columns are the C stick): <frame> <buttons> <stickX> <stickY> [<cX> <cY>], each line holding until
+# the next. Run with --preset sailing (on the boat at sea:11:102) and COS_BOOT_TIME=17.5: the C stick left
+# from frame 700 turns the camera until the low evening sun is near the top centre of the view (about
+# frame 983), where the lens flare and the glare draw if GXPeekZ reads the sky's depth at the sun's five
+# check points (d_kankyo_rain.cpp dKyr_sun_move).
+0   - 0 0 0   0
+700 - 0 0 -60 0
+983 - 0 0 0   0

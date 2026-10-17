@@ -1,0 +1,194 @@
+# Game compile configuration, the native counterpart of the decomp's configure.py cflags and of
+# Dusklight's cmake/GameABIConfig.cmake. Everything the game units share goes on the INTERFACE
+# library cos_game_headers; each module links it.
+include_guard(GLOBAL)
+
+# GZLE01 is VERSIONS.index("GZLE01") == 2 (VERSION_USA) in the decomp's configure.py. The supported
+# builds: 2 (USA, the reference) and 3 (Europe, GZLP01: docs/PAL_DISC_PLAN.md).
+set(COS_VERSION 2 CACHE STRING "Game version: 0 D44J01, 1 GZLJ01, 2 GZLE01, 3 GZLP01")
+set(_cos_game_ids D44J01 GZLJ01 GZLE01 GZLP01)
+if (NOT COS_VERSION MATCHES "^[0-3]$")
+    message(FATAL_ERROR "COS_VERSION=${COS_VERSION}: 0 D44J01, 1 GZLJ01, 2 GZLE01, 3 GZLP01")
+endif ()
+list(GET _cos_game_ids ${COS_VERSION} _cos_game_id)
+set(COS_GAME_ID ${_cos_game_id} CACHE STRING "Disc ID whose generated asset headers are used")
+if (NOT COS_GAME_ID STREQUAL _cos_game_id)
+    message(FATAL_ERROR "COS_GAME_ID=${COS_GAME_ID} but COS_VERSION=${COS_VERSION} is ${_cos_game_id}: "
+            "configure a separate build directory per version (or reconfigure with --fresh)")
+endif ()
+message(STATUS "cos_native: game version ${COS_VERSION} (${COS_GAME_ID})")
+
+# Generated asset headers ("assets/...", "res/Object/...") come from the player's disc and live
+# under the build directory, never in git (native/README.md, "Asset headers").
+set(COS_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/${COS_GAME_ID}" CACHE PATH
+        "Directory holding the asset headers generated from the player's disc")
+
+set(COS_GAME_COMPILE_DEFS
+        TARGET_PC=1
+        VERSION=${COS_VERSION}
+        # the disc this build runs from, for the harness's checks and messages ("GZLE01", "GZLP01")
+        COS_GAME_ID_STR="${COS_GAME_ID}"
+        NDEBUG=1)
+
+# docs/RUNTIME_ASSETS.md: compile against the stub assets/ headers of `gen_assets.sh --stubs` (no
+# game data, no disc needed) and fill those arrays from the player's disc at start-up
+# (native/src/pc/runtime/pc_assets.cpp). COS_ASSETS_DIR must then hold the stubs.
+option(COS_RUNTIME_ASSETS "Asset arrays read from the disc at start-up instead of compiled in" OFF)
+if (COS_RUNTIME_ASSETS)
+    # (only cos_pc, the loader, sees COS_RUNTIME_ASSETS=1: executable.cmake; the stubs need no define)
+    if (EXISTS "${COS_ASSETS_DIR}/include/assets" AND NOT EXISTS "${COS_ASSETS_DIR}/include/assets/cos_assets.h")
+        message(FATAL_ERROR "COS_RUNTIME_ASSETS=ON but ${COS_ASSETS_DIR} holds the headers generated from "
+                "the disc: point COS_ASSETS_DIR at the output of native/tools/gen_assets.sh --stubs")
+    endif ()
+    if (EXISTS "${COS_ASSETS_DIR}/include/assets/cos_assets.h")
+        # stubs written before the version line (GZLE01 only) have none
+        file(STRINGS "${COS_ASSETS_DIR}/include/assets/cos_assets.h" _cos_stub_id REGEX "^#define COS_ASSETS_GAME_ID ")
+        if (_cos_stub_id AND NOT _cos_stub_id MATCHES "\"${COS_GAME_ID}\"")
+            message(FATAL_ERROR "${COS_ASSETS_DIR} holds stubs for another disc (${_cos_stub_id}), not "
+                    "${COS_GAME_ID}: native/tools/gen_assets.sh --stubs --version ${COS_GAME_ID}")
+        endif ()
+    endif ()
+    message(STATUS "cos_native: runtime assets (COS_RUNTIME_ASSETS): stub headers from ${COS_ASSETS_DIR}")
+elseif (EXISTS "${COS_ASSETS_DIR}/include/assets/cos_assets.h")
+    message(FATAL_ERROR "${COS_ASSETS_DIR} holds stub asset headers (gen_assets.sh --stubs): "
+            "configure with -DCOS_RUNTIME_ASSETS=ON, or point COS_ASSETS_DIR at the disc's headers")
+endif ()
+
+# Same order as configure.py's -i list, minus the MSL/Runtime/MetroTRK directories: the host C
+# and C++ libraries replace MSL. native/include/pc/msl holds thin shims for the MSL-only header
+# names the game includes (algorithm.h, new.h...).
+#
+# SDK headers (docs/NATIVE_PORT_PHASE2_3.md, steps 2.3 and 2.8, decision D2): Aurora's headers are
+# the only SDK headers. native/include/sdk holds forwarders for the SDK header names only the game has
+# (dolphin/os/OS.h -> <dolphin/os.h> + game-only declarations) and comes before Aurora, which wins
+# every name both have, so Aurora's own includes stay consistent. game/include/dolphin must
+# never be reached (check/check_sdk_shadow.sh). The decomp's own SDK headers (phase 1's
+# COS_SDK_HEADERS=decomp mode) were dropped for TARGET_PC in step 2.8.
+if (DEFINED COS_SDK_HEADERS AND NOT COS_SDK_HEADERS STREQUAL "aurora")
+    message(FATAL_ERROR "COS_SDK_HEADERS=${COS_SDK_HEADERS}: the decomp SDK header mode was removed "
+            "in phase 2 step 2.8; the game always compiles against Aurora's headers. "
+            "Drop -DCOS_SDK_HEADERS (or reconfigure with --fresh).")
+endif ()
+unset(COS_SDK_HEADERS CACHE)
+include(${CMAKE_CURRENT_LIST_DIR}/Aurora.cmake)
+if (NOT COS_WITH_AURORA)
+    message(FATAL_ERROR "COS_WITH_AURORA=OFF is no longer supported: the game compiles against "
+            "Aurora's SDK headers (phase 2 step 2.8)")
+endif ()
+set(COS_SDK_INCLUDE_DIRS
+        ${COS_NATIVE_ROOT}/include/sdk
+        ${aurora_SOURCE_DIR}/include)
+# As Dusklight compiles the game (GameABIConfig.cmake): PSMTX* resolve to aurora_mtx's C_MTX*.
+list(APPEND COS_GAME_COMPILE_DEFS MTX_USE_PS=1)
+
+set(COS_GAME_INCLUDE_DIRS
+        ${COS_NATIVE_ROOT}/include
+        ${COS_SDK_INCLUDE_DIRS}
+        ${COS_ROOT}/include
+        ${COS_ASSETS_DIR}/include
+        ${COS_ASSETS_DIR}
+        ${COS_ROOT}/src
+        ${COS_NATIVE_ROOT}/include/pc/msl)
+
+set(COS_PC_CONFIG_HEADER ${COS_NATIVE_ROOT}/include/pc/cos_pc_config.h)
+
+# -fno-lifetime-dse (see COS_GAME_COMPILE_OPTIONS) only where the compiler accepts it.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(-fno-lifetime-dse COS_HAVE_NO_LIFETIME_DSE)
+if(COS_HAVE_NO_LIFETIME_DSE)
+    set(COS_NO_LIFETIME_DSE $<$<COMPILE_LANGUAGE:CXX>:-fno-lifetime-dse>)
+else()
+    set(COS_NO_LIFETIME_DSE "")
+endif()
+
+set(COS_GAME_COMPILE_OPTIONS
+        # Force-included first in every unit: what Metrowerks and MSL provided implicitly.
+        "SHELL:-include ${COS_PC_CONFIG_HEADER}"
+        # The game's dolphin/types.h reached every unit through global.h; its names Aurora lacks (uint,
+        # READU32_BE, FLOAT_MIN/MAX) come from this header instead, right after the PC config header.
+        "SHELL:-include ${COS_NATIVE_ROOT}/include/sdk/cos_sdk_extras.h"
+        # Match the GameCube (and x86): plain char is signed. Same as Dusklight on ARM.
+        -fsigned-char
+        # Decision H8 (docs/NATIVE_PORT_PHASE4_6.md): the decompiled code type-puns through pointer
+        # casts everywhere (MWCC never applied type-based alias analysis to it), so clang must not
+        # either. Costs a little optimisation; Dusklight does not use the flag.
+        -fno-strict-aliasing
+        # MWCC was invoked with -Cpp_exceptions off and -RTTI off.
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+        # The game checks `new` for NULL everywhere (a full JKRSolidHeap returns NULL, and
+        # fopAcM_entrySolidHeap retries with a bigger heap when CreateHeap fails). MWCC tested the
+        # result before running constructors or writing the new[] array cookie; clang assumes a
+        # non-noexcept operator new never returns NULL and stores through it unchecked (SIGSEGV
+        # addr=0x0 in cBgW::SetTri's new[] on a full actor heap). -fcheck-new restores the check.
+        $<$<COMPILE_LANGUAGE:CXX>:-fcheck-new>
+        # The decompiled code sometimes reads a local that only one branch wrote (MWCC left stack
+        # garbage there). Clang treats that read as undefined behaviour: an uninitialized value
+        # passed to a function argument (noundef) makes the path unreachable, so the branch's
+        # NULL check is deleted (daWarphr_c::_draw dereferenced a NULL demo camera). Give every
+        # automatic variable defined contents so the branches stay as written. GCC 12+ accepts it.
+        -ftrivial-auto-var-init=zero
+        # The game ends an object's life with an explicit destructor call and then reuses it in
+        # place: dRes_control_c::deleteRes calls resInfo->~dRes_info_c(), and newResInfo hands the
+        # same slot to the next archive. Recent clang (seen with 23.1) treats every store a
+        # destructor makes to its own object as dead and drops it, so ~dRes_info_c no longer clears
+        # mpArchive or mpDMCommand. The next archive in that slot then looks loaded while its mRes
+        # is still NULL (SIGSEGV addr=0x0 in dRes_control_c::getRes for Demo51/title.stb at the
+        # title screen). -fno-lifetime-dse keeps those stores; GCC has had the same flag.
+        ${COS_NO_LIFETIME_DSE}
+        # Diagnostics only (no code change). Same set as Dusklight, plus the MWCC-isms clang
+        # rejects by default but can accept with identical meaning.
+        -Wno-multichar                       # 'ABCD' constants: identical big-endian encoding
+        -Wno-unknown-pragmas                 # #pragma optimization_level, scheduling, ...
+        -Wno-deprecated-declarations
+        -Wno-declaration-after-statement
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-trigraphs>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-non-pod-varargs>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-register>           # 'register' storage class (C++17)
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-c++11-narrowing>    # implicit narrowing in braces, as MWCC
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-invalid-offsetof>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-volatile>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-enum-enum-conversion>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-enum-float-conversion>
+        -Wno-parentheses
+        -Wno-shift-op-parentheses
+        -Wno-logical-op-parentheses
+        -Wno-bitwise-op-parentheses
+        -Wno-dangling-else
+        -Wno-unused-value
+        -Wno-tautological-compare
+        -Wno-tautological-constant-out-of-range-compare
+        -Wno-pointer-sign
+        -Wno-ignored-attributes
+        -Wno-writable-strings
+        # 64-bit diagnostics (int-to-pointer-cast, ...) stay visible on purpose: phase 4 input.
+        # A derived method that only hides a virtual one (u32 is unsigned int on the host, unsigned
+        # long on MWCC: next_msgStatus(unsigned long*) did not override fopNpc_npc_c's, and five
+        # NPCs' talks ended after one message) is an error with clang (Mac, Linux).
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang,AppleClang>>:-Werror=overloaded-virtual>
+        -ferror-limit=50)
+
+# Phase 4 inventory (docs/NATIVE_PORT_PHASE4_6.md, step 4.0a): the 64-bit and missing-return
+# diagnostics, appended after the shared flags so no -Wno-... above can hide them. Turning the
+# option on or off changes every game unit's flags, so the next build recompiles all of them and
+# its log is a complete warning census: native/tools/phase4_inventory.py --log <build log>.
+option(COS_PHASE4_WARNINGS "Add the phase 4 64-bit and return-type warnings to every game unit" OFF)
+if (COS_PHASE4_WARNINGS)
+    list(APPEND COS_GAME_COMPILE_OPTIONS
+            -Wint-to-pointer-cast
+            -Wpointer-to-int-cast
+            -Wint-to-void-pointer-cast
+            -Wreturn-type
+            -Wfortify-source)
+    message(STATUS "cos_native: phase 4 warnings on (COS_PHASE4_WARNINGS)")
+endif ()
+
+add_library(cos_game_headers INTERFACE)
+target_compile_definitions(cos_game_headers INTERFACE ${COS_GAME_COMPILE_DEFS})
+target_include_directories(cos_game_headers INTERFACE ${COS_GAME_INCLUDE_DIRS})
+target_compile_options(cos_game_headers INTERFACE ${COS_GAME_COMPILE_OPTIONS})
+
+if (NOT EXISTS "${COS_ASSETS_DIR}")
+    message(STATUS "cos_native: asset headers not generated yet (${COS_ASSETS_DIR}); "
+            "units that include assets/ or res/Object/ headers will not compile until they are")
+endif ()

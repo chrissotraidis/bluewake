@@ -1,0 +1,223 @@
+# Targets of native/tools/regress.sh: <target> <expected exit> [extra run.sh options]
+# A step that reaches a milestone or adds a smoke test appends it here in the same commit.
+
+# harness self-tests (step 6.0)
+crash-test 13
+panic-test 12
+timeout-test 10 --timeout 5
+stall-test 11 --stall 5
+no-disc 14
+
+# milestones (static-init is M0)
+static-init 0
+aurora-up 0
+heaps 0
+gfx-create 0
+frame-loop 0
+logo-scene 0
+logo-res 0
+opening 0
+title-stage 0
+title 0
+file-select 0 --input native/check/input/file-select.txt
+
+# smoke tests and format sweeps
+disc-ls 0
+heap 0
+font 0
+arc-sweep 0
+msg-sweep 0
+jpa-sweep 0
+stage-sweep 0
+blo-sweep 0
+save 0
+dzb-sweep 0
+audio-parse 0
+j3d-sweep 0
+anm-sweep 0
+# F2-agb-map (lane outset): every AGB floor map (.amp) through mDoLib_cnvind16/32, GBA buffer order
+amp-sweep 0
+stb-sweep 0
+# bug B3: The player's sword blur positions (LkAnm.arc *_POS) read in host order
+blur-pos 0
+# bug B1: Outset's BGM after a house (sea -> Omasao -> sea), audio level and BGM state
+bgm-hop 0 --stage sea:44:0
+
+# input injection (step 6.3): the default script native/check/input/pad-echo.txt
+pad-echo 0
+
+# debug stage boot (step 6.4): the COS_BOOT_STAGE request is made and checked, M6 still logged;
+# a malformed spec is a usage error
+logo-res 0 --stage sea:44:206
+static-init 2 --stage sea
+
+# step 5.5: after the title, the AI output is above -40 dBFS RMS and the sequence ticks advance
+title-audio 0
+# bug B33: the DSP interrupt thread handles every pending DSP interrupt under one hold of the OS lock;
+# COS_DSP_INT_GAP_US widens the window a thread switch opens: without the fix the ucode halts (silence)
+title-audio 0 --env COS_DSP_INT_GAP_US=2000
+
+# milestone M12 (boot loop, lane outset): debug stage boot puts the player in Outset
+outset-debug 0 --stage sea:44:206
+
+# milestone M13 (step 6.6, lane outset): The player is controllable in Outset after Aryll's lookout event
+outset-control 0 --stage sea:44:206 --input native/check/input/outset-control.txt
+
+# F1-vi-stall (lane outset): M13 uncapped, retraces back to back; JUTVideo's measured retrace
+# interval must never be 0 (JFWDisplay::calcCombinationRatio loops by it)
+outset-control 0 --stage sea:44:206 --input native/check/input/outset-control.txt --uncapped
+
+# widescreen option (lane wide, docs/WIDESCREEN.md): M13 with the 16:9 code's changes (camera aspect,
+# 2D bounds, HUD and minimap moved) and the title to the name scene at 16:10 (the interpolated
+# values, the wipe and the full-screen masks)
+outset-control 0 --stage sea:44:206 --input native/check/input/outset-control.txt --aspect 16:9
+file-select 0 --input native/check/input/file-select.txt --aspect 16:10
+# a malformed COS_ASPECT is a usage error
+static-init 2 --aspect 21:9
+
+# M11 new-game (lane audio): title -> name scene on a clean card -> save file made -> name entry
+# -> OPEN scene. Guards the memory card save race (fix NG-memcard-sync) and per-run card folders
+# (fix NG-run-dir)
+new-game 0 --input native/check/input/new-game.txt
+
+# bug B4 (lane b4-grandma): the grandmother's tunic talk and demo in the player's house (debug boot at
+# LinkRM point 0 starts it on a new file), every JKR heap checked every frame (and newlib's free
+# lists on the Switch); the run must end at --frames with no fault, panic or damaged heap
+run 0 --stage LinkRM:0:0 --frames 3000 --uncapped --heap-check 1 --input native/check/input/grandma-talk.txt
+
+# bug B6 (lane b6-cutscene): the telescope demo telescope_demo at 16:9 (new file with event bit 0x2A80
+# and the telescope on X, scripted aim/zoom/look-up); through its cinemascope part the presented
+# picture must reach the left and right edges (no 4:3 side bars)
+telescope-demo 0 --stage sea:44:206 --input native/check/input/telescope-demo.txt --aspect 16:9
+# issue #10: the same with the QoL "Texto instantáneo": the scope messages still close by themselves, so
+# Aryll's postbox lines move on when Quill is in view (they stayed up for good)
+telescope-demo 0 --stage sea:44:206 --input native/check/input/telescope-demo.txt --aspect 16:9 --env COS_QOL_INSTANT_TEXT=1
+# bug B7 (lane b7-shore): Outset's shore foam and sea shadow decals (room model1.bdl, about one unit
+# above the island's water) with a fixed camera moving over the cliffs under the rope bridge: no
+# frame may lose the foam against its neighbours (the Switch's GL depth precision flicker)
+shore-foam 0 --stage sea:44:8 --aspect 16:9
+# bug B9 (lane hd-glitch): NPCs sharing one model with different material tables (Windfall's
+# people: Ub women, an Sa man) must show their own clothes, the same after a trip into a house
+npc-variants 0 --stage sea:11:0
+# bug B10 (lane b10-mflft): the first dungeon's room 2 (M_NewD2, point 8) creates its rope-hung
+# platform over the lava (MFLFT, d_a_mflft) within a few frames of the boot; its struct's own vtable
+# pointer moved the actor 8 bytes off the process and dCcD_Stts::Init faulted at 0x20 (fails without the fix)
+run 0 --stage M_NewD2:2:8 --frames 900 --uncapped
+# bug B11 (lane room-sweep): the ice isle (sea room 40, point 2) freezes the player; the frozen display
+# lists were built with the ice table's texture and its numbers, and once the materials were put back the
+# packets paired the ice table with the player's own texture numbers (texture objects past the array)
+run 0 --stage sea:40:2 --frames 900 --uncapped
+# bug B12 (lane room-sweep): the Ocean minigame stage creates the timer and the starter screens, whose
+# GameCube-size solid heaps were too small for host-sized J2D panes (a NULL pane faulted)
+run 0 --stage Ocean:0:1 --frames 900 --uncapped
+# bug B13 (lane room-sweep): the walk breaks pots in WarpD; the shards' texture-pattern array did not fit
+# its solid heap (sized from the GameCube's struct size); no JKR allocation may fail
+run 0 --stage WarpD:0:21 --frames 900 --uncapped --input native/check/input/room-walk.txt --alloc-max 0
+
+# options menu (lane options-menu): L+R+Z opens it in Outset, the internal resolution (handheld),
+# depth of field and FPS overlay change live and are saved to the run's settings.ini, the game stays
+# paused while it is open, then Depuración > Viajar takes the player to Windfall (sea room 11)
+options-menu 0 --stage sea:44:206 --input native/check/input/options-menu.txt
+# HD textures (lane hd-textures): the menu's "Texturas HD" on and off with no pack installed
+options-menu 0 --stage sea:44:206 --input native/check/input/hd-textures-menu.txt
+# bug B8 (lane b8-heap): internal resolution changes, Viajar to Dragon Roost and Windfall, then the
+# pause menu's item and collection screens with 14 items (the menu window's child heap and the 2D
+# heap, GameCube sizes too small on the host), a save through the save screen on the run's own card and
+# its round trip (load, checksum, card_to_memory: the same items); no JKR allocation may fail
+options-menu 0 --stage sea:44:206 --input native/check/input/menu-travel-save.txt
+# sailing preset (lane sailing): Depuración > "Navegar (barco, vela y batuta)" on Outset's new file puts
+# the boat, the sail (X), the wind baton (Y), the wind song and the open sea on the file in memory and
+# takes the player to Windfall's sea room on the boat; an unknown COS_BOOT_PRESET is a usage error
+options-menu 0 --stage sea:44:206 --input native/check/input/menu-sailing.txt
+# 60 fps from the options menu (Rendimiento > "60 fps (interpolación)", COS_FPS60): turned on live, the
+# game frames are then presented twice (docs/FPS60_PLAN.md)
+options-menu 0 --stage sea:44:206 --input native/check/input/menu-fps60.txt
+# Calidad de vida (docs/QOL_PLAN.md): a QoL row turned on from the menu, saved, then in effect live
+options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol.txt
+# a warp from the menu in the middle of conducting the Wind Waker (Y on the boat, then Depuración > Viajar):
+# the baton's metronome, drone and pulse loops have no actor position, so the scene change did not end them
+# and they sounded on at Windfall for good; the next PLAY scene now stops them (fails without the fix)
+options-menu 0 --preset sailing --input native/check/input/menu-warp-conducting.txt
+# Calidad de vida's "Experiencia BetterWW" (every QoL row to BetterWW's defaults, saved, still editable) and
+# "Valores originales" (every row off)
+options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol-preset.txt
+options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol-original.txt
+# QoL "Barco sin restricciones" (COS_QOL_FREE_BOAT): the sailing smoke before Dragon Roost's arrival (0x0902
+# cleared) crosses into room 18, which the boat's story path 0 forbids then (it fails with the option off), and
+# with neither 0x1980 nor 0x0A80 the boat still offers "get in" (the reboard fails with the option off)
+sailing 0 --preset sailing --env COS_BOOT_EVENTS_OFF=0902 --env COS_QOL_FREE_BOAT=1
+sailing 0 --preset sailing --env COS_BOOT_EVENTS_OFF=1980,0A80 --env COS_QOL_FREE_BOAT=1
+# QoL "Saltar la introducción" (COS_QOL_SKIP_INTRO): M14's real new-game flow without the prologue; the name
+# scene requests the PLAY scene itself, Outset's intro event plays and the player is controllable
+outset-real 0 --input native/check/input/new-game-skip-intro.txt --env COS_QOL_SKIP_INTRO=1
+static-init 2 --preset bogus
+# COS_SMOKE=sailing (lane sailing): the sailing preset's boot on the boat, off it with A and back on
+# with A after swimming to it (bug B17: the preset lacked event bits 0x0A80/0x1980), the wind turned north (the wind
+# song's dKyw_tact_wind_set), the sail up with X, 60 s of sailing north steered by the stick, across the
+# sea room boundary (11 -> 18), room 18 up within 90 frames (bug B18: a room loaded while sailing stayed
+# paused and the island's far model covered it) and at least 20000 units; perf summary and four shots in the run directory
+sailing 0 --preset sailing
+# COS_SMOKE=rope (bug B19): Niko's rope lesson on Tetra's ship (Asoko layer 2): the player hangs where
+# they grab the rope (not at its top) and R + stick back slides them down it
+rope 0 --stage Asoko:0:0:2
+# COS_SMOKE=evcam (bug B20): the event camera's pointer arguments ("Type", &value as the bottle, food
+# and item cameras pass them) read back through getEvIntData; a 32-bit mValue crashed
+evcam 0 --stage sea:44:206
+# COS_SMOKE=wind-screen (bug B21): the wind song's wind-direction screen (d_operate_wind) opens with no
+# failed allocation; its GameCube-sized 20000-byte heap ran out and panicked
+wind-screen 0 --preset sailing
+# COS_SMOKE=ky-procs (bug B22): the storm's lightning, a water mark and a water pillar created as the
+# game creates them; the lightning's GameCube-sized heap failed, so no lightning appeared in storms
+ky-procs 0 --preset sailing
+# COS_SMOKE=sun-glare (issue #7): the evening sun in view at sea; its five GXPeekZ check points read the
+# sky's depth, so the lens flare and the glare draw (the deko3d renderer read 0 for every peek: no glare)
+sun-glare 0 --preset sailing --input native/check/input/sun-glare.txt --env COS_BOOT_TIME=17.5
+sun-glare 0 --preset sailing --input native/check/input/sun-glare.txt --env COS_BOOT_TIME=17.5 --aspect 16:9
+# COS_SUN_GLARE_CHECK=sail (the sail hiding the low sun, native/check/input/sun-glare-sail.txt) is not
+# here: it counts frames, and under the regression's parallel load the sweep lands a few frames off and
+# fails (2026-10-12). Run it by hand: run.sh sun-glare --preset sailing --input
+# native/check/input/sun-glare-sail.txt --env COS_BOOT_TIME=17.0 --env COS_SUN_GLARE_CHECK=sail --aspect 16:9
+# COS_SMOKE=picto-box (bug B36): photos with the picto box (I8) and the deluxe picto box (RGB565);
+# the copy is read back to RAM for the capture thread's CMPR encoder (it panicked on the empty buffer)
+picto-box 0 --stage Asoko:0:0:2 --input native/check/input/picto-box.txt
+picto-box 0 --stage Asoko:0:0:2 --input native/check/input/picto-box.txt --env COS_BOOT_ITEMS=26
+# bug B37: dSnap's subject check (EFB alpha peeks, read back after the frame) sees a Killer Bee held in
+# front of the player on Windfall's town square and judges the photo DSNAP_TYPE_NPC_MK
+picto-box 0 --stage sea:11:9 --input native/check/input/picto-box.txt
+# COS_SMOKE=chest: the chest of Niko's rope lesson (takara3, the Spoils Bag) created in front of the player on
+# Tetra's ship and opened end to end (DEFAULT_TREASURE starts and ends); the stuck-event watch logs it
+chest 0 --stage Asoko:0:0:2
+# COS_SMOKE=item-sweep (native/tools/item_sweep.py runs every item): three items through a big chest's
+# item-get demo (the wind baton, the sword, the sail); each DEFAULT_TREASURE event must end, fanfare included
+item-sweep 0 --stage Asoko:0:0:2 --env COS_ITEM_SWEEP=0x22,0x38,0x78 --env COS_ITEM_SWEEP_SHOTS=0
+# COS_SMOKE=save-sweep (native/tools/save_sweep.py also loads each save back): a save in Dragon Roost
+# Cavern through the save screen's steps; the card must hold what the game packed, return place its entrance
+save-sweep 0 --stage M_NewD2:0:0 --env COS_BOOT_EVENTS=2A08
+# COS_SMOKE=camera-invert: the options' inverted camera axes (Gráficos > "Invertir cámara horizontal" /
+# "vertical"): the C stick turns the camera's yaw and pitch the opposite way with the axis inverted,
+# and the wind baton's left hand still reads the C stick's real direction
+camera-invert 0 --stage sea:11:9
+# COS_SMOKE=stage-hop (bug B23): Adanmae -> Atorizk -> Adanmae three times with every JKR heap checked
+# every frame; Dragon Roost's settled ash wrote one SNOW_EFF past its array into the next heap block's
+# header (caught by the ASan build: native/CMakeLists.txt, "AddressSanitizer variant")
+stage-hop 0 --stage Adanmae:0:0 --heap-check 1
+# COS_SMOKE=event-sweep (bug B34): the sea's awake_zola demo (Demo28) sends a message code after the
+# message process is gone; the demo's message control kept the freed resource container and
+# JMessage::TResourceContainer::Get_groupID walked it (SIGSEGV on about half the runs; the ASan
+# build sees every one). A crash ends the run with 13; the event itself stays "stuck" on its
+# message, as without a message process anywhere
+event-sweep 0 --stage sea:1:0 --env COS_EVENT_SWEEP=120 --env COS_EVENT_SWEEP_SECONDS=20 --env COS_EVENT_SWEEP_DEMOS=awake_zola.stb:28
+# COS_SMOKE=event-sweep (bug B35): the Earth and Wind sages' cutscenes (dance_zola.stb in Demo27,
+# dance_kokiri.stb in Demo30) name a BTK file as a model's BRK; the TEV-register animation built from
+# it followed a garbage pointer (SIGBUS in J3DAnmTevRegKey::searchUpdateMaterialID). Each demo plays to
+# its stage change
+event-sweep 0 --stage Edaichi:0:0 --env COS_EVENT_SWEEP=61 --env COS_BOOT_EVENTS=2D01 --env COS_EVENT_SWEEP_DEMOS=dance_zola.stb:27
+event-sweep 0 --stage Ekaze:0:0 --env COS_EVENT_SWEEP=60 --env COS_BOOT_EVENTS=2D01 --env COS_EVENT_SWEEP_DEMOS=dance_kokiri.stb:30
+# COS_SMOKE=event-sweep (bug B39, issue #3): Jabun's cutscene (getperl_jab.stb in Demo18) names a BTK
+# as a model's BRK (dropped by B35, so the model had no BRK) and later a real BRK for it, which
+# actPerformance initialised through the missing BRK (SIGSEGV). The demo plays to its stage change
+event-sweep 0 --stage Pjavdou:0:1:8 --preset sailing --env COS_EVENT_SWEEP=64 --env COS_EVENT_SWEEP_SECONDS=60
+# COS_SMOKE=dmap (issue #6): the dungeon map screen (Up in Dragon Roost Cavern, map and compass given) draws
+# the rooms: the floor TLUT's palette lookup read the big-endian dmap%d.bti palette in host order, so the
+# TLUT stayed transparent and the map showed its grid alone
+dmap 0 --stage M_NewD2:0:0

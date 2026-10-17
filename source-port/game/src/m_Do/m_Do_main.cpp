@@ -1,0 +1,680 @@
+/**
+ * m_Do_main.cpp
+ * Main Initialization
+ */
+
+#include "m_Do/machine.h" // IWYU pragma: keep
+#include "m_Do/m_Do_main.h"
+#include "DynamicLink.h"
+#include "JSystem/JFramework/JFWSystem.h"
+#include "JSystem/JKernel/JKRAram.h"
+#include "JSystem/JKernel/JKRSolidHeap.h"
+#include "JSystem/JUtility/JUTAssert.h"
+#include "JSystem/JUtility/JUTConsole.h"
+#include "JSystem/JUtility/JUTGamePad.h"
+#include "JSystem/JUtility/JUTReport.h"
+#include "string.h"
+#include "c/c_dylink.h"
+#include "d/d_com_inf_game.h"
+#include "f_ap/f_ap_game.h"
+#include "global.h"
+#include "m_Do/m_Do_MemCard.h"
+#include "m_Do/m_Do_Reset.h"
+#include "m_Do/m_Do_audio.h"
+#include "m_Do/m_Do_controller_pad.h"
+#include "m_Do/m_Do_dvd_thread.h"
+#include "m_Do/m_Do_graphic.h"
+#include "m_Do/m_Do_machine.h"
+#include "m_Do/m_Do_printf.h"
+#include <stdio.h>
+#if TARGET_PC
+#include "pc/pc_harness.h"
+#endif
+#if TARGET_PC
+// From Dusklight (CC0, ref/dusklight/src/dusk/main.cpp): Aurora's aurora::main library owns the
+// process entry point; <aurora/main.h> renames the game's main below to aurora_main, which it
+// calls. Included last so the macro touches nothing but that definition.
+#include <aurora/main.h>
+#endif
+
+/* 800056E0-80005748       .text version_check__Fv */
+void version_check() {
+    if (strcmp("05Sep2002", "05Sep2002") == 0 && strcmp("", "") == 0) {
+        return;
+    }
+
+    OSReport_Error("SDKのバージョンが一致しません。停止します\n");
+    while (true) {
+    }
+}
+
+/* 80005748-800057AC       .text CheckHeap1__9HeapCheckFv */
+void HeapCheck::CheckHeap1() {
+    s32 totalUsedSize = mHeap->getTotalUsedSize();
+    s32 freeSize = mHeap->getFreeSize();
+
+    if (mMaxTotalUsedSize < totalUsedSize)
+        mMaxTotalUsedSize = totalUsedSize;
+
+    if (mMaxTotalFreeSize > freeSize)
+        mMaxTotalFreeSize = freeSize;
+}
+
+char mDoMain::COPYDATE_STRING[] = "\?\?/\?\?/?? ??:??:??";
+
+static HeapCheck RootHeapCheck = {
+    "Root", NULL, 0, 0x7FFFFFFF, 0x1400000, 0x140, 0x10000, 0, 0,
+};
+
+static HeapCheck SystemHeapCheck = {
+    "System", NULL, 0, 0x7FFFFFFF, 0x870000, 0x87, 0x10000, 0, 0,
+};
+
+static HeapCheck ZeldaHeapCheck = {
+    "Zelda", NULL, 0, 0x7FFFFFFF, 0x7C0000, 0x7C, 0x10000, 0, 0,
+};
+
+static HeapCheck GameHeapCheck = {
+    "Game", NULL, 0, 0x7FFFFFFF, 0x300000, 0x30, 0x10000, 0, 0,
+};
+
+static HeapCheck ArchiveHeapCheck = {
+    "Archive", NULL, 0, 0x7FFFFFFF, 0x880000, 0x88, 0x10000, 0, 0,
+};
+
+static HeapCheck CommandHeapCheck = {
+    "Command", NULL, 0, 0x7FFFFFFF, 0x1000, 0x10, 0x100, 0, 0,
+};
+
+static HeapCheck* HeapCheckTable[HeapCheckTableNum] = {
+    &RootHeapCheck, &SystemHeapCheck,  &ZeldaHeapCheck,
+    &GameHeapCheck, &ArchiveHeapCheck, &CommandHeapCheck,
+};
+
+/* 800057AC-80005858       .text CheckHeap__FP10JUTGamePad */
+void CheckHeap(JUTGamePad* i_pad) {
+    mDoMch_HeapCheckAll();
+    OSCheckActiveThreads();
+
+    bool comboCheck = false;
+
+    // if L + R + Z is pressed
+    if ((i_pad->getButton() & ~PAD_TRIGGER_Z) == (PAD_TRIGGER_L | PAD_TRIGGER_R) && i_pad->testTrigger(PAD_TRIGGER_Z) != false)
+        comboCheck = true;
+
+    int saveRel = comboCheck;
+    for (int i = 0; i < HeapCheckTableNum; i++) {
+        HeapCheckTable[i]->CheckHeap1();
+        if (saveRel) {
+            HeapCheckTable[i]->saveRelBase();
+        }
+    }
+}
+
+/* 80005858-800058B0       .text countUsed__FP10JKRExpHeap */
+static int countUsed(JKRExpHeap* heap) {
+    OSDisableScheduler();
+    int counter = 0;
+    JKRExpHeap::CMemBlock* used_blocks_head = heap->getUsedFirst();
+
+    while (used_blocks_head) {
+        used_blocks_head = used_blocks_head->getNextBlock();
+        counter++;
+    };
+
+    OSEnableScheduler();
+    return counter;
+}
+
+/* 800058B0-800058D4       .text getUsedCount__9HeapCheckCFv */
+s32 HeapCheck::getUsedCount() const {
+    return countUsed(mHeap);
+}
+
+/* 800058D4-80005B28       .text heapDisplay__9HeapCheckFv */
+void HeapCheck::heapDisplay() {
+    s32 heap_size = mHeap->getHeapSize();
+    s32 used_count = field_0x14 * mTargetHeapSize;
+
+    field_0x10 = used_count;
+    used_count = heap_size - used_count;
+
+    s32 total_used = mHeap->getTotalUsedSize();
+    s32 total_free = mHeap->getTotalFreeSize();
+    s32 heap_free = mHeap->getFreeSize();
+
+    JUTReport(100, 212, "[%sName]", mName);
+    JUTReport(100, 227, "HeapSize         %8ld", heap_size);
+
+    int target_size = field_0x14 * mTargetHeapSize;
+    field_0x10 = target_size;
+
+    JUTReport(100, 240, "TargetHeapSize   %8ld", target_size);
+    JUTReport(100, 253, "TotalFree        %8ld", total_free - used_count);
+    JUTReport(100, 266, "FreeSize         %8ld", heap_free - used_count);
+    JUTReport(100, 279, "TotalUsedSize    %8ld", total_used);
+
+    target_size = field_0x14 * mTargetHeapSize;
+    field_0x10 = target_size;
+
+    JUTReport(100, 292, "TotalUsedRate        %3ld%%", (int)(total_used * 100) / target_size);
+    JUTReport(100, 305, "MaxTotalUsedSize %8ld", mMaxTotalUsedSize);
+
+    target_size = field_0x14 * mTargetHeapSize;
+    field_0x10 = target_size;
+
+    JUTReport(100, 318, "MaxTotalUsedRate     %3ld%%", (mMaxTotalUsedSize * 100) / target_size);
+    JUTReport(100, 331, "MinFreeSize      %8ld", mMaxTotalFreeSize - used_count);
+
+    target_size = field_0x14 * mTargetHeapSize;
+    field_0x10 = target_size;
+
+    JUTReport(100, 344, "MinFreeRate          %3ld%%",
+              ((mMaxTotalFreeSize - used_count) * 100) / target_size);
+    used_count = countUsed(mHeap);
+    JUTReport(100, 357, "UsedCount             %3ld%", used_count);
+}
+
+#if VERSION == VERSION_DEMO
+int mDoMain::argument = -1;
+#endif
+
+s8 mDoMain::developmentMode = -1;
+
+#if VERSION == VERSION_DEMO
+int mDoMain::gameHeapSize = -1;
+int mDoMain::archiveHeapSize = -1;
+#endif
+
+u32 mDoMain::memMargin = -1;
+
+u8 mHeapBriefType = 4;
+
+#if VERSION > VERSION_DEMO
+static u8 fillcheck_check_frame;
+#endif
+
+OSTime mDoMain::sPowerOnTime;
+OSTime mDoMain::sHungUpTime;
+
+static bool mDisplayHeapSize;
+
+static u8 mSelectHeapBar;
+
+#if VERSION == VERSION_DEMO
+static bool mCheckHeap = true;
+#else
+static bool mCheckHeap = false;
+
+#endif
+
+/* 80005B28-80005DE0       .text debugDisplay__Fv */
+void debugDisplay() {
+    static const char* desc1[5] = {
+        "", "TotalFree", "MaxUsed  ", "Used     ", "RelUsed  ",
+    };
+
+    static const char* desc2[5] = {
+        "", "/ MaxFree", "/HeapSize", "Blk/Bytes", "Blk/Bytes",
+    };
+
+    if (mSelectHeapBar >= 1 && mSelectHeapBar <= 6) {
+        HeapCheckTable[mSelectHeapBar - 1]->heapDisplay();
+    }
+
+    if (mHeapBriefType == 5) {
+        JKRAramHeap* heap = JKRAram::getAramHeap();
+        if (heap) {
+            JUTReport(500, 100, "ARAM Free");
+            JUTReport(500, 114, "%d", heap->getFreeSize());
+            JUTReport(500, 128, "TotalFree");
+            JUTReport(500, 142, "%d", heap->getTotalFreeSize());
+            return;
+        }
+    } else if (mHeapBriefType != 0) {
+        JUT_ASSERT(VERSION_SELECT(528, 530, 531, 531), mHeapBriefType < HeapCheckTableNum);
+
+        JUTReport(500, 100, "%s", desc1[mHeapBriefType]);
+        JUTReport(500, 114, "%s", desc2[mHeapBriefType]);
+
+        for (int i = 0; i < HeapCheckTableNum; i++) {
+            HeapCheck* heap_check = HeapCheckTable[i];
+
+            s32 check1;
+            s32 check2;
+            switch (mHeapBriefType) {
+            case 1:
+                check1 = heap_check->mHeap->getTotalFreeSize();
+                check2 = heap_check->mHeap->getFreeSize();
+                break;
+            case 2:
+                check1 = heap_check->getMaxTotalUsedSize();
+                check2 = heap_check->mHeap->getHeapSize();
+                break;
+            case 3:
+                check1 = heap_check->getUsedCount();
+                check2 = heap_check->mHeap->getTotalUsedSize();
+                break;
+            case 4:
+                check1 = heap_check->getRelUsedCount();
+                check2 = heap_check->getRelTotalUsedSize();
+                break;
+            }
+
+            JUTReport(500, (i * 44) + 150, " [%s]", heap_check->mName);
+            JUTReport(500, (i * 44) + 164, "%10d", check1);
+            JUTReport(500, (i * 44) + 178, "%10d", check2);
+        }
+    }
+}
+
+/* 80005DE0-800061E0       .text Debug_console__FP10JUTGamePad */
+bool Debug_console(JUTGamePad* i_pad) {
+    JUTConsole* console = JFWSystem::getSystemConsole();
+    if (console) {
+        static f32 console_position_x = 20.0f;
+        static f32 console_position_y = 30.0f;
+        static f32 console_scroll = 0.0f;
+
+        if (i_pad->testTrigger(PAD_TRIGGER_Z) && !(i_pad->getButton() & ~PAD_TRIGGER_Z)) {
+            console->setVisible(console->isVisible() == false);
+            JUTAssertion::setMessageCount(0);
+        }
+
+        if (console->isVisible()) {
+            if ((i_pad->testButton(PAD_TRIGGER_L) && i_pad->testButton(PAD_TRIGGER_R)) ||
+                (i_pad->getAnalogL() != 0 && i_pad->getAnalogR() != 0))
+            {
+                f32 stick_x = i_pad->getMainStickX();
+                f32 stick_y = i_pad->getMainStickY();
+
+                if (i_pad->testButton(PAD_BUTTON_X) && i_pad->testButton(PAD_BUTTON_Y) &&
+                    i_pad->testTrigger(PAD_BUTTON_START))
+                {
+                    console->clear();
+                }
+
+                if (!i_pad->testButton(PAD_BUTTON_X) && !i_pad->testButton(PAD_BUTTON_Y)) {
+                    console_scroll -= stick_y;
+
+                    int scrollAmount;
+                    if (console_scroll > 1.0f) {
+                        scrollAmount = console_scroll;
+                    } else if (console_scroll < -1.0f) {
+                        scrollAmount = -(int)-console_scroll;
+                    } else {
+                        scrollAmount = 0;
+                    }
+
+                    if (scrollAmount != 0) {
+                        console_scroll -= scrollAmount;
+                        console->scroll(scrollAmount);
+                    }
+                } else {
+                    if (i_pad->testButton(PAD_BUTTON_X)) {
+                        console_position_x += stick_x;
+                    }
+
+                    if (i_pad->testButton(PAD_BUTTON_Y)) {
+                        console_position_y -= stick_y;
+                    }
+                }
+
+                if (i_pad->testTrigger(PAD_BUTTON_A)) {
+                    console->dumpToTerminal(0xFFFFFFFF);
+                    console->setOutput(JUTConsole::OUTPUT_OSREPORT | JUTConsole::OUTPUT_CONSOLE);
+                }
+
+                JUTReport(30, 390, 1, "Press X+Y+START to CLEAR console.");
+                JUTReport(30, 400, 1, "3DStick UP/Down to scroll");
+                JUTReport(30, 410, 1, "Press A to output terminal from console.");
+                JUTReport(30, 420, 1, "SCROLL：%3d %3d %3d Output=%1x", console->getLineOffset(),
+                          console->getPositionX(), console->getPositionY(), console->getOutput());
+            } else {
+#if VERSION > VERSION_DEMO
+                if (i_pad->testTrigger(PAD_BUTTON_DOWN)) {
+                    g_HIO.mDisplayMeter ^= 1;
+                }
+
+                if (i_pad->testTrigger(PAD_BUTTON_LEFT)) {
+                    if (JKRAram::getAramHeap()) {
+                        JKRAram::getAramHeap()->dump();
+                    }
+
+                    DynamicModuleControlBase::dump();
+                    dComIfG_dumpResControl();
+                }
+
+                if (i_pad->testTrigger(PAD_BUTTON_RIGHT)) {
+                    JKRHeap::getSystemHeap()->dump_sort();
+                }
+
+                if (i_pad->testTrigger(PAD_BUTTON_UP)) {
+                    zeldaHeap->dump_sort();
+                    gameHeap->dump_sort();
+                    archiveHeap->dump_sort();
+                }
+#endif
+                JUTReport(30, 440, 1, "Press L+R trigger to control console.");
+                JUTReport(30, 450, 1, "Press [Z] trigger to close this window.");
+            }
+            console->setPosition(console_position_x, console_position_y);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 800061E8-80006264       .text LOAD_COPYDATE__FPv */
+s32 LOAD_COPYDATE(void*) {
+    s32 status;
+
+    ALIGN_DECL(0x20, DVDFileInfo fileInfo);
+    u8 buffer[0x20];
+    status = DVDOpen("/COPYDATE", &fileInfo);
+
+    if (status) {
+        DVDReadPrio(&fileInfo, &buffer, 32, 0, 2);
+        memcpy(mDoMain::COPYDATE_STRING, buffer, sizeof(mDoMain::COPYDATE_STRING)-1);
+        status = DVDClose(&fileInfo);
+    }
+#if TARGET_PC
+    // Milestone M3 (docs/NATIVE_PORT_PHASE4_6.md): main01 queues this after mDoGph_Create and
+    // mDoCPd_Create returned; the DVD thread has now read the date.
+    pc_copydate_loaded(status, mDoMain::COPYDATE_STRING);
+#endif
+    return status;
+}
+
+#if VERSION > VERSION_DEMO
+/* 80006264-80006338       .text debug__Fv */
+void debug() {
+    if (mDoMain::developmentMode) {
+        if (mCheckHeap) {
+            CheckHeap(g_mDoCPd_gamePad[2]);
+        }
+
+        if ((g_mDoCPd_gamePad[2]->getButton() & ~PAD_TRIGGER_Z) == PAD_TRIGGER_R && g_mDoCPd_gamePad[2]->testTrigger(PAD_TRIGGER_Z))
+            mDisplayHeapSize ^= 1;
+
+        if (mDisplayHeapSize) {
+            if ((g_mDoCPd_gamePad[2]->getButton() & ~PAD_TRIGGER_Z) == PAD_TRIGGER_L && g_mDoCPd_gamePad[2]->testTrigger(PAD_TRIGGER_Z)) {
+                if (mHeapBriefType < 5) {
+                    mHeapBriefType++;
+                } else {
+                    mHeapBriefType = 1;
+                }
+            }
+
+            debugDisplay();
+        }
+
+        Debug_console(g_mDoCPd_gamePad[2]);
+    }
+}
+#endif
+
+/* 80006338-80006464       .text main01__Fv */
+void main01() {
+    // Setup heaps, setup exception manager, set RNG seed, setup DVDError Thread, setup Memory card
+    // Thread
+    mDoMch_Create();
+#if TARGET_PC
+    // Milestone M2 (docs/NATIVE_PORT_PHASE4_6.md): every heap made and consistent.
+    pc_heaps_created();
+#endif
+
+    // setup FrameBuffer and ZBuffer, init display lists
+    mDoGph_Create();
+
+    // Setup control pad
+    mDoCPd_Create();
+
+    RootHeapCheck.setHeap((JKRExpHeap*)JKRHeap::getRootHeap());
+    SystemHeapCheck.setHeap((JKRExpHeap*)JKRHeap::getSystemHeap());
+    ZeldaHeapCheck.setHeap(mDoExt_getZeldaHeap());
+    GameHeapCheck.setHeap(mDoExt_getGameHeap());
+    ArchiveHeapCheck.setHeap(mDoExt_getArchiveHeap());
+    CommandHeapCheck.setHeap(mDoExt_getCommandHeap());
+
+    JUTConsole* console = JFWSystem::getSystemConsole();
+#if VERSION == VERSION_DEMO
+    console->setOutput(JUTConsole::OUTPUT_OSR_AND_CONSOLE);
+#else
+    console->setOutput(mDoMain::developmentMode ? JUTConsole::OUTPUT_OSR_AND_CONSOLE :
+                                                  JUTConsole::OUTPUT_NONE);
+#endif
+    console->setPosition(32, 42);
+
+#if VERSION == VERSION_DEMO
+    console->print("JUTConsole START\n");
+#endif
+
+    mDoDvdThd_callback_c::create((mDoDvdThd_callback_func)LOAD_COPYDATE, NULL);
+    fapGm_Create();  // init framework
+#if VERSION > VERSION_DEMO
+#if VERSION <= VERSION_JPN
+    mDisplayHeapSize = 1;
+#else
+    mDisplayHeapSize = 0;
+#endif
+#endif
+    cDyl_InitAsync();  // init RELs
+
+#if VERSION > VERSION_DEMO
+#if TARGET_PC
+    // Decision H5: doubled for 8-byte pointers and the larger JKR block headers, as Dusklight
+    // doubles its audio heap (ref/dusklight/src/m_Do/m_Do_main.cpp, audioHeapSize, CC0); JAudio
+    // also takes the MEM1 copies of the DSP ucode and tables from it (step 5.2).
+    g_mDoAud_audioHeap = JKRSolidHeap::create(0x166800 * 2, JKRHeap::getCurrentHeap(), false);
+#else
+    g_mDoAud_audioHeap = JKRSolidHeap::create(0x166800, JKRHeap::getCurrentHeap(), false);
+#endif
+
+    static u32 frame;
+#endif
+
+    do {
+#if TARGET_PC
+        // Step 6.2 (pc_frame.cpp): Aurora's events, then its frame opens. Everything below,
+        // including the GX that fapGm_Execute encodes and the VI retraces JFWDisplay's wait makes,
+        // belongs to this frame.
+        pc_frame_begin();
+#endif
+#if VERSION > VERSION_DEMO
+        frame++;
+        if (fillcheck_check_frame != 0 && frame % fillcheck_check_frame == 0) {
+            mDoMch_HeapCheckAll();
+        }
+#endif
+        if (mDoDvdThd::SyncWidthSound) {
+            mDoMemCd_UpDate();
+        }
+
+#if TARGET_PC
+        // Step 6.7 (pc_frame.cpp): the phase split of COS_PERF / COS_PERF_EVERY.
+        pc_perf_begin(PC_PERF_CPD_READ);
+        mDoCPd_Read();     // read controller input
+        pc_perf_end(PC_PERF_CPD_READ);
+        pc_perf_begin(PC_PERF_AUD_EXECUTE);
+        mDoAud_Execute();  // handle audio execution
+        pc_perf_end(PC_PERF_AUD_EXECUTE);
+        pc_perf_begin(PC_PERF_GAME);
+        fapGm_Execute();   // handle game execution
+        pc_perf_end(PC_PERF_GAME);
+#else
+        mDoCPd_Read();     // read controller input
+        mDoAud_Execute();  // handle audio execution
+        fapGm_Execute();   // handle game execution
+#endif
+
+#if VERSION == VERSION_DEMO
+        if (mCheckHeap) {
+            CheckHeap(g_mDoCPd_gamePad[2]);
+        }
+
+        if ((g_mDoCPd_gamePad[2]->getButton() & ~PAD_TRIGGER_Z) == PAD_TRIGGER_R && g_mDoCPd_gamePad[2]->testTrigger(PAD_TRIGGER_Z))
+            mDisplayHeapSize ^= 1;
+
+        if (mDisplayHeapSize) {
+            if ((g_mDoCPd_gamePad[2]->getButton() & ~PAD_TRIGGER_Z) == PAD_TRIGGER_L && g_mDoCPd_gamePad[2]->testTrigger(PAD_TRIGGER_Z)) {
+                if (mHeapBriefType < 5) {
+                    mHeapBriefType++;
+                } else {
+                    if (JKRAram::getAramHeap()) {
+                        JKRAram::getAramHeap()->dump();
+                    }
+                    mHeapBriefType = 1;
+                }
+            }
+
+            debugDisplay();
+        }
+
+        Debug_console(g_mDoCPd_gamePad[2]);
+#else
+        debug();           // run debugger
+#endif
+#if TARGET_PC
+        // aurora_end_frame, the game frame count (stall watchdog, COS_FRAMES) and milestone M4.
+        pc_frame_end();
+#endif
+    } while (true);
+}
+
+#if VERSION == VERSION_DEMO
+void parse_args(int argc, const char* argv[]) {
+    for (int i = 0; i < argc; i++) {
+    }
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--noprint") == 0) {
+            OSReportDisable();
+        } else if (strcmp(argv[i], "--develop") == 0) {
+            mDoMain::developmentMode = 1;
+        } else if (strcmp(argv[i], "--nodevelop") == 0) {
+            mDoMain::developmentMode = 0;
+        } else if (strncmp(argv[i], "--e3argument=", sizeof("--e3argument=")-1) == 0) {
+            sscanf(argv[i] + sizeof("--e3argument=")-1, "%d", &mDoMain::argument);
+        } else if (strncmp(argv[i], "--gameheapsize=0x", sizeof("--gameheapsize=0x")-1) == 0) {
+            sscanf(argv[i] + sizeof("--gameheapsize=0x")-1, "%x", &mDoMain::gameHeapSize);
+        } else if (strncmp(argv[i], "--archiveheapsize=0x", sizeof("--archiveheapsize=0x")-1) == 0) {
+            sscanf(argv[i] + sizeof("--archiveheapsize=0x")-1, "%x", &mDoMain::archiveHeapSize);
+        } else if (strncmp(argv[i], "--memmargin=0x", sizeof("--memmargin=0x")-1) == 0) {
+            sscanf(argv[i] + sizeof("--memmargin=0x")-1, "%x", &mDoMain::memMargin);
+        } else {
+            OSReport_Error("unknown argument %d, %s\n", i, argv[i]);
+        }
+    }
+
+    if (mDoMain::developmentMode < 0) {
+        mDoMain::developmentMode = (OSGetConsoleType() & 0x10000000) ? 1 : 0;
+    }
+}
+#endif
+
+#if VERSION > VERSION_DEMO
+#if TARGET_PC
+// main01 runs on the process main thread, which cos_sdk runs as its default thread (step 6.1).
+OSThread& mainThread = *pc_main_thread();
+#else
+OSThread mainThread;
+#endif
+#endif
+
+/* 80006464-800065DC       .text main */
+#if TARGET_PC
+// Aurora declares extern "C" int aurora_main(int, char*[]); the signature must match it.
+int main(int argc, char* argv[]) {
+#else
+int main(int argc, const char* argv[]) {
+#endif
+#if TARGET_PC
+    // Run harness (docs/NATIVE_PORT_PHASE4_6.md, step 6.0, native/src/pc): crash handler and
+    // watchdog, the COS_SMOKE tests that need no SDK (static-init, which ends here as it did in
+    // step 3.9), then the COS_DISC check. Returns only when the game boots.
+    pc_harness_init(argc, argv);
+    // Aurora's window and device, the disc (aurora_dvd_open, GZLE01 version 0), OSInit (run by
+    // __start on the GameCube), the thread hooks and COS_AUDIO=off (step 6.1, pc_main.cpp).
+    pc_aurora_init(argc, argv);
+#endif
+#if VERSION == VERSION_DEMO
+    OSThread mainThread;
+#endif
+
+    OSThread* current_thread = OSGetCurrentThread();
+#if TARGET_PC
+    // main01 runs right here on the process main thread (SDL and Metal need it), as mainThread.
+    if (current_thread != &mainThread) {
+        OSPanic(__FILE__, __LINE__, "main does not run as mainThread (cos_sdk's default thread)");
+    }
+#else
+    ALIGN_DECL(0x20, u8 stack[0xF000]);
+#endif
+
+    mDoMain::sPowerOnTime = OSGetTime();
+    OSReportInit();
+    version_check();
+#if VERSION > VERSION_JPN
+    mDoRstData* reset_data = (mDoRstData*)OSAllocFromArenaLo(0x10, 4);
+    mDoRst::setResetData(reset_data);
+
+    if (!mDoRst::getResetData()) {
+        do {
+        } while (true);
+    }
+
+    if (OSGetResetCode() == 0) {
+        mDoRst::offReset();
+        mDoRst::offResetPrepare();
+        mDoRst::off3ButtonReset();
+        mDoRst::set3ButtonResetPort(-1);
+    }
+
+    g_dComIfG_gameInfo.ct();
+#endif
+
+#if VERSION > VERSION_DEMO
+    if (mDoMain::developmentMode < 0) {
+        DVDDiskID* disk_id = DVDGetCurrentDiskID();
+
+#if TARGET_PC
+        // Aurora's DVDDiskID spells the field gameVersion (same offset 0x07, same u8).
+        if (disk_id->gameVersion > 0x90) {
+            mDoMain::developmentMode = 1;
+        } else if (disk_id->gameVersion > 0x80) {
+#else
+        if (disk_id->game_version > 0x90) {
+            mDoMain::developmentMode = 1;
+        } else if (disk_id->game_version > 0x80) {
+#endif
+            u32 consoleType = OSGetConsoleType();
+            mDoMain::developmentMode = (consoleType >> 0x1C) & 1;
+        } else {
+            mDoMain::developmentMode = 0;
+        }
+    }
+#endif
+
+#if VERSION == VERSION_DEMO
+#if TARGET_PC
+    parse_args(argc, (const char**)argv);
+#else
+    parse_args(argc, argv);
+#endif
+#endif
+
+#if TARGET_PC
+    // Instead of a new OS thread for main01 and suspending this one (Dusklight does the same): the
+    // window and the Metal device belong to the process main thread. main01 never returns.
+    pc_milestone("aurora-up");
+    main01();
+    return 0;
+#else
+    OSPriority priority = OSGetThreadPriority(current_thread);
+    OSCreateThread(&mainThread, (void*)main01, 0, stack + sizeof(stack), sizeof(stack), priority, 0);
+    OSResumeThread(&mainThread);
+    OSSetThreadPriority(current_thread, 0x1F);
+    return OSSuspendThread(current_thread);
+#endif
+}
