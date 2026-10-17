@@ -1,61 +1,94 @@
+// The desktop settings' defaults, what the menu's core keeps (a launch choice is
+// the session's, a player's edit is saved), Smooth Motion's rate, the frame
+// rate's place, and the right stick's zoom.
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
 #include <cassert>
-#include "../windows/src/settings_state.h"
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
+#include <limits>
+#include <string>
 #include "../runtime/host/src/smooth_rate.h"
 #include "../runtime/host/src/fps_position.h"
 #include "../runtime/host/src/stick_zoom.h"
-#include <limits>
+
+// The settings core as it is (no ImGui, SDL or Aurora), with the game's
+// Better Wind Waker options and the platform's pack folder left empty.
+extern "C" const char* bluewake_game_options_describe(uint32_t, const char**, bool*, bool*) { return nullptr; }
+#include "../runtime/host/src/desktop_settings.cpp"
+namespace bw_platform {
+std::string default_pack_folder() { return ""; }
+}  // namespace bw_platform
+
+static const char* fallback(const char* key) { return bw_settings::fallback_for(*bw_settings::find(key)); }
+
+static void launch_option(const char* key, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(key, value);
+#else
+    setenv(key, value, 1);
+#endif
+}
+
+static std::string read_file(const std::string& path) {
+    std::ifstream file(path);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+static bool has(const std::string& text, const char* line) { return text.find(line) != std::string::npos; }
+
 int main() {
-    Settings saved;
-    assert(!saved.smooth_motion && saved.smooth_steps == 1);
-    assert(!saved.stick_zoom && saved.stick_zoom_speed == 1.275);
-    assert(saved.haptics == 2 && saved.haptics_strength == 80 && saved.haptics_triggers);
-    saved.haptics = 0; saved.haptics_strength = 25; saved.haptics_triggers = false;
-    saved.options["old"] = true;
-    Settings session = saved;
-    session.fullscreen = true; session.render_scale = 4; session.lle_audio = true;
-    session.smooth_motion = true; session.smooth_steps = -1; session.options["session_only"] = true;
-    session.haptics = 2; session.haptics_strength = 90; session.haptics_triggers = true;
-    Settings before = session;
-    session.show_fps = true;
-    bw_settings_keep_edits(saved, before, session);
-    assert(saved.show_fps && !saved.fullscreen && saved.render_scale == 0);
-    assert(!saved.lle_audio && !saved.smooth_motion && saved.options.count("session_only") == 0);
-    assert(saved.smooth_steps == 1); // A session override is not a stored edit.
-    assert(saved.haptics == 0 && saved.haptics_strength == 25 && !saved.haptics_triggers);
-    before = session;
-    session.haptics = 1; session.haptics_strength = 60; session.haptics_triggers = false;
-    bw_settings_keep_edits(saved, before, session);
-    assert(saved.haptics == 1 && saved.haptics_strength == 60 && !saved.haptics_triggers);
-    before = session;
-    session.render_scale = 2; session.options["edited"] = false;
-    bw_settings_keep_edits(saved, before, session);
-    assert(saved.render_scale == 2 && saved.options["edited"] == false);
-    assert(saved.options.count("session_only") == 0 && saved.options["old"]);
-    before = session;
-    session.options.erase("old"); // Player restores this option to its default.
-    bw_settings_keep_edits(saved, before, session);
-    assert(saved.options.count("old") == 0);
-    session.option_defaults_off = true;
-    assert(!bw_settings_option_value(session, "default_on", true));
-    before = session;
-    session.options["default_on"] = true;
-    bw_settings_keep_edits(saved, before, session);
-    assert(bw_settings_option_value(saved, "default_on", false));
-    assert(!saved.option_defaults_off);
-    before = session; session.smooth_steps = 3;
-    bw_settings_keep_edits(saved, before, session);
-    assert(saved.smooth_steps == 3 && !saved.smooth_motion);
-    before = session; session.stick_zoom = true; session.stick_zoom_speed = 1.25;
-    bw_settings_keep_edits(saved, before, session);
-    assert(saved.stick_zoom && saved.stick_zoom_speed == 1.25);
-    // Jump and Run's sprint: today's 1.5 until the player moves the slider.
-    assert(Settings{}.sprint_speed == 1.5 && saved.sprint_speed == 1.5);
-    before = session; session.sprint_speed = 2.0;
-    bw_settings_keep_edits(saved, before, session);
-    assert(saved.sprint_speed == 2.0);
+    // The defaults, on every platform.
+    assert(std::string(fallback("DOL_AURORA_FRAME_INTERP")) == "0" &&
+           bw_smooth_requested(fallback("DOL_AURORA_FRAME_INTERP_STEPS")) == 1);
+    assert(std::string(fallback("BLUEWAKE_STICK_ZOOM")) == "0" &&
+           std::string(fallback("BLUEWAKE_STICK_ZOOM_SPEED")) == "1.275");
+    assert(std::string(fallback("BLUEWAKE_HAPTICS")) == "enhanced" &&
+           std::string(fallback("BLUEWAKE_HAPTICS_STRENGTH")) == "80" &&
+           std::string(fallback("BLUEWAKE_HAPTICS_TRIGGERS")) == "1");
+    // Jump & Sprint's sprint: 1.5 until the player moves the slider.
+    assert(std::string(fallback("BLUEWAKE_SPRINT_CHOICE")) == "1.5");
+    // The frame rate's place: top center unless a corner is named.
+    assert(bw_fps_position(fallback("DOL_AURORA_FPS_POSITION")) == FPS_OVERLAY_TOP_CENTER);
+
+    // What the core keeps: a launch option wins for this session and the file
+    // keeps its own value; a player's edit is saved; choosing the frame rate's
+    // place in the menu is saved, though the launch set one.
+    const char* temp = std::getenv("TEMP");
+    if (temp == nullptr)
+        temp = std::getenv("TMPDIR");
+    const std::string path = std::string(temp != nullptr ? temp : "/tmp") + "/bluewake_settings_state_test.ini";
+    {
+        std::ofstream file(path);
+        file << "DOL_AURORA_RENDER_SCALE=0\nDOL_AURORA_FPS_POSITION=top-left\nDOL_AURORA_SHOW_FPS=0\nUNRELATED=kept\n"
+             // Two old pairs, each held half on.
+             << "BLUEWAKE_FAST_FORWARD=0\nBLUEWAKE_FADE_FRAMES=6\nBLUEWAKE_JUMP_BUTTON=0\nBLUEWAKE_SPRINT_SPEED=1.84\n";
+    }
+    launch_option("DOL_AURORA_RENDER_SCALE", "4");
+    launch_option("DOL_AURORA_FPS_POSITION", "bottom-right");
+    bw_desktop::load(path);
+    assert(bw_desktop::env("DOL_AURORA_RENDER_SCALE") == "4");
+    assert(bw_fps_position(bw_desktop::env("DOL_AURORA_FPS_POSITION").c_str()) == FPS_OVERLAY_BOTTOM_RIGHT);
+    assert(bw_desktop::env("DOL_AURORA_SHOW_FPS") == "0");
+    // The pairs, half on: both halves off, on every platform.
+    assert(bw_desktop::env("BLUEWAKE_FAST_FORWARD") == "0" && bw_desktop::env("BLUEWAKE_FADE_FRAMES") == "0");
+    assert(bw_desktop::env("BLUEWAKE_JUMP_BUTTON") == "0" && bw_desktop::env("BLUEWAKE_SPRINT_SPEED") == "1");
+    bw_desktop::set_env("DOL_AURORA_SHOW_FPS", "1");
+    bw_desktop::save();
+    std::string saved = read_file(path);
+    assert(has(saved, "DOL_AURORA_SHOW_FPS=1\n") && has(saved, "DOL_AURORA_RENDER_SCALE=0\n"));
+    assert(has(saved, "DOL_AURORA_FPS_POSITION=top-left\n") && has(saved, "UNRELATED=kept\n"));
+    bw_desktop::set_env("DOL_AURORA_FPS_POSITION", "top-right");
+    bw_desktop::save();
+    saved = read_file(path);
+    assert(has(saved, "DOL_AURORA_FPS_POSITION=top-right\n") && has(saved, "DOL_AURORA_RENDER_SCALE=0\n"));
+    std::remove(path.c_str());
+
+    // Smooth Motion's rate.
     assert(bw_smooth_requested("display") == -1 && bw_smooth_requested("3") == 3);
     assert(bw_smooth_requested(nullptr) == 1 && bw_smooth_requested("invalid") == 1);
     const float rates[] = {59.94f, 60.f, 90.f, 100.f, 119.88f, 120.f, 144.f, 165.f, 240.f, 360.f};
@@ -68,31 +101,17 @@ int main() {
     assert(bw_smooth_steps(-1, 0) == 1 && bw_smooth_steps(-1, -1) == 1);
     assert(bw_smooth_steps(-1, std::numeric_limits<float>::infinity()) == 1);
     assert(bw_smooth_steps(-1, std::numeric_limits<float>::quiet_NaN()) == 1);
-    // Falling back on a slower/unknown display never edits the preference.
-    assert(bw_smooth_steps(saved.smooth_steps, 60) == 1 && saved.smooth_steps == 3);
+    // Falling back on a slower or unknown display never edits the preference.
+    assert(bw_smooth_steps(3, 60) == 1);
 
-    // The frame rate's place: top center unless a corner is named.
-    assert(Settings{}.fps_position == FPS_OVERLAY_TOP_CENTER);
+    // The frame rate's place.
     for (int i = 0; i < BW_FPS_POSITIONS; ++i)
         assert(bw_fps_position(kBwFpsPositionValues[i]) == i);
     assert(bw_fps_position("bottom-right") == FPS_OVERLAY_BOTTOM_RIGHT);
     assert(bw_fps_position(nullptr) == 0 && bw_fps_position("") == 0);
     assert(bw_fps_position("middle") == 0 && bw_fps_position("Top-Left") == 0 && bw_fps_position("top-left ") == 0);
-    // DOL_AURORA_FPS_POSITION for one session is not saved when another
-    // setting changes; choosing a place in the menu is.
-    Settings file;
-    file.fps_position = FPS_OVERLAY_TOP_LEFT;
-    Settings launch = file;
-    launch.fps_position = bw_fps_position("bottom-right");
-    Settings edit = launch;
-    launch.show_fps = true;
-    bw_settings_keep_edits(file, edit, launch);
-    assert(file.show_fps && file.fps_position == FPS_OVERLAY_TOP_LEFT);
-    edit = launch;
-    launch.fps_position = FPS_OVERLAY_TOP_RIGHT;
-    bw_settings_keep_edits(file, edit, launch);
-    assert(file.fps_position == FPS_OVERLAY_TOP_RIGHT);
 
+    // The right stick's zoom.
     BwStickZoomGesture gesture{};
     double axis = 0.0;
     assert(bw_stick_zoom_update(&gesture, true, true, 0.0, 0.0, 0.12, &axis) == BW_STICK_ZOOM_IDLE);

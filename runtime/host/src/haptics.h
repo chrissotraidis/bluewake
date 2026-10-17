@@ -52,6 +52,10 @@ void bluewake_haptics_retrace(void);
 void bluewake_haptics_reload(void);
 // A menu over the game holds the feedback (true) until it closes (false).
 void bluewake_haptics_block(bool blocked);
+// A short buzz at the chosen strength, for the menu's strength slider (even
+// while the menu holds the game's own feedback): Enhanced only, at most one
+// every 120 ms while the slider moves.
+void bluewake_haptics_preview(void);
 // Whether the game's motor bits drive the controller directly (Classic).
 bool bluewake_haptics_forward_motor(void);
 
