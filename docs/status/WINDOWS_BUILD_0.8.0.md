@@ -114,14 +114,30 @@ it also writes stay on this PC; the Mac makes the release's own.
 
 | | |
 | --- | --- |
-| Commit built | not yet |
-| Build time, jobs, clang | not yet |
-| Lean copies and behaviour timing lines | not yet |
-| Module SHA-256 | not yet |
-| a. Start and look | not yet |
-| b. The HD look | not yet |
-| c. Dragon Roost and saving | not yet |
-| d. The menu with a controller | not yet |
-| e. Import HD textures | not yet |
-| Zip SHA-256, uploaded to the v0.8.0 draft | not yet |
+| Commit built | `f2611b1357215d1f426af9dbe90c7d7189320c99`, detached, clean; 0.8.0 build 7 |
+| Build time, jobs, clang | 81 min 26 s, 6 jobs, clang 22.1.3 (Visual Studio Build Tools 2026 18.10.2); exit 0; app optimization profile and ThinLTO enabled |
+| Lean copies and behaviour timing lines | `lean prepaid block copies: 461975 blocks in 838 chunks`; `behaviour_timing: 401618 block starts in 838 chunks now always prepaid` |
+| Module SHA-256 | `b318ad1f18bd4fb0365e0fb74210a0e8452902e333057330cb4931531306bb24` |
+| a. Start and look | New file on Outset in portable mode. At Chris's direction, completed with scripted controller input and sampled window inspection instead of Chris's hands-on check. Movement and camera turns ran for over two minutes; sampled views showed no obvious missing geometry or incorrect colours. Intermittent flicker and audible sound were not independently verified. Log: `[renderer] D3D12`, `[gx] draw fusion on`, 0 fatal lines; 3 below-target seconds of 321 monitored (lowest dip 72%; 95% median among dips, not the session median), generally 30 FPS. Quit through F1 > Quit the game; process exited and shutdown recorded. |
+| b. The HD look | skipped at Chris's direction |
+| c. Dragon Roost and saving | skipped at Chris's direction |
+| d. The menu with a controller | skipped at Chris's direction |
+| e. Import HD textures | skipped at Chris's direction |
+| Zip SHA-256, uploaded to the v0.8.0 draft | `56cc845823ec7e6af19f5306ab7517a511d6bbcaa222cc7f84a437b38c588e2f`; uploaded only `BlueWake-v0.8.0-windows-x64.zip`; GitHub's digest matches; release remains a draft with the IPA |
 
+Checked October 17, 2026 on Chris's Windows PC: AMD Ryzen 7 5700U with Radeon Graphics,
+Windows build 26300. The build and both game launches ran from visible desktop PowerShell windows.
+No card existed in either documented location; the test used a new portable file. The first session
+remained at the title/attract sequence while awaiting input and was also quit cleanly through F1.
+The second session used the existing `BLUEWAKE_PAD_SCRIPT` and title/dialogue confirmation controls,
+normal D3D12 rendering and normal pacing; no game or build code was changed.
+
+The 35-file Windows zip passed the packager's private-file and DLL-dependency checks plus ZIP integrity
+validation. Its contents include `BlueWake.exe`, `gGZLE01_recomp.dll` and `d3dcompiler_47.dll`.
+The test card and `portable.txt` were removed before packaging. No logs, disc, saves, local source zip or
+local `SHA256SUMS` were uploaded. The previously uploaded release assets were preserved.
+
+Mac hand-off: download the draft Windows zip, verify the SHA-256 above, and run
+`scripts/release/check_public_assets.sh` before publication. The external release gate is not installed
+on this Windows PC and was not run here. The only accepted content finding is
+`containsTranslatedGameCode: true`. Chris retains publication; this hand-off does not publish or tag.
