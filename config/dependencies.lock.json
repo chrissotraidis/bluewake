@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "338a3dbcdd384142f0fe40db44e0cd1d1b0c61e4",
+      "sha": "be07338a68cf4ca85a72a0fc03a54a3aab720283",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -623,6 +623,13 @@
             "patches/recompcore/0182-Aurora-HD-look-cloud-shadows-take-the-sea-from-its-plane-and-dither-the-shades.patch"
           ],
           "evidence": "RecompCore#41: the HD look's cloud shadows take the sea's place from its plane (only nearer surfaces from depth), with gradient noise turned per octave, and the cloud, sun-shadow, ambient-occlusion and bloom passes dither by half an 8-bit step. M3 Max, Metal, a copied card warped to Outset and Dragon Roost with cloud shadows alone at 0.8: the straight-edged band across Outset's sea is gone; the full HD look renders without shader errors. Vulkan and Direct3D 12, where the panels were reported (#371), not yet checked."
+        },
+        "smooth_motion_flicker": {
+          "runtime": "be07338a68cf4ca85a72a0fc03a54a3aab720283",
+          "tracked_patches": [
+            "patches/recompcore/0179-Aurora-Smooth-Motion-without-the-flicker-in-the-HD-look-clouds-and-wave-crests.patch"
+          ],
+          "evidence": "pdale-boop's RecompCore#40 (#136): Smooth Motion's in-between frames get the HD look on every step (it was only the first of 3 at 120 FPS, 5 at 180), its shadows and lights come from the in-between camera, clouds and wave crests drawn with the view matrix are paired by their vertices' centre (and colours) instead of their place in the list, and the ripples, trail and wake of a swimming Link are paired and blended vertex by vertex. Windows 11, i5-12600KF, RTX 5070 Ti, Direct3D 12: the HD look no longer drops out on in-between frames and its shadows stay on the scenery at 60, 120 and 180 FPS; the title screen's clouds no longer flicker (in-between frames with a cloud brighter or darker than both real frames: 384 to 7 on the title pan); swimming, the rings and wake move smoothly, checked frame by frame in dumps at 180 FPS. Debian (clang 19) compiled the first three commits; Linux, Mac and iOS not played."
         }
       }
     },
