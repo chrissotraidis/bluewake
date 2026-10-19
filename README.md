@@ -414,3 +414,13 @@ See [RIGHTS_AND_LICENSES.md](RIGHTS_AND_LICENSES.md) for details and for game co
 BlueWake is an independent fan project, not affiliated with or endorsed by Nintendo. *The Legend of
 Zelda*, *The Wind Waker* and GameCube are trademarks of Nintendo. You need your own legally obtained
 disc and are responsible for following the laws that apply to it.
+
+## Legal
+
+BlueWake is an unofficial, fan-made project. It is not affiliated with, endorsed
+by, or sponsored by Nintendo. The Legend of Zelda: The Wind Waker and related
+names and marks are trademarks of Nintendo (and their respective owners). The
+source code in this repository contains no game data, disc images, or extracted
+assets. To use it, you need your own legally obtained copy of the game. On Mac,
+iPhone, iPad, Apple TV, Linux and Android, you build it yourself on your own
+machine. Please don't share game files or builds made from them.
