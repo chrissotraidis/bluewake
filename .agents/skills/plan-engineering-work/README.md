@@ -62,6 +62,18 @@ Start from issue #215, preserve current gameplay behavior, and separate
 source-only validation from hardware measurements.
 ```
 
+The result is three synchronized artifacts, for example:
+
+```text
+docs/planning/2026-10-19-frame_pacing/
+├── PRD.md       # FR-01: measurable frame-pacing outcome and acceptance
+├── TECH_PLAN.md # source surfaces, proposed contract, tests and IMP-01
+└── PROGRESS.md  # M0-T01 tasks, dependencies and evidence ledger
+```
+
+[PR #397](https://github.com/chrissotraidis/bluewake/pull/397) is a concrete
+upstream example of the planning trio and its implementation milestones.
+
 ## Validate the result
 
 Run the focused validator regression suite after changing the skill:
