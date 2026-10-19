@@ -40,6 +40,7 @@ jobs:
           python3 tests/test_gamethread_qualification.py
           python3 tests/test_gamethread_metrics.py
           python3 tests/test_gamethread_load.py
+          python3 tests/test_gamethread_handoff.py
           python3 tests/test_save_continue_acceptance.py
       - name: Preserve direct-call host boundaries and preparation
         run: |
