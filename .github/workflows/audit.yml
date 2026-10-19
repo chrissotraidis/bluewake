@@ -35,6 +35,8 @@ jobs:
         run: python3 tests/test_guest_checkpoints.py
       - name: Check the benchmark tour on synthetic logs
         run: python3 tests/test_bench_tour.py
+      - name: Check game-thread qualification reports and supervision
+        run: python3 tests/test_gamethread_qualification.py
       - name: Preserve direct-call host boundaries and preparation
         run: |
           python3 tests/test_direct_calls.py
