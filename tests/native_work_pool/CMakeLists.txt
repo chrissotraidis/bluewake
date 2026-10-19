@@ -49,7 +49,7 @@ if(NOT WIN32)
     endforeach()
 
     add_test(NAME bluewake_native_work_pool_clamped_test
-        COMMAND bluewake_native_work_pool_test 1)
+        COMMAND bluewake_native_work_pool_test 8)
     set_tests_properties(bluewake_native_work_pool_clamped_test PROPERTIES
         ENVIRONMENT "BLUEWAKE_NATIVE_WORKERS=99"
         LABELS "native-work-pool;fast"
