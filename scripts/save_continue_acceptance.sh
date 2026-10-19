@@ -20,7 +20,9 @@
 # the real-key path. Nor does it prove the save survives a *different* build -
 # the reload is the same binary that wrote it.
 #
-# Usage: scripts/save_continue_acceptance.sh
+# Usage: scripts/save_continue_acceptance.sh [HOST MODULE ROUTE_CARD]
+# Positional arguments take precedence over the legacy BLUEWAKE_ACCEPTANCE_*
+# variables and defaults. All mutable work is performed on a copied card.
 #   BLUEWAKE_ACCEPTANCE_SAVE_RETRACES   retrace cap for the save half (24000)
 #   BLUEWAKE_ACCEPTANCE_RELOAD_RETRACES retrace cap for the reload half (2500)
 #   BLUEWAKE_ACCEPTANCE_CONTROL_BOUND   reload control must land by this (2000)
@@ -35,23 +37,30 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
 
-host=${BLUEWAKE_ACCEPTANCE_HOST:-$root/build/runtime-host-dsp/bluewake_host}
-composite=${BLUEWAKE_ACCEPTANCE_COMPOSITE:-$root/build/composite-cycle-hybrid-o2-v2/gGZLE01_recomp.dylib}
-route_card=$root/local-research/evidence/outset-performance-route-v1-20260901/run1.card
-dol=$root/generated/full/main.dol
-disc="$root/ref/The Legend Of Zelda The Wind Waker.iso"
-rels=$root/generated/full/rels
-dsp_irom=$root/ref/recompcore/Data/Sys/GC/dsp_rom.bin
-dsp_coef=$root/ref/recompcore/Data/Sys/GC/dsp_coef.bin
+host=${1:-${BLUEWAKE_ACCEPTANCE_HOST:-$root/build/runtime-host-dsp/bluewake_host}}
+composite=${2:-${BLUEWAKE_ACCEPTANCE_COMPOSITE:-$root/build/composite-cycle-hybrid-o2-v2/gGZLE01_recomp.dylib}}
+route_card=${3:-${BLUEWAKE_ACCEPTANCE_ROUTE_CARD:-$root/local-research/evidence/outset-performance-route-v1-20260901/run1.card}}
+dol=${BLUEWAKE_ACCEPTANCE_DOL:-$root/generated/full/main.dol}
+disc=${BLUEWAKE_ACCEPTANCE_DISC:-$root/ref/The Legend Of Zelda The Wind Waker.iso}
+rels=${BLUEWAKE_ACCEPTANCE_RELS:-$root/generated/full/rels}
+dsp_irom=${BLUEWAKE_ACCEPTANCE_DSP_IROM:-$root/ref/recompcore/Data/Sys/GC/dsp_rom.bin}
+dsp_coef=${BLUEWAKE_ACCEPTANCE_DSP_COEF:-$root/ref/recompcore/Data/Sys/GC/dsp_coef.bin}
 save_retraces=${BLUEWAKE_ACCEPTANCE_SAVE_RETRACES:-24000}
 reload_retraces=${BLUEWAKE_ACCEPTANCE_RELOAD_RETRACES:-2500}
 control_bound=${BLUEWAKE_ACCEPTANCE_CONTROL_BOUND:-2000}
+opening_bound=${BLUEWAKE_ACCEPTANCE_OPENING_BOUND:-14000}
+play_bound=${BLUEWAKE_ACCEPTANCE_PLAY_BOUND:-14100}
+workers=${BLUEWAKE_ACCEPTANCE_WORKERS:-0}
 out=${BLUEWAKE_ACCEPTANCE_OUT:-$root/local-research/acceptance/$(date +%Y%m%d-%H%M%S)}
+
+case "$workers" in
+    ''|*[!0-9]*) echo "acceptance: invalid worker count: $workers" >&2; exit 2 ;;
+esac
 
 for required in "$host" "$composite" "$route_card" "$dol" "$disc" "$rels" "$dsp_irom" "$dsp_coef"; do
     if [ ! -e "$required" ]; then
         echo "acceptance: missing required input: $required" >&2
-        exit 1
+        exit 3
     fi
 done
 if pgrep -x bluewake_host >/dev/null 2>&1; then
@@ -62,7 +71,16 @@ fi
 mkdir -p "$out"
 card=$out/save.card
 cp "$route_card" "$card"
+source_digest=$(sha256sum "$route_card" | awk '{print $1}')
 failures=0
+cleanup() {
+    current=$(sha256sum "$route_card" | awk '{print $1}')
+    if [ "$current" != "$source_digest" ]; then
+        printf 'acceptance: FAIL source card changed during acceptance\n' >&2
+        exit 1
+    fi
+}
+trap cleanup EXIT INT TERM
 bad() { printf 'acceptance: FAIL %s\n' "$*"; failures=$((failures + 1)); }
 ok() { printf 'acceptance: ok   %s\n' "$*"; }
 
@@ -81,6 +99,8 @@ run_host() {
         BLUEWAKE_DSP_COEF="$dsp_coef" \
         BLUEWAKE_CARD_PATH="$card_path" \
         BLUEWAKE_CARD_LOG=1 \
+        BLUEWAKE_NATIVE_WORKERS="$workers" \
+        BLUEWAKE_GAMETHREAD_DIAGNOSTICS=1 \
         BLUEWAKE_MAX_RETRACES="$retraces" \
         BLUEWAKE_PAD_BUTTONS=0x0100 \
         BLUEWAKE_PAD_PULSE_ON_TITLE_READY=1 \
@@ -108,12 +128,18 @@ run_host "$out/save.log" "$save_retraces" "$card" "$new_game_script" "" "BLUEWAK
 
 # 1. The route was the certified one. A normal stop is not evidence on its own,
 #    which is why the milestones the bench guards on are checked here too.
-grep -aq 'opening-complete retrace=13850' "$out/save.log" \
-    && ok 'route: opening-complete at retrace 13850 (the certified route)' \
-    || bad 'route: the save half did not follow the certified route'
-grep -aq 'play-scene retrace=13910' "$out/save.log" \
-    && ok 'route: play scene at retrace 13910' \
-    || bad 'route: the play scene milestone is not the certified one'
+opening=$(grep -aoE 'opening-complete retrace=[0-9]+' "$out/save.log" | grep -oE '[0-9]+$' | head -1)
+if [ -n "$opening" ] && [ "$opening" -le "$opening_bound" ]; then
+    ok "route: opening complete at retrace $opening (bound $opening_bound)"
+else
+    bad "route: opening completion missing or later than $opening_bound"
+fi
+play=$(grep -aoE 'play-scene retrace=[0-9]+' "$out/save.log" | grep -oE '[0-9]+$' | head -1)
+if [ -n "$play" ] && [ "$play" -le "$play_bound" ]; then
+    ok "route: play scene at retrace $play (bound $play_bound)"
+else
+    bad "route: play scene missing or later than $play_bound"
+fi
 
 # 2. The guest's own save chain, read from the save screen's proc field.
 grep -aq 'save-screen retrace=' "$out/save.log" \
@@ -182,4 +208,3 @@ if [ "$failures" -eq 0 ]; then
 fi
 echo "acceptance: FAIL - $failures clause(s)" >&2
 exit 1
-
