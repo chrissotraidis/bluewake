@@ -8,9 +8,9 @@ one, this one wins.
 
 - `README.md`: for players.
 - `AGENTS.md` (this file): the rules.
-- `.agents/skills/plan-engineering-work/`: the repository-local planning skill. Use
-  `$plan-engineering-work` when a change needs a grounded PRD, technical plan and progress tracker before
-  implementation.
+- `.agents/skills/plan-engineering-work/`: the provider-neutral planning skill. Invoke
+  `$plan-engineering-work` where supported, or direct an agent to its `SKILL.md`, when a change needs a grounded
+  PRD, technical plan and progress tracker before implementation.
 - `docs/GOAL_LOOP.md`: what we're doing, day by day, and the five-step loop every session follows. Start here.
 - `docs/PRIORITIES.md`: the ranked backlog of bugs, performance work and requests, with the evidence.
 - `docs/PERFORMANCE.md`: the current speed strategy (three horizons, following the decompilation) and its results.

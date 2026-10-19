@@ -1,15 +1,24 @@
 # Engineering planning skill
 
-This repository-local Codex skill creates or updates a synchronized `PRD.md`,
-`TECH_PLAN.md`, and `PROGRESS.md` without implementing the planned feature.
-Codex discovers it automatically from `.agents/skills/`.
+This provider-neutral [Agent Skills](https://agentskills.io/) package creates or
+updates a synchronized `PRD.md`, `TECH_PLAN.md`, and `PROGRESS.md` without
+implementing the planned feature. `SKILL.md` is the authoritative workflow;
+provider metadata under `agents/` is optional and does not change it.
 
 ## Use it
 
-Start Codex in the BlueWake checkout and ask it to use the skill explicitly:
+Agents that discover repository skills under `.agents/skills/` can invoke it by
+name:
 
 ```text
 Use $plan-engineering-work to plan <change or investigation>.
+```
+
+With any other coding agent, point it directly to the portable entry point:
+
+```text
+Read and follow .agents/skills/plan-engineering-work/SKILL.md to plan
+<change or investigation>. Do not implement the planned product change.
 ```
 
 Include the motivating problem, affected users, desired outcome, constraints,
