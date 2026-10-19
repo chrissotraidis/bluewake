@@ -7,8 +7,16 @@ provider metadata under `agents/` is optional and does not change it.
 
 ## Use it
 
-Agents that discover repository skills under `.agents/skills/` can invoke it by
-name:
+The repository copy is available automatically when the agent discovers
+`.agents/skills/`. To install it as a personal Codex skill instead:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R .agents/skills/plan-engineering-work ~/.codex/skills/
+```
+
+Start a new Codex session, enter `/skills`, select **Engineering Plan**, then
+send the planning request. Named invocation is also supported:
 
 ```text
 Use $plan-engineering-work to plan <change or investigation>.
