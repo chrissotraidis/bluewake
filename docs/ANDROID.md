@@ -203,6 +203,60 @@ same touch controls, the same settings under the same names.
 - The picture keeps the game's shape and renders at three times the GameCube's 480 lines by default; the mouse
   camera is off (touches would reach it as clicks).
 
+## Controllers
+
+Physical controllers go through SDL3 and arrive as a GameCube pad, as on Windows: the activity leaves gamepad
+buttons and stick motion to SDL, Aurora opens the gamepads itself, and the ⋯ menu's Controller section (Camera
+Stick, Button Mapping) remaps per frame — face buttons by position, the right shoulder as Z, by default.
+
+The touch controls hide while a controller is connected (Touch Control Settings > Hide with a controller);
+touching the screen brings them back until the controller is used again.
+
+### When SDL doesn't know the controller
+
+If buttons come out wrong — face buttons swapped, a trigger reading half-pressed at rest — SDL has no mapping
+for the device. Put a `gamecontrollerdb.txt` beside the memory card:
+
+```
+/sdcard/Android/data/<application id>/files/gamecontrollerdb.txt
+```
+
+It is read at startup. Each line maps one controller; the format is SDL's, one line per device:
+
+```
+03000000c0160000e105000011010000,Example Pad,platform:Android,a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,
+```
+
+(The line above is the shape of a mapping, not a real device.) The community
+[SDL_GameControllerDB](https://github.com/gabomdq/SDL_GameControllerDB) carries lines for hundreds of pads — copy
+the line for yours. To make one, run SDL's `controllermap` test program against the controller and set
+`platform:Android` on the line it prints.
+
+To check the file loaded, open ⋯ > Share Session Log (or `adb logcat -s BlueWake`) and look for:
+
+```
+[pad] 1 controller mappings from /sdcard/Android/data/<application id>/files/gamecontrollerdb.txt
+```
+
+To identify the controller on the device, `adb shell dumpsys input` lists the connected input devices with their
+names and descriptors.
+
+### Handhelds with built-in controls
+
+On a handheld whose controls are built in (AYN Odin and similar), Android sees the pad as an ordinary non-virtual
+gamepad, so it is picked up the same way: the touch overlay stays hidden and the pad drives the game. Two quirks
+have been reported on Odin-family hardware, **not verified on any handheld here**, worth checking on yours:
+
+- Face buttons swapped relative to SDL's standard layout (A↔B, X↔Y).
+- Analog triggers resting at 0.5 instead of 0.0 when released, which reads as half-pressed. If yours does this,
+  bind the triggers as digital buttons in the mapping line (axis thresholds) rather than analog axes.
+
+**Device reports wanted** (#75): controllers on Android are still largely untried — one phone, no pads yet. If
+you play with a controller, especially a handheld's built-in one, report the device, the Android version, and
+whether the default mapping was right in #75, with the session log if anything was wrong. A correct mapping line
+for your device is better still: it belongs in the community database above, where it helps every SDL app, not
+just this one.
+
 ## Measure
 
 ```bash
