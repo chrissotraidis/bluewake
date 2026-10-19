@@ -8,12 +8,16 @@ provider metadata under `agents/` is optional and does not change it.
 ## Use it
 
 The repository copy is available automatically when the agent discovers
-`.agents/skills/`. To install it as a personal Codex skill instead:
+`.agents/skills/`. To install it outside this checkout, copy the complete skill
+folder to the skills directory configured by your agent:
 
 ```bash
-mkdir -p ~/.codex/skills
-cp -R .agents/skills/plan-engineering-work ~/.codex/skills/
+mkdir -p /path/to/your-agent/skills
+cp -R .agents/skills/plan-engineering-work /path/to/your-agent/skills/
 ```
+
+Use the location documented by the agent client; the package itself does not
+depend on a specific provider or installation path.
 
 ### Use as a slash command
 
