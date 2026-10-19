@@ -69,14 +69,18 @@ Adreno), game controllers on Android (they go through SDL, as on Windows), the H
 
 ## What you need
 
-- A Windows PC or a Mac (the builder runs the host side of the pipeline: the translator and the disc extractor)
+- A Windows PC, a Mac, or a Linux PC (the builder runs the host side of the pipeline: the translator and the disc extractor)
   - **Windows:** Visual Studio 2022 or newer with the C++ workload (its headers and libraries), and a clang for
     Windows: Visual Studio's own clang component, or a portable LLVM (`clang+llvm-*-x86_64-pc-windows-msvc`),
     passed with `--llvm`
   - **macOS (Intel or Apple silicon):** Xcode's command line tools (`xcode-select --install`), Rust (`cargo`,
     which builds `nodtool` to convert an `.rvz`), and `brew install cmake ninja`. No `--llvm`. The NDK's macOS
-    toolchain is a universal binary and runs natively. Builds from an `.rvz` or an `.iso`. Linux hosts take the
-    same path in the code but are untested.
+    toolchain is a universal binary and runs natively. Builds from an `.rvz` or an `.iso`.
+  - **Linux:** a clang (`sudo apt install clang`) and `sudo apt install cmake ninja` (or `pip install cmake ninja`).
+    Rust (`cargo`) for `nodtool` if your dump is an `.rvz`. The SDK is found in `~/Android/Sdk`. Tested on
+    Ubuntu 24.04 with NDK r29 and JDK 17: the builder's tool detection passes, and the translator (DolRecomp)
+    and the disc extractor compile and run. The `.rvz` conversion, the steps past the disc check, and anything
+    touching a device still need a Linux machine with your own disc and phone to check.
   - Python 3.10+, Git, CMake 3.25+ (Ninja from the Android SDK's CMake is used if none is on PATH)
 - The Android SDK with the NDK (r27 or newer), build-tools and a platform, and a JDK 17
 - An arm64 Android device on Android 13 (API 33) or newer with Vulkan

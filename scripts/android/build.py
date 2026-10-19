@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BlueWake Builder for Android (arm64): turn your own game disc into your own APK, on your PC (Windows or macOS).
+"""BlueWake Builder for Android (arm64): turn your own game disc into your own APK, on your PC (Windows, macOS, or Linux).
 
     python scripts/android/build.py DISC [--out build/android] [options]
 
@@ -99,7 +99,8 @@ class AndroidBuilder(wb.Builder):
             env["PATH"] = str(llvm / "bin") + os.pathsep + env["PATH"]
         if shutil.which("clang-cl" if WINDOWS else "clang", path=env["PATH"]) is None:
             die("no clang for Windows: pass --llvm DIR (an LLVM for Windows, e.g. clang+llvm-21-x86_64-pc-windows-msvc)"
-                if WINDOWS else "no clang: install Xcode's command line tools (xcode-select --install)")
+                if WINDOWS else "no clang: install Xcode's command line tools (xcode-select --install)"
+                if sys.platform == "darwin" else "no clang: install clang (e.g. sudo apt install clang)")
         ninja = shutil.which("ninja", path=env["PATH"])
         if ninja is None:
             for sdk_cmake in sorted((self.sdk / "cmake").glob("*/bin")) if self.sdk else []:
@@ -107,7 +108,8 @@ class AndroidBuilder(wb.Builder):
                     env["PATH"] = str(sdk_cmake) + os.pathsep + env["PATH"]
                     ninja = str(sdk_cmake / ("ninja" + EXE))
         if ninja is None:
-            die("ninja is missing (pip install ninja" + ("" if WINDOWS else ", or brew install ninja") + ")")
+            die("ninja is missing (pip install ninja" +
+                ("" if WINDOWS else ", or brew install ninja" if sys.platform == "darwin" else ", or sudo apt install ninja") + ")")
         self.env = env
         self.clang = shutil.which("clang", path=env["PATH"])
         version = subprocess.check_output(["cmake", "--version"], text=True).split()[2]
@@ -148,7 +150,8 @@ class AndroidBuilder(wb.Builder):
     def sdk(self):
         return self.args.sdk or first_existing(os.environ.get("ANDROID_HOME"), os.environ.get("ANDROID_SDK_ROOT"),
                                                Path(os.environ.get("LOCALAPPDATA", "")) / "Android/Sdk",
-                                               Path.home() / "Library/Android/sdk")
+                                               Path.home() / "Library/Android/sdk",
+                                               Path.home() / "Android/Sdk")
 
     def msvc_env(self):
         vswhere = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / \
