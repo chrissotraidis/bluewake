@@ -2,6 +2,8 @@
 
 Use only relevant sections. Replace sample IDs/content; never leave empty templates in a deliverable.
 
+Default directory: `docs/planning/YYYY-MM-DD-feature_name/`. Keep `PRD.md`, `TECH_PLAN.md`, and `PROGRESS.md` together; use the user's local creation date and a lowercase snake_case feature name.
+
 ## PRD.md
 
 ```markdown

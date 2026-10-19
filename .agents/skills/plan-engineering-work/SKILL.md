@@ -22,7 +22,7 @@ Produce three real, synchronized Markdown artifacts. Default to practical edits,
 
 ## 2. Choose real destinations
 
-- Use an existing user-selected planning directory. Otherwise use the repository convention or `docs/planning/YYYY-MM-DD-<slug>/`.
+- Default new artifacts to `docs/planning/YYYY-MM-DD-feature_name/`, relative to the repository root. Use the user's local creation date and a concise lowercase snake_case feature name, for example `docs/planning/2026-10-19-gamethread_parallelization/`. Honor an explicit destination; when updating an existing plan, preserve its directory unless the user requests a move.
 - Create/update `PRD.md`, `TECH_PLAN.md`, `PROGRESS.md`. Preserve existing IDs, completion states and evidence; never reset a tracker while revising prose.
 - For repository work, write within its checkout/worktree. Commit/push/open PRs only when authorized. Do not also copy git-backed work to Library.
 - Without a writable checkout, create user-facing files and save them using the Library skill. Report any failed save; a chat promise, code block, or sandbox link alone is not persistence.

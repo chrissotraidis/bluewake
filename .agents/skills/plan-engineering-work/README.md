@@ -33,7 +33,7 @@ Include the motivating problem, affected users, desired outcome, constraints,
 and any relevant issue or existing planning directory. The skill will inspect
 the current repository and upstream work, ask only for material ambiguities,
 then write the planning trio under the existing project convention or
-`docs/planning/YYYY-MM-DD-<slug>/`.
+`docs/planning/YYYY-MM-DD-feature_name/`.
 
 Example:
 
@@ -49,7 +49,7 @@ Run the included structural validator against the generated planning directory:
 
 ```bash
 python3 .agents/skills/plan-engineering-work/scripts/validate_plan.py \
-  docs/planning/YYYY-MM-DD-<slug>
+  docs/planning/YYYY-MM-DD-feature_name
 ```
 
 The validator checks artifact structure, requirement/task/impact traceability,
