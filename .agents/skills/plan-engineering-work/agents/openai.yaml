@@ -1,0 +1,15 @@
+interface:
+  display_name: Engineering Plan
+  short_description: Lean PRD, technical plan, and progress tracker
+  default_prompt: Use $plan-engineering-work to create concise, code-grounded PRD.md,
+    TECH_PLAN.md, and PROGRESS.md with architecture links, impact tracking, and verifiable
+    acceptance criteria.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true
