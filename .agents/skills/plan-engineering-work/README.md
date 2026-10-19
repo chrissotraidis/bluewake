@@ -49,8 +49,10 @@ Read and follow .agents/skills/plan-engineering-work/SKILL.md to plan
 Include the motivating problem, affected users, desired outcome, constraints,
 and any relevant issue or existing planning directory. The skill will inspect
 the current repository and upstream work, ask only for material ambiguities,
-then write the planning trio under the existing project convention or
-`docs/planning/YYYY-MM-DD-feature_name/`.
+then write new planning artifacts under
+`docs/planning/YYYY-MM-DD-feature_name/`, using the user's local creation date
+and a lowercase `snake_case` feature name. It honors an explicit destination
+and preserves an existing plan's directory unless a move is requested.
 
 Example:
 
@@ -61,6 +63,12 @@ source-only validation from hardware measurements.
 ```
 
 ## Validate the result
+
+Run the focused validator regression suite after changing the skill:
+
+```bash
+python3 .agents/skills/plan-engineering-work/scripts/test_validate_plan.py
+```
 
 Run the included structural validator against the generated planning directory:
 

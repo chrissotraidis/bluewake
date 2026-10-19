@@ -129,7 +129,7 @@ Parallel with M1; owns <different files>; integrates at M3.
 |---|---|---|---|---|
 ```
 
-Task states: `[ ]` open, `[x]` completed with evidence, `[!]` blocked with reason/dependency. Optional evidence can be unavailable; required gates remain incomplete. Report tasks must not say benchmarks passed without actual logs.
+Task states: `[ ]` open, `[x]` completed with evidence, `[!]` blocked with reason/dependency. A completed task needs a populated evidence-ledger row with commit/artifact, command/method and result. Inline evidence uses `evidence: artifact=<identity>; method=<command or method>; result=<outcome>`. Optional evidence can be unavailable; required gates remain incomplete. Report tasks must not say benchmarks passed without actual logs.
 
 ## Output integrity
 

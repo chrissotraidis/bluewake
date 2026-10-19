@@ -16,6 +16,12 @@ IMP = re.compile(r"\bIMP-\d+\b")
 MILESTONE = re.compile(r"^### (M\d+): (.*)$")
 TASK = re.compile(r"^- \[([ xX!])\] (M\d+-T\d+): (.+)$")
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^\s)]+)\)")
+INLINE_EVIDENCE = re.compile(r"\bevidence\s*:\s*(.*)$", re.I)
+EVIDENCE_FIELDS = (
+    ("commit / artifact", "artifact"),
+    ("command / method", "method"),
+    ("result", "result"),
+)
 
 
 def prose(text: str) -> tuple[str, bool]:
@@ -63,6 +69,49 @@ def table_ids(content: str, pattern: str) -> list[str]:
 
 def duplicates(values: list[str]) -> list[str]:
     return [key for key, count in Counter(values).items() if count > 1]
+
+
+def evidence_rows(content: str) -> dict[str, dict[str, str]]:
+    """Return structural evidence fields keyed by completed task ID."""
+    result = {}
+    for line in content.splitlines():
+        if not line.startswith("|"):
+            continue
+        row = cells(line)
+        if not row or not re.fullmatch(r"M\d+-T\d+", row[0]):
+            continue
+        result[row[0]] = {
+            "artifact": row[1].strip() if len(row) > 1 else "",
+            "method": row[2].strip() if len(row) > 2 else "",
+            "result": row[4].strip() if len(row) > 4 else "",
+        }
+    return result
+
+
+def inline_evidence(body: str) -> dict[str, str] | None:
+    """Parse `evidence: artifact=...; method=...; result=...` task metadata."""
+    match = INLINE_EVIDENCE.search(body)
+    if not match:
+        return None
+    aliases = {
+        "artifact": "artifact",
+        "commit": "artifact",
+        "commit / artifact": "artifact",
+        "method": "method",
+        "command": "method",
+        "command / method": "method",
+        "result": "result",
+    }
+    result = {"artifact": "", "method": "", "result": ""}
+    for part in match.group(1).split(";"):
+        field = re.match(r"\s*([^=:]+?)\s*[=:]\s*(.*?)\s*$", part)
+        if field and field.group(1).strip().lower() in aliases:
+            result[aliases[field.group(1).strip().lower()]] = field.group(2).strip()
+    return result
+
+
+def missing_evidence_fields(entry: dict[str, str]) -> list[str]:
+    return [label for label, key in EVIDENCE_FIELDS if not entry.get(key, "").strip()]
 
 
 def validate(directory: Path) -> tuple[list[str], list[str]]:
@@ -194,10 +243,23 @@ def validate(directory: Path) -> tuple[list[str], list[str]]:
                 if not set(headings).intersection(re.findall(r"\bM\d+\b", line)):
                     errors.append(f"{row[0]}: missing owning milestone")
 
-    evidence_rows = set(table_ids(plain["PROGRESS.md"], r"M\d+-T\d+"))
+    ledger = evidence_rows(plain["PROGRESS.md"])
     for task_id, (_, state, body) in tasks.items():
-        if state.lower() == "x" and task_id not in evidence_rows and not re.search(r"evidence:\s*\S+", body, re.I):
-            errors.append(f"{task_id}: completed without an evidence entry")
+        if state.lower() == "x":
+            entry = ledger.get(task_id)
+            source = "evidence row"
+            if entry is None:
+                entry = inline_evidence(body)
+                source = "inline evidence"
+            if entry is None:
+                errors.append(
+                    f"{task_id}: completed without evidence; add a populated evidence row "
+                    "or structured inline evidence"
+                )
+            else:
+                missing = missing_evidence_fields(entry)
+                if missing:
+                    errors.append(f"{task_id}: {source} missing {', '.join(missing)}")
         if state == "!" and not re.search(r"blocked|depends|waiting|reason", body, re.I):
             errors.append(f"{task_id}: blocked without reason")
 
