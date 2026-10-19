@@ -69,6 +69,8 @@ jobs:
                 -DAURORA_DAWN_PROVIDER=vendor -DAURORA_DAWN_LINKAGE=static \
                 -DAURORA_SDL3_PROVIDER=vendor -DAURORA_SDL3_LINKAGE=static
               cmake --build build/linux-host --target bluewake bluewake_disc_extract \
+                bluewake_native_math_guard_test bluewake_native_math_workers_test \
+                bluewake_native_work_pool_test \
                 bluewake_fast_blocks_test bluewake_cycle_domain_test \
                 bluewake_interrupt_sources_test bluewake_delivery_digest_test \
                 bluewake_composite_dispatch_loop_test bluewake_edge_intercepts_test \
