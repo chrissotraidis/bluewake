@@ -15,8 +15,6 @@
   <a href="https://discord.gg/xwHfUD2bxW"><img alt="Join the community on Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&amp;logoColor=white"></a>
 </p>
 
-![BlueWake at the Wind Waker title screen on an iPad Pro, running at 30 FPS and full speed, with the touch controls visible](docs/images/bluewake-ipad-title.jpg)
-
 > [!IMPORTANT]
 > **Bring your own disc.** BlueWake needs your own legally obtained copy of *The Wind Waker* for
 > GameCube, USA version (`GZLE01`, revision 0). This repository contains no disc image, game assets
@@ -249,10 +247,6 @@ turn it off if you see glitches or slowdowns.
 
 Yes, on an A13 or newer. The touch controls sit in the black bars beside the picture. The busiest
 scenes dip below 30 FPS on an iPhone 14.
-
-<p align="center">
-  <img alt="BlueWake on an iPhone 14, with the touch controls in the black bars beside the picture" src="docs/images/bluewake-iphone-title.jpg" width="720">
-</p>
 
 </details>
 
