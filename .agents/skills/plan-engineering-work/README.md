@@ -15,8 +15,21 @@ mkdir -p ~/.codex/skills
 cp -R .agents/skills/plan-engineering-work ~/.codex/skills/
 ```
 
-Start a new Codex session, enter `/skills`, select **Engineering Plan**, then
-send the planning request. Named invocation is also supported:
+### Use as a slash command
+
+Start a new agent session after installation. Agents that expose installed
+skills directly as slash commands can invoke it in one step:
+
+```text
+/plan-engineering-work Plan <change or investigation>.
+```
+
+If the agent uses a skill selector instead, enter `/skills` and select
+**Engineering Plan**, then send the planning request.
+
+### Other invocation methods
+
+Named invocation is also supported:
 
 ```text
 Use $plan-engineering-work to plan <change or investigation>.
