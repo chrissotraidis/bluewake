@@ -739,9 +739,16 @@ mkdir -p "$results/candidate-1"
     "$card" "$candidate_out/BlueWake/bluewake" --mode both )
 
 python3 "$repo/scripts/bench_tour.py" compare \
+  --qualification \
   "$results/control-1/summary.json" \
   "$results/candidate-1/summary.json"
 ```
+
+For native game-thread comparisons, pass `--workers 0` to the control run and
+the candidate worker count to the candidate run. The option is applied after
+environment sanitization and enables activation diagnostics. `--qualification`
+rejects missing modes, scenes, loads, checkpoints, or mismatched retrace grids
+instead of treating incomplete evidence as a successful comparison.
 
 An illustrative useful result might read:
 

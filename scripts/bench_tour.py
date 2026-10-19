@@ -159,7 +159,8 @@ def _phase1(env: dict[str, str], max_retraces: int) -> None:
     })
 
 
-def measurement_environment(base, *, mode, load_state, scratch, card, warp, max_retraces) -> dict[str, str]:
+def measurement_environment(base, *, mode, load_state, scratch, card, warp,
+                            max_retraces, overrides=None) -> dict[str, str]:
     """The child environment for one measured mode.
 
     `warp` is the BLUEWAKE_TEST_WARP string. None leaves that variable unset,
@@ -173,6 +174,11 @@ def measurement_environment(base, *, mode, load_state, scratch, card, warp, max_
     if mode == "headless":
         env["BLUEWAKE_RENDERER"] = "headless"
     _isolate(env, scratch, card)
+    allowed = {"BLUEWAKE_NATIVE_WORKERS", "BLUEWAKE_GAMETHREAD_DIAGNOSTICS"}
+    for key, value in (overrides or {}).items():
+        if key not in allowed or not str(value).isdigit():
+            raise ValueError(f"invalid benchmark override: {key}={value}")
+        env[key] = str(value)
     return env
 
 
@@ -377,6 +383,43 @@ def compare_summaries(left: dict, right: dict) -> tuple[int, str]:
     return 1, "\n".join(lines) + "\n"
 
 
+def qualification_errors(summary: dict) -> list[str]:
+    errors = []
+    expected_modes = summary.get("requested_modes")
+    expected_codes = summary.get("expected_stop_codes")
+    modes = summary.get("modes")
+    if not isinstance(expected_modes, list) or not expected_modes:
+        errors.append("missing requested_modes")
+        return errors
+    if expected_codes is not None and (not isinstance(expected_codes, list) or not expected_codes):
+        errors.append("missing expected_stop_codes")
+    if not isinstance(modes, dict) or set(modes) != set(expected_modes):
+        errors.append("measured modes do not match requested_modes")
+        return errors
+    checkpoint_grid = None
+    for mode in expected_modes:
+        body = modes[mode]
+        stops = body.get("stops", [])
+        actual_codes = [stop.get("code") for stop in stops]
+        if expected_codes is None and len(stops) != 1:
+            errors.append(f"{mode}: state run did not produce exactly one stop")
+        elif expected_codes is not None and actual_codes != expected_codes:
+            errors.append(f"{mode}: incomplete stop grid")
+        if any(not stop.get("loaded") for stop in stops):
+            errors.append(f"{mode}: one or more scenes did not load")
+        checkpoints = body.get("checkpoints", [])
+        retraces = [item.get("retrace") for item in checkpoints]
+        if not retraces or len(retraces) != len(set(retraces)):
+            errors.append(f"{mode}: missing or duplicate checkpoints")
+        if any(item.get("failed") for item in checkpoints):
+            errors.append(f"{mode}: checkpoint generation failed")
+        if checkpoint_grid is None:
+            checkpoint_grid = retraces
+        elif retraces != checkpoint_grid:
+            errors.append(f"{mode}: checkpoint grid differs between modes")
+    return errors
+
+
 def _read_state_retrace(path: Path):
     """Retrace stored in a BWSTATE1 HEADER chunk, or None if this is not one.
 
@@ -421,7 +464,8 @@ def _modes(mode: str) -> list[str]:
     return [mode]
 
 
-def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state) -> int:
+def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str,
+             state, workers=None) -> int:
     stops = UNTRAINED_STOPS if untrained else DEFAULT_STOPS
     end = tour_end(stops, stop_retraces)
     warp = warp_string(stops, stop_retraces)
@@ -461,6 +505,9 @@ def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state
             card=card_out,
             warp=warp_value,
             max_retraces=cap,
+            overrides=({"BLUEWAKE_NATIVE_WORKERS": workers,
+                        "BLUEWAKE_GAMETHREAD_DIAGNOSTICS": 1}
+                       if workers is not None else None),
         )
         log_path = scratch / f"{mode_name}.log"
         code = _run_app(app, env, log_path)
@@ -478,6 +525,11 @@ def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state
         "warp": warp_value,
         "untrained": untrained,
         "modes": modes,
+        "requested_modes": _modes(mode),
+        # Routed tours have an exact scene grid. A state file names its scene
+        # only after it is loaded, so qualification instead requires one
+        # successfully loaded stop for that mode.
+        "expected_stop_codes": [stop.code for stop in stops] if not state else None,
     }
     Path("summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print("wrote summary.json")
@@ -500,6 +552,8 @@ def _compare_main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="bench_tour.py compare")
     parser.add_argument("left", type=Path)
     parser.add_argument("right", type=Path)
+    parser.add_argument("--qualification", action="store_true",
+                        help="reject incomplete mode, stop, load or checkpoint evidence")
     args = parser.parse_args(argv)
     try:
         left = json.loads(args.left.read_text(encoding="utf-8"))
@@ -507,6 +561,12 @@ def _compare_main(argv: list[str]) -> int:
     except (OSError, json.JSONDecodeError) as error:
         print(f"compare: {error}", file=sys.stderr)
         return 1
+    if args.qualification:
+        errors = [*(f"left: {error}" for error in qualification_errors(left)),
+                  *(f"right: {error}" for error in qualification_errors(right))]
+        if errors:
+            sys.stderr.write("qualification incomplete: " + "; ".join(errors) + "\n")
+            return 3
     code, text = compare_summaries(left, right)
     sys.stdout.write(text)
     return code
@@ -530,6 +590,8 @@ def _run_main(argv: list[str]) -> int:
                              "if headless does not run, use rendered.")
     parser.add_argument("--state", metavar="FILE",
                         help="load this state instead of the card route; does not set BLUEWAKE_TEST_WARP")
+    parser.add_argument("--workers", type=int, choices=range(0, 9), metavar="N",
+                        help="explicit native worker count; also enables qualification diagnostics")
     args = parser.parse_args(argv)
     if args.stop_retraces <= 0:
         parser.error("--stop-retraces must be positive")
@@ -540,6 +602,7 @@ def _run_main(argv: list[str]) -> int:
         untrained=args.untrained,
         mode=args.mode,
         state=args.state,
+        workers=args.workers,
     )
 
 

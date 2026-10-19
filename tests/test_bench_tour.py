@@ -1,8 +1,11 @@
 """Synthetic checks for the benchmark tour. No disc, card, or app."""
 
 from pathlib import Path
+import copy
+import json
 import re
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
@@ -38,6 +41,17 @@ def summary(fps, checkpoints, busy=80.0):
                 'checkpoints': checkpoints,
             },
         },
+    }
+
+
+def qualification_summary(modes=('rendered', 'headless')):
+    stops = [{'code': 'sea:44:0', 'loaded': True}]
+    points = [checkpoint(300, 'A' * 32), checkpoint(600, 'B' * 32)]
+    return {
+        'requested_modes': list(modes),
+        'expected_stop_codes': ['sea:44:0'],
+        'modes': {mode: {'stops': copy.deepcopy(stops),
+                         'checkpoints': copy.deepcopy(points)} for mode in modes},
     }
 
 
@@ -183,6 +197,63 @@ class BenchTourTests(unittest.TestCase):
         self.assertNotIn('BLUEWAKE_TEST_WARP', env)
         self.assertEqual(env['BLUEWAKE_RENDERER'], 'headless')
         self.assertNotIn('BLUEWAKE_PLAYER_PROBE', env)
+
+    def test_worker_override_is_explicit_and_applied_after_sanitizing(self):
+        env = bench_tour.measurement_environment(
+            {'BLUEWAKE_NATIVE_WORKERS': '7', 'BLUEWAKE_GAMETHREAD_DIAGNOSTICS': '0'},
+            mode='rendered', load_state='state', scratch='/tmp/scratch',
+            card='/tmp/scratch/card', warp=None, max_retraces=10,
+            overrides={'BLUEWAKE_NATIVE_WORKERS': 2,
+                       'BLUEWAKE_GAMETHREAD_DIAGNOSTICS': 1},
+        )
+        self.assertEqual(env['BLUEWAKE_NATIVE_WORKERS'], '2')
+        self.assertEqual(env['BLUEWAKE_GAMETHREAD_DIAGNOSTICS'], '1')
+        with self.assertRaises(ValueError):
+            bench_tour.measurement_environment(
+                {}, mode='rendered', load_state='state', scratch='/tmp/scratch',
+                card='/tmp/scratch/card', warp=None, max_retraces=10,
+                overrides={'UNRELATED': 1},
+            )
+
+    def test_qualification_requires_complete_comparable_evidence(self):
+        complete = qualification_summary()
+        self.assertEqual(bench_tour.qualification_errors(complete), [])
+
+        missing_mode = qualification_summary()
+        del missing_mode['modes']['headless']
+        self.assertTrue(bench_tour.qualification_errors(missing_mode))
+
+        unloaded = qualification_summary()
+        unloaded['modes']['rendered']['stops'][0]['loaded'] = False
+        self.assertTrue(bench_tour.qualification_errors(unloaded))
+
+        wrong_grid = qualification_summary()
+        wrong_grid['modes']['headless']['checkpoints'][1]['retrace'] = 900
+        self.assertTrue(bench_tour.qualification_errors(wrong_grid))
+
+        failed = qualification_summary()
+        failed['modes']['rendered']['checkpoints'][0]['failed'] = True
+        self.assertTrue(bench_tour.qualification_errors(failed))
+
+    def test_state_qualification_requires_one_loaded_stop(self):
+        body = qualification_summary(('rendered',))
+        body['expected_stop_codes'] = None
+        self.assertEqual(bench_tour.qualification_errors(body), [])
+        body['modes']['rendered']['stops'].append({'code': 'sea:11:1', 'loaded': True})
+        self.assertTrue(bench_tour.qualification_errors(body))
+
+    def test_qualification_compare_uses_distinct_incomplete_exit(self):
+        body = qualification_summary()
+        body['modes']['rendered']['checkpoints'] = []
+        with tempfile.TemporaryDirectory() as directory:
+            left = Path(directory) / 'left.json'
+            right = Path(directory) / 'right.json'
+            left.write_text(json.dumps(body), encoding='utf-8')
+            right.write_text(json.dumps(qualification_summary()), encoding='utf-8')
+            self.assertEqual(
+                bench_tour._compare_main(['--qualification', str(left), str(right)]),
+                3,
+            )
 
     def test_card_command_is_an_argument_list(self):
         argv = bench_tour.card_restart_argv('in.card', 'out.card')
