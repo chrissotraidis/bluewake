@@ -1,5 +1,12 @@
 # Game-thread qualification
 
+Status: deferred exploratory tooling, not a prerequisite for upstream optimization
+work. Review [#399](https://github.com/chrissotraidis/bluewake/pull/399)'s foundation
+and [#424](https://github.com/chrissotraidis/bluewake/pull/424)'s consolidated tests
+as needed. #412–#417 remain preserved drafts; revisit this runner only when a
+measured change requires it. Use the [benchmark tour](../BENCHMARK_TOUR.md) for
+upstream before/after performance evidence, with separate gameplay checks.
+
 [Performance overview](Overview.md) · [Architecture overview](../architecture/Overview.md)
 
 This flow qualifies native game-thread work without publishing a disc, memory
