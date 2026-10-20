@@ -1,7 +1,7 @@
 # Game-thread qualification
 
 Status: deferred exploratory tooling, not a prerequisite for upstream optimization
-work. Review [#399](https://github.com/chrissotraidis/bluewake/pull/399)'s foundation
+work. Review [#397](https://github.com/chrissotraidis/bluewake/pull/397)'s combined plan and foundation
 and [#424](https://github.com/chrissotraidis/bluewake/pull/424)'s consolidated tests
 as needed. #412–#417 remain preserved drafts; revisit this runner only when a
 measured change requires it. Use the [benchmark tour](../BENCHMARK_TOUR.md) for
