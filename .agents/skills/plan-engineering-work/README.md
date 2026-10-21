@@ -67,7 +67,7 @@ The result is three synchronized artifacts, for example:
 ```text
 docs/planning/2026-10-19-frame_pacing/
 ├── PRD.md       # FR-01: measurable frame-pacing outcome and acceptance
-├── TECH_PLAN.md # source surfaces, proposed contract, tests and IMP-01
+├── TECH_PLAN.md # source surfaces, proposed contract, tests and milestones
 └── PROGRESS.md  # M0-T01 tasks, dependencies and evidence ledger
 ```
 
@@ -89,6 +89,6 @@ python3 .agents/skills/plan-engineering-work/scripts/validate_plan.py \
   docs/planning/YYYY-MM-DD-feature_name
 ```
 
-The validator checks artifact structure, requirement/task/impact traceability,
+The validator checks artifact structure, requirement/task traceability,
 milestone dependencies, and local links. Remote references and technical claims
 still require manual review, as reported by the command.

@@ -58,11 +58,6 @@ Source: <revision>
 | Layer | Input / command | Required evidence | Failure / skip |
 |---|---|---|---|
 
-## Impact register
-| ID | Requirement | Entity / flow | Baseline | Expected impact / target | Measurement | Risk | Owner |
-|---|---|---|---|---|---|---|---|
-| IMP-01 | FR-01 | <linked entity> | unknown | <target or hypothesis> | <concrete method> | <risk> | M0 |
-
 ## Implementation order
 | Milestone | Depends | Can run with | Deliverable / integration gate |
 |---|---|---|---|
@@ -81,11 +76,9 @@ Concurrency limits: <shared files/resources; why any serial work is necessary>.
 - <Source with revision and role>
 ```
 
-Impact examples:
-- Performance: expected wall-time reduction; baseline unknown; measure same workload with units/repetitions.
-- Reliability: detect partial writes; inject write failure and check durable output.
-- Refactor: preserve behavior; compare established contracts and target dependency complexity.
-Do not promise speedups when building test infrastructure. Use qualitative acceptance when no defensible numerical target exists.
+Keep performance and reliability targets in PRD success criteria and the
+verification matrix. Do not promise speedups when building test infrastructure;
+use qualitative acceptance when no defensible numerical target exists.
 
 ## PROGRESS.md
 
@@ -118,11 +111,6 @@ Parallel with M1; owns <different files>; integrates at M3.
 - [ ] M3-T01: <Integrate streams> (FR-01)
 - [ ] M3-T02: <Run combined acceptance> (FR-01)
 - [ ] M3-T03: <Record evidence> (FR-01)
-
-## Impact evidence
-| ID | Actual | Outcome | Evidence |
-|---|---|---|---|
-| IMP-01 | not measured | untested | none |
 
 ## Evidence ledger
 | Task | Commit / artifact | Command / method | Environment / input | Result |

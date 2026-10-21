@@ -12,7 +12,6 @@ from urllib.parse import unquote, urlsplit
 
 FILES = ("PRD.md", "TECH_PLAN.md", "PROGRESS.md")
 FR = re.compile(r"\bFR-\d+\b")
-IMP = re.compile(r"\bIMP-\d+\b")
 MILESTONE = re.compile(r"^### (M\d+): (.*)$")
 TASK = re.compile(r"^- \[([ xX!])\] (M\d+-T\d+): (.+)$")
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^\s)]+)\)")
@@ -60,11 +59,6 @@ def anchors(text: str) -> set[str]:
 
 def cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
-
-
-def table_ids(content: str, pattern: str) -> list[str]:
-    return [cells(line)[0] for line in content.splitlines()
-            if line.startswith("|") and re.fullmatch(pattern, cells(line)[0])]
 
 
 def duplicates(values: list[str]) -> list[str]:
@@ -225,23 +219,6 @@ def validate(directory: Path) -> tuple[list[str], list[str]]:
         visited.add(node)
     for owner in headings:
         visit(owner)
-
-    impacts = table_ids(plain["TECH_PLAN.md"], r"IMP-\d+")
-    recorded = table_ids(plain["PROGRESS.md"], r"IMP-\d+")
-    if not impacts:
-        errors.append("TECH_PLAN.md: missing IMP impact register")
-    if duplicates(impacts) or duplicates(recorded):
-        errors.append("duplicate impact ID in a register")
-    if set(impacts) != set(recorded):
-        errors.append("TECH_PLAN/PROGRESS: impact register IDs differ")
-    for line in plain["TECH_PLAN.md"].splitlines():
-        if line.startswith("|"):
-            row = cells(line)
-            if re.fullmatch(r"IMP-\d+", row[0]):
-                if not requirements.intersection(FR.findall(line)):
-                    errors.append(f"{row[0]}: missing requirement reference")
-                if not set(headings).intersection(re.findall(r"\bM\d+\b", line)):
-                    errors.append(f"{row[0]}: missing owning milestone")
 
     ledger = evidence_rows(plain["PROGRESS.md"])
     for task_id, (_, state, body) in tasks.items():

@@ -26,11 +26,6 @@ TECH_PLAN = """# TECH_PLAN — Evidence fixture
 
 FR-01
 
-## Impact register
-| ID | Requirement | Entity / flow | Baseline | Expected impact / target | Measurement | Risk | Owner |
-|---|---|---|---|---|---|---|---|
-| IMP-01 | FR-01 | Validator | unknown | Reject empty evidence | Regression test | Low | M0 |
-
 ## Implementation order
 | Milestone | Depends | Can run with | Deliverable / integration gate |
 |---|---|---|---|
@@ -48,11 +43,6 @@ FR-01
 {task}
 - [ ] M0-T02: Keep open task valid (FR-01)
 - [ ] M0-T03: Keep another open task valid (FR-01)
-
-## Impact evidence
-| ID | Actual | Outcome | Evidence |
-|---|---|---|---|
-| IMP-01 | not measured | untested | none |
 
 ## Evidence ledger
 | Task | Commit / artifact | Command / method | Environment / input | Result |
