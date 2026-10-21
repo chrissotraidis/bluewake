@@ -963,24 +963,34 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
                 .appendQueryParameter("body", body).build());
     }
 
-    private File latestSessionLog() {
+    // The newest two session logs: this session and the one before it. After a crash the player relaunches and
+    // shares, so the previous log is the one that matters.
+    private List<File> recentSessionLogs() {
+        List<File> recent = new ArrayList<>();
         File[] logs = new File(settings.dataDir, "logs").listFiles((dir, name) -> LogProvider.isSessionLog(name));
-        if (logs == null || logs.length == 0) return null;
+        if (logs == null) return recent;
         Arrays.sort(logs, (a, b) -> a.getName().compareTo(b.getName()));
-        return logs[logs.length - 1];
+        for (int i = logs.length - 1; i >= 0 && recent.size() < 2; i--) recent.add(logs[i]);
+        return recent;
     }
 
     private void shareSessionLog() {
         Shell.log("[mark] Share Session Log opened");
-        File log = latestSessionLog();
-        Intent send = new Intent(Intent.ACTION_SEND);
-        if (log != null) {
-            Uri uri = LogProvider.uriFor(activity, log);
+        List<File> logs = recentSessionLogs();
+        Intent send;
+        if (!logs.isEmpty()) {
+            ArrayList<Uri> uris = new ArrayList<>();
+            for (File log : logs) uris.add(LogProvider.uriFor(activity, log));
+            android.content.ClipData clip = android.content.ClipData.newRawUri(logs.get(0).getName(), uris.get(0));
+            for (int i = 1; i < uris.size(); i++) clip.addItem(new android.content.ClipData.Item(uris.get(i)));
+            send = new Intent(uris.size() == 1 ? Intent.ACTION_SEND : Intent.ACTION_SEND_MULTIPLE);
             send.setType("text/plain");
-            send.putExtra(Intent.EXTRA_STREAM, uri);
-            send.setClipData(android.content.ClipData.newRawUri(log.getName(), uri));
+            if (uris.size() == 1) send.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+            else send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+            send.setClipData(clip);
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } else {
+            send = new Intent(Intent.ACTION_SEND);
             send.setType("text/plain");
             send.putExtra(Intent.EXTRA_TEXT, diagnosticReport());
         }

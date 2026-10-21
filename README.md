@@ -167,8 +167,9 @@ Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.m
 - **Discord:** [discord.gg/xwHfUD2bxW](https://discord.gg/xwHfUD2bxW), one community for BlueWake and
   its sibling projects such as KartPad, MeleePad and SunPad
 - **Bug reports:** **⋯ › Help & Feedback › Report a Problem on GitHub** opens a prefilled issue.
-  Say which device, where in the game it happened and what you saw, and attach the session log
-  (**Share Session Log**, same menu). Please don't attach game files or disc images.
+  Say which device, where in the game it happened and what you saw, and attach the session logs
+  (**Share Session Log**, same menu: it shares this session's log and the one before, so after a crash,
+  reopen BlueWake and share). Please don't attach game files or disc images.
 
 ## Frequently asked questions
 

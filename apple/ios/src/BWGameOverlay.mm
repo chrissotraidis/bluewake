@@ -1825,18 +1825,23 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
     [UIApplication.sharedApplication openURL:url.URL options:@{} completionHandler:nil];
 }
 
-- (NSURL*)latestSessionLog {
+// The newest two session logs: this session and the one before it. After a crash
+// the player relaunches and shares, so the previous log is the one that matters.
+- (NSArray<NSURL*>*)recentSessionLogs {
     NSString* dir = [[self dataDirectory] stringByAppendingPathComponent:@"logs"];
     NSArray<NSString*>* logs = [[[[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil]
         filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH 'session-'"]]
         sortedArrayUsingSelector:@selector(compare:)];
-    return logs.count ? [NSURL fileURLWithPath:[dir stringByAppendingPathComponent:logs.lastObject]] : nil;
+    NSMutableArray<NSURL*>* recent = [NSMutableArray array];
+    for (NSUInteger i = logs.count; i > 0 && recent.count < 2; i--)
+        [recent addObject:[NSURL fileURLWithPath:[dir stringByAppendingPathComponent:logs[i - 1]]]];
+    return recent;
 }
 
 - (void)shareSessionLog {
     fprintf(stderr, "[mark] Share Session Log opened\n");
-    NSURL* log = [self latestSessionLog];
-    NSArray* items = log ? @[ log ] : @[ [self diagnosticReport] ];
+    NSArray<NSURL*>* logs = [self recentSessionLogs];
+    NSArray* items = logs.count ? logs : @[ [self diagnosticReport] ];
     UIActivityViewController* share = [[UIActivityViewController alloc] initWithActivityItems:items
                                                                        applicationActivities:nil];
     share.popoverPresentationController.sourceView = _menuButton;
