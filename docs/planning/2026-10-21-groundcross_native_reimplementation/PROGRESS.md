@@ -46,10 +46,26 @@ Architecture: [translated-code dispatch](../../architecture/GameModule.md#transl
 | M0-T02 | [`GROUND_CROSS_CONTRACT.md`](GROUND_CROSS_CONTRACT.md) | Trace child/sibling control flow and host/call boundaries; compare with current native decline contract | Same private composite and public direct-call interfaces | Depth-first child order frozen; unsafe speculative translated-call path identified and made an explicit decline/implementation gate |
 | M0-T03 | Contract [fixture identity](GROUND_CROSS_CONTRACT.md#private-fixture-identity) | Canonicalize the routine with `native_entries.py` rules and SHA-256 the private metadata/chunk | Base composite generated from source `2ab8118` | Fixture and canonical fragment hashes recorded; generated source and game data remain untracked |
 
-M1 portability groundwork is now present: the POSIX native-test builder also
-builds `native_bg_test`, so the existing collision oracle can run unchanged
-against a private Linux `.so`. The GroundCross cases and activation proof are
-still open; this plumbing alone does not complete M1-T02 or M1-T03.
+The POSIX native-test builder now builds `native_bg_test`, so the collision
+oracle and its GroundCross cases run against a private Linux `.so`. Recursive,
+hit-producing and full hooked-module activation coverage remain open; the
+current evidence does not complete M1-T02 or M1-T03.
+
+## Current implementation increment
+
+- `0x802491F4` is hash-certified and routed to `native_bg.c`.
+- The native accepts complete early-return paths where `ChkGrpThrough`
+  filters the group or the first bounds comparison rejects it.
+- Every later bounds, tree-hit and child-recursion path declines unchanged;
+  no translated mutating callee is executed speculatively.
+- The source-matched Clang 18 container produced the private control module.
+  The Linux oracle compared 60,000 GroundCross cases: 19,112 identical native
+  executions, 40,888 unchanged declines, and zero mismatches. The two existing
+  collision natives also completed 60,000 cases each with zero mismatches.
+- Hook certification reported the expected `0ac24f...a7d` fragment and the
+  privately generated hooked chunk compiled with Clang 22. Full hooked-module
+  activation remains open because `--native-entries` currently reaches the
+  unrelated `native-leaf-gen` failure tracked separately from this routine.
 
 PR #421 is the temporary source for candidate selection and the broader Deck
 procedure. No task above is complete merely because that PR contains an older

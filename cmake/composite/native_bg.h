@@ -1,12 +1,13 @@
 #ifndef BLUEWAKE_NATIVE_BG_H
 #define BLUEWAKE_NATIVE_BG_H
 
-/* Two collision checks natively (native_bg.c). */
+/* Collision checks and guarded traversal paths natively (native_bg.c). */
 
 #include "core/cpu.h"
 
 #define BLUEWAKE_BG_CHK_SAME_ACTOR_PID 0x8024734Cu /* ChkSameActorPid__8cBgS_ChkCFUi */
 #define BLUEWAKE_BG_CHK_GRP_THROUGH 0x800A9684u    /* ChkGrpThrough__4dBgWFiP15cBgS_GrpPassChki */
+#define BLUEWAKE_BG_GROUND_CROSS_GRP_RP 0x802491F4u /* GroundCrossGrpRp__4cBgWFP12cBgS_GndChkii */
 
 extern int bluewake_native_bg_enabled;
 

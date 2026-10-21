@@ -39,14 +39,15 @@
 
 int bluewake_native_bg_enabled;
 
-enum { BG_SAME_ACTOR, BG_GRP_THROUGH, BG_COUNT };
+enum { BG_SAME_ACTOR, BG_GRP_THROUGH, BG_GROUND_CROSS_GRP, BG_COUNT };
 static unsigned long long s_bg_runs[BG_COUNT], s_bg_declined[BG_COUNT], s_bg_crossed;
 
 void bluewake_native_bg_report(void) {
     fprintf(stderr,
-            "[native-bg] same-actor-pid=%llu/%llu grp-through=%llu/%llu (native/declined; %llu across the chunk "
-            "boundary)\n",
-            s_bg_runs[0], s_bg_declined[0], s_bg_runs[1], s_bg_declined[1], s_bg_crossed);
+            "[native-bg] same-actor-pid=%llu/%llu grp-through=%llu/%llu ground-cross-grp=%llu/%llu "
+            "(native/declined; %llu across the chunk boundary)\n",
+            s_bg_runs[0], s_bg_declined[0], s_bg_runs[1], s_bg_declined[1],
+            s_bg_runs[2], s_bg_declined[2], s_bg_crossed);
 }
 
 /* One block's entry as the translation makes it, on a running downcount:
@@ -80,7 +81,8 @@ static inline u32 bg_cr0_signed(u32 cr, u32 xer, s32 a, s32 b) { return bg_cr0(c
 static inline u32 bg_cr0_unsigned(u32 cr, u32 xer, u32 a, u32 b) { return bg_cr0(cr, xer, a < b, a > b); }
 
 static inline bool bg_ready(const CPUState* cpu) {
-    return cpu->exception == 0u && g_mem_write_journal == NULL && cpu->cycle_budget > 0;
+    return cpu != NULL && cpu->ram != NULL && cpu->exception == 0u &&
+           g_mem_write_journal == NULL && cpu->cycle_budget > 0;
 }
 
 /* cBgS_Chk::ChkSameActorPid(r3 this, r4 pid): this->mActorPid (8) and
@@ -279,12 +281,141 @@ done:
     return 1;
 }
 
+/* cBgW::GroundCrossGrpRp, for the complete path on which the virtual
+ * ChkGrpThrough call filters the group. This path never reaches the mutating
+ * GroundCrossRp call or child recursion. Everything is prepared in a local
+ * CPU image; stack bytes are committed only after the whole path is proven. */
+static int bg_ground_cross_grp_early(CPUState* cpu) {
+    if (!bg_ready(cpu) || g_ppc_guest_aliases_overlap_mem1)
+        return 0;
+
+    const u32 old_sp = cpu->gpr[1];
+    const u32 frame = old_sp - 32u;
+    const u32 self = cpu->gpr[3];
+    const u32 check = cpu->gpr[4];
+    const u32 group = cpu->gpr[5];
+    const u32 depth = cpu->gpr[6];
+    const u32 old_lr = cpu->lr;
+    const u32 saved[5] = {cpu->gpr[27], cpu->gpr[28], cpu->gpr[29], cpu->gpr[30], cpu->gpr[31]};
+
+    if (!bg_ram(cpu, frame, 4u) || !bg_ram(cpu, old_sp + 4u, 4u) ||
+        !bg_ram(cpu, old_sp - 20u, 20u) || !bg_ram(cpu, check + 4u, 4u) ||
+        !bg_ram(cpu, self + 4u, 4u))
+        return 0;
+
+    const u32 vtable = bg_word(cpu, self + 4u);
+    if (!bg_ram(cpu, vtable + 32u, 4u))
+        return 0;
+    const u32 target = bg_word(cpu, vtable + 32u) & ~3u;
+    if (target != BLUEWAKE_BG_CHK_GRP_THROUGH ||
+        !bw_direct_call_ready(cpu, 0x80328F38u) ||
+        !bw_direct_call_ready(cpu, 0x80249208u) ||
+        !bw_direct_call_ready(cpu, target) ||
+        !bw_direct_call_ready(cpu, 0x80249230u))
+        return 0;
+
+    CPUState work = *cpu;
+    if (!bg_block(&work, &work.downcount, 5u))
+        return 0;
+    work.gpr[1] = frame;
+    work.gpr[0] = old_lr;
+    work.gpr[11] = old_sp;
+
+    if (!bg_block(&work, &work.downcount, 6u))
+        return 0;
+    work.lr = 0x80249208u;
+    work.pc = 0x80249208u;
+    work.cycle_observation_suffix = 0u;
+
+    if (!bg_block(&work, &work.downcount, 11u))
+        return 0;
+    work.gpr[28] = self;
+    work.gpr[29] = check;
+    work.gpr[27] = group;
+    work.gpr[30] = depth;
+    work.gpr[4] = group;
+    work.gpr[5] = bg_word(cpu, check + 4u);
+    work.gpr[12] = target;
+    work.ctr = target;
+    work.lr = 0x80249230u;
+    work.pc = target;
+    if (!bg_grp_through(&work) || work.pc != 0x80249230u)
+        return 0;
+
+    if (!bg_block(&work, &work.downcount, 2u))
+        return 0;
+    work.gpr[0] = work.gpr[3] & 0xFFu;
+    work.cr = bg_cr0_signed(work.cr, work.xer, (s32)work.gpr[0], 0);
+    if (work.gpr[0] != 0u) {
+        /* Filtered group: li r3,0; b epilogue. */
+        if (!bg_block(&work, &work.downcount, 2u))
+            return 0;
+        work.gpr[3] = 0u;
+    } else {
+        /* First bounds rejection: the lower bound is already above the test
+         * point. Later bounds/tree/child paths still decline unchanged. */
+        if (!bg_ram(cpu, self + 156u, 4u))
+            return 0;
+        const u32 bounds = bg_word(cpu, self + 156u) + group * 32u;
+        if ((work.msr & PPC_MSR_FP) == 0u || (work.fpscr & 3u) != 0u ||
+            !bg_ram(cpu, bounds + 4u, 4u) || !bg_ram(cpu, check + 36u, 4u) ||
+            !bg_block(&work, &work.downcount, 7u))
+            return 0;
+        work.gpr[3] = bounds;
+        work.gpr[0] = group * 32u;
+        work.fpr[0] = f64_value(convert_to_double(bg_word(cpu, bounds + 4u)));
+        work.fpr[1] = f64_value(convert_to_double(bg_word(cpu, check + 36u)));
+        work.ps1[0] = work.fpr[0];
+        work.ps1[1] = work.fpr[1];
+        ppc_fcmp(&work, 0, work.fpr[0], work.fpr[1], true);
+        if ((work.cr & 0x40000000u) == 0u)
+            return 0;
+        if (!bg_block(&work, &work.downcount, 2u))
+            return 0;
+        work.gpr[0] = 0u;
+        if (!bg_block(&work, &work.downcount, 2u))
+            return 0;
+        work.cr = bg_cr0_signed(work.cr, work.xer, 0, 0);
+        if (!bg_block(&work, &work.downcount, 2u))
+            return 0;
+        work.gpr[3] = 0u;
+    }
+
+    if (!bg_block(&work, &work.downcount, 2u) ||
+        !bg_block(&work, &work.downcount, 6u) ||
+        !bg_block(&work, &work.downcount, 5u))
+        return 0;
+    work.gpr[11] = old_sp;
+    for (unsigned i = 0; i < 5; ++i)
+        work.gpr[27 + i] = saved[i];
+    work.gpr[0] = old_lr;
+    work.lr = old_lr;
+    work.gpr[1] = old_sp;
+    work.pc = old_lr & ~3u;
+    work.cycle_observation_suffix = 0u;
+
+    *cpu = work;
+    write_be32(cpu->ram + (frame - GC_RAM_BASE), old_sp);
+    write_be32(cpu->ram + (old_sp + 4u - GC_RAM_BASE), old_lr);
+    for (unsigned i = 0; i < 5; ++i)
+        write_be32(cpu->ram + (old_sp - 20u + i * 4u - GC_RAM_BASE), saved[i]);
+    clear_matching_reservation(cpu, frame);
+    clear_matching_reservation(cpu, old_sp + 4u);
+    for (unsigned i = 0; i < 5; ++i)
+        clear_matching_reservation(cpu, old_sp - 20u + i * 4u);
+    return 1;
+}
+
 int bluewake_native_bg(CPUState* cpu, u32 address) {
     unsigned which;
     int done;
     switch (address) {
     case BLUEWAKE_BG_CHK_SAME_ACTOR_PID: which = BG_SAME_ACTOR; done = bg_same_actor(cpu); break;
     case BLUEWAKE_BG_CHK_GRP_THROUGH: which = BG_GRP_THROUGH; done = bg_grp_through(cpu); break;
+    case BLUEWAKE_BG_GROUND_CROSS_GRP_RP:
+        which = BG_GROUND_CROSS_GRP;
+        done = bg_ground_cross_grp_early(cpu);
+        break;
     default: return 0;
     }
     if (done)

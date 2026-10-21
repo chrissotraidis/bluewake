@@ -73,6 +73,8 @@ ENTRIES = {
     0x800A9684: ("dBgW::ChkGrpThrough", "bg", [(0x800A56E0, 0x800A9684, 0x800A96E0),
                                                (0x800A96E0, 0x800A96E0, 0x800A974C)],
                  "d491b8f1f60e6ad9ae20524d879bb8b1d74d9608e919e6c07601e8dcfa69227f"),
+    0x802491F4: ("cBgW::GroundCrossGrpRp", "bg", [(0x802456E0, 0x802491F4, 0x80249368)],
+                 "0ac24fa9c8ef280be5ed359fb406287ffaa989296c8a79a657e0feeeab839a7d"),
     0x8030DB24: ("PSMTXMultVecSR", "vec_sr", [(0x8030D6E0, 0x8030DB24, 0x8030DB78)],
                  "600139a8e4e0caabf4a3006b3eb737577c0934568e1741186eeec1b9565b7db9"),
     # The joint matrix calculations, and the callees they stand in for too:

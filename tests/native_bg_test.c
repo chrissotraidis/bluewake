@@ -80,9 +80,29 @@ static unsigned s_unexpected_service;
 static int edge_service(void* user, CPUState* cpu, u32 address) {
     (void)user;
     (void)cpu;
+    if ((address & ~3u) == 0x80328F84u)
+        return 0; /* GroundCrossGrpRp's certified register-restore helper. */
     if ((address & ~3u) != RETURN_ADDRESS)
         s_unexpected_service++;
     return 1;
+}
+
+/* The private oracle owns the module for the duration of the test. Internal
+ * translated-call boundaries have no host work; the edge service above still
+ * terminates dispatch at the synthetic outer return address. */
+static bool module_can_skip(void* user, const CPUState* cpu, u32 address) {
+    (void)user;
+    (void)cpu;
+    (void)address;
+    return true;
+}
+
+static bool s_native_can_skip = true;
+static bool native_can_skip(void* user, const CPUState* cpu, u32 address) {
+    (void)user;
+    (void)cpu;
+    (void)address;
+    return s_native_can_skip;
 }
 
 static u8* protect_image(u8* p) {
@@ -133,6 +153,10 @@ static void reset_host(void) {
     bw_host_decrementer_pending = &s_decrementer_pending;
     bw_host_pi_cause = &s_pi_cause;
     bw_host_pi_mask = &s_pi_mask;
+    s_native_can_skip = true;
+    bw_host_can_skip = native_can_skip;
+    bw_host_can_skip_user = NULL;
+    bw_host_skip_fast = NULL;
 }
 
 static const u32 FUNCTIONS[] = {BLUEWAKE_BG_CHK_SAME_ACTOR_PID, BLUEWAKE_BG_CHK_GRP_THROUGH};
@@ -250,6 +274,72 @@ static Case build(u8* ram, unsigned which, unsigned scenario) {
     return k;
 }
 
+static Case build_ground_early(u8* ram, unsigned scenario) {
+    Case k;
+    memset(&k, 0, sizeof k);
+    for (u32 i = 0; i < AREA_BYTES; i += 4u)
+        put(ram, AREA + i, next());
+    CPUState* c = &k.cpu;
+    c->ram = ram;
+    c->ram_size = GC_MAIN_RAM_SIZE;
+    for (unsigned r = 0; r < 32; ++r) {
+        c->gpr[r] = next();
+        c->fpr[r] = f64_value(((u64)next() << 32) | next());
+        c->ps1[r] = f64_value(((u64)next() << 32) | next());
+    }
+    const u32 self = AREA + 0x100u;
+    const u32 check = AREA + 0x300u;
+    const u32 pass = AREA + 0x380u;
+    const u32 bgd = AREA + 0x500u;
+    const u32 table = AREA + 0x800u;
+    const u32 bounds = AREA + 0x1800u;
+    const u32 vtable = AREA + 0x2000u;
+    const u32 group = 3u;
+    c->gpr[1] = AREA + 0x3000u;
+    c->gpr[3] = self;
+    c->gpr[4] = check;
+    c->gpr[5] = group;
+    c->gpr[6] = 2u;
+    put(ram, self + 4u, vtable);
+    put(ram, vtable + 32u, BLUEWAKE_BG_CHK_GRP_THROUGH);
+    put(ram, check + 4u, pass);
+    put(ram, self + 148u, bgd);
+    put(ram, self + 156u, bounds);
+    put(ram, bgd + 36u, table);
+    put(ram, table + group * 52u + 48u, 0u);
+    put(ram, pass + 4u, 0u);
+    c->lr = RETURN_ADDRESS | (next() & 3u);
+    c->pc = BLUEWAKE_BG_GROUND_CROSS_GRP_RP;
+    c->ctr = next();
+    c->cr = next();
+    c->xer = next();
+    c->msr = PPC_MSR_FP;
+    c->fpscr = 0u;
+    c->cycle_budget = 16384;
+    c->downcount = -(s64)(next() % 32u);
+    c->cycle_deadline_budget = 100000;
+    c->cycle_observation_suffix = next();
+    c->reserve_valid = (scenario & 1u) != 0u;
+    c->reserve_addr = scenario & 2u ? c->gpr[1] - 20u + 4u * (scenario % 5u) : AREA;
+    switch (scenario % 11u) {
+    case 1: put(ram, vtable + 32u, 0x80001000u); break;
+    case 2: c->exception = 1u; break;
+    case 3: k.aliases = true; break;
+    case 4: k.journal = true; break;
+    case 5: c->cycle_deadline_budget = 1; break;
+    case 6: c->gpr[1] = GC_RAM_BASE + 16u; break;
+    case 7:
+        put(ram, table + group * 52u + 48u, 0x100u);
+        put(ram, pass + 4u, 2u);
+        put(ram, bounds + group * 32u + 4u, 0x41200000u); /* 10 */
+        put(ram, check + 36u, 0u);
+        break;
+    case 8: c->gpr[6] = 1u; break;
+    default: break;
+    }
+    return k;
+}
+
 /* The ways the chunk boundary must not be crossed natively. */
 static void boundary_trouble(unsigned scenario) {
     switch ((scenario / 19u) % 7u) {
@@ -321,9 +411,9 @@ int main(int argc, char** argv) {
     CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))(void*)GetProcAddress(lib, "bluewake_composite_guest_cpu");
     void (*set_edge)(int (*)(void*, CPUState*, u32), void*) =
         (void (*)(int (*)(void*, CPUState*, u32), void*))(void*)GetProcAddress(lib, "bluewake_set_edge_service");
-    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*) =
-        (int (*)(bool, const bool*, const bool*, const u32*, const u32*))(void*)GetProcAddress(
-            lib, "bluewake_composite_direct_calls");
+    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*, BwHostCanSkipFn, void*) =
+        (int (*)(bool, const bool*, const bool*, const u32*, const u32*, BwHostCanSkipFn, void*))(void*)GetProcAddress(
+            lib, "bluewake_composite_direct_calls_v2");
     int (*filter)(bool) = (int (*)(bool))(void*)GetProcAddress(lib, "bluewake_composite_edge_filter");
     if (get == NULL || guest_cpu == NULL || set_edge == NULL || direct == NULL || filter == NULL) {
         fprintf(stderr, "not a compatible BlueWake game module\n");
@@ -337,7 +427,7 @@ int main(int argc, char** argv) {
     /* The module as in play: quiet host flags, direct calls, its edge filter. */
     static const bool clear = false;
     static const u32 zero = 0u;
-    if (!direct(true, &clear, &clear, &zero, &zero) || !filter(true)) {
+    if (!direct(true, &clear, &clear, &zero, &zero, module_can_skip, NULL) || !filter(true)) {
         fprintf(stderr, "the module's direct calls or edge filter are unavailable\n");
         return 1;
     }
@@ -355,6 +445,8 @@ int main(int argc, char** argv) {
             Case k = build(native_ram, which, i);
             memcpy(before, native_ram + (AREA - GC_RAM_BASE), AREA_BYTES);
             reset_host();
+            if (i % 11u == 9u)
+                s_native_can_skip = false;
             if (k.boundary_case) {
                 boundary_trouble(i);
                 if ((i / 19u) % 7u == 1u || (i / 19u) % 7u == 2u) /* an interrupt the guest would take */
@@ -423,6 +515,60 @@ int main(int argc, char** argv) {
         fflush(stdout);
         if (ran[which] < 30000u && cases >= 60000u)
             return 1; /* at least 30,000 compared cases per function */
+    }
+
+    {
+        unsigned accepted_count = 0, declined_count = 0;
+        for (unsigned i = 0; i < cases; ++i) {
+            Case k = build_ground_early(native_ram, i);
+            memcpy(before, native_ram + (AREA - GC_RAM_BASE), AREA_BYTES);
+            reset_host();
+            if (i % 11u == 9u)
+                s_native_can_skip = false;
+            ppc_fpscr_updated(&k.cpu);
+            CPUState native = k.cpu;
+            const CPUState untouched = native;
+            if (k.journal)
+                g_mem_write_journal = journal;
+            if (k.aliases)
+                g_ppc_guest_aliases_overlap_mem1 = true;
+            const int accepted = bluewake_native_bg(&native, BLUEWAKE_BG_GROUND_CROSS_GRP_RP);
+            g_mem_write_journal = NULL;
+            g_ppc_guest_aliases_overlap_mem1 = false;
+            if (!accepted) {
+                declined_count++;
+                if (memcmp(&native, &untouched, sizeof native) != 0 ||
+                    memcmp(before, native_ram + (AREA - GC_RAM_BASE), AREA_BYTES) != 0) {
+                    fprintf(stderr, "GroundCross case %u: declined but changed state\n", i);
+                    return 1;
+                }
+                continue;
+            }
+            accepted_count++;
+            memcpy(reference_ram + (AREA - GC_RAM_BASE), before, AREA_BYTES);
+            CPUState* g = guest_cpu();
+            *g = k.cpu;
+            g->ram = reference_ram;
+            mod->on_state_loaded(g);
+            s_unexpected_service = 0;
+            if (!mod->dispatch(g, BLUEWAKE_BG_GROUND_CROSS_GRP_RP)) {
+                fprintf(stderr, "GroundCross case %u: translation did not run\n", i);
+                return 1;
+            }
+            CPUState reference = *g;
+            reference.ram = native.ram;
+            if (s_unexpected_service != 0u || (reference.pc & ~3u) != RETURN_ADDRESS ||
+                memcmp(&native, &reference, sizeof native) != 0 ||
+                memcmp(native_ram + (AREA - GC_RAM_BASE), reference_ram + (AREA - GC_RAM_BASE), AREA_BYTES) != 0) {
+                fprintf(stderr, "GroundCross case %u: guarded early-path mismatch\n", i);
+                report_cpu(&native, &reference);
+                return 1;
+            }
+        }
+        printf("%08X: %u guarded early-return cases, %u identical, %u declined unchanged, 0 mismatches\n",
+               BLUEWAKE_BG_GROUND_CROSS_GRP_RP, cases, accepted_count, declined_count);
+        if (accepted_count == 0u)
+            return 1;
     }
 
     if (bench_calls != 0u) {

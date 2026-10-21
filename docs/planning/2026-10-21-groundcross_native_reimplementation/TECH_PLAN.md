@@ -128,11 +128,11 @@ and Deck bundle preparation may run concurrently within M3 after M2 is frozen.
   code.
 - `GroundCrossRp` can mutate the ground-check object before a translated
   execution boundary. The native must not call it speculatively and then
-  decline. M1 therefore tests the early, fully provable paths first; support
-  for hit-producing traversal requires a resumable protocol or a complete
-  native equivalent of its mutating callees.
-- The shared POSIX loader now builds the existing collision oracle against a
-  Linux `.so`; GroundCross-specific Linux and Windows cases remain M1 work.
+  decline. The first implementation accepts the fully proved filter and first
+  bounds-rejection paths; support for hit-producing traversal requires a
+  resumable protocol or a complete native equivalent of its mutating callees.
+- The shared POSIX loader now runs GroundCross cases against a Linux `.so`;
+  equivalent Windows and recursive/hit-producing cases remain M1 work.
 - PR #421 owns the parent runtime M1 and supplies provisional candidate evidence.
   Its measurements do not qualify the future implementation.
 
