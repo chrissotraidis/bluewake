@@ -4,7 +4,8 @@ Status: Planned; waits for the M5 compiler decision and
 [#433](https://github.com/chrissotraidis/bluewake/issues/433).
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
-[Parent M6](https://github.com/chrissotraidis/bluewake/pull/421)
+[Parent M6](https://github.com/chrissotraidis/bluewake/pull/421) ·
+[M5 prerequisite](https://github.com/chrissotraidis/bluewake/pull/437)
 
 ## Milestones
 

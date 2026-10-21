@@ -3,6 +3,7 @@
 Status: Draft  
 Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`  
 Parent milestone: [PR #421, M6](https://github.com/chrissotraidis/bluewake/pull/421)
+Prerequisite plan: [PR #437](https://github.com/chrissotraidis/bluewake/pull/437)
 
 ## Motivation
 
@@ -42,7 +43,8 @@ before this option is measured independently.
 | Build identity | One frozen M5 control | Only `-mtune=znver2` and derived hashes differ | Provenance/effective commands |
 | Portability | `-march=x86-64-v3` default | ISA target and generic default remain unchanged | Tests and documentation |
 
-M6 starts after M5 selects or retains a compiler. It also depends on the Linux
+M6 starts after [M5](https://github.com/chrissotraidis/bluewake/pull/437)
+selects or retains a compiler. It also depends on the Linux
 container blocker [#433](https://github.com/chrissotraidis/bluewake/issues/433).
 Private discs, modules, AppImages, states, and raw performance captures remain
 off the repository.

@@ -4,7 +4,8 @@ Status: Planning only
 Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
 
 [Product brief](PRD.md) · [Tracker](PROGRESS.md) ·
-[Parent M6](https://github.com/chrissotraidis/bluewake/pull/421)
+[Parent M6](https://github.com/chrissotraidis/bluewake/pull/421) ·
+[M5 prerequisite](https://github.com/chrissotraidis/bluewake/pull/437)
 
 ## Inspected facts
 
@@ -29,7 +30,8 @@ Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
 | Modify | `tests/test_linux_ci_container.py` | Assert default absence, option forwarding, both CMake flag paths and provenance/fingerprint separation | M1 |
 | Modify | `docs/LINUX.md` | Document the experimental Deck option, portable default and separate output directory | M1 |
 
-Proposed invocation after M5 selects the comparison compiler:
+Proposed invocation after [M5](https://github.com/chrissotraidis/bluewake/pull/437)
+selects the comparison compiler:
 
 ```text
 python3 scripts/linux/build.py GZLE01.iso --out build/deck-control \
