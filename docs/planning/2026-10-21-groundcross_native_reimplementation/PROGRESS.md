@@ -70,10 +70,11 @@ current evidence does not complete M1-T02 or M1-T03.
   The replay generator now accepts the current always-prepaid, lean-deadline,
   address-aware direct-call and guarded inline-GPR source forms, with focused
   source-shape regressions.
-- A 20-second desktop smoke run reached the title scene with certified native
-  entries enabled and shut down cleanly. GroundCross reported `0/0` because
-  this short route did not exercise the registered entry; positive gameplay
-  activation and the matched Deck comparison therefore remain open.
+- A 1.4-minute desktop gameplay run reached the play scene and shut down
+  cleanly. GroundCross reported 3,050,936 native executions, 5,935,727 safe
+  declines and 409,422 cross-chunk executions. This proves positive runtime
+  activation; matched Steam Deck correctness and performance comparisons
+  remain open.
 
 PR #421 is the temporary source for candidate selection and the broader Deck
 procedure. No task above is complete merely because that PR contains an older
