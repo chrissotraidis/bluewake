@@ -3,6 +3,7 @@
 Status: Draft  
 Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`  
 Parent milestone: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
+Follow-up plan: [PR #438](https://github.com/chrissotraidis/bluewake/pull/438)
 
 ## Motivation
 

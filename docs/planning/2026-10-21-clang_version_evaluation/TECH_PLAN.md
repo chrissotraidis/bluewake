@@ -4,7 +4,8 @@ Status: Planning only
 Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
 
 [Product brief](PRD.md) · [Tracker](PROGRESS.md) ·
-[Parent M5](https://github.com/chrissotraidis/bluewake/pull/421)
+[Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
+[M6 follow-up](https://github.com/chrissotraidis/bluewake/pull/438)
 
 ## Inspected facts
 

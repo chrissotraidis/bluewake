@@ -4,7 +4,8 @@ Status: Planned; blocked by
 [#433](https://github.com/chrissotraidis/bluewake/issues/433).
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
-[Parent M5](https://github.com/chrissotraidis/bluewake/pull/421)
+[Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
+[M6 follow-up](https://github.com/chrissotraidis/bluewake/pull/438)
 
 ## Milestones
 
