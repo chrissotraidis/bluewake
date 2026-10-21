@@ -102,10 +102,11 @@ existing native leaves only after their combined call effects are proven equal.
 | Existing suites | Repository audit, host CTest, existing native tests, Linux and Windows CI | No regression in existing contracts | Required failure blocks integration |
 | Steam Deck A/B | Same source/PGO/settings/state; at least three A/A runs, then five interleaved native-off/native-on pairs and a new profile | Matching checkpoints, accepted calls, completed gameplay route, median gain beyond A/A noise | Wrong scene, thermal drift, absent activation, mismatch, or gain within noise is inconclusive/fail |
 
-`BLUEWAKE_NATIVE_ENTRIES=0` supplies the translated control. A forced-decline
-development mode may diagnose hook overhead, but must not become a second
-shipping behavior. Raw private artifacts stay off-repository; record hashes,
-redacted commands, aggregate metrics, and pass/fail results only.
+`BLUEWAKE_NATIVE_GROUND_CROSS=0` supplies the translated control from the same
+module while leaving unrelated native entries unchanged. The broader
+`BLUEWAKE_NATIVE_ENTRIES=0` switch remains available for suite-level testing,
+but is not the candidate A/B control. Raw private artifacts stay off-repository;
+record hashes, redacted commands, aggregate metrics, and pass/fail results only.
 
 ## Implementation order
 

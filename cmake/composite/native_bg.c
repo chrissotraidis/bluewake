@@ -38,6 +38,7 @@
 #include <stdio.h>
 
 int bluewake_native_bg_enabled;
+int bluewake_native_ground_cross_enabled;
 
 enum { BG_SAME_ACTOR, BG_GRP_THROUGH, BG_GROUND_CROSS_GRP, BG_COUNT };
 static unsigned long long s_bg_runs[BG_COUNT], s_bg_declined[BG_COUNT], s_bg_crossed;

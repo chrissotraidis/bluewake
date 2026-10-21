@@ -75,6 +75,12 @@ current evidence does not complete M1-T02 or M1-T03.
   declines and 409,422 cross-chunk executions. This proves positive runtime
   activation; matched Steam Deck correctness and performance comparisons
   remain open.
+- `BLUEWAKE_NATIVE_GROUND_CROSS=0` now bypasses only the candidate hook, so
+  Deck control and candidate runs can use the same AppImage without disabling
+  unrelated native entries or introducing build drift. A paired 1,000-case
+  module check reported `310/0` with the default and `0/0` with the switch,
+  with zero oracle mismatches in both modes. The shared AppImage passed the
+  SteamOS 2.39 ABI/private-file audit and extraction smoke test.
 
 PR #421 is the temporary source for candidate selection and the broader Deck
 procedure. No task above is complete merely because that PR contains an older

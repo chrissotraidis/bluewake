@@ -51,6 +51,13 @@ class NativeEntryBuildOrderTest(unittest.TestCase):
         self.assertIn(native_entries.hook_text(first, chunk), converted)
         self.assertIn(native_entries.hook_text(second, chunk), converted)
 
+    def test_groundcross_has_a_candidate_specific_runtime_gate(self):
+        entry = 0x802491F4
+        hook = native_entries.hook_text(entry, 0x802456E0)
+        self.assertIn("bluewake_native_ground_cross_enabled", hook)
+        exports = (ROOT / "cmake/composite/module_export.c").read_text()
+        self.assertIn('getenv("BLUEWAKE_NATIVE_GROUND_CROSS")', exports)
+
 
 if __name__ == "__main__":
     unittest.main()

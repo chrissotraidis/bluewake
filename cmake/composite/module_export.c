@@ -199,6 +199,8 @@ static void bluewake_native_entries_enable(void)
     const int on = !(setting && strcmp(setting, "0") == 0);
     bluewake_native_fifo_enabled = on;
     bluewake_native_bg_enabled = on;
+    setting = getenv("BLUEWAKE_NATIVE_GROUND_CROSS");
+    bluewake_native_ground_cross_enabled = on && !(setting && strcmp(setting, "0") == 0);
     bluewake_native_vec_sr_enabled = on;
     bluewake_native_mtxcalc_enabled = on;
     bluewake_native_search_enabled = on;

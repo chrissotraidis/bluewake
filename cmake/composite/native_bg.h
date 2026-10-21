@@ -10,6 +10,7 @@
 #define BLUEWAKE_BG_GROUND_CROSS_GRP_RP 0x802491F4u /* GroundCrossGrpRp__4cBgWFP12cBgS_GndChkii */
 
 extern int bluewake_native_bg_enabled;
+extern int bluewake_native_ground_cross_enabled;
 
 /* The function at `address`, entered with the return address in LR, through
  * its blr: nonzero with every register, flag, cycle and byte as the
