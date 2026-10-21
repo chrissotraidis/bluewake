@@ -63,9 +63,14 @@ current evidence does not complete M1-T02 or M1-T03.
   executions, 40,888 unchanged declines, and zero mismatches. The two existing
   collision natives also completed 60,000 cases each with zero mismatches.
 - Hook certification reported the expected `0ac24f...a7d` fragment and the
-  privately generated hooked chunk compiled with Clang 22. Full hooked-module
-  activation remains open because `--native-entries` currently reaches the
-  unrelated `native-leaf-gen` failure tracked separately from this routine.
+  full `--native-entries` module built with Clang 18 in the Linux CI container.
+  The replay generator now accepts the current always-prepaid, lean-deadline,
+  address-aware direct-call and guarded inline-GPR source forms, with focused
+  source-shape regressions.
+- A 20-second desktop smoke run reached the title scene with certified native
+  entries enabled and shut down cleanly. GroundCross reported `0/0` because
+  this short route did not exercise the registered entry; positive gameplay
+  activation and the matched Deck comparison therefore remain open.
 
 PR #421 is the temporary source for candidate selection and the broader Deck
 procedure. No task above is complete merely because that PR contains an older

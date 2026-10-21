@@ -38,10 +38,11 @@ milestone.
   routine](https://github.com/zeldaret/tww/blob/cb24f55fbbb183af5a04783d163468eb9b61536b/src/SSystem/SComponent/c_bg_w.cpp#L577-L602)
   filters a group, tests its bounds and ground tree, then visits child groups
   in sibling order. It is a semantic guide, not executable evidence.
-- Current-source container controls are blocked by
-  [#433](https://github.com/chrissotraidis/bluewake/issues/433). Implementation
-  and local correctness work may proceed; final Deck qualification may not
-  substitute the older PR #421 artifact for a matched current-source control.
+- The current-source Clang 18 container build completed with the pinned
+  RecompCore checkout; [#433](https://github.com/chrissotraidis/bluewake/issues/433)
+  remains relevant if the dependency resolution failure reappears. Final Deck
+  qualification still requires matched current-source control and candidate
+  artifacts.
 - PR #421 already plans this native routine as runtime milestone M1. No open PR
   currently implements the routine; this trio expands that parent milestone.
 
@@ -112,7 +113,7 @@ redacted commands, aggregate metrics, and pass/fail results only.
 | M0 | — | PR #421 runtime M1 preparation | Map the private translated routine and freeze its observable contract; commit no game source |
 | M1 | M0 | PR #421 runtime M1 tests | Add public guards and private differential cases that prove activation and fallback |
 | M2 | M1 | PR #421 runtime M1 implementation | Add the guarded serial path, counters, certified hook, opt-out, and passing correctness suites |
-| M3 | M2; #433 for current container artifact | PR #421 runtime M1 decision gate | Record Linux/Windows results and matched Deck A/B evidence; retain or reject explicitly |
+| M3 | M2 | PR #421 runtime M1 decision gate | Record Linux/Windows results and matched Deck A/B evidence; retain or reject explicitly |
 
 Critical path: M0 → M1 → M2 → M3. The sequence is intentionally serial because
 the tests, implementation, and certification share one frozen translated

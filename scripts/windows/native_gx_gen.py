@@ -51,8 +51,14 @@ import sys
 from pathlib import Path
 
 LEADER = re.compile(
-    r"\nlabel_([0-9A-F]{8}):\n(?:    (?!ctx->pc = |cycle_block_prepaid = )[^\n]*\n)*?"
-    r"(?:    ctx->pc = 0x\1u;\n)?    cycle_block_prepaid = dolrecomp_block_can_precharge\(ctx, (\d+)u\);\n")
+    r"\nlabel_([0-9A-F]{8}):\n(?:(?:    (?!ctx->pc = |cycle_block_prepaid = )[^\n]*\n)|(?:bwend_\d+: ;\n))*?"
+    r"(?:"
+    r"(?:    ctx->pc = 0x\1u;\n)?    cycle_block_prepaid = dolrecomp_block_can_precharge\(ctx, (\d+)u\);\n"
+    r"|"
+    r"(?:    if \(ctx->downcount <= -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET\) \{\n"
+    r"        ctx->pc = 0x\1u;\n        return;\n    \}\n)?"
+    r"    cycle_block_prepaid = true;\n    ctx->downcount -= (\d+)u;\n"
+    r")")
 
 
 class Chunk:
@@ -87,9 +93,12 @@ class Chunk:
             address = int(m.group(1), 16)
             body_end = found[i + 1].start() if i + 1 < len(found) else len(self.main)
             body = self.main[m.end():body_end]
-            fast = re.search(r"    if \(cycle_block_prepaid\) goto (bwfast_\d+);\n", body)
+            # behaviour_timing.py turns the conditional branch into an
+            # unconditional one when the block is always prepaid. Both forms
+            # select the same prepared copy for replay generation.
+            fast = re.search(r"    (?:if \(cycle_block_prepaid\) )?goto (bwfast_\d+);\n", body)
             self.leaders.append(address)
-            self.blocks[address] = {"cycles": int(m.group(2)), "body": body,
+            self.blocks[address] = {"cycles": int(m.group(2) or m.group(3)), "body": body,
                                     "copy": fast.group(1) if fast else None}
         self.next_leader = {a: b for a, b in zip(self.leaders, self.leaders[1:])}
         # bwend_K -> the leader that follows block K's main path.
@@ -122,6 +131,82 @@ class Native:
         self.stop_leaders = set(stop_leaders)
 
 
+def normalize_lean_deadline_accesses(text):
+    """Restore lean-deadline accesses to the form replay generation consumes.
+
+    lean_deadlines.py records whether an access left plain RAM, then performs
+    its deadline refund only on that slow path. Replay helpers already reject
+    and roll back non-RAM accesses, so that slow path cannot be committed by a
+    native run. Keep the access PC and suffix, but remove the now-unreachable
+    wrapper before the normal load/store transformation.
+    """
+    if "_ato(&bw_ool, ctx," not in text:
+        return text
+    deadline = (
+        r"    if \(__builtin_expect\(bw_ool, 0\) &&\n"
+        r"        ctx->cycle_deadline_budget > 0 &&\n"
+        r"        \(s64\)\d+u > ctx->cycle_deadline_budget\) \{\n"
+        r"        ctx->pc = 0x[0-9A-F]{8}u;\n"
+        r"        ctx->cycle_observation_suffix = \d+u;\n"
+        r"        ctx->downcount \+= \(s64\)\d+u;\n"
+        r"        cycle_block_prepaid = false;\n"
+        r"        goto bwslow_\d+_\d+;\n"
+        r"    \}\n")
+    if text.count("_ato(&bw_ool, ctx,") != len(re.findall(deadline, text)):
+        raise SystemExit("a lean-deadline access has an unknown form")
+    out = text.replace("    bool bw_ool = false;\n", "")
+    out = re.sub(r"bw_(read|write)(8|16|32|64)_ato\(&bw_ool, ctx, ",
+                 r"bw_\1\2_at(ctx, ", out)
+    out = re.sub(deadline, "", out)
+    if "bw_ool" in out or "_ato(" in out:
+        raise SystemExit("a lean-deadline access has an unknown form")
+    return out
+
+
+def normalize_direct_call_guards(text):
+    """Remove the prepared source's explicit edge argument.
+
+    Replay generation reconstructs each direct-call boundary from the parsed
+    target and return address and checks both with gx_silent(). The prepared
+    translation now passes those same addresses to bw_direct_call_ready(); its
+    older one-argument spelling is the source shape consumed below.
+    """
+    return re.sub(r"bw_direct_call_ready\(ctx, (?:0x[0-9A-F]{8}u|target)\)",
+                  "bw_direct_call_ready(ctx)", text)
+
+
+def normalize_inline_gpr_guards(text):
+    """Restore the inline save/restore body shape consumed by replay.
+
+    The prepared translation now guards these bodies with direct-edge and
+    stack-memory checks. Replay has its own clock test, turns every stack
+    access into a logged RAM-only access, and rolls the run back on failure.
+    """
+    if "bw_inline_gpr_memory_ready" not in text:
+        return text
+    out = re.sub(r"            ctx->pc = 0x[0-9A-F]{8}u;\n"
+                 r"            (/\* bluewake: _savegpr/_restgpr inline)", r"            \1", text)
+    out = re.sub(r"            if \(bw_direct_call_ready\(ctx\) &&\n"
+                 r"                bw_inline_gpr_memory_ready\(ctx, \d+u\)\) \{\n", "", out)
+    out = re.sub(r"                    \(ctx->cycle_budget > 0 && ctx->downcount <= -ctx->cycle_budget\) \|\|\n"
+                 r"                    !bw_direct_call_ready\(ctx\)\)\n",
+                 "                    (ctx->cycle_budget > 0 && ctx->downcount <= -ctx->cycle_budget))\n", out)
+    out = re.sub(r"(                goto label_[0-9A-F]{8};\n"
+                 r"            \}\n)            \}\n"
+                 r"(            ctx->pc = 0x[0-9A-F]{8}u;\n            return;\n)", r"\1\2", out)
+    if "bw_inline_gpr_memory_ready" in out:
+        raise SystemExit("an inline register save has an unknown guarded form")
+    return out
+
+
+def inline_gpr_edges(text):
+    """Return return-address -> call-target edges from guarded inline helpers."""
+    return {int(ret, 16): int(target, 16) for ret, target in re.findall(
+        r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
+        r"            ctx->pc = 0x([0-9A-F]{8})u;\n"
+        r"            /\* bluewake: _savegpr/_restgpr inline", text)}
+
+
 class Gen:
     def __init__(self, root, prefix="gxn_"):
         self.root = root
@@ -140,7 +225,12 @@ class Gen:
     # --- Text transforms --------------------------------------------------
 
     def transform(self, native, chunk, leader, text, from_copy):
-        out = self.inline_gpr(text) if not native.stops else self.inline_gpr_stops(native, chunk, text)
+        gpr_edges = inline_gpr_edges(text)
+        text = normalize_lean_deadline_accesses(text)
+        text = normalize_direct_call_guards(text)
+        text = normalize_inline_gpr_guards(text)
+        out = (self.inline_gpr(native, text, gpr_edges) if not native.stops
+               else self.inline_gpr_stops(native, chunk, text, gpr_edges))
         # Nothing after an unconditional transfer (blr, b, bctr) runs; the
         # copies chain the next block's text after it all the same.
         m = re.search(r"\n    // [0-9A-F]{8}: (?:blr|b +0x[0-9A-F]{8}|bctr)\n    \{\n(?:        [^\n]*\n)*    \}\n", out)
@@ -343,14 +433,22 @@ class Gen:
         native.boundaries.add(target)
         return f"if (!gx_silent(&s, 0x{target:08X}u))\n        return 0;\n    goto B_{target:08X};"
 
-    def inline_gpr(self, text):
+    def inline_gpr(self, native, text, edges):
         # The inline _savegpr_N/_restgpr_N (inline_save_restore_gpr.py): its
         # cycles and accesses when the budget allows them, then the turn's
         # test, and on to the return address; the routine itself (through the
         # chassis) otherwise, which declines here.
         def save_restore(m):
             ret, room, cycles, body = m.group(1), m.group(2), m.group(3), m.group(4)
+            edge = edges.get(int(ret, 16))
+            boundary = ""
+            if edge is not None:
+                native.boundaries |= {edge, int(ret, 16)}
+                boundary = (f"            if (!gx_silent(&s, 0x{edge:08X}u) || "
+                            f"!gx_silent(&s, 0x{ret}u))\n"
+                            "                return 0;\n")
             return (f"            lr = 0x{ret}u;\n"
+                    + boundary +
                     f"            if (!(s.downcount - {room} > -s.budget))\n"
                     f"                return 0; /* the routine itself, through the chassis */\n"
                     f"            s.downcount -= {cycles};\n"
@@ -375,7 +473,7 @@ class Gen:
             r"            ctx->pc = 0x[0-9A-F]{8}u;\n"
             r"            return;\n", save_restore, text)
 
-    def inline_gpr_stops(self, native, chunk, text):
+    def inline_gpr_stops(self, native, chunk, text, edges):
         """The inline _savegpr_N/_restgpr_N for a native that stops (both of
         inline_save_restore_gpr.py's forms): where the translation would run
         the routine itself through the chassis, a stop before the call; where
@@ -405,7 +503,13 @@ class Gen:
                      else "return 0;")
             if after != "return 0;":
                 native.stops_at.add(ret)
-            return (f"            if (!({cond})) {{\n{fail}\n            }}\n"
+            edge = edges.get(ret)
+            boundary = ""
+            if edge is not None:
+                native.boundaries |= {edge, ret}
+                boundary = (f"            if (!gx_silent(&s, 0x{edge:08X}u) || "
+                            f"!gx_silent(&s, 0x{ret:08X}u)) {{\n{fail}\n            }}\n")
+            return (boundary + f"            if (!({cond})) {{\n{fail}\n            }}\n"
                     f"            lr = 0x{ret:08X}u;\n"
                     f"            s.downcount -= {cycles};\n"
                     + body.replace("                ", "            ") +

@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
     const unsigned bench_calls = argc > 3 ? (unsigned)strtoul(argv[3], NULL, 10) : 2000000u;
     HMODULE lib = LoadLibraryA(argv[1]);
     if (lib == NULL) {
-        fprintf(stderr, "cannot load %s (%lu)\n", argv[1], GetLastError());
+        fprintf(stderr, "cannot load %s (%lu)\n", argv[1], (unsigned long)GetLastError());
         return 1;
     }
     StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)(void*)GetProcAddress(lib, STATICRECOMP_GET_MODULE_SYMBOL);
