@@ -1,10 +1,12 @@
 # TECH_PLAN — Native GroundCrossGrpRp reimplementation
 
-Status: Planning only
+Status: Implementation started
 
 Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
 
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
+
+Frozen translated contract: [GroundCrossGrpRp contract](GROUND_CROSS_CONTRACT.md)
 
 Temporary upstream context: [PR #421 candidate and measurement
 plan](https://github.com/chrissotraidis/bluewake/pull/421/changes#diff-dd62d1af6e31824bdcd61d4b21e687cedc87ae9cfcb19111531762f73e3b7bf9) ·
@@ -122,9 +124,15 @@ and Deck bundle preparation may run concurrently within M3 after M2 is frozen.
 - Serial child traversal is required for this change; no claim of safe
   collision parallelism is made.
 - Exact fragment boundaries, call targets, cycle charges, and certification
-  digest remain M0 evidence because generated translated code is not public.
-- The current Windows-only private oracle must gain a Linux module-loading path
-  or an equivalent Linux differential target before Deck qualification.
+  digest are recorded in the contract map without publishing generated game
+  code.
+- `GroundCrossRp` can mutate the ground-check object before a translated
+  execution boundary. The native must not call it speculatively and then
+  decline. M1 therefore tests the early, fully provable paths first; support
+  for hit-producing traversal requires a resumable protocol or a complete
+  native equivalent of its mutating callees.
+- The shared POSIX loader now builds the existing collision oracle against a
+  Linux `.so`; GroundCross-specific Linux and Windows cases remain M1 work.
 - PR #421 owns the parent runtime M1 and supplies provisional candidate evidence.
   Its measurements do not qualify the future implementation.
 

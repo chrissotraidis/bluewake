@@ -24,6 +24,7 @@ build_one() {
 
 build_one native_search_test.c "$ROOT/cmake/composite/native_search.c"
 build_one native_mtxcalc_test.c "$ROOT/cmake/composite/native_mtxcalc.c"
+build_one native_bg_test.c "$ROOT/cmake/composite/native_bg.c"
 build_one native_leaf_test.c "$ROOT/cmake/composite/native_libm.c $ROOT/cmake/composite/native_bgblk.c $ROOT/cmake/composite/native_rot.c $ROOT/cmake/composite/native_calc.c $ROOT/cmake/composite/native_geom.c $ROOT/cmake/composite/native_jas.c"
 
-echo "done. run: $OUT/native_search_test $SO"
+echo "done. run, for example: $OUT/native_bg_test $SO"

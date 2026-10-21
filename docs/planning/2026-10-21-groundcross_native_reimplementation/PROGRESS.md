@@ -1,6 +1,6 @@
 # PROGRESS — Native GroundCrossGrpRp reimplementation
 
-Status: Planned
+Status: In progress
 
 [Requirements](PRD.md) · [Technical plan](TECH_PLAN.md)
 
@@ -14,9 +14,9 @@ milestone; it is not a parallel candidate track.
 
 Architecture: [translated-code dispatch](../../architecture/GameModule.md#translated-code-dispatch).
 
-- [ ] M0-T01: Record every block, cross-chunk edge, call, guest field, register, flag, and cycle/deadline effect for `0x802491F4–0x80249368`. (FR-01)
-- [ ] M0-T02: Record callback and host-observed boundaries plus the exact child traversal order; identify every condition that must decline. (FR-01, FR-02)
-- [ ] M0-T03: Freeze private fixture identities and certification fragments without committing generated code or game data. (FR-03)
+- [x] M0-T01: Record every block, cross-chunk edge, call, guest field, register, flag, and cycle/deadline effect for `0x802491F4–0x80249368`. (FR-01)
+- [x] M0-T02: Record callback and host-observed boundaries plus the exact child traversal order; identify every condition that must decline. (FR-01, FR-02)
+- [x] M0-T03: Freeze private fixture identities and certification fragments without committing generated code or game data. (FR-03)
 
 ### M1: Build correctness tests first (depends: M0)
 
@@ -42,6 +42,14 @@ Architecture: [translated-code dispatch](../../architecture/GameModule.md#transl
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 | --- | --- | --- | --- | --- |
+| M0-T01 | [`GROUND_CROSS_CONTRACT.md`](GROUND_CROSS_CONTRACT.md) | Inspect the private generated fragment and pinned decomp; enumerate blocks, calls, fields and observable CPU/timing effects | Source `2ab8118`; GZLE01 private composite | Contract mapped; routine remains within one DOL chunk and calls virtual `ChkGrpThrough`, translated `GroundCrossRp`, recursion and save/restore helpers |
+| M0-T02 | [`GROUND_CROSS_CONTRACT.md`](GROUND_CROSS_CONTRACT.md) | Trace child/sibling control flow and host/call boundaries; compare with current native decline contract | Same private composite and public direct-call interfaces | Depth-first child order frozen; unsafe speculative translated-call path identified and made an explicit decline/implementation gate |
+| M0-T03 | Contract [fixture identity](GROUND_CROSS_CONTRACT.md#private-fixture-identity) | Canonicalize the routine with `native_entries.py` rules and SHA-256 the private metadata/chunk | Base composite generated from source `2ab8118` | Fixture and canonical fragment hashes recorded; generated source and game data remain untracked |
+
+M1 portability groundwork is now present: the POSIX native-test builder also
+builds `native_bg_test`, so the existing collision oracle can run unchanged
+against a private Linux `.so`. The GroundCross cases and activation proof are
+still open; this plumbing alone does not complete M1-T02 or M1-T03.
 
 PR #421 is the temporary source for candidate selection and the broader Deck
 procedure. No task above is complete merely because that PR contains an older

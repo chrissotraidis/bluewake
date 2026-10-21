@@ -1,6 +1,14 @@
 /* cmake/composite/native_bg.c against the translations it stands in for.
  *
- * Build and run from the worktree root (x64; the Visual Studio environment):
+ * Linux uses the shared POSIX loader shim and the module produced by the
+ * private build:
+ *
+ *   tests/posix/build_native_tests.sh build/linux/BlueWake/gGZLE01_recomp.so
+ *   build/linux-native/native-tests/native_bg_test \
+ *     build/linux/BlueWake/gGZLE01_recomp.so
+ *
+ * Or build and run from the worktree root on Windows (x64; the Visual Studio
+ * environment):
  *
  *   clang -O2 -march=x86-64-v3 -ffp-contract=off -Icmake/composite
  *     -IE:\Github\Wind-Waker-Recomp\ref\recompcore\GXRuntime\include
@@ -298,7 +306,7 @@ static double now_ns(void) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: native_bg_test MODULE.dll [CASES_PER_FUNCTION] [BENCH_CALLS]\n");
+        fprintf(stderr, "usage: native_bg_test MODULE.(so|dll) [CASES_PER_FUNCTION] [BENCH_CALLS]\n");
         return 2;
     }
     _putenv_s("BLUEWAKE_NATIVE_MATH", "0");
@@ -318,7 +326,7 @@ int main(int argc, char** argv) {
             lib, "bluewake_composite_direct_calls");
     int (*filter)(bool) = (int (*)(bool))(void*)GetProcAddress(lib, "bluewake_composite_edge_filter");
     if (get == NULL || guest_cpu == NULL || set_edge == NULL || direct == NULL || filter == NULL) {
-        fprintf(stderr, "not a BlueWake Windows module\n");
+        fprintf(stderr, "not a compatible BlueWake game module\n");
         return 1;
     }
     const StaticRecompModuleDesc* mod = get();
