@@ -1,0 +1,32 @@
+# PROGRESS — Clang version evaluation
+
+Status: Planned; blocked by
+[#433](https://github.com/chrissotraidis/bluewake/issues/433).
+
+[Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
+[Parent M5](https://github.com/chrissotraidis/bluewake/pull/421)
+
+## Milestones
+
+### M0: Freeze the comparison contract
+
+- [ ] M0-T01: Resolve #433 and pin the source, dependencies, options, `-march`, training recipe and Deck workload.
+- [ ] M0-T02: Add and test the explicit fixed-profile input and complete provenance fields.
+- [ ] M0-T03: Prove one profile is accepted by both final compilers or record the comparison as blocked.
+
+### M1: Produce matched artifacts (depends: M0)
+
+- [ ] M1-T01: Build clean Clang 18 and Clang 22 AppImages in separate output directories.
+- [ ] M1-T02: Confirm provenance matches except for compiler and compiler-derived artifact hashes.
+- [ ] M1-T03: Run Linux tests, AppImage ABI/smoke checks and checkpoint validation for both artifacts.
+
+### M2: Measure and decide (depends: M1)
+
+- [ ] M2-T01: Establish control A/A noise, then run five interleaved Deck A/B pairs.
+- [ ] M2-T02: Capture matched Game Mode summaries and investigate conflicting results when needed.
+- [ ] M2-T03: Retain the measured winner beyond noise or record an inconclusive/rejected result without changing the default.
+
+## Evidence ledger
+
+| Task | Commit / artifact | Command / method | Environment / input | Result |
+|---|---|---|---|---|
