@@ -103,14 +103,6 @@ development mode may diagnose hook overhead, but must not become a second
 shipping behavior. Raw private artifacts stay off-repository; record hashes,
 redacted commands, aggregate metrics, and pass/fail results only.
 
-## Impact register
-
-| ID | Requirement | Baseline | Expected impact / target | Measurement | Risk | Owner |
-| --- | --- | --- | --- | --- | --- | --- |
-| IMP-01 | FR-01, FR-02 | Translation is the only path | Exact accepted behavior and mutation-free fallback | Differential CPU/RAM oracle | Missed callback, timing, or cross-chunk effect | M0–M2 |
-| IMP-02 | FR-03 | Address unregistered | Certified hook with observable accepted/declined counts | Build log and runtime report | Stale fragment hash or silent fallback | M2 |
-| IMP-03 | FR-04 | PR #421 associates the surrounding chunk with 4.04–4.55% of Game Mode samples | Repeatable Deck improvement beyond current A/A noise; 30 FPS not required | Interleaved A/B plus re-profile | Candidate too small or guard activation too low | M3 |
-
 ## Implementation order
 
 | Milestone | Depends | Parent mapping | Deliverable / gate |

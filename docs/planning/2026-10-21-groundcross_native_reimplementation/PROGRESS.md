@@ -38,14 +38,6 @@ Architecture: [translated-code dispatch](../../architecture/GameModule.md#transl
 - [ ] M3-T03: Complete the collision-heavy gameplay route and record any crash, visual, physics, audio, save, or state difference. (FR-01, FR-04)
 - [ ] M3-T04: Retain the opt-in path only if it is equivalent and faster beyond noise; otherwise reject it or return the discovered fix to M2. (FR-04)
 
-## Impact evidence
-
-| ID | Actual | Outcome | Evidence |
-| --- | --- | --- | --- |
-| IMP-01 | not measured | untested | none |
-| IMP-02 | not measured | untested | none |
-| IMP-03 | not measured | untested | none |
-
 ## Evidence ledger
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
