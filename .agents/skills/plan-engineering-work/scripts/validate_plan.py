@@ -11,7 +11,6 @@ import unicodedata
 from urllib.parse import unquote, urlsplit
 
 FILES = ("PRD.md", "TECH_PLAN.md", "PROGRESS.md")
-FR = re.compile(r"\bFR-\d+\b")
 MILESTONE = re.compile(r"^### (M\d+): (.*)$")
 TASK = re.compile(r"^- \[([ xX!])\] (M\d+-T\d+): (.+)$")
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^\s)]+)\)")
@@ -128,21 +127,7 @@ def validate(directory: Path) -> tuple[list[str], list[str]]:
     if len(docs) != len(FILES):
         return errors, warnings
 
-    definitions = re.findall(r"^#{2,4}\s+(FR-\d+)\b", plain["PRD.md"], re.M)
-    requirements = set(definitions)
-    if not requirements:
-        errors.append("PRD.md: no FR requirement headings")
-    for item in duplicates(definitions):
-        errors.append(f"PRD.md: duplicate {item}")
-    for name in ("TECH_PLAN.md", "PROGRESS.md"):
-        refs = set(FR.findall(plain[name]))
-        for item in sorted(refs - requirements):
-            errors.append(f"{name}: undefined requirement {item}")
-        for item in sorted(requirements - refs):
-            errors.append(f"{name}: missing requirement coverage {item}")
-
     headings, tasks, dependencies = {}, {}, {}
-    task_requirements = set()
     current = None
     for line in plain["PROGRESS.md"].splitlines():
         match = MILESTONE.match(line)
@@ -167,16 +152,10 @@ def validate(directory: Path) -> tuple[list[str], list[str]]:
         owner = task_id.split("-")[0]
         if current != owner:
             errors.append(f"PROGRESS.md: {task_id} outside owning milestone")
-        refs = set(FR.findall(body))
-        if not refs:
-            errors.append(f"PROGRESS.md: {task_id} has no FR reference")
-        task_requirements |= refs
         tasks[task_id] = (owner, state, body)
 
     if not headings or not tasks:
         errors.append("PROGRESS.md: missing milestones/tasks")
-    for item in sorted(requirements - task_requirements):
-        errors.append(f"PROGRESS.md: no task implements {item}")
     for owner in headings:
         count = sum(1 for task in tasks.values() if task[0] == owner)
         if not 3 <= count <= 5:

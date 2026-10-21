@@ -32,7 +32,7 @@ Produce three real, synchronized Markdown artifacts. Default to practical edits,
 
 | Artifact | Owns |
 |---|---|
-| PRD | Problem, scope, FR IDs, measurable outcomes, acceptance, constraints |
+| PRD | Problem, scope, measurable outcomes, acceptance, constraints |
 | TECH_PLAN | Inspected facts, file/symbol changes, contracts, examples, flow, tests, implementation order |
 | PROGRESS | Stable milestone/task IDs, matching dependencies, actual state, measured results/evidence |
 
@@ -40,7 +40,7 @@ Produce three real, synchronized Markdown artifacts. Default to practical edits,
 - Make snippets match actual surrounding code and conventions; use small before/after or patch examples. Avoid boilerplate skeletons unrelated to the change.
 - For code-change plans, include at least one short, source-grounded code/diff snippet showing the central edit or contract. If source is unavailable, record that gap instead of inventing code. Do not expand a plan into a full implementation.
 - Use Mermaid for useful branching, ownership or event order; keep each diagram focused. Explain distinctions outside it. Do not put fragile hyperlinks inside diagrams.
-- Link requirement → implementation surface → task → acceptance/evidence. Every FR must have implementation tasks.
+- Link milestone → implementation surface → task → acceptance/evidence.
 
 ## 4. Link architecture where it matters
 
@@ -75,7 +75,7 @@ Produce three real, synchronized Markdown artifacts. Default to practical edits,
 ## 7. Reconcile, validate, deliver
 
 1. Reconcile contradictions/clarifications into PRD; move implementation detail into TECH_PLAN without deleting acceptance.
-2. Match TECH_PLAN implementation-order dependencies to PROGRESS headings. Keep requirements and tasks traceable.
+2. Match TECH_PLAN implementation-order dependencies to PROGRESS headings. Keep milestones and tasks traceable.
    Confirm motivation/ambiguities are resolved and independent work is grouped into parallel streams with explicit integration gates.
 3. Run `python3 <skill-dir>/scripts/validate_plan.py <planning-dir>`.
 4. Inspect relative links/anchors, snippets and cited source manually. The validator cannot verify remote sources, semantic truth or real execution.

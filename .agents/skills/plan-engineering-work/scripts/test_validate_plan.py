@@ -17,14 +17,11 @@ SPEC.loader.exec_module(VALIDATOR)
 
 PRD = """# PRD — Evidence fixture
 
-## Requirements
-### FR-01 — Preserve evidence
+## Outcomes
 - Completed work has concrete evidence.
 """
 
 TECH_PLAN = """# TECH_PLAN — Evidence fixture
-
-FR-01
 
 ## Implementation order
 | Milestone | Depends | Can run with | Deliverable / integration gate |
@@ -36,13 +33,11 @@ FR-01
 def progress(task: str, evidence_row: str = "") -> str:
     return f"""# PROGRESS — Evidence fixture
 
-FR-01
-
 ## Milestones
 ### M0: Evidence validation
 {task}
-- [ ] M0-T02: Keep open task valid (FR-01)
-- [ ] M0-T03: Keep another open task valid (FR-01)
+- [ ] M0-T02: Keep open task valid
+- [ ] M0-T03: Keep another open task valid
 
 ## Evidence ledger
 | Task | Commit / artifact | Command / method | Environment / input | Result |
@@ -62,12 +57,12 @@ class EvidenceValidationTest(unittest.TestCase):
             return errors
 
     def test_completed_task_without_evidence_fails(self) -> None:
-        errors = self.validate(progress("- [x] M0-T01: Complete task (FR-01)"))
+        errors = self.validate(progress("- [x] M0-T01: Complete task"))
         self.assertIn("M0-T01: completed without evidence", "\n".join(errors))
 
     def test_completed_task_with_empty_row_fails(self) -> None:
         errors = self.validate(progress(
-            "- [x] M0-T01: Complete task (FR-01)", "| M0-T01 | | | | |"))
+            "- [x] M0-T01: Complete task", "| M0-T01 | | | | |"))
         diagnostic = "\n".join(errors)
         self.assertIn("M0-T01: evidence row missing", diagnostic)
         self.assertIn("commit / artifact", diagnostic)
@@ -76,35 +71,35 @@ class EvidenceValidationTest(unittest.TestCase):
 
     def test_completed_task_with_partial_row_fails(self) -> None:
         errors = self.validate(progress(
-            "- [x] M0-T01: Complete task (FR-01)",
+            "- [x] M0-T01: Complete task",
             "| M0-T01 | commit abc123 | | local | |"))
         self.assertIn(
             "M0-T01: evidence row missing command / method, result", errors)
 
     def test_completed_task_with_valid_row_passes(self) -> None:
         errors = self.validate(progress(
-            "- [x] M0-T01: Complete task (FR-01)",
+            "- [x] M0-T01: Complete task",
             "| M0-T01 | commit abc123 | python3 test.py | local | passed |"))
         self.assertEqual([], errors)
 
     def test_open_task_without_evidence_passes(self) -> None:
-        errors = self.validate(progress("- [ ] M0-T01: Open task (FR-01)"))
+        errors = self.validate(progress("- [ ] M0-T01: Open task"))
         self.assertEqual([], errors)
 
     def test_empty_inline_evidence_fails(self) -> None:
         errors = self.validate(progress(
-            "- [x] M0-T01: Complete task (FR-01); evidence:"))
+            "- [x] M0-T01: Complete task; evidence:"))
         self.assertIn("M0-T01: inline evidence missing", "\n".join(errors))
 
     def test_partial_inline_evidence_fails(self) -> None:
         errors = self.validate(progress(
-            "- [x] M0-T01: Complete task (FR-01); "
+            "- [x] M0-T01: Complete task; "
             "evidence: artifact=commit abc123; result=passed"))
         self.assertIn("M0-T01: inline evidence missing command / method", errors)
 
     def test_valid_inline_evidence_passes(self) -> None:
         errors = self.validate(progress(
-            "- [x] M0-T01: Complete task (FR-01); "
+            "- [x] M0-T01: Complete task; "
             "evidence: artifact=commit abc123; method=python3 test.py; result=passed"))
         self.assertEqual([], errors)
 

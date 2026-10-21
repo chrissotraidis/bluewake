@@ -16,11 +16,9 @@ Scope: <included>; excluded: <explicit limits>
 ## Motivation
 <User-confirmed problem, affected users, desired outcome and why now>
 
-## Requirements
-### FR-01 — <Outcome>
-Architecture: [affected entity/flow](<verified reference>).
-- <Observable acceptance>
-- <Failure/unavailable-evidence behavior>
+## Outcomes
+- <Observable result and acceptance>
+- <Failure or unavailable-evidence behavior>
 
 ## Success and constraints
 | Metric | Baseline | Target | Validation |
@@ -45,9 +43,9 @@ Source: <revision>
 - <Verified behavior and source link; distinguish measurements from hypotheses>
 
 ## Changes
-| Status | File / symbol | Practical edit | Requirement | Architecture |
+| Status | File / symbol | Practical edit | Milestone | Architecture |
 |---|---|---|---|---|
-| Modify | <real path/symbol> | <specific change> | FR-01 | <verified flow> |
+| Modify | <real path/symbol> | <specific change> | M1 | <verified flow> |
 
 ## Contracts and examples
 <Small before/after snippets; explicit proposed APIs>
@@ -86,31 +84,31 @@ use qualitative acceptance when no defensible numerical target exists.
 # PROGRESS — <Feature>
 
 Status: Planned
-[Requirements](PRD.md) · [Technical plan](TECH_PLAN.md)
+[Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
 ### M0: <Name>
 Architecture: [affected flow](<verified reference>).
-- [ ] M0-T01: <Concrete action> (FR-01)
-- [ ] M0-T02: <Meaningful verification> (FR-01)
-- [ ] M0-T03: <Evidence/report action> (FR-01)
+- [ ] M0-T01: <Concrete action>
+- [ ] M0-T02: <Meaningful verification>
+- [ ] M0-T03: <Evidence/report action>
 
 ### M1: <Name> (depends: M0)
 Parallel with M2; owns <files>; integrates at M3 under <shared contract>.
-- [ ] M1-T01: <Action> (FR-01)
-- [ ] M1-T02: <Action> (FR-01)
-- [ ] M1-T03: <Verification> (FR-01)
+- [ ] M1-T01: <Action>
+- [ ] M1-T02: <Action>
+- [ ] M1-T03: <Verification>
 
 ### M2: <Independent stream> (depends: M0)
 Parallel with M1; owns <different files>; integrates at M3.
-- [ ] M2-T01: <Action> (FR-01)
-- [ ] M2-T02: <Action> (FR-01)
-- [ ] M2-T03: <Verification> (FR-01)
+- [ ] M2-T01: <Action>
+- [ ] M2-T02: <Action>
+- [ ] M2-T03: <Verification>
 
 ### M3: <Integration> (depends: M1, M2)
-- [ ] M3-T01: <Integrate streams> (FR-01)
-- [ ] M3-T02: <Run combined acceptance> (FR-01)
-- [ ] M3-T03: <Record evidence> (FR-01)
+- [ ] M3-T01: <Integrate streams>
+- [ ] M3-T02: <Run combined acceptance>
+- [ ] M3-T03: <Record evidence>
 
 ## Evidence ledger
 | Task | Commit / artifact | Command / method | Environment / input | Result |
@@ -126,7 +124,7 @@ Task states: `[ ]` open, `[x]` completed with evidence, `[!]` blocked with reaso
 | Source/API exists | Inspect exact code/revision |
 | Proposed snippet | Label; do not claim compiled/executed |
 | Architecture link | Read target heading and confirm relevance |
-| Complete acceptance | Compare all original requirements after edits |
+| Complete acceptance | Compare all requested outcomes after edits |
 | Actual impact | Require recorded method/input/result |
 | Motivation / ambiguity | Ask; preserve user answers and unresolved questions |
 | Concurrent implementation | Match dependencies, file ownership, shared contracts and integration gates across plan/tracker |
