@@ -64,6 +64,9 @@ current evidence does not complete M1-T02 or M1-T03.
   collision natives also completed 60,000 cases each with zero mismatches.
 - Hook certification reported the expected `0ac24f...a7d` fragment and the
   full `--native-entries` module built with Clang 18 in the Linux CI container.
+  The builders retain the established native-entry pass before behavior timing,
+  then certify only GroundCross after that final rewrite; the focused ordering
+  regression also proves the later pass preserves earlier hooks.
   The replay generator now accepts the current always-prepaid, lean-deadline,
   address-aware direct-call and guarded inline-GPR source forms, with focused
   source-shape regressions.

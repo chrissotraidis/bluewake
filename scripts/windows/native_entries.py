@@ -8,6 +8,7 @@ search by name) is hooked the same way, by the entries added below the
 second set's.
 
   native_entries.py COMPOSITE_SRC
+  native_entries.py --only ENTRY COMPOSITE_SRC
   native_entries.py --hashes COMPOSITE_SRC    (print each entry's body hash)
 
 Each hook goes right after the function's entry label, so every way into
@@ -32,9 +33,9 @@ addresses the host watches (direct_calls.watched_addresses), is not hooked,
 and the step says so; a rerun after a change removes a hook it no longer
 certifies. The change is repeatable and keeps LF line ends.
 
-Run it after lean_memory.py and prepare_native_j3d.py, and before
-scripts/mods/prepare_simulation_60hz.py and prepare_native_math.py, whose
-manifests hash the chunks as they end up.
+Run the established entries after lean_memory.py. An entry explicitly
+certified against a later source shape can be added with --only after that
+shaping pass; this preserves hooks certified at the earlier boundary.
 """
 import hashlib
 import re
@@ -367,9 +368,10 @@ def entry_hash(texts, entry):  # noqa: F811 (the seventh set's: the extracted lo
 # --- end of the seventh set's entries ---
 
 
-def certify(root, watched, report=False):
+def certify(root, watched, report=False, entries=None):
     certified = {}
-    for entry, (name, _, _, expected) in ENTRIES.items():
+    selected = ENTRIES if entries is None else {entry: ENTRIES[entry] for entry in entries}
+    for entry, (name, _, _, expected) in selected.items():
         sets = translations(root, entry)
         if sets is None:
             print(f"{name}: no translation found; not hooked")
@@ -383,7 +385,8 @@ def certify(root, watched, report=False):
                 print(f"{entry:08X} {name}: {digest} ({where})")
             if digest != expected:
                 if not report:
-                    print(f"{name}: not the certified translation ({where}); not hooked")
+                    print(f"{name}: not the certified translation ({where}); "
+                          f"got {digest}, expected {expected}; not hooked")
                 ok = False
             hit = sorted(a for a in named if a in watched or (a & ~0x40000000) in watched)
             if hit:
@@ -394,10 +397,11 @@ def certify(root, watched, report=False):
     return certified
 
 
-def transform(text, chunk, certified):
+def transform(text, chunk, certified, entries=None):
     """Hooks for the certified entries whose first fragment is this chunk;
     stale hooks (entries no longer certified) removed."""
-    for entry, (_, _, fragments, _) in ENTRIES.items():
+    selected = ENTRIES if entries is None else {entry: ENTRIES[entry] for entry in entries}
+    for entry, (_, _, fragments, _) in selected.items():
         if fragments[0][0] == chunk and entry not in certified:
             text = text.replace(hook_text(entry, chunk), "")
     done = 0
@@ -437,20 +441,33 @@ def main():
     report = args[:1] == ["--hashes"]
     if report:
         args = args[1:]
+    only = None
+    if args[:1] == ["--only"]:
+        if len(args) < 2:
+            sys.exit(__doc__)
+        try:
+            entry = int(args[1], 16)
+        except ValueError:
+            sys.exit(f"invalid entry address: {args[1]}")
+        if entry not in ENTRIES:
+            sys.exit(f"unknown native entry: {entry:08X}")
+        only = {entry}
+        args = args[2:]
     if len(args) != 1:
         sys.exit(__doc__)
     root = Path(args[0])
     watched = watched_addresses()
-    certified = certify(root, watched, report)
+    certified = certify(root, watched, report, only)
     if report:
         return
-    chunks = sorted({fragments[0][0] for _, _, fragments, _ in ENTRIES.values()})
+    selected = ENTRIES if only is None else {entry: ENTRIES[entry] for entry in only}
+    chunks = sorted({fragments[0][0] for _, _, fragments, _ in selected.values()})
     hooks = files = 0
     for chunk in chunks:
         for path in chunk_files(root, chunk):
             with open(path, encoding="utf-8", newline="") as file:
                 original = file.read()
-            converted, count = transform(original, chunk, certified)
+            converted, count = transform(original, chunk, certified, only)
             if converted != original:
                 temporary = path.with_suffix(".c.tmp")
                 with open(temporary, "w", encoding="utf-8", newline="") as file:
@@ -458,7 +475,7 @@ def main():
                 temporary.replace(path)
                 files += 1
             hooks += count
-    print(f"native entries: {len(certified)}/{len(ENTRIES)} certified, {hooks} new hooks in {files} chunks")
+    print(f"native entries: {len(certified)}/{len(selected)} certified, {hooks} new hooks in {files} chunks")
 
 
 if __name__ == "__main__":

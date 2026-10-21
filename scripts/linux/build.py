@@ -779,7 +779,7 @@ int main(void) {{
             self.run("return-ranges", [sys.executable, ROOT / "scripts/windows/return_ranges.py",
                                         o / "composite-src"])
         # dcbf, dcbst, dcbi and icbi as the pc store the host's fallback makes
-        # (cache_ops.py; off by default). After return-ranges, before native-entries.
+        # (cache_ops.py; off by default). After return-ranges.
         if getattr(self.args, "cache_ops", False):
             self.run("cache-ops", [sys.executable, ROOT / "scripts/windows/cache_ops.py",
                                     o / "composite-src"])
@@ -789,10 +789,15 @@ int main(void) {{
         # Game-behaviour timing (behaviour_timing.py; on by default, --no-behaviour-timing turns it off):
         # every block runs its prepaid copy, so a device event lands at the next
         # block's start instead of on its exact instruction, and the turn's budget is
-        # checked where control can loop (and at calls). Last, on the final source.
+        # checked where control can loop (and at calls).
         if getattr(self.args, "behaviour_timing", False):
             self.run("behaviour-timing", [sys.executable, ROOT / "scripts/windows/behaviour_timing.py",
                                            o / "composite-src", "--loop-checks"])
+        # GroundCross is certified against the behaviour-timing source shape.
+        # Add only that hook here, preserving entries certified above.
+        if self.args.native_entries:
+            self.run("native-groundcross", [sys.executable, ROOT / "scripts/windows/native_entries.py",
+                                             "--only", "802491F4", o / "composite-src"])
         digest = tree_digest(o / "composite-src")
         receipt = {"enabled": self.args.prepared_blocks,
                    "fixed_cpu": self.args.fixed_cpu,

@@ -22,8 +22,9 @@ milestone.
 
 ## Inspected facts
 
-- [`native_bg.c`](../../../cmake/composite/native_bg.c) currently implements
-  only `ChkSameActorPid` and `ChkGrpThrough`. `0x802491F4` is not registered.
+- [`native_bg.c`](../../../cmake/composite/native_bg.c) now registers a guarded
+  early-return implementation for `0x802491F4`; later bounds, hit and recursive
+  paths still decline to the translation unchanged.
 - [`native_bg.h`](../../../cmake/composite/native_bg.h) defines the strict
   contract: success reproduces translated registers, flags, cycles, and bytes;
   decline changes nothing.
@@ -52,7 +53,7 @@ milestone.
 | --- | --- | --- | --- |
 | Modify | [`native_bg.h`](../../../cmake/composite/native_bg.h) | Name `BLUEWAKE_BG_GROUND_CROSS_GRP_RP` and retain the current success/decline contract | FR-01, FR-02 |
 | Modify | [`native_bg.c`](../../../cmake/composite/native_bg.c) | Add guarded serial traversal, deferred commit, address dispatch, and accepted/declined counters | FR-01–FR-03 |
-| Modify | [`native_entries.py`](../../../scripts/windows/native_entries.py) | Register every replaced fragment and its certified hash | FR-03 |
+| Modify | [`native_entries.py`](../../../scripts/windows/native_entries.py) | Register the replaced fragment and certify GroundCross after behavior-timing without moving or removing entries certified earlier | FR-03 |
 | Modify | [`native_bg_test.c`](../../../tests/native_bg_test.c) | Add tree, callback, timing, alias, boundary, fallback, and activation cases; make the private oracle usable with Linux `.so` and Windows `.dll` modules | FR-01–FR-04 |
 | Proposed | `tests/native_bg_guard_test.c` and host CMake registrations | Add disc-free guard/decline coverage to ordinary Linux and Windows CTest | FR-02, FR-04 |
 | Modify | This planning trio | Record exact commands, artifact identities, activation, correctness, and Deck comparison | FR-04 |
@@ -96,7 +97,7 @@ existing native leaves only after their combined call effects are proven equal.
 | Layer | Cases / command | Required evidence | Failure / skip |
 | --- | --- | --- | --- |
 | Public guard CTest | Valid synthetic tree plus bad pointers, alias overlap, exception, journal, deadline, watched boundary, and unsupported callback | Accepted cases execute; every declined CPU/RAM image is unchanged on Linux and Windows | Any mutation or missing platform run fails |
-| Hook contract | Run `native_entries.py` against the mapped private composite and a deliberately changed copy | Exact fragments certify and hook; changed or watched input refuses the hook; global opt-out uses translation | Missing hook, stale hash acceptance, or fallback-only execution fails |
+| Hook contract | Run the normal native-entry pass, behavior timing, then `native_entries.py --only 802491F4` against the mapped private composite and a deliberately changed copy | Exact GroundCross fragment certifies after its final source rewrite; earlier hooks remain; changed or watched input refuses the hook; global opt-out uses translation | Missing hook, removed earlier hook, stale hash acceptance, or fallback-only execution fails |
 | Private differential oracle | Shallow/deep trees, empty/filtered groups, hit/no-hit, callback mutation, recursion, deadlines, interruptions, aliases, invalid addresses | Native and translated CPU plus writable RAM match byte-for-byte; positive native activation | No private module is **inconclusive**, never a pass |
 | Existing suites | Repository audit, host CTest, existing native tests, Linux and Windows CI | No regression in existing contracts | Required failure blocks integration |
 | Steam Deck A/B | Same source/PGO/settings/state; at least three A/A runs, then five interleaved native-off/native-on pairs and a new profile | Matching checkpoints, accepted calls, completed gameplay route, median gain beyond A/A noise | Wrong scene, thermal drift, absent activation, mismatch, or gain within noise is inconclusive/fail |
