@@ -35,7 +35,7 @@ Architecture: [translated-code dispatch](../../architecture/GameModule.md#transl
 
 - [ ] M3-T01: Build matched native-off/native-on AppImages from one current revision and record provenance, hashes, settings, and A/A noise. (FR-04)
 - [x] M3-T02: Run five interleaved target-scene pairs, confirm accepted calls, compare checkpoints, and re-profile the game thread. (FR-03, FR-04)
-- [ ] M3-T03: Complete the collision-heavy gameplay route and record any crash, visual, physics, audio, save, or state difference. (FR-01, FR-04)
+- [x] M3-T03: Complete the collision-heavy gameplay route and record any crash, visual, physics, audio, save, or state difference. (FR-01, FR-04)
 - [x] M3-T04: Retain the opt-in path only if it is equivalent and faster beyond noise; otherwise reject it or return the discovered fix to M2. (FR-04)
 
 ## Evidence ledger
@@ -47,6 +47,7 @@ Architecture: [translated-code dispatch](../../architecture/GameModule.md#transl
 | M0-T03 | Contract [fixture identity](GROUND_CROSS_CONTRACT.md#private-fixture-identity) | Canonicalize the routine with `native_entries.py` rules and SHA-256 the private metadata/chunk | Base composite generated from source `2ab8118` | Fixture and canonical fragment hashes recorded; generated source and game data remain untracked |
 | M3-T02 | Private Deck evidence bundle; AppImage SHA-256 `6f903d88...bee8d31` | Five interleaved control/candidate pairs in both headless and rendered modes, six checkpoint comparisons per run, then matched 30-second `perf` captures | Steam Deck LCD, Game Mode, same AppImage and `quick-23874.bwstate`; control used `BLUEWAKE_NATIVE_GROUND_CROSS=0` | All checkpoints matched. Rendered median was 25.4759 FPS control and 25.5724 candidate (+0.38%); headless median was 27.4352 and 27.5667 (+0.48%). Profiles had no lost samples and remained game-thread-bound. |
 | M3-T04 | Same Deck evidence and native summary counters | Compare paired distributions against observed run-to-run noise and inspect candidate activation/fallback ratio | Candidate rendered profile: 1,139,546 native executions, 2,677,657 declines and 183,003 cross-chunk cases | Return to M2: correctness is positive, but the measured gain is within noise and about 70% of attempts decline to translation after entering the candidate path. Do not retain this increment as a performance optimization. |
+| M3-T03 | Private Game Mode session log | Player completed the collision-heavy island route with the candidate through the Steam shortcut, then exited normally | Steam Deck LCD, same candidate AppImage; 3 minutes in `sea/44` and `sea_T/44` | No player-reported visual, physics, audio, input, save-state or crash issue. `ground-cross-return=220,972`; native `6,175,937/13,206,369` accepted/declined; normal renderer teardown warnings only. |
 
 The POSIX native-test builder now builds `native_bg_test`, so the collision
 oracle and its GroundCross cases run against a private Linux `.so`. Recursive,
