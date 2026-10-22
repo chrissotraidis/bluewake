@@ -180,9 +180,16 @@ phases. Each one ends in a pull request, a row in "Results" above, and the row m
 
 ### Phase 1: the benchmark tour (`scripts/bench_tour.py`)
 
-**Written, not yet run on a disc** (jslay88's #360, merged October 17): `scripts/bench_tour.py` does what this
-section describes, and `tests/test_bench_tour.py` checks it with made-up log lines. The first run on a real build is
-due with the next release candidate; then replace this line with the stops that ran and their numbers.
+**Run on a real build** (jslay88's #360, merged October 17). The first run is jkoehler11's, October 22, on an
+own-disc build of `main` at `7382708`, Linux (Ryzen 9 5900X), headless and unpaced: all five stops load, no `[fps-dip]`
+cause at any of them, busy 99% throughout (the game thread is the limit, as expected). Game frames a second, two runs
+from one state: Outset 64.64 / 64.93, Windfall 64.97 / 65.46, Dragon Roost Cavern 88.44 / 89.32, Forest Haven
+56.88 / 58.08, the sea by the Fortress 75.09 / 76.15, within 2.1% at every stop, checkpoints identical.
+
+Two runs only agree when they load the same guest state, and the card route the tour plays to make that state is not
+reproducible: the same build booted twice from the same card differs in CPU and MEM1 from retrace 300 (boot milestones
+identical), and its stop speeds moved by up to 7.5% with them. `--setup-state FILE` keeps the state one run made and
+loads it in the next, which is what the two-run check needs; keep the file out of the repository.
 
 *Goal:* one command that measures a build's speed in several places and proves two builds behave the same. Every
 later phase uses it.
