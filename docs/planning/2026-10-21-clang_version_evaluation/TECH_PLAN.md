@@ -15,48 +15,42 @@ at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 - [`--clang22`](../../../scripts/linux/build.py) prepends LLVM 22 only inside a
   `--ci-container` build. The wrapper forwards the original arguments.
 - [`training_fingerprint`](../../../scripts/linux/build.py) includes the full
-  compiler version and `--march`. Changing compiler therefore triggers a new
-  profile instead of reusing an identical PGO input.
+  compiler version and `--march`. Changing compiler therefore trains a distinct
+  profile, which is part of that compiler's build recipe.
 - [`BuilderProvenance.json`](../../../scripts/linux/build.py) records compiler,
   profile hash, module hash and CPU target, but not a complete effective command.
 - #446 fixes the current Dawn/Abseil build path, but remains unmerged; #433
   therefore remains the upstream qualification blocker.
-- Private #446 Deck smoke/ABI checks passed for both AppImages. Three headless
-  fixed-state runs were deterministic per compiler, but their compiler-specific
-  trained PGO profiles make the observed 33.84 (Clang 18) versus 32.42 (Clang
-  22) game FPS unsuitable for selecting a default.
+- Private #446 Deck smoke/ABI checks passed for both AppImages. Recipe selection
+  includes compiler-trained PGO; rendered and Game Mode gates remain.
 
 ## Proposed changes
 
 | Status | File / symbol | Practical edit | Milestone |
 |---|---|---|---|
-| Modify | `scripts/linux/build.py` profile selection | Add an explicit private `.profdata` input for matched experiments; validate it, hash it, and never copy it into Git | M0 |
-| Modify | `scripts/linux/build.py` provenance | Record compiler executable/version, effective CPU/compiler flags and supplied profile hash | M0 |
-| Modify | `tests/test_linux_ci_container.py` | Cover default/opt-in compiler selection, fixed-profile forwarding and provenance | M0 |
+| Existing | `scripts/linux/build.py` profile selection | Retain compiler-specific training and record its profile hash as recipe provenance | M0 |
+| Modify | `scripts/linux/build.py` provenance | Record compiler executable/version, effective CPU/compiler flags and generated profile hash | M0 |
+| Modify | `tests/test_linux_ci_container.py` | Cover default/opt-in compiler selection and provenance | M0 |
 | Conditional | Dockerfile, docs and toolchain tests | Make Clang 22 the default only after M2 qualifies it; keep explicit Clang 18 selection for CI unless separately approved | M2 |
 
-The central proposed interface is deliberately opt-in:
+The existing interfaces select the recipes:
 
 ```text
-python3 scripts/linux/build.py GZLE01.iso --out build/clang18 \
-  --ci-container --pgo-profile /private/control.profdata --appimage
+python3 scripts/linux/build.py GZLE01.iso --out build/clang18 --ci-container --appimage
 
-python3 scripts/linux/build.py GZLE01.iso --out build/clang22 \
-  --ci-container --clang22 \
-  --pgo-profile /private/control.profdata --appimage
+python3 scripts/linux/build.py GZLE01.iso --out build/clang22 --ci-container --clang22 --appimage
 ```
 
-The builder must reject a missing or unreadable profile and an incompatible
-profile reported by `llvm-profdata`/Clang. If one indexed profile cannot safely
-feed both final compilers, record M0 as blocked: two separately trained profiles
-would test whole toolchains, not isolate compiler code generation.
+Each recipe records its generated profile hash and training recipe; private
+profiles never enter Git. The goal is the fastest correct recipe, not isolated
+compiler-code-generation attribution.
 
 ## Comparison flow
 
 ```mermaid
 flowchart LR
     Source["Frozen source,<br/>dependencies and options"]
-    Profile["One immutable<br/>PGO profile"]
+    Profile["Compiler-specific<br/>trained PGO profile"]
     C18["Clang 18<br/>AppImage"]
     C22["Clang 22<br/>AppImage"]
     Checks["Tests, ABI,<br/>checkpoints"]
@@ -76,8 +70,8 @@ flowchart LR
 
 | Layer | Method | Required evidence | Failure / skip |
 |---|---|---|---|
-| Source contract | `python3 tests/test_linux_ci_container.py` | Compiler selection, CLI rejection, profile forwarding and provenance pass | Fix before building |
-| Build | Two clean container builds after #433 | Same commit, dependency lock, flags, options and PGO SHA; compiler alone differs | Comparison invalid |
+| Source contract | `python3 tests/test_linux_ci_container.py` | Compiler selection and recipe provenance pass | Fix before building |
+| Build | Two clean container builds after #433 | Same commit, dependency lock, flags and options; generated PGO SHA recorded per recipe | Comparison invalid |
 | Linux/AppImage | Existing Linux CTest plus ABI and launch smoke paths | Both variants pass; no private artifact uploaded | Candidate rejected |
 | A/A control | At least three repeated control runs | Checkpoints match and noise band is recorded | A/B deferred |
 | CPU profiles | Capture headless, rendered, and Game Mode profiles after A/A is stable | Flat and per-thread evidence used only to explain a result | Missing profile leaves selection incomplete |
@@ -93,8 +87,8 @@ is needed to explain a result. Follow the comparison rules in the
 
 | Milestone | Depends | Can run with | Deliverable / gate |
 |---|---|---|---|
-| M0 | #433 resolution | Parent runtime track | Frozen comparison contract and verified fixed-profile input |
-| M1 | M0 | Parent runtime track | Two validated artifacts whose recorded inputs differ only by compiler |
+| M0 | #433 resolution | Parent runtime track | Frozen recipe contract and complete provenance |
+| M1 | M0 | Parent runtime track | Two validated artifacts with compiler-specific PGO provenance |
 | M2 | M1 | Parent runtime track | Deck comparison and explicit retain/reject/inconclusive decision |
 
 Critical path: #433 → M0 → M1 → M2. Building the variants may run in
@@ -103,21 +97,22 @@ parallel, so they share the same hardware conditions.
 
 ## Preliminary #446 build-path evidence
 
-This evidence verifies the candidate build path before #446 merges; it does
-not complete M0, M1, or M2. It is one saved-state, headless A/A measurement,
-not the parent procedure's rendered, Game Mode, profiling, or five-pair grid.
-Both private AppImages used the same source,
-dependency revisions, `x86-64-v3` target and options, but the builder trained
-different profiles because `training_fingerprint` includes the compiler.
+This evidence verifies the candidate build path before #446 merges. The initial
+one-state observation does not complete M2; the later full-tour headless grid
+does. Both private AppImages used the same source, dependency revisions,
+`x86-64-v3` target and options, with compiler-specific trained profiles.
 
 | Build | Private AppImage SHA-256 | Deck headless fixed-state runs | Checkpoints |
 |---|---|---|---|
 | Clang 18 | `ad467905…c243a76b5e` | 33.75, 33.86, 33.91 FPS (mean 33.84) | match within A/A |
 | Clang 22 | `97e9291d…e7c73cf25` | 32.45, 32.41, 32.40 FPS (mean 32.42) | match within A/A and across builds |
 
-The 4.2% mean difference is directionally useful only. It may include PGO
-training differences, so it is not evidence that Clang 18 code generation is
-faster. Raw states, logs, modules and AppImages remain private.
+The early one-state 4.2% observation is superseded by the full-tour grid below.
+Raw states, logs, modules and AppImages remain private.
+
+| Full-tour headless grid | Scope | Result |
+|---|---|---|
+| Five warmed A/B/B/A interleaved pairs | 10 samples per recipe; five default scenes; fixed setup state; 31 checkpoints each | all checkpoints match; Clang 18 recipe median is 3.2% faster overall (scene range 2.0–4.3%) |
 
 ## References
 
