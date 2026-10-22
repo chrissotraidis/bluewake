@@ -1,7 +1,8 @@
 # PROGRESS — Steam Deck Zen 2 tuning
 
-Status: Planned; a pre-merge #446 baseline builds privately, but M6 still waits
-for the M5 compiler decision, the `--mtune` implementation, and upstream
+Status: Planned; M5's headless evidence currently favors Clang 18, but its
+rendered stage-completion parser and repeated Game Mode gate remain open. M6
+still waits for the M5 decision, the `--mtune` implementation, and upstream
 resolution of [#433](https://github.com/chrissotraidis/bluewake/issues/433).
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
@@ -33,3 +34,4 @@ resolution of [#433](https://github.com/chrissotraidis/bluewake/issues/433).
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
 | M0-T01 (preparation) | #446 `48a5872` private Clang 18/22 AppImages | Container build plus AppImage ABI/extraction smoke | Steam Deck-compatible `x86-64-v3` baseline | Build path works before merge; no retained M5 compiler or shared PGO profile yet |
+| M0-T01 (M5 status) | [PR #437](https://github.com/chrissotraidis/bluewake/pull/437) | Fixed-state Deck recipe comparison | Five-scene headless grid, one preliminary rendered pair, and directional Game Mode samples | Headless favors Clang 18 by 3.2%; M5 has not retained a compiler, so M6 remains blocked. |
