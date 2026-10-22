@@ -1,7 +1,8 @@
 # PRD — Steam Deck Zen 2 tuning
 
 Status: Draft  
-Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`  
+Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
+at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Parent milestone: [PR #421, M6](https://github.com/chrissotraidis/bluewake/pull/421)
 Prerequisite plan: [PR #437](https://github.com/chrissotraidis/bluewake/pull/437)
 
@@ -48,3 +49,7 @@ selects or retains a compiler. It also depends on the Linux
 container blocker [#433](https://github.com/chrissotraidis/bluewake/issues/433).
 Private discs, modules, AppImages, states, and raw performance captures remain
 off the repository.
+
+The #446 baseline demonstrates that both current compiler paths can build and
+launch privately on Deck; it does not implement `--mtune` or choose M5's
+compiler. M6 stays blocked until those two conditions are met.

@@ -1,7 +1,8 @@
 # TECH_PLAN — Steam Deck Zen 2 tuning
 
 Status: Planning only  
-Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
+Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
+at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 
 [Product brief](PRD.md) · [Tracker](PROGRESS.md) ·
 [Parent M6](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -19,6 +20,9 @@ Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
   those values and artifact hashes. Neither currently records `-mtune`.
 - Steam Deck's CPU is Zen 2, but a scheduling hint does not enable a new ISA.
   The experiment must preserve `-march=x86-64-v3` and the current default.
+- #446 provides a private working container baseline for Clang 18 and 22, but
+  it has no `--mtune` interface and M5 has not selected a compiler. It is
+  preparation evidence only, not an M6 control or candidate.
 
 ## Proposed changes
 

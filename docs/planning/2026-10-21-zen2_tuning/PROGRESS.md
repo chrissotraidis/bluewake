@@ -1,7 +1,8 @@
 # PROGRESS — Steam Deck Zen 2 tuning
 
-Status: Planned; waits for the M5 compiler decision and
-[#433](https://github.com/chrissotraidis/bluewake/issues/433).
+Status: Planned; a pre-merge #446 baseline builds privately, but M6 still waits
+for the M5 compiler decision, the `--mtune` implementation, and upstream
+resolution of [#433](https://github.com/chrissotraidis/bluewake/issues/433).
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
 [Parent M6](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -31,3 +32,4 @@ Status: Planned; waits for the M5 compiler decision and
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
+| M0-T01 (preparation) | #446 `48a5872` private Clang 18/22 AppImages | Container build plus AppImage ABI/extraction smoke | Steam Deck-compatible `x86-64-v3` baseline | Build path works before merge; no retained M5 compiler or shared PGO profile yet |
