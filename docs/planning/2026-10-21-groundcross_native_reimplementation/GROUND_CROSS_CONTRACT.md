@@ -1,6 +1,6 @@
 # GroundCrossGrpRp translated contract
 
-Status: Frozen for the inspected `2ab8118` fixture
+Status: Frozen for the inspected `2ab8118` fixture; partial native path rejected for performance
 
 [Requirements](PRD.md) · [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 
@@ -116,6 +116,14 @@ state machine or a complete native equivalent of every mutating callee.
 
 Generated source, the disc and the translated module are intentionally not
 stored in the repository.
+
+## Qualification result
+
+The contract and private oracle establish correctness only for the supported
+early-return paths. The Deck qualification rejected the partial native hook as
+a performance optimization: it covered 28.1% of calls and its accepted path
+was slower than the translated path in direct timing. The remaining traversal
+contract is unchanged; no broader implementation follows from this result.
 
 ## Public references
 

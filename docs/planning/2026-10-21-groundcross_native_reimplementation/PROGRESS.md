@@ -1,6 +1,6 @@
 # PROGRESS — Native GroundCrossGrpRp reimplementation
 
-Status: In progress
+Status: Evaluated — reject this partial hook for performance
 
 [Requirements](PRD.md) · [Technical plan](TECH_PLAN.md)
 
@@ -45,8 +45,8 @@ Architecture: [translated-code dispatch](../../architecture/GameModule.md#transl
 | M0-T01 | [`GROUND_CROSS_CONTRACT.md`](GROUND_CROSS_CONTRACT.md) | Inspect the private generated fragment and pinned decomp; enumerate blocks, calls, fields and observable CPU/timing effects | Source `2ab8118`; GZLE01 private composite | Contract mapped; routine remains within one DOL chunk and calls virtual `ChkGrpThrough`, translated `GroundCrossRp`, recursion and save/restore helpers |
 | M0-T02 | [`GROUND_CROSS_CONTRACT.md`](GROUND_CROSS_CONTRACT.md) | Trace child/sibling control flow and host/call boundaries; compare with current native decline contract | Same private composite and public direct-call interfaces | Depth-first child order frozen; unsafe speculative translated-call path identified and made an explicit decline/implementation gate |
 | M0-T03 | Contract [fixture identity](GROUND_CROSS_CONTRACT.md#private-fixture-identity) | Canonicalize the routine with `native_entries.py` rules and SHA-256 the private metadata/chunk | Base composite generated from source `2ab8118` | Fixture and canonical fragment hashes recorded; generated source and game data remain untracked |
-| M3-T02 | Private Deck evidence bundle; AppImage SHA-256 `6f903d88...bee8d31` | Five interleaved control/candidate pairs in both headless and rendered modes, six checkpoint comparisons per run, then matched 30-second `perf` captures | Steam Deck LCD, Game Mode, same AppImage and `quick-23874.bwstate`; control used `BLUEWAKE_NATIVE_GROUND_CROSS=0` | All checkpoints matched. Rendered median was 25.4759 FPS control and 25.5724 candidate (+0.38%); headless median was 27.4352 and 27.5667 (+0.48%). Profiles had no lost samples and remained game-thread-bound. |
-| M3-T04 | Same Deck evidence and native summary counters | Compare paired distributions against observed run-to-run noise and inspect candidate activation/fallback ratio | Candidate rendered profile: 1,139,546 native executions, 2,677,657 declines and 183,003 cross-chunk cases | Return to M2: correctness is positive, but the measured gain is within noise and about 70% of attempts decline to translation after entering the candidate path. Do not retain this increment as a performance optimization. |
+| M3-T02 | Private Deck evidence bundle; diagnostic AppImage SHA-256 `6b9dbccaf1fe9e6bbd0d765a3cc044b799350cd84c1ab576bf0acaff968c29b2` | Five interleaved control/candidate pairs in headless and rendered modes, six checkpoint comparisons per run, then matched 30-second `perf` captures | Steam Deck LCD, Game Mode, same AppImage and `quick-23874.bwstate`; control used `BLUEWAKE_NATIVE_GROUND_CROSS=0` | All checkpoints matched. Rendered median was 25.4759 FPS control and 25.5724 candidate (+0.38%); headless median was 27.4352 and 27.5667 (+0.48%). Profiles had no lost samples and remained game-thread-bound. |
+| M3-T04 | Redacted Deck diagnostic log SHA-256 `f52c97bb984bcd899f10d7abb1ddab95ac9163ebf8c64ea510e8a390f505f4ca`; benchmark log SHA-256 `9da5a683b52a8ee659c95254d71070e2d1bf34f9ec1e58a4059e9bde0607eb4e` | Count accepted/declined paths in a normal Deck exit; run 60,000 private oracle cases and time the accepted early return | Steam Deck LCD, extracted diagnostic AppImage | 123,609 / 440,495 calls accepted (28.1%). Of 316,886 declines, 315,167 (99.46%) needed unimplemented traversal. Oracle: zero mismatches. Direct path cost: translated 179.3 ns/call; native 226.1 ns/call. Reject this partial hook as a performance optimization. |
 | M3-T03 | Private Game Mode session log | Player completed the collision-heavy island route with the candidate through the Steam shortcut, then exited normally | Steam Deck LCD, same candidate AppImage; 3 minutes in `sea/44` and `sea_T/44` | No player-reported visual, physics, audio, input, save-state or crash issue. `ground-cross-return=220,972`; native `6,175,937/13,206,369` accepted/declined; normal renderer teardown warnings only. |
 
 The POSIX native-test builder now builds `native_bg_test`, so the collision
@@ -73,11 +73,6 @@ current evidence does not complete M1-T02 or M1-T03.
   The replay generator now accepts the current always-prepaid, lean-deadline,
   address-aware direct-call and guarded inline-GPR source forms, with focused
   source-shape regressions.
-- A 1.4-minute desktop gameplay run reached the play scene and shut down
-  cleanly. GroundCross reported 3,050,936 native executions, 5,935,727 safe
-  declines and 409,422 cross-chunk executions. This proves positive runtime
-  activation; matched Steam Deck correctness and performance comparisons
-  remain open.
 - `BLUEWAKE_NATIVE_GROUND_CROSS=0` now bypasses only the candidate hook, so
   Deck control and candidate runs can use the same AppImage without disabling
   unrelated native entries or introducing build drift. A paired 1,000-case
@@ -85,12 +80,11 @@ current evidence does not complete M1-T02 or M1-T03.
   with zero oracle mismatches in both modes. The shared AppImage passed the
   SteamOS 2.39 ABI/private-file audit and extraction smoke test.
 - Steam Deck qualification used the same AppImage and state for both modes.
-  Five rendered pairs produced a +0.38% median and +0.40% mean candidate
-  difference; five headless pairs produced a +0.48% median and -1.65% mean
-  difference. All checkpoint hashes matched. Both rendered profiles stayed at
-  22–25 game FPS with the game thread 96–98% busy; GPU waits remained about
-  2–6 ms. The candidate's high decline rate makes this partial coverage an
-  implementation target, not a retained optimization.
+  All checkpoint hashes matched, but the five-pair A/B result was within
+  noise. Diagnostic counters showed 28.1% coverage and direct Deck timing
+  showed the accepted path slower than translation. The partial hook is
+  therefore rejected as a performance optimization; it must not be extended
+  without a new, evidence-backed proposal.
 
 PR #421 is the temporary source for candidate selection and the broader Deck
 procedure. No task above is complete merely because that PR contains an older

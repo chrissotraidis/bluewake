@@ -1,6 +1,6 @@
 # TECH_PLAN — Native GroundCrossGrpRp reimplementation
 
-Status: Implementation started
+Status: Evaluated — partial implementation rejected for performance
 
 Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
 
@@ -19,6 +19,16 @@ Parent mapping: **PR #421 runtime M1 — serial `GroundCrossGrpRp` native entry*
 → this plan's M0 contract map, M1 tests, M2 implementation/certification, and
 M3 qualification. This is the detailed execution plan for that existing
 milestone.
+
+## Qualification outcome
+
+The guarded path is correct for its supported inputs but is not a Steam Deck
+performance optimization. It accepted 123,609 of 440,495 calls (28.1%);
+315,167 of 316,886 declines (99.46%) required the unimplemented collision
+traversal. Direct Deck timing for an accepted early return was 179.3 ns/call
+translated versus 226.1 ns/call native. The five-pair rendered and headless
+A/B medians were within noise. Do not extend this partial hook for performance;
+select the next candidate from the current Deck profile instead.
 
 ## Inspected facts
 
@@ -115,7 +125,7 @@ record hashes, redacted commands, aggregate metrics, and pass/fail results only.
 | M0 | — | PR #421 runtime M1 preparation | Map the private translated routine and freeze its observable contract; commit no game source |
 | M1 | M0 | PR #421 runtime M1 tests | Add public guards and private differential cases that prove activation and fallback |
 | M2 | M1 | PR #421 runtime M1 implementation | Add the guarded serial path, counters, certified hook, opt-out, and passing correctness suites |
-| M3 | M2 | PR #421 runtime M1 decision gate | Record Linux/Windows results and matched Deck A/B evidence; retain or reject explicitly |
+| M3 | M2 | PR #421 runtime M1 decision gate | Record Linux/Windows results and matched Deck A/B evidence; **rejected:** partial hook is correct but not faster on Deck |
 
 Critical path: M0 → M1 → M2 → M3. The sequence is intentionally serial because
 the tests, implementation, and certification share one frozen translated

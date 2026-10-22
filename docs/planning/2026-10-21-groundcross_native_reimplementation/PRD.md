@@ -1,6 +1,6 @@
 # PRD — Native GroundCrossGrpRp reimplementation
 
-Status: Draft
+Status: Evaluated — rejected as a performance optimization
 
 Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
 
@@ -17,12 +17,11 @@ not define a separate candidate.
 
 Steam Deck gameplay remains game-thread bound below the 30 FPS game target in
 heavy outdoor scenes ([#215](https://github.com/chrissotraidis/bluewake/issues/215)).
-The current profiling plan identifies the translated chunk containing
-`GroundCrossGrpRp` as the leading bounded game-thread candidate. This work is
+`GroundCrossGrpRp` was evaluated as a bounded native candidate. Such work is
 worth retaining only when the native path is equivalent to the translation,
 activates in the measured scene, and improves the matched Deck control beyond
-run-to-run noise. Reaching 30 FPS is the broader goal, not this candidate's
-individual acceptance threshold.
+run-to-run noise. This candidate did not meet that final condition. Reaching
+30 FPS is the broader goal, not an individual candidate's acceptance threshold.
 
 Until it merges, [PR #421's technical
 plan](https://github.com/chrissotraidis/bluewake/pull/421/changes#diff-dd62d1af6e31824bdcd61d4b21e687cedc87ae9cfcb19111531762f73e3b7bf9)
@@ -70,12 +69,13 @@ Architecture: [test evidence levels](../../architecture/Testing.md#evidence-leve
 | --- | --- | --- | --- |
 | Guest equivalence | Translation at `0x802491F4` | No CPU or writable-RAM mismatch in accepted oracle cases | Private differential suite |
 | Fallback integrity | Existing translated path | Every decline leaves CPU and RAM unchanged | Public guards and private oracle |
-| Activation | Entry is not currently registered | Positive accepted-call count in the target Deck scene | Native report and session evidence |
-| Deck game-thread cost | PR #421 supplies provisional evidence and the procedure; current-source A/A is not yet measured | Candidate improves its matched control beyond measured noise | Interleaved A/B and re-profile |
+| Activation | Entry was not registered | 123,609 native calls out of 440,495 (28.1%) in the Deck capture | Native report and session evidence |
+| Deck game-thread cost | Matched control | Faster than control beyond noise | **Not met:** five interleaved pairs were within noise; accepted native path was slower in direct Deck timing |
 
 Personal modules, disc data, saves, states, and raw logs remain private. The
-change stays opt-in until affected-platform correctness and performance gates
-pass.
+partial implementation is not to be retained as a performance optimization.
+Its evidence is retained to rule out this narrow path and guide future
+candidate selection.
 
 ## Clarifications
 
