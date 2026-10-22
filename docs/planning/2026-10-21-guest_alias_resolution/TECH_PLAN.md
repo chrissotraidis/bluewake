@@ -1,6 +1,6 @@
 # TECH_PLAN — Guest alias-resolution evaluation
 
-Status: Planning only
+Status: M0 evidence captured; no runtime change implemented
 
 Source: BlueWake `main` at `56a9537`; pinned RecompCore
 `338a3dbcdd384142f0fe40db44e0cd1d1b0c61e4`.
@@ -19,6 +19,19 @@ Source: BlueWake `main` at `56a9537`; pinned RecompCore
   calls, iterations, hits, alias count, and MEM1 overlap at normal exit.
 - The resolver returns both a backing pointer and, when requested, a guest
   journal offset. Any fast path must preserve both and alias precedence.
+
+## M0 findings
+
+The fixed Deck route produced two normal-exit alias-cost reports: `12,111,577`
+calls / `3,930,380` iterations / `357,627` hits, and `749,168` calls /
+`7,120,317` iterations / `651,784` hits. The accompanying 20-second,
+99 Hz headless profile lost no samples and attributed 1.60% sampled self time
+to `ppc_guest_alias_resolve` in `gGZLE01_recomp.so`.
+
+This selects a narrowly guarded RecompCore investigation for M1. It does not
+establish a player-visible gain, identify a stable caller beyond the translated
+game module, or authorize a default-path change. M1 must prove equivalence for
+pointer, journal offset, bounds, and alias precedence before Deck A/B work.
 
 ## Candidate flow
 
@@ -87,4 +100,5 @@ integration cannot start before its accepted revision exists.
   history; M0 must show which lookup behavior dominates on the current Deck
   route.
 - The GroundCross partial hook is closed and is not a baseline or dependency.
-- No measurement has been run for this candidate yet.
+- M0 was measured with a diagnostic AppImage carrying the pinned RecompCore
+  runtime source; final qualification still requires a matched post-M1 build.
