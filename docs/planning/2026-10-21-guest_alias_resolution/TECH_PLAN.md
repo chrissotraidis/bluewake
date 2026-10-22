@@ -1,6 +1,6 @@
 # TECH_PLAN — Guest alias-resolution evaluation
 
-Status: M0 evidence captured; no runtime change implemented
+Status: M0 complete; no runtime change selected
 
 Source: BlueWake `main` at `56a9537`; pinned RecompCore
 `338a3dbcdd384142f0fe40db44e0cd1d1b0c61e4`.
@@ -28,10 +28,11 @@ calls / `3,930,380` iterations / `357,627` hits, and `749,168` calls /
 99 Hz headless profile lost no samples and attributed 1.60% sampled self time
 to `ppc_guest_alias_resolve` in `gGZLE01_recomp.so`.
 
-This selects a narrowly guarded RecompCore investigation for M1. It does not
-establish a player-visible gain, identify a stable caller beyond the translated
-game module, or authorize a default-path change. M1 must prove equivalence for
-pointer, journal offset, bounds, and alias precedence before Deck A/B work.
+The second report averages about 9.5 iterations per call. With 1,900 aliases
+and `overlap_mem1=0`, that matches the existing sorted-index binary search in
+`ppc_guest_alias_resolve()`, rather than a linear scan. The profile's 1.60%
+sampled self time is real, but M0 did not identify a distinct, equivalence-safe
+guard that can replace this path. M1 is therefore not selected.
 
 ## Candidate flow
 
@@ -87,7 +88,7 @@ before the fast path becomes default.
 | Milestone | Depends | Can run with | Deliverable / integration gate |
 | --- | --- | --- | --- |
 | M0 | — | — | Deck census and profile; select or reject a concrete resolver mechanism |
-| M1 | M0 selects a mechanism | M2 test-design preparation | RecompCore PR with one guarded path and focused resolver tests |
+| M1 | M0 selects a mechanism | M2 test-design preparation | Not selected: M0 found the applicable binary-search path already present |
 | M2 | M1 accepted in RecompCore | — | BlueWake pin/export plus build/checkpoint integration |
 | M3 | M2 | — | Interleaved Deck A/B, profile, gameplay route, and retain/reject decision |
 
@@ -101,4 +102,5 @@ integration cannot start before its accepted revision exists.
   route.
 - The GroundCross partial hook is closed and is not a baseline or dependency.
 - M0 was measured with a diagnostic AppImage carrying the pinned RecompCore
-  runtime source; final qualification still requires a matched post-M1 build.
+  runtime source. Revisit only if a new, measurable resolver mechanism is
+  identified; do not duplicate the existing binary-search path.

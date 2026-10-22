@@ -1,6 +1,6 @@
 # PROGRESS — Guest alias-resolution evaluation
 
-Status: M0 evidence captured; M1 selected for investigation
+Status: M0 complete; candidate rejected
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · [Parent M2](https://github.com/chrissotraidis/bluewake/pull/421)
 
@@ -12,9 +12,9 @@ Architecture: [guest-to-host address resolution](../../architecture/GuestState.m
 
 - [x] M0-T01: Capture a normal-exit Deck alias-cost trace for the fixed route.
 - [x] M0-T02: Capture an aligned Deck CPU profile and identify resolver call context.
-- [x] M0-T03: Select a guarded resolver investigation; this is not approval to change the default path.
+- [x] M0-T03: Reject a new resolver guard: the measured non-overlapping path already uses the applicable binary-search optimization.
 
-### M1: Implement the selected RecompCore guard (depends: M0 select)
+### M1: Implement the selected RecompCore guard (depends: M0 select; not selected)
 
 Owns the RecompCore runtime PR; BlueWake source remains unchanged.
 
@@ -40,4 +40,4 @@ Owns the RecompCore runtime PR; BlueWake source remains unchanged.
 | --- | --- | --- | --- | --- |
 | M0-T01 | Deck `m2-alias-census/run.log` | `BLUEWAKE_TRACE_ALIAS_COST=1`, headless normal exit | Fixed `quick-23874.bwstate`, diagnostic AppImage, 24,000 retraces | Two reports: 12,111,577 calls / 3,930,380 iterations / 357,627 hits; 749,168 calls / 7,120,317 iterations / 651,784 hits. |
 | M0-T02 | Deck `m2-alias-perf-headless/perf.data`, `report.txt` | `profile_deck.sh --seconds 20` at 99 Hz | Same state and AppImage; headless, unpaced; 0 lost samples | `ppc_guest_alias_resolve` is 1.60% sampled self time in `gGZLE01_recomp.so`. Callers were not unwound by this capture. |
-| M0-T03 | M0-T01 + M0-T02 | Compare trace work and sampled cost | Same fixed route | Select M1 investigation: repeated lookup work and measurable module CPU time justify one equivalence-guarded RecompCore proposal. |
+| M0-T03 | M0-T01 + M0-T02; pinned `cpu.c` | Compare trace work with resolver implementation | Same fixed route; 1,900 aliases; `overlap_mem1=0` | Reject: 7,120,317 / 749,168 = ~9.5 iterations/call, consistent with the existing sorted-index binary search. No distinct guard is identified. |
