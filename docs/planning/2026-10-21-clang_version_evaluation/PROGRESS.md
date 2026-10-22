@@ -1,7 +1,9 @@
 # PROGRESS — Clang version evaluation
 
-Status: Planned; blocked by
-[#433](https://github.com/chrissotraidis/bluewake/issues/433).
+Status: Preliminary build-path evidence recorded; qualification remains blocked
+by unmerged [#446](https://github.com/chrissotraidis/bluewake/pull/446),
+[#433](https://github.com/chrissotraidis/bluewake/issues/433), and M0's shared
+PGO-profile input.
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -31,3 +33,5 @@ Status: Planned; blocked by
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
+| M0-T01 (preliminary) | #446 `48a5872`; private Clang 18/22 AppImages | Container builds, ABI audit, extraction/help smoke | Same private disc; `x86-64-v3`; separate clean outputs | Both builds and checks passed; source is not yet upstream main |
+| M1-T01 (preliminary) | private AppImage SHA-256 `ad467905…c243a76b5e` / `97e9291d…e7c73cf25` | `bench_tour.py … --state quick-23874.bwstate --mode headless`, 3 runs each | Steam Deck; #446; compiler-specific trained PGO profiles | Clang 18 mean 33.84 FPS; Clang 22 mean 32.42 FPS; checkpoints match; artifacts are not matched-profile candidates |

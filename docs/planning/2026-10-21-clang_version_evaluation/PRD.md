@@ -1,7 +1,8 @@
 # PRD — Clang version evaluation
 
 Status: Draft  
-Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`  
+Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
+at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Parent milestone: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
 Follow-up plan: [PR #438](https://github.com/chrissotraidis/bluewake/pull/438)
 
@@ -46,3 +47,12 @@ private game artifacts, or treating a successful build as performance proof.
 Private discs, modules, AppImages, states, raw logs, and `perf.data` remain off
 the repository. Qualification is blocked until
 [#433](https://github.com/chrissotraidis/bluewake/issues/433) is resolved.
+
+## Preliminary baseline
+
+The #446 revision built and passed private AppImage smoke/ABI checks on the
+Deck. Three headless fixed-state runs were deterministic for each compiler:
+Clang 18 averaged 33.84 game FPS and Clang 22 averaged 32.42 FPS. This is
+useful build-path evidence, not an M5 decision: each build generated its own
+compiler-specific PGO profile. M0 must provide one verified profile before an
+isolated compiler comparison can begin.

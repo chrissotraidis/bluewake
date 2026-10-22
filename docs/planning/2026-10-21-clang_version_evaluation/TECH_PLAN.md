@@ -1,7 +1,8 @@
 # TECH_PLAN — Clang version evaluation
 
 Status: Planning only  
-Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
+Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
+at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 
 [Product brief](PRD.md) · [Tracker](PROGRESS.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -18,8 +19,12 @@ Source: upstream `main` at `2ab8118fc09fa08569100201a871616d18a1b771`
   profile instead of reusing an identical PGO input.
 - [`BuilderProvenance.json`](../../../scripts/linux/build.py) records compiler,
   profile hash, module hash and CPU target, but not a complete effective command.
-- The current container build fails in vendored Dawn/Abseil for both compilers;
-  [#433](https://github.com/chrissotraidis/bluewake/issues/433) owns that blocker.
+- #446 fixes the current Dawn/Abseil build path, but remains unmerged; #433
+  therefore remains the upstream qualification blocker.
+- Private #446 Deck smoke/ABI checks passed for both AppImages. Three headless
+  fixed-state runs were deterministic per compiler, but their compiler-specific
+  trained PGO profiles make the observed 33.84 (Clang 18) versus 32.42 (Clang
+  22) game FPS unsuitable for selecting a default.
 
 ## Proposed changes
 
@@ -94,6 +99,22 @@ is needed to explain a result. Follow the comparison rules in the
 Critical path: #433 → M0 → M1 → M2. Building the variants may run in
 parallel after the immutable inputs are frozen; Deck runs are interleaved, not
 parallel, so they share the same hardware conditions.
+
+## Preliminary #446 build-path evidence
+
+This evidence verifies the candidate build path before #446 merges; it does
+not complete M0, M1, or M2. Both private AppImages used the same source,
+dependency revisions, `x86-64-v3` target and options, but the builder trained
+different profiles because `training_fingerprint` includes the compiler.
+
+| Build | Private AppImage SHA-256 | Deck headless fixed-state runs | Checkpoints |
+|---|---|---|---|
+| Clang 18 | `ad467905…c243a76b5e` | 33.75, 33.86, 33.91 FPS (mean 33.84) | match within A/A |
+| Clang 22 | `97e9291d…e7c73cf25` | 32.45, 32.41, 32.40 FPS (mean 32.42) | match within A/A and across builds |
+
+The 4.2% mean difference is directionally useful only. It may include PGO
+training differences, so it is not evidence that Clang 18 code generation is
+faster. Raw states, logs, modules and AppImages remain private.
 
 ## References
 
