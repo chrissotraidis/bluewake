@@ -80,8 +80,9 @@ flowchart LR
 | Build | Two clean container builds after #433 | Same commit, dependency lock, flags, options and PGO SHA; compiler alone differs | Comparison invalid |
 | Linux/AppImage | Existing Linux CTest plus ABI and launch smoke paths | Both variants pass; no private artifact uploaded | Candidate rejected |
 | A/A control | At least three repeated control runs | Checkpoints match and noise band is recorded | A/B deferred |
-| Controlled A/B | Five interleaved pairs with the same states/scenes | Per-scene medians, dispersion, game FPS and game-thread busy | Incomplete grid is inconclusive |
-| Game Mode | Launch each matched AppImage locally, then collect over SSH | Correct process/artifact, settled window, FPS/busy/waits and thermal/power context | Not a qualification without both variants |
+| CPU profiles | Capture headless, rendered, and Game Mode profiles after A/A is stable | Flat and per-thread evidence used only to explain a result | Missing profile leaves selection incomplete |
+| Controlled A/B | Five interleaved pairs with the same states/scenes in headless and rendered modes | Per-scene medians, dispersion, game FPS and game-thread busy | Incomplete grid is inconclusive |
+| Game Mode | Launch each matched AppImage locally, then collect over SSH and repeat the scene | Correct process/artifact, settled window, FPS/busy/waits and thermal/power context | Not a qualification without both variants |
 
 Use [`bench_tour.py`](../../../scripts/bench_tour.py) to control the workload and
 [`profile_deck.sh`](../../../scripts/linux/profile_deck.sh) only when a profile
@@ -103,7 +104,9 @@ parallel, so they share the same hardware conditions.
 ## Preliminary #446 build-path evidence
 
 This evidence verifies the candidate build path before #446 merges; it does
-not complete M0, M1, or M2. Both private AppImages used the same source,
+not complete M0, M1, or M2. It is one saved-state, headless A/A measurement,
+not the parent procedure's rendered, Game Mode, profiling, or five-pair grid.
+Both private AppImages used the same source,
 dependency revisions, `x86-64-v3` target and options, but the builder trained
 different profiles because `training_fingerprint` includes the compiler.
 
