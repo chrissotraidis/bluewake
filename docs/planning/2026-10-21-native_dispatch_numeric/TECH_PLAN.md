@@ -1,6 +1,6 @@
 # TECH_PLAN — Native dispatch and numeric-path evaluation
 
-Status: Planning only
+Status: M0 complete; M3 rejected without a runtime change
 Source: BlueWake `main` at `56a9537`.
 
 [PRD](PRD.md) · [Tracker](PROGRESS.md) · [Parent M3](https://github.com/chrissotraidis/bluewake/pull/421)
@@ -24,6 +24,24 @@ Source: BlueWake `main` at `56a9537`.
   work, but also an array maximum of eight and `parallel=0`. M3 must reproduce
   activation on its matched artifact before relying on that observation.
 
+## M0 findings
+
+The source-matched Deck control was captured with `BLUEWAKE_NATIVE_WORKERS=2`.
+The normal-exit report showed direct calls active (`23,222,258` allowed from
+`23,306,700` queries), active native math/vector paths, `array_max=8`, and
+`parallel=0`. The 60-second headless profile at 99 Hz lost no samples and
+ranked `chassis_dispatch` at 2.01% self time and `selected_dispatch` at 1.34%.
+
+Annotation resolves `selected_dispatch` to the generated
+`dolrecomp_find_original()` cache emitted by
+[`scripts/generate_composite.py`](../../../scripts/generate_composite.py). Its
+sampled hot instructions are the existing exact PC-key comparison and cached
+function-pointer return. [`tests/test_composite.py`](../../../tests/test_composite.py)
+already asserts that cache's emitted contract. The historical measurement record
+documents the same cache and cold-path split as a prior retained dispatch
+improvement. The profile therefore identifies real remaining cost, but not a
+new, distinct reduction.
+
 ## Hypothesis and proposal
 
 M3's hypothesis is not that native code or additional workers are inherently
@@ -45,7 +63,7 @@ flowchart LR
     Native --> Report["Hit/decline + pool telemetry"]
 ```
 
-### Dispatch-boundary hypothesis
+### Dispatch-boundary hypothesis — rejected
 
 `chassis_dispatch()` supplies `selected_dispatch()` to the chassis loop.
 `selected_dispatch()` selects the generated x86-64-v3 dispatcher only after a
@@ -53,13 +71,14 @@ cached CPU-feature check; otherwise it uses `dolrecomp_call()`. The potential
 cost is therefore not CPU-feature probing itself, but any remaining call,
 selection, or indirect-dispatch overhead in the hot edge path.
 
-**Proposed reduction, only if annotation confirms it:** turn the proven
-per-edge selection into a module-lifetime selected dispatch target, while
-retaining the same x86-64-v3 eligibility test and generic fallback. M0 rejects
-this proposal if the compiler already removes the selection cost, or samples
-belong to translated chunk execution rather than the boundary.
+The initial proposal was to make dispatch selection module-lifetime. Annotation
+rejects it: the sampled `selected_dispatch` symbol contains the generated PC
+lookup, not a remaining CPU-feature selector. Its hit path is already the
+exact cache emitted by `generate_composite.py`; changing cache shape without
+measured collision or miss behavior would repeat an existing optimization
+experiment rather than remove a known redundant operation.
 
-### Numeric-routing hypothesis
+### Numeric-routing hypothesis — rejected
 
 Generated hooks call `bluewake_native_math_try()` or
 `bluewake_native_vec_try()`. Each call first invokes the host-provided readiness
@@ -68,24 +87,22 @@ original translated code continues. High successful-hit counts plus samples in
 this route could indicate redundant routing work around already-certified
 leaves.
 
-**Proposed reduction, only if M0 identifies a repeatable redundant check:**
-specialize that selected route without weakening the readiness predicate or its
-translated fallback. The candidate must prove that the predicate's observed
-CPU, memory, timing, and host-observation state is still checked at the same
-required boundary. A high decline rate rejects this surface: optimizing a path
-that normally falls back cannot improve the game.
+M0 confirms that these paths are active, but neither the profile nor module
+reports identify a repeated readiness check that can be removed without
+weakening the CPU, memory, timing, or host-observation contract. Native
+computation self time is not evidence that its guard is redundant. No numeric
+routing change is selected.
 
-### Worker hypothesis
+### Worker hypothesis — rejected
 
 The pool is only reached by `mult_vec_array()`, whose current grain is 256.
 The caller joins workers before it applies guest-visible state. Previous
 telemetry reported a maximum vector array of eight, so a worker configuration
 cannot help that observed route: it remains serial before any worker is woken.
 
-**Proposal:** do not change `BLUEWAKE_NATIVE_WORKERS` or lower the grain. M0
-first rechecks `array_max`, completed batches, and worker items on the matched
-artifact. Only a real batch at or above the existing threshold can justify a
-separate worker experiment; it is not bundled with a serial dispatch change.
+M0 reproduced the small-batch observation (`array_max=8`, `parallel=0`) even
+with two requested workers. Do not change `BLUEWAKE_NATIVE_WORKERS` or lower
+the grain; no production work reaches the existing threshold.
 
 ## Measurement and selection flow
 
@@ -153,15 +170,15 @@ ranges only; guest-visible effects remain on the game thread after join.
 
 | Milestone | Depends | Can run with | Deliverable / integration gate |
 | --- | --- | --- | --- |
-| M0 | — | — | Matched Deck evidence; select one serial surface or reject M3 |
-| M1 | M0 selects | Focused-test design | One isolated code change behind existing fallback/guards |
-| M2 | M1 | — | Focused tests, checkpoints, interleaved Deck pairs, and retain/reject record |
+| M0 | — | — | Complete: evidence rejects dispatch, numeric-routing, and worker changes |
+| M1 | M0 selects | Focused-test design | Not selected: no distinct serial reduction was identified |
+| M2 | M1 | — | Not reached |
 
-Critical path: M0 → M1 → M2. The work is serial because M0 must choose one
-surface and M1/M2 would otherwise edit and measure incompatible controls.
+M0 was the only executed milestone. A new M3 investigation requires a new,
+measured mechanism rather than extending these rejected proposals.
 
 ## Decisions and gaps
 
-- A current-source control remains constrained by [#433](https://github.com/chrissotraidis/bluewake/issues/433). Source-matched evidence may rank a candidate, but cannot qualify a player-facing result.
+- A current-source control remains constrained by [#433](https://github.com/chrissotraidis/bluewake/issues/433). The source-matched evidence is sufficient to reject duplicate work, but not to qualify a player-facing change.
 - M3 does not re-open M1 or M2. It starts from their rejected outcomes and uses
   the parent plan only as investigation context.
