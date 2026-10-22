@@ -24,6 +24,69 @@ Source: BlueWake `main` at `56a9537`.
   work, but also an array maximum of eight and `parallel=0`. M3 must reproduce
   activation on its matched artifact before relying on that observation.
 
+## Hypothesis and proposal
+
+M3's hypothesis is not that native code or additional workers are inherently
+faster. It is that one recurring **boundary** may be doing work that does not
+contribute to the result: dispatch selection on each guest edge, or repeated
+host-readiness routing before a native numeric leaf that is already safe to
+run. The fixed Deck route must show both meaningful self time and successful
+activation before either is a candidate.
+
+```mermaid
+flowchart LR
+    Guest["Guest edge or native leaf"] --> Dispatch["chassis_dispatch\nselected_dispatch"]
+    Dispatch --> Chunk["Translated chunk"]
+    Chunk --> Hook{"Native hook?"}
+    Hook -->|"no"| Translation["Translated leaf"]
+    Hook -->|"yes"| Ready["Host readiness callback"]
+    Ready -->|"decline"| Translation
+    Ready -->|"accept"| Native["Native math/vector leaf"]
+    Native --> Report["Hit/decline + pool telemetry"]
+```
+
+### Dispatch-boundary hypothesis
+
+`chassis_dispatch()` supplies `selected_dispatch()` to the chassis loop.
+`selected_dispatch()` selects the generated x86-64-v3 dispatcher only after a
+cached CPU-feature check; otherwise it uses `dolrecomp_call()`. The potential
+cost is therefore not CPU-feature probing itself, but any remaining call,
+selection, or indirect-dispatch overhead in the hot edge path.
+
+**Proposed reduction, only if annotation confirms it:** turn the proven
+per-edge selection into a module-lifetime selected dispatch target, while
+retaining the same x86-64-v3 eligibility test and generic fallback. M0 rejects
+this proposal if the compiler already removes the selection cost, or samples
+belong to translated chunk execution rather than the boundary.
+
+### Numeric-routing hypothesis
+
+Generated hooks call `bluewake_native_math_try()` or
+`bluewake_native_vec_try()`. Each call first invokes the host-provided readiness
+predicate, then runs a native leaf only when its guard accepts; otherwise the
+original translated code continues. High successful-hit counts plus samples in
+this route could indicate redundant routing work around already-certified
+leaves.
+
+**Proposed reduction, only if M0 identifies a repeatable redundant check:**
+specialize that selected route without weakening the readiness predicate or its
+translated fallback. The candidate must prove that the predicate's observed
+CPU, memory, timing, and host-observation state is still checked at the same
+required boundary. A high decline rate rejects this surface: optimizing a path
+that normally falls back cannot improve the game.
+
+### Worker hypothesis
+
+The pool is only reached by `mult_vec_array()`, whose current grain is 256.
+The caller joins workers before it applies guest-visible state. Previous
+telemetry reported a maximum vector array of eight, so a worker configuration
+cannot help that observed route: it remains serial before any worker is woken.
+
+**Proposal:** do not change `BLUEWAKE_NATIVE_WORKERS` or lower the grain. M0
+first rechecks `array_max`, completed batches, and worker items on the matched
+artifact. Only a real batch at or above the existing threshold can justify a
+separate worker experiment; it is not bundled with a serial dispatch change.
+
 ## Measurement and selection flow
 
 ```mermaid
