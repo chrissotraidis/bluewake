@@ -114,6 +114,17 @@ Raw states, logs, modules and AppImages remain private.
 |---|---|---|
 | Five warmed A/B/B/A interleaved pairs | 10 samples per recipe; five default scenes; fixed setup state; 31 checkpoints each | all checkpoints match; Clang 18 recipe median is 3.2% faster overall (scene range 2.0–4.3%) |
 
+| Preliminary rendered and Game Mode evidence | Scope | Result / limitation |
+|---|---|---|
+| One warmed Desktop Mode rendered pair | Same private setup state; five default scenes; Aurora renderer; 31 checkpoints each | Clang 18 mean 272.06 versus Clang 22 265.67 unpaced rendered game FPS (+2.4%). Raw logs show all five requested warps and checkpoints match, but the summary marks stages `not loaded`: its completion parser does not recognize this build's warp-log form. Do not use this pair as the rendered M2 gate. |
+| One 30-second Game Mode profile per recipe | Same Fortress sea location; verified `48a5872` AppImage/process; 99 Hz `perf` with zero lost samples | Both runs were game-thread limited at roughly 27–29 game FPS. The samples identify comparable hotspot classes, but are directional only, not a repeated controlled FPS comparison. |
+
+The Desktop Mode tour measures rendered throughput with wall pacing disabled;
+it is not player-visible Game Mode FPS. Keep the raw state, session logs and
+`perf.data` private. Repeat the rendered grid after the stage-completion
+contract is repaired, then run the required interleaved pairs before deciding
+the default.
+
 ## References
 
 - [Linux build process](../../architecture/Build.md#linux-builder)

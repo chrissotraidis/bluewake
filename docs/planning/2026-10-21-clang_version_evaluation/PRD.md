@@ -57,3 +57,11 @@ Clang 18 averaged 33.84 game FPS and Clang 22 averaged 32.42 FPS. This is
 useful supplemental build-path evidence, not an M5 decision: it covers only
 one headless saved state. Compiler-specific PGO is valid as part of the recipe;
 the rendered and Game Mode stages remain.
+
+The fixed-state five-scene headless grid later favored the Clang 18 recipe by
+3.2% with matching checkpoints. One warmed Desktop Mode rendered pair also
+favored Clang 18 by 2.4% (272.06 versus 265.67 unpaced rendered game FPS), and
+the matched Game Mode samples were game-thread limited at roughly 27–29 game
+FPS for both recipes. Neither result completes M2: the tour's current
+stage-completion parser does not recognize this build's warp log shape, and the
+Game Mode samples are directional rather than a repeated controlled comparison.
