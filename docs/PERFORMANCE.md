@@ -224,6 +224,14 @@ identical), and its stop speeds moved by up to 7.5% with them. `--setup-state FI
 loads it in the next, which is what the two-run check needs; keep the file out of the repository. A pass that never
 reached gameplay is refused rather than measured from (#458).
 
+The same build on a Steam Deck (VanGogh, 4 c / 8 t, SteamOS, headless and unpaced) gives, game frames a second:
+Outset 41.31 / 42.40, Windfall 41.25 / 42.60, Dragon Roost Cavern 54.48 / 55.74, Forest Haven 37.99 / 38.25, the sea by
+the Fortress 48.88 / 48.36, checkpoints identical; three stops agree within 1% and Windfall's two runs are 3.3% apart,
+which is the Deck's own run-to-run noise. The card has to hold a save in quest log 1: with the Deck's own card the route
+starts a new file (`name-input-complete` at retrace 632 where a continue reaches `play-scene` at 609), the setup pass
+saves a state on the name-entry screen, and the tour then reports 300 to 430 game frames a second with no stop loaded.
+A card copied from a machine whose log 1 has a save works.
+
 *Goal:* one command that measures a build's speed in several places and proves two builds behave the same. Every
 later phase uses it.
 
