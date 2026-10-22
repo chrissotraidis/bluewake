@@ -30,6 +30,24 @@ translated versus 226.1 ns/call native. The five-pair rendered and headless
 A/B medians were within noise. Do not extend this partial hook for performance;
 select the next candidate from the current Deck profile instead.
 
+### Evidence record
+
+| Measure | Result |
+| --- | --- |
+| Native acceptance | 123,609 / 440,495 calls (28.1%) |
+| Ordinary continuation declines | 315,167 / 316,886 declines (99.46%) |
+| Accepted early return, translated | 179.3 ns/call |
+| Accepted early return, native | 226.1 ns/call |
+| Rendered median, five interleaved pairs | 25.4759 → 25.5724 FPS (+0.38%; noise) |
+| Headless median, five interleaved pairs | 27.4352 → 27.5667 FPS (+0.48%; noise) |
+
+The 60,000-case private oracle reported zero mismatches. The three-minute Game
+Mode island route ended normally with no player-reported gameplay issue.
+Private artifacts remain out of the repository: diagnostic AppImage SHA-256
+`6b9dbccaf1fe9e6bbd0d765a3cc044b799350cd84c1ab576bf0acaff968c29b2`;
+decline log SHA-256 `f52c97bb984bcd899f10d7abb1ddab95ac9163ebf8c64ea510e8a390f505f4ca`;
+benchmark log SHA-256 `9da5a683b52a8ee659c95254d71070e2d1bf34f9ec1e58a4059e9bde0607eb4e`.
+
 ## Inspected facts
 
 - [`native_bg.c`](../../../cmake/composite/native_bg.c) now registers a guarded
