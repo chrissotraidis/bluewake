@@ -18,8 +18,7 @@ int main(void) {
     assert(bw_inline_gpr_memory_ready(&cpu, 31));
     cpu.reserve_valid = true;
     assert(bw_inline_gpr_memory_ready(&cpu, 14));
-    /* An alias elsewhere in MEM1 selects the precise fallback without
-     * rejecting this otherwise ordinary stack frame. */
+    /* An alias elsewhere in MEM1 does not reject this ordinary stack frame. */
     assert(ppc_guest_alias_add_shared(0x80000020u, sizeof alias, alias));
     assert(bw_inline_gpr_memory_ready(&cpu, 14));
     assert(ppc_guest_alias_remove(0x80000020u, sizeof alias));
@@ -28,6 +27,10 @@ int main(void) {
     assert(ppc_guest_alias_add_shared(0x800000ECu, sizeof alias, alias));
     assert(!bw_inline_gpr_memory_ready(&cpu, 14));
     assert(bw_inline_gpr_memory_ready(&cpu, 31));
+    assert(ppc_guest_alias_remove(0x800000ECu, sizeof alias));
+    assert(ppc_guest_alias_add_shared(0x800000ECu, sizeof alias, alias));
+    cpu.gpr[11] = 0xC0000100u;
+    assert(!bw_inline_gpr_memory_ready(&cpu, 14));
     assert(ppc_guest_alias_remove(0x800000ECu, sizeof alias));
     cpu.gpr[11] = 0x80000048u;
     assert(bw_inline_gpr_memory_ready(&cpu, 14));

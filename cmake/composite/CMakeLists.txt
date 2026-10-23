@@ -276,7 +276,8 @@ if(WIN32)
   foreach(EXPORTED_SYMBOL
       ppc_set_mem_write_journal ppc_guest_alias_clear ppc_guest_alias_add
       ppc_guest_alias_add_shared ppc_guest_alias_get_storage
-      ppc_guest_alias_remove ppc_guest_alias_resolve)
+      ppc_guest_alias_remove ppc_guest_alias_resolve
+      ppc_guest_alias_range_overlaps)
     target_link_options(${MODULE_NAME} PRIVATE "LINKER:/EXPORT:${EXPORTED_SYMBOL}")
   endforeach()
   target_compile_definitions(${MODULE_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
