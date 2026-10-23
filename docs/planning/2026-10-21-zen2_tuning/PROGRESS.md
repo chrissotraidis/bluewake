@@ -1,37 +1,28 @@
-# PROGRESS — Steam Deck Zen 2 tuning
+# PROGRESS — Steam Deck Zen 2 tuning decision
 
-Status: Planned; M5's headless evidence currently favors Clang 18, but its
-rendered stage-completion parser and repeated Game Mode gate remain open. M6
-still waits for the M5 decision, the `--mtune` implementation, and upstream
-resolution of [#433](https://github.com/chrissotraidis/bluewake/issues/433).
-
-[Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
-[Parent M6](https://github.com/chrissotraidis/bluewake/pull/421) ·
-[M5 prerequisite](https://github.com/chrissotraidis/bluewake/pull/437)
+Status: Complete; rejected / parked
+[Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · [Parent M6](https://github.com/chrissotraidis/bluewake/pull/421)
 
 ## Milestones
 
-### M0: Freeze the tuning contract
+### M0: Measure the isolated flag
 
-- [ ] M0-T01: Record the compiler retained by M5 and freeze source, dependencies, PGO input, options and Deck workload.
-- [ ] M0-T02: Define the opt-in `--mtune znver2` interface while preserving `-march=x86-64-v3` and the default path.
-- [ ] M0-T03: Define provenance, fingerprint and effective-command evidence for tuned and untuned artifacts.
+- [x] M0-T01: Build matched module-only tuned and untuned variants from source `56a9537`.
+- [x] M0-T02: Run four interleaved headless, unpaced rounds across five Steam Deck scenes.
 
-### M1: Implement and build the option (depends: M0)
+### M1: Record the decision (depends: M0)
 
-- [ ] M1-T01: Propagate the tune option to host and module compilation and record it in profile/artifact identity.
-- [ ] M1-T02: Add source-contract tests and concise Linux build documentation.
-- [ ] M1-T03: Produce separate untuned and Zen 2-tuned AppImages and run Linux, ABI, smoke and checkpoint checks.
-
-### M2: Measure and decide (depends: M1)
-
-- [ ] M2-T01: Establish untuned A/A noise, then run five interleaved Steam Deck A/B pairs.
-- [ ] M2-T02: Capture matched Game Mode summaries and explain conflicting results if required.
-- [ ] M2-T03: Retain the opt-in only for a correct gain beyond noise; keep the portable default unchanged without broader evidence.
+- [x] M1-T01: Compare scene medians and reject the option when no gain exceeds noise.
+- [x] M1-T02: Preserve `x86-64-v3` and the portable default without adding a builder flag.
 
 ## Evidence ledger
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
-| M0-T01 (preparation) | #446 `48a5872` private Clang 18/22 AppImages | Container build plus AppImage ABI/extraction smoke | Steam Deck-compatible `x86-64-v3` baseline | Build path works before merge; no retained M5 compiler or shared PGO profile yet |
-| M0-T01 (M5 status) | [PR #437](https://github.com/chrissotraidis/bluewake/pull/437) | Fixed-state Deck recipe comparison | Five-scene headless grid, one preliminary rendered pair, and directional Game Mode samples | Headless favors Clang 18 by 3.2%; M5 has not retained a compiler, so M6 remains blocked. |
+| M0-T01 | Private matched builds from `56a9537` | Identical build options; candidate adds module-only `-mtune=znver2` | Steam Deck; `-march=x86-64-v3` retained | Valid isolated comparison pair. |
+| M0-T02 | [PR #438 measurement report](https://github.com/chrissotraidis/bluewake/pull/438#issuecomment-6357949110) | Four interleaved headless, unpaced rounds per build across five fixed scenes | Steam Deck | Per-scene medians differ by -0.7% to +0.4%. |
+| M1-T01 | Same report | Compare scene medians | Same workload | Mean difference: +0.0%; no measurable gain. |
+| M1-T02 | This decision record | Reject candidate | Portable Linux build remains `x86-64-v3` | No `--mtune` interface or default change. |
+
+Raw artifacts are private. This result is scoped to the tested flag and
+workload; it does not reject unrelated scheduling or host-side work.
