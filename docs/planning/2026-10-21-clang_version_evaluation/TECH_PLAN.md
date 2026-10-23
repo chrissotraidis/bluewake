@@ -107,6 +107,13 @@ private artifact identities are Clang 18 `ad467905…c243a76b5e` and Clang 22
 |---|---|---|
 | Five warmed A/B/B/A interleaved pairs | 10 samples per recipe; five default scenes; fixed setup state; 31 checkpoints each | all checkpoints match; Clang 18 recipe median is 3.2% faster overall (scene range 2.0–4.3%) |
 
+| Run | What ran | Outcome | Decision use |
+|---|---|---|---|
+| Build and smoke | Clean Clang 18 and Clang 22 container builds; ABI audit and extraction/help smoke | Both private artifacts passed | Artifact validation only |
+| Headless grid | Five scenes; 10 interleaved samples per recipe | Clang 18 +3.2%; 31 checkpoints match | Accepted headless finding |
+| Rendered Desktop attempt | One warmed five-scene tour | Completion parser reported scenes not loaded | Excluded; repeat after confirming loading |
+| Game Mode attempt | One 30-second profile per recipe | Directional profile, not repeated controlled comparison | Excluded; repeat controlled runs |
+
 Rendered scene loading was not confirmed, so rendered and Game Mode observations
 are excluded from the decision. Repeat their qualified grids before changing a
 default. Keep raw states, session logs, and `perf.data` private.

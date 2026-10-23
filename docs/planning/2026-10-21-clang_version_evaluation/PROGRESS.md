@@ -31,6 +31,15 @@ certified current native-entry control is blocked by
 
 ## Evidence ledger
 
+## Run findings
+
+| Run | What ran | Outcome | Decision use |
+|---|---|---|---|
+| Build and smoke | Clean Clang 18 and Clang 22 container builds from `48a5872`, followed by ABI audit and extraction/help smoke | Both AppImages built and passed the private smoke checks | Validates the compared artifacts; not a performance result |
+| Headless benchmark | Five fixed scenes, 10 interleaved A/B/B/A samples per recipe, with 31 checkpoints | Clang 18 recipe median was 3.2% faster overall; checkpoints matched | **Accepted headless finding** |
+| Rendered Desktop attempt | One warmed rendered tour across the five scenes | The completion parser reported scenes not loaded, so throughput cannot be accepted | Excluded; repeat after confirming scene loading |
+| Game Mode attempt | One 30-second profile per recipe at the same sea location | Directional profile only; not a repeated controlled comparison | Excluded; repeat controlled runs |
+
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
 | M0-T01 | #446 `48a5872`; private Clang 18/22 AppImages | Container builds, ABI audit, extraction/help smoke | Same private disc; `x86-64-v3`; separate clean outputs | Both builds and checks passed; source is not upstream main. |
