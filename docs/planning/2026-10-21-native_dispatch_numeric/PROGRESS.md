@@ -1,6 +1,6 @@
 # PROGRESS — Native dispatch and numeric-path evaluation
 
-Status: M0 complete; no M1 surface selected
+Status: Complete; M3 rejected without a runtime change
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · [Parent M3](https://github.com/chrissotraidis/bluewake/pull/421)
 
@@ -14,17 +14,11 @@ Architecture: [native routines](../../architecture/NativeRoutines.md) · [compil
 - [x] M0-T02: Capture the fixed-route profile and normal-exit dispatch/native reports.
 - [x] M0-T03: Reject M3: the dispatch cache already implements the measured reduction; numeric and pool telemetry select no distinct change.
 
-### M1: Implement one selected serial reduction (depends: M0 select; not selected)
+## Disposition
 
-- [ ] M1-T01: Specify the selected fallback and state-equivalence contract.
-- [ ] M1-T02: Make one isolated code change; do not change worker defaults.
-- [ ] M1-T03: Add or update only the focused source/component test required by that change.
-
-### M2: Qualify the selected change (depends: M1)
-
-- [ ] M2-T01: Run the focused test and relevant existing work-pool/guard tests.
-- [ ] M2-T02: Verify checkpoints and activation on a matched Deck candidate.
-- [ ] M2-T03: Run five interleaved pairs and the island check; record retain or reject.
+No implementation, worker-default, focused test, checkpoint, or A/B run is
+pending. Those gates apply only after a concrete candidate is selected. The
+existing worker and guard tests remain the baseline for any future candidate.
 
 ## Evidence ledger
 

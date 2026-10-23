@@ -126,8 +126,8 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | Existing | `cmake/composite/module_export.c` / `chassis_dispatch`, `selected_dispatch` | Attribute dispatch self time and generated-dispatch selection before changing either | M0 | Preserve module dispatch, mod selection, and CPU-feature fallback |
 | Existing | `cmake/composite/native_math.c`, `native_vec.c` | Read hit/decline and pool reports on the same route | M0 | A declined native leaves execution to translation unchanged |
-| Proposed | One selected serial surface only | Remove a measured redundant dispatch/routing step while retaining its fallback | M1 | Same CPU/guest-memory result, cycle/deadline behavior, and disable path |
-| Existing | `tests/native_*_guard_test.c`, `tests/native_work_pool_test.c` | Reuse focused contracts; add only a test that covers the selected change | M1–M2 | Guard failures, fallback, and worker publication remain covered |
+| Not selected | One serial surface | No change: no redundant dispatch/routing step was identified | — | Preserve existing behavior |
+| Existing | `tests/native_*_guard_test.c`, `tests/native_work_pool_test.c` | Existing contracts remain available for a future, concrete candidate | — | No new test is needed without a change |
 
 ## Candidate rules
 
@@ -171,11 +171,9 @@ ranges only; guest-visible effects remain on the game thread after join.
 | Milestone | Depends | Can run with | Deliverable / integration gate |
 | --- | --- | --- | --- |
 | M0 | — | — | Complete: evidence rejects dispatch, numeric-routing, and worker changes |
-| M1 | M0 selects | Focused-test design | Not selected: no distinct serial reduction was identified |
-| M2 | M1 | — | Not reached |
 
-M0 was the only executed milestone. A new M3 investigation requires a new,
-measured mechanism rather than extending these rejected proposals.
+M0 was the only milestone. A new M3 investigation requires a new, measured
+mechanism rather than extending these rejected proposals.
 
 ## Decisions and gaps
 
