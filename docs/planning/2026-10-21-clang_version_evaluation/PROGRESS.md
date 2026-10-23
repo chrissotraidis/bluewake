@@ -26,8 +26,10 @@ certified current native-entry control is blocked by
 ### M2: Measure and decide (depends: M1)
 
 - [x] M2-T01: Run five interleaved headless Deck A/B/B/A pairs with matching checkpoints.
-- [ ] M2-T02: Confirm loaded rendered scenes and capture repeated controlled rendered/Game Mode comparisons.
-- [ ] M2-T03: Retain the measured winner beyond noise or record an inconclusive/rejected result without changing the default.
+- [ ] M2-T02: Confirm rendered scene loading, then establish rendered and Game Mode A/A noise.
+- [ ] M2-T03: Run five interleaved rendered and Game Mode pairs, then retain a winner or record an inconclusive result.
+
+See the [ordered remaining measurement sequence](TECH_PLAN.md#remaining-measurement-order).
 
 ## Evidence ledger
 

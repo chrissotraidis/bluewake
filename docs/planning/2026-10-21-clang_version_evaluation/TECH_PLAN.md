@@ -118,6 +118,26 @@ Rendered scene loading was not confirmed, so rendered and Game Mode observations
 are excluded from the decision. Repeat their qualified grids before changing a
 default. Keep raw states, session logs, and `perf.data` private.
 
+## Remaining measurement order
+
+Use the existing private `48a5872` Clang 18 and Clang 22 artifacts only. Do
+not rebuild, retrain, change settings, or substitute a state during this
+sequence: it qualifies the existing recipe comparison, not a new candidate.
+
+| Order | Run | What to record | Advance only when |
+|---:|---|---|---|
+| 1 | Rendered preflight: one tour per artifact | Artifact hash, state, all five requested stops, and summary `loaded` status | Every stop is confirmed loaded and checkpoints match |
+| 2 | Rendered A/A: at least three runs of one artifact | Per-scene game FPS, dispersion, checkpoint result, busy/wait cause | Noise band is recorded |
+| 3 | Rendered A/B: five interleaved Clang 18/22 pairs | Per-scene medians, dispersion, game FPS, busy/waits, and checkpoints | One recipe exceeds rendered noise without a correctness mismatch |
+| 4 | Game Mode preflight: launch each artifact locally at the fixed route | Process ID, artifact hash, settled state/location, session log | Both runs identify the intended artifact and route |
+| 5 | Game Mode A/A and A/B | At least three matched controls, then five interleaved pairs; game FPS, dips, busy/waits, temperature/power, and checkpoints | Direction and magnitude agree with the qualified comparison or explain a conflict |
+| 6 | Diagnose only if needed | One `profile_deck.sh` capture per relevant artifact | Profile explains a measured difference; it is not the primary FPS comparison |
+| 7 | Decision | Headless, rendered, and Game Mode summaries | Retain Clang 18, retain Clang 22, or record inconclusive with no default change |
+
+The Game Mode launch is player-facing and starts locally on the Deck. SSH may
+attach `perf`, retrieve redacted summaries, and collect logs after the running
+process and artifact identity are confirmed.
+
 ## References
 
 - [Linux build process](../../architecture/Build.md#linux-builder)
