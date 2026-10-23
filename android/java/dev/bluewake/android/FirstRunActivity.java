@@ -1,6 +1,8 @@
 package dev.bluewake.android;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -11,8 +13,10 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -27,6 +31,13 @@ import java.io.OutputStream;
  * and main.dol + rels/ are extracted from it on the device (disc_import.c,
  * through Shell.nativeDiscPrepare). The translated game code is already in the
  * app, so once the files exist the game starts and this screen never returns.
+ *
+ * This screen is also where the session log starts, because the disc has to be
+ * read before the game (and its menu) exists: a crash here would otherwise
+ * leave the player with nothing to send. android_entry.c names the log in
+ * logs/session-in-progress when a session starts and removes that file when the
+ * session ends, so one left behind means the last session died, and this screen
+ * offers to share its log.
  */
 public final class FirstRunActivity extends Activity {
     static final int REQUEST_DISC = 0x4B57;  // "BW"
@@ -34,6 +45,7 @@ public final class FirstRunActivity extends Activity {
     private File dataDir;
     private File gameDir;
     private File isoPath;
+    private File previousLog;   // the last session's log, when it did not end properly
     private TextView status;
     private Button choose;
 
@@ -44,6 +56,7 @@ public final class FirstRunActivity extends Activity {
         dataDir = external != null ? external : getFilesDir();
         gameDir = new File(dataDir, "game");
         isoPath = new File(gameDir, "GZLE01.iso");
+        previousLog = previousSessionLog();
 
         if (ready()) {
             forward();
@@ -91,6 +104,27 @@ public final class FirstRunActivity extends Activity {
         bp.gravity = Gravity.CENTER_HORIZONTAL;
         layout.addView(choose, bp);
         choose.setOnClickListener(v -> pickDisc());
+
+        if (previousLog != null) {
+            TextView note = new TextView(this);
+            note.setText("The last session ended unexpectedly.\nIts log is the best record of what went wrong.");
+            note.setTextColor(Color.LTGRAY);
+            note.setTextSize(14);
+            note.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            np.setMargins(0, 24, 0, 0);
+            layout.addView(note, np);
+
+            Button share = new Button(this);
+            share.setText("Share Its Log");
+            LinearLayout.LayoutParams shp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            shp.setMargins(0, 12, 0, 0);
+            shp.gravity = Gravity.CENTER_HORIZONTAL;
+            layout.addView(share, shp);
+            share.setOnClickListener(v -> shareLog(previousLog));
+        }
 
         setContentView(layout);
     }
@@ -143,22 +177,34 @@ public final class FirstRunActivity extends Activity {
         new Thread(() -> {
             String error = null;
             try {
+                // Load libmain.so (SDL is inside it) so the extractor is there;
+                // JNI_OnLoad only registers methods, it does not start SDL.
+                System.loadLibrary("main");
+                // The session log starts here, before the disc is read: a crash
+                // while importing it leaves a log the next start can share, and
+                // the game's own Share Session Log is unreachable until the
+                // files exist.
+                Shell.nativeSessionLogStart(dataDir.getAbsolutePath());
+                Shell.log("[first-run] importing " + uri);
                 if (!gameDir.isDirectory() && !gameDir.mkdirs())
                     throw new IOException("Could not create the game folder.");
+                long copied;
                 try (InputStream in = getContentResolver().openInputStream(uri);
                      OutputStream out = new FileOutputStream(isoPath)) {
                     if (in == null)
                         throw new IOException("The disc image could not be opened.");
-                    copy(in, out);
+                    copied = copy(in, out);
                 }
-                // Load libmain.so (SDL is inside it) so the extractor is there;
-                // JNI_OnLoad only registers methods, it does not start SDL.
-                System.loadLibrary("main");
+                Shell.log("[first-run] copied " + copied + " bytes, " + dataDir.getUsableSpace()
+                        + " bytes free");
                 error = Shell.nativeDiscPrepare(isoPath.getAbsolutePath(), gameDir.getAbsolutePath());
+                Shell.log("[first-run] the disc import " + (error == null ? "finished" : "failed: " + error));
             } catch (IOException e) {
                 error = e.getMessage() != null ? e.getMessage() : "The disc image could not be copied.";
+                Shell.log("[first-run] " + error);
             } catch (UnsatisfiedLinkError e) {
                 error = "The native library could not be loaded.";
+                Shell.log("[first-run] " + error);
             }
             final String result = error;
             runOnUiThread(() -> {
@@ -174,9 +220,50 @@ public final class FirstRunActivity extends Activity {
         }).start();
     }
 
-    private static void copy(InputStream in, OutputStream out) throws IOException {
+    private static long copy(InputStream in, OutputStream out) throws IOException {
         byte[] buffer = new byte[65536];
-        for (int n; (n = in.read(buffer)) > 0; )
+        long total = 0;
+        for (int n; (n = in.read(buffer)) > 0; ) {
             out.write(buffer, 0, n);
+            total += n;
+        }
+        return total;
+    }
+
+    /**
+     * The log the last session left when it did not end properly: android_entry.c
+     * names it in logs/session-in-progress at the start of a session and removes
+     * that file when the session ends, so a file here with a log beside it means
+     * the app died before its own menu could share it.
+     */
+    private File previousSessionLog() {
+        File logs = new File(dataDir, "logs");
+        File marker = new File(logs, "session-in-progress");
+        if (!marker.isFile())
+            return null;
+        String name = null;
+        try (BufferedReader in = new BufferedReader(new FileReader(marker))) {
+            name = in.readLine();
+        } catch (IOException e) {
+            return null;
+        }
+        if (name == null || !LogProvider.isSessionLog(name))
+            return null;
+        File log = new File(logs, name);
+        return log.isFile() ? log : null;
+    }
+
+    private void shareLog(File log) {
+        Uri uri = LogProvider.uriFor(this, log);
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_STREAM, uri);
+        send.setClipData(ClipData.newRawUri(log.getName(), uri));
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivity(Intent.createChooser(send, "Share Session Log"));
+        } catch (ActivityNotFoundException e) {
+            setStatus("This device has no app to share the log with.");
+        }
     }
 }

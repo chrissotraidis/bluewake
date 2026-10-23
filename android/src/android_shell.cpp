@@ -266,6 +266,18 @@ JNIEXPORT void SHELL(nativeCloseForSaves)(JNIEnv*, jclass) {
     bw_process_close(bluewake_card_runtime_close, 0);
 }
 
+// The first-run screen starts the session log before the disc is read, which is
+// before SDL_main, so main() has not started one yet (android_entry.c).
+extern "C" void bw_session_log_start(const char* data_dir);
+
+JNIEXPORT void SHELL(nativeSessionLogStart)(JNIEnv* env, jclass, jstring data_dir) {
+    const char* dir = utf(env, data_dir);
+    if (dir == nullptr)
+        return;
+    bw_session_log_start(dir);
+    env->ReleaseStringUTFChars(data_dir, dir);
+}
+
 JNIEXPORT void SHELL(nativeLog)(JNIEnv* env, jclass, jstring line) {
     const char* s = utf(env, line);
     if (s != nullptr) {
