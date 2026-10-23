@@ -211,6 +211,9 @@ save = os.environ.get("BLUEWAKE_SAVE_STATE")
 if save:
     path, _, at = save.rpartition("@")
     Path(path).write_bytes(b"setup-%d" % count)
+    print("[boot-milestone] title-ready retrace=328 blocks=1")
+    print("[boot-milestone] file-select retrace=454 blocks=1")
+    print("[boot-milestone] play-scene retrace=609 blocks=1")
     print("[state] saved %s retrace=%s" % (path, at))
     sys.exit(0)
 
@@ -234,6 +237,26 @@ for retrace in range(2400, end + 1, 100):
         print("[guest-checkpoint] version=1 retrace=%d cycle=%d cpu=%s mem1=%s mem2=%s "
               "aliases=%s alias_spans=1 alias_bytes=8"
               % (retrace, retrace * 1000, cpu, "1" * 32, "2" * 32, "3" * 32))
+"""
+
+
+FAKE_APP_NAME_ENTRY = r"""#!/usr/bin/env python3
+import os
+from pathlib import Path
+import sys
+
+save = os.environ.get("BLUEWAKE_SAVE_STATE")
+if not save:
+    # The setup pass was accepted, so a measurement pass ran: that is the bug.
+    sys.exit(3)
+path, _, at = save.rpartition("@")
+Path(path).write_bytes(b"setup-name-entry")
+print("[boot-milestone] title-ready retrace=328 blocks=1")
+print("[boot-milestone] file-select retrace=454 blocks=1")
+print("[boot-milestone] name-scene-create retrace=632 blocks=1")
+print("[boot-milestone] name-input-complete retrace=700 blocks=1")
+print("[state] saved %s retrace=%s" % (path, at))
+sys.exit(0)
 """
 
 
@@ -299,6 +322,57 @@ class SetupStateTests(unittest.TestCase):
         code, text = bench_tour.compare_summaries(left, right)
         self.assertNotEqual(code, 0)
         self.assertIn('checkpoints differ', text)
+
+    def make_app(self, text):
+        app = self.root / 'fake_app.py'
+        app.write_text(text)
+        app.chmod(0o755)
+        return app
+
+    def test_a_setup_pass_that_never_plays_is_refused(self):
+        app = self.make_app(FAKE_APP_NAME_ENTRY)
+        (self.root / 'run').mkdir()
+        with working_directory(self.root / 'run'):
+            code = bench_tour.run_tour(
+                'card', str(app), stop_retraces=600, untrained=False,
+                mode='headless', state=None, setup_state=str(self.state),
+            )
+        self.assertNotEqual(code, 0)
+        self.assertFalse((self.root / 'run' / 'summary.json').exists(),
+                         'no measurement may run from that state')
+        self.assertFalse(self.state.is_file(),
+                         'a refused state must not be left for a later run')
+
+    def test_the_refusal_names_the_last_milestone(self):
+        state = self.root / 's.bwstate'
+        state.write_bytes(b'name-entry')
+        log = ('[boot-milestone] file-select retrace=454 blocks=1 scene=0x00000000\n'
+               '[boot-milestone] name-scene-create retrace=632 blocks=1\n'
+               '[boot-milestone] name-input-complete retrace=700 blocks=1\n')
+        code, problem = bench_tour.setup_verdict(0, state, log)
+        self.assertEqual(code, 1)
+        self.assertIn('never reached gameplay', problem)
+        self.assertIn('name-input-complete', problem)
+
+    def test_a_setup_pass_that_plays_is_accepted(self):
+        state = self.root / 's.bwstate'
+        state.write_bytes(b'play')
+        log = ('[boot-milestone] file-select retrace=454 blocks=1 scene=0x00000000\n'
+               '[boot-milestone] play-scene retrace=609 blocks=4\n')
+        self.assertEqual(bench_tour.setup_verdict(0, state, log), (0, ''))
+
+    def test_the_summary_line_alone_counts_as_gameplay(self):
+        state = self.root / 's.bwstate'
+        state.write_bytes(b'play')
+        log = ('[boot-milestone] summary title_ready=1 title_retrace=328 '
+               'play_scene=1 play_scene_retrace=609\n')
+        self.assertEqual(bench_tour.setup_verdict(0, state, log), (0, ''))
+
+    def test_a_setup_pass_that_wrote_no_state_is_refused(self):
+        code, problem = bench_tour.setup_verdict(0, self.root / 'missing.bwstate',
+                                                 '[boot-milestone] play-scene retrace=609 blocks=4\n')
+        self.assertEqual(code, 1)
+        self.assertIn('wrote no state', problem)
 
 
 if __name__ == '__main__':
