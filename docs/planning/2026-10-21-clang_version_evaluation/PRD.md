@@ -1,10 +1,10 @@
 # PRD — Clang version evaluation
 
-Status: Draft  
+Status: Partial result; no recipe-default decision
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Parent milestone: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
-Follow-up plan: [PR #438](https://github.com/chrissotraidis/bluewake/pull/438)
+Parent status: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
 
 ## Motivation
 
@@ -18,7 +18,7 @@ plan determines which correct reproducible recipe runs BlueWake fastest.
 - Hold source, `-march=x86-64-v3`, options, dependencies, and packaging
   constant; treat each compiler's trained PGO profile as part of its recipe.
 - Compare correctness, artifact properties, build cost, and Steam Deck runtime.
-- Change the container default only if Clang 22 wins beyond measured noise.
+- Change no compiler default until the required qualified evidence is complete.
 
 Excluded: changing CI's host-test compiler, changing gameplay code, publishing
 private game artifacts, or treating a successful build as performance proof.
@@ -32,7 +32,7 @@ private game artifacts, or treating a successful build as performance proof.
   headless, rendered, and Game Mode profiles; then run five interleaved A/B
   pairs in both modes and repeat the Game Mode scene.
 - Guest checkpoints and required Linux/AppImage checks match for both variants.
-- The decision retains the faster build recipe only when the gain exceeds noise;
+- The decision retains a recipe only when qualified evidence exceeds noise;
   otherwise Clang 18 remains the default and the result is inconclusive.
 
 ## Success and constraints
@@ -46,22 +46,13 @@ private game artifacts, or treating a successful build as performance proof.
 | Compatibility | Current AppImage ceiling | ABI audit and launch smoke pass | Audit/smoke logs |
 
 Private discs, modules, AppImages, states, raw logs, and `perf.data` remain off
-the repository. Qualification is blocked until
-[#433](https://github.com/chrissotraidis/bluewake/issues/433) is resolved.
+the repository. A certified current native-entry control is blocked by
+[#451](https://github.com/chrissotraidis/bluewake/issues/451); this does not
+turn the pre-merge #446 recipe result into a current-control result.
 
-## Preliminary baseline
+## Findings
 
-The #446 revision built and passed private AppImage smoke/ABI checks on the
-Deck. Three headless fixed-state runs were deterministic for each compiler:
-Clang 18 averaged 33.84 game FPS and Clang 22 averaged 32.42 FPS. This is
-useful supplemental build-path evidence, not an M5 decision: it covers only
-one headless saved state. Compiler-specific PGO is valid as part of the recipe;
-the rendered and Game Mode stages remain.
-
-The fixed-state five-scene headless grid later favored the Clang 18 recipe by
-3.2% with matching checkpoints. One warmed Desktop Mode rendered pair also
-favored Clang 18 by 2.4% (272.06 versus 265.67 unpaced rendered game FPS), and
-the matched Game Mode samples were game-thread limited at roughly 27–29 game
-FPS for both recipes. Neither result completes M2: the tour's current
-stage-completion parser does not recognize this build's warp log shape, and the
-Game Mode samples are directional rather than a repeated controlled comparison.
+The fixed-state five-scene headless grid favored the Clang 18 recipe by 3.2%
+with matching checkpoints. That is the only qualified performance result.
+Rendered scene loading was not confirmed, and Game Mode was not repeated as a
+controlled comparison; neither result participates in recipe selection.
