@@ -19,7 +19,10 @@ the card continue is not reproducible (the same build booted twice from the
 same card differs from retrace 300), so this is what the "two runs of the same
 build: identical checkpoints" check needs. Write it outside the repository: it
 holds guest memory. Without the option the state stays in a temporary directory
-and each run makes its own.
+and each run makes its own. The pass has to reach gameplay: when its log has no
+[boot-milestone] play-scene line, the tour stops and names the last milestone it
+did reach, because a card with no save in quest log 1 starts a new file, ends on
+the name-entry screen, and still exits 0.
 
 Default stops, from retrace 2400, one every --stop-retraces (default 1800).
 The run ends at 11400:
@@ -92,6 +95,11 @@ CHECKPOINT = re.compile(
 )
 FAILED_CHECKPOINT = re.compile(r"\[guest-checkpoint\] failed retrace=(?P<retrace>\d+)")
 STATE_LOADED = re.compile(r"\[state\] loaded \S+ retrace=(?P<retrace>\d+)")
+# The host prints one of these per boot step ("play-scene", "file-select", …) and a
+# summary line whose fields are name=value, which this does not match.
+MILESTONE = re.compile(r"\[boot-milestone\] (?P<name>[a-z][a-z-]*) retrace=(?P<retrace>\d+)")
+GAMEPLAY_MILESTONE = "play-scene"
+SUMMARY_GAMEPLAY = re.compile(r"\[boot-milestone\] summary\b.*\bplay_scene=1\b")
 
 
 class Stop(NamedTuple):
@@ -203,6 +211,41 @@ def setup_environment(base, *, scratch, card, state_path) -> dict[str, str]:
     })
     _isolate(env, scratch, card)
     return env
+
+
+def setup_milestones(text: str) -> list[tuple[int, str]]:
+    """The [boot-milestone] lines a run printed, in the order it printed them."""
+    found = []
+    for line in text.splitlines():
+        match = MILESTONE.search(line)
+        if match:
+            found.append((int(match["retrace"]), match["name"]))
+    return found
+
+
+def setup_verdict(code: int, state_path: Path, log_text: str) -> tuple[int, str]:
+    """Whether a setup pass may be measured from, and why not when it may not.
+
+    An empty message means the state is usable: the pass exited 0, it wrote the
+    state, and a [boot-milestone] line says the route reached gameplay. A card
+    whose quest log 1 holds no save does not continue; it starts a new file,
+    stops at the name-entry screen, and still exits 0 with a state written, so
+    the exit code and the file alone accept a state that was never in play
+    (#458).
+    """
+    if code != 0:
+        return code, f"setup failed ({code})"
+    if not state_path.is_file():
+        return 1, f"setup wrote no state to {state_path}"
+    milestones = setup_milestones(log_text)
+    if any(name == GAMEPLAY_MILESTONE for _retrace, name in milestones):
+        return 0, ""
+    if SUMMARY_GAMEPLAY.search(log_text):
+        return 0, ""
+    last = milestones[-1][1] if milestones else "none"
+    return 1, (f"setup never reached gameplay: its last [boot-milestone] is {last}, "
+               f"so the state at {state_path} is not a play state. A card whose quest "
+               f"log 1 holds no save starts a new file instead of continuing")
 
 
 def _mean(values: list[float]):
@@ -465,9 +508,13 @@ def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state
             setup = setup_environment(base, scratch=scratch, card=card_out, state_path=state_path)
             setup_log = scratch / "setup.log"
             setup_code = _run_app(app, setup, setup_log)
-            if setup_code != 0 or not state_path.is_file():
-                print(f"setup failed ({setup_code}); log {setup_log}", file=sys.stderr)
-                return setup_code or 1
+            setup_text = setup_log.read_text(encoding="utf-8", errors="replace")
+            code, problem = setup_verdict(setup_code, state_path, setup_text)
+            if problem:
+                print(f"{problem}; log {setup_log}", file=sys.stderr)
+                if kept_state is not None:
+                    state_path.unlink(missing_ok=True)
+                return code or 1
             if kept_state is not None:
                 print(f"wrote the setup state {kept_state}", file=sys.stderr)
             load_state = state_path
