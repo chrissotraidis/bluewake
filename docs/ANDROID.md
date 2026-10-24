@@ -174,6 +174,18 @@ In that same folder (`files/`):
 | `launch.env` | optional launch settings, one `NAME=value` a line (`install.py --env NAME=value`) |
 | `logs/session-*.log` | the newest eight sessions (also in logcat, tag `BlueWake`) |
 
+## First run, and the log a crash leaves
+
+With no `main.dol` or rels yet, the app opens its first-run screen instead of SDL (`FirstRunActivity`): the player
+picks their own `GZLE01.iso`, it is copied into `files/game`, and `main.dol` and `rels/` are extracted from it on the
+device. That runs before the game and its menu exist, so the session log starts with the first-run screen:
+`logs/session-*.log` then holds the disc import and the game after it in one file, with the copy's size and the free
+space logged as it goes.
+
+A session that ends properly deletes `logs/session-in-progress`; one that does not leaves it there naming its log,
+and the next first-run screen offers **Share Its Log** (through `LogProvider`, as Help & Feedback > Share Session Log
+does). A crash before the menu is reportable that way instead of existing only in logcat and the tombstone.
+
 **Uninstalling the app deletes this folder, saves included.** Back up the card first:
 `python scripts/android/install.py --pull-saves backup/`. Installing a new build over the old one keeps it.
 
