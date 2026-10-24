@@ -356,7 +356,7 @@ final class GameData {
     /** Copies every PNG and DDS texture under the picked folder into Load/Textures/GZLE01, keeping its subfolders
      *  (the renderer searches them). */
     private void installTexturePackFrom(Uri tree) {
-        final File dest = settings.texturePackDirectory();
+        final File dest = settings.installedTexturePackDirectory();
         final Overlay.Wait wait = overlay.wait("Installing Texture Pack", "Copying textures…");
         new Thread(() -> {
             final int[] counts = new int[2];  // installed, failed
@@ -394,10 +394,11 @@ final class GameData {
                      OutputStream out = new FileOutputStream(new File(dest, name))) {
                     if (in == null) throw new IOException("unreadable");
                     copy(in, out);
-                    counts[0]++;
                 } catch (IOException | RuntimeException e) {
                     counts[1]++;
+                    continue;
                 }
+                counts[0]++; // Closing/flushing the output is part of a successful copy.
                 if (counts[0] > 0 && counts[0] % 250 == 0) wait.setMessage(counts[0] + " textures copied…");
             }
         }
@@ -406,10 +407,20 @@ final class GameData {
     private void finishTextureInstall(int installed, int failed) {
         Shell.log("[mods] texture pack install: " + installed + " copied, " + failed + " failed");
         overlay.texturePackChanged();
+        if (failed > 0) {
+            overlay.showMessage("Texture Pack Incomplete", installed + " files copied; " + failed
+                    + " could not be copied. No new pack was selected. Please try installing again.");
+            return;
+        }
         if (installed == 0) {
             overlay.showMessage("No Textures Found", "That folder has no PNG or DDS textures. Pick the pack's folder "
                     + "of tex1_… images for The Wind Waker (USA), often named GZLE01. If the pack is a .zip, unzip "
                     + "it first (your Files app can).");
+            return;
+        }
+        if (!settings.selectTexturePack(settings.installedTexturePackDirectory())) {
+            overlay.showMessage("Could Not Save Texture Pack Selection", "The files were copied, but BlueWake "
+                    + "could not save the pack selection.");
             return;
         }
         overlay.offerToTurnOn(Settings.MOD_HD_TEXTURES, "Texture Pack Installed", installed + " textures were "

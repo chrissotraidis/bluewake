@@ -46,6 +46,7 @@ public class BlueWakeActivity extends SDLActivity implements InputManager.InputD
     protected void onCreate(Bundle savedInstanceState) {
         applyLockScreenSwitch(getIntent());
         super.onCreate(savedInstanceState);
+        HDImportWorkspace.recoverOnStartup(getApplicationContext());
         if (mBrokenLibraries || mLayout == null)
             return;  // SDL has said why and closes
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -108,9 +109,23 @@ public class BlueWakeActivity extends SDLActivity implements InputManager.InputD
 
     @Override
     protected void onPause() {
-        if (overlay != null)
+        if (overlay != null) {
+            overlay.onPause();
             overlay.clearTouchInput();
+        }
         super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (overlay != null) overlay.onResume();
+    }
+
+    @Override
+    protected void onStop() {
+        if (overlay != null) overlay.onStop();
+        super.onStop();
     }
 
     @Override

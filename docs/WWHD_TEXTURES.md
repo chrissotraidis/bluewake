@@ -22,7 +22,8 @@ many textures the chosen pack has, and a way to add a pack:
 The native importer is in `main` since October 17 ([#315](https://github.com/chrissotraidis/bluewake/pull/315)),
 not yet in a download (0.7.0 doesn't have it). Its entry is **Mods › Wind Waker HD textures › Import
 from Wind Waker HD…**: F1 on Mac, Linux and Windows, or ⋯ on iPhone and iPad.
-Android integration is in [draft #347](https://github.com/chrissotraidis/bluewake/pull/347). The app needs no Python.
+Android's entry is the same, in ⋯ › Mods, in [draft #347](https://github.com/chrissotraidis/bluewake/pull/347); its phone checks
+are still open. The app needs no Python.
 
 1. Choose **Folder…** for your decrypted Wind Waker HD dump: the folder that
    holds `code`, `content` and `meta` (as Cemu uses it), or its `content` folder.
@@ -46,6 +47,10 @@ Android integration is in [draft #347](https://github.com/chrissotraidis/bluewak
    When the import completes, the app offers to turn on HD textures for the next
    launch. Restart to load the pack. This path still needs a full-dump test on
    hardware and an interactive check of cancellation/background transitions.
+5. In the Android build (#347), ⋯ › Mods offers the same folder and image choices.
+   Import pauses the game; Cancel or switching apps cleans up, and the result
+   waits until the app is active again. A finished import selects the pack and
+   offers to turn on HD textures for the next launch. The phone checks are still open.
 
 The native importer implements the script's matching and conversion: from
 the supplied decrypted HD folder and GameCube disc it makes the same 3,546
