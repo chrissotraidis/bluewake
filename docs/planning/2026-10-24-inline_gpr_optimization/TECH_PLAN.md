@@ -65,7 +65,21 @@ The preserved state `quick-23874.bwstate` was loaded before a five-scene tour: O
 | Headless | `43.9139 → 44.9400` | `43.6836 → 44.8011` | **+2.447%** |
 | Rendered | `39.4510 → 40.4019` | `39.9174 → 40.8888` | **+2.422%** |
 
-All five scenes improved in all four pairs. A Game Mode island tour completed without a reported gameplay issue. Invalid attempts using an incompatible setup state or a no-warp `--state` invocation were rejected and excluded. The different PGO profiles do not introduce an unrelated source-code variable: training each otherwise source-matched artifact can legitimately produce different profiles because the GPR optimization changes what training observes. The result therefore measures the complete GPR candidate under its normal training process; a matched-profile qualification remains open to separate the direct source effect from its training-mediated effect.
+### Scene-level results
+
+Each cell reports `control → candidate (change)`. These are the accepted comparator outputs, not values reconstructed from the aggregate mean.
+
+| Scene | Headless round 1 | Headless round 2 | Rendered round 1 | Rendered round 2 |
+|---|---:|---:|---:|---:|
+| Outset | `42.50 → 43.20 (+1.6%)` | `41.70 → 42.91 (+2.9%)` | `38.68 → 39.72 (+2.7%)` | `39.38 → 40.24 (+2.2%)` |
+| Windfall | `45.17 → 45.65 (+1.1%)` | `44.36 → 45.75 (+3.1%)` | `40.53 → 41.51 (+2.4%)` | `40.77 → 42.02 (+3.1%)` |
+| Dragon Roost Cavern | `60.43 → 62.18 (+2.9%)` | `60.42 → 61.60 (+1.9%)` | `53.70 → 55.04 (+2.5%)` | `54.44 → 55.66 (+2.3%)` |
+| Forest Haven | `37.31 → 38.52 (+3.2%)` | `37.50 → 38.60 (+2.9%)` | `33.45 → 34.05 (+1.8%)` | `33.58 → 34.51 (+2.7%)` |
+| Sea by the Fortress | `34.15 → 35.15 (+2.9%)` | `34.43 → 35.14 (+2.1%)` | `30.89 → 31.69 (+2.6%)` | `31.42 → 32.02 (+1.9%)` |
+
+All five scenes improved in all four pairs. The rendered rows are the quantitative evidence closest to live play: the game rendered normally while the fixed scene windows were measured. The separate player-controlled Game Mode island tour verified input, movement, rendering and general behavior, and no gameplay issue was reported. It did not record a synchronized control/candidate interval, so it supports compatibility but does not establish an additional numeric “live gameplay” gain.
+
+Invalid attempts using an incompatible setup state or a no-warp `--state` invocation were rejected and excluded. The different PGO profiles do not introduce an unrelated source-code variable: training each otherwise source-matched artifact can legitimately produce different profiles because the GPR optimization changes what training observes. The result therefore measures the complete GPR candidate under its normal training process; a matched-profile qualification remains open to separate the direct source effect from its training-mediated effect.
 
 ## Verification
 
