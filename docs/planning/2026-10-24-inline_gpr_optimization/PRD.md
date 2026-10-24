@@ -33,5 +33,6 @@ The goal is to remove redundant translated-CPU bookkeeping without changing gues
 ## Clarifications
 
 - The supplied handoff described an unmeasured hypothesis. The implementation and Deck evidence now exist, so this trio records the observed candidate rather than redesigning it.
-- The measured candidate artifact is faster, but its local PGO profile differs from the control. The result qualifies the complete artifact, not the GPR edit in isolation.
+- Aside from the GPR optimization, its RecompCore alias-range API, integration wiring and tests, the control and candidate source are identical. There is no unrelated source-code change confounding the comparison.
+- The measured candidate artifact is faster, but its local PGO profile differs from the control. That profile can itself change because the GPR code changes what training observes, so the result qualifies the complete GPR candidate and its normal training outcome rather than isolating the direct source-level contribution.
 - Runtime log counters printed `inline=0 fallback=0` during the player tour. Their relationship to build-time-generated inline sites remains unresolved and is not used as activation proof.

@@ -14,7 +14,7 @@ Inspected: BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; RecompCore `0ab7
 | Candidate runtime | RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb` | Fork branch `perf/guest-alias-range-overlap`; adds the overlap query |
 | Current upstream | BlueWake `211abfd`, RecompCore `1446450` | Candidate must be rebased and dependency integrated before merge |
 
-The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). The candidate changes only eligibility in [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h); generated `mem_read32` / `mem_write32`, cycle charging, direct-call checks, fallback, and reservation behavior remain intact.
+The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). The candidate changes only eligibility in [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h); generated `mem_read32` / `mem_write32`, cycle charging, direct-call checks, fallback, and reservation behavior remain intact. The complete control-to-candidate source diff consists only of this GPR work, its RecompCore alias-range API, integration wiring and tests; no unrelated runtime, renderer, service or gameplay source changed.
 
 ## Implemented flow
 
@@ -64,7 +64,7 @@ The preserved state `quick-23874.bwstate` was loaded before a five-scene tour: O
 | Headless | `43.9139 → 44.9400` | `43.6836 → 44.8011` | **+2.447%** |
 | Rendered | `39.4510 → 40.4019` | `39.9174 → 40.8888` | **+2.422%** |
 
-All five scenes improved in all four pairs. A Game Mode island tour completed without a reported gameplay issue. Invalid attempts using an incompatible setup state or a no-warp `--state` invocation were rejected and excluded. The candidate's distinct PGO profile prevents attributing the entire result solely to the source edit; a current-main matched-profile qualification remains open.
+All five scenes improved in all four pairs. A Game Mode island tour completed without a reported gameplay issue. Invalid attempts using an incompatible setup state or a no-warp `--state` invocation were rejected and excluded. The different PGO profiles do not introduce an unrelated source-code variable: training each otherwise source-matched artifact can legitimately produce different profiles because the GPR optimization changes what training observes. The result therefore measures the complete GPR candidate under its normal training process; a matched-profile qualification remains open to separate the direct source effect from its training-mediated effect.
 
 ## Verification
 
