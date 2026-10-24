@@ -1,7 +1,7 @@
 # TECH_PLAN — Inline GPR frame validation
 
 Status: Candidate implemented and measured; integration gates remain
-Inspected: BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb`; upstream BlueWake `main` `211abfdecf13beb5b9f2120459a1a3cde50dd84e`
+Inspected: tested BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; tested RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb`; rebased RecompCore companion `47a5229cbfb3387cfd21c2b9d304b303a54a6767`; upstream BlueWake `main` `211abfdecf13beb5b9f2120459a1a3cde50dd84e`
 
 [PRD](PRD.md) · [Tracker](PROGRESS.md) · [guest memory model](../../architecture/GuestState.md#guest-to-host-address-resolution) · [translated-code dispatch](../../architecture/GameModule.md#translated-code-dispatch)
 
@@ -11,7 +11,8 @@ Inspected: BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; RecompCore `0ab7
 |---|---|---|
 | Tested control | BlueWake `45e503fb869215ce3b4cb2490d12a53851268071` | Clang 18, `x86-64-v3`, composite `54f544…`, PGO `7334fd…` |
 | Tested candidate | BlueWake `f9205a53de307caac4e306e2a744609b1565135b` | Same compiler, architecture and composite; PGO `880e00…` |
-| Candidate runtime | RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb` | Fork branch `perf/guest-alias-range-overlap`; adds the overlap query |
+| Tested candidate runtime | RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb` | Exact commit used by the measured artifact |
+| Rebased runtime companion | RecompCore `47a5229cbfb3387cfd21c2b9d304b303a54a6767` | Same API rebased onto current `bluewake-next`; [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45) |
 | Current upstream | BlueWake `211abfd`, RecompCore `1446450` | PR branch rebased; dependency must still be integrated before merge |
 
 The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). The candidate changes only eligibility in [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h); generated `mem_read32` / `mem_write32`, cycle charging, direct-call checks, fallback, and reservation behavior remain intact. The complete control-to-candidate source diff consists only of this GPR work, its RecompCore alias-range API, integration wiring and tests; no unrelated runtime, renderer, service or gameplay source changed.
@@ -50,7 +51,7 @@ return true; /* existing memory helpers still perform every load/store */
 | Existing candidate | [`cmake/composite/inline_gpr.h`](../../../cmake/composite/inline_gpr.h) | Validate one contiguous frame and reject both alias forms | M2 |
 | Existing candidate | [`tests/inline_gpr_memory_test.c`](../../../tests/inline_gpr_memory_test.c) | Cover ordinary, partial-alias, mirror, bounds, MMIO and journal cases | M3 |
 | Existing candidate | RecompCore `ppc_guest_alias_range_overlaps` | Answer precise half-open range overlap without resolving storage | M1 |
-| Integrate | RecompCore `bluewake-next` and BlueWake dependency pins | Land the runtime API upstream, then pin that upstream revision | M5 |
+| Under review | [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45) and BlueWake dependency pins | Land the runtime API upstream, then replace the temporary contributor pin | M5 |
 | Integrated | Candidate branch versus current `main` | Rebased so unrelated Dawn patch history no longer appears in the PR | M5 |
 
 ## Measurement methodology and findings
@@ -89,10 +90,11 @@ All five scenes improved in all four pairs. A Game Mode island tour completed wi
 | M4 | M3 | Repeated headless/rendered evidence and player tour |
 | M5 | M1, M2, M3, M4 | Rebase, upstream RecompCore pin, matched qualification and CI |
 
-Critical path: M1 upstream review → M5 upstream pin → current-main qualification. M3 documentation and evidence review can proceed in parallel, but BlueWake cannot merge before its RecompCore API exists upstream.
+Critical path: [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45) review → M5 upstream pin → current-main qualification. M3 documentation and evidence review can proceed in parallel, but BlueWake cannot merge before its RecompCore API exists upstream.
 
 ## References
 
 - [Steam Deck performance issue](https://github.com/chrissotraidis/bluewake/issues/215)
 - [Parent game-thread performance tracker](https://github.com/chrissotraidis/bluewake/pull/421)
+- [Companion RecompCore API PR](https://github.com/chrissotraidis/RecompCore/pull/45)
 - [Kept-state benchmark PR](https://github.com/chrissotraidis/bluewake/pull/450) and [setup validity follow-up](https://github.com/chrissotraidis/bluewake/pull/459)

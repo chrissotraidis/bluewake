@@ -14,7 +14,7 @@ Status: Candidate measured; upstream integration open
 ### M1: Add precise alias-range detection (depends: M0)
 
 - [x] M1-T01: Implement and component-test `ppc_guest_alias_range_overlaps` on the candidate RecompCore fork.
-- [ ] M1-T02: Submit and land the API on RecompCore `bluewake-next`.
+- [!] M1-T02: Submitted as [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45); blocked waiting for upstream review and merge.
 - [ ] M1-T03: Replace the fork-only pin with the accepted upstream RecompCore revision.
 
 ### M2: Validate one complete GPR frame (depends: M1)
