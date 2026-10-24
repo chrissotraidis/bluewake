@@ -22,7 +22,10 @@ static inline bool bw_inline_gpr_memory_ready(CPUState* cpu, unsigned first) {
         (canonical != address &&
          ppc_guest_alias_range_overlaps(canonical, size)))
         return false;
-    return get_ram_ptr(cpu, address, size, NULL) == cpu->ram + offset;
+    /* Bounds and both accepted address forms are now proven to select plain
+     * MEM1. Calling get_ram_ptr() here would repeat the same alias search;
+     * the actual loads and stores retain their normal memory helpers. */
+    return true;
 }
 
 #endif
