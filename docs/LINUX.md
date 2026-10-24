@@ -49,8 +49,8 @@ build:
 The version-controlled [`scripts/linux/Dockerfile`](../scripts/linux/Dockerfile)
 supplies Clang 18 and 22, CMake, development libraries and AppImage tools.
 Clang 18 remains the default and CI also selects it explicitly; `--clang22` is
-an opt-in for container builds. Ubuntu's libc++ 18 remains the shared C++
-runtime/ABI baseline for either compiler. Docker caches unchanged layers,
+an opt-in for container builds. Either compiler uses Ubuntu's libstdc++, which the
+AppImage links statically. Docker caches unchanged layers,
 mounts the disc read-only and writes normal outputs to `build/linux`; the disc
 never enters the image or CI. The result is always an x86-64 Linux build. Arm
 hosts use Docker's `linux/amd64` emulation, which is substantially slower.
@@ -69,10 +69,10 @@ hosts use Docker's `linux/amd64` emulation, which is substantially slower.
 ## Native build
 
 Install CMake 3.25+, Ninja, Git, `pkg-config`, Clang/Clang++ 17 or newer, LLD,
-`llvm-profdata`, libc++ and the graphics/audio development libraries. Ubuntu
+`llvm-profdata` and the graphics/audio development libraries. Ubuntu
 24.04 package names are:
 
-    sudo apt install clang lld llvm libc++-dev libc++abi-dev cmake ninja-build \
+    sudo apt install clang lld llvm cmake ninja-build \
       git build-essential pkg-config libwayland-dev libxkbcommon-dev \
       libx11-xcb-dev libx11-dev libxrandr-dev libxext-dev libxi-dev \
       libxcursor-dev libgl1-mesa-dev libvulkan-dev libasound2-dev libpulse-dev \
@@ -261,15 +261,15 @@ CI image and avoid installing packaging tools on the host:
       --ci-container --appimage
 
 The shared Dockerfile pins appimagetool, the Type 2 runtime and CMake. It uses
-Clang 18 by default, includes optional Clang 22 tools, and retains Ubuntu's
-libc++ 18 with either compiler.
+Clang 18 by default and includes optional Clang 22 tools.
 The completed AppImage is automatically audited for prohibited private files,
 accidental libstdc++ linkage and a maximum `GLIBC_2.39` requirement.
-To pass that audit, `--appimage` builds the app with LLVM libc++, which the
-AppImage carries, and builds Dawn from source with it, as Linux CI does (the
-prebuilt Dawn package links libstdc++). It uses its own `app-appimage` build
-folder, so the first AppImage build takes longer; folder builds keep the
-prebuilt Dawn.
+To pass that audit, `--appimage` links libstdc++ into the app statically
+(`-static-libstdc++`), as Linux CI does, so the AppImage needs no `GLIBCXX_*`
+from the player's system and uses the same prebuilt Dawn package as a folder
+build. It uses its own `app-appimage` build folder; folder builds keep
+libstdc++ shared. (AppImages used LLVM libc++ with Dawn built from source
+before; on four slow cores that drew frames about 3% slower.)
 
 The outputs are:
 

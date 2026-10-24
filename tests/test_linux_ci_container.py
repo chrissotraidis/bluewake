@@ -235,11 +235,12 @@ class DependencyPreflightTest(unittest.TestCase):
 
 
 class AppImageRuntimeTest(unittest.TestCase):
-    """The AppImage's host uses LLVM libc++, as CI's checked AppImage does.
+    """The AppImage's host links libstdc++ statically, as CI's checked AppImage does.
 
-    The prebuilt Dawn package links libstdc++, so a host built with it needs the
-    player's libstdc++ and check_appimage_abi.py rejects the AppImage
-    (GLIBCXX_3.4.32 on a container build, reported on #371)."""
+    A host linked with the shared libstdc++ needs the player's own (GLIBCXX_3.4.32 on a
+    container build, reported on #371), which check_appimage_abi.py rejects. Linked
+    statically, it keeps the prebuilt Dawn package that folder builds use; LLVM libc++
+    with Dawn from source drew frames about 3% slower on four slow cores."""
 
     def configure(self, appimage):
         builder = BUILD.Builder(argparse.Namespace(out=Path("build/linux"), appimage=appimage,
@@ -249,24 +250,23 @@ class AppImageRuntimeTest(unittest.TestCase):
         builder.configure_app()
         return builder, seen[0]
 
-    def test_appimage_builds_with_libcxx_and_dawn_from_source(self):
+    def test_appimage_links_libstdcxx_statically_with_the_prebuilt_dawn(self):
         builder, argv = self.configure(True)
-        self.assertIn("-DCMAKE_CXX_FLAGS=-march=x86-64-v3 -g -stdlib=libc++", argv)
-        for flag in ("-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++", "-DCMAKE_SHARED_LINKER_FLAGS=-stdlib=libc++",
-                     "-DAURORA_DAWN_PROVIDER=vendor"):
+        self.assertIn("-DCMAKE_CXX_FLAGS=-march=x86-64-v3 -g", argv)
+        for flag in ("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++", "-DAURORA_DAWN_PROVIDER=package"):
             self.assertIn(flag, argv)
-        self.assertNotIn("-DAURORA_DAWN_PROVIDER=package", argv)
+        self.assertFalse(any("libc++" in a for a in argv))
         self.assertEqual(builder.app_build, Path("build/linux/app-appimage"))
         # The same runtime as the CI job whose AppImage passes the ABI check.
         workflow = (BUILD.ROOT / ".github/workflows/linux-host.yml").read_text()
-        for flag in ("-DCMAKE_CXX_FLAGS=-stdlib=libc++", "-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++",
-                     "-DAURORA_DAWN_PROVIDER=vendor"):
+        for flag in ("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++", "-DAURORA_DAWN_PROVIDER=package"):
             self.assertIn(flag, workflow)
+        self.assertNotIn("-stdlib=libc++", workflow)
 
-    def test_folder_build_keeps_the_prebuilt_dawn(self):
+    def test_folder_build_keeps_libstdcxx_shared(self):
         builder, argv = self.configure(False)
         self.assertIn("-DAURORA_DAWN_PROVIDER=package", argv)
-        self.assertFalse(any("-stdlib=libc++" in a for a in argv))
+        self.assertFalse(any("libc++" in a or "-static-libstdc++" in a for a in argv))
         self.assertEqual(builder.app_build, Path("build/linux/app"))
 
 
