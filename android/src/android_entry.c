@@ -41,6 +41,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "disc_import.h"
+
 int bluewake_host_main(int argc, char** argv);
 // The shell's frame hook and the hold (apple/ios/src/touch_controls.cpp, shared
 // with the iPhone app): the touch pad, the pause reasons and the FPS count.
@@ -358,6 +360,22 @@ int main(int argc, char** argv) {
                 missing, missing_path);
         finish_session_log();
         return 1;
+    }
+
+    // Present is not the same as whole: the image the first run copied can end
+    // early (a provider that ended the stream, an interrupted push), and the game
+    // reads the disc itself, so it dies somewhere inside the host instead of
+    // saying anything. Check it here, where there is a screen to say it on.
+    {
+        char disc_error[512] = {0};
+        if (bluewake_disc_check_complete(getenv("BLUEWAKE_DISC"), disc_error,
+                                         sizeof disc_error) != 0) {
+            fprintf(stderr, "[android] the disc image cannot be used: %s\n", disc_error);
+            fprintf(stderr, "[android] choose the disc image again from the first-run screen\n");
+            fatal_box(disc_error);
+            finish_session_log();
+            return 1;
+        }
     }
 
     // The module is found by name in the APK's native library folder.
