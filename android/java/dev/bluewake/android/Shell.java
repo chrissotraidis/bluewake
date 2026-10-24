@@ -39,9 +39,16 @@ final class Shell {
     static native boolean nativeFlushPath(String path);
     static native void nativeCloseForSaves();
     static native void nativeLog(String line);
+    /**
+     * Start this run's session log before SDL does: the first-run screen, so a
+     * crash while the disc is imported is in the log (android_entry.c).
+     */
+    static native void nativeSessionLogStart(String dataDir);
     /** Rows "empty\tchecksum_ok\tmax_life\trupees\tname" for each quest log, or null with error[0] set. */
     static native String[] nativeQuestLogs(byte[] bytes, boolean dolphin, String[] error);
     static native byte[] nativeCardImport(byte[] card, byte[] save, int source, int destination, String[] error);
+    /** Extract main.dol and rels/ from the disc into the game dir; null = success, else the reason. */
+    static native String nativeDiscPrepare(String iso, String gameDir);
 
     static void log(String line) {
         try {
