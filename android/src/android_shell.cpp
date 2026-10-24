@@ -364,6 +364,23 @@ JNIEXPORT jbyteArray SHELL(nativeCardImport)(JNIEnv* env, jclass, jbyteArray car
 // GZLE01 ISO into the game dir, as the iOS first-run screen does on the device
 // (apple/ios/src/disc_import.c). Returns null on success, or a sentence for
 // the user. Progress reports as {fraction 0..1000, stage} through progress.
+// Whether the image the first run copied is whole, not merely present
+// (disc_import.c): null when it is, else the reason to show the player.
+JNIEXPORT jstring SHELL(nativeDiscCheck)(JNIEnv* env, jclass, jstring iso) {
+    const char* iso_path = utf(env, iso);
+    char err[512] = {0};
+    int rc = -1;
+    if (iso_path == nullptr)
+        snprintf(err, sizeof err, "The disc image could not be read.");
+    else
+        rc = bluewake_disc_check_complete(iso_path, err, sizeof err);
+    if (iso_path != nullptr)
+        env->ReleaseStringUTFChars(iso, iso_path);
+    if (rc == 0)
+        return nullptr;
+    return env->NewStringUTF(err[0] != '\0' ? err : "The disc image cannot be used.");
+}
+
 JNIEXPORT jstring SHELL(nativeDiscPrepare)(JNIEnv* env, jclass, jstring iso, jstring game_dir) {
     const char* iso_path = utf(env, iso);
     const char* dir_path = utf(env, game_dir);

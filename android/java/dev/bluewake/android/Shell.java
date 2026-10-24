@@ -49,6 +49,8 @@ final class Shell {
     static native byte[] nativeCardImport(byte[] card, byte[] save, int source, int destination, String[] error);
     /** Extract main.dol and rels/ from the disc into the game dir; null = success, else the reason. */
     static native String nativeDiscPrepare(String iso, String gameDir);
+    /** Whether the disc image is whole, not merely present; null = it is, else the reason. */
+    static native String nativeDiscCheck(String iso);
 
     static void log(String line) {
         try {

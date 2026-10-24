@@ -45,6 +45,7 @@ public final class FirstRunActivity extends Activity {
     private File dataDir;
     private File gameDir;
     private File isoPath;
+    private String problem;     // why the game cannot start, when the files are there but the disc is not usable
     private File previousLog;   // the last session's log, when it did not end properly
     private TextView status;
     private Button choose;
@@ -59,8 +60,14 @@ public final class FirstRunActivity extends Activity {
         previousLog = previousSessionLog();
 
         if (ready()) {
-            forward();
-            return;
+            // The files are there. The image they were made from has to be whole
+            // as well: the game reads the disc directly, so an image that ends
+            // early kills it before the menu (disc_import.c).
+            problem = discProblem();
+            if (problem == null) {
+                forward();
+                return;
+            }
         }
 
         LinearLayout layout = new LinearLayout(this);
@@ -88,6 +95,7 @@ public final class FirstRunActivity extends Activity {
         layout.addView(subtitle, sub);
 
         status = new TextView(this);
+        status.setText(problem != null ? problem : "");
         status.setTextColor(Color.WHITE);
         status.setTextSize(14);
         status.setGravity(Gravity.CENTER);
@@ -127,6 +135,26 @@ public final class FirstRunActivity extends Activity {
         }
 
         setContentView(layout);
+    }
+
+    /**
+     * Null when files/game/GZLE01.iso is a whole disc image, else the reason. The
+     * answer comes from the same check the game's own start makes (disc_import.c,
+     * through Shell.nativeDiscCheck), so the screen and the game cannot disagree:
+     * an image that ends before the files it names is what leaves a player with a
+     * crash instead of a message.
+     */
+    private String discProblem() {
+        if (!isoPath.isFile())
+            return "The disc image is missing. Choose it again.";
+        try {
+            // Load libmain.so (SDL is inside it) so the check is there;
+            // JNI_OnLoad only registers methods, it does not start SDL.
+            System.loadLibrary("main");
+            return Shell.nativeDiscCheck(isoPath.getAbsolutePath());
+        } catch (UnsatisfiedLinkError e) {
+            return "The disc image could not be checked.";
+        }
     }
 
     private boolean ready() {
