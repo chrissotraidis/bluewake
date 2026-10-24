@@ -4,8 +4,9 @@ The working record for 0.9.0, started October 24, 2026. It says what the next ve
 check before publishing. Fill in each check with the device, the commit and what was seen; a row stays "not yet"
 until someone runs it. Previous release: [0.8.0](RELEASE_0.8.0.md), October 18. Only Chris publishes.
 
-`main` is not frozen. `version.json` stays 0.8.0 until Chris has played the second test candidate below; what
-remains to merge after that is #455, #431 and #316, and then the freeze pull request (#464) sets 0.9.0, build 8.
+**Frozen October 24, 2026 at `211abfd`** (#464's merge): `version.json` 0.9.0, build 8. Until the release is out,
+only docs and fixes for what the checks find go into `main`. The Windows build follows
+[WINDOWS_BUILD_0.9.0.md](WINDOWS_BUILD_0.9.0.md).
 
 ## The aim
 
@@ -17,7 +18,9 @@ texture importer and the one desktop menu that are already in `main`.
 
 | | |
 | --- | --- |
-| Version | 0.9.0, build 8 (set by the freeze pull request) |
+| Version | 0.9.0, build 8 |
+| Candidate commit | `211abfdecf13beb5b9f2120459a1a3cde50dd84e` (#464's merge, October 24): what the Windows build, the AppImage and the IPA are built from. `git checkout --detach 211abfd` |
+| Draft release | v0.9.0, a draft targeting `211abfd` (no tag until it's published), with the IPA, the source zip and the recipe; the Windows zip and `SHA256SUMS` come next |
 | Test candidate | `f55ffba5`, a local integration branch (October 24): `main` at `729298f` plus #455, #456, #398 (which carries #371 and #446), #431 and #450. It exists so the Mac and iPad can be played and measured before the merges; the release commit will be `main` after them |
 | Test candidate 2 | `dee2a223` (October 24, evening): `main` at `c5ebeca` (with the rendering stack, #468) plus #455, #431 and #316. The Mac and iPad apps from the first candidate with only the app rebuilt from this tree; the game module is byte-identical. iPad Pro: the tour at the same speed (Outset 92.1, Windfall 93.2, Dragon Roost Cavern 133.4, Forest Haven 75.3, the sea by the Fortress 68.4), the card unchanged. Mac: the camera stand-still 0 of 1,813 frames off; with “The right stick aims too” off, first person ignores the right stick. This is the build for Chris's play |
 | RecompCore | `1446450`, #398's pin: RecompCore#44 (the Dawn callbacks, on #43), then #40 (Smooth Motion), then #42 (sun shadows), on `bluewake-next` |
@@ -130,12 +133,12 @@ does, or under the 14-day rule (AGENTS.md).
 
 | Check | Who | Result |
 | --- | --- | --- |
-| Chris plays test candidate 2 on the Mac and the iPad: the camera with Direct right-stick camera on (normal play, climbing, quick doors); a cutscene with music, saving and loading, the menus, the Picto Box (#431's defaults); two menu switches in a row on the iPad (#316); Smooth Motion above 60 FPS and the sun shadows by eye; the desktop menu with a controller and the two new controller options | Chris | Not yet |
-| Merge in order | Codex | RecompCore#43, #44, #40 and #42 into `bluewake-next`, and #446, #371 and #398 into `main` through #468 (`c5ebeca`), October 24. After Chris's play: #455, #431 and #316, then the freeze pull request #464 |
+| Chris plays test candidate 2 on the iPad | Chris | Played October 24: stable at 30 FPS, no dips, Smooth Motion and the touch controls fine, the mods fine. The other fixes are left to players' reports. The Mac by hand was not played |
+| Merge in order | Codex | Done October 24: RecompCore#43, #44, #40 and #42 into `bluewake-next`; #468 (#446, #371, #398), #431, #316, #469, #471 (#455) and the freeze #464 into `main` |
 | The benchmark tour on the candidate against 0.8.0 | Codex | iPad Pro (M2), October 24: the test candidate (game module `00028fb0…`, built from `f55ffba5` with #431's defaults and the Mac build's training profile) against the October 20 runs of 0.8.0 as players have it, with the same harness, card and settings. Headless game frames a second, two runs: Outset 91.1 / 91.9 (0.8.0: 52.2 / 52.1, +75%), Windfall 92.6 / 92.6 (52.0 / 53.0, +76%), Dragon Roost Cavern 134.3 / 135.8 (75.1 / 77.0, +78%), Forest Haven 75.6 / 76.1 (42.3 / 42.6, +79%), the sea by the Fortress 68.5 / 68.2 (39.1 / 39.0, +75%). Every stop loaded, no dips. At the game's own speed every stop holds 30 game frames a second with the game thread 34 to 52% busy (0.8.0: 51 to 88%). Within 1.2% of the October 20 recipe build, so the rendering stack and the camera fix cost nothing measurable here. The player's card hashed the same (`4b54ec25…`) before the install and after every run. The test candidate stays installed for Sunday; the 0.8.0 app is kept to reinstall |
 | The 468-place warp sweep (`scripts/stage_select_sweep.py`) on the candidate | Codex | Mac (M3 Max), October 24: 446 of 468 arrive and the card is unchanged after all 468, the same outcome at every place as the 0.8.0 candidate on October 17 (an early file at Outset, a copy of the iPad's card). The other 22 are the names file's test-room hangs, Wind Temple R04 and R08 (#318), and late-game cutscenes the file can't reach. A rendered tour on the Mac loaded all five stops at 30 game frames a second without dips, with the standard look and with the HD look (with and without sun shadows) |
-| Windows build from the frozen commit on Chris's PC, with the checks in [WINDOWS_TASKS.md](../WINDOWS_TASKS.md) | Chris's PC | Not yet |
+| Windows build from the frozen commit on Chris's PC, with the checks in [WINDOWS_BUILD_0.9.0.md](WINDOWS_BUILD_0.9.0.md) | Chris's PC | Not yet |
 | Linux AppImage from a contributor's own disc, after #446, with `check_appimage_abi.py` | cforain or jkoehler11 | Asked on #433 on October 24, now that #446 is in `main`. Not yet |
-| The app-only IPA, PadMint's `audit`, and PadMint's `scripts/player-check.sh` before tagging and after publishing | Codex, on this Mac | Not yet |
-| `scripts/release/check_public_assets.sh` on every artifact | Codex | Not yet |
+| The app-only IPA, PadMint's `audit`, and PadMint's `scripts/player-check.sh` before tagging and after publishing | Codex, on this Mac | IPA from a clean checkout of `211abfd`: `BlueWake-v0.9.0-ios-unsigned.ipa`, 5.7 MB, SHA-256 `675afb81…0b375`, reports 0.9.0 build 8, no game module; PadMint `audit` (PadMint `main` `a723ae0`, Apple Python 3.9.6) and `check_public_assets.sh` pass, also for the source zip (`c72a3a0b…9499`, 1,253 entries) and the recipe (`a8508bd7…0375`). `player-check.sh` before tagging: started October 24, 23:21 JST. After publishing: not yet |
+| `scripts/release/check_public_assets.sh` on every artifact | Codex | IPA, source zip and recipe pass. The Windows zip when it's uploaded |
 
