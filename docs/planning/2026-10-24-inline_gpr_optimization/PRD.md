@@ -28,7 +28,7 @@ The goal is to remove redundant translated-CPU bookkeeping without changing gues
 | Headless Deck throughput | Control artifact mean across five scenes | Repeatable positive change beyond run-order noise | Two paired rounds, opposite order |
 | Rendered Deck throughput | Control artifact mean across five scenes | Repeatable positive change | Two paired rounds, opposite order |
 | Player behavior | Existing island route | No observed gameplay or visual regression | Game Mode tour and session log |
-| Upstream readiness | Candidate pins a fork-only RecompCore API | Current `main` base, upstream RecompCore dependency, CI | Open integration milestone |
+| Upstream readiness | Candidate pins a fork-only RecompCore API | Current `main` base, upstream RecompCore dependency, CI | Rebased; dependency and CI remain open |
 
 ## Clarifications
 

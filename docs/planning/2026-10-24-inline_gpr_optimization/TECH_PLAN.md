@@ -12,7 +12,7 @@ Inspected: BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; RecompCore `0ab7
 | Tested control | BlueWake `45e503fb869215ce3b4cb2490d12a53851268071` | Clang 18, `x86-64-v3`, composite `54f544…`, PGO `7334fd…` |
 | Tested candidate | BlueWake `f9205a53de307caac4e306e2a744609b1565135b` | Same compiler, architecture and composite; PGO `880e00…` |
 | Candidate runtime | RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb` | Fork branch `perf/guest-alias-range-overlap`; adds the overlap query |
-| Current upstream | BlueWake `211abfd`, RecompCore `1446450` | Candidate must be rebased and dependency integrated before merge |
+| Current upstream | BlueWake `211abfd`, RecompCore `1446450` | PR branch rebased; dependency must still be integrated before merge |
 
 The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). The candidate changes only eligibility in [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h); generated `mem_read32` / `mem_write32`, cycle charging, direct-call checks, fallback, and reservation behavior remain intact. The complete control-to-candidate source diff consists only of this GPR work, its RecompCore alias-range API, integration wiring and tests; no unrelated runtime, renderer, service or gameplay source changed.
 
@@ -51,7 +51,7 @@ return true; /* existing memory helpers still perform every load/store */
 | Existing candidate | [`tests/inline_gpr_memory_test.c`](../../../tests/inline_gpr_memory_test.c) | Cover ordinary, partial-alias, mirror, bounds, MMIO and journal cases | M3 |
 | Existing candidate | RecompCore `ppc_guest_alias_range_overlaps` | Answer precise half-open range overlap without resolving storage | M1 |
 | Integrate | RecompCore `bluewake-next` and BlueWake dependency pins | Land the runtime API upstream, then pin that upstream revision | M5 |
-| Integrate | Candidate branch versus current `main` | Drop unrelated historical pin changes and requalify the rebased artifact | M5 |
+| Integrated | Candidate branch versus current `main` | Rebased so unrelated Dawn patch history no longer appears in the PR | M5 |
 
 ## Measurement methodology and findings
 
@@ -76,7 +76,7 @@ All five scenes improved in all four pairs. A Game Mode island tour completed wi
 | Repository | `git diff --check`; `scripts/audit_repo.sh` | Clean diff; audit pass | Passed |
 | Packaging | CI-container AppImage build and ABI audit | Successful private AppImage; max `GLIBC_2.38` | Passed |
 | Hardware | Two headless and two rendered paired rounds | Loaded scenes, matching checkpoints, repeatable positive delta | Passed on tested snapshot |
-| Integration | Rebase, upstream runtime pin, Linux/Windows CI | No fork pin; current-main evidence | Open |
+| Integration | Rebase, upstream runtime pin, Linux/Windows CI | No fork pin; current-main evidence | Rebase passed; dependency, qualification and CI open |
 
 ## Implementation order
 
@@ -89,7 +89,7 @@ All five scenes improved in all four pairs. A Game Mode island tour completed wi
 | M4 | M3 | Repeated headless/rendered evidence and player tour |
 | M5 | M1, M2, M3, M4 | Rebase, upstream RecompCore pin, matched qualification and CI |
 
-Critical path: M1 upstream review → M5 rebase/pin → current-main qualification. M3 documentation and evidence review can proceed in parallel, but BlueWake cannot merge before its RecompCore API exists upstream.
+Critical path: M1 upstream review → M5 upstream pin → current-main qualification. M3 documentation and evidence review can proceed in parallel, but BlueWake cannot merge before its RecompCore API exists upstream.
 
 ## References
 
