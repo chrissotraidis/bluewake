@@ -95,6 +95,8 @@ const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "L
 const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
 const char* const kShadowQualityShown[] = {"Low", "Medium", "High"};
 const char* const kShadowQualityStored[] = {"low", "medium", "high"};
+const char* const kInterpPacingShown[] = {"Automatic", "Never pause"};
+const char* const kInterpPacingStored[] = {"", "0"};
 
 // Beside the control when it fits there. A list or a slider fills its line,
 // and after one the note went past the edge and, wrapped to nothing there, was
@@ -657,6 +659,12 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *shown = bw_desktop::kShadowQualityShown;
         *stored = bw_desktop::kShadowQualityStored;
         *count = 3;
+        return true;
+    }
+    if (std::strcmp(key, "DOL_AURORA_FRAME_INTERP_PACING") == 0) {
+        *shown = bw_desktop::kInterpPacingShown;
+        *stored = bw_desktop::kInterpPacingStored;
+        *count = 2;
         return true;
     }
     if (std::strcmp(key, "BLUEWAKE_MENU_TEXT_SIZE") == 0) {
