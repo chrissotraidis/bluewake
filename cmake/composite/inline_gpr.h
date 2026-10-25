@@ -28,4 +28,25 @@ static inline bool bw_inline_gpr_memory_ready(CPUState* cpu, unsigned first) {
     return true;
 }
 
+/* After bw_inline_gpr_memory_ready(): the frame's MEM1 bytes, lowest address
+ * first (r`first` at offset 0). Proven plain MEM1 with no journal, each
+ * mem_write32 would only clear a reservation on its 32-byte granule and store,
+ * and nothing can observe the stores in between; so a save clears a
+ * reservation on any granule the frame covers once, here, and the stores go
+ * straight to memory. A restore's loads need nothing. */
+static inline u8* bw_inline_gpr_frame(CPUState* cpu, unsigned first, bool save) {
+    const u32 size = 4u * (32u - first);
+    const u32 canonical = (cpu->gpr[11] - size) & ~0x40000000u;
+    if (save && cpu->reserve_valid) {
+        const u32 granule = cpu->reserve_addr & ~0x40000000u & ~31u;
+        if (granule >= (canonical & ~31u) && granule <= ((canonical + size - 1u) & ~31u))
+            cpu->reserve_valid = false;
+    }
+#if defined(BW_GUEST_MEM1)
+    return BW_GUEST_MEM1 + (canonical - GC_RAM_BASE);
+#else
+    return cpu->ram + (canonical - GC_RAM_BASE);
+#endif
+}
+
 #endif

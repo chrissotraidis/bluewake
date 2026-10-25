@@ -102,13 +102,15 @@ def inline_body(target, ret):
         lines.append(f"            if (ctx->downcount - {count - 1} > {BUDGET}) {{")
         suffix = 0
     lines.append(f"                ctx->downcount -= {count};")
-    lines.append("                const u32 frame = ctx->gpr[11];")
+    # The frame is proven plain MEM1 (bw_inline_gpr_memory_ready), so the stores
+    # and loads go straight to its bytes (bw_inline_gpr_frame).
+    lines.append(f"                u8* const slots = bw_inline_gpr_frame(ctx, {first}u, {'true' if save else 'false'});")
     for reg in range(first, 32):
-        offset = 4 * reg - 128
+        at = 4 * (reg - first)
         if save:
-            lines.append(f"                mem_write32(ctx, frame + (u32)(s32)({offset}), (u32)ctx->gpr[{reg}]);")
+            lines.append(f"                write_be32(slots + {at}, (u32)ctx->gpr[{reg}]);")
         else:
-            lines.append(f"                ctx->gpr[{reg}] = mem_read32(ctx, frame + (u32)(s32)({offset}));")
+            lines.append(f"                ctx->gpr[{reg}] = read_be32(slots + {at});")
     lines.append(f"                ctx->cycle_observation_suffix = {suffix}u;")
     lines.append(f"                ctx->pc = 0x{ret:08X}u;")
     # The routine's return dispatch, then the chassis's checks at the boundary.
