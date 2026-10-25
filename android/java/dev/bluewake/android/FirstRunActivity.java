@@ -4,9 +4,11 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -20,6 +22,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Locale;
 
 /**
  * The launcher activity: runs before SDL and the game, so a missing game
@@ -41,6 +44,12 @@ import java.io.OutputStream;
  */
 public final class FirstRunActivity extends Activity {
     static final int REQUEST_DISC = 0x4B57;  // "BW"
+    /**
+     * Room kept aside for the extraction that follows the copy: main.dol and the
+     * 415 rels take about 11 MB, and the import writes them beside the old ones
+     * before swapping them in.
+     */
+    private static final long IMPORT_HEADROOM = 32L * 1024 * 1024;
 
     private File dataDir;
     private File gameDir;
@@ -204,6 +213,10 @@ public final class FirstRunActivity extends Activity {
         setStatus("Copying the disc image…");
         new Thread(() -> {
             String error = null;
+            // Copied beside the real name and renamed at the end, so a copy that
+            // an interrupted session or a kill stops halfway leaves no image for
+            // the game to read (#476).
+            final File part = new File(gameDir, "GZLE01.iso.part");
             try {
                 // Load libmain.so (SDL is inside it) so the extractor is there;
                 // JNI_OnLoad only registers methods, it does not start SDL.
@@ -213,26 +226,57 @@ public final class FirstRunActivity extends Activity {
                 // the game's own Share Session Log is unreachable until the
                 // files exist.
                 Shell.nativeSessionLogStart(dataDir.getAbsolutePath());
-                Shell.log("[first-run] importing " + uri);
+                // What the provider says about the file it handed over: the size
+                // the copy is checked against, and what the free-space check is
+                // made of (#476).
+                final long declared = declaredSize(uri);
+                final String name = displayName(uri);
+                Shell.log("[first-run] importing " + uri + (name != null ? " (" + name + ")" : "")
+                        + ", " + (declared > 0 ? declared + " bytes" : "size not reported")
+                        + ", " + dataDir.getUsableSpace() + " bytes free");
                 if (!gameDir.isDirectory() && !gameDir.mkdirs())
                     throw new IOException("Could not create the game folder.");
+                // Room for the image and for the files made from it, before a
+                // byte is copied: a phone short of 4.7 GB is told so here, not
+                // when the copy or the extraction runs out (#476).
+                requireSpace(declared > 0 ? declared + IMPORT_HEADROOM : IMPORT_HEADROOM,
+                        "to import the disc image");
+                part.delete();
                 long copied;
                 try (InputStream in = getContentResolver().openInputStream(uri);
-                     OutputStream out = new FileOutputStream(isoPath)) {
+                     OutputStream out = new FileOutputStream(part)) {
                     if (in == null)
                         throw new IOException("The disc image could not be opened.");
                     copied = copy(in, out);
                 }
-                Shell.log("[first-run] copied " + copied + " bytes, " + dataDir.getUsableSpace()
+                Shell.log("[first-run] copied " + copied + " bytes of "
+                        + (declared > 0 ? declared : copied) + ", " + dataDir.getUsableSpace()
                         + " bytes free");
+                // A provider may end the stream early (a cloud-backed file, a
+                // cancelled download), which leaves a short image: it passes the
+                // disc's own header check and kills the game when the game reads
+                // past its end, so it is refused here instead (#476).
+                if (declared > 0 && copied != declared)
+                    throw new IOException("The copy stopped at " + formatSize(copied) + " of "
+                            + formatSize(declared) + ". If the image is on a cloud drive, download"
+                            + " it to this device first, then choose it again.");
+                if (!finishCopy(part, isoPath))
+                    throw new IOException("Could not finish writing the disc image into "
+                            + gameDir.getName() + ".");
+                requireSpace(IMPORT_HEADROOM, "to make the game files");
                 error = Shell.nativeDiscPrepare(isoPath.getAbsolutePath(), gameDir.getAbsolutePath());
-                Shell.log("[first-run] the disc import " + (error == null ? "finished" : "failed: " + error));
+                Shell.log("[first-run] the disc import "
+                        + (error == null ? "finished" : "failed: " + error));
             } catch (IOException e) {
                 error = e.getMessage() != null ? e.getMessage() : "The disc image could not be copied.";
                 Shell.log("[first-run] " + error);
             } catch (UnsatisfiedLinkError e) {
                 error = "The native library could not be loaded.";
                 Shell.log("[first-run] " + error);
+            } finally {
+                // A copy that never finished leaves nothing for the game to read.
+                if (part.isFile())
+                    part.delete();
             }
             final String result = error;
             runOnUiThread(() -> {
@@ -246,6 +290,72 @@ public final class FirstRunActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    /**
+     * Refuses an import that cannot fit, naming both sizes. Silent when the
+     * filesystem does not report free space: the write itself is the only answer
+     * then (#476).
+     */
+    private void requireSpace(long needed, String what) throws IOException {
+        final long usable = dataDir.getUsableSpace();
+        if (usable < 0 || usable >= needed)
+            return;
+        throw new IOException("BlueWake needs about " + formatSize(needed) + " free " + what
+                + ", and " + formatSize(usable) + " is available. Free some space and choose it"
+                + " again.");
+    }
+
+    /** The size the picked file's provider reports, or -1 when it does not say. */
+    private long declaredSize(Uri uri) {
+        try (Cursor c = getContentResolver().query(uri,
+                new String[] {OpenableColumns.SIZE}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                final int column = c.getColumnIndex(OpenableColumns.SIZE);
+                if (column >= 0 && !c.isNull(column))
+                    return c.getLong(column);
+            }
+        } catch (RuntimeException e) {
+            // A provider that cannot answer is not an error: the log says the size
+            // was not reported, and the copy is then only checked against itself.
+        }
+        return -1;
+    }
+
+    /** The picked file's name as the provider shows it, for the log, or null. */
+    private String displayName(Uri uri) {
+        try (Cursor c = getContentResolver().query(uri,
+                new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                final int column = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (column >= 0 && !c.isNull(column))
+                    return c.getString(column);
+            }
+        } catch (RuntimeException e) {
+            // As above: the name is only for the log.
+        }
+        return null;
+    }
+
+    /** "4.4 GB", "229 MB": the sizes a file manager shows. */
+    static String formatSize(long bytes) {
+        if (bytes >= 1024L * 1024 * 1024)
+            return String.format(Locale.US, "%.1f GB", bytes / (1024.0 * 1024 * 1024));
+        if (bytes >= 1024 * 1024)
+            return String.format(Locale.US, "%.0f MB", bytes / (1024.0 * 1024));
+        return String.format(Locale.US, "%d KB", (bytes + 1023) / 1024);
+    }
+
+    /**
+     * Renames the finished copy over the real name, so an image the player is
+     * replacing is only gone once the new one is whole. Some external-storage
+     * providers refuse a rename onto an existing file, which is why the old image
+     * is dropped before a second attempt (#476).
+     */
+    private static boolean finishCopy(File part, File target) {
+        if (part.renameTo(target))
+            return true;
+        return target.delete() && part.renameTo(target);
     }
 
     private static long copy(InputStream in, OutputStream out) throws IOException {
