@@ -33,6 +33,8 @@ jobs:
         run: |
           python tests/test_triage_session_log.py
           if ($LASTEXITCODE) { throw 'Session-log triage regression failed' }
+          python tests/test_padmint_module.py
+          if ($LASTEXITCODE) { throw 'PadMint module contract failed' }
           python tests/test_windows_training.py
           if ($LASTEXITCODE) { throw 'Windows training contract failed' }
           python tests/test_windows_prepared_cache.py

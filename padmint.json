@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "bluewake",
   "name": "BlueWake",
   "game": "The Legend of Zelda: The Wind Waker (GameCube, GZLE01)",
@@ -18,10 +18,10 @@
     "ios": {
       "hosts": {
         "macos-arm64": "experimental",
-        "linux-x86_64": "experimental",
-        "linux-arm64": "experimental",
-        "windows-x86_64": "experimental",
-        "windows-arm64": "experimental"
+        "linux-x86_64": "planned",
+        "linux-arm64": "planned",
+        "windows-x86_64": "planned",
+        "windows-arm64": "planned"
       },
       "tools": [
         "git",
@@ -31,100 +31,42 @@
       ],
       "published_app": "BlueWake-v{version}-ios-unsigned.ipa",
       "ios_module": {
-        "file": "{work}/composite-ios/gGZLE01_recomp.dylib",
-        "into": "Frameworks/gGZLE01_recomp.dylib"
+        "on": [
+          "windows",
+          "linux"
+        ],
+        "result": "{work}/ios-module-result.json"
       },
-      "steps": [
-        {
-          "stage": "translate",
-          "on": [
-            "macos"
-          ],
-          "command": [
-            "/bin/bash",
-            "{repo}/scripts/builder/build.sh",
-            "{disc}",
-            "--out",
-            "{work}",
-            "--jobs",
-            "{jobs}",
-            "--train-pgo",
-            "--app",
-            "{app}"
-          ]
-        },
-        {
-          "stage": "translate",
-          "on": [
-            "linux"
-          ],
-          "command": [
-            "/bin/bash",
-            "{repo}/scripts/builder/build.sh",
-            "{disc}",
-            "--out",
-            "{work}",
-            "--jobs",
-            "{jobs}",
-            "--source-only"
-          ]
-        },
-        {
-          "stage": "translate",
-          "on": [
-            "windows"
-          ],
-          "command": [
-            "{python}",
-            "{repo}/scripts/windows/build.py",
-            "{disc}",
-            "--out",
-            "{work}",
-            "--jobs",
-            "{jobs}",
-            "--source-only"
-          ]
-        },
-        {
-          "stage": "configure",
-          "on": [
-            "linux",
-            "windows"
-          ],
-          "command": [
-            "cmake",
-            "-S",
-            "{repo}/cmake/composite",
-            "-B",
-            "{work}/composite-ios",
-            "-G",
-            "Ninja",
-            "-DCMAKE_TOOLCHAIN_FILE={ios_toolchain}",
-            "-DCMAKE_BUILD_TYPE=Release",
-            "-DCMAKE_C_FLAGS=-mcpu=apple-a13 -fno-slp-vectorize -mllvm -large-interval-freq-threshold=10 -fprofile-instr-use={repo}/scripts/builder/profiles/bluewake/composite-rt.profdata -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date -Wno-backend-plugin -mllvm -enable-machine-outliner=never",
-            "-DCOMPOSITE_OPTIMIZATION_LEVEL=2",
-            "-DCOMPOSITE_DIR={work}/composite-src",
-            "-DGXRUNTIME_DIR={repo}/ref/recompcore/GXRuntime",
-            "-DABI_DIR={repo}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp"
-          ]
-        },
-        {
-          "stage": "compile",
-          "on": [
-            "linux",
-            "windows"
-          ],
-          "command": [
-            "cmake",
-            "--build",
-            "{work}/composite-ios",
-            "-j",
-            "{jobs}"
-          ]
-        }
-      ],
       "output": "ipa",
-      "check": "ipa"
+      "check": "ipa",
+      "command": [
+        "{python}",
+        "{repo}/scripts/builder/padmint.py",
+        "{disc}",
+        "--out",
+        "{work}",
+        "--jobs",
+        "{jobs}",
+        "--ios-toolchain",
+        "{ios_toolchain}"
+      ],
+      "modes": {
+        "full": [
+          "--app",
+          "{app}",
+          "--train-pgo",
+          "--ipa",
+          "{output}"
+        ],
+        "source-only": [
+          "--source-only"
+        ]
+      },
+      "options": {
+        "no-mods": [
+          "--no-mods"
+        ]
+      }
     },
     "macos": {
       "hosts": {

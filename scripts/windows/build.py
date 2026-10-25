@@ -697,7 +697,14 @@ int main(void) {
         saved = (o / "composite-final.digest").read_text().strip() if (o / "composite-final.digest").exists() else ""
         same_inputs = (o / "composite-inputs.digest").exists() and \
             (o / "composite-inputs.digest").read_text().strip() == inputs
-        if current.exists() and same_inputs and saved and tree_digest(current) == saved:
+        # generate() also records the plain tree for --source-only. A matching
+        # digest alone does not prove the later preparation phase completed.
+        try:
+            prepared = json.loads((o / "prepared-blocks.json").read_text())
+        except (OSError, ValueError):
+            prepared = {}
+        prepared_done = isinstance(prepared, dict) and prepared.get("final_digest") == saved
+        if current.exists() and same_inputs and saved and prepared_done and tree_digest(current) == saved:
             shutil.rmtree(new)
             print("the existing composite source is current")
             self.mods_pending = (o / "mods.done").read_text().strip() != "complete" \
@@ -1470,6 +1477,9 @@ int main(void) {
             changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
             (self.out / "composite-src.times.json").unlink(missing_ok=True)
             print(f"composite source: {changed} of {total} files changed since the last build")
+        if getattr(args, "module_sources", False):
+            print(f"\nmodule sources ready: {self.out / 'composite-src'} (mods and preparations complete)")
+            return
         if not (args.no_train or args.no_pgo):
             self.llvm_profdata = str(Path(self.clang).with_name("llvm-profdata.exe"))
             if not Path(self.llvm_profdata).is_file():
@@ -1641,10 +1651,14 @@ def main():
                         help="build the app without its committed optimization profile and ThinLTO")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
+    parser.add_argument("--module-sources", action="store_true",
+                        help="stop after mods and module preparations, before training or platform compilation")
     parser.add_argument("--source-only", action="store_true",
                         help="stop after generating the source: checks tools, disc and translation in minutes")
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
     args = parser.parse_args()
+    if args.module_sources and (args.source_only or args.host_only or args.check_only):
+        parser.error("--module-sources cannot be combined with --source-only, --host-only or --check-only")
     # Wind Waker Recomp's Windows builds prepare all of these every time; BlueWake
     # matches that by default. --conservative builds the plain translation.
     if not args.conservative:
@@ -1682,7 +1696,7 @@ def main():
         parser.error("--native-set4 requires --direct-calls, --gather-pipe and --native-vec")
     if args.jobs is None:
         args.jobs = default_jobs()
-    if args.source_only:
+    if args.source_only or args.module_sources:
         # Only the disc extractor is built from the app's project: its optimization
         # profile is for the app, and an older Visual Studio clang cannot read it.
         args.no_app_pgo = True

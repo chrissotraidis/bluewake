@@ -135,29 +135,41 @@ it and prepares the game. Keep the imported disc on the device: the game reads i
 **⋯ › Game Data & Saves › Remove Disc Image…** removes the imported disc and extracted game files,
 keeps your saves and settings, and requires importing the disc again before playing.
 
-## On a Windows PC (experimental)
+## On a Windows PC (draft)
 
-From the release after this pull request merges, [PadMint](https://github.com/chrissotraidis/padmint) can build the iPhone and iPad app on a
-Windows 10 or 11 PC, with no Mac. It downloads the app without game code from the release and compiles
-the game from your disc on the PC.
+The Windows iPhone/iPad route in [PR #100](https://github.com/chrissotraidis/bluewake/pull/100)
+is being refreshed against current BlueWake. Its recipe keeps Windows and Linux marked **planned**
+until a current private-disc build, import check and IPA insertion pass. The existing Mac route
+still calls the same builder, with its local training, mods and packaging options.
 
-You need:
+The draft requires PadMint's schema 2 module results and host selection, which are not in PadMint
+0.5.14. Older PadMint refuses this recipe. A future supported release will also need Visual Studio
+Build Tools with Desktop development with C++ and C++ Clang Compiler for Windows, your own GZLE01
+revision 0 disc, and enough space for the translation and compile (the recipe reserves 25 GB).
 
-- PadMint for Windows, the latest release.
-- Visual Studio Build Tools 2022 (free) with **Desktop development with C++** and, under Individual
-  components, **C++ Clang Compiler for Windows**. PadMint checks for it and says how to add it.
-- Your disc image, at least 25 GB of free space, and a few hours: the first build compiles about 760 files.
-- To install: [Sideloadly](https://sideloadly.io) with iTunes and iCloud from Apple's website (not the
-  Microsoft Store versions), a USB cable and your Apple ID.
-- An iPhone or iPad with an A13 chip or newer, on iOS/iPadOS 17 or later.
+The new `--module-sources` stage runs the existing platform builder through translation, mods and
+all selected preparation steps. The iOS compiler uses those completed preparation values; PadMint
+inserts the module and the matching `ModuleOptimizations` data into the app. `--source-only` still
+stops after translation. The off-Mac draft does not run Mac training or use a borrowed profile;
+no performance or gameplay equivalence is claimed.
 
-Open PadMint, choose BlueWake and iPhone or iPad, and pick your disc. Install the IPA PadMint saves with
-Sideloadly. Then copy the same disc image to the device: in the Apple Devices app, select the device,
-open **Files** and drag it onto **BlueWake**.
+Validation on October 26: nine routing, preparation, result and configuration-cache tests pass
+with Apple Python 3.9 and the Windows packaged interpreter; the 23 prepared-cache checks cover
+source-only followed by a full build with mods disabled on both platform builders. The Mac host
+build and all 291 discovered host tests pass. The source archive passes the public-content gate.
+Hosted Windows CI is also required before merging.
 
-A copy built on Windows skips the Mac build's [local optimization](#local-optimization) and uses the
-optimization profile that comes with BlueWake, so busy scenes may run a little slower than in a copy built
-on a Mac. Windows on ARM PCs work too, more slowly. Linux works the same way and is less tested.
+A copy of an existing private extraction (the main executable and 415 RELs) passed current pinned
+translation, all mods and preparation: the base source matches the expected `54f54434…` digest,
+then the recorded final source is `af1c016e…` with `combined-v1`. The original extraction's hashes
+are unchanged. This checks current preparation only; it does not establish original-disc extraction,
+a complete Windows player build, module loading or gameplay. The verified public 0.9.0 base app
+has the same runtime and translator pins and contains neither the module nor its companion marker.
+
+Unknown or edited CMake configurations are refreshed; an exact known configuration and cache keeps
+its compiled objects. Refreshing every run would discard roughly 800 compiled chunks. Actual current
+Windows/Linux module builds and iPhone/iPad gameplay remain pending. The October 7 build is historical
+evidence only.
 
 ## Updating
 

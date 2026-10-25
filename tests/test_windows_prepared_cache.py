@@ -397,6 +397,25 @@ label_80004004:
         self.assertFalse(receipt["inline_gpr"])
         self.assertTrue(receipt["direct_calls"])
 
+    def test_source_only_then_full_without_mods_still_prepares(self):
+        self.args.prepared_blocks = True
+        self.builder.generate()  # --source-only stops here; no preparation receipt.
+        self.assertNotIn(MARK, self.chunk().read_text())
+        self.cycle()
+        self.assertIn(MARK, self.chunk().read_text())
+        receipt = json.loads((self.out / "prepared-blocks.json").read_text())
+        self.assertEqual(receipt["final_digest"], bw.tree_digest(self.out / "composite-src"))
+
+    def test_linux_source_only_then_full_without_mods_still_prepares(self):
+        spec = importlib.util.spec_from_file_location("linux_cache_test", REPO / "scripts/linux/build.py")
+        linux = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(linux)
+        self.builder = linux.Builder(self.args)
+        self.builder.mods = False
+        self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])
+        with patch.object(linux, "ROOT", self.root), patch.object(linux, "profile_value", lambda name: self.digest):
+            self.test_source_only_then_full_without_mods_still_prepares()
+
     def test_explicit_enable_reuse_and_disable(self):
         self.cycle()
         self.assertNotIn(MARK, self.chunk().read_text())

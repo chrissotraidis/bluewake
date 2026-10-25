@@ -47,6 +47,8 @@ jobs:
           python3 tests/native_skin_source_test.py
           python3 tests/native_vec_source_test.py
           python3 tests/native_math_source_test.py
+      - name: Preserve PadMint routing and prepared-module settings
+        run: python3 tests/test_padmint_module.py
       - name: Step past the four cache operations
         run: python3 tests/test_cache_ops.py
       - name: Bound synthetic instant-text patching under sanitizers
