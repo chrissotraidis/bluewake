@@ -158,14 +158,21 @@ with Apple Python 3.9 and the Windows packaged interpreter; the 25 prepared-cach
 source-only followed by a full build with mods disabled on both platform builders, including a
 previous conservative build whose plain-source receipt must be invalidated. The Mac host
 build and all 291 discovered host tests pass. The source archive passes the public-content gate.
-Hosted Windows CI is also required before merging.
+Hosted Windows, Linux, attribution, audit and sanitizer checks pass on source revision `dc4188b0`.
 
 A copy of an existing private extraction (the main executable and 415 RELs) passed current pinned
 translation, all mods and preparation: the base source matches the expected `54f54434…` digest,
 then the recorded final source is `af1c016e…` with `combined-v1`. The original extraction's hashes
-are unchanged. This checks current preparation only; it does not establish original-disc extraction,
-a complete Windows player build, module loading or gameplay. The verified public 0.9.0 base app
-has the same runtime and translator pins and contains neither the module nor its companion marker.
+are unchanged. On a Mac, those copied inputs also completed the portable iOS module compile
+(860 build steps) and strict import checking against the verified public 0.9.0 app. PadMint's
+runtime-import follow-up at `d23c7e1` recognizes all 26 imported runtime names; no app callbacks or
+standard C++ imports are required. The iOS 16 module fits the app's iOS 17 minimum. Personal IPA
+insertion preserves all 14 original app entries and adds only the module and its `combined-v1`
+companion marker. The app's runtime and translator pins match the source.
+
+This is partial Mac compilation and packaging evidence from an existing extraction. Original-disc
+extraction, a complete Windows player build, module loading and gameplay remain unverified. The
+Mac full builder, its training and the recipe's planned Windows/Linux status are unchanged.
 
 Unknown or edited CMake configurations are refreshed; an exact known configuration and cache keeps
 its compiled objects. Refreshing every run would discard roughly 800 compiled chunks. Actual current
