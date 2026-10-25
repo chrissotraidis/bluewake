@@ -147,9 +147,9 @@ static void prune_logs(const char* dir, int keep) {
 
 static void start_session_log(void) {
     g_log_started = 1;
-    // The log and the training profiles are the player's to send: readable when
-    // they are pulled with adb.
-    umask(022);
+    // The log is the player's to send, so it is readable when it is pulled with
+    // adb. The mode goes on the files this function creates: a process-wide
+    // umask would also change the saves and settings written later.
     char dir[1100];
     snprintf(dir, sizeof dir, "%s/logs", g_data_dir);
     mkdir(dir, 0755);
@@ -161,12 +161,15 @@ static void start_session_log(void) {
     snprintf(path, sizeof path, "%s/session-%04d%02d%02d-%02d%02d%02d.log", dir, t.tm_year + 1900,
              t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
     g_log_file = fopen(path, "w");
+    if (g_log_file != NULL)
+        fchmod(fileno(g_log_file), 0644);
     // The log a crash would leave behind: named now, removed when the run ends
     // properly, so the first-run screen can offer to share whatever this still
     // names on the next start (FirstRunActivity.java).
     snprintf(g_log_marker, sizeof g_log_marker, "%s/session-in-progress", dir);
     FILE* marker = fopen(g_log_marker, "w");
     if (marker != NULL) {
+        fchmod(fileno(marker), 0644);
         const char* name = strrchr(path, '/');
         fprintf(marker, "%s\n", name != NULL ? name + 1 : path);
         fclose(marker);
