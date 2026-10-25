@@ -60,12 +60,14 @@ CALL = re.compile(
     r"    \}\n")
 FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx(?:_param)?\) \{$", re.M)
 BUDGET = "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET"
-# Routine entries the host names only together with one return address: the
-# GroundCross check at _restgpr_27 (main.c's host_observe_ground_cross_return,
-# lr 0x80246A04) and the run-queue trace at _savegpr_29 (lr 0x802B09C4). Those
-# returns are named too, so their call sites stay out through the return
-# check; every other caller of these entries is inlined.
-RETURN_KEYED = {0x80328F84, 0x80328F40}
+# Routine entries the host names only together with particular return
+# addresses: the GroundCross check at _restgpr_27 (main.c's
+# host_observe_ground_cross_return, lr 0x80246A04) and the run-queue traces at
+# _savegpr_29 (lr 0x802B09C4 and 0x802B4100). Those returns are named too, so
+# their call sites stay out through the return check; every other caller of
+# these entries is inlined. Entry: its returns. tests/test_inline_gpr.py fails
+# if the host names an entry without one of them.
+RETURN_KEYED = {0x80328F84: (0x80246A04,), 0x80328F40: (0x802B09C4, 0x802B4100)}
 # Elliott's helper-body certificates from scripts/mods/prepare_native_gpr.py.
 # Check all variants before modifying any caller; only hashes are distributed.
 LEAVES = (
