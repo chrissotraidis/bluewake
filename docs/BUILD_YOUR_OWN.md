@@ -154,8 +154,9 @@ stops after translation. The off-Mac draft does not run Mac training or use a bo
 no performance or gameplay equivalence is claimed.
 
 Validation on October 26: nine routing, preparation, result and configuration-cache tests pass
-with Apple Python 3.9 and the Windows packaged interpreter; the 23 prepared-cache checks cover
-source-only followed by a full build with mods disabled on both platform builders. The Mac host
+with Apple Python 3.9 and the Windows packaged interpreter; the 25 prepared-cache checks cover
+source-only followed by a full build with mods disabled on both platform builders, including a
+previous conservative build whose plain-source receipt must be invalidated. The Mac host
 build and all 291 discovered host tests pass. The source archive passes the public-content gate.
 Hosted Windows CI is also required before merging.
 

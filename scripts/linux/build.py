@@ -678,6 +678,9 @@ int main(void) {{
             self.source_times = saved_times(o / "composite-src.times.json") or file_times(current)
             save_times(o / "composite-src.times.json", self.source_times)
             sync_tree(new, current)
+            # A former plain/conservative receipt can have this same base digest
+            # but different options. It no longer describes the reset source.
+            (o / "prepared-blocks.json").unlink(missing_ok=True)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
             (o / "composite-final.digest").write_text(digest + "\n")
