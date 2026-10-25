@@ -60,6 +60,14 @@ def die(message):
     raise BuildError(message)
 
 
+def configure_output():
+    """Embedded Python ignores PYTHONUTF8; status paths must still be printable."""
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def step(title):
     print(f"\n==> {title}", flush=True)
 
@@ -220,7 +228,7 @@ def save_times(path, times):
 
 def tree_digest(root):
     """scripts/ios/composite_manifest.py's digest of a generated tree."""
-    out = subprocess.check_output([sys.executable, str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
+    out = subprocess.check_output([sys.executable, "-X", "utf8", str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
                                   text=True)
     return out.split()[0]
 
@@ -242,6 +250,8 @@ class Builder:
         log = self.logs / f"{name}.log"
         environment = dict(env or self.env or os.environ)
         command = list(command)
+        if command[:1] == [sys.executable]:
+            command[1:1] = ["-X", "utf8"]
         if command[:1] == ["cmake"] and "-S" in command and platform.machine().lower() == "arm64":
             # Windows on ARM builds the x64 game: say so, or CMake takes this ARM64 PC's
             # processor for the target and libraries pick ARM code for the x64 compiler
@@ -352,8 +362,8 @@ class Builder:
         # SDK installers add them); keep the clean ones for the build.
         path = [p.strip('"') for p in os.environ.get("PATH", "").split(os.pathsep)]
         base = dict(os.environ, PATH=os.pathsep.join(p for p in path if p and "(" not in p and ")" not in p))
-        output = subprocess.run(f'cmd /d /c ""{vcvars}" >nul 2>&1 && set"', capture_output=True, text=True,
-                                env=base, shell=False)
+        output = subprocess.run(f'cmd /d /u /c ""{vcvars}" >nul 2>&1 && set"', capture_output=True, text=True,
+                                env=base, shell=False, encoding="utf-16le")
         if output.returncode != 0 or "INCLUDE=" not in output.stdout:
             die(f"{vcvars} failed; open a 'x64 Native Tools Command Prompt' and rerun from there")
         env = {}
@@ -544,7 +554,7 @@ int main(void) {
             self._app_profile_readable = readable
         return self._app_profile_readable
 
-    def configure_app(self, build=None, instrument=False):
+    def configure_app(self, build=None, instrument=False, *, extractor_only=False):
         """The app's build, by default build/windows/app. With the committed
         profile of the app's own code (windows/pgo/app.profdata,
         scripts/windows/train_app_profile.py) it is compiled with it and with
@@ -576,6 +586,7 @@ int main(void) {
             f"-DCMAKE_CXX_FLAGS=-march={self.args.march} -g -gcodeview {profile}",
             "-DBUILD_TESTING=OFF", f"-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,/DEBUG -Wl,/OPT:REF -Wl,/OPT:ICF {link}",
             f"-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld {link}",
+            f"-DBLUEWAKE_WINDOWS_EXTRACTOR_ONLY={'ON' if extractor_only else 'OFF'}",
             f"-DBLUEWAKE_WINDOWS_CONSOLE={'ON' if self.args.console else 'OFF'}"])
 
     # --- 4 extract ---------------------------------------------------------
@@ -740,7 +751,7 @@ int main(void) {
         options = ROOT / "mods/betterww/options.txt"
         # The site list DolRecomp reads, with LF line ends (Python's stdout
         # writes CRLF on Windows).
-        listed = subprocess.run([sys.executable, ROOT / "scripts/mods/game_options.py", "sites", options],
+        listed = subprocess.run([sys.executable, "-X", "utf8", ROOT / "scripts/mods/game_options.py", "sites", options],
                                 capture_output=True, check=True).stdout
         (m / "option-sites.txt").write_bytes(listed.replace(b"\r\n", b"\n"))
         sites = ("--option-sites", m / "option-sites.txt")
@@ -1447,7 +1458,7 @@ int main(void) {
             return
         step("4/10 extract the game from the disc")
         self.dolrecomp = self.build_dolrecomp()
-        self.configure_app()
+        self.configure_app(extractor_only=args.source_only or getattr(args, "module_sources", False))
         game = self.out / "game"
         stamp = self.out / "game.json"
         key = {"iso": str(self.iso), "size": self.iso.stat().st_size, "mtime": self.iso.stat().st_mtime_ns,
@@ -1551,6 +1562,7 @@ WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather
 
 
 def main():
+    configure_output()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("disc", type=Path, help="your GZLE01 revision 0 disc image (.iso, .gcm, .rvz, ...)")
     parser.add_argument("--out", type=Path, default=ROOT / "build/windows",

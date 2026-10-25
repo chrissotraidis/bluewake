@@ -97,6 +97,7 @@ class ModuleTest(unittest.TestCase):
             with self.subTest(host=host), patch.object(entry.subprocess, "run") as run:
                 entry.build(self.args, host)
                 self.assertEqual(run.call_count, 1)
+                self.assertEqual(run.call_args.args[0][1:3], ["-X", "utf8"])
                 self.assertIn("--source-only", run.call_args.args[0])
                 self.assertIn("--no-mods", run.call_args.args[0])
                 self.assertNotIn("--module-sources", run.call_args.args[0])
@@ -228,7 +229,7 @@ class ModuleTest(unittest.TestCase):
                     calls = []
                     for name in ("check_tools", "dependencies", "disc", "build_dolrecomp", "configure_app",
                                  "translate", "generate", "build_mods", "prepare_blocks"):
-                        setattr(b, name, lambda *a, _name=name: calls.append(_name))
+                        setattr(b, name, lambda *a, _name=name, **kw: calls.append(_name))
                     b.extract = lambda *a: (folder / "game").mkdir()
                     with patch.object(builder, "sha256_file", return_value="fixture"):
                         b.build()

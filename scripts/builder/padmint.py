@@ -24,7 +24,7 @@ def prepared_options(work):
     """Use the completed preparation's values, never guess from platform defaults."""
     receipt = json.loads((work / "prepared-blocks.json").read_text(encoding="utf-8"))
     actual = subprocess.check_output(
-        [sys.executable, str(ROOT / "scripts/ios/composite_manifest.py"), str(work / "composite-src")],
+        [sys.executable, "-X", "utf8", str(ROOT / "scripts/ios/composite_manifest.py"), str(work / "composite-src")],
         text=True).split()[0]
     if receipt.get("final_digest") != actual or (work / "composite-final.digest").read_text().strip() != actual:
         raise ValueError("the prepared module source changed; rerun preparation before compiling")
@@ -101,7 +101,7 @@ def build(args, system=None):
     work.mkdir(parents=True, exist_ok=True)
     # A failed new run cannot leave a previously successful result to consume.
     (work / "ios-module-result.json").unlink(missing_ok=True)
-    command = [sys.executable, str(ROOT / f"scripts/{family}/build.py"), *common,
+    command = [sys.executable, "-X", "utf8", str(ROOT / f"scripts/{family}/build.py"), *common,
                "--source-only" if args.source_only else "--module-sources"]
     if args.no_mods:
         command.append("--no-mods")
@@ -127,6 +127,10 @@ def build(args, system=None):
 
 
 def main():
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("disc", type=Path)
     parser.add_argument("--out", type=Path, required=True)
