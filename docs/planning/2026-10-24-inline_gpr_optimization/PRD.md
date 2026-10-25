@@ -332,7 +332,7 @@ CANDIDATE MODEL
     │   routine fallback
     │
     ▼
-  Execute the same memory operations
+  Access the proven frame bytes directly
 ```
 
 The conservative fast path verifies:
@@ -344,7 +344,7 @@ The conservative fast path verifies:
 
 The supporting range query is under review in [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45). BlueWake's implementation is in [`cmake/composite/inline_gpr.h`](../../../cmake/composite/inline_gpr.h).
 
-The optimization modifies only eligibility validation. It keeps the existing memory operations, cycle accounting, host checks, reservation handling and original translated fallback unchanged. Reusing validated backing storage remains a separate possible experiment.
+After eligibility is proven, the optimized path reuses the validated MEM1 backing range and performs the register loads and stores with `read_be32` / `write_be32`. A save clears any reservation covered by the frame once before writing. Cycle accounting, host checks and the original translated fallback remain unchanged. This follow-up came from [`pdale-boop` commit `043495d`](https://github.com/pdale-boop/bluewake/commit/043495d55f0eae2a6cf1d1d4b64852a982bc0a36).
 
 ## 9. Performance questions and findings
 

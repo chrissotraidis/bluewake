@@ -20,8 +20,9 @@ Status: Candidate measured; upstream integration open
 ### M2: Validate one complete GPR frame (depends: M1)
 
 - [x] M2-T01: Replace per-word readiness resolution with bounds plus original/canonical alias-range checks.
-- [x] M2-T02: Keep the existing memory operations, timing, reservation and fallback paths.
+- [x] M2-T02: Reuse the proven MEM1 frame with fixed-offset big-endian accesses while preserving timing and fallback behavior.
 - [x] M2-T03: Preserve Windows symbol export and generated-source integration.
+- [x] M2-T04: Match helper-path bytes, values and reservation state for every supported first register and stack form.
 
 ### M3: Verify correctness (depends: M1, M2)
 
@@ -50,8 +51,9 @@ Status: Candidate measured; upstream integration open
 | M0-T03 | Handoff SHA `185ccc…` | SHA-256 identity check | Supplied Markdown artifact | Input identity recorded |
 | M1-T01 | RecompCore `0ab73ca` | `guest_memory_bounds_test` coverage | Alias registry, overlapping ranges | Candidate API passes |
 | M2-T01 | BlueWake `ba302db`, `f9205a5` | Source and generated-flow inspection | Original and mirror spans | Range proof implemented |
-| M2-T02 | `inline_gpr.h`; generator | Verify unchanged `mem_read32` / `mem_write32` loop | Save/restore calls | Runtime operations preserved |
+| M2-T02 | Contributor commit `043495d`; `inline_gpr.h`; generator | Resolve the proven frame once and use `read_be32` / `write_be32` | Save/restore calls | Direct frame access integrated |
 | M2-T03 | BlueWake `f9205a5` | Inspect CMake export and generator tests | Linux and Windows build paths | Integration retained |
+| M2-T04 | `inline_gpr_memory_test.c` | Compare helper and direct paths across registers, stack forms and reservations | Disc-free compiled test | Bytes, values and reservation state match |
 | M3-T01 | Local test output | Python tests; focused CTest | Disc-free | 4, 21 and 1/1 passed |
 | M3-T02 | Private AppImage `cf972f…` | Audit, diff, package ABI check | Ubuntu 24.04 CI container, Clang 18 | Passed; max GLIBC 2.38 |
 | M3-T03 | `inline_gpr_memory_test.c` | Run focused compiled component suite | RAM, aliases, bounds, MMIO, journal | Rejection coverage passed |

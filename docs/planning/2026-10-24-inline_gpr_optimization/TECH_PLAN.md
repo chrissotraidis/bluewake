@@ -15,7 +15,7 @@ Inspected: tested BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; tested Re
 | Rebased runtime companion | RecompCore `47a5229cbfb3387cfd21c2b9d304b303a54a6767` | Same API rebased onto current `bluewake-next`; [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45) |
 | Current upstream | BlueWake `211abfd`, RecompCore `1446450` | PR branch rebased; dependency must still be integrated before merge |
 
-The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). The candidate changes only eligibility in [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h); generated `mem_read32` / `mem_write32`, cycle charging, direct-call checks, fallback, and reservation behavior remain intact. The complete control-to-candidate source diff consists only of this GPR work, its RecompCore alias-range API, integration wiring and tests; no unrelated runtime, renderer, service or gameplay source changed.
+The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h) first proves that the complete frame is plain MEM1 with no journal; `bw_inline_gpr_frame()` then exposes that validated backing range. Generated code uses `read_be32` / `write_be32` at fixed offsets and clears an affected reservation once for a save. Cycle charging, direct-call checks and fallback remain intact. The complete control-to-candidate source diff consists only of this GPR work, its RecompCore alias-range API, integration wiring and tests; no unrelated renderer, service or gameplay source changed.
 
 ## Implemented flow
 
@@ -27,7 +27,8 @@ flowchart TD
     Bounds -->|No| Fallback["Original translated call"]
     Bounds -->|Yes| Alias{"Original or canonical span overlaps an alias?"}
     Alias -->|Yes| Fallback
-    Alias -->|No| Inline["Existing per-register memory helpers"]
+    Alias -->|No| Frame["Resolve the proven MEM1 frame once"]
+    Frame --> Inline["Fixed-offset big-endian loads or stores"]
     Inline --> Continue["Charge cycles and continue translated code"]
 ```
 
@@ -41,7 +42,7 @@ if (offset > cpu->ram_size - size ||
     (canonical != address &&
      ppc_guest_alias_range_overlaps(canonical, size)))
     return false;
-return true; /* existing memory helpers still perform every load/store */
+return true; /* bw_inline_gpr_frame may now reuse the proven backing range */
 ```
 
 ## Change and integration map
@@ -49,6 +50,7 @@ return true; /* existing memory helpers still perform every load/store */
 | State | File / symbol | Practical role | Milestone |
 |---|---|---|---|
 | Existing candidate | [`cmake/composite/inline_gpr.h`](../../../cmake/composite/inline_gpr.h) | Validate one contiguous frame and reject both alias forms | M2 |
+| Integrated follow-up | [`bw_inline_gpr_frame`](../../../cmake/composite/inline_gpr.h) and the generator | Reuse the proven frame, preserve byte order and clear an affected reservation once | M2 |
 | Existing candidate | [`tests/inline_gpr_memory_test.c`](../../../tests/inline_gpr_memory_test.c) | Cover ordinary, partial-alias, mirror, bounds, MMIO and journal cases | M3 |
 | Existing candidate | RecompCore `ppc_guest_alias_range_overlaps` | Answer precise half-open range overlap without resolving storage | M1 |
 | Under review | [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45) and BlueWake dependency pins | Land the runtime API upstream, then replace the temporary contributor pin | M5 |
@@ -87,7 +89,7 @@ Invalid attempts using an incompatible setup state or a no-warp `--state` invoca
 |---|---|---|---|
 | Source contract | `python3 tests/test_inline_gpr.py` | 4 passing tests | Passed |
 | Builder contract | `python3 tests/test_windows_prepared_cache.py` | 21 passing tests | Passed |
-| Compiled component | CTest `bluewake_inline_gpr_memory_test` | Alias/mirror/bounds/journal cases pass | Passed, 1/1 |
+| Compiled component | CTest `bluewake_inline_gpr_memory_test` | Alias/mirror/bounds/journal plus direct/helper byte, value and reservation equivalence | Passed, 1/1 |
 | Repository | `git diff --check`; `scripts/audit_repo.sh` | Clean diff; audit pass | Passed |
 | Packaging | CI-container AppImage build and ABI audit | Successful private AppImage; max `GLIBC_2.38` | Passed |
 | Hardware | Two headless and two rendered paired rounds | Loaded scenes, matching checkpoints, repeatable positive delta | Passed on tested snapshot |
