@@ -153,6 +153,12 @@ folder buttons use SDL's native dialog through an XDG
 portal or Zenity. Dragging an ISO/GCM onto the setup window and entering paths
 directly also work.
 
+A first import measures the files it is about to write (main.dol and the 415
+`.rel` modules, about 10 MB) and checks the data folder has that much room
+before it starts, so a folder with no space is named as such, with the size
+needed and the size free, instead of one of the extracted files failing. The
+data folder is `~/.local/share/BlueWake`; `BLUEWAKE_DATA_DIR` moves it.
+
 Later AppImage launches start the game directly. Use `--setup` to reopen the
 populated setup window, or `--iso` to replace the remembered disc using only
 the native file picker. A development-folder build keeps the simple picker as

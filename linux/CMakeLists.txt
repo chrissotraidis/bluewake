@@ -206,6 +206,14 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     add_test(NAME bluewake_linux_disc_test COMMAND bluewake_linux_disc_test)
     set_tests_properties(bluewake_linux_disc_test PROPERTIES TIMEOUT 30)
 
+    add_executable(bluewake_disc_space_test
+        ${BLUEWAKE_REPO_ROOT}/tests/disc_space_test.c
+        ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c)
+    target_include_directories(bluewake_disc_space_test PRIVATE ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
+    set_target_properties(bluewake_disc_space_test PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME bluewake_disc_space_test COMMAND bluewake_disc_space_test)
+    set_tests_properties(bluewake_disc_space_test PROPERTIES TIMEOUT 30)
+
     add_executable(bluewake_crash_text_test ${BLUEWAKE_REPO_ROOT}/tests/crash_text_test.c)
     add_test(NAME bluewake_crash_text_test COMMAND bluewake_crash_text_test)
 
