@@ -28,6 +28,14 @@ jobs:
           if ($LASTEXITCODE) { throw 'Runtime fetch failed' }
           git -C ref/recompcore checkout --detach FETCH_HEAD
           if ($LASTEXITCODE) { throw 'Runtime checkout failed' }
+          $translator = $lock.dependencies | Where-Object id -eq 'dolrecomp'
+          if (-not $translator -or $translator.sha -notmatch '^[0-9a-f]{40}$') { throw 'Missing translator pin' }
+          git init ref/recompcore/DolRecomp
+          if ($LASTEXITCODE) { throw 'Translator init failed' }
+          git -C ref/recompcore/DolRecomp fetch --depth 1 --no-tags --recurse-submodules=no $translator.url $translator.sha
+          if ($LASTEXITCODE) { throw 'Translator fetch failed' }
+          git -C ref/recompcore/DolRecomp checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE) { throw 'Translator checkout failed' }
       - name: Check the Windows player training and cache contracts
         shell: pwsh
         run: |

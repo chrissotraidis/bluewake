@@ -57,6 +57,9 @@ target_include_directories(bluewake_disc_extract PRIVATE
     ${BLUEWAKE_COMPAT_INCLUDES} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
 target_compile_options(bluewake_disc_extract PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
 target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt)
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_sources(bluewake_disc_extract PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools-utf8.manifest")
+endif()
 
 # Module preparation needs the same extractor, without configuring Dawn or SDL.
 if(BLUEWAKE_WINDOWS_EXTRACTOR_ONLY)

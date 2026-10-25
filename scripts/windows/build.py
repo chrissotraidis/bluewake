@@ -522,6 +522,7 @@ int main(void) {
         self.run("dolrecomp-configure", ["cmake", "-S", self.recompcore / "DolRecomp", "-B", build, "-G", "Ninja",
                                          "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_C_COMPILER=clang-cl",
                                          "-DDOLRECOMP_WARNINGS_AS_ERRORS=OFF",
+                                         f"-DCMAKE_PROJECT_DolRecomp_INCLUDE={ROOT / 'windows/dolrecomp-utf8.cmake'}",
                                          "-DCMAKE_EXE_LINKER_FLAGS=binmode.obj"])
         self.run("dolrecomp-build", ["cmake", "--build", build, "--target", "dolrecomp", "-j", self.args.jobs],
                  ninja=True)
