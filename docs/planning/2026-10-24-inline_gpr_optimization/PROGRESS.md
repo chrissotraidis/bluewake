@@ -35,6 +35,7 @@ Status: Candidate measured; upstream integration open
 - [x] M4-T01: Complete a player-facing Game Mode island tour.
 - [x] M4-T02: Run two opposite-order five-scene headless and rendered A/B rounds.
 - [x] M4-T03: Confirm every scene loaded and all 31 checkpoints matched.
+- [x] M4-T04: Compare the pre-follow-up and direct-frame AppImages in equal-length player-controlled Deck intervals.
 
 ### M5: Integrate upstream (depends: M1, M2, M3, M4)
 
@@ -60,3 +61,4 @@ Status: Candidate measured; upstream integration open
 | M4-T01 | Private Deck session log | Game Mode island tour | First-revision Deck, SteamOS | No issue reported |
 | M4-T02 | Private summary JSONs | Five-scene A/B, two reversed rounds | Headless and rendered | +2.447% / +2.422% paired mean |
 | M4-T03 | Harness comparisons | `bench_tour_23874.py compare` | 1,800 retraces/scene | All loaded; checkpoints match |
+| M4-T04 | Private Deck session logs | Compare all 46 per-second samples per build | Game Mode island tour; pre-follow-up versus direct-frame AppImage | 26.749 → 27.265 estimated game FPS (+1.93%); supporting ad-hoc evidence |

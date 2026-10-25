@@ -81,6 +81,19 @@ Each cell reports `control → candidate (change)`. These are the accepted compa
 
 All five scenes improved in all four pairs. The rendered rows are the quantitative evidence closest to live play: the game rendered normally while the fixed scene windows were measured. In the separate player-controlled Game Mode island tour, the tester reported that live gameplay felt better and observed no gameplay issue. That assessment is useful anecdotal evidence, but the tour did not record a synchronized control/candidate interval and therefore does not establish an additional numeric “live gameplay” gain.
 
+### Direct-frame player-tour comparison (Steam Deck)
+
+After integrating pdale-boop's direct-frame follow-up, the tester repeated an ad-hoc island tour with the pre-follow-up and combined AppImages. Each interval contains 46 consecutive per-second runtime samples; the comparison uses every `[perf]` rate rather than selecting only `fps-dip` lines.
+
+| Metric | Pre-follow-up | Direct-frame follow-up | Change |
+|---|---:|---:|---:|
+| Estimated game FPS | 26.749 | 27.265 | **+1.93%** |
+| FPS during reported dips | 25.500 | 26.069 | **+2.23%** |
+| Dip samples | 30/46 | 29/46 | One fewer |
+| GPU wait during dips | 3.63 ms | 3.17 ms | −0.46 ms |
+
+Both runs remained game-thread bound at about 97% busy. The route was player-controlled rather than synchronized, so this supports but does not replace the fixed-scene qualification. Raw logs and private AppImages remain local and are not committed.
+
 Invalid attempts using an incompatible setup state or a no-warp `--state` invocation were rejected and excluded. The different PGO profiles do not introduce an unrelated source-code variable: training each otherwise source-matched artifact can legitimately produce different profiles because the GPR optimization changes what training observes. The result therefore measures the complete GPR candidate under its normal training process; the matched-profile qualification below separates the direct source effect from its training-mediated effect.
 
 ### Matched-profile qualification (x86-64 desktop)
@@ -126,6 +139,7 @@ These Intel cores show about half the Deck's gain. That may be the Zen 2 core re
 | Repository | `git diff --check`; `scripts/audit_repo.sh` | Clean diff; audit pass | Passed |
 | Packaging | CI-container AppImage build and ABI audit | Successful private AppImage; max `GLIBC_2.38` | Passed |
 | Hardware | Two headless and two rendered paired rounds | Loaded scenes, matching checkpoints, repeatable positive delta | Passed on tested snapshot |
+| Direct-frame hardware follow-up | Two 46-second player-controlled Deck intervals | All per-second rates plus dip and GPU-wait summaries | +1.93% estimated game FPS; supporting evidence only |
 | Integration | Rebase, upstream runtime pin, Linux/Windows CI | No fork pin; current-main evidence | Rebase passed; dependency, qualification and CI open |
 
 ## Implementation order
