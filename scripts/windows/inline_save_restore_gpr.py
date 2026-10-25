@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MARK = "/* bluewake: _savegpr/_restgpr inline (scripts/windows/inline_save_restore_gpr.py) */\n"
 SAVE, RESTORE = 0x80328F04, 0x80328F50
 CALL = re.compile(
-    r"    // ([0-9A-F]{8}): bl      0x(80328F[0-9A-F]{2})\n"
+    r"    // ([0-9A-F]{8}): bl      0x([8C]0328F[0-9A-F]{2})\n"
     r"    \{\n"
     r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
     r"            ctx->pc = 0x\2u;\n"
@@ -60,6 +60,12 @@ CALL = re.compile(
     r"    \}\n")
 FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx(?:_param)?\) \{$", re.M)
 BUDGET = "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET"
+# Routine entries the host names only together with one return address: the
+# GroundCross check at _restgpr_27 (main.c's host_observe_ground_cross_return,
+# lr 0x80246A04) and the run-queue trace at _savegpr_29 (lr 0x802B09C4). Those
+# returns are named too, so their call sites stay out through the return
+# check; every other caller of these entries is inlined.
+RETURN_KEYED = {0x80328F84, 0x80328F40}
 # Elliott's helper-body certificates from scripts/mods/prepare_native_gpr.py.
 # Check all variants before modifying any caller; only hashes are distributed.
 LEAVES = (
@@ -133,9 +139,14 @@ def transform(text, watched):
         body = text[begin:end]
         pieces, cursor = [], 0
         for m in CALL.finditer(body):
-            site, target, ret = int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)
+            site, ret = int(m.group(1), 16), int(m.group(3), 16)
+            # A REL chunk (linked at 0xC0400000 up) calls the routines through
+            # the mirror, 0xC0328Fxx: the same code, checked by its 0x8 form as
+            # the direct calls check it.
+            target = int(m.group(2), 16) & ~0x40000000
             routine = SAVE <= target < SAVE + 18 * 4 or RESTORE <= target < RESTORE + 18 * 4
-            if (not routine or target % 4 != 0 or target in watched or
+            if (not routine or target % 4 != 0 or
+                    (target in watched and target not in RETURN_KEYED) or
                     ret != site + 4 or ret in watched or site in watched
                     or f"\nlabel_{ret:08X}:\n" not in body):
                 continue

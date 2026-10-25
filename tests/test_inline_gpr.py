@@ -27,8 +27,29 @@ label_80004004:
 
 class InlineGprTests(unittest.TestCase):
     def test_watched_target_cannot_bypass_a_host_observation(self):
-        for watched in ({0x80328F84}, {0x80004000}, {0x80004004}):
-            self.assertEqual(gpr.transform(CALL, watched), (CALL, 0))
+        entry = CALL.replace('0x80328F84', '0x80328F88').replace('0x80328F84u', '0x80328F88u')
+        for source, watched in ((entry, {0x80328F88}), (CALL, {0x80004000}), (CALL, {0x80004004})):
+            self.assertEqual(gpr.transform(source, watched), (source, 0))
+
+    def test_return_keyed_entry_stays_out_only_where_its_return_is_watched(self):
+        # The GroundCross check at _restgpr_27 is keyed on its one return: that
+        # call site stays out, and any other caller of the entry is inlined.
+        self.assertEqual(gpr.transform(CALL, {0x80328F84, 0x80004004}), (CALL, 0))
+        result, count = gpr.transform(CALL, {0x80328F84})
+        self.assertEqual(count, 1)
+        self.assertIn('bw_direct_call_ready(ctx, 0x80328F84u)', result)
+
+    def test_rel_call_through_the_mirror_is_inlined_by_its_canonical_entry(self):
+        rel = (CALL.replace('80004000', 'C0DA0254').replace('80004004', 'C0DA0258')
+               .replace('0x80328F84', '0xC0328F84'))
+        result, count = gpr.transform(rel, set())
+        self.assertEqual(count, 1)
+        self.assertIn('bw_direct_call_ready(ctx, 0x80328F84u)', result)
+        self.assertIn('bw_inline_gpr_memory_ready(ctx, 27u)', result)
+        self.assertIn('bw_direct_call_ready(ctx, 0xC0DA0258u)', result)
+        self.assertIn('goto label_C0DA0258;', result)
+        # Declined, it still goes out through the mirror address it called.
+        self.assertIn('ctx->pc = 0xC0328F84u;\n            return;', result)
 
     def test_plain_and_fixed_cpu_rewrites_keep_memory_and_host_guards(self):
         for source in (CALL, CALL.replace('CPUState* ctx)', 'CPUState* ctx_param)')):
