@@ -37,6 +37,9 @@ import shutil
 import sys
 from pathlib import Path
 
+# PadMint's embedded Python omits the script directory from its import path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 FUNC_RE = re.compile(r"\bfunc_([0-9A-F]{8})\b")
 
 

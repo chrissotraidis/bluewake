@@ -44,6 +44,30 @@ class ModuleTest(unittest.TestCase):
         (self.work / "composite-final.digest").write_text(digest + "\n")
         return receipt
 
+    def test_mod_options_work_with_isolated_python(self):
+        # PadMint's embedded Windows Python omits the script directory from
+        # sys.path. Exercise the real options emitter with synthetic inputs.
+        source = self.work / "composite source"
+        source.mkdir()
+        (source / "generated_composite.h").write_text(
+            "static const u32 s_dolrecomp_chunk_starts[] = {\n0x80000000u,\n};\n"
+            "static const u32 s_ends[] = {\n0x80000004u,\n};\n")
+        (source / "rel_data.inc").write_text("/* no synthetic REL data */\n")
+        disc = self.work / "synthetic.dol"
+        disc.write_bytes(bytes(256))
+        options = self.work / "synthetic options.txt"
+        options.write_text("option example 1 on Example option\n"
+                           "write 0x80000000 example u8 42\n")
+        result = subprocess.run([
+            entry.sys.executable, "-I", str(ROOT / "scripts/mods/build_mod_variants.py"),
+            "--composite-src", str(source), "--base-dol", str(disc), "--options", str(options),
+            "--rels-bin-dir", str(self.work)], cwd=self.work, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        generated = (source / "mod_variants.inc").read_text()
+        self.assertIn("#define MODULE_OPTION_COUNT 1u", generated)
+        self.assertIn("0x80000000u, 1u, s_option_write_0", generated)
+        self.assertIn("0x2Au", generated)
+
     def test_mac_modes_keep_exact_current_recipe_arguments(self):
         # Snapshot of main b1bf26a0: keep the actual player argv contract stable.
         target = {"command": ["/bin/bash", "{repo}/scripts/builder/build.sh", "{disc}",
