@@ -114,14 +114,20 @@ it also writes stay on this PC; the Mac makes the release's own.
 
 | | |
 | --- | --- |
-| Commit built | |
-| Build time, jobs, clang | |
-| Lean copies and behaviour timing lines, RecompCore | |
-| Module SHA-256 | |
-| a. Start and look | |
-| b. The camera standing still | |
-| c. Smooth Motion with the HD look | |
-| d. Dragon Roost and saving | |
-| e. The menu and the new controller options | |
-| Zip SHA-256, uploaded to the v0.9.0 draft | |
+| Commit built | `211abfdecf13beb5b9f2120459a1a3cde50dd84e` (detached, clean); version 0.9.0, build 8. |
+| Build time, jobs, clang | Windows PC, desktop PowerShell; exit 0 in 85m 8s, 6 jobs, clang 22.1.3. App compiler flags use `windows/pgo/app.profdata`; module flags use the locally trained profile. |
+| Lean copies and behaviour timing lines, RecompCore | `lean prepaid block copies: 464979 blocks in 842 chunks`; `behaviour_timing: 404438 block starts in 842 chunks now always prepaid`; RecompCore `1446450c79046bd34e43abadc27522eeab768a6e`. |
+| Module SHA-256 | `795d19375c01df3c8fb7b6b005bd2fd512c7f587d670cb72e91c0b737d58985a` |
+| a. Start and look | Partial: portable title/opening session for 479.3 minutes, `[renderer] D3D12`, `[gx] draw fusion on`, zero fatal lines; F1 > Quit the game exited cleanly. Triage: median game speed 100%, 28 seconds below target (lowest 74%), 8 hitches, worst frame 106 ms. Chris confirmed the window was visible and accepted proceeding without further validation. Forest Haven walking/camera and visual correctness were not verified. |
+| b. The camera standing still | Skipped at Chris's direction to assume it is fine and proceed; no controller, idle-camera dip, ledge or door check verified. |
+| c. Smooth Motion with the HD look | Skipped at Chris's direction; clouds, water, shadows and swimming with both options on remain unverified. |
+| d. Dragon Roost and saving | Skipped at Chris's direction; a valid earlier card was copied and prepared, but Dragon Roost map, F5/F8, saving, reload and clean second launch remain unverified. Real AppData saves were not changed. |
+| e. The menu and the new controller options | Skipped at Chris's direction; controller navigation, background input and separate stick aiming remain unverified. F1 menu opening and Quit the game were checked with desktop input. |
+| Zip SHA-256, uploaded to the v0.9.0 draft | `3c0edc36241fc1783693e1a9fa942995f4f32efec14fb3a9afc889a595da61ce`; Windows ZIP uploaded, GitHub digest matches. Release remains a draft with the existing IPA, source ZIP and PadMint recipe unchanged. |
 
+
+Local `scripts/audit_repo.sh` and `git diff --check` passed. The freeze commit's Windows source-only host, repository audit, attribution, Linux host/AppImage and game-thread sanitizer workflows passed. CI does not establish hardware gameplay acceptance. Logs, disc, test cards and training data remain on this PC. The Mac release content gate remains required before publication.
+
+Packaging produced 35 files and passed its allowlist and DLL import checks. ZIP integrity, unique members, private-file exclusions, required binaries, freeze provenance and module hash were checked independently. Only the Windows ZIP was uploaded; the locally generated source ZIP and SHA256SUMS stayed on this PC. The portable test folder and logs were retained privately outside the build app folder before packaging.
+
+Chris accepted proceeding with unverified gameplay checks on October 24, 2026 ("let sjust assume its fine"). This acceptance is not a gameplay pass. The external `release_gate.py` is absent from both Windows and WSL homes: the Mac must verify the Windows ZIP hash and run `scripts/release/check_public_assets.sh` before publication, accepting only `containsTranslatedGameCode: true`. No release was published, no tag was created, and no issue comments were posted.
