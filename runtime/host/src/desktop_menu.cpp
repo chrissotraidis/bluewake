@@ -1075,6 +1075,7 @@ void draw_menu(const bw_platform::Look& look) {
                 ImGui::Dummy(ImVec2(1.f, ImGui::GetStyle().ItemSpacing.y * 2.f));
                 ImGui::PopTextWrapPos();
                 bw_menu_stick_scroll(pad.scroll);
+                bw_menu_scroll_past_ends();
                 ImGui::EndChild();
                 ImGui::PopID();
                 ImGui::EndTabItem();
