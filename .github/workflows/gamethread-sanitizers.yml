@@ -1,0 +1,56 @@
+name: Game-thread sanitizer tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  address-undefined:
+    name: Native pool ASan and UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure the standalone pool suite
+        run: |
+          cmake -S tests/native_work_pool -B build/native-work-pool-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_C_FLAGS='-Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined' \
+            -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=address,undefined'
+      - name: Build and run ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake --build build/native-work-pool-asan --parallel 2
+          ctest --test-dir build/native-work-pool-asan \
+            --output-on-failure -L native-work-pool
+
+  thread:
+    name: Native pool TSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure the standalone pool suite
+        run: |
+          cmake -S tests/native_work_pool -B build/native-work-pool-tsan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_C_FLAGS='-Wall -Wextra -Werror -fsanitize=thread -fno-omit-frame-pointer' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread' \
+            -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=thread'
+      - name: Build and run TSan
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          cmake --build build/native-work-pool-tsan --parallel 2
+          ctest --test-dir build/native-work-pool-tsan \
+            --output-on-failure -L native-work-pool

@@ -27,6 +27,21 @@ int bluewake_native_math_try(CPUState* cpu, u32 address) {
 
 static unsigned long long s_hits[4], s_fallbacks[4], s_array_vectors, s_array_max;
 static unsigned long long s_gpr_hits, s_gpr_fallbacks;
+BW_MATH_EXPORT int bluewake_composite_native_math_stats_v1(
+    BluewakeNativeMathStatsV1* out,u32 out_size) {
+    if (!out || out_size<sizeof(*out)) return 0;
+    BluewakePoolStats pool_stats;
+    bluewake_parallel_stats(&pool_stats);
+    *out=(BluewakeNativeMathStatsV1){.version=1,.size=sizeof(*out),
+        .requested_workers=pool_stats.requested_workers,
+        .effective_workers=pool_stats.effective_workers,
+        .array_vectors=s_array_vectors,.array_max_vectors=s_array_max,
+        .completed_batches=pool_stats.completed_batches,
+        .worker_items=pool_stats.worker_items};
+    memcpy(out->native_hits,s_hits,sizeof s_hits);
+    memcpy(out->native_fallbacks,s_fallbacks,sizeof s_fallbacks);
+    return 1;
+}
 BW_MATH_EXPORT void bluewake_native_math_report(void) {
     fprintf(stderr, "[native-math] copy=%llu/%llu concat=%llu/%llu vec=%llu/%llu array=%llu/%llu vectors=%llu max=%llu parallel=%llu (native/fallback)\n",
         s_hits[0],s_fallbacks[0],s_hits[1],s_fallbacks[1],s_hits[2],s_fallbacks[2],

@@ -6,8 +6,8 @@
 
 // The Wind Waker HD look (docs/WWHD_LOOK.md): the HD release's changes to how
 // the game is drawn, rebuilt on the GameCube game. Every part is off by
-// default. BLUEWAKE_HD_LOOK=1 turns on every part that exists; a part's own
-// variable (=1 or =0) overrides that.
+// default. BLUEWAKE_HD_LOOK=1 turns on every part that exists except sun
+// shadows; a part's own variable (=1 or =0) overrides that.
 //
 // Distant islands (BLUEWAKE_HD_DISTANT_ISLANDS): each island's far-away model
 // (d_a_lod_bg) appears and is unloaded 100,000 units further out, as in HD.
@@ -19,9 +19,18 @@
 // the HUD.
 // Read again by the settings menus.
 void bluewake_hd_look_reload(void);
+// The softer starting strengths for Aurora's parts; call before Aurora starts.
+void bluewake_hd_look_defaults(void);
 // Once per retrace.
 void bluewake_hd_look_retrace(CPUState* cpu);
 
 extern bool bluewake_hd_distant_islands;
+
+// The room model's culling, widened while sun shadows from the map are shown
+// on the high shadow quality (BLUEWAKE_HD_ROOM_CULL=0 or 1 overrides): set when
+// the edge service should call bluewake_hd_look_room_clip at clipByBox's entry
+// (0x80256CB8), which then culls the room's joints itself and returns.
+extern bool bluewake_hd_room_clip;
+void bluewake_hd_look_room_clip(CPUState* cpu, u32 address);
 
 #endif

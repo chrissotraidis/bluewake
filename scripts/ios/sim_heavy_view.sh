@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The simulator's heavy Outset view: load the acceptance save, stand on the pier
 # facing the island, and time retraces 1000-3100 from the host's frame timing.
-# This is the view the speed table in docs/status/CURRENT.md tracks.
+# This is the view the speed table in docs/archive/status/CURRENT.md tracks.
 #
 # usage: scripts/ios/sim_heavy_view.sh [--runs N] [--no-build] [--env K=V]...
 # Prints one line per run: retraces a second, median and p90 retrace time.

@@ -187,6 +187,11 @@ static unsigned long long g_test_item_retrace = 900;
 // (Z-targeting, the boat's special cameras, cutscenes) it is the game's C-stick.
 // With no controller, or one left resting, nothing changes.
 static bool g_stick_on;
+// The right stick also aims in first person and with items (BLUEWAKE_STICK_AIM,
+// on unless set to 0). Off, those views aim with the left stick and take the
+// C-stick as the GameCube game does, and the right stick still turns the
+// camera everywhere else (#402).
+static bool g_stick_aim_on = true;
 static double g_stick_speed = 360.0;     // degrees a second at full tilt, left and right
 static double g_stick_aim_speed = 180.0; // the same when aiming (first person and items)
 static bool g_stick_zoom_on;             // R3 + right-stick up/down changes the follow-camera distance
@@ -528,6 +533,7 @@ static void read_stick_settings(void) {
 #else
     g_stick_on = !env_is("BLUEWAKE_STICK_CAMERA", '0');
 #endif
+    g_stick_aim_on = !env_is("BLUEWAKE_STICK_AIM", '0');
     const char* speed = getenv("BLUEWAKE_STICK_CAMERA_SPEED");
     g_stick_speed = speed != NULL && atof(speed) > 0.0 ? atof(speed) : 360.0;
     const char* aim = getenv("BLUEWAKE_STICK_AIM_SPEED");
@@ -937,7 +943,7 @@ static void aim_frame(CPUState* cpu, u32 player) {
     // The fast stick camera's right stick aims as the mouse does (at its own
     // speed, a game frame's worth each update), and the D-pad zooms.
     double stick_yaw = 0.0, stick_pitch = 0.0, pad_zoom = 0.0;
-    if (g_stick_on) {
+    if (g_stick_on && g_stick_aim_on) {
         double x, y, left_x, left_y;
         bool click;
         int zoom;
@@ -1178,7 +1184,7 @@ static void camera_frame(CPUState* cpu, u32 process) {
     g_stick_owns = false;
     g_stick_can_zoom = false;
     g_aiming = aiming && player_in_control(cpu);
-    g_stick_aims = g_aiming && g_stick_on;
+    g_stick_aims = g_aiming && g_stick_on && g_stick_aim_on;
     g_stick_zooms = g_stick_aims && (mem_read16(cpu, style + kStyleFlags) & kStyleZoom) != 0u;
     if (aiming && player_in_control(cpu)) {
         // First person or an item's aim: aim_frame, at the player's next

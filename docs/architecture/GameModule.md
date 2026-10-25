@@ -7,6 +7,7 @@
   - [Artifact-to-game examples](#artifact-to-game-examples)
 - [Module loading and ABI](#module-loading-and-abi)
 - [Translated-code dispatch](#translated-code-dispatch)
+  - [Native routine selection](#native-routine-selection)
 
 Architecture path: [Overview](Overview.md) → [Runtime](Runtime.md) → **Native game module**
 
@@ -107,5 +108,23 @@ boundary?`"}
 
 The module's relationship with CPU storage, memory, and guest addresses is
 covered in [Guest machine state](GuestState.md).
+
+Public guard and source-contract tests can validate ABI declarations,
+dispatch preparation, native decline behavior, and synthetic CPU/RAM effects
+without a game module. Generated scheduler and native differential tests are
+conditional or manual because they consume a contributor's local translated
+module. A compiled target is therefore not proof that its private oracle ran.
+See [generated and conditional tests](Testing.md#generated-and-conditional-tests)
+and [private and hardware validation](Testing.md#private-and-hardware-validation).
+
+### Native routine selection
+
+Selected generated function entries can contain hash-certified hooks to
+handwritten native implementations. A native routine either completes with
+guest state equivalent to the translation or declines without mutation and
+lets the translated path continue. Decomp source helps contributors understand
+the original algorithm but is not executed by this mechanism. Continue to
+[translated, native, and decomp routines](NativeRoutines.md) for the build-time
+hook, runtime selection, equivalence, and testing contracts.
 
 Return to the runtime [high-level view](Runtime.md#high-level-view).

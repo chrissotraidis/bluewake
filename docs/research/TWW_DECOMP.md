@@ -4,7 +4,7 @@
 > `/* Nonmatching */` marker as an empty body. Current executable census proves
 > that is false: many marked functions contain complete non-byte-matching
 > source. Use `scripts/route_b_source_manifest.py` and
-> `docs/status/EXECUTION_ROUTE_CENSUS_2026-09-01.md` for route decisions.
+> `docs/archive/status/EXECUTION_ROUTE_CENSUS_2026-09-01.md` for route decisions.
 
 Condensed from full repo inspection + decomp.dev API (2026-08-09). License
 CC0-1.0. No assets/assembly in repo; build requires user's disc at

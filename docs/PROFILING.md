@@ -157,6 +157,47 @@ Then profile the same way as above. On the Deck this is how we confirmed the gam
 `workers: gx=~55% interp=0% render=~9%` and `waits: gx=5ms`, meaning the game is not
 waiting on the GX worker.
 
+### The GX worker's own profile at Outset
+
+A rendered run at Outset on the Deck (`sea` room 44, from a save state, the AppImage
+built from `main` at `7382708` with local preparations, paced at 60 FPS with Smooth Motion
+on) gives the worker something to do and names its hot paths:
+
+```
+[fps-dip] retrace=2281 shown=56.2 game=29 speed=95% interpolated=29/29 draws/frame=598
+          rejected=0.2% unmatched=3.1% busy=94% waits: gx=6ms present=9ms gpu=6ms
+          workers: gx=43% interp=5% render=11% stage=sea room=44
+```
+
+533 to 598 draws a frame, the game thread 94 to 97% busy, waiting 6 to 8 ms on the GX
+worker and 9 ms on the present, with the worker itself taking 35 to 43% of a core and the
+Dawn/Vulkan render worker 11 to 12%. `perf record -g -F 99 -p PID -- sleep 30`, then
+`perf report --tid <the worker's tid>` (`7045` was the game thread and `7064` the worker
+in this capture), ranks the worker's self time like this:
+
+| Share | Symbol | What it is |
+| --- | --- | --- |
+| 3.2% | `gxcore::GxCoreState::build_draw_plan_into` | turning a consumed draw into a `DrawPlan`, including the cached vertex attributes |
+| 2.0% | `aurora_recomp::ConsumingAuroraRenderSink::submit_packet` | handing a render packet to the Aurora sink |
+| 1.7% | `gxcore::GxCoreSink::submit_packet` | the GX core's side of the same hand-off |
+| 1.6% | `aurora_recomp::RetailGxFrontend::emit_new_packets` | FIFO parse into render packets |
+| 1.5% | `aurora_recomp::fill_render_packet` | copying one trace event into a packet |
+| 1.1% | `host_graphics_guest_resolve` | resolving a guest address the graphics path reads |
+| 0.8% | `aurora_recomp::RetailGxFrontend::handle_draw` | the draw command's own handler |
+| 0.75% | `gxcore::GxCoreState::apply` | applying a render-state packet |
+
+The game thread's own graphics work is smaller and separate: `aurora_backend_gx_write`
+2.3% (guest GX register writes) and `ppc_guest_alias_resolve` 2.4%. The third thread with
+samples is the Dawn/Vulkan render worker (`dawn::native::vulkan::CommandBuffer::*`,
+0.1 to 0.2% each, spread thin).
+
+So on four cores the two groups worth attacking are command conversion
+(`emit_new_packets`, `fill_render_packet`, both `submit_packet`s) and draw planning with
+its vertex-attribute caching (`build_draw_plan_into`), with guest address resolution third.
+At 60 FPS the worker is not the wall -- 35 to 43% of one core -- which is why the game
+thread's own numbers move the frame rate here; these paths matter when the worker becomes
+the limit, and they are the ones to measure first if it does.
+
 ## Step 5 — Extra diagnostics
 
 A few more environment variables come in handy:
@@ -178,8 +219,13 @@ export BLUEWAKE_TEST_WARP=retrace:stage:room:point
 
 These each cost real time the first time around:
 
-- **`nohup` is not enough over SSH.** The process dies when the session closes, because
-  the AppImage's FUSE mount tree is torn down with it. Use `setsid ... & disown`.
+- **`nohup` is not enough over SSH, and `setsid … & disown` is not always either.** A
+  rendered run started that way died with the session here: the log stopped mid-frame
+  with no exit line. `systemd-run --user --unit=bw-profile --collect --setenv=… $APP`
+  puts it in its own user unit that survives the session, and
+  `journalctl --user -u bw-profile -f` reads its output. With `APPIMAGE_EXTRACT_AND_RUN=1`
+  (and `TMPDIR` on the SD card, since `/home` on a Deck is often full) the AppImage also
+  stops depending on a FUSE mount that the session teardown can remove.
 - **`BLUEWAKE_MAX_RETRACES` is compared against the loaded state's already-counted
   retrace.** Set it to `state_retrace + the window you want`. A state at retrace 2082
   needs `MAX_RETRACES=4082` for a 2000-retrace window — otherwise the run stops after

@@ -115,7 +115,7 @@ could not before, **or** one of the governing numbers moved. A diagnostic is a c
 measurement trustworthy, never progress by itself.
 
 One hypothesis, one small change, one build, one measurement, and at most one line appended to
-`docs/status/CURRENT.md`. No status document may be longer than the change it describes. Host-only rebuilds
+`docs/archive/status/CURRENT.md`. No status document may be longer than the change it describes. Host-only rebuilds
 are the cheap ones: `cmake --build build/runtime-host-dsp --target bluewake_host -j 8`, about two minutes,
 which also re-assembles and re-signs the bundle. Extend the existing `host_input_chain_probe` rather than
 adding a parallel mechanism.

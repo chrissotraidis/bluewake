@@ -6,6 +6,7 @@
 - [High-level view](#high-level-view)
 - [Build process](#build-process)
 - [Runtime](#runtime)
+- [Testing](#testing)
 
 Architecture path: [Index](README.md) → **Overview**
 
@@ -82,7 +83,8 @@ package`"]
         Executable --> Package
     end
 
-    subgraph Runtime["Runtime — one application process"]
+    subgraph Runtime["`Runtime — one
+application process`"]
         Startup["Startup"]
         Host["BlueWake host"]
         Game["Game module"]
@@ -158,5 +160,26 @@ and a concrete contributing PR: [host data](Host.md#artifact-to-game-examples),
 [service data](Services.md#artifact-to-game-examples), and
 [graphics data](Graphics.md#artifact-to-game-examples).
 
+The [game-thread chapter](GameThread.md) follows the execution path across
+those entities, from each host turn through translated dispatch and back to
+service, graphics, and timing boundaries.
+
 For the complete component map, interaction boundaries, and links to each
 entity's internals, continue to [Runtime](Runtime.md).
+
+## Testing
+
+BlueWake's tests span repository and generated-source contracts, native host
+components, GXRuntime and renderer integration, platform packaging, private
+translated modules, gameplay routes, and hardware checks. Public CI keeps game
+data out while building and running source-only Linux and Windows host suites;
+private and device-backed validation extends that evidence where synthetic
+fixtures cannot establish player-visible behavior.
+
+For the complete test flow, registration paths, CI jobs, fixture boundaries,
+local commands, result interpretation, and extension rules, continue to
+[Testing](Testing.md).
+
+To measure these build and runtime components, identify a bottleneck, and
+validate an optimization, continue to the
+[performance overview](../performance/Overview.md).

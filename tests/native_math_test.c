@@ -1,3 +1,6 @@
+#if !defined(_WIN32)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "native_math.h"
 #include "StaticRecompABI.h"
 #ifdef NDEBUG
@@ -97,6 +100,10 @@ static bool routed_ready(void* user, const CPUState* cpu, u32 address) {
     return true;
 }
 
+static void noop_range(void* context,size_t first,size_t end) {
+    (void)context;(void)first;(void)end;
+}
+
 static int dispatch(Module* module, CPUState* state, u32 entry) {
     CPUState* guest = module->storage.cpu;
     *guest = *state;
@@ -115,7 +122,8 @@ static void unload(Module* module) {
 }
 int main(int argc,char**argv) {
     if (argc != 1 && argc != 2 && !(argc == 4 && strcmp(argv[2], "--candidate") == 0)) return 2;
-    u8* a=calloc(1,GC_MAIN_RAM_SIZE);u8* b=calloc(1,GC_MAIN_RAM_SIZE);assert(a&&b);
+    u8* a=calloc(1,GC_MAIN_RAM_SIZE);u8* b=calloc(1,GC_MAIN_RAM_SIZE);
+    u8* serial_ram=calloc(1,GC_MAIN_RAM_SIZE);assert(a&&b&&serial_ram);
     CPUState c=initial(a,0x8030D0FC);
     c.fpscr|=1;unchanged(&c,c.pc);c.fpscr&=~3u;
     c.cycle_deadline_budget=67;unchanged(&c,c.pc);c.cycle_deadline_budget=1000;
@@ -143,18 +151,50 @@ int main(int argc,char**argv) {
         assert(!bluewake_native_gpr(&c,c.pc));assert(memcmp(&c,&saved,sizeof c)==0);
     }
     puts("native math: fallback leaves state unchanged");
-    if(argc<2) {free(a);free(b);return 0;}
+    if(argc<2) {free(a);free(b);free(serial_ram);return 0;}
     Module original = {0}, candidate_module = {0};
     assert(load_module(argv[1], &original));
     assert(strcmp(original.desc->game_id, "GZLE01") == 0);
     free(b); b = original.storage.mem1;
     const bool candidate = argc == 4;
+#if !defined(_WIN32)
+    char* candidate_workers=NULL;
+    bool candidate_workers_was_set=false;
+#endif
     if (candidate) {
         assert(load_module(argv[3], &candidate_module));
         assert(candidate_module.native_math && candidate_module.native_math(true, routed_ready, NULL));
         free(a); a = candidate_module.storage.mem1;
+#if !defined(_WIN32)
+        const char* configured=getenv("BLUEWAKE_NATIVE_WORKERS");
+        candidate_workers_was_set=configured!=NULL;
+        if(configured) {
+            candidate_workers=strdup(configured);
+            if(!candidate_workers) {
+                fputs("cannot save BLUEWAKE_NATIVE_WORKERS\n",stderr);
+                return 1;
+            }
+        }
+        if(unsetenv("BLUEWAKE_NATIVE_WORKERS")!=0) {
+            perror("unsetenv BLUEWAKE_NATIVE_WORKERS");return 1;
+        }
+        // Initialize only the pool linked into this executable while workers
+        // are disabled. The candidate DSO owns a separate pthread_once/pool.
+        bluewake_parallel_range(0,1,noop_range,NULL);
+        if(bluewake_parallel_batches()!=0) {
+            fputs("local serial pool recorded a parallel batch during initialization\n",stderr);
+            return 1;
+        }
+        int restore_result=candidate_workers_was_set
+            ? setenv("BLUEWAKE_NATIVE_WORKERS",candidate_workers,1)
+            : unsetenv("BLUEWAKE_NATIVE_WORKERS");
+        if(restore_result!=0) {
+            perror("restore BLUEWAKE_NATIVE_WORKERS");return 1;
+        }
+#endif
     }
     const u32 entries[]={0x8030D0C8,0x8030D0FC,0x8030DA44};
+    unsigned serial_accepted[3]={0},serial_declined[3]={0},serial_compared[3]={0};
     for(unsigned fn=0;fn<3;++fn) for(unsigned i=0;i<4000;++i) {
         if (candidate) candidate_module.native_math(i % 31u != 0, routed_ready, NULL);
         memset(a,0,0x10000);c=initial(a,entries[fn]);
@@ -171,10 +211,39 @@ int main(int argc,char**argv) {
         memcpy(b,a,0x10000);memcpy(b+0x3F66F0,a+0x3F66F0,8);
         CPUState reference=c;reference.ram=b;
         assert(dispatch(&original, &reference, reference.pc));
+        memcpy(serial_ram,a,0x10000);memcpy(serial_ram+0x3F66F0,a+0x3F66F0,8);
+        CPUState serial=c;serial.ram=serial_ram;ppc_fpscr_updated(&serial);
+        CPUState serial_before=serial;
+        bool expect_native=!(candidate &&
+            (i%13==0 || i%17==0 || i%19==0 || i%23==0));
+        int serial_used=bluewake_native_math(&serial,serial.pc);
+        if(expect_native && !serial_used) {
+            fprintf(stderr,"missing serial coverage function %08x case %u\n",entries[fn],i);
+            return 1;
+        }
+        if(!expect_native && serial_used) {
+            fprintf(stderr,"unexpected serial acceptance function %08x case %u\n",entries[fn],i);
+            return 1;
+        }
+        if(serial_used) ++serial_accepted[fn]; else {
+            ++serial_declined[fn];
+            if(memcmp(&serial,&serial_before,sizeof serial) ||
+               memcmp(serial_ram,a,0x10000)) {
+                fprintf(stderr,"serial decline changed state function %08x case %u\n",entries[fn],i);
+                return 1;
+            }
+        }
         ppc_fpscr_updated(&c);
         if(candidate) assert(dispatch(&candidate_module, &c, c.pc));
         else assert(bluewake_native_math(&c,c.pc));
         reference.ram=a;
+        serial.ram=a;
+        if(serial_used && (memcmp(&serial,&reference,sizeof serial) ||
+                           memcmp(serial_ram,b,0x10000))) {
+            fprintf(stderr,"serial mismatch function %08x case %u seed %08x\n",entries[fn],i,seed);
+            return 1;
+        }
+        if(serial_used) ++serial_compared[fn];
         if(memcmp(&c,&reference,sizeof c) || memcmp(a,b,0x10000)) {
             fprintf(stderr,"mismatch function %08x case %u seed %08x\n",entries[fn],i,seed);
             for(unsigned j=0;j<sizeof c;++j) if(((u8*)&c)[j]!=((u8*)&reference)[j])
@@ -184,13 +253,26 @@ int main(int argc,char**argv) {
             return 1;
         }
     }
+    for(unsigned fn=0;fn<3;++fn) {
+        if(serial_compared[fn]==0 || (candidate && serial_declined[fn]==0)) {
+            fprintf(stderr,"serial coverage function %08x accepted=%u declined=%u compared=%u\n",
+                    entries[fn],serial_accepted[fn],serial_declined[fn],serial_compared[fn]);
+            return 1;
+        }
+        printf("serial coverage function %08x accepted=%u declined=%u compared=%u\n",
+               entries[fn],serial_accepted[fn],serial_declined[fn],serial_compared[fn]);
+    }
     puts("native math: 12000 complete CPU and 64 KiB RAM-area comparisons against personal module passed");
-    const unsigned counts[]={2,3,17,127,1024,4096};
+    const unsigned counts[]={2,3,17,127,767,768,769,1024,4096};
+    unsigned array_accepted[9][2]={{0}},array_declined[9][2]={{0}};
+    unsigned array_compared[9][2]={{0}};
     for(unsigned i=0;i<360;++i) {
         if (candidate) candidate_module.native_math(i % 31u != 0, routed_ready, NULL);
         memset(a,0,0x40000);c=initial(a,0x8030DA98);
-        unsigned count=counts[i%6];
-        c.gpr[4]=0x80010000;c.gpr[5]=i%2?c.gpr[4]:0x80020000;
+        unsigned count_index=i%(sizeof counts/sizeof counts[0]);
+        unsigned in_place=i%2;
+        unsigned count=counts[count_index];
+        c.gpr[4]=0x80010000;c.gpr[5]=in_place?c.gpr[4]:0x80020000;
         c.gpr[6]=count;c.cycle_budget=100000;c.cycle_deadline_budget=100000;
         c.reserve_valid=true;c.reserve_addr=c.gpr[5]+(i%count)*12;
         for(unsigned j=0;j<count*3;++j) write_float(&c,c.gpr[4]+4*j,random_float());
@@ -201,10 +283,39 @@ int main(int argc,char**argv) {
         memcpy(b,a,0x40000);memcpy(b+0x3F66F0,a+0x3F66F0,8);
         CPUState reference=c;reference.ram=b;
         assert(dispatch(&original, &reference, reference.pc));
+        memcpy(serial_ram,a,0x40000);memcpy(serial_ram+0x3F66F0,a+0x3F66F0,8);
+        CPUState serial=c;serial.ram=serial_ram;ppc_fpscr_updated(&serial);
+        CPUState serial_before=serial;
+        bool expect_native=!(candidate &&
+            (i%13==0 || i%17==0 || i%19==0 || i%23==0));
+        int serial_used=bluewake_native_math(&serial,serial.pc);
+        if(expect_native && !serial_used) {
+            fprintf(stderr,"missing serial array coverage case %u count %u in_place=%u\n",
+                    i,count,in_place);return 1;
+        }
+        if(!expect_native && serial_used) {
+            fprintf(stderr,"unexpected serial array acceptance case %u count %u in_place=%u\n",
+                    i,count,in_place);return 1;
+        }
+        if(serial_used) ++array_accepted[count_index][in_place]; else {
+            ++array_declined[count_index][in_place];
+            if(memcmp(&serial,&serial_before,sizeof serial) ||
+               memcmp(serial_ram,a,0x40000)) {
+                fprintf(stderr,"serial array decline changed state case %u count %u\n",i,count);
+                return 1;
+            }
+        }
         ppc_fpscr_updated(&c);
         if(candidate) assert(dispatch(&candidate_module, &c, c.pc));
         else assert(bluewake_native_math(&c,c.pc));
         reference.ram=a;
+        serial.ram=a;
+        if(serial_used && (memcmp(&serial,&reference,sizeof serial) ||
+                           memcmp(serial_ram,b,0x40000))) {
+            fprintf(stderr,"serial array mismatch case %u count %u seed %08x\n",i,count,seed);
+            return 1;
+        }
+        if(serial_used) ++array_compared[count_index][in_place];
         if(memcmp(&c,&reference,sizeof c) || memcmp(a,b,0x40000)) {
             fprintf(stderr,"array mismatch case %u count %u seed %08x\n",i,count,seed);
             for(unsigned j=0;j<sizeof c;++j) if(((u8*)&c)[j]!=((u8*)&reference)[j])
@@ -216,6 +327,25 @@ int main(int argc,char**argv) {
             return 1;
         }
     }
+    for(unsigned count_index=0;count_index<sizeof counts/sizeof counts[0];++count_index) {
+        for(unsigned in_place=0;in_place<2;++in_place) {
+            if(array_compared[count_index][in_place]==0) {
+                fprintf(stderr,"missing serial array category count=%u in_place=%u\n",
+                        counts[count_index],in_place);return 1;
+            }
+            printf("serial array coverage count=%u in_place=%u accepted=%u declined=%u compared=%u\n",
+                   counts[count_index],in_place,
+                   array_accepted[count_index][in_place],
+                   array_declined[count_index][in_place],
+                   array_compared[count_index][in_place]);
+        }
+    }
+#if !defined(_WIN32)
+    if(candidate && bluewake_parallel_batches()!=0) {
+        fprintf(stderr,"local serial pool executed %llu parallel batches\n",
+                bluewake_parallel_batches());return 1;
+    }
+#endif
     puts("native arrays: 360 complete CPU and 256 KiB RAM-area comparisons, including in-place and worker batches, passed");
     for(unsigned fn=0;fn<36;++fn) for(unsigned i=0;i<80;++i) {
         u32 entry=(fn<18?0x80328F04:0x80328F50)+4*(fn%18);
@@ -247,6 +377,10 @@ int main(int argc,char**argv) {
         if (candidate_module.report) candidate_module.report();
         unload(&candidate_module);
     } else free(a);
+#if !defined(_WIN32)
+    free(candidate_workers);
+#endif
+    free(serial_ram);
     unload(&original);
     return 0;
 }

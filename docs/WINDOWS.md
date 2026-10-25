@@ -3,6 +3,9 @@
 **Most players should download the ready-made Windows build** from the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest): unpack it,
 run `BlueWake.exe` and choose your own disc image (`.iso` or `.gcm`).
 
+If your browser or Windows says the download is a virus, see
+[If Windows says it's a virus](#if-windows-says-its-a-virus).
+
 This page is about building it yourself. BlueWake builds as a native Windows x86-64 program from your own disc:
 the game's code is translated from that disc during the build, so **the folder you build is yours alone: never
 share or upload it.**
@@ -154,11 +157,11 @@ A few words at the bottom left say what each key did.
 
 Game controllers work through SDL (Xbox, PlayStation, Switch Pro and others). The title screen wants A to reach
 the file menu. To choose which controller button presses each GameCube button, open settings and use
-**Controls › Controller buttons**. The optional controller zoom is
+**Controls › Controller button mapping**. The optional controller zoom is
 also under **Controls**: when enabled, hold the right-stick click and move that stick up or down; a tap still
 enters or leaves first person. The mouse turns the game's own camera around Link and tilts it, and a left click is A; a
 cutscene, door, Z-target or first-person view takes the camera back.
-**Controls › Mouse buttons** sets what the left, middle, right and side buttons press, and **Keyboard keys**
+**Controls › Mouse button mapping** sets what the left, middle, right and side buttons press, and **Keyboard mapping**
 changes the GameCube buttons' keys. A controller SDL doesn't
 recognise works once its mapping is in a `gamecontrollerdb.txt` (from
 [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB)) beside your saves; the session log's
@@ -245,7 +248,10 @@ clang (GNU driver, MSVC ABI) from Visual Studio.
   was, by module and offset, charging time in system code to the BlueWake function that called it.
 
 The Windows overlay saves display, camera, mod and audio choices in `settings.ini`; mods and audio mode
-apply after restart. Touch-layout editing and save-management screens remain iOS-specific.
+apply after restart. The file uses the same `KEY=VALUE` names as the Mac and Linux one (`BLUEWAKE_ASPECT=21:9`,
+listed in `runtime/host/src/settings_table.h`). A file from before that (`aspect=`, `option.NAME=`...) is read
+and converted once, and the old one is kept beside it as `settings.ini.before-shared-menu`. Launch options and
+variables set before BlueWake starts still win for that session. Touch-layout editing and save-management screens remain iOS-specific.
 What each Windows release build was checked for is in [Windows tasks](WINDOWS_TASKS.md).
 
 The prepaid-block candidate has bounded correctness evidence on an M3 Max:
@@ -313,3 +319,24 @@ at 30 Hz. A display slower than 120 Hz, or one whose rate isn't known yet, uses
 moving the window to another screen takes effect within a second. When the PC
 can't keep up, the shown rate can drop. `--smooth` turns it on at 60 FPS for
 that session and leaves a saved rate alone unless you change it in the menu.
+
+## If Windows says it's a virus
+
+BlueWake isn't code-signed yet, so every new release is a program Windows has never seen, and antivirus
+programs sometimes block a brand-new one. 0.8.0 was flagged by Microsoft Defender as `Tecabans.STV!cl` on its
+first day. When Chrome or Edge says "Failed – Virus detected", it's Windows' antivirus that blocked the file.
+
+1. Get BlueWake only from the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest).
+   There are no mirrors, and nobody from the project sends download links in messages.
+2. Check the zip. In PowerShell, in the folder you saved it to, run
+   `Get-FileHash .\BlueWake-vX.Y.Z-windows-x64.zip` (with the real file name). The result must match the zip's
+   line in that release's `SHA256SUMS`. If it doesn't, delete the zip and don't run anything from it.
+3. If it matches, you can wait while we ask Microsoft to clear it, keep playing the version you have, or open
+   Windows Security › Virus & threat protection › Protection history, pick the BlueWake entry and choose
+   **Allow on device** (or **Restore**). Your saves in `%APPDATA%\BlueWake` work with every version.
+4. Tell us the detection name it showed, on Discord or in an
+   [issue](https://github.com/chrissotraidis/bluewake/issues). It helps us get the release cleared.
+
+Please don't turn your antivirus off. If it finds something outside the BlueWake folder, such as a program that
+keeps coming back in `AppData`, that didn't come from BlueWake: run a Microsoft Defender Offline scan
+(Windows Security › Scan options) and change your passwords from another device.

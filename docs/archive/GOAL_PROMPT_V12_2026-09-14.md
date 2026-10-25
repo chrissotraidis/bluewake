@@ -141,7 +141,7 @@ An iteration counts only if time-to-playable fell, or fps moved on a named path,
 or do something they could not before. A profile is a cost paid to find the work, never progress by itself.
 
 One hypothesis, one small change, one build, one measurement, and at most one short section appended to
-`docs/status/CURRENT.md`. No status document may be longer than the change it describes. Never add a new
+`docs/archive/status/CURRENT.md`. No status document may be longer than the change it describes. Never add a new
 tier, slice or patch for a unit that already compiles whole.
 
 If an iteration ends with no change to an observable and no change to a number it **failed**: revert it and

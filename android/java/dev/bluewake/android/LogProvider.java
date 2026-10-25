@@ -13,7 +13,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 
 /**
- * Hands one session log to the app the player shares it with (Help & Feedback > Share Session Log), read-only and
+ * Hands session logs to the app the player shares them with (Help & Feedback > Share Session Log), read-only and
  * only through the permission the share grants: the provider is not exported, and it serves nothing but
  * logs/session-*.log from BlueWake's own folder.
  */

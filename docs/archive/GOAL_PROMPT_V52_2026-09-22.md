@@ -24,7 +24,7 @@ presentation is every other retrace, which is what the PRD calls authentic.
 
 The per-block constant was the whole of v51's workstream and it is now closed by
 measurement rather than by argument. The internals are in
-[status/CURRENT.md](../status/CURRENT.md); the shape of it is:
+[status/CURRENT.md](status/CURRENT.md); the shape of it is:
 
 | increment | measured | digest |
 | --- | --- | --- |
@@ -68,7 +68,7 @@ and paid nothing). The census instruments are already in the tree:
 and the host's own `*_CENSUS` env instruments.
 
 **2. The cycle accounting: REFUTED at the route on 2026-09-22. Read
-docs/status/CURRENT.md under that date before re-opening it.** The flat-body fast copy
+docs/archive/status/CURRENT.md under that date before re-opening it.** The flat-body fast copy
 was built (the precise copy byte-identical, the sweep at -6.0 percent) and refused by
 the route: 400 retraces took 3,836,466 host turns against the control's 1,372,978 with
 identical guest cycles, so removing the per-instruction charge path is not
@@ -121,7 +121,7 @@ the deferral-only control), every run stopping at the certified `0x8027fa30` aft
 new worker carries 16,034 of 16,287 sampled intervals while Aurora's render worker
 stays blocked for 16,246 - the work moved rather than vanished. What remains of this
 item is the p99 campaign on the devices P6 names, not another mechanism. See
-docs/status/CURRENT.md 2026-09-22. The earlier scoping entry, kept because it is what
+docs/archive/status/CURRENT.md 2026-09-22. The earlier scoping entry, kept because it is what
 the implementation followed:
 
 **3b. The fact that scoped it.**
@@ -139,7 +139,7 @@ thread, a worker draining it, and a barrier at each guest-visible synchronizatio
 the FIFO's own read-back and idle state, the mirrored CP/BP metadata in guest order,
 and the draw-done publication the guest polls at `0x80308A9C` - with the rendered
 gates (digest, stops, `scripts/bench_rendered.sh`) as the judge. See
-docs/status/CURRENT.md 2026-09-22. **Its first implementation step is to draw the
+docs/archive/status/CURRENT.md 2026-09-22. **Its first implementation step is to draw the
 movable/immovable line in code, not in a share.**
 
 **4. The save-continue path.** Boot the game, load the save the game itself wrote,

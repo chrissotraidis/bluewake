@@ -38,7 +38,7 @@ fixes are not visible in these refs and are not claimed imported.
 after `9921398` are implementation work (runtime patches 0121-0129: device lock,
 slow-game detector, pipeline threads, ubershader, GX worker, Smooth Motion cloth and
 colours; wider training, tiered compile, app PGO, nine natives). They are not in
-BlueWake; the [stability plan](STABILITY_PLAN_2026-10-03.md) sets their import order.
+BlueWake; the [stability plan](../archive/status/STABILITY_PLAN_2026-10-03.md) sets their import order.
 Main is still `d102695` (v0.4.0).
 
 **Source collaboration can move to BlueWake now.** New application PRs target
@@ -1111,7 +1111,7 @@ No issue is closed or externally commented on by this work.
 
 ## Next actions and retained work
 
-The [current goal loop](../GOAL_LOOP.md#critical-path-and-exit-evidence) defines
+The [current goal loop](../GOAL_LOOP.md) defines
 execution order: source consolidation and retained PadMint assembly are complete;
 bounded iPad install/save/reload/upgrade now passes. Finish remaining Mac gameplay
 checks and native Windows qualification, then make the migration decision using matched performance

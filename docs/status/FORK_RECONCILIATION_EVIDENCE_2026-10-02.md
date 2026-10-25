@@ -102,8 +102,8 @@ No external issue comments or messages were sent during this inventory.
   builds. Native Windows at this checkpoint passed 27/27 (run 36944660446);
   later checkpoints and their added regressions are recorded below.
 - Earlier physical iPad bridge/bird checks and Mac intro/skip checks are precisely
-  scoped in [overnight](OVERNIGHT_2026-10-02.md) and
-  [local stability](LOCAL_STABILITY_2026-10-01.md). They are not acceptance of
+  scoped in [overnight](../archive/status/OVERNIGHT_2026-10-02.md) and
+  [local stability](../archive/status/LOCAL_STABILITY_2026-10-01.md). They are not acceptance of
   the whole current source or the donor Windows optimizations.
 - Next: import the missing desktop input/disc foundation in focused batches,
   then reconcile the two newer runtime commits with BlueWake safety fixes.

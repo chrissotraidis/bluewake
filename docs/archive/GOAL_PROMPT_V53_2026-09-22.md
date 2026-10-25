@@ -30,7 +30,7 @@ card manager creates at file-select and nothing else; the pause menu's Save scre
 writes the gameplay save; the guest's own reset quits; a separate boot with that
 card reaches event-free gameplay at retrace 833 against 20,338 for a cold new game.
 That is milestone 9's save, quit and reload, and the PRD's time-to-playable reading,
-at one predicate on one build. The internals are in [status/CURRENT.md](../status/CURRENT.md).
+at one predicate on one build. The internals are in [status/CURRENT.md](status/CURRENT.md).
 
 **What that leaves is the number, and only the number.** 409.2 M instructions per
 play retrace on the bench window against the ~233 M the 16.667 ms target needs: a

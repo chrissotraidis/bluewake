@@ -5,7 +5,7 @@
 > milestones have since been achieved: the signed macOS app reaches
 > controllable Outset gameplay, persistent save/reload, and an authentic
 > Outset-to-Omasao transition. Do not restart the tasks below. Begin with
-> `docs/status/CURRENT.md`, `docs/archive/status/FINISH_LINE.md`, and
+> `docs/archive/status/CURRENT.md`, `docs/archive/status/FINISH_LINE.md`, and
 > `docs/GOAL_LOOP.md`; macOS performance, graphics correctness, and product
 > acceptance now own the active path.
 

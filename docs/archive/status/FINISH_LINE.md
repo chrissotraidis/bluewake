@@ -3,7 +3,7 @@
 **Recorded:** 2026-08-30  
 **Priority (updated 2026-09-23):** iPadOS is the active product target at the
 user's direction, proven in the iOS simulator one device at a time; macOS stays
-the reference host. See [IPADOS_REORIENTATION_2026-09-23.md](../../status/IPADOS_REORIENTATION_2026-09-23.md).
+the reference host. See [IPADOS_REORIENTATION_2026-09-23.md](IPADOS_REORIENTATION_2026-09-23.md).
 The macOS items below still apply to both platforms because they share the host.
 
 ## Honest Product State

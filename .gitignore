@@ -69,3 +69,7 @@ gxruntime-memory-card-*.dolcard*
 *.so
 *.keystore
 *.jks
+
+# Replay of the builder's own translation (native_leaf_gen.py, native_gx_gen.py).
+# The builder writes it into the build folder. A hand run uses this directory.
+cmake/composite/*_gen.inc

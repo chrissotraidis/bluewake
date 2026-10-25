@@ -204,7 +204,7 @@ static int write_file(const char* path, const uint8_t* data, size_t size) {
 }
 
 // The prepared RELs carry alignment 4 in the header word at 0x40 where the
-// disc has 8 or 0x20 (docs/status/GATES.md: "REL alignment field patched from
+// disc has 8 or 0x20 (docs/archive/status/GATES.md: "REL alignment field patched from
 // 8 to 4 in extracted copies"); the composite was translated from those
 // copies, all 415 of which hold 4.
 static int write_rel(const char* dir, const char* name, uint8_t* data,

@@ -331,7 +331,7 @@ int main(int argc, char** argv) {
         bw_default("BLUEWAKE_MAX_BLOCKS", @"100000000000");
         // Dolphin's high-level Zelda ucode: about 15% fewer play-window cycles
         // than the LLE interpreter, with an audio envelope that matches it at
-        // r=0.999 (docs/status/CURRENT.md). BLUEWAKE_DSP_MODE=lle restores LLE.
+        // r=0.999 (docs/archive/status/CURRENT.md). BLUEWAKE_DSP_MODE=lle restores LLE.
         bw_default("BLUEWAKE_DSP_MODE", @"hle");
         // The console's SRAM (ipl_sram.h): without it the game read an empty
         // SRAM, took mono from OSGetSoundMode and played mono. Dolphin's
@@ -380,6 +380,13 @@ int main(int argc, char** argv) {
             NSString* pack = [data stringByAppendingPathComponent:@"Load/Textures/GZLE01"];
             [[NSFileManager defaultManager] createDirectoryAtPath:pack withIntermediateDirectories:YES
                                                        attributes:nil error:nil];
+            // A pack made by Import from Wind Waker HD is used on its own.
+            NSString* chosen = [d stringForKey:@"BlueWake.TexturePackFolder"];
+            BOOL isDir = NO;
+            if (chosen.length > 0 && ![chosen containsString:@".."] &&
+                [[NSFileManager defaultManager] fileExistsAtPath:[data stringByAppendingPathComponent:chosen]
+                                                     isDirectory:&isDir] && isDir)
+                pack = [data stringByAppendingPathComponent:chosen];
             if ([d boolForKey:@"BlueWake.Mod.HDTextures"])
                 bw_default("DOL_AURORA_TEXTURE_PACK", pack);
             // The Wind Waker HD look (runtime/host/src/hd_look.h).

@@ -70,7 +70,7 @@ class LinuxContainerMountTest(unittest.TestCase):
     def test_mounts_checkout_metadata_external_output_and_read_only_disc(self):
         """A worktree and external output receive the minimum required access."""
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()  # macOS temp folders resolve through /private
             root = base / "checkout"
             git_dir = base / "git/worktrees/checkout"
             out = base / "output"
@@ -86,9 +86,10 @@ class LinuxContainerMountTest(unittest.TestCase):
     def test_output_inside_checkout_needs_no_duplicate_mount(self):
         """The checkout mount already covers its normal build/linux output."""
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "checkout"
+            base = Path(temporary).resolve()  # macOS temp folders resolve through /private
+            root = base / "checkout"
             out = root / "build/linux"
-            disc = Path(temporary) / "disc.iso"
+            disc = base / "disc.iso"
             out.mkdir(parents=True)
             disc.touch()
             with patch.object(BUILD, "ROOT", root), \
@@ -103,7 +104,7 @@ class LinuxContainerRunTest(unittest.TestCase):
     def test_reexecutes_the_original_arguments_and_returns_its_status(self):
         """Every user argument and the container's exit status pass through."""
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()  # macOS temp folders resolve through /private
             root = base / "checkout"
             context = root / "scripts/linux"
             out = base / "output"
@@ -231,6 +232,42 @@ class DependencyPreflightTest(unittest.TestCase):
                     BUILD.BuildError,
                     "appimagetool, desktop-file-validate, zsyncmake, readelf, ImageMagick"):
                 builder.check_appimage_tools()
+
+
+class AppImageRuntimeTest(unittest.TestCase):
+    """The AppImage's host uses LLVM libc++, as CI's checked AppImage does.
+
+    The prebuilt Dawn package links libstdc++, so a host built with it needs the
+    player's libstdc++ and check_appimage_abi.py rejects the AppImage
+    (GLIBCXX_3.4.32 on a container build, reported on #371)."""
+
+    def configure(self, appimage):
+        builder = BUILD.Builder(argparse.Namespace(out=Path("build/linux"), appimage=appimage,
+                                                   march="x86-64-v3"))
+        seen = []
+        builder.run = lambda name, argv, **kw: seen.append([str(a) for a in argv])
+        builder.configure_app()
+        return builder, seen[0]
+
+    def test_appimage_builds_with_libcxx_and_dawn_from_source(self):
+        builder, argv = self.configure(True)
+        self.assertIn("-DCMAKE_CXX_FLAGS=-march=x86-64-v3 -g -stdlib=libc++", argv)
+        for flag in ("-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++", "-DCMAKE_SHARED_LINKER_FLAGS=-stdlib=libc++",
+                     "-DAURORA_DAWN_PROVIDER=vendor"):
+            self.assertIn(flag, argv)
+        self.assertNotIn("-DAURORA_DAWN_PROVIDER=package", argv)
+        self.assertEqual(builder.app_build, Path("build/linux/app-appimage"))
+        # The same runtime as the CI job whose AppImage passes the ABI check.
+        workflow = (BUILD.ROOT / ".github/workflows/linux-host.yml").read_text()
+        for flag in ("-DCMAKE_CXX_FLAGS=-stdlib=libc++", "-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++",
+                     "-DAURORA_DAWN_PROVIDER=vendor"):
+            self.assertIn(flag, workflow)
+
+    def test_folder_build_keeps_the_prebuilt_dawn(self):
+        builder, argv = self.configure(False)
+        self.assertIn("-DAURORA_DAWN_PROVIDER=package", argv)
+        self.assertFalse(any("-stdlib=libc++" in a for a in argv))
+        self.assertEqual(builder.app_build, Path("build/linux/app"))
 
 
 if __name__ == "__main__":

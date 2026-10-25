@@ -20,6 +20,9 @@ extern "C" {
 #define BW_MOD_WIDESCREEN_KEY "BlueWake.Mod.Widescreen"   // bool, applies at launch (16:9)
 #define BW_MOD_WIDESCREEN_1610_KEY "BlueWake.Mod.Widescreen1610" // bool, applies at launch; excludes 16:9
 #define BW_MOD_HD_TEXTURES_KEY "BlueWake.Mod.HDTextures"  // bool, applies at launch
+// The texture pack in use, relative to the app data folder (Load/Textures/WWHD after
+// Import from Wind Waker HD); unset for Load/Textures/GZLE01. Applies at launch.
+#define BW_TEXTURE_PACK_FOLDER_KEY "BlueWake.TexturePackFolder"
 #define BW_MOD_BETTERWW_KEY "BlueWake.Mod.BetterWW"       // bool, applies at launch
 #define BW_HD_LOOK_KEY "BlueWake.HDLook"                 // bool, applies at launch (hd_look.h)
 #define BW_DPAD_MENUS_KEY "BlueWake.DpadMenus"           // bool, applies at once (dpad_menus.h, #245)

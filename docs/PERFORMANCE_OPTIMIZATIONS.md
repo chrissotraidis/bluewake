@@ -7,12 +7,12 @@ including the Forsaken Fortress and Adanmae, while its own logic still runs at i
 
 Measurements are from an Apple M3 Max MacBook Pro (3456 x 2168 display at 120 Hz) with the user's save,
 full screen, the ZWW4K 4K texture pack and 16x anisotropy unless a row says otherwise. The engineering
-log with the full reasoning for each is [docs/status/CURRENT.md](status/CURRENT.md); the RecompCore
+log with the full reasoning for each is [docs/archive/status/CURRENT.md](archive/status/CURRENT.md); the RecompCore
 changes are recorded as patches in [patches/recompcore](../patches/recompcore/README.md) (0098 to 0110)
 and are in https://github.com/elliotttate/RecompCore, branch `bluewake`, at 6892947.
 
 Earlier measured work (PGO of the hot chunks, the high-level DSP, the guest alias index, uniform reuse,
-the GX worker and FIFO changes, 2026-09-23 and 24) is in [docs/status/PERFORMANCE.md](status/PERFORMANCE.md).
+the GX worker and FIFO changes, 2026-09-23 and 24) is in [docs/archive/status/PERFORMANCE.md](archive/status/PERFORMANCE.md).
 
 ## Where the time goes
 
@@ -387,7 +387,7 @@ RecompCore windows-release 82607d4).
 ## A 4-core CPU (2026-10-01)
 
 Measured on 4 of the i9-13900KF's E-cores (affinity `0x000F0000`), the stand-in for a 4-core laptop CPU such as
-an i7-8565U. Details in [status/CURRENT.md](status/CURRENT.md), 2026-10-01.
+an i7-8565U. Details in [status/CURRENT.md](archive/status/CURRENT.md), 2026-10-01.
 
 ### 26. Frame interpolation gives way to the game (0119, `frame_interp.cpp`, `gxcore_draw.cpp`)
 
@@ -425,7 +425,7 @@ of line. In the prepaid copies a plain access no longer stores its pc and cycle 
 handler reads them; the out-of-line path stores them). On 4 E-cores, game-thread CPU per game frame 26.3-26.6
 ms before, 23.6-24.2 after; frames identical. Tried and dropped (slower or larger): a one-test block entry,
 the return dispatch through a label table, and gating the deadline test on the out-of-line path. Details in
-[status/CURRENT.md](status/CURRENT.md), 2026-10-01.
+[status/CURRENT.md](archive/status/CURRENT.md), 2026-10-01.
 
 ## Finding slow spots
 

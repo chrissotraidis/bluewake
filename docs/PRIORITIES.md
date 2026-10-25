@@ -1,76 +1,62 @@
 # BlueWake priorities
 
-The ranked backlog. What is being done on which day is in [GOAL_LOOP.md](GOAL_LOOP.md); this page says what comes
-next and why, with links to the evidence. Owner: Chris. Updated October 15, 2026. The full October 15 table, with
-every measurement, is kept in [status/PRIORITIES_2026-10-15.md](status/PRIORITIES_2026-10-15.md); the October 8
-version is [status/PRIORITIES_2026-10-08.md](status/PRIORITIES_2026-10-08.md).
+The ranked backlog and its evidence. Owner: Chris. Updated October 24, 2026. The next actions and Sunday's review
+are in [GOAL_LOOP.md](GOAL_LOOP.md); the speed strategy is in [PERFORMANCE.md](PERFORMANCE.md).
+Older measurements remain in the dated records, including [October 15](status/PRIORITIES_2026-10-15.md).
 
 ## How it's ordered
 
-1. **Bugs that break the game first:** a crash, a soft lock, a controller that can't play, missing sound or drawing,
-   or a regression in the current release.
-2. **Performance next:** low and uneven frame rates are the loudest complaint, on every platform.
-3. **Everything else after:** narrower bugs, then features, then new platforms.
-
-Within a tier, what reaches the most players with the clearest fix goes first. A new crash or data-loss report goes
-straight to the top. Keep the states apart: *suspected*, *cause found*, *fixed in main*, *shipped*, *confirmed*. Close
-an issue only when its reporter confirms, or it is a clear duplicate.
+Bugs that break play come first, followed by low or uneven performance, then narrower bugs and new features.
+Keep *reported*, *reproduced*, *fixed in main*, *shipped* and *reporter confirmed* distinct. Close an issue only
+under the [maintainer rules](../AGENTS.md#talking-to-people-on-github). What 0.9.0 includes, and its checks, are in
+[status/RELEASE_0.9.0.md](status/RELEASE_0.9.0.md); nothing is published before Chris's review.
 
 ## The list
 
-| # | What | Issues | Where it stands | Next |
-| --- | --- | --- | --- | --- |
-| 1 | **Speed on slower PCs, the Steam Deck and phones** (the game thread) | [#59](https://github.com/chrissotraidis/bluewake/issues/59), [#137](https://github.com/chrissotraidis/bluewake/issues/137), [#159](https://github.com/chrissotraidis/bluewake/issues/159), [#86](https://github.com/chrissotraidis/bluewake/issues/86), [#215](https://github.com/chrissotraidis/bluewake/issues/215), [#246](https://github.com/chrissotraidis/bluewake/issues/246) | Lean memory, lean deadlines and the lazy overlap watch are defaults (#277). Behaviour timing is the Windows and Linux default (#335): 7 to 11% faster on Intel desktops, 9% on the Deck, Outset at full speed on the Fold 7. Mac and iOS keep it opt-in ([results](PERFORMANCE.md#results)) | Profile what is left before the next change (row 9); the Apple default (row 6) |
-| 2 | **The Wind Waker HD look and HD textures, the same on every build** | [#57](https://github.com/chrissotraidis/bluewake/issues/57), [#315](https://github.com/chrissotraidis/bluewake/pull/315), [#336](https://github.com/chrissotraidis/bluewake/issues/336) | The look is in `main`, off by default, F2 on the desktop ([WWHD_LOOK.md](WWHD_LOOK.md)); a softer version is draft #321. The in-app importer is draft #315: full imports pass on the Mac, on Linux (pdale-boop's own dump) and on an Android emulator (#347); the iOS menu passes with generated files on the simulator | #315: a Windows import, an authentic WUD/WUX image and an iPhone or iPad import, then merge; #347 after #93. #336: the renderer's loaded-texture count. Chris's call on #321 |
-| 3 | **Clouds and waves flicker** at 60 and 120 FPS with Smooth Motion (NVIDIA, Intel Arc, AMD) | [#136](https://github.com/chrissotraidis/bluewake/issues/136) | Smooth Motion's in-between frames place the sky wrongly in fast turns; draw fusion is ruled out. Not reproduced on the Mac | Trace the sky draws' blend in `frame_interp.cpp` (RecompCore) on a machine that shows it. Until then, Smooth Motion at 60 or off |
-| 4 | **Linux crashed when the window was resized** | [#325](https://github.com/chrissotraidis/bluewake/issues/325) | [RecompCore#38](https://github.com/chrissotraidis/RecompCore/pull/38) (pdale-boop) fixes it; pinned in `main` by #353 (RecompCore `f647d03`). Checked on Arch with X11 and NVIDIA, also with F1 open, and on the Mac (Metal) with zoom and full screen; Windows and Linux CI pass | The reporter to confirm on a build from `main`. Windows (Direct3D 12) resize and fullscreen checked by pdale-boop; resizing with F1 open is checked on Linux only, and Wayland is unchecked |
-| 5 | **Linux as a download** | [#56](https://github.com/chrissotraidis/bluewake/issues/56), [#215](https://github.com/chrissotraidis/bluewake/issues/215) | Builds and plays from source; the AppImage tooling passes CI. 0.7.0's notes say the AppImage comes with 0.8.0 | An AppImage from a contributor's own disc at the next candidate (cforain, jkoehler11), audited before upload |
-| 6 | **Mac, iPhone and iPad: speed and the menus** | [#104](https://github.com/chrissotraidis/bluewake/issues/104), [#316](https://github.com/chrissotraidis/bluewake/pull/316) | Tiered builds (#252). The PC builds' preparations and behaviour timing are opt-in on Apple; on the M2 iPad Pro the prepared build took Outset's sea from 81% to 54% game-thread busy | Chris: the Apple default. #316 needs a tap test on the iPad |
-| 7 | **Android at the iPhone app's standard** | [#75](https://github.com/chrissotraidis/bluewake/issues/75), [#93](https://github.com/chrissotraidis/bluewake/pull/93), [#238](https://github.com/chrissotraidis/bluewake/issues/238) | LiquidAzir's own-disc port plays on a Fold 7, Outset at full speed with behaviour timing. Not in `main` | #93: LiquidAzir's `--no-tiered` check and CI, then merge as "build it yourself, experimental". Bluetooth with the D-pad option, other phones, and #238 (screen recording loses the GPU) |
-| 8 | **The crash sweep, the benchmark tour and the Wind Temple's R04 and R08** | [#318](https://github.com/chrissotraidis/bluewake/issues/318) | The stage select and `BLUEWAKE_WARP` are in `main`. The loose-REL switch (#331, off by default) makes R04 and R08 load; save states wait for it (#350) ([evidence](status/WIND_TEMPLE_2026-10-15.md)) | F5 and F8 during a real wait, then decide the default; the 468-place sweep on the next candidate |
-| 9 | **Speed, horizon 2:** natives, cached display lists, graphics work on four-core CPUs | [#86](https://github.com/chrissotraidis/bluewake/issues/86), [#179](https://github.com/chrissotraidis/bluewake/issues/179) | The certified natives matched 0 of 15 on October 11 | Fix the host-pointer comparisons and re-record the hashes (#179); one measured change per pull request |
-| 10 | **Releases without game code** ([DIRECTION.md](DIRECTION.md#1-no-game-code-in-any-release)) | none | Not started | After the speed work settles the build options |
-| 11 | **Control and mod requests** | [#244](https://github.com/chrissotraidis/bluewake/issues/244), [#245](https://github.com/chrissotraidis/bluewake/issues/245), [#188](https://github.com/chrissotraidis/bluewake/issues/188), [#70](https://github.com/chrissotraidis/bluewake/issues/70), [#108](https://github.com/chrissotraidis/bluewake/issues/108), [#152](https://github.com/chrissotraidis/bluewake/issues/152), [#259](https://github.com/chrissotraidis/bluewake/issues/259) | In `main`: Swap L and R (#244), D-pad menus (#245), gyro aim (#188), 21:9 (#70), F2 for the HD look (#108), Better Wind Waker, Linux portable mode | Reporters to try the next build; custom file-replacement mods (#152) and the over-the-shoulder camera (#259) after the performance work |
-| 12 | Older single reports: a Forsaken Fortress soft lock, the pirate flag's missing texture | [#76](https://github.com/chrissotraidis/bluewake/issues/76), [#69](https://github.com/chrissotraidis/bluewake/issues/69) | Unverified, needs info | Reproduce from a copied save |
-| 13 | iPhone and iPad builds from Windows through PadMint | [#100](https://github.com/chrissotraidis/bluewake/pull/100), [#46](https://github.com/chrissotraidis/bluewake/pull/46) | Parked drafts | A maintainer decision |
+| Priority | What | Current evidence | Next / done when |
+| --- | --- | --- | --- |
+| 1 | **Camera jitter with direct right-stick control** — #401, #430 | #430 now supplies a Windows 0.8.0 log with Smooth Motion off; repeating the interpolation toggle is not a useful next request. Draft [#455](https://github.com/chrissotraidis/bluewake/pull/455) reports a Linux reproduction and missed first-block hook; it is in the 0.9.0 test candidate. | Review the dispatch change; Windows/Mac direct-control on/off and normal camera play checks. Reporter confirmation before closing either report. |
+| 2 | **Native generation blocks the next performance comparison** — [#451](https://github.com/chrissotraidis/bluewake/issues/451), #179 | The generator only rewrites `_at` accesses while lean deadlines emits `_ato`; the reporter also found missing block leaders. Rounds 4, 5 and 7 are present but opt-in. This is a generation problem before it is a request for more hashes. | Reproduce the default pipeline and establish preparation provenance. Preserve deadline accounting, decline behavior and translation/hash guards; generate, compare guest state, then measure one candidate. |
+| 3 | **Low and uneven speed on Deck, PCs and Android** — #215, #427 | Merged Deck records #452/#453 distinguish cache-flush and GX costs; #454's Outset draw record (plans before batching, no speedup claimed) is merged. The #433 author withdrew the 25–27% host-flag slowdown after interleaved runs. #427's 0.8.0 reporter sees improvement but still reports drops. | Use one retained state (#450), alternate builds, separate game-thread, worker and GPU limits for the measured scene. GroundCross #436 and compiler plan #437 closed unmerged; #438's matched tuning trial reports no gain. No new defaults based on those experiments. |
+| 4 | **Android build quality and sustained performance** — #75, #238, #449 | Experimental own-disc port in `main`; Android already has lean/behaviour-timing defaults. [#445](https://github.com/chrissotraidis/bluewake/pull/445) now rejects full training that never reaches control. Its tests establish profile acceptance, not faster gameplay. | Fresh `--retrain` baseline on the actual phone, recording module and app training separately, settings and cold/warm conditions. Keep the screen-recording GPU-loss report #238 separate. Android HD import #347 still needs phone/lifecycle checks. |
+| 5 | **Mac and iOS speed defaults** — draft #431 | [Mac/iPad recipe measurements](status/APPLE_RECIPE_TOUR_2026-10-20.md) show 64–81% more game frames per second in the measured routes; hands-on play is pending. | Chris's Mac/iPad play checks on Sunday. Re-evaluate #392's slow-chunk flags on that recipe, with matched training. |
+| 6 | **Smooth Motion flicker and sun shadows** — #136, #371, #398 | #398's combined runtime includes Dawn and both rendering fixes; #371's intermediate pin still omits Dawn. Contributor rendering evidence is platform-specific. | Preserve the accepted runtime fixes in each pin; Mac/iPad visual checks on Sunday and Windows checks in [WINDOWS_TASKS.md](WINDOWS_TASKS.md). |
+| 7 | **Linux build repair** — #433 | RecompCore#44 corrects the Dawn BMI2 fix's Apple/Android callback compatibility; downstream draft #446 passes Linux/AppImage, Windows host, audit, attribution and sanitizers. | Renderer/cache check, then runtime PR and downstream pin in order. Keep #433 open for reporter confirmation. No claimed Deck speedup from the host flag. |
+| 8 | **HD textures on every platform** — #336, #443, #444, #347 | #443's content-bounds fix is merged after parser tests; #444's key files, pasted keys and `keys.txt` handling are merged. Android menu integration remains draft #347. | A Windows menu import and an iPhone or iPad import with a `keys.txt`. Do not ask players to upload keys or disc content. |
+| 9 | **Menu and control follow-ups** — #316, #188, #402, #442 | The shared desktop menu (#384–#388) is merged. #442 requests controller-only background input on Windows 0.8.0. Independent settings for free camera versus first-person/item aim are requested in #402. | Sunday controller-menu pass and #316's iPad tap test. Keep background controller input separate from keyboard/mouse and pause-on-focus-loss behavior; investigate gyro drift from the requested device evidence. |
+| 10 | **Wind Temple waits and stage sweep** — #318 | Opt-in loose REL loading (#331) and save-state waiting (#350) exist; [record](status/WIND_TEMPLE_2026-10-15.md). | F5/F8 during a real R04/R08 wait before a default decision; the broad stage sweep on a chosen candidate. |
+| 11 | **Cold first Picto photo** — draft #342 / RecompCore#39 | Separate from the subject-recognition fix in #267, whose original reporter now confirms the photo quests. | Resolve the candidate's integration and perform its cold-cache platform checks. Do not treat recognition confirmation as cold-cache acceptance. |
+| 12 | **Distribution and later features** — #56, #75, #100 | Linux AppImage tooling exists; Android remains an own-disc source build. Cross-platform iOS building is draft #100. | A future release candidate needs its own platform, packaging and publication checks. A code-free first-run builder remains the longer-term direction, not a promised APK or release date. |
 
-Not planned now: the European and Japanese discs ([#60](https://github.com/chrissotraidis/bluewake/issues/60)), Intel Macs ([#48](https://github.com/chrissotraidis/bluewake/issues/48)), Switch ([#62](https://github.com/chrissotraidis/bluewake/issues/62)).
-The Wii U-style interface ([#57](https://github.com/chrissotraidis/bluewake/issues/57)) is part of the HD look (row 2). CPUs without AVX2 get a clear message and no build ([#77](https://github.com/chrissotraidis/bluewake/issues/77)).
+## Confirmations and outstanding reports
 
-## Fixed in `main`, for the next build
+- **#267:** the original reporter confirms the Picto quests now work, and this issue is now closed; the cold-first-photo follow-up remains separate.
+- **#325:** the Linux resize reporter confirmed and closed the issue on October 22.
+- **#263:** the sea-chart reporter had already confirmed the fix, and Chris closed it. The cache-flush fallback remains enabled;
+  a measured no-gain experiment is not a reason to remove a correctness fix.
+- **#427:** performance improved for the reporter on 0.8.0, but drops remain. Leave it open.
+- Other control, sound, portable-mode and older scene reports remain subject to their own reporter evidence;
+  a source merge does not by itself close them.
 
-The reporters confirm on the next build: the Picto Box credits the right subject (#267; #333 is confirmed and
-closed), each island's own sea chart (#263), the D-pad in menus (#245), 21:9 (#70) and F2 (#108). Shipped in 0.7.0
-and waiting for the reporter: #138 (the stick at launch), #190 (rumble), #64 (portable mode); earlier, #154, #55,
-#58, #66, #73. Confirmed and closed: #74, #155, #191, #313, #308. Closed as answered: #212 and #322 (other languages
-are #60). Closed as a duplicate of #59: #255.
+## Cache-flush measurement follow-up
 
-## Waiting on someone else
+[jkoehler11's #452](https://github.com/chrissotraidis/bluewake/pull/452) measured the same Deck build (`51bee38`
+with local preparations), headless and unpaced, warped from one save state, in two interleaved rounds each way.
+Forest Haven ran at 33.85/34.25 game FPS with fallback and 34.01/34.20 without it (means 0.2% apart); the sea by the
+Fortress at 31.72/32.12 with it and 31.81/32.02 without (0.0%). The thread was 99% busy in both variants, and
+`[texture-cache] fallback writeback=on` identifies the enabled runs. No cost was measurable in these two scenes;
+the correctness fallback stays enabled. This does not erase the earlier Mac observation of roughly 1–3% cost.
 
-| Who | What | Where |
-| --- | --- | --- |
-| LiquidAzir | Reject `--app-only --no-tiered` for a tiered module, with a fixture; Bluetooth with the D-pad option | #93 |
-| pdale-boop | A Windows import with the in-app importer, and a WUD/WUX import if he has one (asked October 15) | #315 |
-| cforain, jkoehler11 | An AppImage from their own disc at the next release candidate, on the agreed Clang 22 path | #56, #215, #254 |
-| cforain | Clang 18 against `--clang22` at one benchmark spot; runtime docs still being revised | #254, #337 |
-| elbahijeadam | A log from Outset and the open sea | #246 |
-| jay080021 | Their CPU and a bird-scene log; whether the pirate flag has its texture | #59, #69 |
-| A physical iPad | A tap through the ⋯ menu's switches with #316 | #316 |
-| Chris | #321 (on his iPad); #342 with RecompCore#39; the Apple default; when to freeze 0.8.0 | [GOAL_LOOP.md](GOAL_LOOP.md#waiting-on-chris) |
+## Contributor coordination
 
-## Contributors' pull requests
+| Work | Current handoff |
+| --- | --- |
+| Native sets / #451 | Establish the preparations used by the recorded leaves with jslay88 and Elliott; jkoehler11 offered to rerun generation and benchmarks. No generated code, module or disc uploads. |
+| Deck measurement | Keep the controlled results and closed experiments linked from #215. Update #421 for the new generator blocker; retain #448 as a completed negative-result record rather than another implementation plan. |
+| Rendering stack | pdale-boop's #371/#398 and RecompCore#40/#42; retain the Dawn compatibility fix when reconciling the final pins. |
+| Importer | jkoehler11's #443/#444; review their stack and retain platform acceptance tasks. |
+| Android | LiquidAzir's port and measurements; gather sustained measurements on more phones before changing defaults. |
+| Chris | Sunday gameplay/visual review. A public release requires a later explicit decision. |
 
-Review within two days ([DIRECTION.md](DIRECTION.md)). Since 0.7.0, `main` has 21 pull requests from pdale-boop
-(speed, the stage select, the same menus on every build, the Wind Temple switch, widescreen gallery photos), four from
-cforain (the Linux build container and build docs), two from jkoehler11 (the Linux folder picker and texture status),
-jslay88's Picto Box fix and Mrlinkwii's CI update. The merge history is in the
-[October 15 snapshot](status/PRIORITIES_2026-10-15.md#contributors-pull-requests).
-
-Open now:
-
-- **#93** (LiquidAzir, Android): one option check left, then CI and merge as experimental.
-- **#338** (pdale-boop, opt-in 4:3 Picto Box photos under widescreen): needs RecompCore#37 and a runtime decision;
-  its CI fails until then, and conflicts with `main` need resolving before integration.
-- **#337** (cforain, runtime docs): still draft; revised October 15 after feedback on platform entry paths and
-  duplication. Review the latest revision when the author marks it ready.
-- **RecompCore#37** (pdale-boop, the crop API): goes with #338.
+Not planned now: European/Japanese discs (#60), Intel Macs (#48) and Switch (#62). The Wii U-style interface (#57)
+belongs to the HD-look work. CPUs without AVX2 retain their existing build requirement (#77).

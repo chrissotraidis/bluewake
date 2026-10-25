@@ -5,7 +5,7 @@
 # Same clauses as scripts/save_continue_acceptance.sh (the macOS headless
 # version), run through the iOS app with Metal rendering and the SDL audio
 # device. The input is the host's pad schedule, not touch; touch is covered by
-# the manual simulator evidence in docs/status/IPADOS_REORIENTATION_2026-09-23.md.
+# the manual simulator evidence in docs/archive/status/IPADOS_REORIENTATION_2026-09-23.md.
 #
 # Usage: scripts/ios/sim_save_acceptance.sh [--device NAME]  (default iPad Pro 11-inch (M5))
 set -euo pipefail

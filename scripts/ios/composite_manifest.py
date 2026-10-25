@@ -4,7 +4,7 @@
 The digest covers every file's relative path and content hash, in sorted
 order, so two trees have the same digest exactly when they are the same
 generated game code. The Builder (scripts/builder/profiles/bluewake.sh) compares it with the tree
-verified on 2026-09-25 (docs/status/DEVICE_BUILD.md). It reads the private
+verified on 2026-09-25 (docs/DEVICE_BUILD.md). It reads the private
 generated files but prints only hashes.
 
 usage: scripts/ios/composite_manifest.py COMPOSITE_DIR [--list]

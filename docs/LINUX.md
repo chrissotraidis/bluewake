@@ -55,6 +55,17 @@ mounts the disc read-only and writes normal outputs to `build/linux`; the disc
 never enters the image or CI. The result is always an x86-64 Linux build. Arm
 hosts use Docker's `linux/amd64` emulation, which is substantially slower.
 
+### If the container build fails
+
+- **Don't run it with `sudo`.** Files a root run creates make Git refuse the checkout ("dubious ownership") and
+  block later runs. Give them back with `sudo chown -R "$USER": path/to/bluewake`, add yourself to the
+  `docker` group (`sudo usermod -aG docker "$USER"`, then log out and back in), and check that `docker info`
+  works without `sudo`.
+- **"failed to extract layer", "content digest ... not found" or another image error:** Docker's build cache is
+  damaged, often after a run with `sudo`. Your disc image is fine. Run `docker builder prune -af` and build again.
+- **Bazzite, Fedora Atomic and other read-only systems:** build inside a Distrobox (for example Ubuntu 24.04) with the
+  native steps below, or use the ready-made AppImage once it is published.
+
 ## Native build
 
 Install CMake 3.25+, Ninja, Git, `pkg-config`, Clang/Clang++ 17 or newer, LLD,
@@ -176,13 +187,20 @@ that are new on Linux are off until you turn them on. The widescreen choice is u
 textures. Under **Gameplay**, Jump & Sprint (with a **Sprint speed**) and Fast transitions are one
 switch each, as on the iPad.
 
-**Sound and files** is the last tab, as on Windows: the sound (**Fast**, Dolphin's high-level Zelda sound,
-the default, or **Exact**, the sound chip's own program, slower; next launch), and where your saves and
-session logs are, with buttons that open the folder and the logs. The menu's buttons are the same on every
+**Config** is the last tab: **Exact sound** (off: Dolphin's high-level Zelda sound, the default and faster;
+on: the sound chip's own program, slower; next launch), the menu's own settings (**Pause the game while the
+menu is open**, **Menu text size** and **Menu contrast**), and where your saves and session logs are, with
+buttons that open
+the folder and the logs. The menu opens at the size and place you left it. The menu's buttons are the same on every
 desktop build: Resume, Save state (F5), Load latest state (F8) and Quit the game.
 
 A setting that applies at the next launch shows **Restart now** beside its note: BlueWake saves your
 settings, closes and starts again by itself.
+
+**Wayland:** when `WAYLAND_DISPLAY` is set, BlueWake presents with mailbox instead of FIFO (#370, jslay88). FIFO
+waits for the compositor on the game thread, and on KWin 6.8 that wait held the game at about 70% speed.
+Mailbox doesn't tear. `BLUEWAKE_VSYNC=1` brings back FIFO. Checked on KWin 6.8; GNOME and the Steam Deck's
+gamescope haven't been checked yet.
 
 **Safe mode:** if the last launch never reached a clean exit (it crashed or was killed), the next one starts
 in safe mode, as on Windows: Fast sound, 4:3, in a window, with the mods, Better Wind Waker's settings, the
@@ -247,6 +265,11 @@ Clang 18 by default, includes optional Clang 22 tools, and retains Ubuntu's
 libc++ 18 with either compiler.
 The completed AppImage is automatically audited for prohibited private files,
 accidental libstdc++ linkage and a maximum `GLIBC_2.39` requirement.
+To pass that audit, `--appimage` builds the app with LLVM libc++, which the
+AppImage carries, and builds Dawn from source with it, as Linux CI does (the
+prebuilt Dawn package links libstdc++). It uses its own `app-appimage` build
+folder, so the first AppImage build takes longer; folder builds keep the
+prebuilt Dawn.
 
 The outputs are:
 

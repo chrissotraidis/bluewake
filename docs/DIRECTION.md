@@ -74,7 +74,7 @@ The desktop F1 menu is fine for testing, but it isn't what Android players shoul
 platform.
 
 **HD art.** The Wind Waker HD texture importer is in BlueWake (`docs/WWHD_TEXTURES.md`). It should become a menu
-action on every platform: "Import HD textures from your Wii U game" (in progress in #315). Elliott Tate's HD renderer
+action on every platform: "Import HD textures from your Wii U game": in `main` since October 17 (#315) on Windows, Mac, Linux, iPhone and iPad; Android is #347. Elliott Tate's HD renderer
 work (a GameCube or HD switch, lighting, shadows, ambient occlusion) isn't on any public branch, so BlueWake rebuilt
 the look itself, off by default ([WWHD_LOOK.md](WWHD_LOOK.md)).
 
@@ -121,7 +121,7 @@ What Wind Waker HD Recomp players get that BlueWake players ask for, in rough or
 | Gyro aiming (DualSense, Switch Pro, Steam Deck, a DSU server) | In `main`, off by default (#302, #304); not yet tried with a gyro controller | SDL3 reads controller gyros; aim in first person like the Wii U GamePad |
 | 120 and 240 FPS, matched to the display, "keep game speed" | 60 and 120; on desktop also Match the display, up to 240 | Smooth Motion's flicker (#136) and cost on small CPUs come first |
 | A mod manager with installable packs that replace game files | Built-in mods and texture packs only (#152) | Needs a file replacement path in the disc reader |
-| HD textures from the player's own Wii U game, from the menu | The importer is a script; in the app, in progress in #315 | Section 2 |
+| HD textures from the player's own Wii U game, from the menu | In the app on Windows, Mac, Linux, iPhone and iPad (#315); Android in #347 | Section 2 |
 | Crash recovery: automatic save states plus recorded input, so a crash can be replayed | Save states exist | Turns crash reports into reproductions |
 | Cheats (items, hearts, rupees) | None | Cheap; a spare save file only |
 

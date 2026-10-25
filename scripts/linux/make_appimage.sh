@@ -54,6 +54,9 @@ mkdir -p "$appdir/usr/bin" "$appdir/usr/lib" "$appdir/usr/share/icons/hicolor/25
 # itself are deliberately absent: the launcher validates and prepares them from
 # the player's own disc on first run.
 cp "$app/bluewake" "$appdir/usr/bin/bluewake"
+mkdir -p "$appdir/usr/share/licenses/BlueWake"
+cp "$root/ref/recompcore/Externals/mbedtls/LICENSE" \
+    "$appdir/usr/share/licenses/BlueWake/MbedTLS-Apache-2.0.txt"
 if [ -f "$app/initial_pipeline_cache.db" ]; then
     cp "$app/initial_pipeline_cache.db" "$appdir/usr/bin/"
 fi

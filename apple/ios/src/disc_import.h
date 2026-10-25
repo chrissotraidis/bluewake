@@ -3,7 +3,7 @@
 // Produces, from the disc alone, the two inputs the host reads besides the
 // disc itself: main.dol and the rels/ directory, byte-identical to the macOS
 // preparation (scripts/prepare.py plus the REL alignment quirk recorded in
-// docs/status/GATES.md). Pure C so it can be tested on the Mac.
+// docs/archive/status/GATES.md). Pure C so it can be tested on the Mac.
 #pragma once
 
 #include <stddef.h>

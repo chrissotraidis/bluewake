@@ -7,6 +7,12 @@ void bluewake_parallel_range(size_t count,size_t grain,BluewakeRangeWork work,vo
     (void)grain;work(context,0,count);
 }
 unsigned long long bluewake_parallel_batches(void) { return 0; }
+void bluewake_parallel_stats(BluewakePoolStats *out) {
+    *out=(BluewakePoolStats){0};
+}
+#if defined(BLUEWAKE_POOL_TESTING)
+unsigned bluewake_parallel_workers(void) { return 0; }
+#endif
 #else
 #include <pthread.h>
 #include <stdlib.h>
@@ -20,8 +26,8 @@ static struct {
     pthread_cond_t ready, finished;
     pthread_t threads[MAX_WORKERS];
     unsigned ids[MAX_WORKERS];
-    unsigned workers, remaining;
-    unsigned long long generation, batches;
+    unsigned requested, workers, remaining;
+    unsigned long long generation, batches, worker_items;
     int stop;
     size_t count;
     BluewakeRangeWork work;
@@ -47,6 +53,7 @@ static void* worker(void* argument) {
         pthread_mutex_unlock(&pool.mutex);
         work(context,first,end);
         pthread_mutex_lock(&pool.mutex);
+        pool.worker_items+=end-first;
         if (--pool.remaining==0) pthread_cond_signal(&pool.finished);
     }
     pthread_mutex_unlock(&pool.mutex);
@@ -59,7 +66,18 @@ static void initialize(void) {
     long requested=option?strtol(option,&end,10):0;
     if (!option || end==option || *end || requested<1) return;
     if (requested>MAX_WORKERS) requested=MAX_WORKERS;
+    pool.requested=(unsigned)requested;
+#if defined(BLUEWAKE_POOL_TESTING)
+    const char* failure=getenv("BLUEWAKE_NATIVE_WORKER_FAIL_AFTER");
+    char* failure_end=NULL;
+    long fail_after=failure?strtol(failure,&failure_end,10):-1;
+    if (!failure || failure_end==failure || *failure_end || fail_after<0)
+        fail_after=-1;
+#endif
     for (unsigned i=0;i<(unsigned)requested;++i) {
+#if defined(BLUEWAKE_POOL_TESTING)
+        if (fail_after>=0 && pool.workers>=(unsigned)fail_after) break;
+#endif
         pool.ids[i]=i;
         if (pthread_create(&pool.threads[i],NULL,worker,&pool.ids[i])!=0) break;
         ++pool.workers;
@@ -96,4 +114,17 @@ void bluewake_parallel_range(size_t count,size_t minimum_grain,
 }
 
 unsigned long long bluewake_parallel_batches(void) { return pool.batches; }
+void bluewake_parallel_stats(BluewakePoolStats *out) {
+    pthread_once(&once,initialize);
+    pthread_mutex_lock(&pool.mutex);
+    *out=(BluewakePoolStats){pool.requested,pool.workers,pool.batches,
+                             pool.worker_items};
+    pthread_mutex_unlock(&pool.mutex);
+}
+#if defined(BLUEWAKE_POOL_TESTING)
+unsigned bluewake_parallel_workers(void) {
+    pthread_once(&once,initialize);
+    return pool.workers;
+}
+#endif
 #endif

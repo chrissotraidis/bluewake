@@ -46,6 +46,9 @@ def assemble(args):
     app = stage / "BlueWake.app"
     shutil.copytree(args.app, app)
     resources = app / "Contents/Resources"
+    licenses = resources / "Licenses"
+    licenses.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(args.runtime / "Externals/mbedtls/LICENSE", licenses / "MbedTLS-Apache-2.0.txt")
     info_path = app / "Contents/Info.plist"
     info = plistlib.loads(info_path.read_bytes())
     info["LSMinimumSystemVersion"] = "14.0"

@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CMAKE_VERSION=3.31.10
 ARG LLVM_VERSION=22
-ARG LLVM_APT_KEY_FINGERPRINT=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+ARG LLVM_APT_SIGNER_FINGERPRINT=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
 ARG APPIMAGETOOL_VERSION=1.9.1
 ARG APPIMAGETOOL_X86_64_SHA256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
 ARG TYPE2_RUNTIME_RELEASE=20251108
@@ -23,7 +23,7 @@ RUN apt-get update \
         ca-certificates wget gnupg python3 python3-pip python3-venv \
     && wget -q https://apt.llvm.org/llvm-snapshot.gpg.key -O /tmp/apt.llvm.org.asc \
     && test "$(gpg --batch --show-keys --with-colons /tmp/apt.llvm.org.asc \
-        | awk -F: '$1 == "fpr" { print $10; exit }')" = "${LLVM_APT_KEY_FINGERPRINT}" \
+        | awk -F: '$1 == "fpr" { print $10; exit }')" = "${LLVM_APT_SIGNER_FINGERPRINT}" \
     && gpg --batch --dearmor -o /usr/share/keyrings/apt.llvm.org.gpg /tmp/apt.llvm.org.asc \
     && printf 'deb [signed-by=/usr/share/keyrings/apt.llvm.org.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-%s main\n' \
         "${LLVM_VERSION}" > /etc/apt/sources.list.d/apt.llvm.org.list \

@@ -29,9 +29,11 @@ DEFAULT_PACKAGE = "dev.bluewake.BlueWake"
 def find_adb(explicit):
     if explicit:
         return str(explicit)
+    exe = "adb.exe" if os.name == "nt" else "adb"
     for candidate in (shutil.which("adb"),
-                      os.environ.get("ANDROID_HOME") and Path(os.environ["ANDROID_HOME"]) / "platform-tools/adb.exe",
-                      Path(os.environ.get("LOCALAPPDATA", "")) / "Android/Sdk/platform-tools/adb.exe"):
+                      os.environ.get("ANDROID_HOME") and Path(os.environ["ANDROID_HOME"]) / "platform-tools" / exe,
+                      Path(os.environ.get("LOCALAPPDATA", "")) / "Android/Sdk/platform-tools" / exe,
+                      Path.home() / "Library/Android/sdk/platform-tools" / exe):
         if candidate and Path(candidate).exists():
             return str(candidate)
     sys.exit("adb not found: pass --adb PATH")

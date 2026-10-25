@@ -180,6 +180,13 @@ static const StaticRecompModuleDesc s_desc = {
 #include "native_vec.h"
 #include "native_mtxcalc.h"
 #include "native_search.h"
+/* The seventh set: leaf compute code. */
+#include "native_libm.h"
+#include "native_bgblk.h"
+#include "native_rot.h"
+#include "native_calc.h"
+#include "native_geom.h"
+#include "native_jas.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,6 +202,28 @@ static void bluewake_native_entries_enable(void)
     bluewake_native_vec_sr_enabled = on;
     bluewake_native_mtxcalc_enabled = on;
     bluewake_native_search_enabled = on;
+    /* The seventh set follows the same switch. BLUEWAKE_NATIVE_<GROUP>=0
+     * leaves that group to the translation. */
+    {
+        static const struct {
+            const char* name;
+            int* enabled;
+            void (*report)(void);
+        } groups[] = {
+            {"BLUEWAKE_NATIVE_LIBM", &bluewake_native_libm_enabled, bluewake_native_libm_report},
+            {"BLUEWAKE_NATIVE_BGBLK", &bluewake_native_bgblk_enabled, bluewake_native_bgblk_report},
+            {"BLUEWAKE_NATIVE_ROT", &bluewake_native_rot_enabled, bluewake_native_rot_report},
+            {"BLUEWAKE_NATIVE_CALC", &bluewake_native_calc_enabled, bluewake_native_calc_report},
+            {"BLUEWAKE_NATIVE_GEOM", &bluewake_native_geom_enabled, bluewake_native_geom_report},
+            {"BLUEWAKE_NATIVE_JAS", &bluewake_native_jas_enabled, bluewake_native_jas_report},
+        };
+        for (unsigned g = 0; g < sizeof groups / sizeof groups[0]; ++g) {
+            const char* value = getenv(groups[g].name);
+            *groups[g].enabled = on && !(value && strcmp(value, "0") == 0);
+            if (*groups[g].enabled)
+                atexit(groups[g].report);
+        }
+    }
     if (on) {
         atexit(bluewake_native_fifo_report);
         atexit(bluewake_native_bg_report);
@@ -206,10 +235,72 @@ static void bluewake_native_entries_enable(void)
 }
 #endif
 
+#if defined(BLUEWAKE_NATIVE_SET4)
+#include "native_kankyo.h"
+#include "native_anim.h"
+#include "native_cc.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+static void bluewake_native_set4_enable(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    const char* setting = getenv("BLUEWAKE_NATIVE_SET4");
+    const int on = !(setting && strcmp(setting, "0") == 0);
+    {
+        static const struct {
+            const char* name;
+            int* enabled;
+            void (*report)(void);
+        } groups[] = {
+            {"BLUEWAKE_NATIVE_KANKYO", &bluewake_native_kankyo_enabled, bluewake_native_kankyo_report},
+            {"BLUEWAKE_NATIVE_ANIM", &bluewake_native_anim_enabled, bluewake_native_anim_report},
+            {"BLUEWAKE_NATIVE_CC", &bluewake_native_cc_enabled, bluewake_native_cc_report},
+        };
+        for (unsigned g = 0; g < sizeof groups / sizeof groups[0]; ++g) {
+            const char* value = getenv(groups[g].name);
+            *groups[g].enabled = on && !(value && strcmp(value, "0") == 0);
+            if (*groups[g].enabled)
+                atexit(groups[g].report);
+        }
+    }
+    if (on)
+        fprintf(stderr, "[native-set4] colour, animation and collision setup enabled\n");
+}
+#endif
+
+#if defined(BLUEWAKE_NATIVE_GX)
+#include "native_gx.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+static void bluewake_native_gx_enable(void)
+{
+    static int done;
+    if (done) return;
+    done = 1;
+    const char* setting = getenv("BLUEWAKE_NATIVE_GX");
+    const int on = !(setting && strcmp(setting, "0") == 0);
+    bluewake_native_gx_enabled = on;
+    if (on) {
+        atexit(bluewake_native_gx_report);
+        fprintf(stderr, "[native-gx] GX FIFO writers enabled\n");
+    }
+}
+#endif
+
 RECOMP_MODULE_EXPORT const StaticRecompModuleDesc* staticrecomp_get_module(void)
 {
 #if defined(BLUEWAKE_NATIVE_ENTRIES)
     bluewake_native_entries_enable();
+#endif
+#if defined(BLUEWAKE_NATIVE_GX)
+    bluewake_native_gx_enable();
+#endif
+#if defined(BLUEWAKE_NATIVE_SET4)
+    bluewake_native_set4_enable();
 #endif
     return &s_desc;
 }

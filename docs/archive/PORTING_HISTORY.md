@@ -835,7 +835,7 @@ This is the narrative companion to BlueWake's technical ledgers. It records
 how the project moved from a feasibility question to original retail code
 reaching its first play scene in the native macOS runtime. It is not a claim
 of playability: the authoritative current frontier remains
-[`status/CURRENT.md`](../status/CURRENT.md).
+[`status/CURRENT.md`](status/CURRENT.md).
 
 BlueWake does not distribute Nintendo code or assets. Private evidence comes
 from a user-owned `GZLE01` disc and remains ignored; committed records contain
@@ -844,10 +844,10 @@ only derived measurements, hashes, implementation code, and conclusions.
 ## How to read the record
 
 This file is the milestone-scale story for readers who want to understand how
-the port was built. [`status/CURRENT.md`](../status/CURRENT.md) is the live
+the port was built. [`status/CURRENT.md`](status/CURRENT.md) is the live
 engineering frontier, [`status/BLOCKERS.md`](status/BLOCKERS.md) preserves the
 accepted and rejected blocker evidence, and
-[`status/DECISIONS.md`](../status/DECISIONS.md) records architectural choices.
+[`status/DECISIONS.md`](status/DECISIONS.md) records architectural choices.
 Dated reviews and reorientations remain in `status/` so later conclusions do
 not erase the evidence that changed the project's direction. Commit history
 supplies the implementation-level record.
@@ -891,7 +891,7 @@ boundary, then processed the whole executable inventory:
 This was compilation proof, not boot proof. The next phase had to reconstruct
 the GameCube runtime contracts around that translated code.
 
-Evidence: [`status/GATES.md`](../status/GATES.md) and the commits ending in P0,
+Evidence: [`status/GATES.md`](status/GATES.md) and the commits ending in P0,
 P1, P2, and P3 `PASS`.
 
 ## August 22-24: Runtime reconstruction and a costly wrong turn
@@ -914,7 +914,7 @@ That episode became a durable engineering rule: evidence from a rejected
 workaround cannot block the authentic route, and incoherent downstream values
 should be escalated to the clock, translator, ABI, or other owning subsystem.
 
-Evidence: [`status/REORIENTATION_2026-08-22.md`](../status/REORIENTATION_2026-08-22.md)
+Evidence: [`status/REORIENTATION_2026-08-22.md`](status/REORIENTATION_2026-08-22.md)
 and [`GOAL_LOOP.md`](../GOAL_LOOP.md).
 
 ## August 24-25: Native graphics, audio, and coherent device cadence
@@ -933,8 +933,8 @@ time advanced by generated cycle charges. Promoting VI, PAD, and AI onto the
 same guest-cycle clock made boot pacing coherent and made later observations
 comparable.
 
-Evidence: [`status/INDEPENDENT_REVIEW_2026-08-25.md`](../status/INDEPENDENT_REVIEW_2026-08-25.md)
-and [`status/REFERENCE_ORACLE_2026-08-25.md`](../status/REFERENCE_ORACLE_2026-08-25.md).
+Evidence: [`status/INDEPENDENT_REVIEW_2026-08-25.md`](status/INDEPENDENT_REVIEW_2026-08-25.md)
+and [`status/REFERENCE_ORACLE_2026-08-25.md`](status/REFERENCE_ORACLE_2026-08-25.md).
 
 ## August 25-26: Title, file creation, and the visible opening
 

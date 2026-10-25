@@ -220,7 +220,7 @@ export BLUEWAKE_RENDERER="$renderer"
 # adopted it recorded in docs/archive/GOAL_PROMPT_V16_2026-09-14.md.
 # This used to pin `dynamic`, the policy commit 8da70d2 adopted and commit
 # be84bdf superseded. The runtime's own default moved to a fixed 16384 window
-# (docs/status/CURRENT.md, "the cycle window is a free lever"), so pinning
+# (docs/archive/status/CURRENT.md, "the cycle window is a free lever"), so pinning
 # `dynamic` here made the human play path slower than a double-click of the
 # same app: play-window median 31.38 fps against 33.55 and 87.56 s against
 # 70.68 s on the route, digest UNCHANGED either way. Aligned with the benchmark

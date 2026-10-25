@@ -12,11 +12,11 @@ Ground rules for whoever implements these:
 - Code under `ref/recompcore` is the pinned runtime. To change it, commit to
   `chrissotraidis/RecompCore` branch `bluewake-next`, export the patch to `patches/recompcore/`, and
   update the pin in `scripts/builder/profiles/bluewake.sh`, `config/dependencies.lock.json` and
-  `docs/status/DEVICE_BUILD.md`, as PR #12 does.
+  `docs/DEVICE_BUILD.md`, as PR #12 does.
 - Releases stay paused (AGENTS.md). Never commit or upload discs, modules, saves or builds.
 
 Implementation progress and exact validation limits are recorded in
-[the local October 1 follow-up](../status/LOCAL_STABILITY_2026-10-01.md). This review remains
+[the local October 1 follow-up](status/LOCAL_STABILITY_2026-10-01.md). This review remains
 the work list; source fixes and synthetic passes do not close hardware checks.
 
 Paths starting `GXRuntime/` are inside `ref/recompcore/`.
@@ -91,7 +91,7 @@ Every save replaces the only card. Backups exist only after a manual Restore or 
 
 ### 1.6 Apple TV stores the only card in purgeable Caches
 
-tvOS keeps the card in `Library/Caches` (`ios_entry.m:173`, `docs/status/TVOS_BUILD.md`), which
+tvOS keeps the card in `Library/Caches` (`ios_entry.m:173`, `docs/TVOS_BUILD.md`), which
 the system can delete.
 
 - **Fix:** after each successful save, mirror the card to iCloud key-value storage or CloudKit

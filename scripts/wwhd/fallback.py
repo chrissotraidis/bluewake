@@ -42,7 +42,7 @@ def add_fallback(destination: Path, primary_files: list[str], source: Path,
     excluded = set(excluded_keys)
     groups = defaultdict(list)
     unrecognized = []
-    for path in sorted(source.rglob("*")):
+    for path in sorted(source.rglob("*"), key=lambda p: p.as_posix()):  # the same order on every OS
         if not path.is_file() or path.suffix.lower() not in (".png", ".dds"):
             continue
         parsed = texture_file(path.name)

@@ -115,7 +115,7 @@ Stop when every item is fixed, explained, or labeled as needing hardware.
 ## Current operating loop — stability and slowdowns, October 3, 2026
 
 Make BlueWake hold full speed and stay stable in the places players report, and make every
-slowdown explain itself in the session log. The [stability plan](../status/STABILITY_PLAN_2026-10-03.md)
+slowdown explain itself in the session log. The [stability plan](status/STABILITY_PLAN_2026-10-03.md)
 owns the evidence, the report table and the import list. Migration acceptance (below) continues in
 parallel; its remaining gate is Elliott's Windows testing.
 
@@ -139,7 +139,7 @@ parallel; its remaining gate is Elliott's Windows testing.
 | 2. Baseline measurements | Mac and iPad, original 30 Hz and Smooth Motion 60, fixed routes or states: Outset, opening bird, Aryll's abduction, Forsaken Fortress exterior, open sea. Done when each scene has game speed, dips by cause, frame-time tails and audio recorded with exact app/module identities. |
 | 3. Import Elliott's post-0.4.0 batch | Merged: detector (#40), runtime 0143-0150 and app/builder commits (#43), Windows optimization defaults matching his builds (#45). Remaining: his second set of nine natives and `lean_memory.py`, which need adapting to BlueWake's opt-in native handshakes; Metal timing of the device lock and live D3D12 checks come from Elliott's Windows run. |
 | 4. Reported bugs | Reproduce before changing: scripted/intro music (#1, #12), camera flip in water (#24), dungeon map (#25), flag texture (#20), Moblin soft lock (#27). Each closes only with a before/after reproduction on the affected platform. |
-| 5. Windows confirmation | Extend Elliott's [checklist](../status/WINDOWS_ACCEPTANCE_2026-10-04.md) with the imported batch and the slow scenes; his results close the Windows rows. |
+| 5. Windows confirmation | Extend Elliott's [checklist](status/WINDOWS_ACCEPTANCE_2026-10-04.md) with the imported batch and the slow scenes; his results close the Windows rows. |
 
 ### Iteration contract
 
@@ -275,7 +275,7 @@ already reaches controllable Outset gameplay in the simulator; the loop now
 works down what stops a person from playing on an iPad. The operating document
 is [GOAL_PROMPT_V56_2026-09-23.md](GOAL_PROMPT_V56_2026-09-23.md) and the
 decision record is
-[status/IPADOS_REORIENTATION_2026-09-23.md](../status/IPADOS_REORIENTATION_2026-09-23.md).
+[status/IPADOS_REORIENTATION_2026-09-23.md](status/IPADOS_REORIENTATION_2026-09-23.md).
 The v55 Route B campaign below continues as a background track.
 
 **Superseded by v56 — v50, 2026-09-21. Finish the project.** The product half of macOS is
@@ -312,7 +312,7 @@ archive handoff, opening transition and METER admission remain next; audio start
 reset recovery and legacy MAT2/BLS formats are not qualified here. Solid-heap
 individual-free/size warnings remain recorded. No product gate advances; full PRD
 goal active. Recovery: `local-research/checkpoints/reorientation-20260909-logo-cold-start/`.
-See [world integration evidence](../status/ROUTE_B_WORLD_INTEGRATION_2026-09-09.md).
+See [world integration evidence](status/ROUTE_B_WORLD_INTEGRATION_2026-09-09.md).
 
 **Governing requirements:** [PRD.md](PRD.md)
 
@@ -338,7 +338,7 @@ measured **0.91**. Its barrier was never speed - it is the port's coverage, whic
 dossier recorded as a claim and this loop turns into a list.
 
 **Where the loop enters.** The LOGO-to-opening handoff is measured rather than assumed
-([status/CURRENT.md](../status/CURRENT.md), 2026-09-22): the scheduler diagnostic runs 600
+([status/CURRENT.md](status/CURRENT.md), 2026-09-22): the scheduler diagnostic runs 600
 original scheduler frames, the LOGO's DVD-wait guard is fully open (queue drained, no
 object resource outstanding, no reset), so `dComIfG_changeOpeningScene` really runs and
 requests `fpcNm_OPENING_SCENE_e` with `fpcNm_OVERLAP0_e`. It cannot be answered because
@@ -637,7 +637,7 @@ would have to be reloaded per instruction. With that, the emitted bodies - 73.5
 percent of the main thread at 27.24 host instructions per guest cycle - have no
 remaining measured candidate inside route A's emit shape, and the next step is a
 decision rather than a trim. The dossier section 8.1 requires is at
-[status/ROUTE_DECISION_2026-09-22.md](../status/ROUTE_DECISION_2026-09-22.md): the
+[status/ROUTE_DECISION_2026-09-22.md](status/ROUTE_DECISION_2026-09-22.md): the
 measured state, the exhausted fixes, the affected surface, the routes the ground
 rules leave open (a runtime JIT is not one of them) and a falsifiable spike - one hot
 function compiled from the tww source, measured in host instructions per guest
@@ -683,7 +683,7 @@ is the case that test exists to serve, so the entry guard and the hand-off cost 
 than the test they replace. The code growth the screening loop was built to price is
 not the problem: ten chunks with both bodies grow the artifact 0.19 percent, because
 the prepaid body compiles smaller than the precise one. See
-[status/CURRENT.md](../status/CURRENT.md) for the pair; 0053 stays in
+[status/CURRENT.md](status/CURRENT.md) for the pair; 0053 stays in
 `patches/recompcore/` as the record of the shape and of why it fails. The emitter is
 `ref/recompcore/DolRecomp/src/backend/emitter.c`, not the `ref/DolRecomp` checkout
 beside it, which never contained the cycle emission.
@@ -695,7 +695,7 @@ per play retrace** - and removing the predecoded table's per-instruction
 initialization guard and call is worth **-0.37 percent** on the route: nine
 instructions in the object, about 1.1 per emulated instruction. The handler bodies are
 the rest of the interpreter's cost and they are the DSP's semantics rather than
-overhead, so this item closes; see [status/CURRENT.md](../status/CURRENT.md). It spends
+overhead, so this item closes; see [status/CURRENT.md](status/CURRENT.md). It spends
 about **31 host instructions per emulated DSP instruction** (41.6 M host instructions
 a retrace against the 1.35 M measured above), and the ledger's estimate that the
 dispatch and bookkeeping were ten to fifteen of those was a static count that the
@@ -746,7 +746,7 @@ boundaries**, not the ~1.07 M the fast-reject's 4.42 percent implied, so one hos
 instruction removed per boundary is worth **0.080 percent** of the steady window
 (0.083 in the certified 13,800-14,100 window the 1.81x figure is quoted in, 0.090
 in early play, 0.040 in the opening cutscene, per the table in
-[status/CURRENT.md](../status/CURRENT.md)) and
+[status/CURRENT.md](status/CURRENT.md)) and
 a candidate has to remove about fifty instructions a boundary to weigh what the
 fast-reject weighed. The dispatch entry is the second increment, and it is the
 dispatch cache rather than the loop that carries it: an exact pc-keyed 4096-entry
@@ -761,7 +761,7 @@ inline and its call does devirtualise but `selected_dispatch` is 908 bytes and
 stays out of line. The artifact is reproducible byte for byte from the generator
 with `scripts/splice_composite_dispatch.py`, which is the check that settles
 which change the hash belongs to; the entry in
-[status/CURRENT.md](../status/CURRENT.md) has the evidence and the corrections.
+[status/CURRENT.md](status/CURRENT.md) has the evidence and the corrections.
 The per-block constant has since lost its call frame: `bluewake_edge_requires_host`
 is inlined into the chassis, worth **-0.78 percent** (459.0 M to 455.4 M on a frozen
 copy of the composite, digest `83d2590d...` unchanged), which the corrected list
@@ -1592,13 +1592,13 @@ P0 begins. JSON/YAML equivalents are acceptable if schemas remain documented.
 
 ```text
 config/dependencies.lock.json     dependency URLs, SHAs, licenses, patches
-docs/status/CURRENT.md            concise current gate and next action
-docs/status/GATES.md              gate ledger and evidence links
+docs/archive/status/CURRENT.md            concise current gate and next action
+docs/archive/status/GATES.md              gate ledger and evidence links
 docs/archive/status/BLOCKERS.md           active/resolved blocker ledger
-docs/status/DECISIONS.md          architecture and scope decisions
-docs/status/COMPATIBILITY.md      coverage summary and open content failures
-docs/status/PERFORMANCE.md        dated measured performance results
-docs/status/RELEASE.md            release checklist and artifact identities
+docs/archive/status/DECISIONS.md          architecture and scope decisions
+docs/archive/status/COMPATIBILITY.md      coverage summary and open content failures
+docs/archive/status/PERFORMANCE.md        dated measured performance results
+docs/archive/status/RELEASE.md            release checklist and artifact identities
 tests/coverage/catalog.json       public-safe generated content/test catalog
 ```
 
@@ -1672,12 +1672,12 @@ source reconstruction, or other gates can still advance safely.
 ### Step 0 — recover safely
 
 1. Read PRD, current state, gate ledger, blockers, decisions, last handoff,
-   `docs/archive/status/FINISH_LINE.md`, `docs/status/TECH_DEBT.md`,
-   `docs/status/REORIENTATION_2026-08-22.md`,
-   `docs/status/REORIENTATION_2026-09-01.md`,
-   `docs/status/INDEPENDENT_REVIEW_2026-08-25.md`, and
-   `docs/status/INDEPENDENT_REVIEW_2026-08-30.md`, and
-   `docs/status/INDEPENDENT_REVIEW_2026-09-01.md`.
+   `docs/archive/status/FINISH_LINE.md`, `docs/archive/status/TECH_DEBT.md`,
+   `docs/archive/status/REORIENTATION_2026-08-22.md`,
+   `docs/archive/status/REORIENTATION_2026-09-01.md`,
+   `docs/archive/status/INDEPENDENT_REVIEW_2026-08-25.md`, and
+   `docs/archive/status/INDEPENDENT_REVIEW_2026-08-30.md`, and
+   `docs/archive/status/INDEPENDENT_REVIEW_2026-09-01.md`.
 2. Inspect `git status`, current branch, recent commits, dependency lock, and
    ignored work areas.
    The lock includes recursive submodule SHAs, translator/runtime ABI versions,
@@ -2215,7 +2215,7 @@ The loop may enter `COMPLETE` only after:
 8. no required content ID lacks coverage;
 9. licensing/provenance/SBOM/corresponding-source obligations are complete;
 10. public claims match the evidence; and
-11. `docs/status/CURRENT.md` has no next required action.
+11. `docs/archive/status/CURRENT.md` has no next required action.
 
 If a user chooses to ship a preview before completion, record it as a preview
 with explicit open gates; do not mark the master goal complete.
@@ -2332,7 +2332,7 @@ same time: it owns the Windows build, packaging and the release draft. This loop
 doesn't repeat its work.
 
 The reports this loop works from are catalogued in
-[OPEN_ISSUES_2026-10-05.md](../status/OPEN_ISSUES_2026-10-05.md).
+[OPEN_ISSUES_2026-10-05.md](status/OPEN_ISSUES_2026-10-05.md).
 
 ### How to work
 
@@ -2352,7 +2352,7 @@ The reports this loop works from are catalogued in
 
 ### Every pass
 
-1. `git fetch` and `gh pr list`. If the Windows report (`docs/status/WINDOWS_BUILD_2026-10-05.md`) has
+1. `git fetch` and `gh pr list`. If the Windows report (`docs/archive/status/WINDOWS_BUILD_2026-10-05.md`) has
    appeared, add its findings to the catalog; anything it shows broken in shared code moves to the front.
 2. Take the first step that isn't done, make the smallest change that finishes it, and update the progress
    below.
@@ -2391,6 +2391,6 @@ it is written up in WINDOWS_TASKS.md; finishing doesn't depend on the Windows PC
 - **9. Forsaken Fortress map and compass:** done. No BlueWake patch hands them out; most likely the original game.
 - **10. Hand-off:** done. "The second Windows run" in WINDOWS_TASKS.md lists the five rows to check.
 
-Details: [OPEN_ISSUES_2026-10-05.md](../status/OPEN_ISSUES_2026-10-05.md#what-the-october-5-loop-found).
+Details: [OPEN_ISSUES_2026-10-05.md](status/OPEN_ISSUES_2026-10-05.md#what-the-october-5-loop-found).
 
 Earlier loops are in [the archive](GOAL_LOOP_HISTORY.md).

@@ -11,8 +11,8 @@
 **Platform order amended 2026-09-23 by the user:** iPadOS is the active target
 now, tested in the iOS simulator one device at a time before any hardware run.
 Scope, gates and the definition of done are unchanged. Record:
-[status/IPADOS_REORIENTATION_2026-09-23.md](../status/IPADOS_REORIENTATION_2026-09-23.md).
-Evidence as of 2026-09-24 night (details in [status/CURRENT.md](../status/CURRENT.md)): the
+[status/IPADOS_REORIENTATION_2026-09-23.md](status/IPADOS_REORIENTATION_2026-09-23.md).
+Evidence as of 2026-09-24 night (details in [status/CURRENT.md](status/CURRENT.md)): the
 iPad simulator app imports the user's disc on first run, boots through the title into
 controllable Outset play with SunPad touch controls, a hardware keyboard or a controller, saves
 and reloads through the game's own pause menu (acceptance script), plays the game's stereo mix
@@ -861,7 +861,7 @@ Measure separately:
 Release requires representative field, sailing, dungeon, boss, cutscene, and
 UI workloads plus a multi-hour session with no progressive collapse.
 
-P6 must calibrate and lock exact budgets in `docs/status/PERFORMANCE.md` before
+P6 must calibrate and lock exact budgets in `docs/archive/status/PERFORMANCE.md` before
 P8 device promotion. Unless measured reference behavior justifies a stricter
 content-specific exception, release thresholds are:
 

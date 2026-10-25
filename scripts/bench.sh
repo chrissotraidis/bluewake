@@ -40,7 +40,7 @@ window="${BLUEWAKE_BENCH_WINDOW:-13910:14100}"
 # constant: the cap A/B has to be able to name the cap it ran.
 #
 # The shipping default is a fixed 16384-cycle window, adopted 2026-09-17 on the
-# regenerated build (docs/status/CURRENT.md, "the cycle window is a free
+# regenerated build (docs/archive/status/CURRENT.md, "the cycle window is a free
 # lever"): same host, composite and card, play-window median 33.55 fps against
 # 33.07 at 4096 and 31.38 under the previous dynamic 256-in-1024 policy, route
 # wall 70.68 s against 73.76 s and 87.56 s, host turns 32,203,791 against
@@ -78,9 +78,9 @@ canonical_card_sha=6b43aabd94f00ae3de01b42567b5d11026cf6a9374e4d023565b31bf3c7e1
 # 2b7a1fa575b62a2eece2f1ed860542953a33689b4ca922b1a62cc644deab4e2b, which no
 # longer compares like with like.
 #
-# Re-derived again under decision D2 (docs/status/CURRENT.md, 2026-09-17, "the
+# Re-derived again under decision D2 (docs/archive/status/CURRENT.md, 2026-09-17, "the
 # DSP slice has Dolphin's idle skip switched off", and the D2 row in
-# docs/status/DECISIONS.md): the selector now also canonicalises the host
+# docs/archive/status/DECISIONS.md): the selector now also canonicalises the host
 # turn-boundary fields out of the per-delivery records and the route clock, and
 # `scripts/route_digest.py` gates those as bounds. D1's previous value was
 # 0d4cee87923dea4bc09ef89af34ed438c1d9542368058423c722c3ad50bf7b7a, which was

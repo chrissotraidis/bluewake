@@ -43,7 +43,7 @@ player-owned-disc build, Direct3D gameplay, audio or physical controllers.
 Remaining native acceptance needs an x86-64 Windows PC with a Direct3D 12 GPU.
 A Windows ARM64 VM running x64 applications can provide separately labelled
 compatibility evidence, but cannot establish native x64 performance parity.
-Use the [Windows testing handoff](WINDOWS_ACCEPTANCE_2026-10-04.md) for the current build,
+Use the [Windows testing handoff](../archive/status/WINDOWS_ACCEPTANCE_2026-10-04.md) for the current build,
 gameplay, save-preservation and donor-comparison checklist and results template.
 
 The candidate includes prepaid blocks, fixed CPU/RAM storage, inline floating

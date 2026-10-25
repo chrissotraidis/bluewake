@@ -165,7 +165,7 @@ flow (`main_proc 0 -> 2 -> 3` at retraces 472, 510, 543).
 An iteration counts only if time-to-playable fell, or fps moved on a named path,
 or a human can now see, hear or do something they could not before. One
 hypothesis, one small change, one build, one measurement, and at most one short
-section appended to `docs/status/CURRENT.md`. **A document is not an
+section appended to `docs/archive/status/CURRENT.md`. **A document is not an
 iteration**, and neither is a probe: a probe is a cost paid to find the work.
 Report to the user every three iterations in one paragraph.
 

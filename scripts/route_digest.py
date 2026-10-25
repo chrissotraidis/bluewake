@@ -29,7 +29,7 @@ DELIVERY_SUMMARY_PREFIX = "[cycle-delivery] summary"
 DELIVERY_TIMING_HASH = re.compile(r"\s+hash=[0-9A-F]+(?=\s|$)")
 
 
-# D2, docs/status/CURRENT.md "2026-09-17 the DSP slice has Dolphin's idle skip
+# D2, docs/archive/status/CURRENT.md "2026-09-17 the DSP slice has Dolphin's idle skip
 # switched off, and it is worth 1.7x on the route". This finishes D1. D1
 # canonicalised the delivery-timing *aggregate* out of the digest and said in as
 # many words that "delivery timing is gated as a bounded quantity instead of an

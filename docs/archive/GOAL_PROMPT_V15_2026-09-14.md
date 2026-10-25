@@ -101,7 +101,7 @@ Re-recording a digest so a run passes stays forbidden on every branch.
 An iteration counts only if time-to-playable fell, or fps moved on a named path,
 or a human can now see, hear or do something they could not before. One
 hypothesis, one small change, one build, one measurement, and at most one short
-section appended to `docs/status/CURRENT.md`. A document is not an iteration.
+section appended to `docs/archive/status/CURRENT.md`. A document is not an iteration.
 A profile is a cost paid to find the work, never progress by itself. Report to
 the user every three iterations in one paragraph.
 

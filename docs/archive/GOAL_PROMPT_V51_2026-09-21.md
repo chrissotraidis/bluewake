@@ -50,11 +50,11 @@ from:**
 
 That is a better instrument than any profile in this ledger, because it prices a
 change before it is written. The counts and the arithmetic behind the correction
-are in `docs/status/CURRENT.md` under 2026-09-22.
+are in `docs/archive/status/CURRENT.md` under 2026-09-22.
 
 ## The queue, in the order the model prices it
 
-**1. The overlap-phase observation in the chassis edge service. DONE 2026-09-21, and it was 0.5 percent rather than the predicted 2-5** - the guard under which it runs is false on most boundaries, so the block's live fraction has to be measured before the per-block price is applied to it. See `docs/status/CURRENT.md`. The model stands; the application needs a second measurement.
+**1. The overlap-phase observation in the chassis edge service. DONE 2026-09-21, and it was 0.5 percent rather than the predicted 2-5** - the guard under which it runs is false on most boundaries, so the block's live fraction has to be measured before the per-block price is applied to it. See `docs/archive/status/CURRENT.md`. The model stands; the application needs a second measurement.
 
 Inside
 `host_chassis_edge_service`, before the intercept predicate, sits this:

@@ -7,6 +7,7 @@ behaviour timing either way, leaving the source and the caches as they were. Whe
 skips the game-source steps, and the APK's record describes the module it reused."""
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -133,6 +134,18 @@ class AppOnly(unittest.TestCase):
 
     def test_refuses_a_module_without_a_record(self):
         self.assert_refused("is missing")
+
+    def test_refuses_no_tiered_for_a_tiered_module(self):
+        self.compiled()
+        path = self.out / "composite/module.json"
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["tiered"] = True  # as a trained module's compile records it
+        path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        self.assert_refused("tiered: the module has True, this build asks for False", "--no-tiered")
+        # Without --no-tiered the tiered module is reused unchanged.
+        self.app_only()
+        self.assertEqual(self.calls, ["check_tools", "dependencies", "build_app", "package"])
+        self.assertTrue(self.provenance["module_reused"])
 
 
 if __name__ == "__main__":

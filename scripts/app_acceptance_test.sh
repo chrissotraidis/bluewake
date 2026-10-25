@@ -57,7 +57,7 @@
 # wall time than it takes to play at any emulator speed, so the cold new game
 # cannot meet a five-minute launch-to-interactive bar and never could. The PRD
 # forbids a save-state warm start but not continuing from a save the game itself
-# wrote, and that path is what fits. See docs/status/PLAN_2026-09-18.md (M2).
+# wrote, and that path is what fits. See docs/archive/status/PLAN_2026-09-18.md (M2).
 #
 # The --menu pass is the cheap front half of the same thing: a shorter run with a
 # picture series, for the double-click-to-file-menu clause alone.
@@ -104,7 +104,7 @@ if [ -z "$retraces" ]; then
     # (median 33.6 fps, p99 77.6 ms) - the 120 ms figure that used to stand here
     # was measured before W1 and W4 and was wrong by 4x, which is part of why
     # the rendered path went a whole workstream without being profiled; see
-    # docs/status/PLAN_2026-09-18.md. The ceiling is still the run's tail: the
+    # docs/archive/status/PLAN_2026-09-18.md. The ceiling is still the run's tail: the
     # play scene costs about 30 ms a retrace, so 22,000 leaves time after the W
     # hold and the arrow for the run to stop normally.
     # v19 spent retraces 19,700-22,000 still inside the cutscene because the

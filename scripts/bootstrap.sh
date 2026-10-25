@@ -41,4 +41,4 @@ if [ -e ref/recompcore/.git ]; then
 fi
 
 echo "Bootstrap complete."
-echo "For the iPad app, scripts/ios/build_device.sh fetches what it needs on its own (docs/status/DEVICE_BUILD.md)."
+echo "For the iPad app, scripts/ios/build_device.sh fetches what it needs on its own (docs/DEVICE_BUILD.md)."

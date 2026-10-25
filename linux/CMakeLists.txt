@@ -60,6 +60,20 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/fps_watch.c
     ${BLUEWAKE_HOST_SRC}/game_options.c
     ${BLUEWAKE_HOST_SRC}/settings_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
+    ${BLUEWAKE_HOST_SRC}/texture_pack_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/formats.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/addrlib.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/hd.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/imaging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/sha256.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/ui.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/pack.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/output_staging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/import_job.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/disc_image.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/wiiu_disc.cpp
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c)
 
 add_executable(bluewake
@@ -73,7 +87,9 @@ add_executable(bluewake
 # owns main() and hands over after setting the defaults.
 set_source_files_properties(${BLUEWAKE_HOST_SRC}/main.c PROPERTIES
     COMPILE_DEFINITIONS "main=bluewake_host_main")
-target_link_libraries(bluewake PRIVATE gxruntime GXRuntime::aurora xxhash ${CMAKE_DL_LIBS} pthread)
+target_link_libraries(bluewake PRIVATE gxruntime GXRuntime::aurora xxhash ZLIB::ZLIB ${CMAKE_DL_LIBS} pthread)
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_crypto.cmake")
+target_link_libraries(bluewake PRIVATE bluewake_wwhd_disc_crypto)
 if(TARGET imgui)
     target_link_libraries(bluewake PRIVATE imgui)
 endif()
@@ -149,6 +165,12 @@ target_include_directories(bluewake_disc_extract PRIVATE ${BLUEWAKE_REPO_ROOT}/a
 
 if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     enable_testing()
+    # The native-math oracle requires a local player-owned module and remains an
+    # explicit build; the synthetic guard and work-pool tests remain public-safe.
+    include("${BLUEWAKE_REPO_ROOT}/cmake/native_math_tests.cmake")
+    bluewake_add_native_math_tests()
+    add_subdirectory(${BLUEWAKE_REPO_ROOT}/tests/native_work_pool native_work_pool_tests)
+
     add_executable(bluewake_fast_blocks_test EXCLUDE_FROM_ALL ${BLUEWAKE_REPO_ROOT}/tests/fast_blocks_test.c)
     target_include_directories(bluewake_fast_blocks_test PRIVATE
         ${GXRUNTIME_DIR}/include
@@ -192,9 +214,18 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)
 
     add_executable(bluewake_settings_state_test ${BLUEWAKE_REPO_ROOT}/tests/settings_state_test.cpp)
-    target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
+    target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_20)
     target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
     add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
+
+    add_executable(bluewake_settings_table_test ${BLUEWAKE_REPO_ROOT}/tests/settings_table_test.cpp)
+    target_compile_features(bluewake_settings_table_test PRIVATE cxx_std_20)
+    add_test(NAME bluewake_settings_table_test COMMAND bluewake_settings_table_test)
+
+    add_executable(bluewake_settings_file_test ${BLUEWAKE_REPO_ROOT}/tests/settings_file_test.cpp)
+    target_compile_features(bluewake_settings_file_test PRIVATE cxx_std_20)
+    target_include_directories(bluewake_settings_file_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
+    add_test(NAME bluewake_settings_file_test COMMAND bluewake_settings_file_test)
 
     add_executable(bluewake_save_state_test ${BLUEWAKE_REPO_ROOT}/tests/save_state_test.c ${BLUEWAKE_HOST_SRC}/save_state.c)
     target_include_directories(bluewake_save_state_test PRIVATE ${BLUEWAKE_HOST_SRC})
@@ -214,6 +245,8 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     target_link_libraries(bluewake_dvd_completion_test PRIVATE gxruntime ZLIB::ZLIB)
     set_target_properties(bluewake_dvd_completion_test PROPERTIES LINKER_LANGUAGE CXX)
     include("${BLUEWAKE_REPO_ROOT}/cmake/cache_flush_fallback_test.cmake")
+    include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_import_job_test.cmake")
+    include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_image_test.cmake")
     target_link_libraries(bluewake_cache_flush_fallback_test PRIVATE gxruntime)
     set_target_properties(bluewake_cache_flush_fallback_test PROPERTIES LINKER_LANGUAGE CXX)
 endif()

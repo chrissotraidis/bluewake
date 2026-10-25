@@ -139,7 +139,7 @@ hear or do something they could not before. A profile is a cost paid to find the
 itself.
 
 One hypothesis, one small change, one build, one measurement, and at most one line appended to
-`docs/status/CURRENT.md`. No status document may be longer than the change it describes. Host-only
+`docs/archive/status/CURRENT.md`. No status document may be longer than the change it describes. Host-only
 rebuild: `cmake --build build/runtime-host-dsp --target bluewake_host -j 8`, about two minutes, which also
 re-assembles and re-signs the bundle. Never add a new tier, slice or patch for a unit that already
 compiles whole; new code must remove cost, not add diagnostics.

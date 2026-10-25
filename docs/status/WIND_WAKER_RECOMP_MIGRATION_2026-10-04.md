@@ -59,7 +59,7 @@ Elliott's own (GitHub's push events show the pushing account).
 GitHub cannot transfer issues between repositories owned by different accounts, so they are recreated:
 
 1. Check each open issue against BlueWake: some are already fixed or answered there (the
-   [stability plan](STABILITY_PLAN_2026-10-03.md) sorts them).
+   [stability plan](../archive/status/STABILITY_PLAN_2026-10-03.md) sorts them).
 2. Open it in BlueWake with its title and text, "Originally reported by @user in
    elliotttate/Wind-Waker-Recomp#N", and the label `from-wind-waker-recomp`. Tagging the reporter
    notifies them.
@@ -78,7 +78,7 @@ was already BlueWake #13. The three pull request authors have been asked to reop
   [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest), the same as Wind-Waker-Recomp 0.4.0. Mac, iPhone and iPad stay on PadMint
   ([rights](../../RIGHTS_AND_LICENSES.md)). Wind-Waker-Recomp's releases were unpublished on
   October 4 (see above).
-- **Windows testing** of BlueWake from a player's own disc: [checklist](WINDOWS_ACCEPTANCE_2026-10-04.md).
+- **Windows testing** of BlueWake from a player's own disc: [checklist](../archive/status/WINDOWS_ACCEPTANCE_2026-10-04.md).
 - **Remaining code:** Elliott's second set of native functions, his `lean_memory` step, and his
   newest Wind-Waker-Recomp commits on October 3 (WWHD texture import, Mac rendering fixes, smooth HUD
   interpolation).

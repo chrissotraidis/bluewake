@@ -4,7 +4,7 @@
 Why this exists. The composite generator does not run end to end from this tree
 (scripts/generate_composite.py reports "REL module 181 section 1 linked range
 [0x804000f4, 0x80400fd0) overlaps retail MEM1" against the REL inputs the tree
-holds; see docs/status/CURRENT.md, 2026-09-18), so the header the composite is
+holds; see docs/archive/status/CURRENT.md, 2026-09-18), so the header the composite is
 built from cannot be regenerated as a whole. The dispatch block can, and it is
 the part the P1 workstream changes: it is emitted independently of the chunk
 lists, so it can be lifted out of a generator run and written into a tree.

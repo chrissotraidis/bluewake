@@ -2,7 +2,7 @@
 
 > **SUPERSEDED STATUS (2026-09-02):** This file preserves the original wait
 > decision and prototype promotion gates. Active work is governed by
-> `docs/status/CURRENT.md`, `docs/archive/status/BLOCKERS.md`, and `docs/GOAL_LOOP.md`.
+> `docs/archive/status/CURRENT.md`, `docs/archive/status/BLOCKERS.md`, and `docs/GOAL_LOOP.md`.
 > macOS Route B is active; iOS/iPadOS remains deferred until macOS is stable.
 
 Original decision 2026-08-09: **WAIT on all implementation.**

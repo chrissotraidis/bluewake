@@ -11,7 +11,7 @@ neither goal completion nor an external technical block.
 The accumulated increment includes original display/retrace/XFB ownership,
 native DSP/audio transport and sound-request work, complete resource ownership,
 and startup heap/thread fixes. Earlier qualified evidence remains in
-[the integration ledger](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-09.md).
+[the integration ledger](ROUTE_B_WORLD_INTEGRATION_2026-09-09.md).
 
 The latest private startup experiment invokes the original `fapGm_Create`,
 `fapGm_Execute`, complete process manager, graphics dispatch and Painter. With

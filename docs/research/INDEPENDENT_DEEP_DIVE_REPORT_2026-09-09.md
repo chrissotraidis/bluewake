@@ -101,7 +101,7 @@ than for the application. Evidence:
 | Item | Value |
 |---|---|
 | Repository HEAD | `6949c27` "Preserve active J3D vertex bindings and prepare optional Metal presentation", 2026-09-06 22:57 -0500 |
-| Dirty tracked files | `docs/archive/status/BLOCKERS.md`, `docs/status/CURRENT.md`, `route_b/CMakeLists.txt`, `scripts/prepare_route_b.sh`, `tests/route_b_player_init_services.cpp`, `tests/route_b_player_phase_three_fences.cpp`, `tests/route_b_private_camera_run_probe.cpp` |
+| Dirty tracked files | `docs/archive/status/BLOCKERS.md`, `docs/archive/status/CURRENT.md`, `route_b/CMakeLists.txt`, `scripts/prepare_route_b.sh`, `tests/route_b_player_init_services.cpp`, `tests/route_b_player_phase_three_fences.cpp`, `tests/route_b_private_camera_run_probe.cpp` |
 | Untracked | `docs/archive/status/NEXT_MODEL_HANDOFF_2026-09-06.md`, `docs/research/INDEPENDENT_DEEP_DIVE_PROMPT_2026-09-09.md`, `patches/tww/0209-compose-world-teardown-authentic-tiers.patch`, `patches/tww/0210-world-room-memory-tier.patch`, `tests/route_b_world_geometry_services.cpp` |
 | `ref/tww` | `03d27aa` (upstream 2026-08-18) + patches 0001-0209 applied + one unregistered hunk in `src/d/d_stage.cpp` (finding F3) |
 | `ref/aurora` | `8b690b6` (upstream 2026-08-20) + Aurora patches 0001/0002 applied (`git diff` shows only `GXManage.cpp`/`GXTexture.cpp`) |

@@ -29,7 +29,7 @@ root=$PWD
 build=$root/build/composite-cycle-hybrid-o2-v2
 
 # The hottest generated chunks in the live play window, from the rendered
-# sample recorded in docs/status/CURRENT.md (share of the sampled main thread):
+# sample recorded in docs/archive/status/CURRENT.md (share of the sampled main thread):
 #   0201 15.7%  0144 3.6%  0015 1.5%  0145 1.2%  0181 1.1%
 #   0200  1.0%  0187 0.6%  0203 0.5%  0188 0.4%  0148 0.4%
 DEFAULT_CHUNKS="chunk_0201_text1_803256E0.c chunk_0144_text1_802416E0.c chunk_0015_text1_8003D6E0.c chunk_0145_text1_802456E0.c chunk_0181_text1_802D56E0.c chunk_0200_text1_803216E0.c chunk_0187_text1_802ED6E0.c chunk_0203_text1_8032D6E0.c chunk_0188_text1_802F16E0.c chunk_0148_text1_802516E0.c"

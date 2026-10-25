@@ -63,7 +63,7 @@ once the observer is installed.
 
 ## Pictobox preview (#13), on the same build
 
-From the list in [WINDOWS_TASKS.md](../WINDOWS_TASKS.md#in-main-waiting-for-a-windows-build). A test card from
+From the list in [WINDOWS_TASKS.md](../WINDOWS_TASKS.md). A test card from
 my playthrough (Windfall dock, `sea 11 0`): quest log 1 with the regular Pictobox, quest log 2 the same save
 with the Deluxe one.
 
@@ -103,7 +103,7 @@ each scene a few steps away. Each was watched without skipping, fix on (the defa
 | Scene | Heard | Log |
 | --- | --- | --- |
 | History intro (check a) | Music to the end | Above |
-| The Helmaroc King carries Tetra, the catapult fires, she falls into the forest (`sea` event 251) | Everything: the catapult, the bird's wings and cry, Tetra falling into the leaves | `demo01.afc` played in full (decoded = playback samples); `[demo] end stage=sea event=251 frames=1384 cues=0 sounds=0 missing=0 silent=0.1s of 46.2s`. The reports in [the October 8 triage](TRIAGE_2026-10-08.md#the-bird-scene-one-cutscene-two-problems-65-59) have `silent=12.4s` here without the fix. The scene itself ran at full speed; two slow seconds (51%, 97%) came just before it, on arriving at sea. |
+| The Helmaroc King carries Tetra, the catapult fires, she falls into the forest (`sea` event 251) | Everything: the catapult, the bird's wings and cry, Tetra falling into the leaves | `demo01.afc` played in full (decoded = playback samples); `[demo] end stage=sea event=251 frames=1384 cues=0 sounds=0 missing=0 silent=0.1s of 46.2s`. The reports in [the October 8 triage](../archive/status/TRIAGE_2026-10-08.md#the-bird-scene-one-cutscene-two-problems-65-59) have `silent=12.4s` here without the fix. The scene itself ran at full speed; two slow seconds (51%, 97%) came just before it, on arriving at sea. |
 | Arriving at the Forsaken Fortress with the pirates | Everything | `MajyuE` event 69: `cues=4 sounds=4 missing=0 silent=0.0s of 145.6s`; `mj_demo1.afc`, `go_maju.afc` |
 | Gohma, then Valoo and Komali after Dragon Roost | Everything | `btdstart.afc` and `b_clear.afc` reached playing state; `Adanmae` event 62: `cues=3 sounds=3 missing=0`; `sea` event 134: `cues=4 sounds=4 missing=0`. Gohma's room had 6 slow seconds, lowest 68%. |
 | The Tower of the Gods rises (Din's Pearl, the statues) | Everything, including the statues' hum and the explosion, which were missing in my playthrough | `ADMumi` event 74: `cues=3 sounds=3 missing=0 silent=0.0s of 103.2s`; `demo19.afc`. Inside the tower the map drew (`unsupported_texgen=0`, `tev_stages_over=0`). |

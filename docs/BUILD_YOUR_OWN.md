@@ -35,15 +35,14 @@ previous packaged app beside the new one. It signs locally with an ad-hoc
 signature; `--identity NAME` selects an installed Mac signing identity. Device
 options `--ipa`, `--app`, `--profile` and `--install` do not apply to Mac.
 
-The Mac build also accepts `--combined-optimizations` for personal
-Mac builds. It selects the imported preparation/native helpers measured in the
-reconciliation ledger, applies the same configuration during local training and
-compilation, and records it in the app's provenance. The packaged app enables
-those compatible paths when launched; explicit diagnostic environment overrides
-still win. Original 30 Hz game logic and display-mode preferences stay unchanged.
-This option is off by default until clean player-build and sustained acceptance
-finish. Changing the option preserves and regenerates incompatible source;
-matching completed work is reused. This does not enable PadMint Mac support.
+Personal Mac, iPhone and iPad builds get the same module preparations as the Windows and Linux builders:
+`--combined-optimizations`, `--lean-blocks`, `--lean-memory`, `--lean-deadlines` and `--behaviour-timing`, all on
+by default. On the benchmark tour they made the game 64 to 77% faster on an M3 Max and 75 to 81% faster on an
+iPad Pro, with a smaller module and a shorter compile
+([record](status/APPLE_RECIPE_TOUR_2026-10-20.md)). `--conservative` builds the plain translation instead;
+naming any of the five builds exactly the ones named. The same configuration is used for local training and
+compilation and recorded in the app, and the app turns on its side of each when it starts. Changing the
+options preserves and regenerates incompatible source; matching completed work is reused.
 
 `--app-only --platform macos` builds the shell without game files. It is for
 local packaging checks, not a playable build or an accepted public release.
@@ -121,7 +120,7 @@ BlueWake-specific end-to-end installation has not been verified with every tool.
 | [Sideloadly](https://sideloadly.io/) | Mac app: connect the device, drag the IPA in, sign in with your Apple ID |
 | [AltStore](https://altstore.io/) | AltServer on the Mac installs AltStore on the device; add the IPA from AltStore's **My Apps** |
 | [SideStore](https://sidestore.io/) | Like AltStore, but refreshes on the device without the Mac |
-| Xcode | Sign and install from the Builder directly: `--identity`, `--profile` and `--install` ([DEVICE_BUILD.md](status/DEVICE_BUILD.md)) |
+| Xcode | Sign and install from the Builder directly: `--identity`, `--profile` and `--install` ([DEVICE_BUILD.md](DEVICE_BUILD.md)) |
 
 With a free Apple ID, apps expire after seven days; refresh them with the same tool (your saves stay).
 The device needs **Developer Mode** on (Settings › Privacy & Security), and the first launch may ask you to
@@ -188,6 +187,13 @@ The build includes the Widescreen (16:9 and 16:10, and 21:9 on the Mac) and Bett
 **⋯ › Mods › Better Wind Waker Settings**. No patched disc is needed. See [MODS.md](MODS.md).
 
 ## If something fails
+
+**Sideloading fails with error -80045** ("This action cannot be completed at this time"): Apple's sign-in rejected
+the sideloading tool's login. It isn't the IPA. Since mid-October 2026 it has hit Sideloadly, AltStore and SideStore
+alike. Update the tool, sign out of the Apple ID in it and sign in again, turn off any VPN or try another network,
+or try a separate Apple ID kept for sideloading. Sometimes the only fix is waiting for the tool's update. On the Mac that
+built the IPA, Xcode can install it instead: the Builder's `--identity`, `--profile` and `--install` options
+([DEVICE_BUILD.md](DEVICE_BUILD.md)).
 
 If a Mac build reports missing SQLite functions, Mono headers, or a Homebrew SQLite dependency
 that is not self-contained, update BlueWake and rerun the same build command. Both the local

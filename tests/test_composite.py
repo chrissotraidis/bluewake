@@ -153,7 +153,7 @@ def test_single_dol_no_rels():
         assert "ctx->downcount += (s64)ctx->cycle_observation_suffix" in h
         # The dispatch cache is pc-keyed and exact, and the dispatcher is split
         # so the path every block boundary takes carries no cold code. Both are
-        # measured properties of the emitted text (docs/status/CURRENT.md,
+        # measured properties of the emitted text (docs/archive/status/CURRENT.md,
         # 2026-09-22); the reason they are checked here is that a cache which
         # answers for a pc it never resolved is a boot failure, not a slowdown,
         # and a dispatcher that lost its alias fallbacks is a wrong answer.

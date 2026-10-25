@@ -169,7 +169,7 @@ An experiment that produces a number nobody can use - like this cap run - counts
 worth exactly one short section, and it retires a lever that would otherwise have been built.
 
 One hypothesis, one small change, one build, one measurement, and at most one short section appended to
-`docs/status/CURRENT.md`. No status document may be longer than the change it describes. Never add a new
+`docs/archive/status/CURRENT.md`. No status document may be longer than the change it describes. Never add a new
 tier, slice or patch for a unit that already compiles whole.
 
 If an iteration ends with no change to an observable and no change to a number it **failed**: revert it and

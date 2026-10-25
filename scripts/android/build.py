@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BlueWake Builder for Android (arm64): turn your own game disc into your own APK, on your PC.
+"""BlueWake Builder for Android (arm64): turn your own game disc into your own APK, on your PC (Windows or macOS).
 
     python scripts/android/build.py DISC [--out build/android] [options]
 
@@ -11,9 +11,9 @@ app are compiled for arm64 Android with the NDK's clang, the renderer is
 Aurora through Dawn on Vulkan, and the result is an APK.
 
 Steps, each logged under OUT/logs:
-  1 tools        a Windows clang (for the translator), the Android NDK and SDK, a JDK
+  1 tools        a host clang (for the translator: clang-cl on Windows, Xcode's clang on macOS), the Android NDK and SDK, a JDK
   2 dependencies the pinned RecompCore and DolRecomp sources (ref/recompcore)
-  3 disc         check the disc (an .iso; convert an .rvz with Dolphin first)
+  3 disc         check the disc (an .iso, or an .rvz converted with nodtool)
   4 extract      main.dol and the 415 RELs from the disc (the disc is verified)
   5 translate    the game's PowerPC code to C (DolRecomp)
   6 generate     the composite source, compared with the verified digest
@@ -45,6 +45,10 @@ wb = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(wb)
 
 die, step, sha256_file = wb.die, wb.step, wb.sha256_file
+WINDOWS = sys.platform == "win32"
+EXE, BAT = (".exe", ".bat") if WINDOWS else ("", "")
+# The NDK's host toolchain. Its macOS build is a universal binary, so it runs natively on Apple silicon.
+NDK_HOST = "windows-x86_64" if WINDOWS else "darwin-x86_64" if sys.platform == "darwin" else "linux-x86_64"
 MODULE = "libgGZLE01_recomp.so"
 # The Java activity (android/java); the application id and the label are options.
 ACTIVITY = "dev.bluewake.android.BlueWakeActivity"
@@ -86,22 +90,24 @@ class AndroidBuilder(wb.Builder):
         # Visual Studio's headers and libraries. Any Visual Studio with the C++
         # workload; clang comes from --llvm (a portable LLVM for Windows) when
         # Visual Studio has none of its own.
-        env = self.msvc_env()
+        # On macOS and Linux the host's own clang (Xcode's) builds them: no Visual Studio, no --llvm.
+        env = self.msvc_env() if WINDOWS else dict(os.environ)
         llvm = self.args.llvm
         if llvm is not None:
-            if not (llvm / "bin/clang-cl.exe").exists():
-                die(f"no clang-cl.exe in {llvm / 'bin'}")
+            if not (llvm / "bin" / ("clang-cl" + EXE if WINDOWS else "clang")).exists():
+                die(f"no clang in {llvm / 'bin'}")
             env["PATH"] = str(llvm / "bin") + os.pathsep + env["PATH"]
-        if shutil.which("clang-cl", path=env["PATH"]) is None:
-            die("no clang for Windows: pass --llvm DIR (an LLVM for Windows, e.g. clang+llvm-21-x86_64-pc-windows-msvc)")
+        if shutil.which("clang-cl" if WINDOWS else "clang", path=env["PATH"]) is None:
+            die("no clang for Windows: pass --llvm DIR (an LLVM for Windows, e.g. clang+llvm-21-x86_64-pc-windows-msvc)"
+                if WINDOWS else "no clang: install Xcode's command line tools (xcode-select --install)")
         ninja = shutil.which("ninja", path=env["PATH"])
         if ninja is None:
             for sdk_cmake in sorted((self.sdk / "cmake").glob("*/bin")) if self.sdk else []:
-                if (sdk_cmake / "ninja.exe").exists():
+                if (sdk_cmake / ("ninja" + EXE)).exists():
                     env["PATH"] = str(sdk_cmake) + os.pathsep + env["PATH"]
-                    ninja = str(sdk_cmake / "ninja.exe")
+                    ninja = str(sdk_cmake / ("ninja" + EXE))
         if ninja is None:
-            die("ninja is missing (pip install ninja)")
+            die("ninja is missing (pip install ninja" + ("" if WINDOWS else ", or brew install ninja") + ")")
         self.env = env
         self.clang = shutil.which("clang", path=env["PATH"])
         version = subprocess.check_output(["cmake", "--version"], text=True).split()[2]
@@ -115,10 +121,10 @@ class AndroidBuilder(wb.Builder):
         self.ndk = self.args.ndk or (ndks[-1] if ndks else None)
         if self.ndk is None or not (self.ndk / "build/cmake/android.toolchain.cmake").exists():
             die("the Android NDK was not found: pass --ndk DIR (r27 or newer)")
-        self.ndk_bin = self.ndk / "toolchains/llvm/prebuilt/windows-x86_64/bin"
-        self.clang_version = subprocess.check_output([self.ndk_bin / "clang.exe", "--version"],
+        self.ndk_bin = self.ndk / f"toolchains/llvm/prebuilt/{NDK_HOST}/bin"
+        self.clang_version = subprocess.check_output([self.ndk_bin / ("clang" + EXE), "--version"],
                                                      text=True).splitlines()[0]
-        self.llvm_profdata = self.ndk_bin / "llvm-profdata.exe"
+        self.llvm_profdata = self.ndk_bin / ("llvm-profdata" + EXE)
         tools = sorted((self.sdk / "build-tools").glob("*"),
                        key=lambda p: [int(x) for x in re.findall(r"\d+", p.name)])
         if not tools:
@@ -130,10 +136,10 @@ class AndroidBuilder(wb.Builder):
             die(f"no platforms in {self.sdk}")
         self.android_jar = platforms[-1] / "android.jar"
         java_home = self.args.jdk or first_existing(os.environ.get("JAVA_HOME"))
-        if java_home is None or not (java_home / "bin/javac.exe").exists():
+        if java_home is None or not (java_home / "bin" / ("javac" + EXE)).exists():
             die("a JDK 17 is required: pass --jdk DIR")
         self.jdk = java_home
-        print(f"Windows clang: {subprocess.check_output([self.clang, '--version'], text=True, env=env).splitlines()[0]}")
+        print(f"{'Windows ' if WINDOWS else ''}clang: {subprocess.check_output([self.clang, '--version'], text=True, env=env).splitlines()[0]}")
         print(f"NDK {self.ndk.name}: {self.clang_version}")
         print(f"SDK build-tools {self.build_tools.name}, {platforms[-1].name}; JDK {self.jdk}")
         print(f"cmake {version}; {self.args.jobs} jobs; -mcpu={self.args.cpu}")
@@ -141,7 +147,8 @@ class AndroidBuilder(wb.Builder):
     @property
     def sdk(self):
         return self.args.sdk or first_existing(os.environ.get("ANDROID_HOME"), os.environ.get("ANDROID_SDK_ROOT"),
-                                               Path(os.environ.get("LOCALAPPDATA", "")) / "Android/Sdk")
+                                               Path(os.environ.get("LOCALAPPDATA", "")) / "Android/Sdk",
+                                               Path.home() / "Library/Android/sdk")
 
     def msvc_env(self):
         vswhere = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / \
@@ -171,14 +178,43 @@ class AndroidBuilder(wb.Builder):
         print(f"Visual Studio: {install}")
         return env
 
+    def build_dolrecomp(self):
+        if WINDOWS:
+            return super().build_dolrecomp()
+        build = self.out / "dolrecomp"
+        self.run("dolrecomp-configure", ["cmake", "-S", self.recompcore / "DolRecomp", "-B", build, "-G", "Ninja",
+                                         "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_C_COMPILER=clang",
+                                         "-DDOLRECOMP_WARNINGS_AS_ERRORS=OFF"])
+        self.run("dolrecomp-build", ["cmake", "--build", build, "--target", "dolrecomp", "-j", self.args.jobs],
+                 ninja=True)
+        return build / "dolrecomp"
+
+    def nodtool(self):
+        if WINDOWS:
+            return super().nodtool()
+        exe = ROOT / "build/tools/nodtool/bin/nodtool"
+        if not exe.exists():
+            if shutil.which("cargo") is None:
+                die("this disc image is compressed; converting it needs Rust's cargo (https://rustup.rs) "
+                    "to build nodtool, or convert it to .iso yourself (Dolphin: Convert File..., format ISO)")
+            print(f"building nodtool {wb.NODTOOL_VERSION} from crates.io (once)")
+            self.run("nodtool-install", ["cargo", "install", "nodtool", "--version", wb.NODTOOL_VERSION,
+                                         "--locked", "--root", exe.parent.parent], env=os.environ)
+        return exe
+
     # --- 4 extract: the disc extractor, built for this PC ------------------
     def configure_app(self):
         """The Windows builder configures its whole app here for the extractor;
         only the extractor is needed on this side, built directly."""
         self.app_build.mkdir(parents=True, exist_ok=True)
-        exe = self.app_build / "bluewake_disc_extract.exe"
-        sources = [ROOT / "scripts/ios/disc_extract.c", ROOT / "apple/ios/src/disc_import.c",
-                   ROOT / "windows/compat/bw_posix_compat.c"]
+        exe = self.app_build / ("bluewake_disc_extract" + EXE)
+        sources = [ROOT / "scripts/ios/disc_extract.c", ROOT / "apple/ios/src/disc_import.c"]
+        if not WINDOWS:  # POSIX has what the Windows compat layer stands in for
+            if not exe.exists() or exe.stat().st_mtime <= max(s.stat().st_mtime for s in sources):
+                self.run("disc-extract-build", [self.clang, "-O2", "-I", ROOT / "apple/ios/src", *sources,
+                                                "-o", exe], env=self.env)
+            return
+        sources.append(ROOT / "windows/compat/bw_posix_compat.c")
         if exe.exists() and exe.stat().st_mtime > max(s.stat().st_mtime for s in sources):
             return
         compat = ROOT / "windows/compat"
@@ -192,7 +228,7 @@ class AndroidBuilder(wb.Builder):
         env = dict(self.env)
         if accept_sha1:
             env["BLUEWAKE_ACCEPT_DOL_SHA1"] = accept_sha1
-        self.run("disc-extract", [self.app_build / "bluewake_disc_extract.exe", iso, game], env=env)
+        self.run("disc-extract", [self.app_build / ("bluewake_disc_extract" + EXE), iso, game], env=env)
         rels = len(list((game / "rels").glob("*.rel")))
         if rels != 415:
             die(f"expected 415 RELs in {game / 'rels'}, found {rels}")
@@ -201,7 +237,10 @@ class AndroidBuilder(wb.Builder):
     def android_cmake_args(self):
         return ["-G", "Ninja", f"-DCMAKE_TOOLCHAIN_FILE={(self.ndk / 'build/cmake/android.toolchain.cmake').as_posix()}",
                 "-DANDROID_ABI=arm64-v8a", f"-DANDROID_PLATFORM=android-{MIN_SDK}", "-DANDROID_STL=c++_static",
-                "-DCMAKE_BUILD_TYPE=Release"]
+                "-DCMAKE_BUILD_TYPE=Release",
+                # A pkg-config on a Mac (Homebrew's) finds host libraries such as zstd, which an arm64
+                # Android link cannot use; without it Aurora fetches and builds its own.
+                *([] if WINDOWS else ["-DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON"])]
 
     def compile_module(self):
         flags = []
@@ -304,6 +343,10 @@ class AndroidBuilder(wb.Builder):
         # The profile only when one is named: an app-only build of a trained module need not name it again.
         if self.args.profile is not None and sha256_file(self.args.profile.resolve()) != record.get("profile_sha256"):
             differ.append(("profile", record.get("profile"), self.args.profile.name))
+        # --no-tiered asks for every function at -O2; a trained, tiered module compiled its cold ones at -O1.
+        # Leaving --no-tiered out reuses the module as it was compiled.
+        if self.args.no_tiered and record.get("tiered"):
+            differ.append(("tiered", True, False))
         if differ:
             die("--app-only reuses the compiled game module, which was built differently:\n"
                 + "".join(f"  {name}: the module has {has!r}, this build asks for {asks!r}\n"
@@ -385,9 +428,9 @@ class AndroidBuilder(wb.Builder):
         java = [str(p) for p in sdl_java.rglob("*.java")]
         java += [str(p) for p in (ROOT / "android/java").rglob("*.java")]
         jdk_bin = self.jdk / "bin"
-        self.run("apk-javac", [jdk_bin / "javac.exe", "-nowarn", "-encoding", "UTF-8", "--release", "11",
+        self.run("apk-javac", [jdk_bin / ("javac" + EXE), "-nowarn", "-encoding", "UTF-8", "--release", "11",
                                "-classpath", self.android_jar, "-d", pkg / "classes", *java], env=os.environ)
-        d8 = self.build_tools / "d8.bat"
+        d8 = self.build_tools / ("d8" + BAT)
         # The classes go to d8 as one jar: named one by one, they no longer fit
         # in a Windows command line (8191 characters).
         classes_jar = pkg / "classes.jar"
@@ -402,7 +445,7 @@ class AndroidBuilder(wb.Builder):
         manifest = manifest.replace("@DEBUGGABLE@", "true" if getattr(self.args, "debuggable", False) else "false")
         (pkg / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
         res_zip = pkg / "res.zip"
-        self.run("apk-aapt2-compile", [self.build_tools / "aapt2.exe", "compile", "--dir", ROOT / "android/res",
+        self.run("apk-aapt2-compile", [self.build_tools / ("aapt2" + EXE), "compile", "--dir", ROOT / "android/res",
                                        "-o", res_zip])
         # Aurora's bundled pipeline cache (apple/ios/resources): Aurora opens
         # it through SDL at its base path, which on Android is the APK's assets.
@@ -410,7 +453,7 @@ class AndroidBuilder(wb.Builder):
         assets.mkdir()
         shutil.copy2(ROOT / "apple/ios/resources/initial_pipeline_cache.db", assets / "initial_pipeline_cache.db")
         unsigned = pkg / "unsigned.apk"
-        self.run("apk-aapt2-link", [self.build_tools / "aapt2.exe", "link", "-o", unsigned, "-A", assets, "-0", "db",
+        self.run("apk-aapt2-link", [self.build_tools / ("aapt2" + EXE), "link", "-o", unsigned, "-A", assets, "-0", "db",
                                     "--manifest", pkg / "AndroidManifest.xml", "-I", self.android_jar,
                                     "--min-sdk-version", str(MIN_SDK), "--target-sdk-version", str(TARGET_SDK),
                                     "--version-code", str(int(time.time()) // 60), "--version-name", "0.1-android",
@@ -420,7 +463,7 @@ class AndroidBuilder(wb.Builder):
         # The NDK's toolchain compiles with -g: the debug information (most of
         # the game module's 800 MB) stays in the build, out of the APK.
         (pkg / "lib").mkdir()
-        strip = self.ndk_bin / "llvm-strip.exe"
+        strip = self.ndk_bin / ("llvm-strip" + EXE)
         stripped_lib = pkg / "lib/libmain.so"
         self.run("apk-strip-main", [strip, "--strip-debug", "-o", stripped_lib, lib])
         stripped_module = None
@@ -433,15 +476,15 @@ class AndroidBuilder(wb.Builder):
             if stripped_module is not None:
                 apk.write(stripped_module, f"lib/arm64-v8a/{MODULE}", compress_type=zipfile.ZIP_STORED)
         aligned = pkg / "aligned.apk"
-        self.run("apk-zipalign", [self.build_tools / "zipalign.exe", "-f", "-P", "16", "4", unsigned, aligned])
+        self.run("apk-zipalign", [self.build_tools / ("zipalign" + EXE), "-f", "-P", "16", "4", unsigned, aligned])
         keystore = self.out / "debug.keystore"
         if not keystore.exists():
-            self.run("apk-keystore", [jdk_bin / "keytool.exe", "-genkeypair", "-keystore", keystore,
+            self.run("apk-keystore", [jdk_bin / ("keytool" + EXE), "-genkeypair", "-keystore", keystore,
                                       "-storepass", "android", "-keypass", "android", "-alias", "androiddebugkey",
                                       "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
                                       "-dname", "CN=Android Debug,O=Android,C=US"], env=os.environ)
         apk_out = self.out / apk_name
-        self.run("apk-sign", [self.build_tools / "apksigner.bat", "sign", "--ks", keystore,
+        self.run("apk-sign", [self.build_tools / ("apksigner" + BAT), "sign", "--ks", keystore,
                               "--ks-pass", "pass:android", "--out", apk_out, aligned],
                  env=dict(os.environ, JAVA_HOME=str(self.jdk), PATH=str(jdk_bin) + os.pathsep + os.environ["PATH"]))
         if not provenance:
@@ -514,7 +557,7 @@ class AndroidBuilder(wb.Builder):
             if previous.get("fingerprint") == key and previous.get("profile") == sha256_file(profile):
                 print("reusing the optimization profile trained for these inputs")
                 return self.hashed_profile(profile)
-        self.adb_exe = self.sdk / "platform-tools/adb.exe"
+        self.adb_exe = self.sdk / ("platform-tools/adb" + EXE)
         devices = subprocess.run([str(self.adb_exe), "devices"], capture_output=True, text=True).stdout
         if self.args.device not in devices:
             die(f"device {self.args.device} is not connected (adb devices)")
@@ -523,7 +566,7 @@ class AndroidBuilder(wb.Builder):
             work / "composite", "0", ["-fprofile-instr-generate"], ["-fprofile-instr-generate"],
             "training-composite",
             extra_cmake=[f"-DCOMPOSITE_EXTRA_SOURCES={(ROOT / 'android/src/profile_flush.c').as_posix()}"])
-        exported = subprocess.run([str(self.ndk_bin / "llvm-nm.exe"), "-D", "--defined-only", str(module)],
+        exported = subprocess.run([str(self.ndk_bin / ("llvm-nm" + EXE)), "-D", "--defined-only", str(module)],
                                   capture_output=True, text=True).stdout
         if " bluewake_profile_write" not in exported:
             die("the instrumented module does not export bluewake_profile_write")
@@ -597,7 +640,7 @@ class AndroidBuilder(wb.Builder):
             if previous.get("fingerprint") == key and previous.get("profile") == sha256_file(profile):
                 print("reusing the app's optimization profile trained for these inputs")
                 return
-        self.adb_exe = self.sdk / "platform-tools/adb.exe"
+        self.adb_exe = self.sdk / ("platform-tools/adb" + EXE)
         devices = subprocess.run([str(self.adb_exe), "devices"], capture_output=True, text=True).stdout
         if self.args.device not in devices:
             die(f"device {self.args.device} is not connected (adb devices)")
@@ -669,9 +712,9 @@ class AndroidBuilder(wb.Builder):
                 text = self.adb("shell", f"cat {self.DEVICE_FILES}/logs/{log_name}", capture=True, check=False)
                 if "[android] host returned" in text:
                     break
-                retraces = re.findall(r"retrace=(\d+)", text[-20000:])
+                observed_retraces = re.findall(r"retrace=(\d+)", text[-20000:])
                 print(f"  {name}: {elapsed // 60}m {elapsed % 60:02d}s, retrace "
-                      f"{retraces[-1] if retraces else 0}/{self.TRAINING_RETRACES}", flush=True)
+                      f"{observed_retraces[-1] if observed_retraces else 0}/{self.TRAINING_RETRACES}", flush=True)
             if elapsed > 60 and not self.adb("shell", "pidof", self.app_id, check=False).stdout.strip():
                 die(f"the training playback {name} stopped early (device log {log_name})")
             if elapsed > 3 * 3600:

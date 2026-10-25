@@ -101,7 +101,8 @@ or store`"}
 
     subgraph Space["Guest address space"]
         direction TB
-        subgraph MEM1["MEM1 guest address views"]
+        subgraph MEM1["`MEM1 guest
+address views`"]
             direction TB
             Retail["`0x80000000–
 0x817FFFFF
@@ -126,7 +127,8 @@ including
 0xC800xxxx`"]
     end
 
-    subgraph Native["Native process storage and services"]
+    subgraph Native["`Native process
+storage and services`"]
         direction TB
         RAM["`MEM1 native
 backing array
@@ -137,8 +139,10 @@ alias storage`"]
 services
 VI, PI, DI,
 SI, audio,
-DSP, GX`"]
+        DSP, GX`"]
     end
+
+    CPU ~~~ Space ~~~ Native
 
     Host -->|"dispatch"| Code
     Code -->|"yield"| Host
@@ -182,7 +186,8 @@ flowchart TD
 host
 native code`"]
 
-    subgraph Guest["Guest-facing operations"]
+    subgraph Guest["`Guest-facing
+operations`"]
         direction TB
         GuestWork["`Operate on
 the GameCube
@@ -215,7 +220,8 @@ exceptions`"]
         GuestWork --> Events
     end
 
-    subgraph Native["Native-facing operations"]
+    subgraph Native["`Native-facing
+operations`"]
         direction TB
         NativeWork["`Use host
 platform
@@ -242,6 +248,8 @@ through the GPU`"]
         NativeWork --> Graphics
     end
 
+    Guest ~~~ Native
+
     Host --> GuestWork
     Host --> NativeWork
 ```
@@ -261,18 +269,22 @@ for explaining handoffs between the host and translated module. They are not
 fields or named states in the implementation.
 
 ```mermaid
-flowchart LR
+flowchart TD
     Ready["Ready for dispatch"]
-    Executing["Executing translated code"]
+    Executing["`Executing translated
+code`"]
     Boundary["At a host boundary"]
     Handler["Handler ready"]
     Stopped["Stopped"]
-    Service["Nested host service<br/>for MMIO or an edge"]
+    Service["`Nested host service
+for MMIO or an edge`"]
 
-    Ready -->|"dispatch at CPUState.pc"| Executing
+    Ready -->|"`dispatch at
+CPUState.pc`"| Executing
     Executing -->|"yield"| Boundary
     Boundary -->|"resume"| Ready
-    Boundary -->|"prepare exception handler"| Handler
+    Boundary -->|"`prepare exception
+handler`"| Handler
     Handler --> Ready
     Ready -->|"stop condition"| Stopped
     Boundary -->|"stop condition"| Stopped
@@ -300,7 +312,8 @@ flowchart TD
     State["`Authoritative
 CPUState`"]
 
-    subgraph Architectural["Guest-visible Gekko state"]
+    subgraph Architectural["`Guest-visible
+Gekko state`"]
         direction TB
         Arch["`Architectural
 register file`"]
@@ -336,7 +349,8 @@ valid bits`"]
         Arch --> Atomic
     end
 
-    subgraph Execution["Native execution bookkeeping"]
+    subgraph Execution["`Native execution
+bookkeeping`"]
         direction TB
         Exec["`Dispatch and
 access
@@ -382,6 +396,8 @@ control`"]
         Runtime --> Memory
         Runtime --> Callbacks
     end
+
+    Architectural ~~~ Execution ~~~ Bridge
 
     State --> Arch
     State --> Exec
@@ -494,20 +510,35 @@ into that reserved interval.
 
 ```mermaid
 flowchart LR
-    subgraph MEM1["MEM1 native backing — 32 MiB<br/>cached ranges · high to low"]
+    subgraph MEM1["`MEM1 native backing
+— 32 MiB
+cached ranges
+· high to low`"]
         direction TB
-        Extension["&#160;<br/>BlueWake MEM1 extension — 8 MiB<br/>0x81800000–0x81FFFFFF<br/>&#160;"]
+        Extension["`&#160;
+BlueWake MEM1
+extension — 8 MiB
+0x81800000–0x81FFFFFF
+&#160;`"]
         Boot["`Above-arena boot area
 0x817FEC60–0x817FFFFF
 initial SP: 0x817FFF00`"]
-        Arena["&#160;<br/>&#160;<br/>OS arena and game heap<br/>ArenaLo–0x817FEC60<br/>&#160;<br/>&#160;"]
+        Arena["`&#160;
+&#160;
+OS arena and game heap
+ArenaLo–0x817FEC60
+&#160;
+&#160;`"]
         Stack["`Guest stack reserve
 DOL BSS end–ArenaLo
 128 KiB plus alignment`"]
-        DOL["`DOL sections and BSS span
-linked ranges from main.dol`"]
+        DOL["`DOL sections and
+BSS span
+linked ranges from
+main.dol`"]
         Low["`OS low-memory globals
-selected words at 0x80000020–0x800000FC`"]
+selected words at
+0x80000020–0x800000FC`"]
 
         Extension ~~~ Boot ~~~ Arena ~~~ Stack ~~~ DOL ~~~ Low
     end
@@ -653,7 +684,8 @@ snapshot at a safe host boundary.
 ```mermaid
 flowchart TD
     Host["`Running BlueWake host
-starts a fresh guest session`"]
+starts a fresh guest
+session`"]
     DOL["main.dol"]
     REL["`REL
 metadata
@@ -674,8 +706,10 @@ globals, stack
 and arenas`"]
     Devices["`Device
 state`"]
-    Ready["`Guest ready for first dispatch
-CPUState.pc set to entry PC`"]
+    Ready["`Guest ready for
+first dispatch
+CPUState.pc set to
+entry PC`"]
 
     Host -->|"initialize"| CPU
     Host -->|"load image"| Loader
@@ -723,12 +757,17 @@ different mechanisms:
 A concrete external-interrupt example follows this path:
 
 ```mermaid
-flowchart LR
-    Interrupted["Interrupted guest state"]
-    Save["Save return context<br/>PC and machine state"]
-    Select["Select guest handler PC"]
-    Execute["Execute translated handler"]
-    Restore["Restore context and resume"]
+flowchart TD
+    Interrupted["`Interrupted guest
+state`"]
+    Save["`Save return context
+PC and machine state`"]
+    Select["`Select guest
+handler PC`"]
+    Execute["`Execute translated
+handler`"]
+    Restore["`Restore context
+and resume`"]
 
     Interrupted --> Save --> Select --> Execute --> Restore
 ```
@@ -744,6 +783,15 @@ not a claim that every exception follows an identical guest OS route.
 | Account completed work | All devices observe one absolute guest timeline | [Cycle domain](../../runtime/host/src/cycle_domain.c) |
 | Advance to the next deadline | Video, audio, DSP, disc, and controller state remain ordered | [Device synchronization](../../runtime/host/src/main.c#L5455-L5474) |
 | Publish and deliver interrupts | Guest exception state and handler PC are established at a safe boundary | [Interrupt routing](../../runtime/host/src/main.c#L3441-L3544), [delivery](../../runtime/host/src/main.c#L3078-L3234) |
+
+Guest-state tests pair narrow synthetic invariants with broader comparisons.
+Component tests cover CPU layout, aliases, cycle accounting, callbacks,
+exceptions, checkpoints, and save-state ownership; conditional generated tests
+then exercise those contracts through a local module; gameplay checkpoints
+compare complete expected regions across a repeatable route. See
+[evidence levels](Testing.md#evidence-levels),
+[fixtures and test data](Testing.md#fixtures-and-test-data), and
+[results and failure evidence](Testing.md#results-and-failure-evidence).
 
 ## Project history references
 

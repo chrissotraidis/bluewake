@@ -205,6 +205,9 @@ class TrainingTest(unittest.TestCase):
         crt = self.root / "redist/x64/Microsoft.VC.fixture.CRT";crt.mkdir(parents=True)
         (crt / "msvcp140_atomic_wait.dll").write_bytes(b"synthetic CRT")
         self.b.env["VCToolsRedistDir"] = str(self.root / "redist")
+        sdk = self.root / "Windows Kits/10";(sdk / "Redist/D3D/x64").mkdir(parents=True)
+        (sdk / "Redist/D3D/x64/d3dcompiler_47.dll").write_bytes(b"synthetic FXC")
+        self.b.env["WindowsSdkDir"] = str(sdk)
         game = self.root / "game";(game / "rels").mkdir(parents=True)
         (game / "main.dol").write_bytes(b"synthetic input")
         self.b.recompcore = self.root / "runtime"
@@ -217,6 +220,8 @@ class TrainingTest(unittest.TestCase):
         self.b.git = lambda *args: "" if args[0] == "status" else "test-source"
         app = self.b.package(module)
         self.assertEqual((app / "msvcp140_atomic_wait.dll").read_bytes(), b"synthetic CRT")
+        # Direct3D 11 needs the shader compiler beside the app (a GPU without Direct3D 12).
+        self.assertEqual((app / "d3dcompiler_47.dll").read_bytes(), b"synthetic FXC")
         receipt = json.loads((app / "BuilderProvenance.json").read_text())
         self.assertTrue(receipt["local_training"])
         self.assertEqual(receipt["composite_profile_sha256"], bw.sha256_file(self.b.profile))

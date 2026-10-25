@@ -29,6 +29,10 @@ jobs:
         run: python3 tests/test_windows_prepared_cache.py
       - name: Android --app-only reuses only the module it was compiled as
         run: python3 tests/test_android_app_only.py
+      - name: Android training requires player control before accepting a profile
+        run: python3 tests/test_android_training.py
+      - name: Linux builder contracts
+        run: python3 tests/test_linux_ci_container.py
       - name: Require complete guest checkpoint comparison coverage
         run: python3 tests/test_guest_checkpoints.py
       - name: Check the benchmark tour on synthetic logs
@@ -43,6 +47,8 @@ jobs:
           python3 tests/native_skin_source_test.py
           python3 tests/native_vec_source_test.py
           python3 tests/native_math_source_test.py
+      - name: Step past the four cache operations
+        run: python3 tests/test_cache_ops.py
       - name: Bound synthetic instant-text patching under sanitizers
         run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/bmg_patch_test.c -o "$RUNNER_TEMP/bluewake_bmg_patch_test"
@@ -51,3 +57,7 @@ jobs:
         run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/audio_dma_stereo_test.c -o "$RUNNER_TEMP/bluewake_audio_dma_stereo_test"
           "$RUNNER_TEMP/bluewake_audio_dma_stereo_test"
+      - name: Preserve iOS HD import cancellation and file-access lifetime
+        run: |
+          xcrun --sdk macosx clang++ -std=c++17 -O1 -fobjc-arc -Werror=objc-method-access -Werror=arc-retain-cycles -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I apple/ios/src -framework Foundation tests/wwhd_ios_import_operation_test.mm -o "$RUNNER_TEMP/bluewake_wwhd_ios_import_operation_test"
+          "$RUNNER_TEMP/bluewake_wwhd_ios_import_operation_test" "$RUNNER_TEMP"

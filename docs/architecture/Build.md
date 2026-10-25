@@ -43,14 +43,14 @@ validation, translation, preparation, native compilation, and packaging.
 
 ```mermaid
 flowchart TD
-    Disc["GZLE01 revision-0 disc"]
-    Extract["Validate and extract<br/>main.dol + 415 RELs"]
-    Translate["Build and run<br/>pinned DolRecomp"]
-    Composite["Generate and verify<br/>composite source"]
-    Prepare["Apply selected mods and<br/>guarded optimizations"]
-    PGO["Optional local<br/>PGO training"]
-    Compile["Compile host and<br/>native game module"]
-    Package["Package for the<br/>target platform"]
+    Disc["GZLE01 disc"]
+    Extract["Extract DOL + RELs"]
+    Translate["Translate to C"]
+    Composite["Compose source"]
+    Prepare["Apply variants"]
+    PGO["Optional PGO"]
+    Compile["Compile outputs"]
+    Package["Package app"]
 
     Disc --> Extract --> Translate --> Composite --> Prepare --> Compile --> Package
     Prepare --> PGO --> Compile
@@ -123,14 +123,14 @@ artifact; it need not be the artifact's historical origin.
 
 ```mermaid
 flowchart TD
-    Profile["bluewake.sh<br/>game profile"]
+    Profile["bluewake.sh"]
     Linux["Linux build.py"]
     Windows["Windows build.py"]
-    Apple["Apple build.sh<br/>macOS / iOS / tvOS"]
+    Apple["Apple build.sh"]
 
-    Profile -->|reads pins and digest| Linux
-    Profile -->|reads pins and digest| Windows
-    Profile -->|variables and build hooks| Apple
+    Profile -->|pins + digest| Linux
+    Profile -->|pins + digest| Windows
+    Profile -->|hooks| Apple
 ```
 
 ### `bluewake.sh` game profile
@@ -199,22 +199,22 @@ supported game revision.
 
 ```mermaid
 flowchart TD
-    Profile["bluewake.sh<br/>executable pins"]
-    Lock["dependencies.lock.json<br/>dependency record"]
-    Linux["Linux build.py<br/>dependencies()"]
-    Windows["Windows build.py<br/>dependencies()"]
-    Apple["Apple build.sh<br/>profile_dependencies()"]
-    Checkout["Shared source dependency output<br/>ROOT/ref/recompcore<br/>pinned RecompCore and DolRecomp checkout"]
-    Dawn["Apple mobile renderer dependency output<br/>ROOT/build/deps<br/>verified Dawn archive"]
+    Profile["bluewake.sh pins"]
+    Lock["Dependency record"]
+    Linux["Linux builder"]
+    Windows["Windows builder"]
+    Apple["Apple builder"]
+    Checkout["Pinned toolchain"]
+    Dawn["Mobile Dawn"]
 
     Profile --> Linux
     Profile --> Windows
     Profile --> Apple
-    Linux -->|fetch and verify| Checkout
-    Windows -->|fetch and verify| Checkout
-    Apple -->|fetch and verify| Checkout
-    Apple -. "iOS / tvOS only: independent additional fetch" .-> Dawn
-    Lock -. "records origins and roles" .-> Profile
+    Linux -->|fetch| Checkout
+    Windows -->|fetch| Checkout
+    Apple -->|fetch| Checkout
+    Apple -. "iOS / tvOS" .-> Dawn
+    Lock -. "provenance" .-> Profile
 ```
 
 Each platform has a separate implementation that produces the same pinned
@@ -260,15 +260,15 @@ prepare the mobile archive during the dependency hook.
 
 ```mermaid
 flowchart TD
-    Disc["Required extraction input<br/>uncompressed GZLE01 ISO / GCM"]
-    Linux["Linux build.py<br/>platform adapter"]
-    Windows["Windows build.py<br/>platform adapter"]
-    Apple["Apple profile_extract()<br/>platform adapter"]
-    CLI["Shared build-time CLI<br/>scripts/ios/disc_extract.c"]
-    Importer["Shared extraction core<br/>apple/ios/src/disc_import.c"]
-    Output["Build output<br/>OUT/game/main.dol + rels/"]
+    Disc["GZLE01 ISO / GCM"]
+    Linux["Linux builder"]
+    Windows["Windows builder"]
+    Apple["Apple builder"]
+    CLI["disc_extract.c"]
+    Importer["disc_import.c"]
+    Output["OUT/game"]
     FirstRun["iOS first-run UI"]
-    AppData["iOS app data<br/>prepared game files"]
+    AppData["iOS app data"]
 
     Disc --> Linux
     Disc --> Windows
@@ -277,8 +277,8 @@ flowchart TD
     Windows -->|CMake target| CLI
     Apple -->|direct Clang command| CLI
     CLI --> Importer --> Output
-    FirstRun -. "calls the core API directly" .-> Importer
-    Importer -. "first-run destination" .-> AppData
+    FirstRun -. "direct API" .-> Importer
+    Importer -. "destination" .-> AppData
 ```
 
 | Boundary | Shared | Platform-specific |
@@ -310,17 +310,17 @@ and optional Yaz0 compression before producing one uniform REL directory.
 ```mermaid
 flowchart TD
     Disc["GZLE01 disc image"]
-    Header["bluewake_disc_check()<br/>identity and GameCube magic"]
-    Dol["bluewake_disc_prepare()<br/>read offsets and DOL sections"]
-    Revision["SHA-1 check<br/>USA revision 0"]
-    FST["File-system table"]
-    Loose["Loose rels/*.rel"]
-    Archive["RELS.arc<br/>RARC archive"]
-    Decode["yaz0_decode() / unpack_rels_arc()<br/>decode modules"]
-    Normalize["write_rel()<br/>set alignment field to 4"]
+    Header["Disc check"]
+    Dol["Read DOL layout"]
+    Revision["Revision check"]
+    FST["FST"]
+    Loose["Loose RELs"]
+    Archive["RELS.arc"]
+    Decode["Decode RELs"]
+    Normalize["Normalize RELs"]
     StagedDol[".import/main.dol"]
     StagedRels[".import/rels/*.rel"]
-    Runtime["Textures, audio, and other assets<br/>remain on the disc image"]
+    Runtime["Runtime assets"]
 
     Disc --> Header
     Header -->|DOL offset| Dol --> Revision --> StagedDol
@@ -339,14 +339,14 @@ Code: [`bluewake_disc_check`](../../apple/ios/src/disc_import.c),
 **Safe publication and builder gate**
 
 ```mermaid
-flowchart LR
-    Prepare["Write complete outputs<br/>under OUT/game/.import"]
+flowchart TD
+    Prepare["Stage outputs"]
     Importer{"Importer checks pass?"}
-    Clean["Remove temporary outputs<br/>keep failure isolated"]
-    Publish["Replace OUT/game/main.dol<br/>and OUT/game/rels"]
+    Clean["Discard staging"]
+    Publish["Publish outputs"]
     Count{"Exactly 415 RELs?"}
     Stop["Stop the build"]
-    Translate["Continue to translation"]
+    Translate["Translate"]
 
     Prepare --> Importer
     Importer -->|no| Clean --> Stop
@@ -382,15 +382,15 @@ the platform commands in [`docs/BUILD_YOUR_OWN.md`](../BUILD_YOUR_OWN.md).
 
 ```mermaid
 flowchart TD
-    Source["DolRecomp<br/>source"]
-    Build["CMake<br/>+ Ninja"]
-    Tool["DolRecomp<br/>executable"]
+    Source["DolRecomp source"]
+    Build["CMake + Ninja"]
+    Tool["DolRecomp"]
     Dol["Main DOL"]
     Rels["415 RELs"]
-    Frontend["GameCube input<br/>Gekko CPU"]
-    Backend["Portable C<br/>backend"]
+    Frontend["Gekko frontend"]
+    Backend["C backend"]
     DolC["DOL C chunks"]
-    RelC["REL-grouped<br/>C chunks"]
+    RelC["REL C chunks"]
 
     Source --> Build --> Tool
     Tool -. "contains" .-> Frontend
@@ -435,20 +435,18 @@ The table below links the corresponding BlueWake invocation on each platform.
 ## 5. Compose and prepare
 
 ```mermaid
-flowchart LR
+flowchart TD
     DolC["DOL C chunks"]
     RelC["REL C chunks"]
-    Binaries["DOL + REL<br/>metadata"]
-    Base["Verified composite<br/>source"]
-    Ready["Compile-ready<br/>source"]
+    Binaries["Metadata"]
+    Base["Verified source"]
+    Ready["Prepared source"]
     Stop["Stop the build"]
 
-    subgraph BlueWake["BlueWake logic"]
-        Generate["Compose source"]
-        Verify{"Digest match?"}
-        Variants["Optional: add<br/>mod variants"]
-        Prepare["Optional: apply guarded<br/>optimizations"]
-    end
+    Generate["Compose source"]
+    Verify{"Digest match?"}
+    Variants["Optional mods"]
+    Prepare["Optional optimizations"]
 
     DolC --> Generate
     RelC --> Generate
@@ -457,7 +455,7 @@ flowchart LR
     Verify -->|yes| Base
     Verify -->|no| Stop
     Base --> Variants --> Prepare --> Ready
-    Base -. "mods and optimizations disabled" .-> Ready
+    Base -. "none selected" .-> Ready
 ```
 
 Stage 5 is where BlueWake-specific build logic turns DolRecomp's generic
@@ -504,18 +502,18 @@ without changing game behavior; no machine-learning model is trained.
 
 ```mermaid
 flowchart TD
-    Prepared["Stage 5 prepared<br/>C source"]
-    Fingerprint["Input<br/>fingerprint"]
-    Host["Build or reuse<br/>playback host"]
-    Compile["Stage 6: compile Stage 5<br/>source for training"]
-    Instrumented["Training module<br/>with counters"]
-    Playback["Headless<br/>playbacks"]
+    Prepared["Prepared C"]
+    Fingerprint["Fingerprint"]
+    Host["Playback host"]
+    Compile["Training build"]
+    Instrumented["Counters"]
+    Playback["Playbacks"]
     Raw["Raw profiles"]
     Merge["Merge profiles"]
-    Profile["Optional PGO<br/>profile data"]
+    Profile["PGO profile"]
     Disabled["No PGO profile"]
-    Final["Stage 7 final<br/>module compile"]
-    Module["Final native<br/>game module"]
+    Final["Final compile"]
+    Module["Native module"]
 
     Prepared -->|training enabled| Fingerprint
     Fingerprint -->|cache miss| Host --> Playback
@@ -550,13 +548,13 @@ inside the private `OUT` tree and are not release artifacts.
 
 ```mermaid
 flowchart TD
-    Composite["Prepared game<br/>source"]
-    Runtime["BlueWake host<br/>+ RecompCore"]
-    Module["Native game<br/>module"]
-    Host["Platform host<br/>application"]
-    Assemble["Assemble host,<br/>module, data,<br/>and provenance"]
+    Composite["Prepared source"]
+    Runtime["Host + RecompCore"]
+    Module["Game module"]
+    Host["Host application"]
+    Assemble["Assemble app"]
     Package{"Package target"}
-    Desktop["Desktop app<br/>or folder"]
+    Desktop["Desktop output"]
     AppImage["AppImage"]
     IPA["Unsigned IPA"]
 
@@ -627,12 +625,21 @@ signing material.
 | Install and launch | When requested, installs the app, transfers the disc into its data container, and launches it through `devicectl`. | Running device installation | App data `Library/Caches/BlueWake/GZLE01.iso` | [Device deployment](../../scripts/builder/build.sh) (`--install`) |
 
 The Dawn archive bridge remains experimental; see the
-[tvOS build guide](../status/TVOS_BUILD.md).
+[tvOS build guide](../TVOS_BUILD.md).
 
 ### Android (in progress)
 
 Android arm64 support is under development in
 [PR #93](https://github.com/chrissotraidis/bluewake/pull/93). It is not yet a
 current build path, so its proposed artifacts are not included above.
+
+The build paths are also test entry points. Direct Python contracts protect
+source generation and packaging rules; Linux and Windows CI fetch the pinned
+public runtime, compile explicit source-only targets, run their CTest graphs,
+and reject unexpected personal modules. Disc-free package fixtures then check
+container and ABI behavior without claiming that a playable build was tested.
+See [test families](Testing.md#test-families),
+[platform entry points](Testing.md#platform-entry-points), and
+[continuous integration](Testing.md#continuous-integration).
 
 Continue to the runtime [high-level view](Runtime.md#high-level-view).

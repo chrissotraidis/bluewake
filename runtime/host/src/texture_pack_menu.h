@@ -88,6 +88,11 @@ inline PackState state_of(size_t textures, bool on) {
     return textures > 0 ? PackState::Ready : PackState::Empty;
 }
 
+// What an import left out: textures whose name already had a replacement, and
+// HD resources that could not be read. Amber, between the green of a pack that
+// loaded and the red of one that did not.
+inline ImVec4 skipped_color() { return ImVec4(1.f, 0.78f, 0.33f, 1.f); }
+
 inline ImVec4 state_color(PackState s) {
     switch (s) {
     case PackState::Ready: return ImVec4(0.35f, 0.9f, 0.45f, 1.f); // green
@@ -96,62 +101,92 @@ inline ImVec4 state_color(PackState s) {
     }
 }
 
-// The system's folder picker (SDL_ShowOpenFolderDialog). SDL may answer on
-// another thread, so the answer waits here for the menu's next frame.
+// System pickers may answer on another thread. Only this mailbox is shared;
+// the menu consumes an answer before another dialog can replace its purpose.
+enum class Pick { pack, wind_waker_hd, disc_image, disc_key, common_key, title_key };
+
 struct Picker {
     std::mutex lock;
     bool showing = false;
     bool answered = false;
-    std::string folder; // the folder picked, when answered
+    Pick purpose = Pick::pack;
+    std::string path;   // empty on cancellation or error
     std::string error;  // why the picker could not open ("" when it did)
 };
 
 inline Picker& picker() {
-    static Picker p;
-    return p;
+    // A late SDL callback must not reach a destroyed mutex at app shutdown.
+    static Picker* p = new Picker;
+    return *p;
 }
 
-inline void choose_folder(SDL_Window* window, const std::string& start) {
-    Picker& p = picker();
-    {
-        std::lock_guard<std::mutex> hold(p.lock);
-        if (p.showing)
-            return;
-        p.showing = true;
-        p.error.clear();
-    }
-    const auto answer = [](void*, const char* const* files, int) {
-        Picker& p = picker();
-        std::lock_guard<std::mutex> hold(p.lock);
-        p.showing = false;
-        if (files == nullptr) {
-            p.error = SDL_GetError();
-            if (p.error.empty())
-                p.error = "this system has no folder picker";
-        } else if (files[0] != nullptr) {
-            p.folder = files[0];
-            p.answered = true;
-        }
-    };
-    SDL_ShowOpenFolderDialog(answer, nullptr, window, start.empty() ? nullptr : start.c_str(), false);
-}
-
-// The folder the player picked since the last call, if any.
-inline bool take_folder(std::string& folder) {
+inline bool begin_pick(Pick purpose) {
     Picker& p = picker();
     std::lock_guard<std::mutex> hold(p.lock);
-    if (!p.answered)
+    if (p.showing || p.answered)
         return false;
-    p.answered = false;
-    folder = p.folder;
+    p.showing = true;
+    p.purpose = purpose;
+    p.path.clear();
+    p.error.clear();
     return true;
 }
 
-// Why the picker could not open, or "".
+inline void SDLCALL picker_answer(void*, const char* const* files, int) {
+    Picker& p = picker();
+    std::lock_guard<std::mutex> hold(p.lock);
+    if (files == nullptr) {
+        p.error = SDL_GetError();
+        if (p.error.empty())
+            p.error = "this system has no file picker";
+    } else if (files[0] != nullptr) {
+        p.path = files[0]; // SDL frees these strings when the callback returns.
+    }
+    p.showing = false;
+    p.answered = true; // Consume cancellation and errors as well as selections.
+}
+
+inline void choose_folder(SDL_Window* window, const std::string& start, Pick purpose = Pick::pack) {
+    if (begin_pick(purpose))
+        SDL_ShowOpenFolderDialog(picker_answer, nullptr, window, start.empty() ? nullptr : start.c_str(), false);
+}
+
+inline bool take_pick(std::string& path, std::string& error, Pick purpose) {
+    Picker& p = picker();
+    std::lock_guard<std::mutex> hold(p.lock);
+    if (!p.answered || p.purpose != purpose)
+        return false;
+    p.answered = false;
+    path = p.path;
+    p.path.clear();
+    error = p.error;
+    return true;
+}
+
+// The folder the player picked for this purpose since the last call, if any.
+inline bool take_folder(std::string& folder, Pick purpose = Pick::pack) {
+    std::string error;
+    return take_pick(folder, error, purpose) && !folder.empty();
+}
+
+inline bool picker_busy() {
+    Picker& p = picker();
+    std::lock_guard<std::mutex> hold(p.lock);
+    return p.showing || p.answered;
+}
+
+// The existing menus display folder-picker errors themselves. Image/key errors
+// belong to the import form, not their "type the texture-pack folder" fallback.
 inline std::string picker_error() {
     Picker& p = picker();
     std::lock_guard<std::mutex> hold(p.lock);
-    return p.error;
+    return p.purpose == Pick::pack || p.purpose == Pick::wind_waker_hd ? p.error : "";
 }
+
+// Import from a Wind Waker HD folder or WUD/WUX with local key files, followed
+// by progress and Cancel. Key paths live only in the transient import form/job;
+// they never enter settings. textures_dir is the app's Load/Textures folder.
+// True once on success, with the new pack's folder in folder.
+bool import_controls(SDL_Window* window, const std::string& textures_dir, std::string& folder);
 
 } // namespace bw_texture_pack

@@ -719,7 +719,7 @@ static u64 g_edge_scheduler_true;
 static u64 g_edge_source_publishes;
 static u64 g_edge_source_changes;
 // Where the guest's device-register traffic goes. A third of the block
-// boundaries run host_mmio_read or host_mmio_write (docs/status/CURRENT.md,
+// boundaries run host_mmio_read or host_mmio_write (docs/archive/status/CURRENT.md,
 // 2026-09-22), and each of those steps the device cursors and can publish an
 // interrupt source, so the ranges that traffic reaches decide what a cheaper
 // path can skip. Counted per 0xCC00 page rather than assumed; buckets 16..19 are
@@ -965,7 +965,7 @@ static u64 g_credit_lag_max;
 // run bound or the no-progress path; the remainder is the dispatcher miss. This
 // supersedes the budget/early split, which compared each turn's credit against
 // the *previous* turn's budget and disagreed with itself after the tolerance
-// landed (docs/status/CURRENT.md, 2026-09-22).
+// landed (docs/archive/status/CURRENT.md, 2026-09-22).
 static bool g_turn_census_enabled;
 // The retrace the credit census starts counting at. The play window is the
 // graded one (13,900) but a host-accounting effect that shows in the boot must
@@ -1086,7 +1086,7 @@ static void report_credit_census(void) {
 }
 // BLUEWAKE_GX_FLUSH_CENSUS. The rendered play window's per-retrace cost is bimodal
 // with a two-retrace period, and the retrace that carries the presentation is
-// where the whole of the rendered gap sits (docs/status/CURRENT.md, 2026-09-22).
+// where the whole of the rendered gap sits (docs/archive/status/CURRENT.md, 2026-09-22).
 // The main thread meets the translation worker at one barrier - the draw-done
 // commit, which drains everything appended so far - so timing that one call says
 // whether the slow retrace is waiting on the worker or doing its own work. It is
@@ -1297,7 +1297,7 @@ static unsigned g_decrementer_context_reports;
 static unsigned g_interrupt_delivery_reports;
 BLUEWAKE_TRACE_STORAGE(g_guest_clock_trace);
 static bool g_guest_decrementer_pending;
-// Opt-in census for W1 (docs/status/REORGANIZATION_2026-09-17.md). The external
+// Opt-in census for W1 (docs/archive/status/REORGANIZATION_2026-09-17.md). The external
 // interrupt is delivered only when bluewake_scheduler_interrupt_safe() says the
 // pc is an architectural interrupt boundary; the decrementer has no such test.
 // This counts how often each line delivers at an unsafe pc, so the claim that a
@@ -1353,7 +1353,7 @@ static bool g_chassis_service_each_block;
 // a boundary at that pc goes to the full service and ends the turn
 // (host_chassis_edge_service_body); every other boundary stays on the fast path.
 static bool g_player_route_waiting;
-// Differential guest-state trace (W1, docs/status/REORGANIZATION_2026-09-17.md).
+// Differential guest-state trace (W1, docs/archive/status/REORGANIZATION_2026-09-17.md).
 // Every host action that could have been omitted has been measured away, so the
 // remaining question is what the guest itself sees differently. This samples the
 // same guest-state fingerprint at the same guest cycle in both configurations, so
@@ -1567,7 +1567,7 @@ static u32 g_overlap_cached_object;
 // The guest-alias generation the cached slot pointer was resolved under. It
 // starts at a value the counter cannot hold so that the first call resolves,
 // which is what g_overlap_cache_valid used to do as a separate flag - one load
-// and one test that this replaces. See the census in docs/status/CURRENT.md,
+// and one test that this replaces. See the census in docs/archive/status/CURRENT.md,
 // 2026-09-22: this revalidation runs at every block boundary.
 static u32 g_overlap_cached_alias_state = 0xFFFFFFFFu;
 
@@ -1699,7 +1699,7 @@ static bool host_chassis_edge_service_body(void* user, CPUState* cpu, u32 addres
     if (edge_requires)
         return true;
     // BLUEWAKE_CHASSIS_SERVICE. Diagnostic form of W1's experiment 2
-    // (docs/status/REORGANIZATION_2026-09-17.md). The chassis returns to the
+    // (docs/archive/status/REORGANIZATION_2026-09-17.md). The chassis returns to the
     // host once per budget window, so the per-turn device service and the guest
     // clock advance run once per window instead of once per block. This runs
     // both here, at every block boundary the chassis already stops at, which
@@ -1730,7 +1730,7 @@ static bool host_chassis_edge_service_body(void* user, CPUState* cpu, u32 addres
     // and keeps the call, its frame and its argument out of the other
     // forty-nine. It is the edge service's remaining per-boundary call and the
     // boundary census counts 391,432 boundaries a play retrace:
-    // docs/status/CURRENT.md, 2026-09-22.
+    // docs/archive/status/CURRENT.md, 2026-09-22.
     if (g_interrupt_sources_dirty)
         host_refresh_interrupt_sources(cpu);
     if ((cpu->msr & PPC_MSR_EE) != 0u && g_guest_decrementer_pending) {
@@ -1762,7 +1762,7 @@ static bool host_chassis_edge_service_body(void* user, CPUState* cpu, u32 addres
 // height the check object holds. It used to run only at host turn starts, so
 // 0x80328F84 was an edge the chassis had to return on - 98 percent of all the
 // play window's turn exits, 5,700 a retrace, each paying the whole turn body
-// (docs/status/CURRENT.md, 2026-09-24). It is now also made at the edge itself,
+// (docs/archive/status/CURRENT.md, 2026-09-24). It is now also made at the edge itself,
 // by the edge service, whenever that edge does not end the turn, so every
 // arrival is observed exactly once either way. blocks is the turn's block
 // count when called from the turn body and 0 from an edge (it only labels the
@@ -1929,7 +1929,7 @@ __attribute__((noinline)) static bool host_chassis_edge_service_full(
 // three boundary-loop iterations, three edge-service calls and three chunk
 // entries to compare one word: 204,000 of the 384,000 boundaries a play
 // retrace takes (BLUEWAKE_BOUNDARY_CENSUS_BY_ADDRESS over the certified window,
-// 68,000 nodes a retrace; docs/status/CURRENT.md, 2026-09-24).
+// 68,000 nodes a retrace; docs/archive/status/CURRENT.md, 2026-09-24).
 //
 // At the boundary that enters cTgIt_JudgeFilter (0x80245640) from cNdIt_Judge's
 // bctrl (0x80244F84), this runs whole iterations whose judge answers NULL and
@@ -2210,6 +2210,14 @@ static inline __attribute__((always_inline)) bool host_chassis_edge_service_with
     }
     if (bluewake_jump_button_dispatch(cpu, address))
         return true;
+    // The HD look's room culling (J3DUClipper::clipByBox's entry, called only
+    // by the room draw). Here, before the full service, which only sees the
+    // intercept table's addresses; when it has culled, the guest is at the return.
+    if (__builtin_expect(bluewake_hd_room_clip, 0) && address == 0x80256CB8u) {
+        bluewake_hd_look_room_clip(cpu, address);
+        if (cpu->pc != address)
+            return true;
+    }
     if (host_chassis_requires_full(cpu, address))
         return host_chassis_edge_service_full(user, cpu, address);
     if (address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native)
@@ -2217,12 +2225,16 @@ static inline __attribute__((always_inline)) bool host_chassis_edge_service_with
     return false;
 }
 
+static BluewakeTurnEntry g_turn_entry = {BLUEWAKE_TURN_ENTRY_NONE};
+
 static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
-    return host_chassis_edge_service_with(user, cpu, address, false);
+    return bluewake_turn_entry_edge(&g_turn_entry, address,
+                                    host_chassis_edge_service_with(user, cpu, address, false));
 }
 
 static bool host_chassis_edge_service_stage_select(void* user, CPUState* cpu, u32 address) {
-    return host_chassis_edge_service_with(user, cpu, address, true);
+    return bluewake_turn_entry_edge(&g_turn_entry, address,
+                                    host_chassis_edge_service_with(user, cpu, address, true));
 }
 
 // Host-only CPU state has no representation in the retail OSContext image.
@@ -3382,7 +3394,7 @@ static void host_refresh_interrupt_sources(CPUState* cpu);
 // donor DSP raises DIRQ, and the mailbox reads that clear it). The refresh used to
 // rebuild all three booleans at every block boundary - 1.305 publishes a boundary,
 // and the play window changes its answer 17 times a retrace
-// (docs/status/CURRENT.md, 2026-09-22) - so those entry points are its real
+// (docs/archive/status/CURRENT.md, 2026-09-22) - so those entry points are its real
 // trigger.
 //
 // The flag is set at every one of them, before the work that can change the
@@ -7632,6 +7644,7 @@ int main(int argc, char** argv) {
             .window_pos_x = window_x,
             .window_pos_y = window_y,
         };
+        bluewake_hd_look_defaults();
         if (dol_aurora_initialize(argc, argv, &aurora_config)) {
             aurora_enabled = true;
             // BLUEWAKE_LIVE_PAD=0 (test runs): the pad script alone, even with a
@@ -7877,7 +7890,7 @@ int main(int argc, char** argv) {
     dol_interrupts_init(&g_interrupts);
     g_cycle_vi_clock = &vi_clock;
     // Shipping policy. Measured on the regenerated build with the chassis
-    // schedule (docs/status/CURRENT.md, 2026-09-17 "the cycle window is a free
+    // schedule (docs/archive/status/CURRENT.md, 2026-09-17 "the cycle window is a free
     // lever"): a fixed 4096 window gives 33.24 fps in the play window against
     // 31.38 for the previous dynamic 256-in-1024 policy, 73.91 s against
     // 87.56 s on the route, host turns 57,369,093 against 148,527,447, and the
@@ -10258,7 +10271,7 @@ int main(int argc, char** argv) {
         if (cpu.pc == 0x80308A9Cu && cpu.lr == 0x80322C38u) {
             // The guest is about to be told the GPU finished, so everything it
             // has written to the FIFO has to be translated and submitted first.
-            // This is the draw-done barrier of docs/status/CURRENT.md
+            // This is the draw-done barrier of docs/archive/status/CURRENT.md
             // 2026-09-22; the front end buffers writes and parses in batches.
             struct timespec flush_before;
             if (g_gx_flush_census) {
@@ -14128,7 +14141,7 @@ int main(int argc, char** argv) {
         }
         bluewake_cycle_domain_prepare_dispatch(&g_cycle_domain, &cpu);
         // The play window is the graded one; the boot's turn structure is not
-        // (docs/status/CURRENT.md, 2026-09-22).
+        // (docs/archive/status/CURRENT.md, 2026-09-22).
         const bool turn_census =
             g_turn_census_enabled && g_host_retrace_count >= g_credit_census_window;
         if (turn_census) {
@@ -14136,6 +14149,7 @@ int main(int argc, char** argv) {
             g_turn_edge_hit = false;
             g_turn_downcount_before_last_block = cpu.downcount;
         }
+        bluewake_turn_entry_begin(&g_turn_entry, &cpu, cpu.pc);
         int dispatched = mod->dispatch(&cpu, cpu.pc);
         if (turn_census)
             host_turn_exit_classify(&cpu, dispatched);

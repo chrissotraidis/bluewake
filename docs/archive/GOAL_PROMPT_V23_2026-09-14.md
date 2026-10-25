@@ -238,7 +238,7 @@ traced numbers; H-TTP-TRACE-TAX is still unpaid.
    ceiling stop. One BlueWake process at a time.
 2. **Read the verdict**, and write it down with the line that carries it.
 3. **If the displacement clause passes**, append one short section to
-   `docs/status/CURRENT.md` and send the report this loop owes.
+   `docs/archive/status/CURRENT.md` and send the report this loop owes.
 4. **TTP-A / TTP-B**: keep both red or both green on their own merits, report
    both, and never silently substitute. TTP-A stays the cold-boot number.
 5. **Then performance**, in v17's order: **H-TURN-COST priced as a number before
@@ -284,7 +284,7 @@ traced numbers; H-TTP-TRACE-TAX is still unpaid.
 An iteration counts only if time-to-playable fell, or fps moved on a named path,
 or a human can now see, hear or do something they could not before. One
 hypothesis, one small change, one build, one measurement, and at most one short
-section appended to `docs/status/CURRENT.md`. **A document is not an iteration**,
+section appended to `docs/archive/status/CURRENT.md`. **A document is not an iteration**,
 and neither is a probe: a probe is a cost paid to find the work. Report to the
 user every three iterations in one paragraph. Silence is not acceptable; neither
 is a document about why it cannot be done.

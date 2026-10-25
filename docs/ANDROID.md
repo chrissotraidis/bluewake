@@ -12,6 +12,10 @@ activity, input and audio), and a touch overlay stands in for a controller.
 
 ## Status
 
+In `main` since October 17 (#93, LiquidAzir), as an **experimental** build you make yourself. It is checked on one
+phone, the Fold 7 below; other phones, Bluetooth controllers with the D-pad option, and screen recording (#238) are
+still open. Importing Wind Waker HD textures in the app is draft #347.
+
 Brought up on 2026-09-30 on one device, a Samsung Galaxy Z Fold 7 (Snapdragon 8 Elite, Adreno 830, Android 16),
 from a Redump-verified `.rvz` converted to ISO with Dolphin, built on a Windows 11 PC (i9-13900K) with NDK r29:
 
@@ -65,10 +69,14 @@ Adreno), game controllers on Android (they go through SDL, as on Windows), the H
 
 ## What you need
 
-- A Windows PC (the builder runs the Windows side of the pipeline: the translator and the disc extractor)
-  - Visual Studio 2022 or newer with the C++ workload (its headers and libraries), and a clang for Windows:
-    Visual Studio's own clang component, or a portable LLVM (`clang+llvm-*-x86_64-pc-windows-msvc`), passed
-    with `--llvm`
+- A Windows PC or a Mac (the builder runs the host side of the pipeline: the translator and the disc extractor)
+  - **Windows:** Visual Studio 2022 or newer with the C++ workload (its headers and libraries), and a clang for
+    Windows: Visual Studio's own clang component, or a portable LLVM (`clang+llvm-*-x86_64-pc-windows-msvc`),
+    passed with `--llvm`
+  - **macOS (Intel or Apple silicon):** Xcode's command line tools (`xcode-select --install`), Rust (`cargo`,
+    which builds `nodtool` to convert an `.rvz`), and `brew install cmake ninja`. No `--llvm`. The NDK's macOS
+    toolchain is a universal binary and runs natively. Builds from an `.rvz` or an `.iso`. Linux hosts take the
+    same path in the code but are untested.
   - Python 3.10+, Git, CMake 3.25+ (Ninja from the Android SDK's CMake is used if none is on PATH)
 - The Android SDK with the NDK (r27 or newer), build-tools and a platform, and a JDK 17
 - An arm64 Android device on Android 13 (API 33) or newer with Vulkan
@@ -79,6 +87,12 @@ Adreno), game controllers on Android (they go through SDL, as on Windows), the H
 
 ```bash
 python scripts/android/build.py PATH/TO/GZLE01.iso --llvm PATH/TO/llvm --sdk PATH/TO/android-sdk --jdk PATH/TO/jdk-17
+```
+
+On a Mac, leave out `--llvm`; the SDK is found in `~/Library/Android/sdk`:
+
+```bash
+python3 scripts/android/build.py PATH/TO/GZLE01.rvz --jdk PATH/TO/jdk-17
 ```
 
 The steps and their logs (`build/android/logs`) are the Windows builder's, then:

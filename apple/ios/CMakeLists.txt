@@ -46,6 +46,17 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/game_options.c
     ${BLUEWAKE_HOST_SRC}/forest_water.c
     ${BLUEWAKE_HOST_SRC}/hd_look.c
+    ${BLUEWAKE_HOST_SRC}/wwhd/formats.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/addrlib.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/hd.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/imaging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/sha256.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/ui.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/pack.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/output_staging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/import_job.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/disc_image.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/wiiu_disc.cpp
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/fast_load.c
     ${BLUEWAKE_HOST_SRC}/fps_watch.c
@@ -97,6 +108,15 @@ add_executable(BlueWake MACOSX_BUNDLE
 set_source_files_properties(${BLUEWAKE_HOST_SRC}/main.c PROPERTIES
     COMPILE_DEFINITIONS "main=bluewake_host_main")
 target_link_libraries(BlueWake PRIVATE gxruntime GXRuntime::aurora z)
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_crypto.cmake")
+target_link_libraries(BlueWake PRIVATE bluewake_wwhd_disc_crypto)
+set_source_files_properties("${_wwhd_runtime}/Externals/mbedtls/LICENSE"
+    PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/Licenses/MbedTLS")
+target_sources(BlueWake PRIVATE "${_wwhd_runtime}/Externals/mbedtls/LICENSE")
+# The built-in Wind Waker HD importer (runtime/host/src/wwhd) names textures with xxHash.
+if(TARGET xxhash)
+    target_link_libraries(BlueWake PRIVATE xxhash)
+endif()
 set_target_properties(BlueWake PROPERTIES
     LINKER_LANGUAGE CXX
     OUTPUT_NAME BlueWake

@@ -40,8 +40,9 @@ else
   echo "OK: dependency lock is valid JSON"
 fi
 
-for f in docs/status/CURRENT.md docs/status/GATES.md docs/status/DECISIONS.md docs/status/COMPATIBILITY.md docs/status/PERFORMANCE.md docs/status/RELEASE.md tests/coverage/catalog.json; do
-  if [ ! -f "$f" ]; then echo "FAIL: required ledger $f missing"; fail=1; fi
+# The active plan: what is being done, in what order, and how speed is measured.
+for f in docs/GOAL_LOOP.md docs/PRIORITIES.md docs/PERFORMANCE.md docs/DIRECTION.md docs/WINDOWS_TASKS.md tests/coverage/catalog.json; do
+  if [ ! -f "$f" ]; then echo "FAIL: required file $f missing"; fail=1; fi
 done
 
 # Merge conflict markers left in tracked text files (a merge committed half-done).

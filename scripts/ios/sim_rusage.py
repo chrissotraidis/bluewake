@@ -5,7 +5,7 @@ usage: scripts/ios/sim_rusage.py &   (start it, then launch a run; it waits for 
 Prints the app's total instructions and cycles (proc_pid_rusage, rusage_info_v4:
 ri_instructions, ri_cycles) as last read before it exits. Wall-clock rates on a busy
 Mac swing by 2x between identical runs; these counts do not, so A/B the app with them
-(docs/status/CURRENT.md, 2026-09-24).
+(docs/archive/status/CURRENT.md, 2026-09-24).
 """
 import ctypes, subprocess, time, sys
 lib = ctypes.CDLL('/usr/lib/libproc.dylib')

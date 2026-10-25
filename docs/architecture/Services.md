@@ -144,7 +144,7 @@ dispatch at the nearest VI, DSP, audio, decrementer, or interrupt deadline.
 When the module yields, the host advances device cursors and rebudgets.
 
 ```mermaid
-flowchart LR
+flowchart TD
     Charge["`Translated code
 charges cycles`"]
     Domain["`Cycle domain
@@ -267,16 +267,24 @@ persistence, and shutdown.
 ```mermaid
 flowchart TD
     Initialize["`Initialize services
-coherent boot-time registers`"]
-    Dispatch["`Dispatch translated work
-guest commands and RAM changes`"]
-    Synchronize["`Synchronize required devices
-ordered DMA, status and events`"]
-    Rebudget["`Select the next boundary
-deadline, decrementer or interrupt`"]
+coherent boot-time
+registers`"]
+    Dispatch["`Dispatch translated
+work
+guest commands and
+RAM changes`"]
+    Synchronize["`Synchronize required
+devices
+ordered DMA, status
+and events`"]
+    Rebudget["`Select the next
+boundary
+deadline, decrementer
+or interrupt`"]
     Stop{"Guest session ending?"}
     Shutdown["`Shut down services
-close storage and release resources`"]
+close storage and
+release resources`"]
 
     Initialize --> Dispatch
     Dispatch --> Synchronize --> Rebudget --> Stop
@@ -291,6 +299,15 @@ close storage and release resources`"]
 | Synchronize | Advance devices required by time or an observable access | Ordered DMA, status, callbacks, and interrupts |
 | Rebudget | Select the next device, decrementer, or interrupt boundary | Execution cannot skip a required event |
 | Shut down | Stop adapters and close mutable storage whose accepted writes were already persisted | No worker retains invalid guest resources, and durable data remains available to the next run |
+
+Service tests use synthetic clocks, memory, callbacks, packets, files, and
+device events to make ordering and persistence failures deterministic. Tests
+that cross process or filesystem boundaries use owned temporary paths and
+timeouts; real cards, saves, discs, controllers, and audio hardware remain
+private or device-backed evidence. See
+[compiled component tests](Testing.md#compiled-component-tests),
+[packaging and process tests](Testing.md#packaging-and-process-tests), and
+[private and hardware validation](Testing.md#private-and-hardware-validation).
 
 Graphics-related GX services continue in the [graphics stack](Graphics.md).
 

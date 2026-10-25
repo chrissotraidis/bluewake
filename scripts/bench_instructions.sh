@@ -7,7 +7,7 @@
 # two builds with the same digest execute the same guest instructions, and the
 # only difference is what the host spent to execute them. On 2026-09-18 this
 # measured the live play window at IPC 4.01, which is why instruction count is
-# the metric for this workstream rather than speed (docs/status/CURRENT.md).
+# the metric for this workstream rather than speed (docs/archive/status/CURRENT.md).
 #
 # It works by differencing two headless runs of the same route: the difference
 # between N and N+delta retraces is exactly the delta live-play retraces, so
@@ -133,7 +133,7 @@ for log in "$tmp/low.log" "$tmp/high.log"; do
     esac
     case "$variant:$ceiling" in
         # The pre-tolerance control artifact: 486.6 M instructions per play
-        # retrace on this window (docs/status/CURRENT.md, 2026-09-21).
+        # retrace on this window (docs/archive/status/CURRENT.md, 2026-09-21).
         control:13800) want="after 29737920 blocks at pc=0x80307ef4" ;;
         control:13900) want="after 29937744 blocks at pc=0x80307ef4" ;;
         control:14100) want="after 32203791 blocks at pc=0x80307ef4" ;;
@@ -142,7 +142,7 @@ for log in "$tmp/low.log" "$tmp/high.log"; do
         # tree (sha256 4288b958, the build whose 400-retrace smoke reports
         # 766,380 turns at pc=0x80246960): 400.0 M instructions per play retrace
         # against the 409.2 M control, a gain of 2.25 percent. The 14,532,577 /
-        # 20,464,729 pair that docs/status/CURRENT.md first recorded for this
+        # 20,464,729 pair that docs/archive/status/CURRENT.md first recorded for this
         # tolerance belongs to the earlier private composite 3b7ea820 and is not
         # this artifact's row.
         # Since 2026-09-24 the host writes the GX gather pipe without the

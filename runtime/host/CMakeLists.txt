@@ -48,6 +48,20 @@ add_executable(bluewake_host
     src/jump_button.c
     src/climb.c
     src/settings_menu.cpp
+    src/desktop_menu.cpp
+    src/desktop_settings.cpp
+    src/texture_pack_menu.cpp
+    src/wwhd/formats.cpp
+    src/wwhd/addrlib.cpp
+    src/wwhd/hd.cpp
+    src/wwhd/imaging.cpp
+    src/wwhd/sha256.cpp
+    src/wwhd/ui.cpp
+    src/wwhd/pack.cpp
+    src/wwhd/output_staging.cpp
+    src/wwhd/import_job.cpp
+    src/wwhd/disc_image.cpp
+    src/wwhd/wiiu_disc.cpp
     src/sprint.c
     src/quick_doors.c
     src/haptics.c
@@ -65,6 +79,8 @@ add_executable(bluewake_host
     src/scheduler_contract.c
     src/save_state.c)
 target_link_libraries(bluewake_host PRIVATE gxruntime GXRuntime::aurora z xxhash)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/wwhd_disc_crypto.cmake")
+target_link_libraries(bluewake_host PRIVATE bluewake_wwhd_disc_crypto)
 # The options menu (settings_menu.cpp) draws with Aurora's Dear ImGui.
 if(TARGET imgui)
     target_link_libraries(bluewake_host PRIVATE imgui)
@@ -194,6 +210,8 @@ set(BLUEWAKE_HOST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 include("${BLUEWAKE_REPO_ROOT}/cmake/host_state_save_test.cmake")
 include("${BLUEWAKE_REPO_ROOT}/cmake/dvd_completion_test.cmake")
 include("${BLUEWAKE_REPO_ROOT}/cmake/cache_flush_fallback_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_import_job_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_image_test.cmake")
 target_link_libraries(bluewake_dvd_completion_test PRIVATE z)
 include("${BLUEWAKE_REPO_ROOT}/cmake/haptics_test.cmake")
 target_link_libraries(bluewake_host_state_save_failure_test PRIVATE z)
@@ -328,16 +346,11 @@ target_link_libraries(bluewake_gather_dispatch_test PRIVATE gxruntime)
 target_compile_definitions(bluewake_gather_dispatch_test PRIVATE BLUEWAKE_GATHER_PIPE=1)
 add_test(NAME bluewake_gather_dispatch_test COMMAND bluewake_gather_dispatch_test)
 
-# Requires a local player-owned module; built explicitly, never run by public CI.
-add_executable(bluewake_native_math_test EXCLUDE_FROM_ALL
-    ${BLUEWAKE_REPO_ROOT}/tests/native_math_test.c
-    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_math.c
-    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_work_pool.c)
-target_include_directories(bluewake_native_math_test PRIVATE
-    ${BLUEWAKE_REPO_ROOT}/cmake/composite
-    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
-target_link_libraries(bluewake_native_math_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
-target_compile_options(bluewake_native_math_test PRIVATE -ffp-contract=off)
+# The native-math oracle requires a local player-owned module and remains an
+# explicit build; the synthetic guard and work-pool tests remain public-safe.
+include("${BLUEWAKE_REPO_ROOT}/cmake/native_math_tests.cmake")
+bluewake_add_native_math_tests()
+add_subdirectory(${BLUEWAKE_REPO_ROOT}/tests/native_work_pool native_work_pool_tests)
 
 # Requires a local player-owned module; built explicitly, never run by public CI.
 # Requires a local player-owned module; built explicitly, never run by public CI.
@@ -379,23 +392,6 @@ target_include_directories(bluewake_native_j3d_test PRIVATE
     ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
 target_link_libraries(bluewake_native_j3d_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
 target_compile_options(bluewake_native_j3d_test PRIVATE -ffp-contract=off)
-
-add_executable(bluewake_native_math_guard_test
-    ${BLUEWAKE_REPO_ROOT}/tests/native_math_guard_test.c
-    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_math.c
-    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_work_pool.c)
-target_include_directories(bluewake_native_math_guard_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
-target_link_libraries(bluewake_native_math_guard_test PRIVATE gxruntime)
-target_compile_options(bluewake_native_math_guard_test PRIVATE -ffp-contract=off)
-add_test(NAME bluewake_native_math_guard_test COMMAND bluewake_native_math_guard_test)
-
-if(NOT WIN32)
-    find_package(Threads REQUIRED)
-    target_link_libraries(bluewake_native_math_test PRIVATE Threads::Threads)
-    target_link_libraries(bluewake_native_math_guard_test PRIVATE Threads::Threads)
-    add_test(NAME bluewake_native_math_workers_test COMMAND bluewake_native_math_guard_test)
-    set_tests_properties(bluewake_native_math_workers_test PROPERTIES ENVIRONMENT "BLUEWAKE_NATIVE_WORKERS=2")
-endif()
 
 add_executable(bluewake_native_game_math_guard_test
     ${BLUEWAKE_REPO_ROOT}/tests/native_game_math_guard_test.c
@@ -826,7 +822,7 @@ target_include_directories(bluewake_launch_marker_test PRIVATE ${CMAKE_CURRENT_S
 add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)
 
 add_executable(bluewake_settings_state_test ../../tests/settings_state_test.cpp)
-target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
+target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_20)
 target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
 if(UNIX)

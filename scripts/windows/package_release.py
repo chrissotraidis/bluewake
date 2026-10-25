@@ -39,6 +39,7 @@ REQUIRED_LICENSES = {
     "BlueWake-GPL-3.0.txt": ROOT / "LICENSE",
     "RecompCore-COPYING.txt": ROOT / "ref/recompcore/COPYING",
     "Aurora-MIT.txt": ROOT / "ref/recompcore/GXRuntime/graphics/aurora/LICENSE",
+    "MbedTLS-Apache-2.0.txt": ROOT / "ref/recompcore/Externals/mbedtls/LICENSE",
     "SDL3-zlib.txt": DEPS / "sdl3_prebuilt-src/licenses/SDL3/LICENSE.txt",
     # The prebuilt Dawn package and DXC's DLLs carry no license text of their own.
     "Dawn-BSD-3-Clause.txt": ROOT / "windows/licenses/Dawn-BSD-3-Clause.txt",

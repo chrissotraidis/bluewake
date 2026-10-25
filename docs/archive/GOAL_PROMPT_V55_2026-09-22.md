@@ -5,7 +5,7 @@ workstream here, as the user asked it to, and the choice follows from the
 measurement the previous loop finished rather than from preference. The governing
 specification is [PRD.md](PRD.md), the operating procedure is
 [GOAL_LOOP.md](../GOAL_LOOP.md), the decision that this loop executes is
-[status/ROUTE_DECISION_2026-09-22.md](../status/ROUTE_DECISION_2026-09-22.md), and the
+[status/ROUTE_DECISION_2026-09-22.md](status/ROUTE_DECISION_2026-09-22.md), and the
 previous workstream page is [GOAL_PROMPT_V54_2026-09-22.md](GOAL_PROMPT_V54_2026-09-22.md).
 
 ## Why this is the next workstream, in one number
@@ -29,7 +29,7 @@ turns the claim into a list and works down it.
 ## Where this loop enters
 
 The LOGO-to-opening handoff on route B is now measured rather than assumed
-(docs/status/CURRENT.md, 2026-09-22). The scheduler diagnostic runs 600 original
+(docs/archive/status/CURRENT.md, 2026-09-22). The scheduler diagnostic runs 600 original
 scheduler frames, the LOGO's DVD-wait guard is fully open - queue drained, no object
 resource outstanding, no reset - so `dComIfG_changeOpeningScene` really runs and
 requests `fpcNm_OPENING_SCENE_e` with `fpcNm_OVERLAP0_e`. It cannot be answered

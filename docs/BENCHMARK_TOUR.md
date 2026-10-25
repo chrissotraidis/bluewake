@@ -1,5 +1,8 @@
 # The benchmark tour
 
+**Done:** jslay88 wrote it in #360, merged October 17. What's left is the first run on a build made from someone's
+own disc (the optional check below), at the next release candidate. The rest of this page is kept as the task was set.
+
 One task. It adds the command the speed work is waiting on. It does not make the game faster, and it does not need you to already know the runtime.
 
 The behaviour is already decided. Read [PERFORMANCE.md](PERFORMANCE.md) from "Phase 1: the benchmark tour" through the check at the end of that section. This page is who does it, and when to stop. If the two disagree, PERFORMANCE.md wins.

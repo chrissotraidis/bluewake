@@ -15,16 +15,16 @@ the render worker paused while the swapchain changes). BlueWake now builds from
 https://github.com/chrissotraidis/RecompCore, branch `bluewake-next`: 9618e9d plus 0114 (one DSP
 interpreter table layout under the Microsoft ABI, so Exact/LLE audio no longer calls address 0
 on Windows), with the same DolRecomp. The Builder fetches it at the commit pinned in
-`scripts/builder/profiles/bluewake.sh`; see docs/status/DEVICE_BUILD.md.
+`scripts/builder/profiles/bluewake.sh`; see docs/DEVICE_BUILD.md.
 
 Patches 0115-0125 add the ordered save, shutdown and audio fixes, opt-in display
 timing, and a render-worker identity fix reproduced with ThreadSanitizer. The stability baseline
 pin was `99e4748002d42c1a86fdcb33a47cd0e97292acff`. Tests and hardware limits are in
-[the local stability ledger](../../docs/status/LOCAL_STABILITY_2026-10-01.md).
+[the local stability ledger](../../docs/archive/status/LOCAL_STABILITY_2026-10-01.md).
 
 Patch 0126 preserves the published in-memory card contents after a directory-sync
 error, while continuing to report the error. Evidence is in
-[the overnight ledger](../../docs/status/OVERNIGHT_2026-10-02.md).
+[the overnight ledger](../../docs/archive/status/OVERNIGHT_2026-10-02.md).
 
 Patch 0127 resumes a paused, already buffered output before the overflow/drop
 path can prevent recovery; its actual SDL dummy-device regression covers the full queue.
@@ -55,7 +55,7 @@ is still required; donor scene results are not transferred.
 Patch 0140 changes session logging only: GX batches between 20 and 50 ms are summed
 into one `[gx-slow-sum]` line every ten seconds, and batches of 50 ms or more keep
 their own `[gx-slow]` line. A player's 104-minute Windows log had 33,712 of the old
-lines. Evidence is in [the stability plan](../../docs/status/STABILITY_PLAN_2026-10-03.md).
+lines. Evidence is in [the stability plan](../../docs/archive/status/STABILITY_PLAN_2026-10-03.md).
 
 Patch 0141 is Elliott Tate's slow-game detector for Smooth Motion (his RecompCore
 `0bb1fef`, Wind-Waker-Recomp patch 0122), with his authorship: the median of the last
@@ -146,3 +146,41 @@ Patch 0180 is pdale-boop's RecompCore #37, for BlueWake #338: `aurora_set_copy_c
 texture copy of exactly that size takes `fraction` of its source's width about the frame's middle and is scaled back
 to its full size, as a 4:3 camera would have taken it; `GXCopyTex` and gxcore's EFB copies both use it. Nothing
 changes until a game calls it: BlueWake does for the Picto Box's 152x104 copy, behind `picto_crop=1` (off by default).
+
+Patch 0182 is RecompCore #41: the HD look's cloud shadows take the sea's place from its plane, since positions from
+depth far out on the sea made straight-edged steps (the "square" shadows on Vulkan, a hard band on Metal), with gradient
+noise turned per octave. The cloud, sun-shadow, ambient-occlusion and bloom passes add half an 8-bit step of dither so
+their smooth shades don't band on the sea. 0181 is taken by draft #342.
+
+Patch 0179 is pdale-boop's RecompCore #40, for BlueWake #136: Smooth Motion without the flicker in the HD look, the
+clouds and the wave crests. Every in-between frame gets the HD look's effects (only the first of three at 120 FPS did,
+and the first of five at 180); their shadows and lights come from the in-between frame's camera, moved as
+`frame_interp` moves the scenery, instead of the latest one the game set; and copies drawn with the view matrix and
+their own world positions (the sky's clouds, the wave crests at sea) are paired by the centre of their vertices
+instead of their place in the list, which shifted whenever one faded or came into view and blended a cloud toward its
+neighbour's alpha, with their colours counting too (each cloud is drawn twice, once with alpha 1). The water around a
+swimming Link follows him as well: a ripple's growing rings, the trail of rings behind him and his wake, which stepped
+at 30 FPS or jumped back a ring whenever a new one was born. It sits on `bluewake-next` after #41, so this pin carries
+#37, #38 and #41 as well.
+
+Patch 0183 is pdale-boop's sun shadow map (`aurora_set_sun_shadow_map`). BlueWake turns it on with its sun shadows
+(`BLUEWAKE_HD_SUN_SHADOWS=1`, still off by default); `DOL_AURORA_SUN_SHADOW_MAP=0` keeps the screen's version alone. The HD look's sun shadows came from the screen, so something off screen cast nothing.
+With the map, each EFB pass's solid draws are drawn again from the sun into a depth map before the pass, with two
+fixed pipelines and each draw's own constants (no pipeline per draw), and each pixel's place in the world is looked up
+in it with a turned disc of lookups, at full resolution and without the screen's steps. Alpha-tested scenery (leaves,
+fences) casts its texture's cutout, the sail and flags cast, and blended furniture casts when its vertices stand still;
+the game's own shadows are left out while the map is on (`DOL_AURORA_GAME_SHADOWS=1` keeps them). In an in-between
+frame the draws take their blended constants and the map that frame's camera. The map is four cascades (1,250 to
+80,000 units; 4096 texels each on the high shadow quality, the default, 2048 on medium and low), with a bias for a low sun that grows with the surface's angle to it and nothing at
+the sea's height shading the water. Its long shadows hold until the sun is 3 degrees up, and at night it is drawn
+from the moon (opposite the sun) at half strength, from 12 degrees up. It keeps debug tools for testers, each off
+unless its variable is set (the F3 frame dump, `_DEBUG` views, `DOL_AURORA_SUN_SHADOW_MAP_ALL`,
+`DOL_AURORA_SUN_CASTER_LOG`, `DOL_AURORA_GAME_SHADOW_LOG`); docs/HD_SUN_SHADOW_MAP.md lists them.
+
+Patch 0184 preserves jslay88's RecompCore #43: vendored Dawn advances to `1155e0ed`, whose bundled
+Abseil includes `immintrin.h` correctly when the Linux AppImage builder enables BMI2 through
+`-march=x86-64-v3`. Cache callbacks use Dawn's setters; the prebuilt package tag stays unchanged.
+Patch 0185 keeps those callbacks compatible with the pinned Apple headers by omitting `noexcept`
+on their lambdas (RecompCore #44). The existing header's callback traits do not accept that qualifier.
+Focused Mac, iOS, tvOS and Android NDK source checks and a callback-forwarding fixture pass; full application
+builds and the Sunday gameplay/visual checks are separate. 0183 is reserved for #398's sun shadows.

@@ -14,6 +14,18 @@ if(NOT WIN32)
 endif()
 
 get_filename_component(BLUEWAKE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+
+# Windows shows the version and publisher under BlueWake.exe's Properties > Details. The version comes
+# from version.json, as it does for the Mac and iPhone apps, so it can't fall behind the release.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${BLUEWAKE_REPO_ROOT}/version.json)
+file(READ ${BLUEWAKE_REPO_ROOT}/version.json BLUEWAKE_VERSION_JSON)
+string(JSON BLUEWAKE_VERSION GET "${BLUEWAKE_VERSION_JSON}" version)
+if(NOT BLUEWAKE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "version.json: expected a version like 0.8.0, got '${BLUEWAKE_VERSION}'")
+endif()
+string(REPLACE "." "," BLUEWAKE_VERSION_COMMAS "${BLUEWAKE_VERSION},0")
+configure_file(src/bluewake_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/bluewake_version.h @ONLY)
+
 # RecompCore's checkout: ref/recompcore, or another (a worktree) for a build
 # beside the usual one.
 set(BLUEWAKE_RECOMPCORE ${BLUEWAKE_REPO_ROOT}/ref/recompcore CACHE PATH "The RecompCore checkout to build with")
@@ -79,7 +91,21 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/fps_watch.c
     ${BLUEWAKE_HOST_SRC}/game_options.c
-    ${BLUEWAKE_HOST_SRC}/mouse_camera.c)
+    ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
+    ${BLUEWAKE_HOST_SRC}/mouse_camera.c
+    ${BLUEWAKE_HOST_SRC}/texture_pack_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/formats.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/addrlib.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/hd.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/imaging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/sha256.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/ui.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/pack.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/output_staging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/import_job.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/disc_image.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/wiiu_disc.cpp)
 
 # The manifest (DPI awareness, long paths, UTF-8 code page) is merged into the
 # one the linker embeds.
@@ -96,12 +122,15 @@ add_executable(BlueWake
 # owns main() and hands over after setting the defaults.
 set_source_files_properties(${BLUEWAKE_HOST_SRC}/main.c PROPERTIES
     COMPILE_DEFINITIONS "main=bluewake_host_main")
-target_link_libraries(BlueWake PRIVATE gxruntime GXRuntime::aurora xxhash bluewake_posix_compat winmm bcrypt comctl32 comdlg32)
+target_link_libraries(BlueWake PRIVATE gxruntime GXRuntime::aurora xxhash ZLIB::ZLIB bluewake_posix_compat winmm bcrypt comctl32 comdlg32)
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_crypto.cmake")
+target_link_libraries(BlueWake PRIVATE bluewake_wwhd_disc_crypto)
 if(TARGET imgui)
     target_link_libraries(BlueWake PRIVATE imgui)
 endif()
 set_target_properties(BlueWake PROPERTIES LINKER_LANGUAGE CXX OUTPUT_NAME BlueWake)
 target_include_directories(BlueWake PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${BLUEWAKE_COMPAT_INCLUDES}
     ${BLUEWAKE_HOST_SRC}
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src
@@ -383,7 +412,11 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     target_link_libraries(bluewake_windows_disc_test PRIVATE bluewake_posix_compat comctl32 comdlg32)
     target_compile_definitions(bluewake_windows_disc_test PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     add_test(NAME bluewake_windows_disc_test COMMAND bluewake_windows_disc_test)
-    set_tests_properties(bluewake_windows_disc_test PROPERTIES TIMEOUT 30)
+    # 120 s, not 30. On the CI runners this test and bluewake_windows_crash_test
+    # (both start processes and write many files) have hung past 30 s together, at
+    # the same moments in unrelated pull requests, while passing in under a second
+    # (the crash test in about 5 s) otherwise. A real hang still fails.
+    set_tests_properties(bluewake_windows_disc_test PROPERTIES TIMEOUT 120)
 
     enable_testing()
     add_executable(bluewake_card_dispatch_lock_test ${BLUEWAKE_REPO_ROOT}/tests/card_dispatch_lock_test.c)
@@ -464,7 +497,8 @@ set_tests_properties(bluewake_audio_sink_test PROPERTIES TIMEOUT 15)
     target_compile_definitions(bluewake_windows_crash_driver PRIVATE BLUEWAKE_ENABLE_DEVELOPER_TRACING=1)
     add_test(NAME bluewake_windows_crash_test COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File ${BLUEWAKE_REPO_ROOT}/tests/windows_crash_test.ps1 -Driver $<TARGET_FILE:bluewake_windows_crash_driver>)
-    set_tests_properties(bluewake_windows_crash_test PROPERTIES TIMEOUT 30)
+    # 120 s, as bluewake_windows_disc_test above.
+    set_tests_properties(bluewake_windows_crash_test PROPERTIES TIMEOUT 120)
 
 
 add_executable(bluewake_crash_text_test ${BLUEWAKE_REPO_ROOT}/tests/crash_text_test.c)
@@ -478,9 +512,22 @@ set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)
 
 
 add_executable(bluewake_settings_state_test ${BLUEWAKE_REPO_ROOT}/tests/settings_state_test.cpp)
-target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_17)
+target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_20)
 target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
+# The settings core writes its file through atomic_file.h, whose rename is the
+# compat layer's atomic replace on Windows, as in the app.
+target_compile_options(bluewake_settings_state_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+target_link_libraries(bluewake_settings_state_test PRIVATE bluewake_posix_compat)
+
+add_executable(bluewake_settings_table_test ${BLUEWAKE_REPO_ROOT}/tests/settings_table_test.cpp)
+target_compile_features(bluewake_settings_table_test PRIVATE cxx_std_20)
+add_test(NAME bluewake_settings_table_test COMMAND bluewake_settings_table_test)
+
+add_executable(bluewake_settings_file_test ${BLUEWAKE_REPO_ROOT}/tests/settings_file_test.cpp)
+target_compile_features(bluewake_settings_file_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_settings_file_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
+add_test(NAME bluewake_settings_file_test COMMAND bluewake_settings_file_test)
 
 
 add_executable(bluewake_launch_marker_test ${BLUEWAKE_REPO_ROOT}/tests/launch_marker_test.c)
@@ -504,6 +551,8 @@ add_test(NAME bluewake_save_state_test COMMAND bluewake_save_state_test)
 include("${BLUEWAKE_REPO_ROOT}/cmake/host_state_save_test.cmake")
 include("${BLUEWAKE_REPO_ROOT}/cmake/dvd_completion_test.cmake")
 include("${BLUEWAKE_REPO_ROOT}/cmake/cache_flush_fallback_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_import_job_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_image_test.cmake")
 target_include_directories(bluewake_cache_flush_fallback_test PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})
 target_compile_options(bluewake_cache_flush_fallback_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
 target_link_libraries(bluewake_cache_flush_fallback_test PRIVATE bluewake_posix_compat)

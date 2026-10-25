@@ -64,6 +64,12 @@ vendored Wii U surface address library is AboodXD's BFRES-Tool addrlib under
 GPL-3.0-or-later; its license, copyright and pinned source are recorded in
 `scripts/wwhd/vendor/`. Format reader attribution is in `docs/WWHD_TEXTURES.md`.
 
+The native importer in `runtime/host/src/wwhd/` uses the AES and SHA-1 sources
+already tracked in the pinned RecompCore's `Externals/mbedtls` (Mbed TLS 2.28.0,
+Apache-2.0). These sources retain their copyright notices; the apps include
+their license. No console keys are compiled into the importer. Its encrypted
+disc tests generate toy images with deliberately synthetic keys.
+
 ## Stage select names
 
 `config/stage_select/` holds English names for the developers' stage select that is still on the disc

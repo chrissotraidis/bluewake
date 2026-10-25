@@ -223,7 +223,9 @@ def index_gc(path: Path, errors: list):
 def hd_files(path: Path, args):
     suffixes = (".szs", ".sarc", ".pack", ".bfres")
     if path.is_dir():
-        for p in sorted(path.rglob("*")):
+        # POSIX order on every OS: Windows paths compare without case, which picked a different (identical)
+        # copy of 68 textures than the Mac, Linux and the native importer (#315).
+        for p in sorted(path.rglob("*"), key=lambda p: p.as_posix()):
             if p.is_file() and p.suffix.lower() in suffixes:
                 if args.only and not any(s.lower() in p.as_posix().lower() for s in args.only):
                     continue
@@ -390,7 +392,7 @@ def build(args) -> dict:
                     t.name.lower() == "c_nintendo_e"}
         fallback = (add_fallback(staging, [t["file"] for t in accepted], args.fallback_pack, excluded)
                     if getattr(args, "fallback_pack", None) else None)
-        tool_sources = [Path(__file__), *sorted((ROOT / "scripts/wwhd").rglob("*.py")),
+        tool_sources = [Path(__file__), *sorted((ROOT / "scripts/wwhd").rglob("*.py"), key=lambda p: p.as_posix()),
                         ROOT / "scripts/wwhd/requirements.txt", ROOT / "scripts/wwhd/yaz0_native.c"]
         report = {"format": 1, "name": "Wind Waker HD (local disc import)",
                   "created_utc": datetime.now(timezone.utc).isoformat(),

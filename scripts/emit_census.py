@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Attribute emitted host code to guest opcodes, per generated chunk.
 
-The dynamic census in docs/status/CURRENT.md says the play scene is
+The dynamic census in docs/archive/status/CURRENT.md says the play scene is
 instruction-bound at IPC 4.01, so the only lever is fewer host instructions per
 guest instruction - and the guest side is a long tail, which means the fix has to
 be broad rather than targeted at a few functions. The question that leaves is

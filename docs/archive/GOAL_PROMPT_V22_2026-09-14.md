@@ -197,7 +197,7 @@ is **not** the gate.
 
 1. **Read v22 out.** Do not read it live as a verdict; wait for the ceiling stop.
    Then write the verdict down with the line that carries it.
-2. **If the W hold passes**, append one short section to `docs/status/CURRENT.md`
+2. **If the W hold passes**, append one short section to `docs/archive/status/CURRENT.md`
    and send the report this loop owes.
 3. **The clean time-to-playable run** (H-TTP-TRACE-TAX): the double-click path
    with no exported variables, read from the host's own `[frame-timing]` stamps,
@@ -239,7 +239,7 @@ is **not** the gate.
 An iteration counts only if time-to-playable fell, or fps moved on a named path,
 or a human can now see, hear or do something they could not before. One
 hypothesis, one small change, one build, one measurement, and at most one short
-section appended to `docs/status/CURRENT.md`. **A document is not an iteration**,
+section appended to `docs/archive/status/CURRENT.md`. **A document is not an iteration**,
 and neither is a probe: a probe is a cost paid to find the work. Report to the
 user every three iterations in one paragraph. Silence is not acceptable; neither
 is a document about why it cannot be done.

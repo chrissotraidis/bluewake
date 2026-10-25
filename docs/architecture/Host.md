@@ -29,20 +29,14 @@ compatibility and graphics services.
 ```mermaid
 flowchart TD
     Package["Packaged app"]
-    Startup["`Platform
-startup`"]
-    Paths["`Resources +
-data paths`"]
-    Host["`Shared host
-entry`"]
+    Startup["Platform startup"]
+    Paths["Runtime paths"]
+    Host["Shared host"]
     Module["Game module"]
-    Runtime["`State +
-services
-+ graphics`"]
+    Runtime["Runtime systems"]
 
     Package --> Startup --> Host
-    Paths -->|"`resolved by
-wrapper or host`"| Host
+    Paths -->|"resolved paths"| Host
     Host --> Module
     Host --> Runtime
 ```
@@ -59,15 +53,13 @@ order.
 flowchart TD
     Linux["Linux entry"]
     Windows["Windows entry"]
-    Mobile["`iOS, iPadOS,
-and tvOS entry`"]
+    Mobile["Apple mobile entry"]
     Mac["macOS app"]
-    Host["`Shared host
-entry`"]
+    Host["Shared host"]
 
-    Linux -->|"paths and configuration"| Host
-    Windows -->|"paths and configuration"| Host
-    Mobile -->|"paths and configuration"| Host
+    Linux -->|"configuration"| Host
+    Windows -->|"configuration"| Host
+    Mobile -->|"configuration"| Host
     Mac -->|"enters directly"| Host
 ```
 
@@ -84,13 +76,13 @@ entry`"]
 flowchart TD
     Start["Linux process startup"]
     Entry["Linux entry layer"]
-    Resources["Application resources<br/>module, disc, DSP files"]
-    Data["Writable player data<br/>settings, saves, logs"]
+    Resources["Application resources"]
+    Data["Player data"]
     Host["Shared host"]
 
     Start --> Entry
     Resources -->|"resolve paths"| Entry
-    Data <-->|"select paths and read settings"| Entry
+    Data <-->|"paths and settings"| Entry
     Entry -->|"prepared arguments"| Host
 ```
 
@@ -116,15 +108,15 @@ recovery, and passes the module path to `bluewake_host_main`.
 
 ```mermaid
 flowchart TD
-    Start["Windows process startup"]
+    Start["Windows startup"]
     Entry["Windows entry layer"]
-    Resources["Executable-relative resources"]
-    Data["Windows player-data paths"]
+    Resources["Application resources"]
+    Data["Player data"]
     Host["Shared host"]
 
     Start --> Entry
     Resources -->|"resolve paths"| Entry
-    Data -->|"resolve writable locations"| Entry
+    Data -->|"writable paths"| Entry
     Entry -->|"prepared arguments"| Host
 ```
 
@@ -148,17 +140,16 @@ SDL metadata, and the settings hotkey before entering the shared host.
 
 ```mermaid
 flowchart TD
-    Start["Apple application startup"]
+    Start["Apple app startup"]
     Entry["Apple entry layer"]
-    Bundle["App bundle<br/>packaged resources"]
-    Storage["Writable application storage"]
-    Host["`Shared host entry
-bluewake_host_main`"]
+    Bundle["App bundle"]
+    Storage["Player data"]
+    Host["Shared host"]
 
     Start --> Entry
     Bundle -->|"resolve resource paths"| Entry
-    Storage -->|"resolve player-data paths"| Entry
-    Entry -->|"configured host startup"| Host
+    Storage -->|"writable paths"| Entry
+    Entry -->|"configuration"| Host
 ```
 
 On iOS and iPadOS, SDL starts `UIApplicationMain` before the Objective-C entry
@@ -186,17 +177,13 @@ application alive.
 ```mermaid
 flowchart TD
     Start["BlueWake.app startup"]
-    Host["`Shared host entry
-main`"]
-    Bundle["`App bundle
-Frameworks and
-Resources`"]
-    Storage["`Writable
-player data`"]
+    Host["Shared host"]
+    Bundle["App bundle"]
+    Storage["Player data"]
 
     Start -->|"enters directly"| Host
-    Bundle -->|"resolve packaged inputs"| Host
-    Storage <-->|"settings, saves, and logs"| Host
+    Bundle -->|"packaged inputs"| Host
+    Storage <-->|"persistence"| Host
 ```
 
 macOS does not use the UIKit entry shim or rename the shared entry point. Its
@@ -214,10 +201,10 @@ and optional DSP files from `Contents/Resources`.
 
 ```mermaid
 flowchart TD
-    Input["Platform-provided configuration"]
-    Parse["Parse arguments and options"]
-    Validate["Validate required inputs"]
-    Init["Continue into host initialization"]
+    Input["Platform configuration"]
+    Parse["Parse options"]
+    Validate["Validate inputs"]
+    Init["Initialize host"]
 
     Input --> Parse --> Validate --> Init
 ```
@@ -257,12 +244,12 @@ execution with service work.
 
 ```mermaid
 flowchart TD
-    Configure["Configure settings<br/>and validate inputs"]
-    Load["Load game module<br/>and validate ABI"]
-    Initialize["Initialize guest state,<br/>services, and graphics"]
+    Configure["Configure and validate"]
+    Load["Load game module"]
+    Initialize["Initialize runtime"]
     Run["Run translated code"]
-    Service["Service deadlines,<br/>callbacks, and interrupts"]
-    Stop["Finish pending writes,<br/>close services, and shut down"]
+    Service["Service guest events"]
+    Stop["Shut down"]
 
     Configure --> Load --> Initialize --> Run
     Run <--> Service
@@ -282,32 +269,32 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph Host["BlueWake host"]
-        Check{"Execution limit or<br/>stop reason reached?"}
-        Turn["Apply per-turn host work<br/>and begin guest-time turn"]
-        Quit{"Platform quit<br/>requested?"}
-        Ready["Service ready host work<br/>and pending interrupts"]
-        Budget["Prepare cycle budget<br/>and device deadline"]
-        Mapped{"Dispatch resolved<br/>or recovered?"}
-        End["End guest-time turn<br/>and advance devices"]
-        Events["Deliver ready callbacks,<br/>decrementer, and exceptions"]
+        Check{"Stop condition?"}
+        Turn["Begin guest turn"]
+        Quit{"Quit requested?"}
+        Ready["Service host work"]
+        Budget["Set cycle budget"]
+        Mapped{"Dispatch resolved?"}
+        End["End guest turn"]
+        Events["Deliver guest events"]
         Outcome{"Turn outcome?"}
         Record["Record completed turn"]
-        Stop["Leave loop and<br/>report stop reason"]
+        Stop["Leave loop"]
     end
 
     subgraph Module["Native game module"]
-        Dispatch["Resolve guest PC and run<br/>translated DOL or REL code"]
-        Boundary{"Timing, exception, callback,<br/>or service boundary?"}
+        Dispatch["Run translated code"]
+        Boundary{"Yield boundary?"}
         Dispatch --> Boundary
-        Boundary -->|"continue translated execution"| Dispatch
+        Boundary -->|"continue"| Dispatch
     end
 
     Check -->|"no"| Turn --> Quit
     Check -->|"yes"| Stop
     Quit -->|"yes"| Stop
     Quit -->|"no"| Ready --> Budget
-    Budget -->|"call module dispatcher<br/>for this guest-time turn"| Dispatch
-    Dispatch -->|"guest address not mapped"| Mapped
+    Budget -->|"dispatch"| Dispatch
+    Dispatch -->|"unmapped address"| Mapped
     Boundary -->|"yield control to host"| Mapped
     Mapped -->|"no"| Stop
     Mapped -->|"yes"| End --> Events --> Outcome
@@ -327,6 +314,9 @@ decrementer, handles exceptions, and begins another turn unless a stop
 condition was set. MMIO and edge services can also run while translated code
 is dispatching, so the diagram summarizes control flow rather than exact call
 order.
+
+For the complete ownership, dispatch, service, graphics, worker, and profiling
+view of this execution path, see the [game-thread architecture](GameThread.md).
 
 | Component | What it does |
 | --- | --- |
@@ -377,5 +367,14 @@ CPU storage.
 | Detect a quit request, configured limit, or runtime stop reason | Guest dispatch ends at a controlled boundary | [Main runtime loop](../../runtime/host/src/main.c#L8651-L8662) |
 | Finish pending settings and diagnostic writes, then close mutable storage | Player data written during the run remains available to the next launch | [Card runtime](../../runtime/host/src/card_runtime.c), [SRAM runtime](../../runtime/host/src/ipl_sram.c) |
 | Tear down services and shared storage | Native resources are released before returning to the platform layer | [Host shutdown](../../runtime/host/src/main.c#L16364-L16373) |
+
+The host is the broadest compiled source-only test graph. Focused executables
+exercise scheduling, persistence, input, audio, shutdown, and renderer-facing
+contracts; conditional tests add a local composite module or optional DSP
+adapter; platform CMake entry points prove that shared behavior still compiles
+and runs under Linux and Windows. See
+[compiled component tests](Testing.md#compiled-component-tests),
+[generated and conditional tests](Testing.md#generated-and-conditional-tests),
+and [platform entry points](Testing.md#platform-entry-points).
 
 Return to the runtime [high-level view](Runtime.md#high-level-view).

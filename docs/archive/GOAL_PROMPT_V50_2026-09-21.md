@@ -126,7 +126,7 @@ optimisation work is scheduled.
   open addressing terminated by an empty slot - sound by construction - the
   generator writes the header and verifies every key, and the test asserts the
   lookup finds every key it emits.
-- **Open:** write the one-page position into `docs/status/CURRENT.md` and keep
+- **Open:** write the one-page position into `docs/archive/status/CURRENT.md` and keep
   it small; the composite still has to regenerate from the tree.
 - **Open:** the composite must regenerate from the tree. Until it does, no
   artifact in `build/` is reproducible and every "the generator change is

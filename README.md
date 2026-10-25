@@ -15,8 +15,6 @@
   <a href="https://discord.gg/xwHfUD2bxW"><img alt="Join the community on Discord" src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&amp;logoColor=white"></a>
 </p>
 
-![BlueWake at the Wind Waker title screen on an iPad Pro, running at 30 FPS and full speed, with the touch controls visible](docs/images/bluewake-ipad-title.jpg)
-
 > [!IMPORTANT]
 > **Bring your own disc.** BlueWake needs your own legally obtained copy of *The Wind Waker* for
 > GameCube, USA version (`GZLE01`, revision 0). This repository contains no disc image, game assets
@@ -29,10 +27,11 @@
 | **Windows** 10 or 11 | [Download the ready-made build](#windows) and choose your disc image |
 | **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac or, new and experimental, a Windows PC, then install it |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
-| **Apple TV** | Follow the [tvOS build guide](docs/status/TVOS_BUILD.md) (experimental) |
+| **Apple TV** | Follow the [tvOS build guide](docs/TVOS_BUILD.md) (experimental) |
 | **Linux** (x86-64) | [Build the native version](docs/LINUX.md); a ready-made download is not published yet |
+| **Android** (arm64) | [Build your own APK](docs/ANDROID.md) on a Windows PC (experimental) |
 
-On Mac, iPhone, iPad and Linux, the app you build contains code translated from your disc. **It is yours
+On Mac, iPhone, iPad, Linux and Android, the app you build contains code translated from your disc. **It is yours
 alone: never share or upload it.**
 
 **Questions or bugs?** Ask on [Discord](https://discord.gg/xwHfUD2bxW) or
@@ -43,7 +42,7 @@ alone: never share or upload it.**
 Wind Waker Recomp has moved here. Its creator, [Elliott](https://github.com/elliotttate), now
 maintains BlueWake together with Chris, and his work is part of BlueWake with his authorship kept.
 
-- **Windows:** BlueWake 0.7.0, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
+- **Windows:** BlueWake 0.8.0, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
   is built from BlueWake itself and replaces Wind Waker Recomp 0.4.0. Smooth
   Motion is off by default (press **F10** to turn it on), and 0.4.0's experimental 60 FPS game logic
   is gone.
@@ -57,14 +56,14 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download `BlueWake-v0.7.0-windows-x64.zip` from the
+1. Download `BlueWake-v0.8.0-windows-x64.zip` from the
    [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest).
 2. Unpack the whole ZIP and run `BlueWake.exe`.
 3. On first launch, choose your disc image (`.iso` or `.gcm`). A Dolphin `.rvz` must first be
    converted to ISO in Dolphin: right-click the game and choose **Convert File**.
 
-You need a Direct3D 12 GPU and a CPU with AVX2 (Intel Haswell from 2013, AMD Ryzen, or newer). If
-nothing happens when you open it, see the FAQ below. To build it yourself from your disc instead, see
+You need a CPU with AVX2 (Intel Haswell from 2013, AMD Ryzen, or newer) and a Direct3D 12 GPU; since 0.8.0 an older
+GPU gets Direct3D 11 instead of a black screen (not yet checked on such a PC). If nothing happens when you open it, see the FAQ below. To build it yourself from your disc instead, see
 [BlueWake on Windows](docs/WINDOWS.md).
 
 ### Linux
@@ -171,8 +170,9 @@ Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.m
 - **Discord:** [discord.gg/xwHfUD2bxW](https://discord.gg/xwHfUD2bxW), one community for BlueWake and
   its sibling projects such as KartPad, MeleePad and SunPad
 - **Bug reports:** **⋯ › Help & Feedback › Report a Problem on GitHub** opens a prefilled issue.
-  Say which device, where in the game it happened and what you saw, and attach the session log
-  (**Share Session Log**, same menu). Please don't attach game files or disc images.
+  Say which device, where in the game it happened and what you saw, and attach the session logs
+  (**Share Session Log**, same menu: it shares this session's log and the one before, so after a crash,
+  reopen BlueWake and share). Please don't attach game files or disc images.
 
 ## Frequently asked questions
 
@@ -252,10 +252,6 @@ turn it off if you see glitches or slowdowns.
 Yes, on an A13 or newer. The touch controls sit in the black bars beside the picture. The busiest
 scenes dip below 30 FPS on an iPhone 14.
 
-<p align="center">
-  <img alt="BlueWake on an iPhone 14, with the touch controls in the black bars beside the picture" src="docs/images/bluewake-iphone-title.jpg" width="720">
-</p>
-
 </details>
 
 <details>
@@ -270,10 +266,11 @@ following [the Linux guide](docs/LINUX.md). A ready-made Linux download has not 
 <details>
 <summary><strong>Is there an Android version?</strong></summary>
 
-Not yet. The Android port is still in review ([#93](https://github.com/chrissotraidis/bluewake/pull/93)) and
-isn't in `main`. It builds from your own disc and plays on a Galaxy Z Fold 7, where its latest cool-start
-check ran at full speed at Outset's pier (October 14). There is no Android release yet. Follow
-[#75](https://github.com/chrissotraidis/bluewake/issues/75) for news.
+An experimental one, which you build yourself. The Android port ([#93](https://github.com/chrissotraidis/bluewake/pull/93),
+by LiquidAzir) is in `main` since October 17: [the Android guide](docs/ANDROID.md) builds an APK from your own
+disc on a Windows PC. It has been checked on a Galaxy Z Fold 7, where Outset runs at full speed. There is no
+ready-made APK, because it would hold game code. Follow [#75](https://github.com/chrissotraidis/bluewake/issues/75)
+for news.
 
 </details>
 
@@ -282,7 +279,7 @@ check ran at full speed at Outset's pier (October 14). There is no Android relea
 
 Yes. On iPhone and iPad, any controller iOS supports works, with rumble, camera inversion and button
 remapping under **⋯ › Controller**. Mac, Windows and Linux work with Xbox, PlayStation, Switch Pro and
-other SDL controllers; remap buttons under **Settings › Controls › Controller buttons** (F1 or Esc
+other SDL controllers; remap buttons under **Settings › Controls › Controller button mapping** (F1 or Esc
 opens settings). The same tab changes what the mouse buttons and keyboard keys press.
 The settings menu works with a controller too: the D-pad or left stick moves, the game's A chooses, its B
 closes, LB and RB change tabs and the right stick scrolls.
@@ -348,6 +345,17 @@ unless you pick specific ones, since they compete with the main textures. You do
 </details>
 
 <details>
+<summary><strong>Windows says the download is a virus</strong></summary>
+
+BlueWake isn't code-signed yet, so antivirus programs sometimes block a brand-new release they haven't seen
+before. Download it only from the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest),
+check the zip against the release's `SHA256SUMS`, and see
+[If Windows says it's a virus](docs/WINDOWS.md#if-windows-says-its-a-virus) for what to do next. Please tell us
+the detection name it showed.
+
+</details>
+
+<details>
 <summary><strong>BlueWake.exe does nothing when I open it</strong></summary>
 
 First check your processor. The Windows build needs a CPU with AVX2 (Intel Haswell from 2013, AMD
@@ -370,7 +378,7 @@ Don't delete `%APPDATA%\BlueWake` to troubleshoot: it holds your saves and setti
 - [Build your own BlueWake](docs/BUILD_YOUR_OWN.md): the player's guide for iPhone, iPad and Mac
 - [BlueWake on Windows](docs/WINDOWS.md): playing and building on Windows
 - [BlueWake on Linux](docs/LINUX.md): building and playing on Linux and the Steam Deck
-- [Apple TV build](docs/status/TVOS_BUILD.md) and [device build options](docs/status/DEVICE_BUILD.md)
+- [Apple TV build](docs/TVOS_BUILD.md) and [device build options](docs/DEVICE_BUILD.md)
 - [Mods](docs/MODS.md), [Wind Waker HD textures](docs/WWHD_TEXTURES.md) and the
   [developers' stage select](docs/STAGE_SELECT.md)
 - [The Builder](docs/BUILDER.md): how the build works, and reusing it for other ports
@@ -398,7 +406,8 @@ Don't delete `%APPDATA%\BlueWake` to troubleshoot: it holds your saves and setti
 - [Ian MacFarlane (@iannotian)](https://github.com/iannotian), for the Apple TV version
 
 BlueWake is developed with substantial AI assistance for code, testing, documentation and debugging.
-The [engineering log](docs/status/CURRENT.md) records what has been checked, and on what.
+[The plan](docs/GOAL_LOOP.md) and [the priorities](docs/PRIORITIES.md) record what has been checked, and on what;
+older records are in [docs/archive](docs/archive).
 
 ## License and legal
 
@@ -409,3 +418,13 @@ See [RIGHTS_AND_LICENSES.md](RIGHTS_AND_LICENSES.md) for details and for game co
 BlueWake is an independent fan project, not affiliated with or endorsed by Nintendo. *The Legend of
 Zelda*, *The Wind Waker* and GameCube are trademarks of Nintendo. You need your own legally obtained
 disc and are responsible for following the laws that apply to it.
+
+## Legal
+
+BlueWake is an unofficial, fan-made project. It is not affiliated with, endorsed
+by, or sponsored by Nintendo. The Legend of Zelda: The Wind Waker and related
+names and marks are trademarks of Nintendo (and their respective owners). The
+source code in this repository contains no game data, disc images, or extracted
+assets. To use it, you need your own legally obtained copy of the game. On Mac,
+iPhone, iPad, Apple TV, Linux and Android, you build it yourself on your own
+machine. Please don't share game files or builds made from them.

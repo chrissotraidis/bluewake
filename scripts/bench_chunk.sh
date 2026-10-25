@@ -38,7 +38,7 @@ sdk=$(xcrun --show-sdk-path)
 work="${BLUEWAKE_CHUNK_BENCH_DIR:-/tmp/bw-chunk-bench}"
 
 # The hottest generated chunks in the live play window, from the rendered
-# sample in docs/status/CURRENT.md. 0201 is 15.7% of the sampled main thread.
+# sample in docs/archive/status/CURRENT.md. 0201 is 15.7% of the sampled main thread.
 HOT_CHUNKS="0201 0144 0015 0145 0181 0200 0187 0203 0188 0148"
 
 chunk_ids=()

@@ -24,7 +24,7 @@ archive handoff, opening transition and METER admission remain next; audio start
 reset recovery and legacy MAT2/BLS formats are not qualified here. Solid-heap
 individual-free/size warnings remain recorded. No product gate advances; full PRD
 goal active. Recovery: `local-research/checkpoints/reorientation-20260909-logo-cold-start/`.
-See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-09.md).
+See [world integration evidence](ROUTE_B_WORLD_INTEGRATION_2026-09-09.md).
 
 > **STARTUP RESOURCE HANDOFF FRONTIER:** the expanded world now links and
 > passes strict scripted 180-frame regression. Original scheduler reaches METER
@@ -651,7 +651,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > constant camera, empty body, or response fence and call it gameplay.
 > The explicit player census target remains correctly failing (exit 2) in
 > all three modes; default 67/67 tests and private regressions pass.
-> Evidence: `docs/status/PLAYABILITY_CRITICAL_PATH_2026-09-06.md`.
+> Evidence: `docs/archive/status/PLAYABILITY_CRITICAL_PATH_2026-09-06.md`.
 >
 > **BW-P4-0124 deferred / S1 / ROUTE_B_OBJ_TORIPOST_IDLE_LIFECYCLE.**
 > Its reusable heap/morph prerequisites are preserved. Resume required mailbox
@@ -666,7 +666,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > modes, 67/67 public tests, and private regressions pass. Next: independent
 > resource/createInit/fresh-save WAIT/idle execute/draw/delayed-delete
 > composition. Keep interactive gameplay and parent composition closed.
-> Evidence: `docs/status/ROUTE_B_ACTOR_SOLID_HEAP_MANAGER_2026-09-06.md`.
+> Evidence: `docs/archive/status/ROUTE_B_ACTOR_SOLID_HEAP_MANAGER_2026-09-06.md`.
 >
 > **BW-P4-0124 active / S1 / ROUTE_B_OBJ_TORIPOST_IDLE_LIFECYCLE
 > (2026-09-06, allocation prerequisite closed).** Resume independent original
@@ -681,7 +681,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > plus parent regression pass. Direct BG heap-callback failure cleans up;
 > full create-failure scene restart remains fenced. All three private matrices
 > and 66/66 public tests pass. Not a full-game leak-free claim. Evidence:
-> `docs/status/ROUTE_B_BG_MOVEBG_ALLOCATION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_BG_MOVEBG_ALLOCATION_2026-09-06.md`.
 >
 > **BW-P4-0125 active / S1 / ROUTE_B_NATIVE_ALLOCATION_OWNERSHIP
 > (2026-09-06, model/morph repair).** Patch 0142 closes the exact Toripost
@@ -692,7 +692,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > references before migrating those sites, then prove repeated BG/Stone2 and
 > parent cleanup. Actor lifecycle `BW-P4-0124` remains deferred. Public 66/66
 > tests and existing private regressions pass; no full-game leak-free claim.
-> Evidence: `docs/status/ROUTE_B_MODEL_MORPH_ALLOCATION_2026-09-06.md`.
+> Evidence: `docs/archive/status/ROUTE_B_MODEL_MORPH_ALLOCATION_2026-09-06.md`.
 >
 > **BW-P4-0125 active / S1 / ROUTE_B_NATIVE_ALLOCATION_OWNERSHIP
 > (2026-09-06).** Toripost's original heap callback returns success, but
@@ -703,7 +703,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > membership and repeated actual reclamation, including BG/Stone2 regression
 > coverage. Do not restore global allocation blindly across host libraries or
 > advance actor composition on a successful callback alone. Evidence:
-> `docs/status/ROUTE_B_TORIPOST_HEAP_OWNERSHIP_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_TORIPOST_HEAP_OWNERSHIP_2026-09-06.md`.
 >
 > **BW-P4-0124 deferred / S1 / ROUTE_B_OBJ_TORIPOST_IDLE_LIFECYCLE.**
 > Resume after the measured shared allocation owner is closed; the actor is
@@ -715,7 +715,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > idle-profile prerequisites. Next, partition and independently register the
 > original resource/solid-heap, fresh-save WAIT, stable execute/draw, and
 > delayed-delete lifecycle with all interactive branches fail-closed.
-> Evidence: `docs/status/ROUTE_B_TORIPOST_AUDIO_CONSTRUCTION_2026-09-06.md`.
+> Evidence: `docs/archive/status/ROUTE_B_TORIPOST_AUDIO_CONSTRUCTION_2026-09-06.md`.
 >
 > **BW-P4-0123 resolved / S1 / ROUTE_B_TORIPOST_ANIMATION_AUDIO_CONSTRUCTION
 > (2026-09-06).** Original JAI construction/inert stop passes with unchanged
@@ -739,7 +739,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > exact Toripost BCKS BAS data, and leave position-driven playback/JAIZel sound
 > dispatch as named abort fences. Require all three configurations, then return
 > to the actor create/WAIT/execute/draw/delete partition. Evidence:
-> `docs/status/ROUTE_B_MCA_MORF_OWNER_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_MCA_MORF_OWNER_2026-09-06.md`.
 >
 > **BW-P4-0122 resolved / S1 / ROUTE_B_TORIPOST_MCAMORF_OWNER
 > (2026-09-06).** Patches 0137-0139 partition the original McaMorf and BCK
@@ -749,7 +749,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > calculation, and material-packet evidence in Debug, Release, and strict
 > ASan/UBSan. The full 65-test public and exact parent/Stone2/BG private
 > matrices remain green. Evidence:
-> `docs/status/ROUTE_B_MCA_MORF_OWNER_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_MCA_MORF_OWNER_2026-09-06.md`.
 >
 > **BW-P4-0122 active / S1 / ROUTE_B_TORIPOST_MCAMORF_OWNER
 > (2026-09-06).** The Toripost link census reduces its raw 107-symbol object
@@ -767,7 +767,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > retain the exact BCK transition function through an equally bounded source
 > tier. Reuse qualified model-create/draw owners and verify focused behavior in
 > all three configurations before actor execution. Evidence:
-> `docs/status/ROUTE_B_OBJ_TORIPOST_LINK_CENSUS_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_OBJ_TORIPOST_LINK_CENSUS_2026-09-06.md`.
 >
 > **BW-P4-0121 resolved / S1 / ROUTE_B_OBJ_TORIPOST_PROFILE_LINK_CENSUS
 > (2026-09-06).** A fail-closed link probe measured 74 unresolved symbols
@@ -775,7 +775,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > collision/matrix runtime. The frontier is classified into six owner families,
 > and the temporary failing target was removed. The next reusable source unit
 > is the five-symbol McaMorf/BCK boundary. Evidence:
-> `docs/status/ROUTE_B_OBJ_TORIPOST_LINK_CENSUS_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_OBJ_TORIPOST_LINK_CENSUS_2026-09-06.md`.
 >
 > **BW-P4-0121 active / S1 / ROUTE_B_OBJ_TORIPOST_PROFILE_LINK_CENSUS
 > (2026-09-06).** Patch 0136 closes Toripost's two strict representation
@@ -794,7 +794,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > branches named, fail-closed boundaries before registering one independent
 > standard Toripost request. Keep parent composition, the other 47 requests,
 > another BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_OBJ_TORIPOST_SOURCE_PORTABILITY_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_OBJ_TORIPOST_SOURCE_PORTABILITY_2026-09-06.md`.
 >
 > **BW-P4-0120 resolved / S1 / ROUTE_B_OBJ_TORIPOST_SOURCE_PORTABILITY
 > (2026-09-06).** Patch 0136 closes the unsigned collision-mask and J3D model
@@ -802,7 +802,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > Release, and strict ASan/UBSan at 0.41% adaptation across the actor/header
 > boundary. Full default builds, all 65 public tests, and the exact parent,
 > Stone2, and BG private regressions pass in all three modes. Evidence:
-> `docs/status/ROUTE_B_OBJ_TORIPOST_SOURCE_PORTABILITY_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_OBJ_TORIPOST_SOURCE_PORTABILITY_2026-09-06.md`.
 >
 > **BW-P4-0120 active / S1 / ROUTE_B_OBJ_TORIPOST_SOURCE_PORTABILITY
 > (2026-09-06).** The exact Room44 parent now composes Stone2 and leaves 48
@@ -823,7 +823,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > link closure. Keep profile execution, parent composition, the other 47
 > requests, event/talk/item behavior, another BlueWake process, and another
 > Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_STONE2_CHILD_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_STONE2_CHILD_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0119 resolved / S1 / ROUTE_B_ROOM_SCENE_STONE2_CHILD_EXECUTION
 > (2026-09-06).** The exact parent now retains Stone2 beside BG, KYTAG01,
@@ -832,7 +832,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > crosses delayed collision/heap/resource teardown before BG and parent
 > cleanup. Exact Debug, Release, strict ASan/UBSan, both standalone persistent
 > child regressions, and all 65 public tests pass. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_STONE2_CHILD_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_STONE2_CHILD_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0119 active / S1 / ROUTE_B_ROOM_SCENE_STONE2_CHILD_EXECUTION
 > (2026-09-06).** The exact type-3 `Ekao` request now completes independent
@@ -850,7 +850,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > delayed delete and resource decrement precede parent teardown. Continue
 > cancelling the other 48 requests and keep closed gameplay branches, another
 > BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_STONE2_PROFILE_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_STONE2_PROFILE_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0118 resolved / S1 / ROUTE_B_STONE2_PROFILE_LINK_CENSUS
 > (2026-09-06).** Patch 0135 closes the bounded wait-mode owner graph. The
@@ -860,7 +860,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > heap, and resource teardown. The patch's two-source adaptation density is
 > 7.29%. Exact Debug, Release, strict ASan/UBSan, the BG lifecycle regression,
 > and all 65 public tests pass. Evidence:
-> `docs/status/ROUTE_B_STONE2_PROFILE_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_STONE2_PROFILE_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0118 active / S1 / ROUTE_B_STONE2_PROFILE_LINK_CENSUS
 > (2026-09-06).** Patch 0134 closes Stone2's five strict compile errors, and
@@ -880,7 +880,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > standard synthetic `Ekao` request and prove delayed deletion. Keep exact
 > parent composition, the other 48 requests, another BlueWake process, and
 > another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_STONE2_SOURCE_PORTABILITY_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_STONE2_SOURCE_PORTABILITY_2026-09-06.md`.
 >
 > **BW-P4-0117 resolved / S1 / ROUTE_B_STONE2_SOURCE_PORTABILITY
 > (2026-09-06).** Patch 0134 replaces two incorrectly typed zero literals,
@@ -888,7 +888,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > camera body access through a named fence while leaving retail unchanged.
 > Complete strict compilation passes in Debug, Release, and ASan/UBSan; all 65
 > public tests remain green. No execution claim is made. Evidence:
-> `docs/status/ROUTE_B_STONE2_SOURCE_PORTABILITY_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_STONE2_SOURCE_PORTABILITY_2026-09-06.md`.
 >
 > **BW-P4-0117 active / S1 / ROUTE_B_STONE2_PROFILE_QUALIFICATION
 > (2026-09-06).** The exact parent now composes BG, KYTAG01, all nine Obj_Wood
@@ -909,7 +909,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > deletion. Keep exact parent composition, the other 48 requests,
 > carry/drop/damage behavior, another BlueWake process, and another Simulator
 > closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_GRASS_CHILD_BATCH_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_GRASS_CHILD_BATCH_2026-09-06.md`.
 >
 > **BW-P4-0116 resolved / S1 / ROUTE_B_ROOM_SCENE_GRASS_CHILD_BATCH
 > (2026-09-06).** All 119 exact GRASS requests now run beside BG, KYTAG01, and
@@ -919,7 +919,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > packet owners are released after the parent closes. Debug, Release, and
 > strict ASan/UBSan agree; the standalone regression and all 65 public tests
 > pass. No new TWW patch was required. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_GRASS_CHILD_BATCH_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_GRASS_CHILD_BATCH_2026-09-06.md`.
 >
 > **BW-P4-0116 active / S1 / ROUTE_B_ROOM_SCENE_GRASS_CHILD_BATCH
 > (2026-09-06).** The exact parent now composes BG, KYTAG01, and all nine
@@ -940,7 +940,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > simulation/rendering, other persistent profiles, functional collision, map
 > drawing, representative gameplay presentation, another BlueWake process,
 > and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_OBJ_WOOD_CHILD_BATCH_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_OBJ_WOOD_CHILD_BATCH_2026-09-06.md`.
 >
 > **BW-P4-0115 resolved / S1 / ROUTE_B_ROOM_SCENE_OBJ_WOOD_CHILD_BATCH
 > (2026-09-06).** All nine exact Obj_Wood requests now run beside BG and
@@ -950,7 +950,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > is released after the parent closes. Debug, Release, and strict ASan/UBSan
 > agree; the standalone regression and all 65 public tests pass. No new TWW
 > patch was required. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_OBJ_WOOD_CHILD_BATCH_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_OBJ_WOOD_CHILD_BATCH_2026-09-06.md`.
 >
 > **BW-P4-0115 active / S1 / ROUTE_B_ROOM_SCENE_OBJ_WOOD_CHILD_BATCH
 > (2026-09-06).** The exact parent now runs BG and KYTAG01 as children and
@@ -972,7 +972,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > persistent profiles, functional collision, map drawing, representative
 > gameplay presentation, another BlueWake process, and another Simulator
 > closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_KYTAG01_CHILD_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_KYTAG01_CHILD_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0114 resolved / S1 / ROUTE_B_ROOM_SCENE_KYTAG01_CHILD_EXECUTION
 > (2026-09-06).** The exact parent retains BG and its single KYTAG01 request
@@ -982,7 +982,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > Both child states clear before map/dRes/archive/room teardown in Debug,
 > Release, and strict ASan/UBSan; both standalone regressions and all 65 public
 > tests pass. No new TWW patch was required. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_KYTAG01_CHILD_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_KYTAG01_CHILD_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0114 active / S1 / ROUTE_B_ROOM_SCENE_KYTAG01_CHILD_EXECUTION
 > (2026-09-06).** The exact parent now runs and deletes its leading BG child
@@ -1003,7 +1003,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > keep grass, wood, functional collision, map drawing, representative gameplay
 > presentation, another BlueWake process, and another Simulator closed.
 > Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_BG_CHILD_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_BG_CHILD_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0113 resolved / S1 / ROUTE_B_ROOM_SCENE_BG_CHILD_EXECUTION
 > (2026-09-06).** The exact reloader publishes all 179 requests and now admits
@@ -1014,7 +1014,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > heap, room BG/status, map, archive, owner, and room-heap lifetimes close in
 > order in Debug, Release, and strict ASan/UBSan; all 65 public tests and the
 > standalone BG probe pass. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_BG_CHILD_EXECUTION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_BG_CHILD_EXECUTION_2026-09-06.md`.
 >
 > **BW-P4-0113 active / S1 / ROUTE_B_ROOM_SCENE_BG_CHILD_EXECUTION
 > (2026-09-06).** Exact Room44 now enters one standard ROOM_SCENE process from
@@ -1036,7 +1036,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > invariants. Continue cancelling every other requested profile; keep
 > functional collision, map drawing, representative gameplay presentation,
 > another BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_ASYNC_ARCHIVE_SUBMISSION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_ASYNC_ARCHIVE_SUBMISSION_2026-09-06.md`.
 >
 > **BW-P4-0112 resolved / S1 / ROUTE_B_ROOM_SCENE_ASYNC_ARCHIVE_SUBMISSION
 > (2026-09-06).** Patch 0132 lets the exact standard process create Room44's
@@ -1046,7 +1046,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > after the Aurora-backed mount. Exact DZR, requests, map lifetime, delayed
 > delete, unmount, owner resets, and heap reset remain unchanged in Debug,
 > Release, and strict ASan/UBSan; all 65 public tests pass. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_ASYNC_ARCHIVE_SUBMISSION_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_ASYNC_ARCHIVE_SUBMISSION_2026-09-06.md`.
 >
 > **BW-P4-0112 active / S1 / ROUTE_B_ROOM_SCENE_ASYNC_ARCHIVE_SUBMISSION
 > (2026-09-06).** One standard ROOM_SCENE process now crosses exact Room44 DZR,
@@ -1066,7 +1066,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > `/res/Stage/sea_T/Room44.arc`. Prove phase-2 busy then ready behavior and keep
 > the passing exact lifecycle unchanged. Requested profiles, map drawing, and
 > functional collision remain closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_EXACT_LIFECYCLE_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_EXACT_LIFECYCLE_2026-09-06.md`.
 >
 > **BW-P4-0111 resolved / S1 / ROUTE_B_ROOM_SCENE_FULL_LIFECYCLE
 > (2026-09-06).** Patch 0131 composes the exact archive owner, native initial
@@ -1075,7 +1075,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > owner resets, and room-heap reset in one process. The archive begins as a
 > private preload and phase 1 acquires it; replacing that handoff is tracked
 > separately as BW-P4-0112. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_EXACT_LIFECYCLE_2026-09-06.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_EXACT_LIFECYCLE_2026-09-06.md`.
 
 > **BW-P4-0111 active / S1 / ROUTE_B_ROOM_SCENE_FULL_LIFECYCLE
 > (2026-09-05 standard-process update).** Patch 0130 closes the phase-table
@@ -1095,7 +1095,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > skeleton. Requested persistent profiles remain queued but unexecuted; keep
 > the other 50 persistent profiles, map drawing, and functional collision
 > closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_LIFECYCLE_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_LIFECYCLE_2026-09-05.md`.
 >
 > **BW-P4-0111 active / S1 / ROUTE_B_ROOM_SCENE_FULL_LIFECYCLE
 > (2026-09-05).** Exact Room44 phases 0-4, native DZR views, all 178 bounded
@@ -1113,7 +1113,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > request/mount, DZR decode, resource barriers, request publication, player/map
 > completion, delayed process deletion, controller removal, archive unmount,
 > and heap reset. Keep the other 50 persistent profiles and map drawing closed.
-> Evidence: `docs/status/ROUTE_B_MAP_ROOMINFO_OWNER_2026-09-05.md`.
+> Evidence: `docs/archive/status/ROUTE_B_MAP_ROOMINFO_OWNER_2026-09-05.md`.
 >
 > **BW-P4-0110 resolved / S1 / ROUTE_B_MAP_ROOMINFO_OWNER
 > (2026-09-05).** Patch 0129 partitions the original map translation unit to
@@ -1123,7 +1123,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > removed before real archive teardown. Target-PC-only repairs provide one
 > mandatory exact-floor lookup and eight-byte Aurora GX-object alignment.
 > Debug, Release, strict ASan/UBSan, and all 64 public tests pass. Evidence:
-> `docs/status/ROUTE_B_MAP_ROOMINFO_OWNER_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_MAP_ROOMINFO_OWNER_2026-09-05.md`.
 >
 > **BW-P4-0110 active / S1 / ROUTE_B_MAP_ROOMINFO_OWNER
 > (2026-09-05 census update).** The full original map unit compiles unchanged
@@ -1142,7 +1142,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > lookup, room-info initialization/entry/delete, controller existence and
 > lifetime, and real `dMap_c::setImage`/`deleteImage`. Fence or dead-strip all
 > draw, icon, cursor, and AGB behavior. Evidence:
-> `docs/status/ROUTE_B_MAP_ROOMINFO_CENSUS_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_MAP_ROOMINFO_CENSUS_2026-09-05.md`.
 >
 > **BW-P4-0110 active / S1 / ROUTE_B_MAP_ROOMINFO_OWNER
 > (2026-09-05).** Exact Room44 phase 4 now proves its player-ready wait,
@@ -1161,7 +1161,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > drawing/AGB behavior, pearl/Dragon-Roost mutations, functional collision,
 > the other 50 persistent profiles, another BlueWake process, and another
 > Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_PHASE4_MAP_LIFETIME_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_ROOM_PHASE4_MAP_LIFETIME_2026-09-05.md`.
 >
 > **BW-P4-0109 resolved / S1 / ROUTE_B_ROOM_SCENE_PHASE4_MAP_LIFETIME
 > (2026-09-05).** A bounded source-ordered phase-4 partition waits for the
@@ -1171,7 +1171,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > `Omori`, and Dragon Roost branches fail closed. Exact private and 64-test
 > public matrices pass in Debug, Release, and strict ASan/UBSan. The real map
 > room-info owner remains separate. Evidence:
-> `docs/status/ROUTE_B_ROOM_PHASE4_MAP_LIFETIME_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_ROOM_PHASE4_MAP_LIFETIME_2026-09-05.md`.
 >
 > **BW-P4-0109 active / S1 / ROUTE_B_ROOM_SCENE_PHASE4_MAP_LIFETIME
 > (2026-09-05).** Exact Room44 scene deletion now reaches real dRes archive
@@ -1189,7 +1189,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > scene and prove one set/delete pair. Keep pearl and Dragon Roost special
 > cases, functional collision, the other 50 persistent profiles, another
 > BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_DELETE_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_DELETE_2026-09-05.md`.
 >
 > **BW-P4-0108 resolved / S1 / ROUTE_B_ROOM_SCENE_DELETE_UNLOAD
 > (2026-09-05).** A bounded source-ordered partition of the actual room-scene
@@ -1199,7 +1199,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > Event/start-stage/NPC branches are excluded, and the map branch is
 > source-correctly absent because phase 4 has not set it. Exact Debug, Release,
 > and strict ASan/UBSan probes plus all 63 public tests pass. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCENE_DELETE_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCENE_DELETE_2026-09-05.md`.
 >
 > **BW-P4-0108 active / S1 / ROUTE_B_ROOM_SCENE_DELETE_UNLOAD
 > (2026-09-05).** The exact Room44 BG actor now survives two complete
@@ -1219,7 +1219,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > unavailable only there, room status/data reset, optional particle ownership,
 > and room heap reset. Keep phase 4, functional collision, the other 50
 > persistent profiles, another BlueWake process, and another Simulator closed.
-> Evidence: `docs/status/ROUTE_B_BG_DELETE_2026-09-05.md`.
+> Evidence: `docs/archive/status/ROUTE_B_BG_DELETE_2026-09-05.md`.
 >
 > **BW-P4-0107 resolved / S1 / ROUTE_B_BG_DELETE
 > (2026-09-05).** Standard process deletion reaches the unchanged original
@@ -1230,7 +1230,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > bounded host call-contract implementations; functional collision is not
 > claimed. The Room44 archive deliberately remains mounted because its retail
 > owner is the room scene, not BG. Evidence:
-> `docs/status/ROUTE_B_BG_DELETE_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_BG_DELETE_2026-09-05.md`.
 >
 > **BW-P4-0107 active / S1 / ROUTE_B_BG_DELETE_UNLOAD
 > (2026-09-05).** The exact Room44 BG actor now enters the unchanged original
@@ -1251,7 +1251,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > functional collision queries, the
 > other 50 persistent profiles, phase 4, another BlueWake process, and another
 > Simulator closed. Evidence:
-> `docs/status/ROUTE_B_BG_DRAW_SUBMISSION_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_BG_DRAW_SUBMISSION_2026-09-05.md`.
 >
 > **BW-P4-0106 resolved / S1 / ROUTE_B_BG_DRAW_SUBMISSION
 > (2026-09-05).** The unchanged original BG draw method transfers the exact
@@ -1261,7 +1261,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > far-plane restoration plus a no-model control pass in Debug, optimized
 > Release, and strict ASan/UBSan. Functional clipping/lighting, pixels,
 > collision queries, and teardown are excluded from this closure. Evidence:
-> `docs/status/ROUTE_B_BG_DRAW_SUBMISSION_2026-09-05.md`.
+> `docs/archive/status/ROUTE_B_BG_DRAW_SUBMISSION_2026-09-05.md`.
 >
 > **BW-P4-0106 active / S1 / ROUTE_B_BG_DRAW_SUBMISSION
 > (2026-09-03).** The exact leading Room44 BG request now completes original
@@ -1283,7 +1283,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > functional collision queries, generalized J3D animation formats, the other
 > 50 profiles, phase 4, another BlueWake process, and another Simulator
 > closed. Evidence:
-> `docs/status/ROUTE_B_BG_PROFILE_EXECUTION_2026-09-03.md`.
+> `docs/archive/status/ROUTE_B_BG_PROFILE_EXECUTION_2026-09-03.md`.
 >
 > **BW-P4-0105 resolved / S1 / ROUTE_B_BG_PROFILE_EXECUTION
 > (2026-09-03).** Original `g_profile_BG` consumes the exact Room44 archive,
@@ -1291,7 +1291,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > object, publishes ready state, and completes one execute call in Debug,
 > optimized Release, and ASan/UBSan. Draw, functional collision, animation
 > sampling, and deletion are excluded from this closure. Evidence:
-> `docs/status/ROUTE_B_BG_PROFILE_EXECUTION_2026-09-03.md`.
+> `docs/archive/status/ROUTE_B_BG_PROFILE_EXECUTION_2026-09-03.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_BG_PROFILE_EXECUTION
 > (2026-09-03).** The original Obj_Wood profile now executes all nine exact
@@ -1313,7 +1313,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > room status, execute/draw, unload/delete, and failure cleanup without
 > weakening exact assets. Keep the other 50 profiles, phase 4, another
 > BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_OBJ_WOOD_PROFILE_EXECUTION_2026-09-03.md`.
+> `docs/archive/status/ROUTE_B_OBJ_WOOD_PROFILE_EXECUTION_2026-09-03.md`.
 >
 > **BW-P4-0105 resolved / S1 / ROUTE_B_OBJ_WOOD_PROFILE_EXECUTION
 > (2026-09-03).** Original `g_profile_Obj_Wood` executes all exact title-room
@@ -1322,7 +1322,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > allocation failure, owner reset, and deliberate process disposal pass in
 > Debug, optimized Release, and ASan/UBSan. Ground projection and packet
 > simulation/rendering remain explicitly outside this tier. Evidence:
-> `docs/status/ROUTE_B_OBJ_WOOD_PROFILE_EXECUTION_2026-09-03.md`.
+> `docs/archive/status/ROUTE_B_OBJ_WOOD_PROFILE_EXECUTION_2026-09-03.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_OBJ_WOOD_PROFILE_EXECUTION
 > (2026-09-03).** The original GRASS profile now executes all 119 exact
@@ -1343,7 +1343,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > request disposal, and reset. Keep BG, all persistent profiles, packet
 > rendering/update, phase 4, another BlueWake process, and another Simulator
 > closed. Evidence:
-> `docs/status/ROUTE_B_GRASS_PROFILE_EXECUTION_2026-09-03.md`.
+> `docs/archive/status/ROUTE_B_GRASS_PROFILE_EXECUTION_2026-09-03.md`.
 >
 > **BW-P4-0105 resolved / S1 / ROUTE_B_GRASS_PROFILE_EXECUTION
 > (2026-09-03).** Original `g_profile_GRASS` executes all exact title-room
@@ -1352,7 +1352,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > allocation failure, owner reset, and deliberate process disposal pass in
 > Debug, optimized Release, and ASan/UBSan. Packet simulation and rendering
 > remain explicitly outside this tier. Evidence:
-> `docs/status/ROUTE_B_GRASS_PROFILE_EXECUTION_2026-09-03.md`.
+> `docs/archive/status/ROUTE_B_GRASS_PROFILE_EXECUTION_2026-09-03.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_GRASS_PROFILE_EXECUTION
 > (2026-09-02).** Patch 0122 executes the first exact Room44 actor through the
@@ -1374,7 +1374,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > counts and positions, room 44 ownership, allocation failures, and reset
 > lifetime. Keep Obj_Wood, BG, every other profile, phase 4, another BlueWake
 > process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_KYTAG01_PROFILE_EXECUTION_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_KYTAG01_PROFILE_EXECUTION_2026-09-02.md`.
 >
 > **BW-P4-0105 resolved / S1 / ROUTE_B_KYTAG01_PROFILE_EXECUTION
 > (2026-09-02).** The original profile and actor lifecycle now pass through
@@ -1382,7 +1382,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > placement construction, and assertions cover append propagation, layer/list
 > retention, wave publication, execute/draw, and delete cleanup. All 61 tests
 > pass in Debug, Release, and strict ASan/UBSan. Evidence:
-> `docs/status/ROUTE_B_KYTAG01_PROFILE_EXECUTION_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_KYTAG01_PROFILE_EXECUTION_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_KYTAG01_PROFILE_EXECUTION
 > (2026-09-02).** The strict census compiles all 16 Room44 profile sources in
@@ -1401,7 +1401,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > instance fields, wave-slot publication, execute/draw stability, and deletion
 > cleanup. Keep every other requested profile, phase 4, another BlueWake
 > process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_PROFILE_CENSUS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM_PROFILE_CENSUS_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM_PROFILE_EXECUTION_CENSUS
 > (2026-09-02).** Patch 0121 closes the visible-room owner over the complete
@@ -1419,7 +1419,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > target-PC compile/link frontier, resource archives, and child fanout; rank a
 > smallest representative construction cohort. Keep aggregate execution,
 > phase 4, another BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_VISIBLE_ROOM_TRANSITION_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_VISIBLE_ROOM_TRANSITION_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_VISIBLE_ROOM_TRANSITION
 > (2026-09-02).** Patch 0120 composes all 178 Room44 reload records through
@@ -1439,7 +1439,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > behavior. Assert BG precedes the exact 178 reload requests and that ownership
 > resets once. Keep requested-profile execution, phase 4, another BlueWake
 > process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_RELOADER_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM_RELOADER_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_RELOADER_COMPOSITION
 > (2026-09-02).** Patch 0119 closes all six scaled reload records with
@@ -1457,7 +1457,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > independent native owners, TGDR publication, zero layer additions, and reset
 > lifetime. Keep leading BG, `objectSetCheck`, requested-profile execution,
 > phase 4, another BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_SCALED_REQUESTS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM_SCALED_REQUESTS_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_SCALED_REQUESTS
 > (2026-09-02).** Patch 0118 closes the 172-record ACTR tier with all 25 names,
@@ -1477,7 +1477,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > allocation failure, unknown-name cleanup, and reset lifetime. Keep aggregate
 > reload, BG, requested-profile execution, phase 4, another BlueWake process,
 > and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_ACTOR_REQUESTS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM_ACTOR_REQUESTS_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_ACTR_REQUESTS
 > (2026-09-02).** The exact reload census resolves 172 ACTR records into 13
@@ -1497,7 +1497,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > failure, unknown-name cleanup, and reset lifetime. Keep TGDR/SCOB, aggregate
 > reload, requested-profile execution, phase 4, another BlueWake process, and
 > another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM44_RELOAD_CENSUS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM44_RELOAD_CENSUS_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_RELOAD_CENSUS
 > (2026-09-02).** Patch 0117 closes phase 3 through demo and room-particle
@@ -1517,7 +1517,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > parameters/layer relevance, and native owner. Use that evidence to choose
 > cohesive reload tiers before executing `objectSetCheck`. Keep reload/profile
 > execution, phase 4, another BlueWake process, and another Simulator closed.
-> Evidence: `docs/status/ROUTE_B_ROOM_PHASE3_BARRIER_2026-09-02.md`.
+> Evidence: `docs/archive/status/ROUTE_B_ROOM_PHASE3_BARRIER_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM_PHASE3_RESOURCE_BARRIER
 > (2026-09-02).** Patch 0116 closes ROOM_SCENE phase 2 around the exact
@@ -1536,7 +1536,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > `objectSetCheck` fence. Prove busy/error/ready and command absent/present
 > behavior plus single ownership transfer. Keep room reload, requested-profile
 > execution, phase 4, another BlueWake process, and another Simulator closed.
-> Evidence: `docs/status/ROUTE_B_ROOM_PHASE2_2026-09-02.md`.
+> Evidence: `docs/archive/status/ROUTE_B_ROOM_PHASE2_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM_SCENE_PHASE2
 > (2026-09-02).** Patch 0115 composes all eight present initial-room handlers
@@ -1555,7 +1555,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > identity, demo-bank present/absent decisions, particle number and command
 > ownership, and final phase result. Keep requested-profile execution, phase 3,
 > room reload, another BlueWake process, and another Simulator closed.
-> Evidence: `docs/status/ROUTE_B_ROOM_AGGREGATE_2026-09-02.md`.
+> Evidence: `docs/archive/status/ROUTE_B_ROOM_AGGREGATE_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_LOADER_COMPOSITION
 > (2026-09-02).** Patch 0114 closes the last individual initial-room handler.
@@ -1575,7 +1575,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > Keep surrounding phase-2 sync/zone/demo-bank/particle work, requested-profile
 > execution, room reload, another BlueWake process, and another Simulator
 > closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_PLAYER_REQUEST_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM_PLAYER_REQUEST_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_PLAYER_REQUEST
 > (2026-09-02).** Patch 0113 closes the room's SHIP owner. The one native
@@ -1595,7 +1595,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > request payload and order, restart/start-stage mutations, ship IDs, and
 > room-reset lifetime. Keep aggregate phase 2, CAMERA resume, player/profile
 > execution, room reload, another BlueWake process, and another Simulator
-> closed. Evidence: `docs/status/ROUTE_B_ROOM_SHIP_STATE_2026-09-02.md`.
+> closed. Evidence: `docs/archive/status/ROUTE_B_ROOM_SHIP_STATE_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_SHIP_STATE
 > (2026-09-02).** Patch 0112 closes all six representation-only initial-room
@@ -1615,7 +1615,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > angle, count, and exact preserve/clear decisions. Keep PLYR, aggregate phase
 > 2, actor construction, room reload, another BlueWake process, and another
 > Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_NATIVE_VIEWS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM_NATIVE_VIEWS_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_NATIVE_VIEWS
 > (2026-09-02).** The required source-and-asset census shows that current
@@ -1635,7 +1635,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > values, topology, malformed-range rejection, and reset lifetime. Keep
 > `SHIP`, `PLYR`, aggregate phase 2, room reload, profile execution, another
 > BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM44_CENSUS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM44_CENSUS_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM44_PHASE2_CENSUS
 > (2026-09-02).** Patch 0111 carries the initial request through authentic
@@ -1653,7 +1653,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > and pointer representation, process effects, and qualified reusable owners;
 > then choose cohesive implementation tiers. Keep room reload, actors, maps,
 > particles, another BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_ROOM_PHASE01_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_ROOM_PHASE01_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_ROOM_SCENE_PHASE01
 > (2026-09-02).** Patch 0110 preserves the initial room allocation across the
@@ -1673,7 +1673,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > exact archive name/heap ownership, and failure propagation. Keep resource
 > sync, `room.dzr`, room actors, maps, events, particles, another BlueWake
 > process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_INITIAL_ROOM_REQUEST_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_INITIAL_ROOM_REQUEST_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_INITIAL_ROOM_SCENE_REQUEST
 > (2026-09-02).** Patch 0109 composes all 14 present stage-loader handlers
@@ -1692,7 +1692,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > process/fade fields, request ownership, and stay-room publication. Keep the
 > ROOM_SCENE profile, maps, events, another BlueWake process, and another
 > Simulator closed. Evidence:
-> `docs/status/ROUTE_B_STAGE_AGGREGATE_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_STAGE_AGGREGATE_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_STAGE_AGGREGATE_COMPOSITION
 > (2026-09-02).** Patch 0108 closes the final individual present handler. All
@@ -1710,7 +1710,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > original loader order, and prove all native views plus exact request order
 > without executing profiles. Keep `dStage_roomInit`, room-scene creation,
 > another BlueWake process, and another Simulator closed. Evidence:
-> `docs/status/ROUTE_B_STAGE_SCOB_VIEW_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_STAGE_SCOB_VIEW_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_STAGE_SCOB_REQUESTS
 > (2026-09-02).** Patch 0107 closes the linked RPPN/RPAT graph with 40 native
@@ -1727,7 +1727,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > transforms, angles, set IDs, scale, names, and standard-create queue
 > ownership, and keep all requested profiles unexecuted. Keep aggregate-loader
 > composition, room creation, another BlueWake process, and another Simulator
-> closed. Evidence: `docs/status/ROUTE_B_STAGE_PATH_GRAPH_2026-09-02.md`.
+> closed. Evidence: `docs/archive/status/ROUTE_B_STAGE_PATH_GRAPH_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_STAGE_RPPN_RPAT_GRAPH
 > (2026-09-02).** Patch 0106 closes all seven passive metadata handlers in one
@@ -1745,7 +1745,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > exact Outset graph topology. Keep SCOB requests, aggregate-loader success,
 > room creation, profile execution, another BlueWake process, and another
 > Simulator closed. Evidence:
-> `docs/status/ROUTE_B_STAGE_PASSIVE_METADATA_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_STAGE_PASSIVE_METADATA_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_STAGE_PASSIVE_METADATA
 > (2026-09-02).** The required remainder census closes the ten-handler unknown.
@@ -1762,7 +1762,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > SCLS, EVNT, and EnvR views in one tier and assert the complete Outset payload
 > contract. Keep RPPN/RPAT, SCOB, aggregate-loader success, room creation,
 > profile execution, another BlueWake process, and another Simulator closed.
-> Evidence: `docs/status/ROUTE_B_STAGE_REMAINDER_CENSUS_2026-09-02.md`.
+> Evidence: `docs/archive/status/ROUTE_B_STAGE_REMAINDER_CENSUS_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_STAGE_REMAINDER_CENSUS
 > (2026-09-02).** Patch 0105 decodes the complete preserved Outset RTBL into
@@ -1782,7 +1782,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > views, nested offsets, and process-bearing owners; then choose one smallest
 > cohesive implementation tier. Keep initial-room creation, room `PLYR`,
 > queued profile execution, another BlueWake process, and another Simulator
-> closed. Evidence: `docs/status/ROUTE_B_STAGE_ROOM_READ_VIEW_2026-09-02.md`.
+> closed. Evidence: `docs/archive/status/ROUTE_B_STAGE_ROOM_READ_VIEW_2026-09-02.md`.
 >
 > **BW-P4-0105 active / S1 / ROUTE_B_STAGE_RTBL_ROOM_GATE
 > (2026-09-02).** Patch 0104 decodes all four Outset ACTR records into
@@ -1803,7 +1803,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > arrays. Do not enter `dStage_roomInit`, create a room scene, execute the four
 > ACTR profiles, inject a player, construct full `dCamera_c`, admit later DZS
 > handlers, or run concurrent BlueWake/Simulator processes. Evidence:
-> `docs/status/ROUTE_B_STAGE_ACTOR_VIEW_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_STAGE_ACTOR_VIEW_2026-09-02.md`.
 >
 > **ACTR vertical result:** patch 0104 qualifies the shared resolver, exact
 > big-endian ACTR decode, original actor append defaults, object-name mapping
@@ -1834,7 +1834,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > standard-create request. The test inspects the queued retail append payload
 > and deliberately stops before CAMERA profile execution. Clean replay and
 > 44/44 public tests pass in Debug, optimized Release, and strict ASan/UBSan.
-> Evidence: `docs/status/ROUTE_B_STAGE_CAMERA_VIEW_2026-09-02.md`.
+> Evidence: `docs/archive/status/ROUTE_B_STAGE_CAMERA_VIEW_2026-09-02.md`.
 >
 > **Next smallest action:** execute the queued request through authentic
 > CAMERA profile lookup, allocation, list insertion, and reached creation
@@ -1851,7 +1851,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > All 42 tests pass in Debug, optimized Release, and strict ASan/UBSan.
 > Execute/delete/draw remain fenced; KYEFF, KYEFF2 lifecycle, and ENVSE do not
 > inherit this result. Evidence:
-> `docs/status/ROUTE_B_KANKYO_PROFILE_CREATE_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_KANKYO_PROFILE_CREATE_2026-09-02.md`.
 >
 > **Next smallest action:** return to `dStage_Create` source order after
 > `dKankyo_create`. Measure `dComIfG_getStageRes("Stage", "stage.dzs")` and
@@ -1867,7 +1867,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > stage-lifetime-owned host view for the first present handler, `MULT`, and
 > exact big-endian entry fields. Clean replay and 43/43 tests pass in all
 > three configurations. Evidence:
-> `docs/status/ROUTE_B_STAGE_MULTI_VIEW_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_STAGE_MULTI_VIEW_2026-09-02.md`.
 >
 > **Next smallest action:** measure `RCAM`, the next present chunk in loader
 > order, through its counted view and original camera-create call. If it
@@ -1901,7 +1901,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > exactly. The retained closure has three behavior seams and fail-closed
 > unentered virtuals/diagnostics. Adaptation density is 39/3,693 lines (1.06%);
 > Debug, optimized Release, and strict ASan/UBSan pass 32/32. Evidence:
-> `docs/status/ROUTE_B_STAGE_ROOM_CONTROL_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_STAGE_ROOM_CONTROL_2026-09-02.md`.
 >
 > **Next smallest action:** run one retained-link census of unchanged
 > `dKankyo_create`, the first source-ordered stage-create operation. Classify
@@ -1917,7 +1917,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > count of ten was incorrect. This qualifies enqueue ownership only. Patch
 > densities are 35/3,693 (0.95%) and 10/143 (6.99%); all 33 public tests pass
 > in Debug, optimized Release, and strict ASan/UBSan. Evidence:
-> `docs/status/ROUTE_B_STAGE_ENVIRONMENT_REQUEST_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_STAGE_ENVIRONMENT_REQUEST_2026-09-02.md`.
 >
 > **Profile census:** `d_kyeff2.cpp` compiles unchanged with six retained
 > owners. `d_kyeff.cpp`, `d_envse.cpp`, and `d_kankyo.cpp` stop at the explicit
@@ -1939,7 +1939,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > defect, then correctly modeled as the retail node layer's sixteen-list
 > topology. Delete, execute, and draw remain fail-closed and unqualified.
 > Patch density is 26/5,154 (0.50%); all 34 tests pass in all three build
-> modes. Evidence: `docs/status/ROUTE_B_KYEFF2_CREATE_2026-09-02.md`.
+> modes. Evidence: `docs/archive/status/ROUTE_B_KYEFF2_CREATE_2026-09-02.md`.
 >
 > **Next smallest action:** measure the exact `camera_process_class` fields
 > read by original `d_kankyo.cpp` and `d_kyeff.cpp`, then promote one shared
@@ -1972,7 +1972,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > Object SHA-256 is
 > `15f67e9cffd3aeec5715aa1757f1b91ba8be1a8ef83706b656d7ec96463a1b5f`;
 > evidence is summarized in
-> `docs/status/ROUTE_B_KANKYO_PROFILE_CENSUS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_KANKYO_PROFILE_CENSUS_2026-09-02.md`.
 >
 > **Next smallest action:** retain and measure the original seven-owner
 > creation closure only, then link one real request and assert reached state.
@@ -1989,7 +1989,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > imports remain unresolved. Initializer object SHA-256 is
 > `fcfbd708de5013aedc2b8b7aa84de28582aada57eaa9a0b1b76ac6c3ba3ae187`;
 > evidence is summarized in
-> `docs/status/ROUTE_B_KANKYO_INITIALIZER_CLOSURE_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_KANKYO_INITIALIZER_CLOSURE_2026-09-02.md`.
 >
 > **Next smallest action:** compile and qualify unchanged
 > `d_kankyo_data.cpp`, then remove its seven imports from the same link probe.
@@ -2028,7 +2028,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > resource-element and save-memory construction. Static construction proves
 > brightness, embedded play defaults, and all 17 memory-bit resets. All 38
 > tests pass in Debug, optimized Release, and strict ASan/UBSan. Evidence:
-> `docs/status/ROUTE_B_GAME_INFO_OWNER_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_GAME_INFO_OWNER_2026-09-02.md`.
 >
 > **Next smallest action:** execute unchanged `dKyw_wind_set` against the real
 > singleton and qualified room control, covering ambient and override
@@ -2043,7 +2043,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > A single `g_profile_KANKYO`-only re-link leaves exactly JAudio's three
 > position resets and singleton, `g_regHIO`, event-bit lookup, and symbol
 > lookup as unqualified creation-state owners. Evidence:
-> `docs/status/ROUTE_B_KANKYO_WIND_SET_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_KANKYO_WIND_SET_2026-09-02.md`.
 >
 > **Next smallest action:** retain and directly test the unchanged JAudio
 > window/sea/river position-reset owner. Do not admit broad audio playback,
@@ -2056,7 +2056,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > exact pinned-source no-mutation behavior and singleton identity without
 > claiming recovered retail semantics. The patch changes no method body. All
 > 40 tests pass in Debug, optimized Release, and strict ASan/UBSan. Evidence:
-> `docs/status/ROUTE_B_JAIZEL_POSITION_RESET_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_JAIZEL_POSITION_RESET_2026-09-02.md`.
 >
 > **Next smallest action:** retain and directly test unchanged
 > `dSv_event_c::isEventBit` and `dSv_player_collect_c::isSymbol` through the
@@ -2117,7 +2117,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > collision owners. Unentered virtual and destruction paths abort. All 27
 > public tests pass in Debug, optimized Release, and strict ASan/UBSan; the
 > partition adds 48 lines across 4,286 reached source lines (1.12%). Evidence:
-> `docs/status/ROUTE_B_PLAY_STATE_OWNER_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_PLAY_STATE_OWNER_2026-09-02.md`.
 >
 > **Play mutation result:** patch 0081 retains the two original
 > `dDlst_window_c` mutation methods and exercises the real inline play setters.
@@ -2211,7 +2211,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > frontier. One valid compile census produced 89 errors and one warning,
 > normalized into seven source-ordered owner bands. The first new cohesive
 > band is background collision, actor collision, demo, sea, and snapshot.
-> Evidence: `docs/status/ROUTE_B_PLAY_PHASE4_CENSUS_2026-09-02.md`.
+> Evidence: `docs/archive/status/ROUTE_B_PLAY_PHASE4_CENSUS_2026-09-02.md`.
 >
 > **Historical normalized blocker:** the unchanged body
 > creates background/collision/demo/sea/snapshot/stage owners, render windows,
@@ -2252,7 +2252,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > slot 1. Outset has zero IDs from the scene-simple table, so seven common
 > emitters remain and no scene emitter is added. Debug, optimized Release, and
 > strict sanitizer pass without executing a callback. Evidence:
-> `docs/status/ROUTE_B_PARTICLE_SCENE_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_PARTICLE_SCENE_2026-09-02.md`.
 
 > **BW-P4-0099 active / S1 / ROUTE_B_PLAY_PHASE3_BARRIER
 > (2026-09-02).** Exact play phase 2 now publishes authentic Stage info and
@@ -2279,7 +2279,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > short-circuit matrix and advances over the real completed 168,256-byte
 > particle command with two authentically evaluated ready wave banks. Debug,
 > optimized Release, strict sanitizer, and all 19 public tests pass. Evidence:
-> `docs/status/ROUTE_B_PLAY_PHASE3_2026-09-02.md` and
+> `docs/archive/status/ROUTE_B_PLAY_PHASE3_2026-09-02.md` and
 > `local-research/evidence/route-b-play-phase3-v1-20260902/`.
 
 > **BW-P4-0098 active / S1 / ROUTE_B_PARTICLE_COMMON_OWNER
@@ -2328,7 +2328,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > `newSimple` emitter-creation closure once, then require stable composed common
 > ownership. Do not create the scene JPC owner, execute particle callbacks,
 > admit play phase 4, or run concurrent processes. Evidence:
-> `docs/status/ROUTE_B_PARTICLE_COMMON_CENSUS_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_PARTICLE_COMMON_CENSUS_2026-09-02.md`.
 
 > **BW-P4-0098 resolved / S1 / ROUTE_B_PARTICLE_COMMON_OWNER
 > (2026-09-02).** Unchanged `createCommon` now composes every qualified owner
@@ -2350,7 +2350,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > construction test fences them with aborts and makes no execution claim.
 > Patch 0058 has 1.10% adaptation density. Debug, Release, and strict
 > ASan/UBSan pass all 17 public tests. Evidence:
-> `docs/status/ROUTE_B_PARTICLE_CONSTRUCTION_2026-09-02.md`.
+> `docs/archive/status/ROUTE_B_PARTICLE_CONSTRUCTION_2026-09-02.md`.
 > The play owner uses a bounded declaration because the full aggregate header
 > repeats the closed JStudio/JGadget failure; full aggregate admission is not
 > claimed.
@@ -3107,7 +3107,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > toon `ResTIMG*` to `dDlst_list_c::setToonImage`. More custom resource parsers,
 > another logo callback layer, and further audio reconstruction are closed
 > until this tier passes or falsifies the route-density bound. Evidence:
-> `docs/status/INDEPENDENT_REVIEW_2026-09-01.md`.
+> `docs/archive/status/INDEPENDENT_REVIEW_2026-09-01.md`.
 >
 > **First result:** the reproducible strict census initially passed one of nine
 > owners and now passes all nine. Patches 0008-0010 apply exact big-endian
@@ -3178,8 +3178,8 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > without fabricated game state, success-returning stubs, or Route A guest-
 > memory calls. If the closure is unbounded, record Route B as long-horizon;
 > do not retreat to another generic leaf port. Evidence:
-> `docs/status/TECH_DEBT.md` and
-> `docs/status/REORIENTATION_2026-09-01.md`.
+> `docs/archive/status/TECH_DEBT.md` and
+> `docs/archive/status/REORIENTATION_2026-09-01.md`.
 >
 > **First result:** the reproducible strict probe reaches 63 unique dependencies
 > from `f_ap_game.cpp` and 287 from `d_s_logo.cpp`. The latter crosses J3D,
@@ -3328,7 +3328,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > menu/pause decisions as host services and compile `f_op_camera.cpp` against
 > only the portable base. Do not port `dCamera_c`, player, actor manager, J3D,
 > or message UI in this tier. Evidence:
-> `docs/status/ROUTE_B_FOP_BOUNDARY_2026-09-01.md`.
+> `docs/archive/status/ROUTE_B_FOP_BOUNDARY_2026-09-01.md`.
 >
 > **Resolution:** `camera_class` now includes only portable process/view state
 > under `TARGET_PC`; the concrete `camera_process_class::dCamera_c` extension
@@ -3348,7 +3348,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > manager group using explicit pause, menu, and host-I/O services. Keep actor
 > manager, message manager, concrete profiles, player, J3D implementation, and
 > audio out of the gate. Evidence:
-> `docs/status/ROUTE_B_FOP_BOUNDARY_2026-09-01.md`.
+> `docs/archive/status/ROUTE_B_FOP_BOUNDARY_2026-09-01.md`.
 >
 > **Resolution:** scene and scene-manager now compile through a host scene-
 > deletion service and width-safe payload conversion. A header-light native
@@ -3368,7 +3368,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > first ownership frontier and link a focused initialization/frame smoke if
 > that frontier remains inside SComponent/f_pc. Stop before f_op, player,
 > scene, graphics, or audio. Evidence:
-> `docs/status/ROUTE_B_GAME_MANAGER_BOUNDARY_2026-09-01.md`.
+> `docs/archive/status/ROUTE_B_GAME_MANAGER_BOUNDARY_2026-09-01.md`.
 >
 > **Resolution:** excluding the superseded monolithic all-actor profile table
 > reduced the apparent 522-symbol frontier to 16 adjacent project services.
@@ -3425,7 +3425,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > the slice on pointer narrowing, disabled BlueWake assertions, a native-to-
 > guest-memory bridge, or adaptation density that is not systematic. Keep
 > Route A unchanged as the oracle. Evidence:
-> `docs/status/REORIENTATION_2026-09-01.md` and
+> `docs/archive/status/REORIENTATION_2026-09-01.md` and
 > `local-research/evidence/route-b-native-abi-probe-v1-20260901/`.
 >
 > **Resolution:** BlueWake now owns exact-width types, `BigEndian<T>`, signed
@@ -3450,7 +3450,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > by source readiness, portability work, missing behavior, host replacement,
 > or deferral. Stop if the spine depends on broad missing actor/audio work or a
 > fine-grained native/guest-memory hybrid. Keep Route A unchanged as the oracle.
-> Evidence: `docs/status/EXECUTION_ROUTE_CENSUS_2026-09-01.md`.
+> Evidence: `docs/archive/status/EXECUTION_ROUTE_CENSUS_2026-09-01.md`.
 >
 > **Manifest tier complete:** 1,096 configured objects reproduce all 4,335
 > markers and distinguish 4,175 syntactically empty bodies. In the GZLE01
@@ -3478,7 +3478,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > Dusklight Apple/Aurora recipe. Audio may be excluded only as an explicitly
 > non-acceptance compile seam. Fail on unexplained layout changes or any
 > native-to-guest-memory call. Evidence:
-> `docs/status/ROUTE_B_AUDIO_BOUNDARY_2026-09-01.md`.
+> `docs/archive/status/ROUTE_B_AUDIO_BOUNDARY_2026-09-01.md`.
 >
 > **ABI tier complete:** the deterministic Apple Clang probe fails closed on
 > eight-byte `s32/u32` before broad headers, then reaches explicit pointer
@@ -3486,7 +3486,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > and not an unexplained compiler failure. Decompose ownership to
 > `BW-P4-0070`; preserve Route B as the strategic route and prove its smallest
 > native process slice before expanding the graph. Evidence:
-> `docs/status/REORIENTATION_2026-09-01.md`.
+> `docs/archive/status/REORIENTATION_2026-09-01.md`.
 
 > **BW-P4-0068 RESOLVED / CPU_RUNTIME_ROUTE_SELECTION (2026-09-01).** The
 > final translated-C edge mechanism and the one authorized current-host LLVM
@@ -3498,7 +3498,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > The census rejects both alternate static-recompiler donors and selects one
 > bounded Route B boot-spine feasibility gate. This is not a whole-game pivot;
 > Route A remains the accepted oracle. Ownership transfers to `BW-P4-0069`.
-> Evidence: `docs/status/EXECUTION_ROUTE_CENSUS_2026-09-01.md`.
+> Evidence: `docs/archive/status/EXECUTION_ROUTE_CENSUS_2026-09-01.md`.
 
 > **BW-P4-0067 SUPERSEDED_BY_DECISION / LLVM_CURRENT_HOST_QUALIFICATION
 > (2026-09-01).** Exact LLVM v27's first attributed profile reproduces its
@@ -3669,7 +3669,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 > oracle, followed by exactly one architecture-scale AOT code-quality spike
 > selected from partitioned/per-unit `-O2` or decomposed LLVM. Require at least
 > a 1.7x route-speed result or decisive rejection evidence. See
-> `docs/status/TECH_DEBT.md`.
+> `docs/archive/status/TECH_DEBT.md`.
 
 > **BW-P4-0063 GX contract sub-blocker RESOLVED; visual adjudication inactive /
 > GRAPHICS_CORRECTNESS (2026-09-01).** Static inspection and a focused failing
@@ -6435,7 +6435,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
   209/209 JAS forwards, an empty JAS queue, the active command done, and 4,295
   ARAM transfers with zero rejects/pending interrupt. P4 milestone 3 passes;
   continue under `BW-P4-0053`.
-- Evidence: `docs/status/REFERENCE_ORACLE_2026-08-25.md`; private ignored logs
+- Evidence: `docs/archive/status/REFERENCE_ORACLE_2026-08-25.md`; private ignored logs
   SHA-256 `29cc8ae3ec335f5570f6701dea4d4a818aba126a5abe2186d4e685b0430b26ee`
   (500 retraces) and
   `c44c028ed281585004c58043bba8c951f162ec5172bcfd5b116125c6ac50e11c`
@@ -6527,7 +6527,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 - Prohibited until resolved: fixed-retrace input schedules, larger unchanged
   boot bounds, zero-PCM/track tracing, and another address-specific scheduler
   exception.
-- Evidence: `docs/status/INDEPENDENT_REVIEW_2026-08-25.md`;
+- Evidence: `docs/archive/status/INDEPENDENT_REVIEW_2026-08-25.md`;
   `/tmp/bluewake-vi-timebase-tier0-3m-20260825.log` (SHA-256
   `714281279d9e195c095e167b45494a1e3f0afe0f91cf52fb2424dd77cbf73a98`);
   `/tmp/bluewake-guest-clock-cadence-3m-20260825.log` (SHA-256
@@ -6826,7 +6826,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 - New payload-owner evidence: `/tmp/bluewake-audio-pcm-content-3m-20260829.log` records the same zero hash at pushes 1-16 and playback-start push 160. DMA source `0x006AEEA0` maps to the MEM1 DSP DAC buffer at `0x806AEEA0`, whose retail `TDSP_DACBuffer::init()` path zeroes the buffers. The prior ARAM-source interpretation was tested and rejected; no allocator or heap boundary trace is justified. The next action is to trace authentic DSP/DAC buffer writes after `TDSP_DACBuffer::updateDSP()` and before AI consumption.
 - DAC write-owner evidence: `/tmp/bluewake-audio-dac-postboot-1500k-20260829.log` records 495 writes in `0x806AEEA0..0x806AF760`, all from `0x803031AC` (`dcbz`) with zero old contents during initialization; no later write occurs through 1.5M blocks despite callbacks at `0x80289414`, `0x8027BDAC`, and `0x8027BD14`. The next action is the authentic `DsyncFrame2`/DSP task write contract, not another queue, sink, heap, or ARAM trace.
 - DSP command boundary: retail `DsyncFrame` submits `0x82000000 | DSP_MIXERLEVEL | subframes` plus the two DAC-buffer pointers via `DSPSendCommands2`; BlueWake currently models mailbox completion but does not execute the DSP task that writes those buffers. This is the promoted AUDIO/CPU_RUNTIME owner. Any replacement must be source-compatible and evidence-backed; direct silence or arbitrary sample injection is rejected.
-- Donor feasibility: RecompCore contains `DSPCore` and `DSP/Interpreter`, but they are outside the current GXRuntime target. The exact pinned recursive submodules were restored only in the ignored reference checkout; no dependency pin changed. A full `DSPTOOL=ON` configure and build completed with AppleClang on macOS, including `libcore.a`'s authentic `DSPCore`, interpreter, and `DSPLLE` host units, and an arm64 `dsptool` link. The tracked optional adapter now assembles only the donor DSP/interpreter object set, supplies source-compatible `DSPHost` callbacks, exposes a plain C ABI, and passes both C++ and C caller tests for initialization DMA, interpreter cycles, mailbox, IFX access, callback ownership, and teardown when explicitly pointed at that donor checkout/build. The optional macOS `bluewake_host` also links with the adapter attached to live `CPUState` guest-memory callbacks; this build and both adapter contract tests pass. The extracted donor's global opcode metadata table was uninitialized; the adapter now calls `DSP::InitInstructionTable()` before execution. The retail `CC005034` DSP DMA-start register was also missing from the host-to-adapter map and is now forwarded to `DSP_DSPA (0xCD)`, with a focused register assertion. The focused tests pass 2/2. The focused donor test now presents the exact retail `__DSP_boot_task` mailbox sequence after `0x8071FEED` and observes a guest `jdsp` read at `0x80399420`, proving donor task DMA in isolation. A 1,000,000-block single-host authentic observation reaches the host-fabricated `0x8071FEED` response but emits no `0x80F3xxxx` task words to the live MMIO bridge before an unrelated REL mapping stop; no donor DMA write to the DAC buffer or nonzero PCM payload has appeared. Existing deprecation/shadow and deployment-target linker warnings remain. Evidence: `docs/status/DSP_INTEGRATION_2026-08-25.md`. Next action: trace the live guest continuation after `0x8071FEED` and restore the authentic mailbox word path, then re-observe `DsyncFrame2`; do not inject samples.
+- Donor feasibility: RecompCore contains `DSPCore` and `DSP/Interpreter`, but they are outside the current GXRuntime target. The exact pinned recursive submodules were restored only in the ignored reference checkout; no dependency pin changed. A full `DSPTOOL=ON` configure and build completed with AppleClang on macOS, including `libcore.a`'s authentic `DSPCore`, interpreter, and `DSPLLE` host units, and an arm64 `dsptool` link. The tracked optional adapter now assembles only the donor DSP/interpreter object set, supplies source-compatible `DSPHost` callbacks, exposes a plain C ABI, and passes both C++ and C caller tests for initialization DMA, interpreter cycles, mailbox, IFX access, callback ownership, and teardown when explicitly pointed at that donor checkout/build. The optional macOS `bluewake_host` also links with the adapter attached to live `CPUState` guest-memory callbacks; this build and both adapter contract tests pass. The extracted donor's global opcode metadata table was uninitialized; the adapter now calls `DSP::InitInstructionTable()` before execution. The retail `CC005034` DSP DMA-start register was also missing from the host-to-adapter map and is now forwarded to `DSP_DSPA (0xCD)`, with a focused register assertion. The focused tests pass 2/2. The focused donor test now presents the exact retail `__DSP_boot_task` mailbox sequence after `0x8071FEED` and observes a guest `jdsp` read at `0x80399420`, proving donor task DMA in isolation. A 1,000,000-block single-host authentic observation reaches the host-fabricated `0x8071FEED` response but emits no `0x80F3xxxx` task words to the live MMIO bridge before an unrelated REL mapping stop; no donor DMA write to the DAC buffer or nonzero PCM payload has appeared. Existing deprecation/shadow and deployment-target linker warnings remain. Evidence: `docs/archive/status/DSP_INTEGRATION_2026-08-25.md`. Next action: trace the live guest continuation after `0x8071FEED` and restore the authentic mailbox word path, then re-observe `DsyncFrame2`; do not inject samples.
 - REL entry fix: `f_pc_profile_lst.rel` materializes at `0x81E021C0`, so its actual entry `0x81E02294` is now aliased to linked `0x81F800D4` using the recorded module-1 raw base. Normal and DSP-enabled 500,000-block replays, plus a clean DSP-enabled 1,000,000-block replay, pass that boundary and stop normally at `0x80307EF4`.
 - Disc-backed bootstrap result: `/tmp/bluewake-audio-dsp-live-read-1m.log` reaches `TAudioThread::start` at block `546848`, `audioproc` at `548184`, JAudio `DspBoot` at `549759`, and the live `0x80F3xxxx` task words. The donor-backed route then reads the zeroed DAC buffer at `0x806AEEA0` but emits no donor-to-guest DMA write. The longer `/tmp/bluewake-audio-start-disc-5m.log` stops normally at 5,000,000 blocks with the same missing write. The active owner is donor task execution/DAC production; do not force-wake the thread or inject samples.
 - Measured facts: `dol_audio_dma_poll()` exists in `ref/recompcore/GXRuntime/src/audio_dma.c` but has no caller in the BlueWake host; `dol_platform_audio_push()` is exposed by the platform API but has no authentic host call site. `/tmp/bluewake-aurora-input-audio-20m-20260827.log` contains one stream-init line, zero queue pushes, repeated DSP DMA acknowledgements, and no sample-queue failure. The authentic guest `mDoAud_seStart` entries are source-mapped at `0x800F0D10` (GZLE01) and `0x800F4A50` (GZLP01), while inline `JAIZelBasic::seStart` is `0x802A6720` / `0x802AB8C0`; the fresh 20M opening-scene replay reached room 44 and room 0, stopped normally at `pc=0x80307EF4`, and produced zero events at all four boundaries.
@@ -6958,7 +6958,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 ### Historical: BW-P4-0039 - Authentic macOS continuation was CPU-bound before room completion
 - State/priority: superseded by BW-P4-0040
 - Resolution: the generator-owned last-chunk cache made a 20M authentic room replay practical enough to expose a concrete BG request-phase boundary.
-- Evidence: `/tmp/bluewake-cache-20m-20260825.log`; `/tmp/bluewake-cache-25m-20260825.log`; `docs/status/PERFORMANCE.md`.
+- Evidence: `/tmp/bluewake-cache-20m-20260825.log`; `/tmp/bluewake-cache-25m-20260825.log`; `docs/archive/status/PERFORMANCE.md`.
 
 ### Historical: BW-P4-0038 - Authentic post-overlap room child materialization had not yet reached the playable macOS boot milestone
 - State/priority: superseded by BW-P4-0039
@@ -7289,7 +7289,7 @@ See [world integration evidence](../../status/ROUTE_B_WORLD_INTEGRATION_2026-09-
 - Hypothesis: one monotonic elapsed guest clock shared by `CPUState.timebase`, SPR-22, and `__OSGetSystemTime` will cross the alarm deadline and deliver the translated retail decrementer callback, producing the second logo draw while the no-disc control remains unchanged.
 - Implementation: promoted default-on `guest_clock_advance` in `runtime/host/src/main.c`; no environment gate or ARAM/allocator change.
 - Regression test: `python3 tests/test_guest_clock.py`; then `python3 tests/test_alarm_deadline.py`, runtime-host build, and `python3 tests/test_composite.py`.
-- Evidence: `tests/test_guest_clock.py`; `docs/status/REORIENTATION_2026-08-22.md` §4. Authentic replay is pending this tiered verification.
+- Evidence: `tests/test_guest_clock.py`; `docs/archive/status/REORIENTATION_2026-08-22.md` §4. Authentic replay is pending this tiered verification.
 - Ruled out for the active boundary: allocator defect, ARAM request construction, and downstream heap ownership. Those were superseded by decision until an authentic post-clock replay re-observes them.
 - State/priority: superseded by BW-P4-0011 / S2; the corrected clock now defines the clean title-progression signature.
 - Verification: focused unit, alarm/allocator regressions, composite (`12/12`), and runtime-host build pass. One authentic default-on replay loaded 2391 FST entries, delivered repeated decrementer exceptions, reached multiple logo draws and scene requests `request_id=1`/`request_id=2`, then stopped at the malformed ARAM request after 7,763,161 blocks.

@@ -34,6 +34,9 @@ class MacPackageTest(unittest.TestCase):
         dsp.mkdir(parents=True)
         for name in ("dsp_rom.bin", "dsp_coef.bin"):
             (dsp / name).write_bytes(b"synthetic runtime resource")
+        license = self.args.runtime / "Externals/mbedtls/LICENSE"
+        license.parent.mkdir(parents=True)
+        license.write_text("Synthetic license fixture")
         self.args.output.mkdir(parents=True)
         (self.args.output / "old").write_text("previous app")
         self.player_save = self.root / "player.card"
@@ -80,6 +83,8 @@ class MacPackageTest(unittest.TestCase):
     def test_app_only_contains_no_personal_inputs(self):
         result = PACKAGE.assemble(self.args)
         self.assertFalse(result["containsTranslatedGameCode"])
+        self.assertEqual((self.args.output / "Contents/Resources/Licenses/MbedTLS-Apache-2.0.txt").read_text(),
+                         "Synthetic license fixture")
         self.assertFalse((self.args.output / "Contents/Resources/Game").exists())
         self.assertFalse((self.args.output / "Contents/Frameworks/gGZLE01_recomp.dylib").exists())
         self.assertEqual(json.loads((self.args.output / "Contents/Resources/BuilderProvenance.json").read_text()), result)
