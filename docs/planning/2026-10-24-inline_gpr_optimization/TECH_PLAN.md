@@ -81,7 +81,40 @@ Each cell reports `control → candidate (change)`. These are the accepted compa
 
 All five scenes improved in all four pairs. The rendered rows are the quantitative evidence closest to live play: the game rendered normally while the fixed scene windows were measured. In the separate player-controlled Game Mode island tour, the tester reported that live gameplay felt better and observed no gameplay issue. That assessment is useful anecdotal evidence, but the tour did not record a synchronized control/candidate interval and therefore does not establish an additional numeric “live gameplay” gain.
 
-Invalid attempts using an incompatible setup state or a no-warp `--state` invocation were rejected and excluded. The different PGO profiles do not introduce an unrelated source-code variable: training each otherwise source-matched artifact can legitimately produce different profiles because the GPR optimization changes what training observes. The result therefore measures the complete GPR candidate under its normal training process; a matched-profile qualification remains open to separate the direct source effect from its training-mediated effect.
+Invalid attempts using an incompatible setup state or a no-warp `--state` invocation were rejected and excluded. The different PGO profiles do not introduce an unrelated source-code variable: training each otherwise source-matched artifact can legitimately produce different profiles because the GPR optimization changes what training observes. The result therefore measures the complete GPR candidate under its normal training process; the matched-profile qualification below separates the direct source effect from its training-mediated effect.
+
+### Matched-profile qualification (x86-64 desktop)
+
+Run by pdale-boop to separate the source change from its training. Four builds in the Linux CI container (Clang 18, `x86-64-v3`, default switches, `--portable`) from `main` `211abfd` and this branch at `7d6a30d` (RecompCore `47a5229`), as a 2×2. `--host-only` keeps the profile already in a build folder whatever source has changed, so rebuilding there with the other source gives that source the first build's profile:
+
+| | `main` profile (`4a95a094…`) | Candidate profile (`71f6bd72…`) |
+|---|---|---|
+| `main` source | A: trained | D: `main` rebuilt in B's folder |
+| Candidate source | C: candidate rebuilt in A's folder | B: trained |
+
+C − A and B − D measure the source change at a fixed profile; D − A and B − C measure the profile change at fixed source; B − A is the comparison above.
+
+The profile match was checked rather than assumed: sample chunks of C were recompiled with `-Wprofile-instr-out-of-date` turned back on (the builder passes `-Wno-profile-instr-out-of-date`). Each main-executable chunk reported 1 mismatched function of 85–91, the per-chunk copy of the rewritten `bw_inline_gpr_memory_ready`; the sampled REL chunks reported none. The candidate source keeps every other function's counts. D has the same one-helper mismatch in reverse.
+
+Headless, unpaced (`BLUEWAKE_WALL_PACE=0`), from three kept states (Outset 2,400 retraces, the bird 2,800, Tower of the Gods by boat 2,400), taking the median of the per-second rates with the first three and the last left out. Three rounds; the order of the four builds rotated each round and state, so every build ran in every position. 36 runs per machine, all loaded and exited cleanly. Mean over the three states:
+
+| Comparison | i5-6500, Debian 13, all 4 cores | i5-12600KF, 4 E-cores (`taskset`), Arch |
+|---|---:|---:|
+| Source at `main`'s profile (C vs A) | **+1.4%** (9/9 pairs faster) | **+1.1%** (9/9) |
+| Source at candidate's profile (B vs D) | +2.2% (9/9) | +2.2% (9/9) |
+| `main` with the candidate's profile (D vs A) | −0.9% | −0.9% |
+| Candidate with `main`'s profile (B vs C) | −0.1% | +0.2% |
+| As above, each with its own training (B vs A) | **+1.3%** | **+1.3%** |
+
+| State, i5-6500 | A | C | B | D | Instructions, C vs A |
+|---|---:|---:|---:|---:|---:|
+| Outset | 101.6 | 103.1 | 103.2 | 100.7 | −2.43% |
+| Bird | 70.8 | 71.7 | 71.3 | 70.0 | −1.81% |
+| Tower of the Gods by boat | 112.0 | 113.6 | 113.8 | 111.5 | −2.97% |
+
+Guest checkpoints matched across all four builds on both machines, `main` and candidate included. The source change is faster in every fixed-profile pair (36/36) and does not depend on retraining: C is as fast as B. The new profile mostly costs `main` (D), so B vs D overstates the change; C vs A and B vs A are the fair figures. A rendered pass on the same E-cores (unpaced, Smooth Motion off, A and B, 3 rotated rounds) gave +1.5%, +0.6% and +2.0%, mean +1.4% (8/9 pairs faster), about the same as headless.
+
+These Intel cores show about half the Deck's gain. That may be the Zen 2 core responding more to fewer instructions; the Deck figure was not rerun with matched profiles.
 
 ## Verification
 
