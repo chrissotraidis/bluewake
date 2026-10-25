@@ -74,7 +74,7 @@ inline void draw_control(const bw_settings::Setting& s);
 // Why the row just drawn (a group) is greyed, for the pointer over it: a
 // greyed item takes no hovering of its own, so an invisible button over the
 // row does. A pad and the keyboard skip greyed rows; the switch that turns
-// one on is beside it.
+// one on is beside it, or on another tab and named under it (draw_setting).
 inline void greyed_why(const char* why) {
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     ImGui::SetCursorScreenPos(a);
@@ -116,6 +116,10 @@ inline void draw_setting(const bw_settings::Setting& s) {
         ImGui::PushID(s.key);
         greyed_why(why);
         ImGui::PopID();
+        // A switch on another tab isn't beside the row, and a pad gets no
+        // pointer to ask: the reason is a quiet line under it instead.
+        if (waiting && setting(off_need).tab != s.tab)
+            ImGui::TextDisabled("%s", why);
     }
 }
 
