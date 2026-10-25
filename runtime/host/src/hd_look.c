@@ -57,8 +57,10 @@ void bluewake_hd_look_reload(void) {
     g_clouds = setting("BLUEWAKE_HD_CLOUD_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_CLOUD_SHADOWS") : all;
     // Sun shadows are worked out from what is on screen, and on open ground
     // they drew long dark streaks, so the HD look leaves them off; only
-    // BLUEWAKE_HD_SUN_SHADOWS=1 turns them on.
-    g_sun = setting("BLUEWAKE_HD_SUN_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_SUN_SHADOWS") : all >= 0 ? 0 : -1;
+    // BLUEWAKE_HD_SUN_SHADOWS=1 turns them on. They are part of the HD look,
+    // so turning the look off (F2, or BLUEWAKE_HD_LOOK=0) takes them too.
+    g_sun = all == 0 ? 0
+            : setting("BLUEWAKE_HD_SUN_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_SUN_SHADOWS") : all >= 0 ? 0 : -1;
     // Sun shadows come from a shadow map (Aurora's post_fx), so what is off
     // screen still casts. DOL_AURORA_SUN_SHADOW_MAP=0 keeps the screen's
     // version alone, for comparing the two.

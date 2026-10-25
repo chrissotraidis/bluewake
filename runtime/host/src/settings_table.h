@@ -96,7 +96,7 @@ inline constexpr Setting kSettings[] = {
      .control = Control::Switch, .next_launch = Os::All,
      .experimental = "Every stage select place checked headless on Windows and Linux; not yet played through, or on a Mac."},
     {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
-     .tab = Tab::Mods, .control = Control::Switch,
+     .tab = Tab::Mods, .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
      .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},
     // The sun shadow map's quality (hd_look.c hands it to Aurora's post_fx when it changes).
     {.key = "DOL_AURORA_SUN_SHADOW_QUALITY", .kind = Kind::Choice, .fallback = "high", .label = "Sun shadow quality",

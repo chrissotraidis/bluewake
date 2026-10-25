@@ -77,7 +77,7 @@ Turned on by `BLUEWAKE_HD_SUN_SHADOWS=1` (BlueWake's `runtime/host/src/hd_look.c
 
 | Switch | Default | What it does |
 |---|---|---|
-| `BLUEWAKE_HD_SUN_SHADOWS` | off | Sun shadows on, using the map |
+| `BLUEWAKE_HD_SUN_SHADOWS` | off | Sun shadows on, using the map, while the HD look is on (F2 off takes them too) |
 | `DOL_AURORA_SUN_SHADOW_MAP` | follows the above | `0` keeps the screen-only version, for A/B |
 | `DOL_AURORA_SUN_SHADOW_QUALITY` | `high` | `high` (map 4096, plus the room and palm culling below), `medium` (2048) or `low` (2048, three cascades, six filter lookups, no gap fill); each switch below still wins. In the desktop menu: Mods › Experimental › Sun shadow quality, which changes it at once (the map is made again, a one-frame hitch) |
 | `DOL_AURORA_SUN_SHADOW_MAP_SIZE` | 4096 | Texels a side, every cascade (4096 is 256 MB of video memory for four cascades, 2048 is 64 MB, 8192 is 1 GB) |

@@ -52,7 +52,7 @@ come from the player's own disc through [WWHD_TEXTURES.md](WWHD_TEXTURES.md).
 | HD's far-distance blur | HD depth of field | **In**, with the switch (RecompCore 0170). Off by default | `BLUEWAKE_HD_FAR_BLUR` |
 | Ambient occlusion | Ambient occlusion | **In**, with the switch (RecompCore 0171). Off by default | `BLUEWAKE_HD_AO` |
 | Cloud shadows on the sea | Cloud shadows | **In**, with the switch, outdoors (RecompCore 0172). Off by default | `BLUEWAKE_HD_CLOUD_SHADOWS` |
-| Sun shadows | Sun shadows (resolution, strength) | **In**, outdoors, from a shadow map of the whole scene (RecompCore 0173, 0183). Left out of the HD look switch: from the screen alone, on open ground it drew long dark streaks. Only its own variable turns it on | `BLUEWAKE_HD_SUN_SHADOWS` |
+| Sun shadows | Sun shadows (resolution, strength) | **In**, outdoors, from a shadow map of the whole scene (RecompCore 0173, 0183). Left out of the HD look switch: from the screen alone, on open ground it drew long dark streaks. Only its own variable turns it on, and the HD look switch off turns it off | `BLUEWAKE_HD_SUN_SHADOWS` |
 | Edge light | Character edge light | **In**, with the switch, outdoors (RecompCore 0174). Off by default | `BLUEWAKE_HD_EDGE_LIGHT` |
 | Torch light | Torch and fire light | **In**, with the switch, everywhere (RecompCore 0175). Off by default | `BLUEWAKE_HD_TORCH_LIGHT` |
 
@@ -166,7 +166,7 @@ at noon Link, the boat and the tower cast shadows on the pier and the water; at 
 a building behind the camera, which the screen's version left lit.
 
 On an iPad Pro (M2), walking across Outset's grass, it drew long dark diagonal streaks across the ground, so the HD look
-switch leaves it off (October 13). `BLUEWAKE_HD_SUN_SHADOWS=1` still turns it on. With the shadow map, pdale-boop played
+switch leaves it off (October 13). `BLUEWAKE_HD_SUN_SHADOWS=1` still turns it on, while the HD look is on: turning the look off (F2, or `BLUEWAKE_HD_LOOK=0`) takes the sun shadows with it. With the shadow map, pdale-boop played
 Outset on Arch (RTX 5070 Ti, Vulkan) with sun shadows on and saw no streaks (October 17); not yet checked on Metal.
 
 Checked on an M3 Max from an Outset save state with the sun high: Link casts a soft shadow on the pier away from the
