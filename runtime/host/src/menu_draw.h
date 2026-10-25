@@ -31,8 +31,7 @@ void next_launch_note(const bw_settings::Setting& setting);
 bool choices(const char* key, const char* const** shown, const char* const** stored, int* count);
 
 inline bool on(const char* key, bool fallback) {
-    const std::string value = get(key, fallback ? "1" : "0");
-    return !value.empty() && value[0] != '0' && value != "off" && value != "false";
+    return bw_settings::switch_on(get(key, fallback ? "1" : "0").c_str(), fallback);
 }
 
 // The setting named `key`, or a complaint and a blank: an unknown name is a

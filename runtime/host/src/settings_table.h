@@ -195,6 +195,8 @@ inline constexpr Setting kSettings[] = {
      .tab = Tab::Controls, .control = Control::Custom, .needs = "BLUEWAKE_MOUSE_CAMERA"},
     {.key = "BLUEWAKE_STICK_CAMERA", .old_windows = "stick_camera", .kind = Kind::Bool, .on = Os::All,
      .label = "Direct right-stick camera and aiming", .tab = Tab::Controls, .control = Control::Switch,
+     .note = "On: the right stick turns and tilts the camera at once, with no easing, and its click is first "
+             "person. Off: the GameCube camera, where up/down zooms. Still zooming? Press L to center the camera.",
      .group = ""},
     {.key = "BLUEWAKE_STICK_CAMERA_SPEED", .old_windows = "stick_camera_speed", .kind = Kind::Float,
      .fallback = "360", .low = 120.f, .high = 720.f, .label = "Right-stick turn speed", .tab = Tab::Controls,
@@ -295,6 +297,16 @@ inline bool filled_on(const Setting& s, Os os = kThisOs) { return includes(s.fil
 inline bool default_on(const Setting& s, Os os = kThisOs) {
     const char* value = fallback_for(s, os);
     return value[0] != '\0' && value[0] != '0';
+}
+
+// A switch's value as the menus show it. Empty is the default, as the game's
+// own readers take it: an older settings file keeps a switch it never changed
+// as KEY=, which would otherwise read off in the menu while it is on (the
+// direct right-stick camera, whose reader is on unless 0).
+inline bool switch_on(const char* value, bool fallback) {
+    if (value == nullptr || value[0] == '\0')
+        return fallback;
+    return value[0] != '0' && std::strcmp(value, "off") != 0 && std::strcmp(value, "false") != 0;
 }
 
 } // namespace bw_settings

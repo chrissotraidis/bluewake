@@ -107,5 +107,10 @@ int main() {
     assert(find("BLUEWAKE_NOT_A_SETTING") == nullptr);
     assert(default_on(*find("BLUEWAKE_MOUSE_CAMERA")) && !default_on(*find("BLUEWAKE_HD_LOOK")));
     assert(std::strcmp(find("BLUEWAKE_ASPECT")->old_windows, "aspect") == 0);
+    // A switch left empty (KEY= in an older settings file) shows its default,
+    // as the game's readers take it: the stick camera is on there, not off.
+    const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));
+    assert(stick && switch_on("", stick) && switch_on(nullptr, stick) && !switch_on("", false));
+    assert(switch_on("1", false) && !switch_on("0", true) && !switch_on("off", true) && !switch_on("false", true));
     return 0;
 }
