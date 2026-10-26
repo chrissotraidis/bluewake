@@ -24,7 +24,7 @@
 
 | You play on | What to do |
 | --- | --- |
-| **Windows** 10 or 11 | [Download the ready-made build](#windows) and choose your disc image |
+| **Windows** 10 or 11 | [Download the ready-made build](#windows): nothing to build, just choose your disc image |
 | **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/TVOS_BUILD.md) (experimental) |
@@ -56,8 +56,9 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download `BlueWake-v0.9.0-windows-x64.zip` from the
-   [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest).
+1. Download [`BlueWake-v0.9.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.9.0/BlueWake-v0.9.0-windows-x64.zip)
+   from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play:
+   you don't need PadMint or a Mac.
 2. Unpack the whole ZIP and run `BlueWake.exe`.
 3. On first launch, choose your disc image (`.iso` or `.gcm`). A Dolphin `.rvz` must first be
    converted to ISO in Dolphin: right-click the game and choose **Convert File**.

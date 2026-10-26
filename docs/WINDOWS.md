@@ -18,7 +18,7 @@ point in place of the iOS app shell.
 ## Status
 
 Windows is BlueWake's ready-made download. Since 0.5.0 (October 5) every Windows release is built from `main`
-on a maintainer's PC from their own disc, checked there, and published by Chris; the latest is 0.7.0. What each
+on a maintainer's PC from their own disc, checked there, and published by Chris; the latest is 0.9.0. What each
 build was checked for, and what still needs a Windows PC, is in [Windows tasks](WINDOWS_TASKS.md); the release
 records are `docs/status/WINDOWS_BUILD_*.md`. The CI host build and its tests run on every pull request. The
 early history of the port (Elliott Tate's `windows-release` commits and the October 1 to 4 CI runs) is in
