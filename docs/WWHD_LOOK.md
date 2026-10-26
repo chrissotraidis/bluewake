@@ -91,7 +91,8 @@ walk over the actor list once a frame while the option is on. Nothing runs while
 
 Wind Waker draws its 3D scene, copies the finished scene out at full size, and then draws the HUD flat on top. Bloom
 runs in Aurora just before that copy: whatever is brighter than a threshold is blurred at a quarter of the size and
-added back, so clouds, foam and white highlights glow while the HUD stays sharp. It's six small GPU passes a frame
+screened back (it brightens what is darker and tends to white without passing it; added, it clipped the clouds to flat
+white), so clouds, foam and white highlights glow while the HUD stays sharp. It's six small GPU passes a frame
 and nothing while it's off. `DOL_AURORA_BLOOM_THRESHOLD` (default 0.72) and `DOL_AURORA_BLOOM_STRENGTH` (BlueWake starts it at 0.3; Aurora's default
 0.35) tune it; `DOL_AURORA_PASS_TRACE=1` logs one frame's passes.
 
@@ -117,8 +118,11 @@ HD darkens creases and the ground where things meet it. Before the far blur and 
 a quarter of the size: around each pixel, six pairs of samples on opposite sides, in a ring that shrinks with
 distance. A pair whose average is nearer than the pixel (a crease, a contact) darkens it; on a flat floor the two
 samples straddle the pixel, so it stays as it was. Where there is no depth (the sky, the horizon) and across big
-steps (a silhouette in front of the background) nothing is darkened. `DOL_AURORA_AO_RADIUS` (default 30) and
-`_STRENGTH` (BlueWake starts it at 0.3; Aurora's default 0.6) tune it, and `DOL_AURORA_AO_DEBUG=1` shows the occlusion alone.
+steps (a silhouette in front of the background) nothing is darkened. It is blurred and stretched back to the scene's
+size only along each surface, so Link's own shade stays on him instead of spreading onto what is behind him (#491), and it
+fades out from 1,000 to 2,500 units away, where the ring is a few pixels across and the sea's swells darkened a band toward
+the horizon. `DOL_AURORA_AO_RADIUS` (default 30), `_STRENGTH` (BlueWake starts it at 0.3; Aurora's default 0.6),
+`_FADE_START` and `_FADE_END` tune it, and `DOL_AURORA_AO_DEBUG=1` shows the occlusion alone.
 
 Checked on an M3 Max from an Outset save state: darker under Link's feet, round the pier's posts and in the cliffs'
 creases; the pier's deck and the sea unchanged.

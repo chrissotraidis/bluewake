@@ -184,3 +184,43 @@ Patch 0185 keeps those callbacks compatible with the pinned Apple headers by omi
 on their lambdas (RecompCore #44). The existing header's callback traits do not accept that qualifier.
 Focused Mac, iOS, tvOS and Android NDK source checks and a callback-forwarding fixture pass; full application
 builds and the Sunday gameplay/visual checks are separate. 0183 is reserved for #398's sun shadows.
+
+Patch 0186 is pdale-boop's RecompCore #47, the HD look's fixes for #491, in one commit. The ambient occlusion is
+blurred and stretched back to the scene's size only along each surface. Both steps mixed in neighbours whatever their
+distance, so Link's own shade (under his hat, around his shield) spread about 30 pixels onto the sea behind him, a
+dark outline around him. Each neighbour now counts by how near its distance is to the pixel's, and where there is no
+depth the scene is left as it is. Sun shadows keep the shared blur and apply. It also fades out from 1,000 to 2,500
+units away (`DOL_AURORA_AO_FADE_START`, `_FADE_END`): further away its ring is a few pixels across, and the sea's
+swells darkened a band from about 1,500 to 8,000 units, right up to Link's outline on Outset's pier.
+
+The bloom is screened onto the scene (glow * (1 - scene) + scene) instead of added. Added, it pushed Wind Waker's
+near-white clouds past white: at Outset's pier a fifth of the clouds were flat white, with no shading left. Screened,
+it brightens what is darker as before and tends to white without clipping.
+
+Two fixes go with the HD look's sky left sharp under the far blur. The far blur eases off within 24 pixels of the
+sky, where it stopped at the horizon's edge in a hard band. A lightning strike's invisible model (depth only, about
+100,000 units out) writes no depth while the HD look's effects are on: in the sky it turned the far blur and cloud
+shadows into grey columns from the sea to the clouds.
+
+The HD look's effects go in before a copy of the frame laid back over the scene. Wind Waker does that while the
+camera shakes (`motionBlure`, as when Link's sword hits a tree): the previous frame's copy, which already holds the
+effects, is blended over the scene, and post_fx ran after it, so the shadows, ambient occlusion and cloud shadows
+were multiplied in a second time. Shadowed ground went from 0.65 of its unshadowed brightness down to 0.41 and back
+with each game frame of the blur (#491). A flat draw that samples an EFB copy is marked as such, and the effects go
+in before the first one after the scene's perspective draws.
+
+The ambient occlusion is limited to what is within reach in the scene. Each pair of samples around a pixel occluded
+it when their average was nearer, with the radius measured on screen; across a floor seen at a low angle a short step
+on screen is a long way along the floor, so Link's legs darkened a wide patch of floor in front of him in a test
+room, and long grass at Outset left a dark halo (#491). Each sample now gets a place in the scene from the depth, and
+the pixel a surface normal from the depth around it; a sample shades the pixel only when it is above that surface and
+within the radius of it, each read at a whole texel of the depth so a sample never mixes two distances across an edge
+(bands across the screen otherwise). `DOL_AURORA_AO_DEBUG=2` tints what the occlusion darkens red over the scene
+instead of showing it alone.
+
+The sun shadow map gets the same bias near the camera as far off: two texels along the surface's normal and ten of
+its slope, where near had half a texel and one. On a rock wall the sun only grazes (Outset), the map's texels showed
+through as light and dark vertical stripes that shifted with the camera (#491). And it reads each pixel's distance
+from the depth with the camera's far plane (`aurora_set_world_view_far`, from `hd_look.c`): read as if it were
+infinitely far, an island 8,000 units ahead came out hundreds of units too far, and shaded itself in blocks from the
+waterline up.
