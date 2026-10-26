@@ -106,7 +106,8 @@ by distance, before bloom. Aurora's depth gives the distance; Wind Waker draws t
 the islands' far models without depth, so those get a lighter amount of their own. At Outset's pier, Link is about
 240 near-plane units away and the island's cliffs about 3,700, so the blur starts at 8,000 and is full at 30,000:
 the island stays sharp and the horizon softens. `DOL_AURORA_FAR_BLUR_START`, `_END`, `_AMOUNT` (BlueWake starts it at 0.4; Aurora's default 0.8) and
-`_BACKGROUND` (0.35) tune it, and `DOL_AURORA_FAR_BLUR_DEBUG=1` shows the distance as brightness. It needs the
+`_BACKGROUND` (BlueWake starts it at 0, so the sky's clouds and the wind's lines stay sharp; the islands' far models
+then soften only a little, from the sea in front of them; Aurora's default 0.35) tune it, and `DOL_AURORA_FAR_BLUR_DEBUG=1` shows the distance as brightness. It needs the
 renderer's full feature set, so it stays off in compatibility mode.
 
 Checked on an M3 Max from an Outset save state: the horizon, far islands and sky soften, the island and the HUD stay
@@ -192,7 +193,8 @@ get a warm rim; the HUD is unchanged.
 On the GameCube, a torch lights the models near it but not the walls and floor. With the switch, the host reads the
 game's own point lights each retrace (`g_env_light.mpPLights`: torches, fires, lanterns, bombs) and passes the 16 nearest
 the camera to Aurora, which lights every surface around them from the depth, with a smooth falloff and a slight flicker
-for the lights the game marks as fluctuating. `DOL_AURORA_TORCH_LIGHT_STRENGTH` (0.35) and `_REACH` (the glow's radius,
+for the lights the game marks as fluctuating. `DOL_AURORA_TORCH_LIGHT_STRENGTH` (BlueWake starts it at 0.2; at Aurora's 0.35 the Dragon Roost Cavern's walls beside
+each torch were washed pale yellow) and `_REACH` (the glow's radius,
 times the game's own, 3) tune it.
 
 Checked on an M3 Max from a Dragon Roost Cavern save state: five lights near the camera, and the wall around the torch

@@ -46,11 +46,16 @@ static int part(const char* key, int all) {
 // strength the look came out darker than the GameCube's, with a dark smudge
 // under Link. Aurora reads these once when it starts, so they are set before
 // that (main.c), whether or not the look is on yet; a value already set wins.
+// The far blur leaves the sky (no depth) sharp: blurred, its clouds looked out
+// of focus and the wind's lines faded. Torch light at Aurora's 0.35 washed the
+// Dragon Roost Cavern's walls pale yellow beside each torch.
 void bluewake_hd_look_defaults(void) {
     setenv("DOL_AURORA_AO_STRENGTH", "0.3", 0);
     setenv("DOL_AURORA_CLOUD_SHADOWS_STRENGTH", "0.15", 0);
     setenv("DOL_AURORA_BLOOM_STRENGTH", "0.3", 0);
     setenv("DOL_AURORA_FAR_BLUR_AMOUNT", "0.4", 0);
+    setenv("DOL_AURORA_FAR_BLUR_BACKGROUND", "0", 0);
+    setenv("DOL_AURORA_TORCH_LIGHT_STRENGTH", "0.2", 0);
 }
 
 void bluewake_hd_look_reload(void) {
