@@ -8,8 +8,7 @@ time. Each piece is an option, off by default, and one switch turns on every pie
 - **Android:** Mods › **Wind Waker HD Look**, then restart BlueWake (experimental own-disc builds, [ANDROID.md](ANDROID.md)).
 - **From a terminal:** `BLUEWAKE_HD_LOOK=1`.
 
-Each piece also has its own variable, which wins over the switch (`=1` on, `=0` off), so a piece that costs too
-much on a small GPU can be left out.
+Each piece also has its own switch (below), so a piece that costs too much on a small GPU can be left out.
 
 **Known issues** (October 17): with Smooth Motion above 60 FPS, the effects dropped out of most in-between frames
 and the shadows slid against the ground; pdale-boop's draft #371 (RecompCore#40) fixes that. Fixed in `main`: the
@@ -17,22 +16,24 @@ softer default (#321: sun shadows off, gentler ambient occlusion, cloud shadows,
 that looked square and banding on the sea (RecompCore#41: the sea's place from its plane, dithered shades). The last
 is checked on the Mac; Vulkan, where jslay88 saw it, still needs a look.
 
-On Mac, Linux and Windows, safe startup turns the HD look off and clears the eight `BLUEWAKE_HD_*`
-per-effect overrides listed below. F2 or the menu can turn the whole look back on during that session.
+On Mac, Linux and Windows, safe startup turns the HD look off, puts each of its parts listed below back on (so the
+look comes back whole) and clears the sun shadows' switch. F2 or the menu can turn the whole look back on during that
+session.
 The reset is saved only after the earlier settings file is backed up; if the backup fails, or Mac/Linux
 uses `BLUEWAKE_SETTINGS=none`, startup resets only the session. Normal startup keeps the usual overrides.
 
 ## Turning one piece off
 
-Each piece has its own switch, which wins over the main one: `=0` turns it off, `=1` on. The names are
-`BLUEWAKE_HD_AO` (ambient occlusion), `BLUEWAKE_HD_SUN_SHADOWS`, `BLUEWAKE_HD_CLOUD_SHADOWS`, `BLUEWAKE_HD_BLOOM`,
-`BLUEWAKE_HD_FAR_BLUR`, `BLUEWAKE_HD_EDGE_LIGHT`, `BLUEWAKE_HD_TORCH_LIGHT` and `BLUEWAKE_HD_DISTANT_ISLANDS`.
+In the menu, under "Wind Waker HD look" on the Display tab, each piece has a switch of its own: islands on the
+horizon, soft shading (ambient occlusion), cloud shadows, edge light, torch light, the soft distance (far blur) and
+bloom. They're on with the look and greyed while it's off. Sun shadows are under Mods › Experimental. Turning the
+look off (F2) takes every piece with it, whatever its switch says.
 
-- **Mac and Linux:** add a line such as `BLUEWAKE_HD_AO=0` to the settings file
-  (`~/Library/Application Support/BlueWake/settings.ini` on the Mac, `~/.config/BlueWake/settings.ini` on Linux)
-  while BlueWake isn't running. The menu keeps lines it doesn't manage.
-- **Windows:** set it in PowerShell before starting the game: `$env:BLUEWAKE_HD_AO="0"; .\BlueWake.exe`.
-- Menu switches for each piece are planned with the new desktop menu (#368).
+For testing, the same switches are variables: `BLUEWAKE_HD_AO` (ambient occlusion), `BLUEWAKE_HD_SUN_SHADOWS`,
+`BLUEWAKE_HD_CLOUD_SHADOWS`, `BLUEWAKE_HD_BLOOM`, `BLUEWAKE_HD_FAR_BLUR`, `BLUEWAKE_HD_EDGE_LIGHT`,
+`BLUEWAKE_HD_TORCH_LIGHT` and `BLUEWAKE_HD_DISTANT_ISLANDS`. `=0` turns a piece off and `=1` on;
+`BLUEWAKE_HD_LOOK=0` turns them all off, and with `BLUEWAKE_HD_LOOK` not set, a piece's own `=1` turns it on alone.
+On Windows, set them in PowerShell before starting the game: `$env:BLUEWAKE_HD_AO="0"; .\BlueWake.exe`.
 
 ## Where this comes from
 

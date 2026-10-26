@@ -367,11 +367,12 @@ void apply_safe_mode() {
         {"BLUEWAKE_FADE_FRAMES", "0"},       {"BLUEWAKE_QUICK_DOORS", "0"},
         {"BLUEWAKE_STAGE_SELECT_TOGGLE", "0"},
         {"BLUEWAKE_HD_LOOK", "0"},
-        // Clear overrides so the HD switch can enable every effect again later.
-        {"BLUEWAKE_HD_DISTANT_ISLANDS", ""}, {"BLUEWAKE_HD_BLOOM", ""},
-        {"BLUEWAKE_HD_FAR_BLUR", ""},        {"BLUEWAKE_HD_AO", ""},
-        {"BLUEWAKE_HD_CLOUD_SHADOWS", ""},   {"BLUEWAKE_HD_SUN_SHADOWS", ""},
-        {"BLUEWAKE_HD_EDGE_LIGHT", ""},      {"BLUEWAKE_HD_TORCH_LIGHT", ""},
+        // Every part back to its default, on with the look, so the HD switch
+        // turns every effect on again later; sun shadows' override is cleared.
+        {"BLUEWAKE_HD_DISTANT_ISLANDS", "1"}, {"BLUEWAKE_HD_BLOOM", "1"},
+        {"BLUEWAKE_HD_FAR_BLUR", "1"},        {"BLUEWAKE_HD_AO", "1"},
+        {"BLUEWAKE_HD_CLOUD_SHADOWS", "1"},   {"BLUEWAKE_HD_SUN_SHADOWS", ""},
+        {"BLUEWAKE_HD_EDGE_LIGHT", "1"},      {"BLUEWAKE_HD_TORCH_LIGHT", "1"},
     };
     for (const auto& pair : kSafe) {
         if (g_safe_backed_up) {

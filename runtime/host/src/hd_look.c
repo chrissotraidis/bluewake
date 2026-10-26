@@ -33,6 +33,15 @@ static int setting(const char* key) {  // 1, 0, or -1 when unset
     return value[0] == '1';
 }
 
+// A part of the HD look: its own switch, else the look's. Turning the look off
+// (F2, or BLUEWAKE_HD_LOOK=0) takes every part with it, whatever its switch
+// says; with the look unset, a part's own variable alone still turns it on.
+static int part(const char* key, int all) {
+    if (all == 0)
+        return 0;
+    return setting(key) >= 0 ? setting(key) : all;
+}
+
 // The HD look's strengths, softer than Aurora's own starting values: at full
 // strength the look came out darker than the GameCube's, with a dark smudge
 // under Link. Aurora reads these once when it starts, so they are set before
@@ -46,15 +55,14 @@ void bluewake_hd_look_defaults(void) {
 
 void bluewake_hd_look_reload(void) {
     const int all = setting("BLUEWAKE_HD_LOOK");
-    const int islands = setting("BLUEWAKE_HD_DISTANT_ISLANDS");
-    bluewake_hd_distant_islands = islands >= 0 ? islands == 1 : all == 1;
+    bluewake_hd_distant_islands = part("BLUEWAKE_HD_DISTANT_ISLANDS", all) == 1;
     g_trace = setting("BLUEWAKE_HD_TRACE") == 1;
     // The renderer's parts (Aurora's post_fx). Left to DOL_AURORA_BLOOM and
     // DOL_AURORA_FAR_BLUR and DOL_AURORA_AO while neither the switch nor the part is set.
-    const int bloom = setting("BLUEWAKE_HD_BLOOM") >= 0 ? setting("BLUEWAKE_HD_BLOOM") : all;
-    const int far_blur = setting("BLUEWAKE_HD_FAR_BLUR") >= 0 ? setting("BLUEWAKE_HD_FAR_BLUR") : all;
-    const int ao = setting("BLUEWAKE_HD_AO") >= 0 ? setting("BLUEWAKE_HD_AO") : all;
-    g_clouds = setting("BLUEWAKE_HD_CLOUD_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_CLOUD_SHADOWS") : all;
+    const int bloom = part("BLUEWAKE_HD_BLOOM", all);
+    const int far_blur = part("BLUEWAKE_HD_FAR_BLUR", all);
+    const int ao = part("BLUEWAKE_HD_AO", all);
+    g_clouds = part("BLUEWAKE_HD_CLOUD_SHADOWS", all);
     // Sun shadows are worked out from what is on screen, and on open ground
     // they drew long dark streaks, so the HD look leaves them off; only
     // BLUEWAKE_HD_SUN_SHADOWS=1 turns them on. They are part of the HD look,
@@ -67,8 +75,8 @@ void bluewake_hd_look_reload(void) {
     const int sun_map = setting("DOL_AURORA_SUN_SHADOW_MAP") >= 0 ? setting("DOL_AURORA_SUN_SHADOW_MAP") : g_sun;
     g_palm_cull = setting("BLUEWAKE_HD_PALM_CULL");
     g_room_cull = setting("BLUEWAKE_HD_ROOM_CULL");
-    g_edge = setting("BLUEWAKE_HD_EDGE_LIGHT") >= 0 ? setting("BLUEWAKE_HD_EDGE_LIGHT") : all;
-    g_torch = setting("BLUEWAKE_HD_TORCH_LIGHT") >= 0 ? setting("BLUEWAKE_HD_TORCH_LIGHT") : all;
+    g_edge = part("BLUEWAKE_HD_EDGE_LIGHT", all);
+    g_torch = part("BLUEWAKE_HD_TORCH_LIGHT", all);
     if (bloom >= 0)
         aurora_set_bloom(bloom == 1);
     if (far_blur >= 0)
