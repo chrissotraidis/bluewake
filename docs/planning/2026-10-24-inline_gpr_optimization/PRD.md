@@ -2,7 +2,7 @@
 
 Status: Implemented and measured candidate; upstream integration open
 Source: user handoff SHA-256 `185ccc3b6575a46f11fb4d460993513409d33fb0f392d82d83f5d8a761bb94bb`
-Scope: translated CPU save/restore overhead; excluded: renderer, GPU work, new native routines, and direct replacement of memory helpers
+Scope: translated CPU save/restore overhead in the main DOL and REL modules; excluded: renderer, GPU work, unrelated native routines, and unsafe bypass of watched host returns
 
 [Technical plan](TECH_PLAN.md) · [Progress](PROGRESS.md) · [Companion RecompCore PR](https://github.com/chrissotraidis/RecompCore/pull/45) · [Parent performance tracker](https://github.com/chrissotraidis/bluewake/pull/421)
 
@@ -175,7 +175,9 @@ AFTER INLINING
   Resume function A
 ```
 
-The existing preparation pass rewrote **5,728 call sites** in the measured Clang 18 build. This measures static coverage, not runtime execution frequency.
+The original preparation pass rewrote **5,728 call sites** in the measured Clang 18 build. The consolidated implementation also recognizes REL mirror calls (`0xC0328Fxx`) and inlines safe callers of return-keyed entries while preserving the watched returns. Its generated module contains 28,590 inline sites across the main DOL and 496 REL chunks. These are static coverage counts, not runtime execution frequency.
+
+Two entries remain conditional: `_restgpr_27` and `_savegpr_29` may be inlined only when the call's return address is not one of the host-observed returns. A source-contract test fails if a future host hook names either keyed entry without a corresponding return guard.
 
 Relevant generator: [`scripts/windows/inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py).
 

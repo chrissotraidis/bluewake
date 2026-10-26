@@ -1,6 +1,6 @@
 # TECH_PLAN — Inline GPR frame validation
 
-Status: Candidate implemented and measured; integration gates remain
+Status: Complete BlueWake stack implemented and measured; RecompCore integration gate remains
 Inspected: tested BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; tested RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb`; rebased RecompCore companion `47a5229cbfb3387cfd21c2b9d304b303a54a6767`; upstream BlueWake `main` `211abfdecf13beb5b9f2120459a1a3cde50dd84e`
 
 [PRD](PRD.md) · [Tracker](PROGRESS.md) · [guest memory model](../../architecture/GuestState.md#guest-to-host-address-resolution) · [translated-code dispatch](../../architecture/GameModule.md#translated-code-dispatch)
@@ -14,8 +14,9 @@ Inspected: tested BlueWake `f9205a53de307caac4e306e2a744609b1565135b`; tested Re
 | Tested candidate runtime | RecompCore `0ab73ca9a673553675b8e511882e6f6b485407eb` | Exact commit used by the measured artifact |
 | Rebased runtime companion | RecompCore `47a5229cbfb3387cfd21c2b9d304b303a54a6767` | Same API rebased onto current `bluewake-next`; [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45) |
 | Current upstream | BlueWake `211abfd`, RecompCore `1446450` | PR branch rebased; dependency must still be integrated before merge |
+| Consolidated BlueWake head | `02fe42e1ca1e81954bf7855160bc1b59b868754e` | Direct-frame work plus REL mirror matching, return-keyed exclusions, guard tests and combined evidence |
 
-The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h) first proves that the complete frame is plain MEM1 with no journal; `bw_inline_gpr_frame()` then exposes that validated backing range. Generated code uses `read_be32` / `write_be32` at fixed offsets and clears an affected reservation once for a save. Cycle charging, direct-call checks and fallback remain intact. The complete control-to-candidate source diff consists only of this GPR work, its RecompCore alias-range API, integration wiring and tests; no unrelated renderer, service or gameplay source changed.
+The generator inserts guarded inline loads/stores through [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py). It recognizes main-DOL and REL-mirror calls, but excludes the exact return-keyed call sites observed by host hooks. [`inline_gpr.h`](../../../cmake/composite/inline_gpr.h) first proves that the complete frame is plain MEM1 with no journal; `bw_inline_gpr_frame()` then exposes that validated backing range. Generated code uses `read_be32` / `write_be32` at fixed offsets and clears an affected reservation once for a save. Cycle charging, host-observed returns and fallback remain intact.
 
 ## Implemented flow
 
@@ -51,6 +52,8 @@ return true; /* bw_inline_gpr_frame may now reuse the proven backing range */
 |---|---|---|---|
 | Existing candidate | [`cmake/composite/inline_gpr.h`](../../../cmake/composite/inline_gpr.h) | Validate one contiguous frame and reject both alias forms | M2 |
 | Integrated follow-up | [`bw_inline_gpr_frame`](../../../cmake/composite/inline_gpr.h) and the generator | Reuse the proven frame, preserve byte order and clear an affected reservation once | M2 |
+| Consolidated follow-up | [`inline_save_restore_gpr.py`](../../../scripts/windows/inline_save_restore_gpr.py) | Match REL mirror calls and inline return-keyed entries except at named host returns | M2 |
+| Consolidated guard | [`tests/test_inline_gpr.py`](../../../tests/test_inline_gpr.py) | Reject a keyed entry named by the host without one of its declared return addresses | M3 |
 | Existing candidate | [`tests/inline_gpr_memory_test.c`](../../../tests/inline_gpr_memory_test.c) | Cover ordinary, partial-alias, mirror, bounds, MMIO and journal cases | M3 |
 | Existing candidate | RecompCore `ppc_guest_alias_range_overlaps` | Answer precise half-open range overlap without resolving storage | M1 |
 | Under review | [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45) and BlueWake dependency pins | Land the runtime API upstream, then replace the temporary contributor pin | M5 |
@@ -129,11 +132,24 @@ Guest checkpoints matched across all four builds on both machines, `main` and ca
 
 These Intel cores show about half the Deck's gain. That may be the Zen 2 core responding more to fewer instructions; the Deck figure was not rerun with matched profiles.
 
+### Consolidated full-stack qualification
+
+The follow-up record in [`INLINE_GPR_FOLLOWUP_2026-10-25.md`](../../status/INLINE_GPR_FOLLOWUP_2026-10-25.md) covers REL mirror calls and return-keyed entries on top of the direct-frame candidate. A fresh profile is required: using `main`'s profile grew the module by 7% and lost 3.4%, while training the consolidated source kept module size near `main` and produced the gains below.
+
+| Environment | Comparison | Result |
+|---|---|---:|
+| Steam Deck, five-scene headless tour | Full stack versus 0.9.0 AppImage | **+7.68%** |
+| i5-6500, five-scene headless tour | Freshly trained full stack versus `main` | +7.9%, then +8.2% |
+| Windows 11, i5-12600KF E-cores, rendered D3D12 | Freshly trained full stack versus `main` | **+6.6%** |
+| i5-12600KF E-cores, rendered Vulkan AppImages | Full stack versus current `main` AppImage | **+6.3%** |
+
+All five scenes improved and all 31 checkpoints matched in the recorded tours. The full record also retains negative results, including the mismatched-profile regression and an out-of-line helper that was 0.6% slower than trained full inlining.
+
 ## Verification
 
 | Layer | Command / method | Required evidence | State |
 |---|---|---|---|
-| Source contract | `python3 tests/test_inline_gpr.py` | 4 passing tests | Passed |
+| Source contract | `python3 tests/test_inline_gpr.py` | 7 passing tests, including REL mirror and keyed-return guards | Passed |
 | Builder contract | `python3 tests/test_windows_prepared_cache.py` | 21 passing tests | Passed |
 | Compiled component | CTest `bluewake_inline_gpr_memory_test` | Alias/mirror/bounds/journal plus direct/helper byte, value and reservation equivalence | Passed, 1/1 |
 | Repository | `git diff --check`; `scripts/audit_repo.sh` | Clean diff; audit pass | Passed |
@@ -148,7 +164,7 @@ These Intel cores show about half the Deck's gain. That may be the Zen 2 core re
 |---|---|---|
 | M0 | — | Preserve existing inline behavior and define range proof |
 | M1 | M0 | Tested RecompCore query; upstream dependency still required |
-| M2 | M1 | Implemented eligibility change with unchanged memory operations |
+| M2 | M1 | Range proof, direct frame access, REL mirror coverage and return-keyed exclusions |
 | M3 | M1, M2 | Focused tests and repository checks pass |
 | M4 | M3 | Repeated headless/rendered evidence and player tour |
 | M5 | M1, M2, M3, M4 | Rebase, upstream RecompCore pin, matched qualification and CI |
