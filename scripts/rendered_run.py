@@ -4,6 +4,9 @@
   python3 scripts/rendered_run.py APP OUT_DIR --card CARD [where] [input] [pictures] [--set KEY=VALUE ...]
                                   [--variant NAME [KEY=VALUE ...]] ...
 
+APP is a BlueWake executable (on a Mac, BlueWake.app/Contents/MacOS/BlueWake). CARD is a memory card; each
+run gets a copy of it. OUT_DIR gets each run's folder, status.txt and results.json.
+
 Where (one of):
   --state FILE                 start from a save state (made with BLUEWAKE_SAVE_STATE=FILE@RETRACE, or F5)
   --warp stage:room:point[:layer] [--warp-file N] [--warp-time noon] [--stop-after PLAY_FRAMES]
