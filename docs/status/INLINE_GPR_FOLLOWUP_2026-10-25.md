@@ -250,6 +250,33 @@ setup state, every run loading 5/5 stops with 31/31 checkpoints, identical acros
 The geometric mean of the per-run medians: **+7.68%**, against +7.9% and +8.2% on the i5-6500 (§4). The gain holds on
 AMD. Headless, so #472's rendering gain isn't in it.
 
+## 10. Windows
+
+The tour on Windows 11 on October 25, on the same i5-12600KF and RTX 5070 Ti (D3D12): `main` `211abfd` against the
+full stack (`d9424af`, the same code as this branch). Both were built from scratch with `scripts/windows/build.py`,
+each into its own folder with its own training (33 and 32 minutes, `--jobs 16`). Rendered, unpaced, Smooth Motion off,
+with the whole run pinned to the four E-cores (processor affinity `0xF000`, CPUs 12-15, the same cores as
+`taskset -c 12-15` in §6). One setup state, made by `main`'s first run, was loaded by every run (the setup pass is
+headless, which runs fine on Windows). Three rounds with the order rotated, about 2 minutes a run, every run loading
+5/5 stops.
+
+| Stop | `main` | Full stack | Change |
+| --- | ---: | ---: | ---: |
+| Outset | 39.20 | 41.83 | +6.7% |
+| Windfall | 37.48 | 40.00 | +6.7% |
+| Dragon Roost Cavern | 48.18 | 52.03 | +8.0% |
+| Forest Haven | 35.03 | 37.19 | +6.2% |
+| Sea by the Fortress | 40.70 | 42.82 | +5.2% |
+| Mean | 40.12 | 42.77 | **+6.6%** |
+
+Each stop is the mean over the three rounds. By round: +7.9%, +6.3% and +5.7%, and the full stack was faster at every
+stop in every round (15/15). The same build moved 1.0% (`main`) and 1.6% (the full stack) between rounds. All 31
+checkpoints were identical across all six runs, both builds. That is in line with the rendered AppImages on the same
+cores on Linux (+6.3%, §6).
+
+One difference from Linux: the trained full-stack module is 0.72% bigger than `main`'s here (459,785,728 against
+456,518,144 bytes), where on Linux the two were the same size. There's no hand play on Windows yet.
+
 ## Builds and branches
 
 - `pdale-boop/bluewake` `exp/gpr-direct`: #480 at `7d6a30d`, then `043495d` (direct frame writes) and `52583a4` (REL
@@ -260,9 +287,9 @@ AMD. Headless, so #472's rendering gain isn't in it.
 ## Not done yet
 
 - `main`'s AppImage rendered for three rounds (§6 has one pass).
-- Windows and a Mac. The Steam Deck (§9) is the only AMD CPU; the rest is Intel x86-64.
+- A Mac. The Steam Deck (§9) is the only AMD CPU; the rest is Intel x86-64, Windows (§10) included.
 - The Steam Deck rendered, with #472's AppImage, to see whether it reaches the game's full 30 frames a second.
 - A second independent training of the full stack, to put a number on profile luck. It moved results by about ±1% in
   §1, small against +8%.
 - The training-tour sweet spot (§7).
-- Hand play on other machines (§8 is one PC, about 40 minutes).
+- Hand play on other machines (§8 is one PC, about 40 minutes), Windows among them.
