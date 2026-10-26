@@ -170,21 +170,40 @@ inline void draw_control(const bw_settings::Setting& s) {
         changed(s);
 }
 
-// Every row of one tab, in the table's order. Experimental rows wait for the
-// Mods tab's last section (draw_experimental).
+// Every row of one tab, in the table's order. A pane's rows are drawn inside it,
+// set in, while it is open. Experimental rows wait for the Mods tab's last
+// section (draw_experimental), unless they are in a pane: there, their line
+// says they are experimental.
 inline void draw_tab(bw_settings::Tab tab) {
-    for (const bw_settings::Setting& s : bw_settings::kSettings)
-        if (s.tab == tab && s.experimental == nullptr)
+    const char* pane = nullptr;
+    bool open = false;
+    for (const bw_settings::Setting& s : bw_settings::kSettings) {
+        if (s.tab != tab || (s.experimental != nullptr && s.pane == nullptr))
+            continue;
+        if (s.pane != nullptr && (pane == nullptr || std::strcmp(pane, s.pane) != 0))
+            open = bw_menu_pane(s.pane);
+        pane = s.pane;
+        if (pane == nullptr) {
             draw_setting(s);
+            continue;
+        }
+        if (!open)
+            continue;
+        ImGui::Indent();
+        draw_setting(s);
+        if (s.experimental != nullptr)
+            ImGui::TextDisabled("Experimental: %s", s.experimental);
+        ImGui::Unindent();
+    }
 }
 
-// The Experimental section: every row with an experimental line, each with
-// that line under it saying what has not been checked yet.
+// The Experimental section: every row with an experimental line that is not
+// in a pane, each with that line under it saying what has not been checked yet.
 inline void draw_experimental() {
     ImGui::SeparatorText("Experimental");
     ImGui::TextDisabled("Off by default, and still being checked.");
     for (const bw_settings::Setting& s : bw_settings::kSettings) {
-        if (s.experimental == nullptr)
+        if (s.experimental == nullptr || s.pane != nullptr)
             continue;
         draw_setting(s);
         ImGui::TextDisabled("%s", s.experimental);

@@ -57,6 +57,10 @@ struct Setting {
     const char* note = nullptr;          // the quiet line under it
     const char* needs = nullptr;         // a Bool setting that must be on for it to be changed
     const char* group = nullptr;         // a heading drawn before it, "" for a plain line
+    // A pane that folds away under this name, closed until it is opened: this
+    // row and the ones after it that name it too are drawn inside it. An
+    // experimental row in a pane stays there, with its line saying so.
+    const char* pane = nullptr;
     const char* shown = nullptr;         // Slider: how its value reads ("%.0f seconds"), nullptr for "%.2f"
     const char* stored = nullptr;        // Slider: how it is written to the file, nullptr for "%.3f"
     const char* dead_when = nullptr;     // greyed while this setting has a value
@@ -80,23 +84,40 @@ inline constexpr Setting kSettings[] = {
      .label = "Widescreen", .tab = Tab::Mods, .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_HD_LOOK", .old_windows = "hd_look", .kind = Kind::Bool, .label = "Wind Waker HD look   (F2)",
      .control = Control::Switch,
-     .note = "The HD release's look, rebuilt piece by piece; each piece below can be turned off on its own. Sun shadows are under Mods, Experimental. Off by default."},
+     .note = "The HD release's look, rebuilt piece by piece. Its settings below turn each piece off on its own. Off by default."},
     // The HD look's parts, on with it (hd_look.c): each can be turned off on
-    // its own, and turning the look off takes them all.
+    // its own, and turning the look off takes them all. Folded away under the
+    // look, with sun shadows, which are still experimental.
     {.key = "BLUEWAKE_HD_DISTANT_ISLANDS", .kind = Kind::Bool, .on = Os::All,
-     .label = "Islands on the horizon from further away", .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK"},
+     .label = "Islands on the horizon from further away", .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_AO", .kind = Kind::Bool, .on = Os::All, .label = "Soft shading (ambient occlusion)",
-     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK"},
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_CLOUD_SHADOWS", .kind = Kind::Bool, .on = Os::All, .label = "Cloud shadows outdoors",
-     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK"},
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_EDGE_LIGHT", .kind = Kind::Bool, .on = Os::All, .label = "Edge light outdoors",
-     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK"},
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_TORCH_LIGHT", .kind = Kind::Bool, .on = Os::All, .label = "Torch light",
-     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK"},
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_FAR_BLUR", .kind = Kind::Bool, .on = Os::All, .label = "A soft distance (far blur)",
-     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK"},
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_BLOOM", .kind = Kind::Bool, .on = Os::All, .label = "Bloom", .control = Control::Switch,
-     .needs = "BLUEWAKE_HD_LOOK"},
+     .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK", .pane = "Wind Waker HD look settings",
+     .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},
+    // The sun shadow map's quality (hd_look.c hands it to Aurora's post_fx when it changes).
+    {.key = "DOL_AURORA_SUN_SHADOW_QUALITY", .kind = Kind::Choice, .fallback = "high", .label = "Sun shadow quality",
+     .control = Control::Chooser,
+     .note = "High is the sharpest, and keeps islands and palms behind the camera casting; Low is for slower graphics cards.",
+     .needs = "BLUEWAKE_HD_SUN_SHADOWS", .pane = "Wind Waker HD look settings",
+     .experimental = "Low, Medium and High played on Linux (Vulkan); not yet on Windows or a Mac."},
     {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
      .label = "Show the frame rate   (F9)", .control = Control::Switch},
     {.key = "DOL_AURORA_ASPECT_FIT", .old_windows = "keep_aspect", .kind = Kind::Bool, .on = Os::Windows,
@@ -111,15 +132,6 @@ inline constexpr Setting kSettings[] = {
      .label = "A load time for loose RELs (the stage select's Wind Temple R04 and R08 load)", .tab = Tab::Mods,
      .control = Control::Switch, .next_launch = Os::All,
      .experimental = "Every stage select place checked headless on Windows and Linux; not yet played through, or on a Mac."},
-    {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
-     .tab = Tab::Mods, .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
-     .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},
-    // The sun shadow map's quality (hd_look.c hands it to Aurora's post_fx when it changes).
-    {.key = "DOL_AURORA_SUN_SHADOW_QUALITY", .kind = Kind::Choice, .fallback = "high", .label = "Sun shadow quality",
-     .tab = Tab::Mods, .control = Control::Chooser,
-     .note = "High is the sharpest, and keeps islands and palms behind the camera casting; Low is for slower graphics cards.",
-     .needs = "BLUEWAKE_HD_SUN_SHADOWS",
-     .experimental = "Low, Medium and High played on Linux (Vulkan); not yet on Windows or a Mac."},
     {.key = "BLUEWAKE_PAUSE_UNFOCUSED", .old_windows = "pause_unfocused", .kind = Kind::Bool,
      .label = "Pause while the window is in the background", .control = Control::Switch},
     {.key = "BLUEWAKE_SHADERS_FIRST", .old_windows = "compile_shaders_first", .kind = Kind::Bool,
