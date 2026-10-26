@@ -56,16 +56,11 @@ jobs:
                 -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 \
                 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
                 "-DCMAKE_C_FLAGS=-D_GNU_SOURCE -march=x86-64-v3" \
-                "-DCMAKE_CXX_FLAGS=-stdlib=libc++ -march=x86-64-v3" \
-                -DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++ \
-                -DCMAKE_SHARED_LINKER_FLAGS=-stdlib=libc++ \
-                -DCMAKE_CXX_STANDARD_LIBRARIES= \
-                -DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE \
-                -DCMAKE_DISABLE_FIND_PACKAGE_absl=TRUE \
-                -DDAWN_USE_GLFW=OFF \
+                "-DCMAKE_CXX_FLAGS=-march=x86-64-v3" \
+                -DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ \
                 -DBLUEWAKE_WWHD_TEST_PYTHON=/src/build/wwhd-disc-test-env/bin/python \
                 -DBLUEWAKE_LINUX_REGRESSION_TESTS=ON \
-                -DAURORA_DAWN_PROVIDER=vendor -DAURORA_DAWN_LINKAGE=static \
+                -DAURORA_DAWN_PROVIDER=package -DAURORA_DAWN_LINKAGE=static \
                 -DAURORA_SDL3_PROVIDER=vendor -DAURORA_SDL3_LINKAGE=static
               cmake --build build/linux-host --target bluewake bluewake_disc_extract \
                 bluewake_native_math_guard_test \

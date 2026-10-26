@@ -15,9 +15,9 @@ ARG TYPE2_RUNTIME_X86_64_SHA256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c8
 # default for both CI and playable builds. The playable builder can opt into
 # LLVM 22 with --ci-container --clang22 for performance testing without moving
 # the project's default compiler.
-# Keep Ubuntu's libc++ 18 development files for both compilers: versioned
-# libc++ development packages conflict, and this preserves CI's existing C++
-# runtime and the AppImage ABI baseline while only changing code generation.
+# Ubuntu's libc++ 18 development files stay for anyone building against libc++
+# by hand; the AppImage and CI link libstdc++ statically instead (versioned
+# libc++ development packages conflict, so only one is installed).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates wget gnupg python3 python3-pip python3-venv \

@@ -11,7 +11,7 @@ import tempfile
 
 # SteamOS currently provides glibc, but not necessarily the same libstdc++ as
 # the build host. BlueWake therefore caps glibc at the Ubuntu 24.04 build
-# baseline and bundles libc++.
+# baseline and links libstdc++ statically.
 GLIBC_VERSION = re.compile(r"\bGLIBC_(\d+(?:\.\d+)*)\b")
 GLIBCXX_VERSION = re.compile(r"\bGLIBCXX_(\d+(?:\.\d+)*)\b")
 
@@ -128,7 +128,7 @@ def audit_elf_versions(image, root, readelf, maximum_glibc):
             required = max(glibcxx_versions, key=parse_version)
             errors.append(
                 f"{label} requires GLIBCXX_{required}; "
-                "the AppImage must use its bundled LLVM libc++"
+                "link libstdc++ statically (-static-libstdc++)"
             )
 
     if elf_count == 0:
