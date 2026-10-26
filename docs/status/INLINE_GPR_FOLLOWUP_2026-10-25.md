@@ -232,6 +232,24 @@ around Windfall (sea rooms 0, 3, 4, 10, 11, 12, 19, 26 and 27), Windfall, the To
 sailing. No crash or hang; the game held 60 frames a second (the rate dipped below 58 twice in 2,025 one-second samples).
 What went wrong was in the menu and is on `main` too, not the inlining; those fixes are chrissotraidis/bluewake#485.
 
+## 9. Steam Deck
+
+irregularthanis ran the headless benchmark tour on a Steam Deck (SteamOS) on October 25: the 0.9.0 AppImage
+(`main-090`) against the full stack as an AppImage (`gpr-direct-ex`), 10 runs each, interleaved A/B/B/A, one fixed
+setup state, every run loading 5/5 stops with 31/31 checkpoints, identical across both builds
+([his comment on #480](https://github.com/chrissotraidis/bluewake/pull/480#issuecomment-6405842013)).
+
+| Stop | `main-090` | Full stack | Change |
+|---|---:|---:|---:|
+| Outset | 41.268 | 44.537 | +7.92% |
+| Windfall | 43.444 | 47.053 | +8.31% |
+| Dragon Roost Cavern | 58.570 | 64.704 | +10.47% |
+| Forest Haven | 35.804 | 37.397 | +4.45% |
+| Sea by the Fortress | 33.194 | 35.770 | +7.76% |
+
+The geometric mean of the per-run medians: **+7.68%**, against +7.9% and +8.2% on the i5-6500 (§4). The gain holds on
+AMD. Headless, so #472's rendering gain isn't in it.
+
 ## Builds and branches
 
 - `pdale-boop/bluewake` `exp/gpr-direct`: #480 at `7d6a30d`, then `043495d` (direct frame writes) and `52583a4` (REL
@@ -242,7 +260,8 @@ What went wrong was in the menu and is on `main` too, not the inlining; those fi
 ## Not done yet
 
 - `main`'s AppImage rendered for three rounds (§6 has one pass).
-- A Steam Deck or another AMD CPU, Windows, and a Mac. All the numbers here are Intel x86-64.
+- Windows and a Mac. The Steam Deck (§9) is the only AMD CPU; the rest is Intel x86-64.
+- The Steam Deck rendered, with #472's AppImage, to see whether it reaches the game's full 30 frames a second.
 - A second independent training of the full stack, to put a number on profile luck. It moved results by about ±1% in
   §1, small against +8%.
 - The training-tour sweet spot (§7).
