@@ -603,6 +603,7 @@ int main(void) {{
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
                        f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
+                       f"{int(self.args.gather_alias_cache)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
                        + ("lean_blocks\n" if getattr(self.args, "lean_blocks", False) else "")
@@ -938,6 +939,7 @@ int main(void) {{
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
@@ -1259,6 +1261,7 @@ int main(void) {{
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
+            "gather_alias_cache": self.args.gather_alias_cache,
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
             "native_j3d": self.args.native_j3d,
@@ -1466,6 +1469,8 @@ def main():
                         help="opt into experimental inline floating-point helpers (off by default)")
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
+    parser.add_argument("--gather-alias-cache", action="store_true",
+                        help="candidate: cache gather-pipe alias-window overlap by registry generation; requires --gather-pipe")
     parser.add_argument("--inline-gpr", action="store_true",
                         help="inline certified register saves/restores; requires --direct-calls")
     parser.add_argument("--direct-calls", action="store_true",
@@ -1576,6 +1581,8 @@ def main():
         parser.error("--lean-memory requires --prepared-blocks")
     if args.lean_memory and not args.gather_pipe:
         parser.error("--lean-memory requires --gather-pipe (its accesses call gather_pipe.h's helpers)")
+    if args.gather_alias_cache and not args.gather_pipe:
+        parser.error("--gather-alias-cache requires --gather-pipe")
     if getattr(args, "behaviour_timing", False) and not args.prepared_blocks:
         parser.error("--behaviour-timing requires --prepared-blocks")
     if args.lean_deadlines and not args.lean_memory:
