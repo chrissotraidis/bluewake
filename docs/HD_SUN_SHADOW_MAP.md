@@ -48,17 +48,21 @@ Turned on by `BLUEWAKE_HD_SUN_SHADOWS=1` (BlueWake's `runtime/host/src/hd_look.c
    projected shadows are recognised by their blended re-draw of the ground, and its blob and volume shadows by the two
    fixed position arrays they index (`d_drawlist`'s `l_shadowVolPos` 0x8037C554 and `l_simpleShadowPos` 0x8037C7DC).
    `DOL_AURORA_GAME_SHADOWS=1` keeps them.
-5. **Looking it up** (`post_fx.cpp`). The sun shadow pass takes each pixel's world position into the sharpest
+5. **Looking it up** (`post_fx.cpp`). The sun shadow pass takes each pixel's world position (its distance from the
+   depth with the camera's near and far planes: `hd_look.c` passes the far one with `aurora_set_world_view_far`;
+   read as if it were infinitely far, an island 8,000 units ahead came out hundreds of units too far and shaded
+   itself in blocks, #491) into the sharpest
    cascade that holds it (blending into the next near its edge) and checks 12 texels in a disc two texels wide,
    turned per pixel by a stable angle, so the edge comes out soft and the texels break into fine noise instead of
    stairs. The result is multiplied into the scene at full resolution.
 6. **Keeping surfaces from shading themselves.** A surface compared against its own depth in the map shades itself
    in stripes or rings ("acne"), worst with the sun low over flat ground. Four things keep it lit:
    - a constant bias that follows each cascade's texels: 3, 12, 48 and 192 world units;
-   - the lookup moved out along the surface's normal (worked out from the depth buffer's neighbours), half a texel
-     near the camera and two far off;
-   - a slope term: the bias grows with the angle between the surface and the sun, 1 texel's worth near the camera and
-     10 far off (from 1,500 to 5,000 units), because far away the normal from the depth buffer is rough;
+   - the lookup moved out along the surface's normal (worked out from the depth buffer's neighbours), two texels;
+   - a slope term: the bias grows with the angle between the surface and the sun, 10 texels' worth, because the
+     normal from the depth buffer is rough. Both were smaller near the camera (half a texel and one), and on a rock
+     wall the sun only grazes the map's texels showed through as vertical stripes that shifted with the camera (#491);
+     `_NORMAL_NEAR` and `_SLOPE_NEAR` still set them apart, near up to 1,500 units and far from 5,000;
    - the casters' own slope bias, one texel (two lifted the shadow off thin casters' bases).
    And nothing at the sea's height or below shades the water or the sand at its edge: the islands' models carry their
    sea floor up to the waterline, and the waves dip below it, so the water read the sea floor as something above it.
@@ -86,8 +90,8 @@ Turned on by `BLUEWAKE_HD_SUN_SHADOWS=1` (BlueWake's `runtime/host/src/hd_look.c
 | `DOL_AURORA_SUN_SHADOW_MAP_SPREAD` | 4 | Each next cascade this many times wider |
 | `DOL_AURORA_SUN_SHADOW_MAP_DEPTH` | 20000 | World units toward and away from the sun a cascade holds (at least twice its range) |
 | `DOL_AURORA_SUN_SHADOW_MAP_BIAS` | 12 | World units of bias at the 5,000-unit cascade, scaled by each cascade's texels (raise it for acne, lower it for gaps at feet) |
-| `DOL_AURORA_SUN_SHADOW_MAP_SLOPE`, `_SLOPE_NEAR` | 10, 1 | Texels of the surface's own slope added to the bias, far from and near the camera |
-| `DOL_AURORA_SUN_SHADOW_MAP_NORMAL_OFFSET`, `_NORMAL_NEAR` | 2, 0.5 | Texels the lookup moves out along the surface's normal, far and near |
+| `DOL_AURORA_SUN_SHADOW_MAP_SLOPE`, `_SLOPE_NEAR` | 10, 10 | Texels of the surface's own slope added to the bias, far from and near the camera |
+| `DOL_AURORA_SUN_SHADOW_MAP_NORMAL_OFFSET`, `_NORMAL_NEAR` | 2, 2 | Texels the lookup moves out along the surface's normal, far and near |
 | `DOL_AURORA_SUN_SHADOW_MAP_FAR_START`, `_FAR_END` | 1500, 5000 | World units from the camera over which "near" turns into "far" |
 | `DOL_AURORA_SUN_SHADOW_MAP_SMOOTH` | on | The bias, normal offset, slope term and filter reach grow continuously from one cascade's inner edge to its outer one (4x); `0` steps them at each edge, as before |
 | `DOL_AURORA_SUN_SHADOW_MAP_GAP_FILL` | on | Steps toward the sun through the depth buffer over the bias's reach, so shadows meet their casters' feet when zoomed out; `0` turns it off |
@@ -186,8 +190,17 @@ The loop was short: change RecompCore, build host-only, play, look, repeat.
   the sea-level rule's answer) rather than tuning by eye. A per-lookup receiver plane (each lookup compared against
   the surface's own depth at that texel, from the screen's derivatives) was tried and changed nothing with the slope
   terms at their defaults.
-- **Distant islands with cascades.** The last cascade reaches 80,000 units; islands farther off still cast nothing,
-  and how the far cascades look on an island you sail toward hasn't been checked closely.
+- **Distant islands with cascades.** The last cascade reaches 80,000 units; islands farther off still cast nothing.
+  Sailing toward an island, its blocks of self-shading are gone (the far plane above); the rest of the far
+  cascades on an island ahead hasn't been checked closely.
+- **The sea and what stands in it** (#491, from pdale-boop's save states). The boat's shadow has gaps at its base
+  when it gets longer, a sea platform's ladder has a dark blob at its foot, a tower's shadow comes away from its base
+  as the sun gets low (the same as before these changes), and at Outset's sunrise, a few degrees up, shadows come
+  apart in streaks and dashed rows. The sea isn't in the map, so the swell's height there is only guessed (the
+  `_SEA_` rule). Tried, not finished: drawing the sea's surface into a map of its own and ignoring what is under it
+  fixed the boat and the ladder out at sea, but not the sunrise, where Outset's water is the island's own flat model.
+- **Test rooms:** Link's legs cast nothing in the stage select's test rooms (K_Test2); his blended, skinned legs
+  aren't taken as a caster there. Everywhere else they cast.
 - **Shadows popping when an actor leaves the view.** The game stops drawing a culled actor, so it leaves the map.
   Buildings are rarely culled; actors are. The fix is on the game side: widen the clipper while the room model and
   then actors draw. Actors with `fopAcStts_NOCULLEXEC` stop updating when they aren't drawn, so widening their culling
@@ -205,7 +218,7 @@ The loop was short: change RecompCore, build host-only, play, look, repeat.
 
 RecompCore, `GXRuntime/graphics/aurora/`:
 
-- `include/aurora/aurora.h`: `aurora_set_sun_shadow_map()`.
+- `include/aurora/aurora.h`: `aurora_set_sun_shadow_map()`, and `aurora_set_world_view_far()` for the depth.
 - `lib/gfx/post_fx.cpp`: the map's settings and texture, `sun_map()` (its matrices), `draw_sun_map()`, the lookup
   shader (`in_sun_map`, `fs_sun_map`) and the debug views.
 - `lib/gfx/gxcore_draw.cpp`: the caster rules (`sun_caster`, `sun_caster_alpha`, cloth, blended furniture), the
