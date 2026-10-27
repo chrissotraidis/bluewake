@@ -17,7 +17,9 @@ variant, and keeps what it made: frame captures, frame dumps, its log, and what 
 time (`results.json`). Each run gets its own copy of the card, its own settings and data folder, and none of the
 caller's `BLUEWAKE_`/`DOL_` variables. [`scripts/frame_compare.py`](../scripts/frame_compare.py) reads the frames
 (it needs `pip install numpy pillow`). Both print their full usage with `--help`; the sections below are what they
-set and why.
+set and why. A run that ends at start-up leaves the app's launch marker, and the next run in that folder would start
+in safe mode (no HD look, no mods, 4:3): `rendered_run.py` clears the marker before each run, and marks a run that
+still started in safe mode (SAFE MODE on its line, `safe_mode` in `results.json`).
 
 **Flicker, `main` against a build.** From a save state, two sword swings, frames dumped at 60 FPS and render scale 2,
 sun shadows on and off on each build, plus a debug run whose frames mark where the shadows are:

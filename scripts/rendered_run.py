@@ -69,6 +69,8 @@ def measure(log_text, skip):
     """What one run's log says about its speed and GPU time."""
     perfs = [m for m in map(PERF.search, log_text.splitlines()) if m]
     out = {}
+    if "no HD look, mods or options" in log_text:  # desktop_settings.cpp apply_safe_mode
+        out["safe_mode"] = True
     if perfs:
         first = int(perfs[0]["retrace"])
         kept = [m for m in perfs if int(m["retrace"]) >= first + skip] or perfs
@@ -117,6 +119,10 @@ def run(app, card, folder, env, status, skip):
     folder.mkdir(parents=True, exist_ok=True)
     data = folder / "data"
     data.mkdir(exist_ok=True)
+    # A run that ended at start-up (a crash, a wrong path) leaves the marker the
+    # app takes as a failed launch: the next run in this folder would start in
+    # safe mode (no HD look, no mods, 4:3).
+    (data / "launch.pending").unlink(missing_ok=True)
     copy = data / "GZLE01.card"
     shutil.copy(card, copy)
     full = {k: v for k, v in os.environ.items() if not k.startswith(("BLUEWAKE_", "DOL_"))}
@@ -148,7 +154,7 @@ def run(app, card, folder, env, status, skip):
     speed = f", {result['game_fps']} game frames/s, busy {result['busy']}%" if "game_fps" in result else ""
     gpu = f", GPU busy {result['gpu_busy_ms']} ms" if "gpu_busy_ms" in result else ""
     print(f"{folder.name}: exit {code} after {result['seconds']:.0f} s, {frames} frames, {dumped} dumped images"
-          f"{speed}{gpu}")
+          f"{speed}{gpu}" + (" (SAFE MODE: not the settings asked for)" if result.get("safe_mode") else ""))
     return result
 
 
@@ -179,6 +185,8 @@ def main():
     args = parser.parse_args()
     if bool(args.state) == bool(args.warp):
         parser.error("give --state or --warp")
+    if args.state and not Path(args.state).is_file():
+        parser.error(f"no state at {args.state}")
     if args.dump and not args.smooth:
         parser.error("--dump writes Smooth Motion's frames: give --smooth")
     if args.dump and args.unpaced:
