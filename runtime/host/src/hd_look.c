@@ -325,10 +325,11 @@ static void trace_islands(CPUState* cpu, unsigned long long retrace) {
 // its STAG info: outdoors 0 or the sea 7), with the game's camera.
 // GZLE01: g_dComIfG_gameInfo.play is at 0x803C5EA8; its mCurStage (the stage's
 // name first) at +0x3E94 and mCurrentView (view_class*) at +0x4A58. In the
-// view: mNear +0xC8, mFovy (degrees) +0xD0, mAspect +0xD4, mInvViewMtx +0x170.
+// view: mNear +0xC8, mFar +0xCC, mFovy (degrees) +0xD0, mAspect +0xD4, mInvViewMtx +0x170.
 enum {
     kCurrentView = 0x803CA900u,
     kViewNear = 0xC8u,
+    kViewFar = 0xCCu,
     kViewFovy = 0xD0u,
     kViewAspect = 0xD4u,
     kViewInvMtx = 0x170u,
@@ -407,10 +408,15 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
             const float near_plane = read_float(cpu, view + kViewNear);
             if (fovy > 1.f && fovy < 170.f && aspect > 0.1f && near_plane > 0.f) {
                 if (g_trace && retrace % 300u == 0u)
-                    fprintf(stderr, "[hd-look] camera eye %.0f %.0f %.0f fovy %.1f aspect %.3f near %.2f\n", inv[3],
-                            inv[7], inv[11], fovy, aspect, near_plane);
+                    fprintf(stderr, "[hd-look] camera eye %.0f %.0f %.0f fovy %.1f aspect %.3f near %.2f far %.0f\n",
+                            inv[3], inv[7], inv[11], fovy, aspect, near_plane, read_float(cpu, view + kViewFar));
                 aurora_set_world_view(inv, tanf(fovy * 0.5f * 3.14159265f / 180.f), aspect, near_plane, 0.f,
                                       (float)retrace / 59.94f);
+                // With the far plane the sun shadow map reads distances from the
+                // depth exactly: taken as infinitely far, an island 8,000 units
+                // off read hundreds of units too far and shaded itself in blocks.
+                const float far_plane = read_float(cpu, view + kViewFar);
+                aurora_set_world_view_far(far_plane > near_plane ? far_plane : 0.f);
                 const float sx = read_float(cpu, kSunPos) - inv[3];
                 const float sy = read_float(cpu, kSunPos + 4u) - inv[7];
                 const float sz = read_float(cpu, kSunPos + 8u) - inv[11];
