@@ -74,6 +74,8 @@ jobs:
                 bluewake_fast_blocks_test bluewake_cycle_domain_test \
                 bluewake_interrupt_sources_test bluewake_delivery_digest_test \
                 bluewake_composite_dispatch_loop_test bluewake_edge_intercepts_test \
+                bluewake_gather_memory_plain_test bluewake_gather_memory_global_test \
+                bluewake_gather_memory_cache_test \
                 bluewake_linux_disc_test bluewake_crash_text_test \
                 bluewake_launch_marker_test bluewake_settings_state_test bluewake_settings_table_test bluewake_settings_file_test \
                 bluewake_save_state_test bluewake_host_state_save_failure_test bluewake_restart_request_test \
