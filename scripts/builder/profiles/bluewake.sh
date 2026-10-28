@@ -37,10 +37,10 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # patches/recompcore/0098-0113) plus BlueWake stability patches 0114-0130, reconciliation patches 0131-0139, logging patches 0140 and 0142, pacing patch 0141 and Elliott Tate's post-0.4.0 runtime 0143-0150, the FPS overlay fix 0151, and Elliott Tate's October 3 runtime 0152-0155, module display list textures 0156, the hardware's texgen and TEV stage counts 0157, the Linux port's shutdown fix 0158 (James Koehler-Killeen), the GameCube stick scale 0159, Aurora's user folder 0160, the window's position at creation 0161 and the FPS overlay's position 0162 (saulob), the renderer's name 0163, Smooth Motion on 8+ threads 0164, and Elliott Tate's October 4 draw fusion and GPU profiler 0165-0168, and the Wind Waker HD look's bloom, far blur, ambient occlusion, cloud shadows, sun shadows, edge light and torch light 0169-0175, and a cache flush keeping the GPU's EFB copies 0176, the Picto Box's actor ids from the current EFB 0177 (jslay88), and a resized Vulkan window keeping its surface 0178 (pdale-boop), and the copy crop for pictures taken through a widened camera 0180 (pdale-boop), and the HD look's cloud shadows from the sea's plane with dithered shades 0182, and Smooth Motion without the flicker in the HD look, clouds, wave crests and a swimming Link's ripples 0179 (pdale-boop), and sun shadows from a shadow map 0183 (pdale-boop). DolRecomp: elliotttate's copy of
 # chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 # Dawn source/package compatibility: patches/recompcore/0184-0185 (RecompCore #44).
-# The guest-alias range query is under upstream review in RecompCore #45; use
-# the contributor branch until that PR supplies an upstream bluewake-next SHA.
-RECOMPCORE_URL=https://github.com/irregularthanis/RecompCore.git
-RECOMPCORE_SHA=47a5229cbfb3387cfd21c2b9d304b303a54a6767
+# The guest-alias range query is under upstream review in RecompCore #45; pin
+# that PR's head, fetched from upstream, until it merges into bluewake-next.
+RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
+RECOMPCORE_SHA=caeedd81d24fbc0ecc91b0dd9e4d5404023d5a00
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
