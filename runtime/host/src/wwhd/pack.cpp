@@ -590,6 +590,7 @@ ImportResult import_pack(const ImportOptions& o) {
 
     std::map<std::string, Match> matches;
     std::set<std::string> conflicts;
+    std::map<std::string, std::string> optional_clouds; // file: HD source and GameCube original
     try {
         // Declared in the try block, so an error or a cancel stops its threads
         // before the staging folder is removed.
@@ -652,6 +653,26 @@ ImportResult import_pack(const ImportOptions& o) {
                                         intensity = for_gc_format(images, t->format, mask);
                                     digests[is_intensity] = digest_of(is_intensity ? intensity : images, o.exact_report);
                                 }
+                            if (is_hd_cloud(hd.name, resource(hd.source))) {
+                                for (const GCTexture* original : gc) {
+                                    check_cancel();
+                                    const std::string key = original->filename();
+                                    if (!optional_clouds.emplace(key, hd.source + "\n" + original->source).second)
+                                        continue;
+                                    const fs::path folder = staging / kHdCloudsFolder;
+                                    fs::create_directories(folder, ec);
+                                    if (ec)
+                                        throw WriteError("cannot make " + folder.string() + ": " + ec.message());
+                                    for (size_t i = 0; i < images.size(); i++) {
+                                        const std::string name =
+                                            i == 0 ? key : key.substr(0, key.size() - 4) + "_mip" + std::to_string(i) + ".png";
+                                        if (o.exact_report)
+                                            write_file(folder / name, encode_png(images[i]));
+                                        else
+                                            writer.add(folder / name, images[i]);
+                                    }
+                                }
+                            }
                             const int priority = candidate_priority(hd.name, resource(hd.source));
                             for (const GCTexture* original : gc) {
                                 check_cancel();
@@ -781,6 +802,15 @@ ImportResult import_pack(const ImportOptions& o) {
             errors += std::string(errors.empty() ? "" : ",\n") + "    {\"source\": " + json_string(e.source) +
                       ", \"reason\": " + json_string(e.reason) + "}";
         }
+        std::string clouds;
+        for (const auto& [file, from] : optional_clouds) {
+            const size_t split = from.find('\n');
+            clouds += std::string(clouds.empty() ? "\n    " : ",\n    ") + "{\"file\": " + json_string(file) +
+                      ", \"hd\": " + json_string(from.substr(0, split)) +
+                      ", \"original\": " + json_string(from.substr(split + 1)) + "}";
+        }
+        if (!clouds.empty())
+            clouds += "\n  ";
         const std::time_t now = std::time(nullptr);
         char created[32];
         std::strftime(created, sizeof created, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
@@ -788,7 +818,8 @@ ImportResult import_pack(const ImportOptions& o) {
                                  "  \"tool\": \"BlueWake built-in importer\",\n  \"created_utc\": \"" + created + "\",\n" +
                                  "  \"replacement_count\": " + std::to_string(accepted) + ",\n" +
                                  "  \"conflicts_skipped\": " + std::to_string(conflicts.size()) + ",\n" +
-                                 "  \"unsupported\": [\n" + errors + "\n  ],\n" + "  \"textures\": [\n" + textures + "\n  ]\n}\n";
+                                 "  \"unsupported\": [\n" + errors + "\n  ],\n" + "  \"textures\": [\n" + textures + "\n  ],\n" +
+                                 "  \"optional\": {\"hd-clouds\": [" + clouds + "]}\n}\n";
         write_file(staging / "import-report.json", Bytes(json.begin(), json.end()));
         const std::string readme = "Private artwork extracted from your own Wind Waker HD disc.\n"
                                    "Choose this folder in Mods > Wind Waker HD textures, then restart.\n"

@@ -27,5 +27,14 @@ PREFERRED = {
 }
 
 
+# HD's own sky clouds, the sea's, kept apart from the pack in optional/hd-clouds
+# for the HD look's "HD's clouds in the sky" switch. Two are GameCube I4/I8
+# bands that HD draws from colour with the cloud in alpha, so all of them keep
+# HD's own colour and alpha rather than the GameCube's intensity.
+HD_CLOUDS = {"ws_naka06", "ws_mae08", "ws_mae09", "cloudtx_01", "cloudtx_02", "cloudtx_03"}
+HD_CLOUDS_SOURCE = ("stage", "sea", "stage")
+HD_CLOUDS_FOLDER = "optional/hd-clouds"
+
+
 def candidate_priority(hd, identity):
     return int(PREFERRED.get(hd.name.lower()) == identity)

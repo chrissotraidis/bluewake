@@ -56,6 +56,7 @@ struct Setting {
     Control control = Control::None;     // how the shared draw_tab draws it; table order is display order
     const char* note = nullptr;          // the quiet line under it
     const char* needs = nullptr;         // a Bool setting that must be on for it to be changed
+    const char* needs_set = nullptr;     // and a setting that must have a value (the HD textures' folder)
     const char* group = nullptr;         // a heading drawn before it, "" for a plain line
     // A pane that folds away under this name, closed until it is opened: this
     // row and the ones after it that name it too are drawn inside it. An
@@ -109,6 +110,12 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_HD_BLOOM", .kind = Kind::Bool, .on = Os::All, .label = "Bloom", .control = Control::Switch,
      .needs = "BLUEWAKE_HD_LOOK",
      .pane = "Wind Waker HD look settings"},
+    // HD's sky clouds: textures the importer keeps apart (optional/hd-clouds),
+    // loaded at launch over the HD textures (hd_look.c).
+    {.key = "BLUEWAKE_HD_CLOUDS", .kind = Kind::Bool, .label = "HD's clouds in the sky", .control = Control::Switch,
+     .note = "Wind Waker HD's soft sky clouds, from the HD textures. A pack imported before this switch needs importing again.",
+     .needs = "BLUEWAKE_HD_LOOK", .needs_set = "DOL_AURORA_TEXTURE_PACK", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All},
     {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK", .pane = "Wind Waker HD look settings",
      .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},

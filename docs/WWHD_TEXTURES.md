@@ -215,7 +215,11 @@ expects. Missing levels down to 1x1 are generated. Conflicting artwork for the s
 texture key is skipped, except for explicitly audited shared-artwork variants.
 Those choices preserve the original UV composition instead of HD debug-room,
 figurine or photographic-cloud variants. Selected alternatives are recorded
-in the report. Tiny placeholders and shader ramp textures stay
+in the report. HD's own sky clouds (the sea's `ws_naka06`, `ws_mae08`, `ws_mae09` and `cloudtx_01`-`03`) are written
+apart, in the pack's `optional/hd-clouds`, in HD's own colour and alpha: two of them are GameCube intensity
+bands that HD draws from colour with the cloud in alpha, so the GameCube's intensity would turn them into a grey
+haze. The pack leaves that folder out; the HD look's **HD's clouds in the sky** switch loads it over the pack
+([WWHD_LOOK.md](WWHD_LOOK.md)), and the report lists them under `optional`. Tiny placeholders and shader ramp textures stay
 original. Different UV layouts or changed names need separate, verified
 mappings and are not guessed.
 

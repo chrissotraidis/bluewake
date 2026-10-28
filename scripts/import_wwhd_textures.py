@@ -24,7 +24,7 @@ from wwhd.formats import FormatError, HDTexture, MAX_FILE, bfres, bflim, for_gc_
 from wwhd.fallback import add_fallback
 from wwhd.title import title_image
 from wwhd.layout import HEARTS, SWIM_ICONS, heart_image, inventory_names
-from wwhd.matches import candidate_priority
+from wwhd.matches import HD_CLOUDS, HD_CLOUDS_FOLDER, HD_CLOUDS_SOURCE, candidate_priority
 from wwhd.font import BitmapFont
 from wwhd.ui import LAYOUT_SPRITES, OPENING_PANELS, fit_sprite, font_sprites, opening_sprite
 
@@ -295,6 +295,7 @@ def build(args) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix="." + output.name + "-", dir=output.parent))
     matches, conflicts, unmatched = {}, set(), []
+    optional_clouds = {}
     scanned, decoded = 0, 0
     try:
         for source, archive in hd_files(args.hd_source, args):
@@ -333,6 +334,16 @@ def build(args) -> dict:
                             digests = {fmt: hashlib.sha256(b"".join(im.tobytes() for im in variant)).hexdigest()
                                        for fmt, variant in variants.items()}
                             decoded += 1
+                            if hd.name.lower() in HD_CLOUDS and resource(hd.source) == HD_CLOUDS_SOURCE:
+                                for original in gc:
+                                    key = original.filename()
+                                    if key in optional_clouds:
+                                        continue
+                                    folder = staging / HD_CLOUDS_FOLDER
+                                    folder.mkdir(parents=True, exist_ok=True)
+                                    for i, image in enumerate(images):
+                                        image.save(folder / (key if not i else key.removesuffix(".png") + f"_mip{i}.png"))
+                                    optional_clouds[key] = {"file": key, "hd": hd.source, "original": original.source}
                             for original in gc:
                                 variant, digest = variants[original.format], digests[original.format]
                                 key = original.filename()
@@ -407,6 +418,7 @@ def build(args) -> dict:
                   "combined_replacement_count": len(accepted) + (fallback["texture_count"] if fallback else 0),
                   "conflicts_skipped": sorted(conflicts), "unsupported": errors,
                   "unmatched": unmatched, "textures": accepted,
+                  "optional": {"hd-clouds": [optional_clouds[k] for k in sorted(optional_clouds)]},
                   "limits": "Compatible BFRES artwork, audited shared-artwork variants, inventory/collection/chart icons, HUD hearts and swimming meter, adapted English title/opening layouts, font-derived English action/menu text, counters and A/B/X/Y symbols, and adapted key/cursor sprites; HD shaders, models, lighting and other redesigned HUD are not imported."}
         (staging / "import-report.json").write_text(json.dumps(report, indent=2) + "\n")
         (staging / "README.txt").write_text("Private artwork extracted from your own Wind Waker HD disc.\n"

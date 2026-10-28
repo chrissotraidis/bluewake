@@ -98,6 +98,8 @@ inline void draw_setting(const bw_settings::Setting& s) {
     for (const char* need = s.needs; need != nullptr && off_need == nullptr; need = setting(need).needs)
         if (!on(need, bw_settings::default_on(setting(need))))
             off_need = need;
+    if (off_need == nullptr && s.needs_set != nullptr && get(s.needs_set, "").empty())
+        off_need = s.needs_set;
     const bool waiting = off_need != nullptr;
     const bool overridden = s.dead_when != nullptr && !get(s.dead_when, "").empty();
     if (s.group != nullptr)

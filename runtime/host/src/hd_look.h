@@ -17,7 +17,8 @@
 // camera and sun. Torch light (BLUEWAKE_HD_TORCH_LIGHT) everywhere, from the
 // game's own point lights. Ambient occlusion (BLUEWAKE_HD_AO), far blur (BLUEWAKE_HD_FAR_BLUR) and
 // bloom (BLUEWAKE_HD_BLOOM): Aurora's post_fx, on the finished scene before
-// the HUD.
+// the HUD. HD's sky clouds (BLUEWAKE_HD_CLOUDS) are textures, from the HD
+// texture pack's optional/hd-clouds, and need the look and the pack.
 // Read again by the settings menus.
 void bluewake_hd_look_reload(void);
 // The softer starting strengths for Aurora's parts; call before Aurora starts.

@@ -56,6 +56,14 @@ void bluewake_hd_look_defaults(void) {
     setenv("DOL_AURORA_FAR_BLUR_AMOUNT", "0.4", 0);
     setenv("DOL_AURORA_FAR_BLUR_BACKGROUND", "0", 0);
     setenv("DOL_AURORA_TORCH_LIGHT_STRENGTH", "0.2", 0);
+    // HD's sky clouds (BLUEWAKE_HD_CLOUDS, off by default, not on with the
+    // look): the importer keeps them in the pack's optional/hd-clouds, which
+    // Aurora loads over the pack only when asked, so they come only with the
+    // HD textures and the look both on. Textures load once, so this holds
+    // until BlueWake starts again.
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (setting("BLUEWAKE_HD_CLOUDS") == 1 && setting("BLUEWAKE_HD_LOOK") == 1 && pack != NULL && pack[0] != '\0')
+        setenv("DOL_AURORA_TEXTURE_PACK_OPTIONAL", "hd-clouds", 0);
 }
 
 void bluewake_hd_look_reload(void) {

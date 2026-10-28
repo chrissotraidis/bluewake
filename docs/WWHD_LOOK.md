@@ -54,6 +54,7 @@ come from the player's own disc through [WWHD_TEXTURES.md](WWHD_TEXTURES.md).
 | HD's far-distance blur | HD depth of field | **In**, with the switch (RecompCore 0170). Off by default | `BLUEWAKE_HD_FAR_BLUR` |
 | Ambient occlusion | Ambient occlusion | **In**, with the switch (RecompCore 0171). Off by default | `BLUEWAKE_HD_AO` |
 | Cloud shadows on the sea | Cloud shadows | **In**, with the switch, outdoors (RecompCore 0172). Off by default | `BLUEWAKE_HD_CLOUD_SHADOWS` |
+| HD's sky clouds | The remaster's soft, painted sky clouds | **In**, with its own switch, **HD's clouds in the sky**: off by default, and only with the HD textures and the HD look both on; it takes effect when BlueWake starts again. The importer keeps them in the pack's `optional/hd-clouds`, which RecompCore loads over the pack only when asked (`DOL_AURORA_TEXTURE_PACK_OPTIONAL=hd-clouds`). A pack imported before needs importing again | `BLUEWAKE_HD_CLOUDS` |
 | Sun shadows | Sun shadows (resolution, strength) | **In**, outdoors, from a shadow map of the whole scene (RecompCore 0173, 0183). Left out of the HD look switch: from the screen alone, on open ground it drew long dark streaks. Only its own variable turns it on, and the HD look switch off turns it off | `BLUEWAKE_HD_SUN_SHADOWS` |
 | Edge light | Character edge light | **In**, with the switch, outdoors (RecompCore 0174). Off by default | `BLUEWAKE_HD_EDGE_LIGHT` |
 | Torch light | Torch and fire light | **In**, with the switch, everywhere (RecompCore 0175). Off by default | `BLUEWAKE_HD_TORCH_LIGHT` |
