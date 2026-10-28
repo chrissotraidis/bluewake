@@ -250,7 +250,8 @@ profile_compile() {
     run "composite-configure-$platform" cmake -S cmake/composite -B "$build_dir" -G Ninja \
         "-DCMAKE_SYSTEM_NAME=$cmake_system" "-DCMAKE_OSX_SYSROOT=$sdk" -DCMAKE_OSX_ARCHITECTURES=arm64 \
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=$deployment" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_FLAGS=$flags" \
-        -DCOMPOSITE_OPTIMIZATION_LEVEL="$opt_level" "-DCOMPOSITE_COLD_SOURCES_FILE=$cold_file" "${optimization_flags[@]}" \
+        -DCOMPOSITE_OPTIMIZATION_LEVEL="$opt_level" "-DCOMPOSITE_COLD_SOURCES_FILE=$cold_file" \
+        "-DCOMPOSITE_SLOW_SOURCES_FILE=$root/scripts/builder/profiles/bluewake/slow-chunks.txt" "${optimization_flags[@]}" \
         -DCOMPOSITE_DIR="$out/composite-src" -DGXRUNTIME_DIR="$recompcore/GXRuntime" \
         -DABI_DIR="$recompcore/Source/Core/Core/PowerPC/StaticRecomp"
     run "composite-build-$platform" cmake --build "$build_dir" -j "$jobs"

@@ -363,3 +363,25 @@ if(COMPOSITE_OPTIMIZATION_LEVEL STREQUAL "2")
     message(STATUS "O1 optimizer fallback: ${FALLBACK_SOURCE}")
   endforeach()
 endif()
+
+# Chunks that took over three minutes in an unflagged Mac compile, one
+# composite-relative path a line. Those two passes are superlinear on them.
+# The other chunks keep the SLP vectorizer and an uncapped coalescer: turning
+# the passes off for the whole module makes the game slower on Apple silicon.
+# The flags come after -O. Apple Clang turns the SLP vectorizer back on when
+# -O2 or -O3 follows -fno-slp-vectorize. Windows, Linux, and Android pass both
+# flags on every chunk from their own builders.
+set(COMPOSITE_SLOW_SOURCES_FILE "" CACHE FILEPATH "Chunks compiled without the SLP vectorizer and with the coalescer cap")
+if(COMPOSITE_SLOW_SOURCES_FILE)
+  file(STRINGS "${COMPOSITE_SLOW_SOURCES_FILE}" SLOW_SOURCES)
+  list(LENGTH SLOW_SOURCES SLOW_COUNT)
+  foreach(SLOW_SOURCE IN LISTS SLOW_SOURCES)
+    set(SLOW_PATH "${COMPOSITE_DIR}/${SLOW_SOURCE}")
+    if(EXISTS "${SLOW_PATH}")
+      set_property(SOURCE "${SLOW_PATH}" APPEND PROPERTY COMPILE_OPTIONS
+        -fno-slp-vectorize
+        -mllvm -large-interval-freq-threshold=10)
+    endif()
+  endforeach()
+  message(STATUS "Slow chunks: ${SLOW_COUNT} without the SLP vectorizer")
+endif()
