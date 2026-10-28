@@ -72,12 +72,18 @@ def watched_addresses():
     """Guest addresses the host names: a boundary at any of them may matter.
     Both mirror forms of each: the edge service tests a boundary's address
     with the 0x40000000 bit cleared (host_canonical_linked_pc), so a REL
-    chunk's 0xC1E01B88 is its 0x81E01B88."""
+    chunk's 0xC1E01B88 is its 0x81E01B88. Text between
+    `bluewake-unwatched-begin` and `bluewake-unwatched-end` is left out, as
+    direct_calls.py leaves it out: those addresses only a diagnostic reads are
+    not boundaries the host acts at, and the two preparations must agree on
+    which addresses those are."""
     found = set()
     for folder in ("runtime/host/src", "windows/src"):
         for path in (ROOT / folder).rglob("*"):
             if path.suffix in (".c", ".h", ".cpp", ".mm", ".m"):
-                for m in re.finditer(r"0x([8C][0-9A-Fa-f]{7})u?\b", path.read_text(errors="replace")):
+                text = re.sub(r"bluewake-unwatched-begin.*?bluewake-unwatched-end", "",
+                              path.read_text(errors="replace"), flags=re.S)
+                for m in re.finditer(r"0x([8C][0-9A-Fa-f]{7})u?\b", text):
                     address = int(m.group(1), 16)
                     found.update((address, address | 0x40000000, address & ~0x40000000))
     return found
