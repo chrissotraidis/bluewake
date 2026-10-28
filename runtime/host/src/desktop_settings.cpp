@@ -53,6 +53,7 @@ bool g_dirty = false;
 long long g_dirty_at = 0;
 bool g_safe_mode = false;
 bool g_safe_backed_up = false;
+bool g_first_launch = false;
 
 // The file keeps the folder HD textures were on with while they are off.
 constexpr const char* kPackFolderKey = "BLUEWAKE_TEXTURE_PACK_FOLDER";
@@ -292,6 +293,7 @@ void load(const std::string& path, const std::string& read_instead) {
             g_launch[s.key] = "";
     Lines lines;
     const bool found = read_file(path, &lines) || read_file(read_instead, &lines);
+    g_first_launch = !found;
     if (!found) {
         if (!path.empty())
             std::fprintf(stderr, "[settings] no settings file yet (%s)\n", path.c_str());
@@ -346,6 +348,9 @@ void launch_choice(const char* key, const std::string& value) {
         g_launch[key] = env(key);
     put_env(key, value);
 }
+
+bool launched(const char* key) { return g_launch.count(key) != 0; }
+bool first_launch() { return g_first_launch; }
 
 void apply_safe_mode() {
     g_safe_mode = true;

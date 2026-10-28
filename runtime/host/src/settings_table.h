@@ -162,12 +162,17 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_SPRINT_CHOICE", .old_windows = "sprint_speed", .kind = Kind::Float, .fallback = "1.5",
      .low = 1.1f, .high = 2.f, .label = "Sprint speed", .tab = Tab::Gameplay, .needs = "BLUEWAKE_JUMP_BUTTON",
      .shown = "%.2fx", .stored = "%.2f"},
+    // A and B, and X and Y, swapped (desktop_menu.cpp, apply_controller); the
+    // key is the one Swap A and B had, so a file that turned it on keeps it.
     {.key = "BLUEWAKE_PAD_SWAP_AB", .old_windows = "controller_swap_ab", .kind = Kind::Bool,
-     .label = "Swap A and B", .tab = Tab::Controls, .control = Control::Switch, .group = "Controller",
-     .dead_when = "BLUEWAKE_BUTTON_MAP"},
-    {.key = "BLUEWAKE_PAD_SWAP_XY", .old_windows = "controller_swap_xy", .kind = Kind::Bool,
-     .label = "Swap X and Y", .tab = Tab::Controls, .control = Control::Switch,
-     .dead_when = "BLUEWAKE_BUTTON_MAP"},
+     .label = "Nintendo button layout", .tab = Tab::Controls, .control = Control::Switch,
+     .note = "For Switch controllers and Joy-Cons: A, B, X and Y do what their letters say. On by itself the "
+             "first time BlueWake starts with one.",
+     .group = "Controller", .dead_when = "BLUEWAKE_BUTTON_MAP"},
+    // A new settings file waits for its first controller to choose the Nintendo
+    // button layout (desktop_menu.cpp, first_controller_layout); an older file
+    // has no such line, so it never waits.
+    {.key = "BLUEWAKE_PAD_LAYOUT_PENDING", .kind = Kind::Bool, .tab = Tab::Controls},
     {.key = "BLUEWAKE_PAD_SWAP_LR", .old_windows = "controller_swap_lr", .kind = Kind::Bool,
      .label = "Swap L and R (the triggers)", .tab = Tab::Controls, .control = Control::Switch,
      .dead_when = "BLUEWAKE_BUTTON_MAP"},

@@ -149,17 +149,56 @@ void set_fullscreen(bool on) {
     }
 }
 
-// The controller's buttons as the player set them: the swaps, or a custom
-// layout instead of them, the triggers, and the camera stick inverted. Applied
-// whenever they or the controller on port 0 change; a mapping set elsewhere is
-// left alone until the player touches one of these.
+// A Nintendo controller's A is where an Xbox pad's B is, and the game takes each
+// button by where it is, so a new player pressing A at the first save prompt
+// backed out of it, with nothing to say why. A new settings file waits for its
+// first controller, at this launch or a later one (a first launch played on the
+// keyboard): a Nintendo controller turns the Nintendo button layout on, so its
+// buttons do what their letters say, and any other leaves it off. The player
+// changing the switch, choosing a custom layout, or a launch that set it ends
+// the wait too. A file from before this has no wait, so a player who already
+// plays with a Nintendo controller keeps what they chose.
+void first_controller_layout() {
+    static bool started = false;
+    static bool layout = false;  // the switch, as the wait last saw it
+    if (!started) {
+        started = true;
+        if (first_launch())
+            set_env("BLUEWAKE_PAD_LAYOUT_PENDING", "1");
+        layout = env_on("BLUEWAKE_PAD_SWAP_AB", false);
+    }
+    if (!env_on("BLUEWAKE_PAD_LAYOUT_PENDING", false))
+        return;
+    if (env_on("BLUEWAKE_PAD_SWAP_AB", false) != layout || !env("BLUEWAKE_BUTTON_MAP").empty() ||
+        launched("BLUEWAKE_PAD_SWAP_AB")) {
+        set_env("BLUEWAKE_PAD_LAYOUT_PENDING", "0");
+        return;
+    }
+    const SDL_JoystickID connection = bw_controller_connection(0);
+    if (connection == 0)
+        return;
+    const bool nintendo = bw_nintendo_face_layout(0);
+    set_env("BLUEWAKE_PAD_LAYOUT_PENDING", "0");
+    if (nintendo)
+        set_env("BLUEWAKE_PAD_SWAP_AB", "1");
+    const char* name = SDL_GetGamepadName(SDL_GetGamepadFromID(connection));
+    std::fprintf(stderr, "[pad] first controller: '%s' %s, so the Nintendo button layout is %s\n",
+                 name ? name : "controller", nintendo ? "has Nintendo's layout" : "doesn't have Nintendo's layout",
+                 nintendo ? "on" : "off");
+}
+
+// The controller's buttons as the player set them: the Nintendo layout (A and
+// B, and X and Y, swapped), or a custom layout instead of it, the triggers, and
+// the camera stick inverted. Applied whenever they or the controller on port 0
+// change; a mapping set elsewhere is left alone until the player touches one
+// of these.
 void apply_controller() {
     static SDL_JoystickID previous = 0;
     static bool applied = false;
     static std::string last;
     const SDL_JoystickID connection = bw_controller_connection(0);
     const std::string map_text = env("BLUEWAKE_BUTTON_MAP");
-    const bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = env_on("BLUEWAKE_PAD_SWAP_XY", false);
+    const bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = ab;
     const bool lr = env_on("BLUEWAKE_PAD_SWAP_LR", false);
     // The camera stick's inverts at the pad, for where the game's own camera
     // has the view. Still as each menu had it on main, until it is decided:
@@ -1139,6 +1178,7 @@ void draw(void*) {
         refresh_smooth_rate();  // the display may have changed
         rate_checked = now;
     }
+    first_controller_layout();
     apply_controller();
     apply_key_map();
     test_hook();

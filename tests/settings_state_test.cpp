@@ -71,6 +71,8 @@ int main() {
     launch_option("DOL_AURORA_RENDER_SCALE", "4");
     launch_option("DOL_AURORA_FPS_POSITION", "bottom-right");
     bw_desktop::load(path);
+    assert(!bw_desktop::first_launch());
+    assert(bw_desktop::launched("DOL_AURORA_RENDER_SCALE") && !bw_desktop::launched("DOL_AURORA_SHOW_FPS"));
     assert(bw_desktop::env("DOL_AURORA_RENDER_SCALE") == "4");
     assert(bw_fps_position(bw_desktop::env("DOL_AURORA_FPS_POSITION").c_str()) == FPS_OVERLAY_BOTTOM_RIGHT);
     assert(bw_desktop::env("DOL_AURORA_SHOW_FPS") == "0");
@@ -87,6 +89,8 @@ int main() {
     saved = read_file(path);
     assert(has(saved, "DOL_AURORA_FPS_POSITION=top-right\n") && has(saved, "DOL_AURORA_RENDER_SCALE=0\n"));
     std::remove(path.c_str());
+    bw_desktop::load(path);  // no file: a first launch (Nintendo controllers' swaps, desktop_menu.cpp)
+    assert(bw_desktop::first_launch());
 
     // Smooth Motion's rate.
     assert(bw_smooth_requested("display") == -1 && bw_smooth_requested("3") == 3);

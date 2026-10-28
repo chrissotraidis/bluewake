@@ -207,6 +207,42 @@ int main() {
     bw_game_dead_zone(0);                              // once is enough; a second call changes nothing
     aurora::input::remove_controller(stick);
     SDL_CloseJoystick(joystick); assert(SDL_DetachVirtualJoystick(stick));
+
+    // A Switch controller's A is its right button: a new settings file's first controller
+    // turns the Nintendo button layout on for it (desktop_menu.cpp, first_controller_layout),
+    // and it still reads as one with the layout on. An Xbox-style pad doesn't, nor does the
+    // NSO GameCube controller, whose layout already matches.
+    assert(!bw_nintendo_face_layout(0));                   // nothing on player 1
+    auto nintendo = [&](Uint16 product) {
+        SDL_VirtualJoystickDesc pro = desc;
+        pro.vendor_id = 0x057e;
+        pro.product_id = product;
+        pro.name = "BlueWake synthetic Nintendo controller";
+        SDL_JoystickID pad = SDL_AttachVirtualJoystick(&pro); assert(pad);
+        SDL_Joystick* opened = SDL_OpenJoystick(pad); assert(opened);
+        assert(aurora::input::add_controller(pad) == pad);
+        aurora::input::set_player_index(pad, 0);
+        PADRestoreDefaultMapping(0);
+        const bool layout = bw_nintendo_face_layout(0);
+        bw_apply_face_swaps(0, true, true);
+        assert(bw_nintendo_face_layout(0) == layout);
+        aurora::input::remove_controller(pad);
+        SDL_CloseJoystick(opened); assert(SDL_DetachVirtualJoystick(pad));
+        return layout;
+    };
+    assert(nintendo(0x2009));                              // Switch Pro
+    assert(nintendo(0x2006) && nintendo(0x2007));          // a Joy-Con on its own, left and right
+    assert(nintendo(0x2008));                              // a pair of Joy-Cons
+    assert(nintendo(0x2069));                              // Switch 2 Pro
+    assert(!nintendo(0x2073));                             // NSO GameCube
+    SDL_JoystickID xbox = SDL_AttachVirtualJoystick(&desc); assert(xbox);
+    joystick = SDL_OpenJoystick(xbox); assert(joystick);
+    assert(aurora::input::add_controller(xbox) == xbox);
+    aurora::input::set_player_index(xbox, 0);
+    PADRestoreDefaultMapping(0);
+    assert(!bw_nintendo_face_layout(0));
+    aurora::input::remove_controller(xbox);
+    SDL_CloseJoystick(joystick); assert(SDL_DetachVirtualJoystick(xbox));
     SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
     std::filesystem::remove_all(directory);
 }
