@@ -224,3 +224,8 @@ through as light and dark vertical stripes that shifted with the camera (#491). 
 from the depth with the camera's far plane (`aurora_set_world_view_far`, from `hd_look.c`): read as if it were
 infinitely far, an island 8,000 units ahead came out hundreds of units too far, and shaded itself in blocks from the
 waterline up.
+
+Patch 0187 leaves a texture pack's top-level `optional/` folder out of the pack and loads the folders that
+`DOL_AURORA_TEXTURE_PACK_OPTIONAL` names (comma-separated) over it, at a higher priority. The HD importers put Wind
+Waker HD's own sky clouds there (`optional/hd-clouds`), for the HD look's **HD's clouds in the sky** switch. A
+missing folder is reported in the log and not created.

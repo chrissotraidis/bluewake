@@ -38,8 +38,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 # Dawn source/package compatibility: patches/recompcore/0184-0185 (RecompCore #44).
 # The HD look's ambient occlusion blurred and upscaled along each surface and faded with distance, its bloom screened, the far blur and lightning with the sky left sharp, its effects before the motion blur's copy of the frame, its occlusion only from what is within reach in the scene, and the sun shadow map's bias near the camera as far off and its distances read with the camera's far plane: patches/recompcore/0186 (pdale-boop).
+# A texture pack's optional/ folders, loaded over it only when asked (HD's sky clouds): patches/recompcore/0187 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=e05ed3cee7819feefb8e30256441ab10c62612bb
+RECOMPCORE_SHA=f013169b4dce10fa1b4526545532737dd9f92694
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
