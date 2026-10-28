@@ -310,6 +310,21 @@ static bool host_gx_entry_traced(u32 pc) {
             return true;
     return false;
 }
+
+// bluewake-unwatched-begin
+// The pc the runqueue diagnostics below compare a dispatch's input against. A
+// thread switch leaves the guest wherever it was, so this is not an entry the
+// host acts at: 0x80328F40 is _savegpr_29's entry, named only to label the two
+// late-callback reports. Watching it made the builders' prepare refuse every
+// call to that routine (inline_save_restore_gpr.py and direct_calls.py both
+// skip a watched target), so the 0.9.0 module left 2,372 calls to it going
+// round the chassis loop instead of inline, and the entry comparison tests
+// stopped at a prologue's save rather than at the return. Only these traces
+// read it, and a build with a trace on never skips the chassis for a direct
+// call (host_direct_can_skip), so the watch list leaves it out: in release
+// builds a call to it is inlined or runs as a direct call again.
+#define BW_RUNQUEUE_TRACE_SAVEGPR_29 0x80328F40u
+// bluewake-unwatched-end
 BLUEWAKE_TRACE_STORAGE(g_dispatch_terminal_trace);
 BLUEWAKE_TRACE_STORAGE(g_alarm_state_trace);
 static u32 g_pad_si_data_watch;
@@ -14243,7 +14258,7 @@ int main(int argc, char** argv) {
         if (g_runqueue_trace &&
             late_worker_callback_trace_reports < 48u &&
             blocks >= 31000000ull &&
-            ((dispatch_input_pc == 0x80328F40u &&
+            ((dispatch_input_pc == BW_RUNQUEUE_TRACE_SAVEGPR_29 &&
               dispatch_input_lr == 0x802B09C4u) ||
              dispatch_input_pc == 0x802B09C4u)) {
             fprintf(stderr,
@@ -14310,7 +14325,7 @@ int main(int argc, char** argv) {
         if (g_runqueue_trace &&
             late_scheduler_callback_trace_reports < 48u &&
             blocks >= 31000000ull &&
-            ((dispatch_input_pc == 0x80328F40u &&
+            ((dispatch_input_pc == BW_RUNQUEUE_TRACE_SAVEGPR_29 &&
               dispatch_input_lr == 0x802B4100u) ||
              dispatch_input_pc == 0x802B4100u)) {
             fprintf(stderr,
