@@ -1424,7 +1424,8 @@ a user folder here instead (a rebuild leaves it alone).
 # Linux builder matches that by default so a Linux build behaves the same as a
 # Windows one; --conservative builds the plain translation. The app enables each
 # one only where the module it loads was prepared with it.
-LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
+LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "gather_alias_cache",
+                               "inline_gpr",
                                "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
                                "behaviour_timing")
@@ -1470,7 +1471,9 @@ def main():
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
     parser.add_argument("--gather-alias-cache", action="store_true",
-                        help="candidate: cache gather-pipe alias-window overlap by registry generation; requires --gather-pipe")
+                        help="cache gather-pipe alias-window overlap by registry generation (on by default; requires --gather-pipe)")
+    parser.add_argument("--no-gather-alias-cache", action="store_true",
+                        help="disable the default gather-pipe alias-window cache")
     parser.add_argument("--inline-gpr", action="store_true",
                         help="inline certified register saves/restores; requires --direct-calls")
     parser.add_argument("--direct-calls", action="store_true",
@@ -1561,6 +1564,8 @@ def main():
     if not args.conservative:
         for name in LINUX_DEFAULT_OPTIMIZATIONS:
             setattr(args, name, True)
+    if args.no_gather_alias_cache:
+        args.gather_alias_cache = False
     if args.no_lean_blocks:
         args.lean_blocks = False
     if args.no_lean_memory:
