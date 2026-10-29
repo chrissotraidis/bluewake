@@ -21,7 +21,8 @@ one, this one wins.
 - `docs/BUILD_YOUR_OWN.md`, `docs/BUILDER.md`, `docs/DEVICE_BUILD.md`, `docs/WINDOWS.md`, `docs/LINUX.md`,
   `docs/ANDROID.md`, `docs/TVOS_BUILD.md`, `docs/MODS.md`, `docs/WWHD_TEXTURES.md`, `docs/WWHD_LOOK.md`,
   `docs/STAGE_SELECT.md`: how things work. `docs/BENCHMARK_TOUR.md` (the speed benchmark), `docs/PROFILING.md` (measuring on the
-  Steam Deck), `docs/RENDERED_TESTING.md` (scripted rendered tests: warps, save states, pad scripts, frame dumps),
+  Steam Deck), `docs/RENDERED_TESTING.md` (scripted rendered tests: warps, save states, pad scripts, frame dumps, and
+  `scripts/render_bench` to benchmark builds rendered, A against B, on a Deck or here),
   `docs/PERFORMANCE_OPTIMIZATIONS.md` (Smooth Motion and renderer changes, with their switches) and
   `docs/PADMINT_HANDOFF.md` (the PadMint adapter contract) are references.
 - `docs/WINDOWS_TASKS.md`: what each Windows build was checked for, and what still needs a Windows PC.

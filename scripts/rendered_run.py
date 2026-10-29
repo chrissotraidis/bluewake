@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Run BlueWake rendered, the same way each time: its frames, its speed and its GPU time, for each variant.
 
-  python3 scripts/rendered_run.py APP OUT_DIR --card CARD [where] [input] [pictures] [--set KEY=VALUE ...]
+  python3 scripts/rendered_run.py APP OUT_DIR [--card CARD] [where] [input] [pictures] [--set KEY=VALUE ...]
                                   [--variant NAME [KEY=VALUE ...]] ...
 
 APP is a BlueWake executable (on a Mac, BlueWake.app/Contents/MacOS/BlueWake). CARD is a memory card; each
-run gets a copy of it. OUT_DIR gets each run's folder, status.txt and results.json.
+run gets a copy of it (a warp needs one with a save; from a state, a run without one gets a new, empty card). OUT_DIR gets each run's folder, status.txt and results.json.
 
 Where (one of):
   --state FILE                 start from a save state (made with BLUEWAKE_SAVE_STATE=FILE@RETRACE, or F5)
@@ -20,10 +20,20 @@ Pictures:
   --scale N                    render scale (1 is the game's 640x480 picture at the window's size)
 Run:
   --max-retraces N             end the run at this retrace; a state's retrace counts on from where it was saved
+  --timeout SECONDS            stop a run that is still going after this long (timed_out in results.json)
+  --stop-on TEXT               stop the run as soon as its log has TEXT (e.g. "is empty; stopped pressing A")
   --unpaced                    as fast as it can (BLUEWAKE_WALL_PACE=0): captures in seconds, no in-between frames
   --set KEY=VALUE              any other variable, for every variant (BLUEWAKE_HD_LOOK=1, DOL_AURORA_AO_DEBUG=1, ...)
 Measure:
   --gpu-prof                   Aurora's GPU time per zone (DOL_AURORA_GPU_PROF=1; needs timestamp queries)
+  --cpu-profile                Linux perf counters per thread and sampled function cost; use only for attribution,
+                               not FPS. Profiles the --profile-window ranges, or else the whole run (window "run")
+  --profile-window NAME:FIRST:LAST
+                               profile from retrace FIRST to LAST only (repeat for several): perf attaches when the
+                               log's [perf] line reaches FIRST and detaches at LAST. In the run folder, per window:
+                               perf-NAME-stat.csv (counters per thread), perf-NAME.data, perf-NAME-window.json (the
+                               retraces covered), perf-NAME-report.txt (every thread) and perf-NAME-busiest.txt
+                               (the busiest thread alone: the game thread when the game is CPU-bound)
   --repeat N                   each variant N times (OUT_DIR/NAME-1, -2, ...), for the spread between runs
   --skip RETRACES              leave the first RETRACES after the run's first [perf] line out (default 300)
   --variant NAME [KEY=VALUE ...]
@@ -53,6 +63,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -117,7 +128,186 @@ def variables(args):
     return env
 
 
-def run(app, card, folder, env, status, skip):
+def stop(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (AttributeError, OSError):
+        process.kill()
+
+
+def last_line(log):
+    """The game's last log line so far (not gamescope's), to show a run is moving."""
+    lines = [l for l in log.read_text(errors="replace").splitlines()
+             if l.strip() and not l.startswith(("[gamescope]", ">", "The XKEYBOARD", "Errors from xkbcomp"))]
+    return f"last: {lines[-1][:100]}" if lines else "nothing from the game yet"
+
+
+def player_data():
+    """The player's own BlueWake data folder (read only here)."""
+    if os.environ.get("BLUEWAKE_DATA_DIR"):
+        return Path(os.environ["BLUEWAKE_DATA_DIR"])
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/BlueWake"
+    if os.name == "nt":
+        return Path(os.environ.get("APPDATA", Path.home())) / "BlueWake"
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "BlueWake"
+
+
+def child_process(root, wanted="bluewake", timeout=15):
+    """Find WANTED at or below ROOT in Linux's process tree. gamescope starts the AppImage, which starts BlueWake;
+    a BlueWake started directly is ROOT itself."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        children = {root}
+        changed = True
+        while changed:
+            changed = False
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit() or int(entry.name) in children:
+                    continue
+                try:
+                    # /proc/PID/stat's command can contain spaces and parentheses; the parent follows its last ')'.
+                    fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+                    if int(fields[1]) in children:
+                        children.add(int(entry.name))
+                        changed = True
+                except (OSError, ValueError, IndexError):
+                    pass
+        for pid in sorted(children):  # the app itself when it is BlueWake, else what its launcher started
+            try:
+                proc = Path("/proc") / str(pid)
+                # Its name, or the program in its command line (a script started by #! is named after python3).
+                names = [proc.joinpath("comm").read_text().strip()]
+                names += [Path(arg).name for arg in proc.joinpath("cmdline").read_bytes().decode(
+                    errors="replace").split("\0")[:2]]
+                if wanted in (n.lower() for n in names):
+                    return pid
+            except OSError:
+                pass
+        time.sleep(0.05)
+    return None
+
+
+PERF_EVENTS = "task-clock,cycles,instructions,branches,branch-misses,cache-references,cache-misses"
+
+
+def per_thread_stat(path):
+    """perf stat --per-thread -x ';' output: {tid: {event: count}}. Each line is NAME-TID;COUNT;UNIT;EVENT;..."""
+    threads = {}
+    for line in Path(path).read_text(errors="replace").splitlines() if Path(path).is_file() else []:
+        fields = line.split(";")
+        if line.startswith("#") or len(fields) < 4 or "-" not in fields[0]:
+            continue
+        try:
+            tid, count = int(fields[0].rsplit("-", 1)[1]), float(fields[1])
+        except ValueError:
+            continue  # <not counted>, <not supported>
+        # With perf_event_paranoid 2 the events are user space only: cycles:u, instructions:u, ...
+        threads.setdefault(tid, {})[fields[3].split(":", 1)[0]] = count
+    return threads
+
+
+def retrace_at(points, when):
+    """The retrace at wall time WHEN, from (wall time, retrace) pairs of [perf] lines as they appeared: linear
+    between the two around it, or along the last two past either end."""
+    if len(points) < 2:
+        return points[0][1] if points else None
+    pairs = list(zip(points, points[1:]))
+    (t0, r0), (t1, r1) = next(((a, b) for a, b in pairs if a[0] <= when <= b[0]),
+                              pairs[0] if when < points[0][0] else pairs[-1])
+    return round(r0 + (r1 - r0) * (when - t0) / (t1 - t0)) if t1 > t0 else r1
+
+
+class Profiler:
+    """Linux perf on BlueWake (below gamescope and the AppImage), attached only for the retrace windows asked
+    for. Sampling and counting slow the game, so a profiled run is for attribution, never for FPS."""
+
+    def __init__(self, folder, process, windows):
+        if sys.platform != "linux" or not shutil.which("perf"):
+            stop(process)
+            raise RuntimeError("--cpu-profile needs Linux perf")
+        self.folder, self.process = folder, process
+        self.windows = list(windows) or [("run", 0, 1 << 62)]
+        self.pid = child_process(process.pid)
+        if self.pid is None:
+            stop(process)
+            raise RuntimeError("--cpu-profile could not find the BlueWake process below its launcher")
+        self.log, self.offset, self.partial = folder / "log.txt", 0, ""
+        self.points, self.active, self.done = [], None, []
+        if self.windows[0][1] <= 0:
+            self.attach(self.windows.pop(0))
+
+    def poll(self):
+        """Read the log's new [perf] lines, then attach or detach where the retraces say."""
+        with self.log.open(errors="replace") as log:
+            log.seek(self.offset)
+            text = self.partial + log.read()
+            self.offset = log.tell()
+        lines = text.split("\n")
+        self.partial = lines.pop()
+        now = time.time()
+        for line in lines:
+            match = PERF.search(line)
+            if match:
+                self.points.append((now, int(match["retrace"])))
+        latest = self.points[-1][1] if self.points else -1
+        if self.active and latest >= self.active["last"]:
+            self.detach()
+        if not self.active and self.windows and latest >= self.windows[0][1]:
+            self.attach(self.windows.pop(0))
+
+    def attach(self, window):
+        name, first, last = window
+        out = lambda suffix: str((self.folder / f"perf-{name}{suffix}").resolve())
+        self.active = {"name": name, "first": first, "last": last, "start": time.time(), "procs": [
+            subprocess.Popen(["perf", "stat", "--per-thread", "-x", ";", "-o", out("-stat.csv"), "-e", PERF_EVENTS,
+                              "-p", str(self.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+            # 999 Hz without call stacks keeps perf.data small enough to copy back from a Deck.
+            subprocess.Popen(["perf", "record", "-q", "-F", "999", "-e", "cycles:u", "-o", out(".data"),
+                              "-p", str(self.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]}
+
+    def detach(self):
+        window, self.active = self.active, None
+        window["stop"] = time.time()
+        for proc in window["procs"]:
+            proc.send_signal(signal.SIGINT)  # perf writes its results on SIGINT
+        for proc in window.pop("procs"):
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        self.done.append(window)
+
+    def finish(self):
+        """After the game has ended: detach, then write each window's retraces and reports."""
+        self.poll()
+        if self.active:
+            self.detach()
+        for window in self.done:
+            name = window["name"]
+            # The retraces actually covered: perf attaches and detaches between two [perf] lines.
+            covered = {"name": name, "asked": [window["first"], window["last"]],
+                       "from_retrace": retrace_at(self.points, window["start"]),
+                       "to_retrace": retrace_at(self.points, window["stop"]),
+                       "seconds": round(window["stop"] - window["start"], 3)}
+            threads = per_thread_stat(self.folder / f"perf-{name}-stat.csv")
+            busiest = max(threads, key=lambda tid: threads[tid].get("task-clock", 0), default=None)
+            covered["busiest_tid"] = busiest
+            (self.folder / f"perf-{name}-window.json").write_text(json.dumps(covered, indent=1))
+            data = self.folder / f"perf-{name}.data"
+            if not data.is_file():
+                continue
+            report = ["perf", "report", "--stdio", "--no-children", "--percent-limit", "0.10",
+                      "--sort", "dso,symbol", "-i", str(data)]
+            with (self.folder / f"perf-{name}-report.txt").open("w") as out:
+                subprocess.run(report, stdout=out, stderr=subprocess.STDOUT, check=False)
+            if busiest is not None:
+                with (self.folder / f"perf-{name}-busiest.txt").open("w") as out:
+                    subprocess.run(report + ["--tid", str(busiest)], stdout=out, stderr=subprocess.STDOUT,
+                                   check=False)
+
+
+def run(app, card, folder, env, status, skip, timeout=None, stop_on=None, cpu_profile=False, windows=()):
     folder.mkdir(parents=True, exist_ok=True)
     data = folder / "data"
     data.mkdir(exist_ok=True)
@@ -126,7 +316,14 @@ def run(app, card, folder, env, status, skip):
     # safe mode (no HD look, no mods, 4:3).
     (data / "launch.pending").unlink(missing_ok=True)
     copy = data / "GZLE01.card"
-    shutil.copy(card, copy)
+    if card:
+        shutil.copy(card, copy)  # without one, a run from a state gets a new, empty card
+    # Which disc to read: on Linux the app keeps it in its data folder (disc.txt, and game.txt for the
+    # files it prepared from it, both absolute paths). This run's folder is new, so without them the app
+    # starts with no disc and waits for one to be chosen.
+    for name in ("disc.txt", "game.txt"):
+        if (player_data() / name).is_file() and not (data / name).exists():
+            shutil.copy(player_data() / name, data / name)
     full = {k: v for k, v in os.environ.items() if not k.startswith(("BLUEWAKE_", "DOL_"))}
     full.update(HOME=str(data), BLUEWAKE_DATA_DIR=str(data), BLUEWAKE_CARD_PATH=str(copy),
                 BLUEWAKE_SRAM=str(data / "sram.bin"), BLUEWAKE_SETTINGS=str(data / "settings.ini"))
@@ -146,13 +343,35 @@ def run(app, card, folder, env, status, skip):
     start = time.time()
     with open(folder / "log.txt", "w") as log:
         # A GUI program on Windows: waiting on it here waits for the game to close.
-        code = subprocess.run([str(app)], env=full, cwd=str(Path(app).parent), stdout=log,
-                              stderr=subprocess.STDOUT).returncode
-    note(f"exit {code}")
+        # Its own process group, so a timeout also ends what it started (gamescope, the AppImage's game).
+        process = subprocess.Popen([str(app)], env=full, cwd=str(Path(app).parent), stdout=log,
+                                   stderr=subprocess.STDOUT, start_new_session=os.name != "nt")
+        profiler = Profiler(folder, process, windows if cpu_profile else []) if cpu_profile else None
+        code, timed_out, last_print = None, False, start
+        while code is None:
+            try:
+                # Profiling follows the log closely, to attach and detach on the retraces asked for.
+                code = process.wait(timeout=0.1 if profiler else min(5 if stop_on else 30, timeout or 30))
+            except subprocess.TimeoutExpired:
+                elapsed = time.time() - start
+                if profiler:
+                    profiler.poll()
+                if stop_on and stop_on in (folder / "log.txt").read_text(errors="replace"):
+                    stop(process)
+                    code = process.wait()
+                elif timeout and elapsed > timeout:
+                    stop(process)
+                    code, timed_out = process.wait(), True
+                elif time.time() - last_print >= 29.5:
+                    last_print = time.time()
+                    print(f"{folder.name}: running {elapsed:.0f} s, {last_line(folder / 'log.txt')}", flush=True)
+        if profiler:
+            profiler.finish()
+    note(f"exit {code}" + (" (timed out)" if timed_out else ""))
     frames = len(list(folder.glob("frame-*.ppm")))
     dumped = len(list((folder / "dump").glob("*.ppm"))) if (folder / "dump").exists() else 0
     result = {"run": folder.name, "exit": code, "seconds": round(time.time() - start, 1), "frames": frames,
-              "dumped": dumped, **measure((folder / "log.txt").read_text(errors="replace"), skip)}
+              "dumped": dumped, "timed_out": timed_out, **measure((folder / "log.txt").read_text(errors="replace"), skip)}
     speed = f", {result['game_fps']} game frames/s, busy {result['busy']}%" if "game_fps" in result else ""
     gpu = f", GPU busy {result['gpu_busy_ms']} ms" if "gpu_busy_ms" in result else ""
     print(f"{folder.name}: exit {code} after {result['seconds']:.0f} s, {frames} frames, {dumped} dumped images"
@@ -166,7 +385,7 @@ def main():
                                          __doc__.splitlines()[2:]))
     parser.add_argument("app", type=Path)
     parser.add_argument("out", type=Path)
-    parser.add_argument("--card", type=Path, required=True)
+    parser.add_argument("--card", type=Path)
     parser.add_argument("--state")
     parser.add_argument("--warp")
     parser.add_argument("--warp-file", type=int, default=1)
@@ -179,7 +398,11 @@ def main():
     parser.add_argument("--scale", type=int)
     parser.add_argument("--max-retraces", type=int)
     parser.add_argument("--unpaced", action="store_true")
+    parser.add_argument("--timeout", type=float)
+    parser.add_argument("--stop-on")
     parser.add_argument("--gpu-prof", action="store_true")
+    parser.add_argument("--cpu-profile", action="store_true")
+    parser.add_argument("--profile-window", action="append", default=[], metavar="NAME:FIRST:LAST")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--skip", type=int, default=300)
     parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
@@ -212,7 +435,8 @@ def main():
         for repeat in range(1, args.repeat + 1):
             folder = name + (f"-{repeat}" if args.repeat > 1 else "")
             result = run(app, args.card, args.out / folder if folder else args.out, {**env, **overrides}, status,
-                         args.skip)
+                         args.skip, args.timeout, args.stop_on, args.cpu_profile,
+                         [(n, int(f), int(l)) for n, f, l in (w.split(":") for w in args.profile_window)])
             results.append({"variant": name, **result})
     (args.out / "results.json").write_text(json.dumps(results, indent=1))
     if len(results) > 1:
@@ -223,7 +447,7 @@ def main():
                                 if all(key in r for r in mine) else "-")
             print(f"{name or '(run)':16} {mean('game_fps'):>13}   {mean('busy'):>6}   {mean('gpu_busy_ms'):>11}")
     # A warp's own stop (BLUEWAKE_WARP_STOP_AFTER) ends with 1: that is a finished run.
-    sys.exit(1 if any(r["exit"] not in (0, 1) for r in results) else 0)
+    sys.exit(1 if any(r["exit"] not in (0, 1) or r["timed_out"] for r in results) else 0)
 
 
 if __name__ == "__main__":
