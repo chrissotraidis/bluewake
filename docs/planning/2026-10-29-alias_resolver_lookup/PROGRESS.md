@@ -1,6 +1,6 @@
 # PROGRESS — Constant-time guest alias lookup
 
-Status: In progress (M1, M2 implemented; M0 and M3 measurements pending)
+Status: In progress (M1, M2 implemented; census done; Deck A/B running, A/A to follow)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -8,9 +8,9 @@ Status: In progress (M1, M2 implemented; M0 and M3 measurements pending)
 ### M0: Baseline and census
 Architecture: [guest-to-host address resolution](../../architecture/GuestState.md#guest-to-host-address-resolution).
 - [x] M0-T01: Add `same_as_last`, page-scan-step and miss counters to the RecompCore census, plus an exported report call
-- [ ] M0-T02: Make BlueWake call that report before exiting at `BLUEWAKE_MAX_RETRACES`; check a non-empty `[alias-cost]` line on the Deck (host call in `81e8020`; Deck line pending)
+- [x] M0-T02: Make BlueWake call that report before exiting at `BLUEWAKE_MAX_RETRACES`; check a non-empty `[alias-cost]` line on the Deck
 - [ ] M0-T03: Deck A/A of the current stack (#495/#480), 5 states, `--warmup 1 --pairs 5`: record each scene's spread
-- [ ] M0-T04: Census in the lava room and Hyrule Castle: calls per frame, last-hit rate, scan steps for 4 KiB pages
+- [x] M0-T04: Census in the lava room and Hyrule Castle: calls per frame, last-hit rate, scan steps for 4 KiB pages
 - [x] M0-T05: Check whether the gather path resolves off the game thread during a REL load; record the M1 build mode (lazy or eager)
 
 ### M1: Resolver lookup (depends: M0)
@@ -43,3 +43,5 @@ Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMak
 | M1-T04 | RecompCore `abb3e31` | `ctest -R 'guest_alias_lookup\|guest_memory\|gxruntime_tests'` | GXRuntime standalone, Release, Linux (Gentoo, GCC) | 5/5 passed |
 | M2-T01 | RecompCore `abb3e31`, `GXRuntime/tests/guest_alias_lookup_test.c` | Reference: first alias in registration order holding the access | Same CTest run | 11,249,145 accesses matched, both variants |
 | M2-T02 | Same test | Page edges, sizes 1-8, removes and re-adds, 4,096 aliases, span over 32 MiB, overlapping sets; a deliberately wrong page start (+1) failed at `0xC0414000` | Same CTest run; mutation run by hand | Edges covered; the mutation is caught |
+| M0-T02 | BlueWake `172a787` (host) on builds `alias-base` `8d6fd5e` and `alias-lookup` `4a2158d` | `rendered_run.py --set BLUEWAKE_TRACE_ALIAS_COST=1`, stopped at `BLUEWAKE_MAX_RETRACES` | Steam Deck, offscreen gamescope, lava room and Hyrule Castle states | `[alias-cost]` printed by the game module (first line) and the host (second line) in all 4 runs |
+| M0-T04 | Same builds; RecompCore `caeedd8` (reference) and `abb3e31` (lookup) | 1,800 retraces from each state, unpaced | Same Deck | Lava room: 233.5 M resolver calls (≈ 259 k per game frame), 2.55 G search steps (≈ 11 per call) on the reference; lookup: 0 search steps, 231.0 M of 232.1 M hits from the last hit (99.5 %), 1.12 M page lookups at 2.3 steps. Hyrule Castle: 4.6 M calls; last hit 76 %, page lookups 1.6 steps. Same block counts in both builds (1,305,946; 1,306,926). 7,041 pages |
