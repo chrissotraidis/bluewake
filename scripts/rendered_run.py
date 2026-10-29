@@ -97,7 +97,9 @@ def measure(log_text, skip):
 
 
 def variables(args):
-    env = {"BLUEWAKE_NO_DIALOG": "1"}
+    # The [perf] lines the results come from: the Windows and Linux launchers
+    # turn them on by default, the Mac app doesn't.
+    env = {"BLUEWAKE_NO_DIALOG": "1", "BLUEWAKE_PERF_LOG": "1"}
     if args.state:
         env["BLUEWAKE_LOAD_STATE"] = str(Path(args.state).resolve())
     if args.warp:
