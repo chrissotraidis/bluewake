@@ -218,8 +218,13 @@ figurine or photographic-cloud variants. Selected alternatives are recorded
 in the report. HD's own sky clouds (the sea's `ws_naka06`, `ws_mae08`, `ws_mae09` and `cloudtx_01`-`03`) are written
 apart, in the pack's `optional/hd-clouds`, in HD's own colour and alpha: two of them are GameCube intensity
 bands that HD draws from colour with the cloud in alpha, so the GameCube's intensity would turn them into a grey
-haze. The pack leaves that folder out; the HD look's **HD's clouds in the sky** switch loads it over the pack
-([WWHD_LOOK.md](WWHD_LOOK.md)), and the report lists them under `optional`. Tiny placeholders and shader ramp textures stay
+haze. HD's `ws_naka06` is written for the GameCube's `ws_naka07` too: HD draws each cloud layer from one
+texture, its own colour and alpha, and the HD look's sky draws the GameCube's layers the same way. The pack
+leaves that folder out; the HD look's **HD's clouds in the sky** switch loads it over the pack
+([WWHD_LOOK.md](WWHD_LOOK.md)), and the report lists them under `optional`. HD's sky and light palettes for
+every stage on both discs (each stage's Pale and Virt tables, 130 stages) go in `optional/hd-sky/stages.bin`
+for the HD look's `BLUEWAKE_HD_SKY`; the report gives their count under `optional.hd-sky`. Both importers make
+the same bytes (`scripts/wwhd/sky.py`, `runtime/host/src/wwhd/sky.h`). Tiny placeholders and shader ramp textures stay
 original. Different UV layouts or changed names need separate, verified
 mappings and are not guessed.
 
