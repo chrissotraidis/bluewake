@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: render_bench [user@host] BUILD_A [BUILD_B] [options]
+
+Benchmark one build, or build A against build B (the reference), rendered:
+game frames a second, busy %, GPU time, slowdowns and guest checkpoints scene
+by scene, and with two builds the pictures. With user@host it runs there over
+SSH (a Steam Deck or any Linux machine); without it, here. Everything comes
+back here: the target keeps only the tour's state, for the next run.
+
+A build is an AppImage, or a folder holding BlueWake-x86_64.AppImage (or one
+*.AppImage). Its commit is read from build_script's paths
+(build/ALIAS-COMMIT/, build/artifacts/ALIAS/COMMIT/).
+
+Scenes:
+  (default)                 the benchmark tour of scripts/bench_tour.py:
+                            Outset, Windfall, Dragon Roost Cavern, Forest
+                            Haven, the sea by the Fortress, from a state at
+                            Outset made once on the target and kept in
+                            ~/bluewake-render/ (from the first quest log 1-3
+                            with a save on the card)
+  --states DIR              instead, each *.bwstate in DIR here, in lexical
+                            order, a scene named after its file
+                            (states/1-outset.bwstate is "1-outset")
+  --retraces N              retraces each --states scene plays (default 1800)
+                            Make states with: python3 scripts/render_bench.py
+                            make-state DIR/NAME.bwstate --app BUILD --warp
+                            stage:room:point (or copy F5's quick-*.bwstate)
+
+Runs:
+  --pairs N                 A/B/B/A pairs with two builds (default 2)
+  --runs N                  runs with one build (default 3)
+  --warmup N                runs of each build first, not measured (default 0)
+  --headless                no renderer (BLUEWAKE_RENDERER=headless), as
+                            benchmark_on_steamdeck runs; no pictures
+  --every N                 retraces between captured frames (default 300;
+                            0 for none)
+  --cpu-profile             one more run of each build under Linux perf, not
+                            measured: per scene, over the same window as FPS,
+                            counters per game frame for the game thread (the
+                            busiest) and all threads, and the game thread's
+                            hottest functions
+
+Every path given (builds, --states, --card, --out) is on this machine; what
+the target needs is copied there for the run.
+
+Target:
+  --card PATH               memory card to make the tour's state from;
+                            without it, the target's own
+                            (~/.local/share/BlueWake/GZLE01.card) is used for
+                            that, there. Only read, and only needed until the
+                            state exists
+  --display auto|headless|desktop
+                            headless runs the game under offscreen gamescope;
+                            desktop uses the running session (DISPLAY=:0)
+                            (default: auto, gamescope if there is one)
+  --size WxH                headless size (default 1280x800 on a Deck)
+  --ssh-key PATH            SSH private key for user@host
+  --keep-remote             leave the run's folder on the target
+
+  --out DIR                 where results go here (default ./YYYY_MM_DD-HHMMSS,
+                            in the directory you run it from)
+  -h, --help                this help
+
+Results, in one folder: report.md (ready for a pull request), report.txt,
+report.html, summary.json and, for scenes whose pictures differ,
+worst-<scene>.png (A, B and their difference). raw/ holds what the analysis
+read: collected.json, each run's logs and the differing scenes' frames. Analysis needs numpy and Pillow
+here (pip install --user numpy pillow); the target needs python3 and tar.
+
+Remote runs use your SSH keys and ~/.ssh/config, or ask for the password once.
+Exit: 0 passed, 1 a check failed (a run failed, checkpoints differ, pictures
+changed), 2 a usage or setup error.
+EOF
+}
+
+die() {
+    printf 'render_bench: %s\n' "$*" >&2
+    exit 2
+}
+
+find_image() {
+    local given=$1 directory count
+    if [[ -f "$given" ]]; then
+        realpath "$given"
+        return
+    fi
+    [[ -d "$given" ]] || die "no such build: $given"
+    directory=$(realpath "$given")
+    if [[ -s "$directory/BlueWake-x86_64.AppImage" ]]; then
+        printf '%s\n' "$directory/BlueWake-x86_64.AppImage"
+        return
+    fi
+    mapfile -d '' images < <(find "$directory" -maxdepth 2 -type f -name '*.AppImage' -print0)
+    count=${#images[@]}
+    [[ $count -eq 1 ]] || die "$directory: expected BlueWake-x86_64.AppImage or one unique AppImage; found $count"
+    printf '%s\n' "${images[0]}"
+}
+
+# ssh joins its arguments into one command line: quote each one.
+quote() {
+    local out= arg
+    for arg in "$@"; do
+        out+=" $(printf '%q' "$arg")"
+    done
+    printf '%s' "${out# }"
+}
+
+[[ ${1:-} == -h || ${1:-} == --help ]] && { usage; exit 0; }
+
+target=
+if [[ ${1:-} =~ ^[a-zA-Z0-9._-]+@[a-zA-Z0-9.:-]+$ ]]; then
+    target=$1
+    shift
+fi
+builds=()
+options=()
+states=
+card=
+out=
+ssh_key=
+keep_remote=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --states) states=${2:?--states needs a folder}; shift ;;
+        --card) card=${2:?--card needs a path}; shift ;;
+        --out) out=${2:?--out needs a folder}; shift ;;
+        --ssh-key) ssh_key=${2:?--ssh-key needs a path}; shift ;;
+        --keep-remote) keep_remote=1 ;;
+        --headless) options+=(--headless) ;;
+        --cpu-profile) options+=(--cpu-profile) ;;
+        --pairs|--runs|--warmup|--retraces|--every)
+            [[ ${2:-} =~ ^[0-9]+$ ]] || die "$1 needs a number"
+            options+=("$1" "$2"); shift ;;
+        --display)
+            [[ ${2:-} =~ ^(auto|headless|desktop)$ ]] || die "--display must be auto, headless or desktop"
+            options+=("$1" "$2"); shift ;;
+        --size)
+            [[ ${2:-} =~ ^[0-9]+x[0-9]+$ ]] || die "--size must be WxH"
+            options+=("$1" "$2"); shift ;;
+        -h|--help) usage; exit 0 ;;
+        -*) die "unknown option: $1" ;;
+        *) builds+=("$1") ;;
+    esac
+    shift
+done
+[[ ${#builds[@]} -ge 1 && ${#builds[@]} -le 2 ]] || { usage >&2; exit 2; }
+[[ -z "$states" || -d "$states" ]] || die "no such folder: $states"
+[[ -z "$card" || -f "$card" ]] || die "no such card: $card"
+
+scripts=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+harness=(render_bench.py rendered_run.py bench_tour.py)
+for file in "${harness[@]}" frame_compare.py; do
+    [[ -f "$scripts/$file" ]] || die "missing beside render_bench: $file"
+done
+python3 -c 'import numpy, PIL' 2>/dev/null || die "the analysis here needs numpy and Pillow: pip install --user numpy pillow"
+
+names=(A B)
+images=()
+for i in "${!builds[@]}"; do
+    images+=("$(find_image "${builds[$i]}")")
+    printf '%s%s: %s\n' "${names[$i]}" "$([[ $i -eq 1 ]] && echo ' (reference)')" "${images[$i]}"
+done
+# One folder for the run, here: YYYY_MM_DD-HHMMSS, the reports flat in it and the raw data in raw/.
+stamp=$(date +%Y_%m_%d-%H%M%S)
+run_name=$stamp
+out=${out:-$PWD/$stamp}
+mkdir -p "$out/raw"
+out=$(realpath "$out")
+raw=$out/raw
+analyze=()
+for i in "${!images[@]}"; do
+    analyze+=(--build "${names[$i]}=${images[$i]}")
+done
+status=0
+
+if [[ -z "$target" ]]; then
+    apps=()
+    for i in "${!images[@]}"; do
+        apps+=(--app "${names[$i]}=${images[$i]}")
+    done
+    [[ -n "$states" ]] && options+=(--states "$(realpath "$states")")
+    card=${card:-$HOME/.local/share/BlueWake/GZLE01.card}
+    [[ -f "$card" ]] && options+=(--card "$(realpath "$card")")
+    printf 'Running here; results in %s\n' "$out"
+    python3 -u "$scripts/render_bench.py" collect "$raw" "${apps[@]}" "${options[@]}" </dev/null || status=$?
+else
+    for dependency in ssh scp sha256sum tar; do
+        command -v "$dependency" >/dev/null || die "missing local dependency: $dependency"
+    done
+    control_directory=$(mktemp -d "${TMPDIR:-/tmp}/render-bench-ssh.XXXXXX")
+    control_path="$control_directory/control"
+    root=
+    cleanup() {
+        if [[ -n "$root" && $keep_remote -eq 0 ]]; then
+            ssh -o ControlPath="$control_path" "$target" "rm -rf $(quote "$root")" >/dev/null 2>&1 || true
+        fi
+        ssh -o ControlPath="$control_path" -O exit "$target" >/dev/null 2>&1 || true
+        rm -rf "$control_directory"
+    }
+    trap cleanup EXIT
+    trap 'exit 130' HUP INT TERM
+    ssh_options=(-o ControlPath="$control_path" -o ServerAliveInterval=30 -o ConnectTimeout=10)
+    [[ -n "$ssh_key" ]] && ssh_options+=(-i "$ssh_key" -o IdentitiesOnly=yes)
+    # One connection for the whole run: SSH keys (or ~/.ssh/config), else one password prompt here.
+    printf 'Connecting to %s...\n' "$target"
+    ssh "${ssh_options[@]}" -o ControlMaster=yes -o ControlPersist=yes -N -f "$target" ||
+        die "could not connect to $target (is it on and on this network?)"
+    ssh_command=(ssh "${ssh_options[@]}" -o ControlMaster=no)
+    scp_command=(scp "${ssh_options[@]}" -o ControlMaster=no)
+
+    printf 'Checking %s...\n' "$target"
+    need_perf=0
+    [[ " ${options[*]} " == *" --cpu-profile "* ]] && need_perf=1
+    root=$("${ssh_command[@]}" "$target" "bash -s -- $(quote "$run_name" "$need_perf")" <<'CHECK'
+set -eu
+for command in python3 tar sha256sum; do
+    command -v "$command" >/dev/null || { echo "missing on target: $command" >&2; exit 2; }
+done
+if [ "$2" = 1 ]; then
+    command -v perf >/dev/null || { echo "missing on target: perf" >&2; exit 2; }
+    perf version >/dev/null || { echo "perf is installed but unavailable" >&2; exit 2; }
+fi
+mkdir -p "$HOME/bluewake-render/runs/$1/harness"
+printf '%s\n' "$HOME/bluewake-render/runs/$1"
+CHECK
+) || die "target check failed"
+    printf 'Staging builds and harness in %s:%s...\n' "$target" "$root"
+    apps=()
+    for i in "${!images[@]}"; do
+        remote="$root/${names[$i]}.AppImage"
+        if [[ $i -eq 1 && "${images[1]}" == "${images[0]}" ]]; then
+            "${ssh_command[@]}" "$target" "ln $(quote "$root/A.AppImage" "$remote")"
+        else
+            hash=$(sha256sum "${images[$i]}" | cut -d' ' -f1)
+            "${scp_command[@]}" -q "${images[$i]}" "$target:$remote"
+            "${ssh_command[@]}" "$target" "chmod 0755 $(quote "$remote") &&
+                test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||
+                die "the copy of ${images[$i]} does not match"
+        fi
+        apps+=(--app "${names[$i]}=$remote")
+    done
+    "${scp_command[@]}" -q "${harness[@]/#/$scripts/}" "$target:$root/harness/"
+    if [[ -n "$states" ]]; then
+        "${ssh_command[@]}" "$target" "mkdir -p $(quote "$root/states")"
+        "${scp_command[@]}" -q "$states"/*.bwstate "$target:$root/states/"
+        options+=(--states "$root/states")
+    fi
+    if [[ -n "$card" ]]; then
+        "${scp_command[@]}" -q "$card" "$target:$root/GZLE01.card"
+        options+=(--card "$root/GZLE01.card")
+    else
+        options+=(--card "~/.local/share/BlueWake/GZLE01.card")  # the target's own; expanded there
+    fi
+
+    "${ssh_command[@]}" "$target" "cd $(quote "$root") && python3 -u harness/render_bench.py collect \
+        $(quote "$root/out" "${apps[@]}" "${options[@]}") </dev/null" || status=$?
+
+    printf 'Copying back logs and frame hashes...\n'
+    "${ssh_command[@]}" "$target" "cd $(quote "$root") && tar czf - --exclude='*.ppm' --exclude='launch' \
+        --exclude='data' out" </dev/null | tar xzf - -C "$raw" --strip-components=1 || true
+    if [[ -s "$raw/collected.json" ]]; then
+        mapfile -t scenes < <(python3 "$scripts/render_bench.py" differing "$raw")
+        for scene in "${scenes[@]}"; do
+            [[ -n "$scene" ]] || continue
+            printf 'Copying back the frames of %s (A and B differ)...\n' "$scene"
+            "${ssh_command[@]}" "$target" "cd $(quote "$root/out") && tar czf - $(quote "frames/$scene")" \
+                </dev/null | tar xzf - -C "$raw"
+        done
+    fi
+    [[ $keep_remote -eq 1 ]] && printf 'Left on the target: %s:%s\n' "$target" "$root"
+fi
+
+[[ -s "$raw/collected.json" ]] || die "the target collected nothing (exit $status)"
+printf '\nAnalysing here...\n'
+python3 "$scripts/render_bench.py" analyze "$raw" "${analyze[@]}" --into "$out" || status=$?
+printf '\n'
+cat "$out/report.txt"
+printf '\nResults: %s (report.md, report.txt, report.html, summary.json; raw/ has every run)\n' "$out"
+exit "$status"
