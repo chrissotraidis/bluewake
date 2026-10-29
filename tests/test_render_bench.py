@@ -89,6 +89,20 @@ class Plan(unittest.TestCase):
             loose.write_bytes(b'x')
             self.assertIsNone(render_bench.build_info(loose)['commit'])
 
+    def test_a_mac_app_is_a_build_with_its_own_commit(self):
+        with tempfile.TemporaryDirectory() as d:
+            app = Path(d) / 'build' / 'macos' / 'packaged' / 'BlueWake.app'
+            (app / 'Contents' / 'MacOS').mkdir(parents=True)
+            (app / 'Contents' / 'Resources').mkdir()
+            (app / 'Contents' / 'MacOS' / 'BlueWake').write_bytes(b'x')
+            (app / 'Contents' / 'Resources' / 'BuilderProvenance.json').write_text(json.dumps(
+                {'source_commit': '82371ebf15adaa2fdaefd5e3a69af004e378d2f6', 'source_modified': False,
+                 'module_sha256': '29' * 32}))
+            for given in (app, app / 'Contents' / 'MacOS' / 'BlueWake', app.parents[1]):
+                info = render_bench.build_info(given)
+                self.assertEqual((info['commit'], info['path'], info['module_sha256']),
+                                 ('82371ebf15ad', str(app.resolve()), '29' * 32), given)
+
     def test_a_file_that_is_not_a_state_has_no_retrace(self):
         with tempfile.NamedTemporaryFile() as f:
             f.write(b's\n')
@@ -255,8 +269,9 @@ class States(Work):
 class Wrapper(Work):
     def test_one_folder_a_run_with_the_reports_flat_in_it(self):
         home = self.dir / 'home'
-        (home / '.local/share/BlueWake').mkdir(parents=True)
-        (home / '.local/share/BlueWake/GZLE01.card').write_bytes(b'card')  # the tour's state is made from it
+        data = home / ('Library/Application Support/BlueWake' if sys.platform == 'darwin' else '.local/share/BlueWake')
+        data.mkdir(parents=True)
+        (data / 'GZLE01.card').write_bytes(b'card')  # the tour's state is made from it
         here = self.dir / 'here'
         here.mkdir()
         done = subprocess.run(['bash', str(SCRIPTS / 'render_bench'), str(self.app('bright')),
@@ -270,6 +285,23 @@ class Wrapper(Work):
         self.assertEqual(len(list(folder.glob('worst-*.png'))), 5)
         self.assertIn('worst-Outset.png', (folder / 'report.md').read_text())
         self.assertIn('BlueWake A/B benchmark', done.stdout)  # report.txt, printed at the end
+
+
+    def test_mac_apps_are_builds_to_the_wrapper(self):
+        apps = []
+        for name in ('bright', 'plain'):
+            app = self.dir / name / 'packaged' / 'BlueWake.app'
+            shutil.copytree(self.app(name).parent, app / 'Contents' / 'MacOS')
+            (app / 'Contents' / 'MacOS' / f'{name}.AppImage').rename(app / 'Contents' / 'MacOS' / 'BlueWake')
+            apps.append(str(app.parents[1]))  # the build folder, as build/macos is
+        here = self.dir / 'here'
+        here.mkdir()
+        done = subprocess.run(['bash', str(SCRIPTS / 'render_bench'), *apps, '--pairs', '1', '--display', 'desktop',
+                               '--card', str(self.dir / 'card')], cwd=here, env=dict(os.environ, HOME=str(self.dir)),
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1, done.stdout[-2000:] + done.stderr)  # the pictures changed
+        self.assertIn('A: ' + str((self.dir / 'bright/packaged/BlueWake.app/Contents/MacOS/BlueWake').resolve()),
+                      done.stdout)
 
 
 class Arguments(unittest.TestCase):

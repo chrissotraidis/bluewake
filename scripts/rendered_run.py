@@ -47,7 +47,8 @@ at 30 and busy and GPU time are what to compare; unpaced, the rate is the speed.
 benchmark at fixed stops, use scripts/bench_tour.py.
 
 Each run gets its own copy of the card, its own SRAM, settings and data folder, and none of the caller's
-BLUEWAKE_ or DOL_ variables, so it never reads or changes the player's own. OUT_DIR/status.txt gets a line
+BLUEWAKE_ or DOL_ variables, so it never reads or changes the player's own. It plays no sound
+(SDL_AUDIO_DRIVER=dummy), and the audio queue never holds the game back. OUT_DIR/status.txt gets a line
 as each run starts and ends; each run's folder has log.txt. From a save state, runs are frame-exact (the
 game's randomness is in the state): two runs that differ in one variable can be compared pixel for pixel
 (scripts/frame_compare.py). From boot they are not. docs/RENDERED_TESTING.md has the rest.
@@ -99,7 +100,11 @@ def measure(log_text, skip):
 def variables(args):
     # The [perf] lines the results come from: the Windows and Linux launchers
     # turn them on by default, the Mac app doesn't.
-    env = {"BLUEWAKE_NO_DIALOG": "1", "BLUEWAKE_PERF_LOG": "1"}
+    env = {"BLUEWAKE_NO_DIALOG": "1", "BLUEWAKE_PERF_LOG": "1",
+           # No sound out of the speakers (--set SDL_AUDIO_DRIVER= for the device), and the audio queue never
+           # holds the game back: the Windows and Linux launchers turn its throttle off, the Mac app doesn't, so
+           # there it held an unpaced run to real time and added waits to a paced one.
+           "SDL_AUDIO_DRIVER": "dummy", "DOL_AUDIO_NO_THROTTLE": "1"}
     if args.state:
         env["BLUEWAKE_LOAD_STATE"] = str(Path(args.state).resolve())
     if args.warp:

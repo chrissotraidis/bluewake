@@ -70,7 +70,10 @@ render_bench [user@host] BUILD_A [BUILD_B] [--states DIR] [--card PATH] [--pairs
 Every path you give (the builds, `--states`, `--card`, `--out`) is on the machine you run it from; what the target
 needs is copied there for the run, and **everything comes back**: the target keeps only the tour's start state for
 the next run. A build is an AppImage or a folder with one; its commit is read from `build_script`'s paths
-(`build/ALIAS-COMMIT/`, `build/artifacts/ALIAS/COMMIT/`).
+(`build/ALIAS-COMMIT/`, `build/artifacts/ALIAS/COMMIT/`). On a Mac it runs here only: a build is a `BlueWake.app` or
+a build folder holding `packaged/BlueWake.app` (`build/macos`), its commit the app's own (`BuilderProvenance.json`),
+and the card `~/Library/Application Support/BlueWake/GZLE01.card`. The game's window opens on screen, so run it
+with the screen locked if it shouldn't be seen; rendered runs work locked. `--cpu-profile` needs Linux `perf`.
 
 **Scenes.** By default, the benchmark tour of [`bench_tour.py`](BENCHMARK_TOUR.md): Outset, Windfall, Dragon Roost
 Cavern, Forest Haven and the sea by the Fortress, one every 1800 retraces (`BLUEWAKE_TEST_WARP`), from a save state
@@ -125,8 +128,10 @@ own processes in user space; `render_bench` checks for `perf` before it starts.
 
 ### How to run it
 
-1. **Once, on the machine you run it from:** numpy and Pillow (`pip install --user numpy pillow`), and builds,
-   for example from `build_script` (`build/artifacts/ALIAS/latest`).
+1. **Once, on the machine you run it from:** numpy and Pillow (`pip install --user numpy pillow`; on a Mac, whose
+   Python refuses that, in a virtual environment: `python3 -m venv ~/.venv-bench`, `~/.venv-bench/bin/pip install
+   numpy pillow`, and that `bin` first on `PATH`), and builds, for example from `build_script`
+   (`build/artifacts/ALIAS/latest`).
 2. **Once, on the target** (a Deck or any Linux machine): nothing to install. It needs `python3` and `tar` (SteamOS
    has both), the game's disc set up as for playing, and a card with a Wind Waker save in any quest log (for the
    tour's start state; or pass `--card`). For SSH, keys or `~/.ssh/config` avoid the password prompt; without them
