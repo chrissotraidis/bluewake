@@ -1,6 +1,6 @@
 # PROGRESS — Constant-time guest alias lookup
 
-Status: In progress (accepted: lava room +10.0 %, resolver 9.36 % → 2.52 %, identical checkpoints and pictures; next: RecompCore #48's CI, then the pin)
+Status: In progress (accepted: lava room +10.0 %, resolver 9.36 % → 2.52 %, identical checkpoints and pictures; next: the Windows test run, then the pin after the merge order)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -24,10 +24,10 @@ Parallel with M2; owns RecompCore `GXRuntime/src/core/cpu.c`; stacked on RecompC
 Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMakeLists.txt` registration; integrates at M3.
 - [x] M2-T01: Reference linear-scan resolver in the test; random alias sets (none, overlapping, 1 and 4,096 aliases)
 - [x] M2-T02: Edge cases: page boundaries, sizes 1–8, mirror bit, remove and re-add, alias span over 32 MiB
-- [ ] M2-T03: Register it in CTest for both variants; run on Linux and Windows CI (registered; Linux run locally; Windows CI pending)
+- [ ] M2-T03: Register it in CTest for both variants; run on Linux and Windows (registered; Linux done; RecompCore has no PR CI, so Windows runs by hand)
 
 ### M3: Integration and Deck acceptance (depends: M1, M2)
-- [ ] M3-T01: RecompCore PR to `bluewake-next` with M1 and M2; CI green on Linux and Windows (opened as RecompCore [#48](https://github.com/chrissotraidis/RecompCore/pull/48), draft, stacked on #45; CI pending)
+- [ ] M3-T01: RecompCore PR to `bluewake-next` with M1 and M2; tests passing on Linux and Windows (opened as RecompCore [#48](https://github.com/chrissotraidis/RecompCore/pull/48), draft, stacked on #45; RecompCore has no PR CI, tests run by hand)
 - [x] M3-T02: BlueWake build of the current stack with the new pin; census and `render_bench --cpu-profile` in the lava room
 - [x] M3-T03: Deck A/B against the same stack with the old pin, 5 states, `--warmup 1 --pairs 5`: FPS, checkpoints, pictures
 - [x] M3-T04: Record the result against the PRD targets (pass, or no-go with numbers); BlueWake pin PR only on pass

@@ -91,7 +91,7 @@ sequenceDiagram
 
 | Layer | Input / command | Required evidence | Failure / skip |
 | --- | --- | --- | --- |
-| Unit, differential | `ctest -R 'gxruntime_(guest_memory\|guest_alias_lookup)'`, both `BW_GUEST_MEM1` variants | ≥ 1 M random `(address, size)` per alias set, matching a reference linear scan: no-overlap, overlap, 1 and 4,096 aliases, page edges, sizes 1–8, mirror bit, remove/re-add | Any mismatch fails; Linux and Windows CI must both run |
+| Unit, differential | `ctest -R 'gxruntime_(guest_memory\|guest_alias_lookup)'`, both `BW_GUEST_MEM1` variants | ≥ 1 M random `(address, size)` per alias set, matching a reference linear scan: no-overlap, overlap, 1 and 4,096 aliases, page edges, sizes 1–8, mirror bit, remove/re-add | Any mismatch fails; Linux and Windows must both run. RecompCore's only workflow builds Dolphin on pushes to `main`, so the tests run by hand |
 | Census | `BLUEWAKE_TRACE_ALIAS_COST=1`, lava-room state, Deck | Non-empty `[alias-cost]` with `same_as_last`, scan steps, misses | No report means incomplete, not pass |
 | Profile | `render_bench … --states <5 states> --cpu-profile` | Lava resolver share; per-scene game cycles/frame | Missing profile window is a failure |
 | Product | `render_bench deck@… A B --states <5 states> --warmup 1 --pairs 5` | FPS per scene beyond the M0 A/A spread; checkpoints and pictures identical; 5/5 loaded | Within noise means no-go; any checkpoint/picture difference fails |
