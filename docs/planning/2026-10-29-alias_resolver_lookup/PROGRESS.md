@@ -24,7 +24,7 @@ Parallel with M2; owns RecompCore `GXRuntime/src/core/cpu.c`; stacked on RecompC
 Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMakeLists.txt` registration; integrates at M3.
 - [x] M2-T01: Reference linear-scan resolver in the test; random alias sets (none, overlapping, 1 and 4,096 aliases)
 - [x] M2-T02: Edge cases: page boundaries, sizes 1–8, mirror bit, remove and re-add, alias span over 32 MiB
-- [ ] M2-T03: Register it in CTest for both variants; run on Linux and Windows (registered; Linux done; RecompCore has no PR CI, so Windows runs by hand)
+- [x] M2-T03: Register it in CTest for both variants; run on Linux and Windows (RecompCore has no PR CI: run by hand; CI coverage through BlueWake's host CI with the pin, M3)
 
 ### M3: Integration and Deck acceptance (depends: M1, M2)
 - [ ] M3-T01: RecompCore PR to `bluewake-next` with M1 and M2; tests passing on Linux and Windows (opened as RecompCore [#48](https://github.com/chrissotraidis/RecompCore/pull/48), draft, stacked on #45; RecompCore has no PR CI, tests run by hand)
@@ -48,6 +48,7 @@ Builds: A = `alias-lookup` `4a2158d` (RecompCore `abb3e31`), B = `alias-base` `8
 | M1-T04 | RecompCore `abb3e31` | `ctest -R 'guest_alias_lookup\|guest_memory\|gxruntime_tests'` | GXRuntime, Release, Linux | 5/5 passed |
 | M2-T01 | `guest_alias_lookup_test.c` | Differential test against registration order | Same CTest run | 11,249,145 accesses matched |
 | M2-T02 | `guest_alias_lookup_test.c` | Edge cases; page start +1 mutation | Same CTest run | Edges pass; mutation caught |
+| M2-T03 | RecompCore `abb3e31` | Linux: CTest, both variants. Windows: `x86_64-w64-mingw32-gcc -static` (GCC 12), run under Wine 8 in `debian:bookworm-slim` | Linux (GCC), Windows (MinGW, Wine) | Both variants pass on both: 11,249,145 accesses matched. Not yet built with MSVC |
 | M3-T02 | Build A; report `2026_10_29-145102` | `render_bench --cpu-profile` | Deck, 5 states | [Profile](#profile): resolver 9.36 % → 2.52 % |
 | M3-T03 | Builds A and B; same report | `render_bench --warmup 1 --pairs 5 --cpu-profile` | Deck, 5 states, 10 runs per build | [A/B](#ab): lava room +10.00 %, overall +2.97 % |
 | M3-T04 | Report `2026_10_29-145102` | PRD targets against the A/B | — | Pass: resolver 2.52 % (≤ 3 %), lava room +10.00 % beyond run spread, checkpoints and pictures identical; "no scene slower" accepted by the owner without the A/A (M0-T03 skipped) |
