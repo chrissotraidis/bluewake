@@ -217,6 +217,9 @@ Let the agent do the counting and only show you the frames that matter (`frame_c
 (`Ambient occlusion 0.089 x2.0`, ...); `rendered_run.py` keeps the last report of each run in `results.json`. Measure
 paced runs: unpaced, the whole frame's GPU time varied by tens of percent between runs; paced, two runs of the same
 variant were within 2%. A zone is the steadier number.
+On a Mac (Metal) with the HD look on, the zones and `frame_ms` can't be used: on an M2 `frame_ms` read about
+12,000 ms and each HD pass about 1.0 or 2.0 ms, adding up to four times `busy_ms`. `busy_ms` was steady there (4.41
+and 4.29 ms in two paced runs), and with the HD look off the whole report was (`frame_ms` 1.57 and 1.59).
 `DOL_AURORA_RENDER_SCALE` takes effect at the first frame, after the startup log line that still reports scale 1.
 
 ## Agent pitfalls we hit
