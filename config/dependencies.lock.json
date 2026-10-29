@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "1cc1699c1c33e20015b759c32d11d0cf3ae51b35",
+      "sha": "379beb0f122c0014f7a6c26a44b9dc4852abd76e",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -673,6 +673,13 @@
             "patches/recompcore/0189-Aurora-sun-shadows-on-the-sea-as-in-Wind-Waker-HD-which-takes-them-but-casts-none.patch"
           ],
           "evidence": "pdale-boop's: sun shadows on the sea as Wind Waker HD's (HD's sea casts nothing): the sea's surface out of the sun shadow map, no slope or normal bias on it, and the gap fill counting only what the map holds. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), a grid of rendered save states (the boat, three sea platforms, the Outset jetty and sunrise, four under sail, one at dusk): the horizon specks, the trough shading, the hull's gap and the platforms' detached legs gone; nothing else changed. Windows and Mac not yet checked."
+        },
+        "hd_sun_look": {
+          "runtime": "379beb0f122c0014f7a6c26a44b9dc4852abd76e",
+          "tracked_patches": [
+            "patches/recompcore/0190-Aurora-sun-shadows-shaped-as-in-Wind-Waker-HD-held-at-24-degrees-soft-toward-their-tips-and-tinted-by-the-sky.patch"
+          ],
+          "evidence": "pdale-boop's: sun shadows shaped as Wind Waker HD's, measured in Cemu with Link's place and the camera tracked: the sun held at 24 degrees with its shadows thinning to half by -7 and gone by -8 (the Private Oasis, 17:15-17:25); long shadows soft toward their tips; the shadow a colour lit by the sky (0.22, 0.41, 0.60 of what is lit; HD's about 0.21, 0.39, 0.56 on Windfall's dock); two debug views; three cascades (a fourth shaded far islands in light-blue blocks through the haze); aurora_set_sun_shadow_strength for lighter shadows; a slope bias of 20 texels far off (acne on Ice Ring Isle's walls). Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk and noon warps and saved states against HD's frames; Windfall sailed toward from sea room 10 with three cascades and four. Windows and Mac not yet checked."
         }
       }
     },

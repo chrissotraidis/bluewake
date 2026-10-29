@@ -29,9 +29,11 @@ Turned on by `BLUEWAKE_HD_SUN_SHADOWS=1` (BlueWake's `runtime/host/src/hd_look.c
    `sunOrtho × sunView × cameraInvView`, takes each draw from the camera's view space into the map. A few fixed
    pipelines (`gxcore_draw.cpp` `make_sun_caster_pipelines()`: current matrix or indexed positions, with or without a
    texture for cutouts) draw them all with each draw's own constants, so nothing is compiled per draw.
-   There are four maps (cascades), each 2048×2048 and four times wider than the one before: 1,250, 5,000, 20,000
-   and 80,000 world units from their centres, which sit half their range ahead of the camera. The first has a texel
-   about the width of Link's leg, so his shadow starts under his shoes; the last reaches an island you sail toward.
+   There are three maps (cascades), each 2048×2048 and four times wider than the one before: 1,250, 5,000 and
+   20,000 world units from their centres, which sit half their range ahead of the camera. The first has a texel
+   about the width of Link's leg, so his shadow starts under his shoes; the last reaches an island you sail toward
+   once it is out of the haze. A fourth, out to 80,000 (`DOL_AURORA_SUN_SHADOW_MAP_CASCADES=4`), held only islands
+   deep in the haze, and its coarse texels shaded Windfall in light-blue blocks from across the sea.
    Each moves by whole texels so its edges don't crawl. The casters are drawn once per cascade. In an in-between
    frame the draws use their blended constants and that frame's camera.
 3. **Which draws cast** (`gxcore_draw.cpp`):
@@ -83,14 +85,14 @@ Turned on by `BLUEWAKE_HD_SUN_SHADOWS=1` (BlueWake's `runtime/host/src/hd_look.c
 |---|---|---|
 | `BLUEWAKE_HD_SUN_SHADOWS` | off | Sun shadows on, using the map, while the HD look is on (F2 off takes them too) |
 | `DOL_AURORA_SUN_SHADOW_MAP` | follows the above | `0` keeps the screen-only version, for A/B |
-| `DOL_AURORA_SUN_SHADOW_QUALITY` | `high` | `high` (map 4096, plus the room and palm culling below), `medium` (2048) or `low` (2048, three cascades, six filter lookups, no gap fill); each switch below still wins. In the desktop menu: Display › Wind Waker HD look settings › Sun shadow quality, which changes it at once (the map is made again, a one-frame hitch) |
-| `DOL_AURORA_SUN_SHADOW_MAP_SIZE` | 4096 | Texels a side, every cascade (4096 is 256 MB of video memory for four cascades, 2048 is 64 MB, 8192 is 1 GB) |
-| `DOL_AURORA_SUN_SHADOW_MAP_CASCADES` | 4 | How many cascades (1 to 4) |
+| `DOL_AURORA_SUN_SHADOW_QUALITY` | `high` | `high` (map 4096, plus the room and palm culling below), `medium` (2048) or `low` (2048, six filter lookups, no gap fill); each switch below still wins. In the desktop menu: Display › Wind Waker HD look settings › Sun shadow quality, which changes it at once (the map is made again, a one-frame hitch) |
+| `DOL_AURORA_SUN_SHADOW_MAP_SIZE` | 4096 | Texels a side, every cascade (4096 is 256 MB of video memory for its four layers, 2048 is 64 MB, 8192 is 1 GB) |
+| `DOL_AURORA_SUN_SHADOW_MAP_CASCADES` | 3 | How many cascades (1 to 4) |
 | `DOL_AURORA_SUN_SHADOW_MAP_RANGE` | 1250 | The first cascade's world units from its centre to its edge |
 | `DOL_AURORA_SUN_SHADOW_MAP_SPREAD` | 4 | Each next cascade this many times wider |
 | `DOL_AURORA_SUN_SHADOW_MAP_DEPTH` | 20000 | World units toward and away from the sun a cascade holds (at least twice its range) |
 | `DOL_AURORA_SUN_SHADOW_MAP_BIAS` | 12 | World units of bias at the 5,000-unit cascade, scaled by each cascade's texels (raise it for acne, lower it for gaps at feet) |
-| `DOL_AURORA_SUN_SHADOW_MAP_SLOPE`, `_SLOPE_NEAR` | 10, 10 | Texels of the surface's own slope added to the bias, far from and near the camera |
+| `DOL_AURORA_SUN_SHADOW_MAP_SLOPE`, `_SLOPE_NEAR` | 20, 10 | Texels of the surface's own slope added to the bias, far from and near the camera |
 | `DOL_AURORA_SUN_SHADOW_MAP_NORMAL_OFFSET`, `_NORMAL_NEAR` | 2, 2 | Texels the lookup moves out along the surface's normal, far and near |
 | `DOL_AURORA_SUN_SHADOW_MAP_FAR_START`, `_FAR_END` | 1500, 5000 | World units from the camera over which "near" turns into "far" |
 | `DOL_AURORA_SUN_SHADOW_MAP_SMOOTH` | on | The bias, normal offset, slope term and filter reach grow continuously from one cascade's inner edge to its outer one (4x); `0` steps them at each edge, as before |
