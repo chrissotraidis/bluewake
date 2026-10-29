@@ -9,7 +9,7 @@ Status: In progress (accepted: lava room +10.0 %, resolver 9.36 % → 2.52 %, id
 Architecture: [guest-to-host address resolution](../../architecture/GuestState.md#guest-to-host-address-resolution).
 - [x] M0-T01: Add `same_as_last`, page-scan-step and miss counters to the RecompCore census, plus an exported report call
 - [x] M0-T02: Make BlueWake call that report before exiting at `BLUEWAKE_MAX_RETRACES`; check a non-empty `[alias-cost]` line on the Deck
-- [!] M0-T03: Deck A/A of the current stack (#495/#480), 5 states, `--warmup 1 --pairs 5`: record each scene's spread (skipped by the owner's decision, 2026-10-29: confident Hyrule Castle's −0.77 % is noise; covered by later testing)
+- [!] M0-T03: Deck A/A of the current stack (#495/#480), 5 states, `--warmup 1 --pairs 5`: record each scene's spread (blocked by decision: the owner skipped it on 2026-10-29, confident Hyrule Castle's −0.77 % is noise; covered by later testing)
 - [x] M0-T04: Census in the lava room and Hyrule Castle: calls per frame, last-hit rate, scan steps for 4 KiB pages
 - [x] M0-T05: Check whether the gather path resolves off the game thread during a REL load; record the M1 build mode (lazy or eager)
 
