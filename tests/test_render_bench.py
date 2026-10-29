@@ -265,6 +265,12 @@ class States(Work):
         self.assertEqual({p['verdict'] for p in summary['pictures']}, {'identical'})
 
 
+def wrapper_env(**more):
+    """The wrapper runs `python3` from PATH: put this Python first, the one with numpy and Pillow (a venv in CI)."""
+    path = os.path.dirname(sys.executable) + os.pathsep + os.environ.get('PATH', '')
+    return dict(os.environ, PATH=path, **more)
+
+
 @unittest.skipUnless(HAVE_IMAGES, 'needs numpy and Pillow')
 class Wrapper(Work):
     def test_one_folder_a_run_with_the_reports_flat_in_it(self):
@@ -276,7 +282,7 @@ class Wrapper(Work):
         here.mkdir()
         done = subprocess.run(['bash', str(SCRIPTS / 'render_bench'), str(self.app('bright')),
                                str(self.app('plain')), '--pairs', '1', '--display', 'desktop'],
-                              cwd=here, env=dict(os.environ, HOME=str(home)), capture_output=True, text=True)
+                              cwd=here, env=wrapper_env(HOME=str(home)), capture_output=True, text=True)
         self.assertEqual(done.returncode, 1, done.stdout[-2000:] + done.stderr)  # the pictures changed
         [folder] = list(here.iterdir())
         self.assertRegex(folder.name, r'^\d{4}_\d{2}_\d{2}-\d{6}$')
@@ -297,7 +303,7 @@ class Wrapper(Work):
         here = self.dir / 'here'
         here.mkdir()
         done = subprocess.run(['bash', str(SCRIPTS / 'render_bench'), *apps, '--pairs', '1', '--display', 'desktop',
-                               '--card', str(self.dir / 'card')], cwd=here, env=dict(os.environ, HOME=str(self.dir)),
+                               '--card', str(self.dir / 'card')], cwd=here, env=wrapper_env(HOME=str(self.dir)),
                               capture_output=True, text=True)
         self.assertEqual(done.returncode, 1, done.stdout[-2000:] + done.stderr)  # the pictures changed
         self.assertIn('A: ' + str((self.dir / 'bright/packaged/BlueWake.app/Contents/MacOS/BlueWake').resolve()),
