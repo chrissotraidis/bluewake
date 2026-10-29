@@ -378,7 +378,8 @@ void apply_safe_mode() {
         {"BLUEWAKE_HD_FAR_BLUR", "1"},        {"BLUEWAKE_HD_AO", "1"},
         {"BLUEWAKE_HD_CLOUD_SHADOWS", "1"},   {"BLUEWAKE_HD_SUN_SHADOWS", ""},
         {"BLUEWAKE_HD_EDGE_LIGHT", "1"},      {"BLUEWAKE_HD_TORCH_LIGHT", "1"},
-        {"BLUEWAKE_HD_CLOUDS", ""},
+        {"BLUEWAKE_HD_CLOUDS", ""},           {"BLUEWAKE_HD_SKY", ""},
+        {"BLUEWAKE_HD_SKY_MODELS", ""},       {"BLUEWAKE_HD_SKY_LINEAR", ""},
     };
     for (const auto& pair : kSafe) {
         if (g_safe_backed_up) {

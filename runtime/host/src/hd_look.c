@@ -26,6 +26,8 @@ static float g_sun_view[3] = {0.0f, 1.0f, 0.0f};  // toward the sun, in the came
 static float g_sun_up = 1.0f;  // the sun's direction's height (sine of its elevation)
 static bool g_trace;
 static bool g_sky;  // HD's sky and light palettes (BLUEWAKE_HD_SKY)
+static bool g_sky_models;  // with them, HD's sky models (BLUEWAKE_HD_SKY_MODELS=1; off by default)
+static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; off by default)
 static void sky_load(void);
 
 // A number setting, or `fallback` when it is unset or not a number in [lo, hi].
@@ -103,6 +105,9 @@ void bluewake_hd_look_reload(void) {
     g_edge = part("BLUEWAKE_HD_EDGE_LIGHT", all);
     g_torch = part("BLUEWAKE_HD_TORCH_LIGHT", all);
     g_sky = all == 1 && setting("BLUEWAKE_HD_SKY") == 1;
+    // Off until turned on, the HD look on or not (they are new).
+    g_sky_models = setting("BLUEWAKE_HD_SKY_MODELS") == 1;
+    g_sky_linear = setting("BLUEWAKE_HD_SKY_LINEAR") == 1;
     if (g_sky)
         sky_load();
     if (bloom >= 0)
@@ -1063,9 +1068,7 @@ static void sky_layer_material(CPUState* cpu, u32 data, bool hd) {
 }
 
 static void sky_models(CPUState* cpu, bool hd) {
-    static int s_on = -1;  // BLUEWAKE_HD_SKY_MODELS=0 leaves the models as they are
-    if (s_on < 0)
-        s_on = setting("BLUEWAKE_HD_SKY_MODELS") != 0;
+    const bool models_on = g_sky_models;
     bool clouds_seen = false;
     u32 node = mem_read32(cpu, kActorQueue);
     for (u32 n = 0; n < kMaxActors && guest_pointer(node); ++n, node = mem_read32(cpu, node + kNodeNext)) {
@@ -1080,7 +1083,7 @@ static void sky_models(CPUState* cpu, bool hd) {
             const u32 clouds = mem_read32(cpu, actor + 0x294u);
             const u32 data = guest_pointer(clouds) ? mem_read32(cpu, clouds + 0x04u) : 0u;
             if (guest_pointer(data) && mem_read16(cpu, data + 0x28u) == 5u)
-                sky_layer_material(cpu, data, hd && s_on);
+                sky_layer_material(cpu, data, hd && models_on);
         }
         for (u32 k = 0; k < sizeof kSkyJoints / sizeof kSkyJoints[0]; ++k) {
             if (kSkyJoints[k].proc != proc)
@@ -1094,7 +1097,7 @@ static void sky_models(CPUState* cpu, bool hd) {
             if (!guest_pointer(joint))
                 continue;
             const float now = read_float(cpu, joint + 0x20u);
-            const float want = hd && s_on ? kSkyJoints[k].hd : kSkyJoints[k].gc;
+            const float want = hd && models_on ? kSkyJoints[k].hd : kSkyJoints[k].gc;
             if (now != want && (now == kSkyJoints[k].gc || now == kSkyJoints[k].hd))
                 write_float(cpu, joint + 0x20u, want);
         }
@@ -1181,7 +1184,7 @@ static float sky_brightness(CPUState* cpu) {
 // host writes the linear blend of their colours into all four (their Pale
 // entries and the Virt entries those name): whatever the weights, the game's
 // blend is then HD's. Each retrace the entries written last time get HD's
-// own colours back first. BLUEWAKE_HD_SKY_LINEAR=0 leaves the game's blend.
+// own colours back first. Only with BLUEWAKE_HD_SKY_LINEAR=1.
 static float sky_lin(u8 v) { return powf(v / 255.0f, 2.2f); }
 static u8 sky_gam(float v) {
     const float g = powf(v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v, 1.0f / 2.2f) * 255.0f + 0.5f;
@@ -1202,9 +1205,7 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
         sky_linear_forget();
         return;
     }
-    static int s_on = -1;
-    if (s_on < 0)
-        s_on = setting("BLUEWAKE_HD_SKY_LINEAR") != 0;
+    const bool linear_on = g_sky_linear;
     const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
     const u8* hd_virt = hd_pale + g_sky_pale * 0x2Cu + g_sky_virt * 0x24u;
     // HD's own colours back where they were blended.
@@ -1220,7 +1221,7 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
     }
     int pale[4];
     float ab, cb;
-    if (!on || !s_on || !sky_blend_state(cpu, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
+    if (!on || !linear_on || !sky_blend_state(cpu, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
         return;
     const float w[4] = {(1.0f - ab) * (1.0f - cb), ab * (1.0f - cb), (1.0f - ab) * cb, ab * cb};
     int virt[4];

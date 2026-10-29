@@ -116,6 +116,19 @@ inline constexpr Setting kSettings[] = {
      .note = "Wind Waker HD's soft sky clouds, from the HD textures. A pack imported before this switch needs importing again.",
      .needs = "BLUEWAKE_HD_LOOK", .needs_set = "DOL_AURORA_TEXTURE_PACK", .pane = "Wind Waker HD look settings",
      .next_launch = Os::All},
+    // HD's sky and light (hd_look.c sky()): HD's palettes for every stage, its
+    // sunlight for the hour and its light schedule, from the HD textures'
+    // optional/hd-sky; with them HD's sky models and its blend in linear
+    // light. Each is off until turned on, the HD look on or not; all three
+    // follow the menu at once.
+    {.key = "BLUEWAKE_HD_SKY", .kind = Kind::Bool, .label = "HD's sky and light", .control = Control::Switch,
+     .note = "Wind Waker HD's colours for every place, its brighter sunlight and its earlier sunset. A pack imported before this switch needs importing again.",
+     .needs = "BLUEWAKE_HD_LOOK", .needs_set = "DOL_AURORA_TEXTURE_PACK", .pane = "Wind Waker HD look settings",
+     .experimental = "Checked on Linux (Vulkan) against Wind Waker HD at Windfall through the day, and at every stage select place once at noon; not yet on Windows or a Mac."},
+    {.key = "BLUEWAKE_HD_SKY_MODELS", .kind = Kind::Bool, .label = "HD's taller haze and cloud layers",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_SKY_LINEAR", .kind = Kind::Bool, .label = "HD's dawn and dusk colours (blended in linear light)",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK", .pane = "Wind Waker HD look settings",
      .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},
