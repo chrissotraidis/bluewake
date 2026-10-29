@@ -14,10 +14,11 @@ the cloud colours' alpha (HD changed it; what HD's alpha means isn't known).
 The native importer doesn't write this file yet; this is how it is made until it does, from the two stage
 files (GC: res/Stage/sea/Stage.arc dzs/stage.dzs; HD: content/Common/Pack/first_szs_permanent.pack, sea_Stage.szs,
 Stage.bfres's embedded dzs). OUT goes in the HD pack as optional/hd-sky/sea.bin (BLUEWAKE_HD_SKY).
-Usage: wwhd_sky_palettes.py GC_DZS HD_DZS OUT"""
-import struct, sys
-
-gc_path, hd_path, out = sys.argv[1:4]
+Usage: wwhd_sky_palettes.py GC_DZS HD_DZS OUT
+   or: wwhd_sky_palettes.py --all GC_DIR HD_DIR OUT: every STAGE.dzs in both folders into one file for the host,
+       optional/hd-sky/stages.bin: 'BWSA' u32 count, then for each stage its name (16 bytes, zero-padded), u32 length
+       and the one-stage file above."""
+import os, struct, sys
 
 
 def chunks(d):
@@ -29,24 +30,47 @@ def gamma(b):
     return bytes(round(((x / 255) ** (1 / 2.2)) * 255) for x in b)
 
 
-gc, hd = open(gc_path, 'rb').read(), open(hd_path, 'rb').read()
-gcc, hdc = chunks(gc), chunks(hd)
-(pn, po), (vn, vo) = gcc['Pale'], gcc['Virt']
-(hpn, hpo), (hvn, hvo) = hdc['Pale'], hdc['Virt']
-assert (pn, vn) == (hpn, hvn), 'HD and GC tables differ in length'
+def convert(gc, hd):
+    gcc, hdc = chunks(gc), chunks(hd)
+    # A stage without a sky (an interior) has no Virt table: none is written.
+    (pn, po), (vn, vo) = gcc['Pale'], gcc.get('Virt', (0, 0))
+    (hpn, hpo), (hvn, hvo) = hdc['Pale'], hdc.get('Virt', (0, 0))
+    assert (pn, vn) == (hpn, hvn), 'HD and GC tables differ in length'
 
-gc_pale = gc[po:po + 0x2C * pn]
-gc_virt = gc[vo:vo + 0x24 * vn]
-hd_pale = b''
-for i in range(pn):
-    e = hd[hpo + 0x6C * i:hpo + 0x6C * i + 0x2C]
-    hd_pale += gamma(e[:0x21]) + e[0x21:0x2C]  # 11 colours, then Virt index, pad, fog start and end
-factors = b''.join(hd[hpo + 0x6C * i + 0x30:hpo + 0x6C * i + 0x48] for i in range(pn))
-hd_virt = b''
-for i in range(vn):
-    e, g = hd[hvo + 0x38 * i:hvo + 0x38 * i + 0x24], gc_virt[0x24 * i:0x24 * (i + 1)]
-    hd_virt += (e[:0x10] + gamma(e[0x10:0x13]) + g[0x13:0x14] + gamma(e[0x14:0x17]) + g[0x17:0x18]
-                + gamma(e[0x18:0x21]) + e[0x21:0x24])
-with open(out, 'wb') as f:
-    f.write(b'BWSK' + struct.pack('>III', 2, pn, vn) + gc_pale + hd_pale + gc_virt + hd_virt + factors)
-print(f'{pn} Pale, {vn} Virt -> {out}')
+    gc_pale = gc[po:po + 0x2C * pn]
+    gc_virt = gc[vo:vo + 0x24 * vn]
+    hd_pale = b''
+    for i in range(pn):
+        e = hd[hpo + 0x6C * i:hpo + 0x6C * i + 0x2C]
+        hd_pale += gamma(e[:0x21]) + e[0x21:0x2C]  # 11 colours, then Virt index, pad, fog start and end
+    factors = b''.join(hd[hpo + 0x6C * i + 0x30:hpo + 0x6C * i + 0x48] for i in range(pn))
+    hd_virt = b''
+    for i in range(vn):
+        e, g = hd[hvo + 0x38 * i:hvo + 0x38 * i + 0x24], gc_virt[0x24 * i:0x24 * (i + 1)]
+        hd_virt += (e[:0x10] + gamma(e[0x10:0x13]) + g[0x13:0x14] + gamma(e[0x14:0x17]) + g[0x17:0x18]
+                    + gamma(e[0x18:0x21]) + e[0x21:0x24])
+    return b'BWSK' + struct.pack('>III', 2, pn, vn) + gc_pale + hd_pale + gc_virt + hd_virt + factors
+
+
+if sys.argv[1] == '--all':
+    gc_dir, hd_dir, out = sys.argv[2:5]
+    entries = b''
+    count = 0
+    for name in sorted(n[:-4] for n in os.listdir(gc_dir) if n.endswith('.dzs')):
+        if not os.path.exists(os.path.join(hd_dir, name + '.dzs')) or len(name.encode()) > 15:
+            continue
+        try:
+            one = convert(open(os.path.join(gc_dir, name + '.dzs'), 'rb').read(), open(os.path.join(hd_dir, name + '.dzs'), 'rb').read())
+        except (AssertionError, KeyError) as e:
+            print(f'{name}: skipped ({e})')
+            continue
+        entries += name.encode().ljust(16, b'\0') + struct.pack('>I', len(one)) + one
+        count += 1
+    open(out, 'wb').write(b'BWSA' + struct.pack('>I', count) + entries)
+    print(f'{count} stages -> {out}')
+else:
+    gc_path, hd_path, out = sys.argv[1:4]
+    data = convert(open(gc_path, 'rb').read(), open(hd_path, 'rb').read())
+    open(out, 'wb').write(data)
+    pn, vn = struct.unpack('>II', data[8:16])
+    print(f'{pn} Pale, {vn} Virt -> {out}')

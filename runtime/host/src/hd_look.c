@@ -691,7 +691,18 @@ enum {
     kPaletInfo = 0x803C9D74u,     // mpPaletInfo (stage_palet_info_class, 0x2C each)
     kVrboxInfo = 0x803C9D80u,     // mpVrboxInfo (stage_vrbox_info_class, 0x24 each)
 };
-static u8* g_sky_data;  // the file: GC Pale, HD Pale, GC Virt, HD Virt, HD's Pale factors
+// Every stage HD retuned (optional/hd-sky/stages.bin, else sea.bin alone): a
+// stage's GC Pale, HD Pale, GC Virt, HD Virt, HD's Pale factors. The stage in
+// play is known by its tables holding one stage's GameCube colours; its data
+// is then g_sky_data (Virt can be none: an interior has no sky).
+typedef struct SkyStage {
+    char name[16];
+    u8* data;
+    u32 pale, virt;
+} SkyStage;
+static SkyStage* g_skies;
+static u32 g_sky_count;
+static u8* g_sky_data;  // the stage in play's, or NULL
 static u32 g_sky_pale, g_sky_virt;
 static bool g_sky_shown;  // the tables hold HD's (as last seen)
 static float g_sky_exposure;  // what aurora_set_exposure was last given
@@ -705,23 +716,83 @@ static void sky_load(void) {
     if (pack == NULL || pack[0] == '\0')
         return;
     char path[4096];
-    snprintf(path, sizeof path, "%s/optional/hd-sky/sea.bin", pack);
+    snprintf(path, sizeof path, "%s/optional/hd-sky/stages.bin", pack);
     FILE* f = fopen(path, "rb");
-    if (f == NULL)
-        return;
+    u32 count = 1u;
+    bool all = false;
     u8 head[16];
-    if (fread(head, 1, 16, f) == 16 && memcmp(head, "BWSK", 4) == 0 && head[7] == 2u) {
-        g_sky_pale = (u32)head[8] << 24 | (u32)head[9] << 16 | (u32)head[10] << 8 | head[11];
-        g_sky_virt = (u32)head[12] << 24 | (u32)head[13] << 16 | (u32)head[14] << 8 | head[15];
-        const size_t size = 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + g_sky_pale * 24u;
-        if (g_sky_pale < 256u && g_sky_virt < 256u && (g_sky_data = malloc(size)) != NULL &&
-            fread(g_sky_data, 1, size, f) != size) {
-            free(g_sky_data);
-            g_sky_data = NULL;
+    if (f != NULL && fread(head, 1, 8, f) == 8 && memcmp(head, "BWSA", 4) == 0) {
+        count = (u32)head[4] << 24 | (u32)head[5] << 16 | (u32)head[6] << 8 | head[7];
+        all = true;
+    } else {
+        if (f != NULL)
+            fclose(f);
+        snprintf(path, sizeof path, "%s/optional/hd-sky/sea.bin", pack);
+        f = fopen(path, "rb");
+    }
+    if (f == NULL || count == 0u || count > 512u || (g_skies = calloc(count, sizeof *g_skies)) == NULL) {
+        if (f != NULL)
+            fclose(f);
+        fprintf(stderr, "[hd-look] HD sky palettes: none in the pack\n");
+        return;
+    }
+    for (u32 i = 0; i < count; ++i) {
+        SkyStage* stage = &g_skies[g_sky_count];
+        if (all) {
+            u8 name[20];
+            if (fread(name, 1, 20, f) != 20)
+                break;
+            memcpy(stage->name, name, 15);
+        } else {
+            memcpy(stage->name, "sea", 4);
         }
+        if (fread(head, 1, 16, f) != 16 || memcmp(head, "BWSK", 4) != 0 || head[7] != 2u)
+            break;
+        stage->pale = (u32)head[8] << 24 | (u32)head[9] << 16 | (u32)head[10] << 8 | head[11];
+        stage->virt = (u32)head[12] << 24 | (u32)head[13] << 16 | (u32)head[14] << 8 | head[15];
+        const size_t size = 2u * (stage->pale * 0x2Cu + stage->virt * 0x24u) + stage->pale * 24u;
+        if (stage->pale == 0u || stage->pale >= 256u || stage->virt >= 256u || (stage->data = malloc(size)) == NULL)
+            break;
+        if (fread(stage->data, 1, size, f) != size) {
+            free(stage->data);
+            break;
+        }
+        ++g_sky_count;
     }
     fclose(f);
-    fprintf(stderr, "[hd-look] HD sky palettes: %s\n", g_sky_data ? path : "none in the pack");
+    fprintf(stderr, "[hd-look] HD sky palettes: %u stages from %s\n", g_sky_count, path);
+}
+
+static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size);
+
+// The stage whose GameCube Pale table the game's holds (the first entry, then
+// all of it), made the one in play; false if none. Several stages share the
+// GameCube's tables where HD retuned them apart (the fairy fountains, the
+// title's and the epilogue's sea against the sea's, two Triforce caves), so
+// the stage of that name is taken first (play.mCurStage, 0x803C9D3C).
+static bool sky_pick(CPUState* cpu, u32 table) {
+    char current[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        current[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);
+    int found = -1;
+    for (u32 i = 0; i < g_sky_count; ++i) {
+        const SkyStage* stage = &g_skies[i];
+        if (!guest_equals(cpu, table, stage->data, 0x2Cu) || !guest_equals(cpu, table, stage->data, stage->pale * 0x2Cu))
+            continue;
+        if (found < 0 || strncmp(stage->name, current, 8) == 0)
+            found = (int)i;
+        if (strncmp(stage->name, current, 8) == 0)
+            break;
+    }
+    if (found < 0)
+        return false;
+    const SkyStage* stage = &g_skies[found];
+    if (g_sky_data != stage->data && g_trace)
+        fprintf(stderr, "[hd-look] sky palettes for stage %s\n", stage->name);
+    g_sky_data = stage->data;
+    g_sky_pale = stage->pale;
+    g_sky_virt = stage->virt;
+    return true;
 }
 
 static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size) {
@@ -1119,11 +1190,21 @@ static u8 sky_gam(float v) {
 
 static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
+static int s_written_pale[4] = {-1, -1, -1, -1}, s_written_virt[4] = {-1, -1, -1, -1};
+
+static void sky_linear_forget(void) {
+    for (int i = 0; i < 4; ++i)
+        s_written_pale[i] = s_written_virt[i] = -1;
+}
+
 static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
+    if (g_sky_data == NULL) {
+        sky_linear_forget();
+        return;
+    }
     static int s_on = -1;
     if (s_on < 0)
         s_on = setting("BLUEWAKE_HD_SKY_LINEAR") != 0;
-    static int s_written_pale[4] = {-1, -1, -1, -1}, s_written_virt[4] = {-1, -1, -1, -1};
     const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
     const u8* hd_virt = hd_pale + g_sky_pale * 0x2Cu + g_sky_virt * 0x24u;
     // HD's own colours back where they were blended.
@@ -1131,7 +1212,7 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
         if (on && s_written_pale[i] >= 0)
             for (u32 c = 0; c < 0x21u; ++c)
                 mem_write8(cpu, pale_table + (u32)s_written_pale[i] * 0x2Cu + c, hd_pale[(u32)s_written_pale[i] * 0x2Cu + c]);
-        if (on && s_written_virt[i] >= 0)
+        if (on && virt_table != 0u && s_written_virt[i] >= 0)
             for (u32 c = 0; c < sizeof kVirtColours; ++c)
                 mem_write8(cpu, virt_table + (u32)s_written_virt[i] * 0x24u + kVirtColours[c],
                            hd_virt[(u32)s_written_virt[i] * 0x24u + kVirtColours[c]]);
@@ -1144,7 +1225,7 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
     const float w[4] = {(1.0f - ab) * (1.0f - cb), ab * (1.0f - cb), (1.0f - ab) * cb, ab * cb};
     int virt[4];
     for (int i = 0; i < 4; ++i)
-        virt[i] = hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] < g_sky_virt ? hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] : -1;
+        virt[i] = virt_table != 0u && hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] < g_sky_virt ? hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] : -1;
     u8 pale_out[0x21], virt_out[sizeof kVirtColours];
     for (u32 c = 0; c < 0x21u; ++c) {
         float v = 0.0f;
@@ -1171,21 +1252,43 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
     }
 }
 
+// A kept Pale table is still the stage's while each entry's bytes after its
+// colours (its Virt index and fog distances, which the blend never writes)
+// are HD's: a stage loaded again at the same place brings the GameCube's.
+static bool sky_kept(CPUState* cpu, u32 table) {
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    for (u32 i = 0; i < g_sky_pale; ++i)
+        if (!guest_equals(cpu, table + i * 0x2Cu + 0x21u, hd_pale + i * 0x2Cu + 0x21u, 0x2Cu - 0x21u))
+            return false;
+    return true;
+}
+
 static void sky(CPUState* cpu) {
-    if (g_sky_data == NULL)
+    if (g_sky_count == 0u)
         return;
-    const u8* gc_pale = g_sky_data;
-    const u8* hd_pale = gc_pale + g_sky_pale * 0x2Cu;
-    const u8* gc_virt = hd_pale + g_sky_pale * 0x2Cu;
-    const u8* hd_virt = gc_virt + g_sky_virt * 0x24u;
     static u32 s_pale, s_virt;  // the tables the host keeps
-    // Last retrace's linear blend comes out before the GameCube's go back.
-    if (!g_sky && s_pale != 0u && s_virt != 0u)
-        sky_linear(cpu, s_pale, s_virt, false);
-    const u32 pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, gc_pale, hd_pale, &s_pale);
-    const u32 virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, &s_virt);
+    const u32 pale_now = mem_read32(cpu, kPaletInfo);
+    if (s_pale != 0u && (pale_now != s_pale || g_sky_data == NULL || !sky_kept(cpu, s_pale))) {
+        s_pale = s_virt = 0u;
+        sky_linear_forget();
+    }
+    if (s_pale == 0u && !(guest_pointer(pale_now) && sky_pick(cpu, pale_now)))
+        g_sky_data = NULL;
+    u32 pale = 0u, virt = 0u;
+    if (g_sky_data != NULL) {
+        const u8* gc_pale = g_sky_data;
+        const u8* hd_pale = gc_pale + g_sky_pale * 0x2Cu;
+        const u8* gc_virt = hd_pale + g_sky_pale * 0x2Cu;
+        const u8* hd_virt = gc_virt + g_sky_virt * 0x24u;
+        // Last retrace's linear blend comes out before the GameCube's go back.
+        if (!g_sky && s_pale != 0u)
+            sky_linear(cpu, s_pale, s_virt, false);
+        pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, gc_pale, hd_pale, &s_pale);
+        if (g_sky_virt != 0u)
+            virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, &s_virt);
+    }
     g_sky_shown = g_sky && pale != 0u;
-    sky_linear(cpu, pale, virt, g_sky_shown && virt != 0u);
+    sky_linear(cpu, pale, virt, g_sky_shown);
     // The schedule goes with the palettes (back to the GameCube's when they go).
     sky_schedule(cpu, g_sky_shown);
     sky_models(cpu, g_sky_shown);
