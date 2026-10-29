@@ -1,6 +1,6 @@
 # PROGRESS — Constant-time guest alias lookup
 
-Status: In progress (M1, M2 implemented; census done; Deck A/B running, A/A to follow)
+Status: In progress (Deck A/B done: lava room +10.0 %, resolver 9.36 % → 2.52 %, identical checkpoints and pictures; A/A pending for the other scenes)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -28,8 +28,8 @@ Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMak
 
 ### M3: Integration and Deck acceptance (depends: M1, M2)
 - [ ] M3-T01: RecompCore PR to `bluewake-next` with M1 and M2; CI green on Linux and Windows
-- [ ] M3-T02: BlueWake build of the current stack with the new pin; census and `render_bench --cpu-profile` in the lava room
-- [ ] M3-T03: Deck A/B against the same stack with the old pin, 5 states, `--warmup 1 --pairs 5`: FPS, checkpoints, pictures
+- [x] M3-T02: BlueWake build of the current stack with the new pin; census and `render_bench --cpu-profile` in the lava room
+- [x] M3-T03: Deck A/B against the same stack with the old pin, 5 states, `--warmup 1 --pairs 5`: FPS, checkpoints, pictures
 - [ ] M3-T04: Record the result against the PRD targets (pass, or no-go with numbers); BlueWake pin PR only on pass
 
 ## Evidence ledger
@@ -45,3 +45,5 @@ Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMak
 | M2-T02 | Same test | Page edges, sizes 1-8, removes and re-adds, 4,096 aliases, span over 32 MiB, overlapping sets; a deliberately wrong page start (+1) failed at `0xC0414000` | Same CTest run; mutation run by hand | Edges covered; the mutation is caught |
 | M0-T02 | BlueWake `172a787` (host) on builds `alias-base` `8d6fd5e` and `alias-lookup` `4a2158d` | `rendered_run.py --set BLUEWAKE_TRACE_ALIAS_COST=1`, stopped at `BLUEWAKE_MAX_RETRACES` | Steam Deck, offscreen gamescope, lava room and Hyrule Castle states | `[alias-cost]` printed by the game module (first line) and the host (second line) in all 4 runs |
 | M0-T04 | Same builds; RecompCore `caeedd8` (reference) and `abb3e31` (lookup) | 1,800 retraces from each state, unpaced | Same Deck | Lava room: 233.5 M resolver calls (≈ 259 k per game frame), 2.55 G search steps (≈ 11 per call) on the reference; lookup: 0 search steps, 231.0 M of 232.1 M hits from the last hit (99.5 %), 1.12 M page lookups at 2.3 steps. Hyrule Castle: 4.6 M calls; last hit 76 %, page lookups 1.6 steps. Same block counts in both builds (1,305,946; 1,306,926). 7,041 pages |
+| M3-T02 | `alias-lookup` `4a2158d` (RecompCore `abb3e31`); report `2026_10_29-145102` | `render_bench … --cpu-profile`: game-thread share of `ppc_guest_alias_resolve` | Steam Deck, 5 states | Lava room 9.36 % (reference) → **2.52 %** (lookup); elsewhere below the top ten on both. Lava game-thread cycles/frame −8.30 %, instructions −17.62 % |
+| M3-T03 | Same; reference `alias-base` `8d6fd5e` (RecompCore `caeedd8`), both on #495 `82371eb` | `render_bench deck@… A B --states test_render/states --warmup 1 --pairs 5 --cpu-profile` | Steam Deck, offscreen gamescope 1280×800, 10 measured runs per build | Lava room **30.47 → 33.51 FPS (+10.00 %)**; Outset +0.80 %, butterfly room +1.11 %, shipwreck +1.27 %, Hyrule Castle −0.77 % (within run spread, sd ≈ 1.5 %; A/A pending); overall +2.97 %. 20/20 loaded; guest checkpoints identical in every run of both builds; pictures identical in all 5 scenes; no problems |
