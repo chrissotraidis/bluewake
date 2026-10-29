@@ -311,6 +311,19 @@ foreach(_variant plain global cache)
     endif()
     add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
 endforeach()
+# RecompCore #48's guest-alias resolver against the registration-order rule it
+# implements (11 million accesses, overlapping sets, removes, page edges).
+foreach(_variant plain global)
+    add_executable(bluewake_guest_alias_lookup_${_variant}_test
+        ${GXRUNTIME_DIR}/tests/guest_alias_lookup_test.c)
+    target_include_directories(bluewake_guest_alias_lookup_${_variant}_test PRIVATE ${GXRUNTIME_DIR}/include)
+    target_link_libraries(bluewake_guest_alias_lookup_${_variant}_test PRIVATE gxruntime)
+    if(_variant STREQUAL "global")
+        target_compile_definitions(bluewake_guest_alias_lookup_${_variant}_test PRIVATE
+            BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+    endif()
+    add_test(NAME bluewake_guest_alias_lookup_${_variant}_test COMMAND bluewake_guest_alias_lookup_${_variant}_test)
+endforeach()
 add_executable(bluewake_inline_gpr_memory_test ${BLUEWAKE_REPO_ROOT}/tests/inline_gpr_memory_test.c)
 target_include_directories(bluewake_inline_gpr_memory_test PRIVATE
     ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite)
