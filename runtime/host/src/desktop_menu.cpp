@@ -93,8 +93,6 @@ const char* const kAnisoShown[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
 const char* const kAnisoStored[] = {"1", "2", "4", "8", "16"};
 const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "Largest"};
 const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
-const char* const kShadowQualityShown[] = {"Low", "Medium", "High"};
-const char* const kShadowQualityStored[] = {"low", "medium", "high"};
 
 // Beside the control when it fits there. A list or a slider fills its line,
 // and after one the note went past the edge and, wrapped to nothing there, was
@@ -287,8 +285,7 @@ void apply_now(const bw_settings::Setting& s) {
         set_env("BLUEWAKE_FADE_FRAMES", value != "0" ? "6" : "0");
     if (next_launch(s))
         return;
-    if (std::strncmp(key, "BLUEWAKE_HD_", 12) == 0 ||  // the HD look and its parts (sun shadows)
-        std::strcmp(key, "DOL_AURORA_SUN_SHADOW_QUALITY") == 0)
+    if (std::strncmp(key, "BLUEWAKE_HD_", 12) == 0)  // the HD look and its parts (sun shadows)
         bluewake_hd_look_reload();
     else if (std::strcmp(key, "BLUEWAKE_MENU_PAUSES") == 0)
         read_menu_pauses();
@@ -690,12 +687,6 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *shown = bw_desktop::kAnisoShown;
         *stored = bw_desktop::kAnisoStored;
         *count = 5;
-        return true;
-    }
-    if (std::strcmp(key, "DOL_AURORA_SUN_SHADOW_QUALITY") == 0) {
-        *shown = bw_desktop::kShadowQualityShown;
-        *stored = bw_desktop::kShadowQualityStored;
-        *count = 3;
         return true;
     }
     if (std::strcmp(key, "BLUEWAKE_MENU_TEXT_SIZE") == 0) {

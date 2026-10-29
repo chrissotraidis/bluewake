@@ -27,7 +27,7 @@ uses `BLUEWAKE_SETTINGS=none`, startup resets only the session. Normal startup k
 In the menu, under "Wind Waker HD look" on the Display tab, **Wind Waker HD look settings** opens to a switch for
 each piece: islands on the horizon, soft shading (ambient occlusion), cloud shadows, edge light, torch light, the soft
 distance (far blur) and bloom. They're on with the look and greyed while it's off; turning the look off (F2) takes
-them all with it, whatever their switches say. Sun shadows and their quality are in the same place, marked
+them all with it, whatever their switches say. Sun shadows are in the same place, marked
 experimental: off by default, with a switch of their own.
 
 For testing, the same switches are variables: `BLUEWAKE_HD_AO` (ambient occlusion), `BLUEWAKE_HD_SUN_SHADOWS`,

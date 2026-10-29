@@ -119,12 +119,6 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK", .pane = "Wind Waker HD look settings",
      .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},
-    // The sun shadow map's quality (hd_look.c hands it to Aurora's post_fx when it changes).
-    {.key = "DOL_AURORA_SUN_SHADOW_QUALITY", .kind = Kind::Choice, .fallback = "high", .label = "Sun shadow quality",
-     .control = Control::Chooser,
-     .note = "High is the sharpest, and keeps islands and palms behind the camera casting; Low is for slower graphics cards.",
-     .needs = "BLUEWAKE_HD_SUN_SHADOWS", .pane = "Wind Waker HD look settings",
-     .experimental = "Low, Medium and High played on Linux (Vulkan); not yet on Windows or a Mac."},
     {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
      .label = "Show the frame rate   (F9)", .control = Control::Switch},
     {.key = "DOL_AURORA_ASPECT_FIT", .old_windows = "keep_aspect", .kind = Kind::Bool, .on = Os::Windows,

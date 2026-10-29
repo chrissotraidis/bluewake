@@ -111,6 +111,11 @@ void read_line(const std::string& key, const std::string& value) {
     // turns HD textures off for this session, and the folder is kept.
     if (key == "DOL_AURORA_TEXTURE_PACK" && !value.empty())
         g_choices.last_pack = value;
+    // Sun shadows have one quality for now, the HD look's (high); a Low a
+    // player chose in 0.9.0's menu is dropped, not kept out of sight. Lite
+    // and Enhanced come later.
+    if (key == "DOL_AURORA_SUN_SHADOW_QUALITY")
+        return;
     const bw_settings::Setting* row = bw_settings::find(key.c_str());
     const bool known = row != nullptr && bw_settings::exists_on(*row);
     const auto launched = g_launch.find(key);
