@@ -110,7 +110,7 @@ Critical path: M0 → M1 → M3. Concurrency limits: M1 alone edits `cpu.c`, and
 ## Decisions / gaps
 
 - **Stacking:** on RecompCore #45, not the pin. Same file and generation semantics, and #495 (unmerged, consistently positive) needs it. If #45 changes first, M1 rebases.
-- **Baseline build:** the earlier Deck numbers came from `8d8587b`, whose builder profile fetched RecompCore `47a5229`, an older #45 commit without the generation tracking #495 relies on. M0 and M3 therefore compare two fresh builds of #495's head `82371eb` (plus the host census commit), one at RecompCore `caeedd8` and one at `perf/alias-lookup` `57477db`, built the same way.
+- **Baseline build:** the earlier Deck numbers came from `8d8587b`, whose builder profile fetched RecompCore `47a5229`, an older #45 commit without the generation tracking #495 relies on. M0 and M3 therefore compare two fresh builds of #495's head `82371eb` (plus the host census commit), one at RecompCore `caeedd8` and one at `perf/alias-lookup` `abb3e31`, built the same way.
 - **Granularity:** 4 KiB pages. Smaller pages trade memory (fine up to 64 KiB of table) for shorter scans; M0's scan-step census decides.
 - **Not cached:** guest pointers or results. Only an index into the existing sorted array, so nothing can go stale silently.
 - **Gap:** no call stacks for the game module. The collision link is correlational until M0's census shows the lava room's call count.
