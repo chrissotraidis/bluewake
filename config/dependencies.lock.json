@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "8e3626b0d2cede7e434a24b24121f0bfe9324e16",
+      "sha": "1cc1699c1c33e20015b759c32d11d0cf3ae51b35",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -666,6 +666,13 @@
             "patches/recompcore/0188-Aurora-sun-shadows-timed-as-in-Wind-Waker-HD-the-sun-s-while-its-disk-shows-and-the-moon-s-from-25-degrees-down-to-8-at-dawn.patch"
           ],
           "evidence": "pdale-boop's: the sun shadow map's shadows timed against Wind Waker HD in Cemu (the stage select's warps with the clock tracked): the sun's last while the game draws its sun disk, the moon's start from 25 degrees up and last at dawn until it is down to 8 degrees. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk, night and dawn warps to Windfall's dock and the Private Oasis against HD's frames at the same times. Windows and Mac not yet checked."
+        },
+        "hd_sun_sea": {
+          "runtime": "1cc1699c1c33e20015b759c32d11d0cf3ae51b35",
+          "tracked_patches": [
+            "patches/recompcore/0189-Aurora-sun-shadows-on-the-sea-as-in-Wind-Waker-HD-which-takes-them-but-casts-none.patch"
+          ],
+          "evidence": "pdale-boop's: sun shadows on the sea as Wind Waker HD's (HD's sea casts nothing): the sea's surface out of the sun shadow map, no slope or normal bias on it, and the gap fill counting only what the map holds. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), a grid of rendered save states (the boat, three sea platforms, the Outset jetty and sunrise, four under sail, one at dusk): the horizon specks, the trough shading, the hull's gap and the platforms' detached legs gone; nothing else changed. Windows and Mac not yet checked."
         }
       }
     },

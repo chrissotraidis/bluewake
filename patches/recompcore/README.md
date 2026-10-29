@@ -233,3 +233,9 @@ missing folder is reported in the log and not created.
 Patch 0188 times the sun shadow map's shadows as Wind Waker HD does. It keeps the sun's shadows while the game draws
 its sun disk (they had stopped well before the sun set) and starts the moon's from 25 degrees up, and keeps the
 moon's shadows at dawn until it is down to 8 degrees, where they had gone as soon as the sun's began.
+
+Patch 0189 is sun shadows on the sea, as in Wind Waker HD. It leaves the sea's surface out of the sun shadow map (it
+takes shadows and casts none): a swell's crest had shaded the trough behind it, specks along the horizon, and a tower
+standing in the sea lost the foot of its shadow. It drops the slope and normal bias on the sea, which can't shade
+itself, so the far platforms' legs meet their shadows. And the gap fill counts only what the map holds, one-sided, so
+wave crests no longer cast through it (sunrise specks, the bow spray's wings).
