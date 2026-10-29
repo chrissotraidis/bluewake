@@ -442,8 +442,11 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                 if (g_trace && retrace % 300u == 0u)
                     fprintf(stderr, "[hd-look] camera eye %.0f %.0f %.0f fovy %.1f aspect %.3f near %.2f far %.0f\n",
                             inv[3], inv[7], inv[11], fovy, aspect, near_plane, read_float(cpu, view + kViewFar));
-                aurora_set_world_view(inv, tanf(fovy * 0.5f * 3.14159265f / 180.f), aspect, near_plane, 0.f,
-                                      (float)retrace / 59.94f);
+                // The sea is at 0 outdoors; indoors there is none, and a floor near
+                // 0 would read as sea to the passes that leave the sea alone (HD's
+                // brightness for the hour), so the sea goes far below.
+                aurora_set_world_view(inv, tanf(fovy * 0.5f * 3.14159265f / 180.f), aspect, near_plane,
+                                      outdoors ? 0.f : -1.0e9f, (float)retrace / 59.94f);
                 // With the far plane the sun shadow map reads distances from the
                 // depth exactly: taken as infinitely far, an island 8,000 units
                 // off read hundreds of units too far and shaded itself in blocks.
