@@ -1,6 +1,6 @@
 # PROGRESS — Constant-time guest alias lookup
 
-Status: In progress (accepted: lava room +10.0 %, resolver 9.36 % → 2.52 %, identical checkpoints and pictures; next: the Windows test run, then the pin after the merge order)
+Status: In progress (accepted: lava room +10.0 %, resolver 9.36 % → 2.52 %, identical checkpoints and pictures; next: the merge order (#45, #48, #480, #495), then rebase onto main)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -31,11 +31,11 @@ Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMak
 - [x] M3-T02: BlueWake build of the current stack with the new pin; census and `render_bench --cpu-profile` in the lava room
 - [x] M3-T03: Deck A/B against the same stack with the old pin, 5 states, `--warmup 1 --pairs 5`: FPS, checkpoints, pictures
 - [x] M3-T04: Record the result against the PRD targets (pass, or no-go with numbers); BlueWake pin PR only on pass
-- [ ] M3-T05: With the pin (after #45, #48, #480, #495 land): register `bluewake_guest_alias_lookup_{plain,global}_test` in `runtime/host/CMakeLists.txt` from RecompCore's `GXRuntime/tests/guest_alias_lookup_test.c`, linked to `gxruntime` like the gather-memory tests, and add them to the build targets in `linux-host.yml` and `windows-host.yml`; CI then runs it on Linux and on Windows (MSVC)
+- [x] M3-T05: With the pin (after #45, #48, #480, #495 land): register `bluewake_guest_alias_lookup_{plain,global}_test` in `runtime/host/CMakeLists.txt` from RecompCore's `GXRuntime/tests/guest_alias_lookup_test.c`, linked to `gxruntime` like the gather-memory tests, and add them to the build targets in `linux-host.yml` and `windows-host.yml`; CI then runs it on Linux and on Windows (MSVC)
 
 ## Evidence ledger
 
-Builds: A = `alias-lookup` `4a2158d` (RecompCore `abb3e31`), B = `alias-base` `8d6fd5e` (RecompCore `caeedd8`), both BlueWake #495 `82371eb` plus host commit `172a787`. Deck = Steam Deck, offscreen gamescope 1280×800. Numbers are in [Results](#results).
+Builds: A = `alias-lookup` `4a2158d` (RecompCore `abb3e31`; #48 later added `2e4e599`, an MSVC-only path that leaves other compilers' code unchanged), B = `alias-base` `8d6fd5e` (RecompCore `caeedd8`), both BlueWake #495 `82371eb` plus host commit `172a787`. Deck = Steam Deck, offscreen gamescope 1280×800. Numbers are in [Results](#results).
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
@@ -53,6 +53,7 @@ Builds: A = `alias-lookup` `4a2158d` (RecompCore `abb3e31`), B = `alias-base` `8
 | M3-T02 | Build A; report `2026_10_29-145102` | `render_bench --cpu-profile` | Deck, 5 states | [Profile](#profile): resolver 9.36 % → 2.52 % |
 | M3-T03 | Builds A and B; same report | `render_bench --warmup 1 --pairs 5 --cpu-profile` | Deck, 5 states, 10 runs per build | [A/B](#ab): lava room +10.00 %, overall +2.97 % |
 | M3-T04 | Report `2026_10_29-145102` | PRD targets against the A/B | — | Pass: resolver 2.52 % (≤ 3 %), lava room +10.00 % beyond run spread, checkpoints and pictures identical; "no scene slower" accepted by the owner without the A/A (M0-T03 skipped) |
+| M3-T05 | BlueWake `523a333` (#501), RecompCore `2e4e599` | Upstream CI on #501: [Linux host](https://github.com/chrissotraidis/bluewake/actions/runs/40971122162/job/123787822952), [Windows host](https://github.com/chrissotraidis/bluewake/actions/runs/40971122244/job/123787824304) | Ubuntu 24.04 (GCC); Windows (Clang, MSVC mode) | `bluewake_guest_alias_lookup_{plain,global}_test` passed on both; 41/41 and 75/75 tests. The first run found the missing MSVC atomics (fixed in `2e4e599`) and the Linux registration in the wrong project (fixed in `523a333`) |
 
 ## Results
 

@@ -25,7 +25,7 @@ Source: BlueWake `main` at `a773185`; RecompCore pin `1446450` and RecompCore #4
 | Modify | RecompCore `cpu.c`: `ppc_guest_alias_index_insert`/`_rebuild`, `_clear`, `_remove` | Mark the page index stale; reset the last hit | M1 | — |
 | Proposed | RecompCore `GXRuntime/tests/guest_alias_lookup_test.c` + `GXRuntime/CMakeLists.txt` | Differential test against a reference linear scan, both `BW_GUEST_MEM1` variants | M2 | [Testing](../../architecture/Testing.md) |
 | Modify | BlueWake `config/dependencies.lock.json`, builder profile pin | Pin the RecompCore commit | M3 | [Build](../../architecture/Build.md) |
-| Modify | BlueWake `runtime/host/CMakeLists.txt`, `.github/workflows/linux-host.yml`, `windows-host.yml` | Register the differential test as `bluewake_guest_alias_lookup_{plain,global}_test` against the pinned `gxruntime`, as #495 does for its gather-memory tests, so BlueWake's Linux and Windows (MSVC) CI run it | M3 | [Testing](../../architecture/Testing.md) |
+| Modify | BlueWake `linux/CMakeLists.txt`, `windows/CMakeLists.txt`, `.github/workflows/linux-host.yml`, `windows-host.yml` | Register the differential test as `bluewake_guest_alias_lookup_{plain,global}_test` against the pinned `gxruntime`, as #495 does for its gather-memory tests, so BlueWake's Linux and Windows (MSVC) CI run it | M3 | [Testing](../../architecture/Testing.md) |
 
 ## Contracts and examples
 
