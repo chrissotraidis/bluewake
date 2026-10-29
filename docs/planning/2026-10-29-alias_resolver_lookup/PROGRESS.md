@@ -33,17 +33,60 @@ Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMak
 - [ ] M3-T04: Record the result against the PRD targets (pass, or no-go with numbers); BlueWake pin PR only on pass
 
 ## Evidence ledger
+
+Builds: A = `alias-lookup` `4a2158d` (RecompCore `abb3e31`), B = `alias-base` `8d6fd5e` (RecompCore `caeedd8`), both BlueWake #495 `82371eb` plus host commit `172a787`. Deck = Steam Deck, offscreen gamescope 1280×800. Numbers are in [Results](#results).
+
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
-| M0-T01 | RecompCore `abb3e31` (`perf/alias-lookup`) | `last_hits`, `page_lookups`, `page_steps` in `[alias-cost]`; exported `ppc_guest_alias_cost_report_now()` | GXRuntime build, Linux | Builds and links; the printed line is checked in M0-T02 |
-| M0-T05 | RecompCore `abb3e31` | Design: the page index is rebuilt by the alias mutators, as the sorted index already is ("never rebuilt lazily by a reader"), so no reader builds it and no thread question arises | Source review of `cpu.c` at `caeedd8` | Eager build; lazy mode dropped |
-| M1-T01 | RecompCore `abb3e31` | RecompCore #34's last-hit check (registry index, relaxed atomic) carried onto #45 | Stacked on `caeedd8` | Applied |
-| M1-T02 | RecompCore `abb3e31` | `ppc_guest_alias_pages_rebuild()` after add, remove and clear | `cpu.c` | Applied |
-| M1-T03 | RecompCore `abb3e31` | Page start plus forward scan replaces the binary search; overlapping scan and the over-32 MiB fallback kept | `cpu.c` | Applied |
-| M1-T04 | RecompCore `abb3e31` | `ctest -R 'guest_alias_lookup\|guest_memory\|gxruntime_tests'` | GXRuntime standalone, Release, Linux (Gentoo, GCC) | 5/5 passed |
-| M2-T01 | RecompCore `abb3e31`, `GXRuntime/tests/guest_alias_lookup_test.c` | Reference: first alias in registration order holding the access | Same CTest run | 11,249,145 accesses matched, both variants |
-| M2-T02 | Same test | Page edges, sizes 1-8, removes and re-adds, 4,096 aliases, span over 32 MiB, overlapping sets; a deliberately wrong page start (+1) failed at `0xC0414000` | Same CTest run; mutation run by hand | Edges covered; the mutation is caught |
-| M0-T02 | BlueWake `172a787` (host) on builds `alias-base` `8d6fd5e` and `alias-lookup` `4a2158d` | `rendered_run.py --set BLUEWAKE_TRACE_ALIAS_COST=1`, stopped at `BLUEWAKE_MAX_RETRACES` | Steam Deck, offscreen gamescope, lava room and Hyrule Castle states | `[alias-cost]` printed by the game module (first line) and the host (second line) in all 4 runs |
-| M0-T04 | Same builds; RecompCore `caeedd8` (reference) and `abb3e31` (lookup) | 1,800 retraces from each state, unpaced | Same Deck | Lava room: 233.5 M resolver calls (≈ 259 k per game frame), 2.55 G search steps (≈ 11 per call) on the reference; lookup: 0 search steps, 231.0 M of 232.1 M hits from the last hit (99.5 %), 1.12 M page lookups at 2.3 steps. Hyrule Castle: 4.6 M calls; last hit 76 %, page lookups 1.6 steps. Same block counts in both builds (1,305,946; 1,306,926). 7,041 pages |
-| M3-T02 | `alias-lookup` `4a2158d` (RecompCore `abb3e31`); report `2026_10_29-145102` | `render_bench … --cpu-profile`: game-thread share of `ppc_guest_alias_resolve` | Steam Deck, 5 states | Lava room 9.36 % (reference) → **2.52 %** (lookup); elsewhere below the top ten on both. Lava game-thread cycles/frame −8.30 %, instructions −17.62 % |
-| M3-T03 | Same; reference `alias-base` `8d6fd5e` (RecompCore `caeedd8`), both on #495 `82371eb` | `render_bench deck@… A B --states test_render/states --warmup 1 --pairs 5 --cpu-profile` | Steam Deck, offscreen gamescope 1280×800, 10 measured runs per build | Lava room **30.47 → 33.51 FPS (+10.00 %)**; Outset +0.80 %, butterfly room +1.11 %, shipwreck +1.27 %, Hyrule Castle −0.77 % (within run spread, sd ≈ 1.5 %; A/A pending); overall +2.97 %. 20/20 loaded; guest checkpoints identical in every run of both builds; pictures identical in all 5 scenes; no problems |
+| M0-T01 | RecompCore `abb3e31` | New census counters and `ppc_guest_alias_cost_report_now()` | GXRuntime, Linux | Builds and links |
+| M0-T02 | BlueWake `172a787` | `BLUEWAKE_TRACE_ALIAS_COST=1`, run stopped at `BLUEWAKE_MAX_RETRACES` | Deck, builds A and B | `[alias-cost]` printed in 4/4 runs |
+| M0-T04 | Builds A and B | 1,800 retraces from each state, unpaced | Deck, lava room and Hyrule Castle | [Census](#census): 99.5 % last hits in the lava room |
+| M0-T05 | RecompCore `abb3e31` | Source review: mutators rebuild the page index, as they do the sorted index | `cpu.c` at `caeedd8` | Eager build; no reader builds it |
+| M1-T01 | RecompCore `abb3e31` | RecompCore #34's last-hit check carried onto #45 | `cpu.c` | Done |
+| M1-T02 | RecompCore `abb3e31` | `ppc_guest_alias_pages_rebuild()` in add, remove, clear | `cpu.c` | Done |
+| M1-T03 | RecompCore `abb3e31` | Page start and forward scan replace the binary search | `cpu.c` | Done; overlap and over-32 MiB paths kept |
+| M1-T04 | RecompCore `abb3e31` | `ctest -R 'guest_alias_lookup\|guest_memory\|gxruntime_tests'` | GXRuntime, Release, Linux | 5/5 passed |
+| M2-T01 | `guest_alias_lookup_test.c` | Differential test against registration order | Same CTest run | 11,249,145 accesses matched |
+| M2-T02 | `guest_alias_lookup_test.c` | Edge cases; page start +1 mutation | Same CTest run | Edges pass; mutation caught |
+| M3-T02 | Build A; report `2026_10_29-145102` | `render_bench --cpu-profile` | Deck, 5 states | [Profile](#profile): resolver 9.36 % → 2.52 % |
+| M3-T03 | Builds A and B; same report | `render_bench --warmup 1 --pairs 5 --cpu-profile` | Deck, 5 states, 10 runs per build | [A/B](#ab): lava room +10.00 %, overall +2.97 % |
+
+## Results
+
+### Census
+
+Game module's resolver, 1,800 retraces from each state (M0-T04).
+
+| Scene | Build | Calls | Search steps | Last hits | Page lookups | Steps per page lookup |
+|---|---|---:|---:|---:|---:|---:|
+| Lava room | B | 233.5 M | 2.55 G | — | — | — |
+| Lava room | A | 233.5 M | 0 | 231.0 M (99.5 % of hits) | 1.12 M | 2.3 |
+| Hyrule Castle | B | 4.6 M | 34.9 M | — | — | — |
+| Hyrule Castle | A | 4.6 M | 0 | 2.4 M (76 % of hits) | 0.75 M | 1.6 |
+
+Both builds ran the same blocks: 1,305,946 (lava room) and 1,306,926 (Hyrule Castle). 1,900 aliases, 7,041 pages.
+
+### A/B
+
+Game frames a second, median of 10 runs per build (M3-T03).
+
+| Scene | B | A | Change |
+|---|---:|---:|---:|
+| Outset | 26.695 | 26.909 | +0.80 % |
+| Lava room | 30.465 | 33.511 | **+10.00 %** |
+| Hyrule Castle | 55.277 | 54.854 | −0.77 % |
+| Butterfly room | 41.607 | 42.069 | +1.11 % |
+| Shipwreck | 29.882 | 30.262 | +1.27 % |
+| Overall | 35.347 | 36.398 | +2.97 % |
+
+Checks: 20/20 runs loaded every scene; guest checkpoints identical in every run; pictures identical in all 5 scenes. Hyrule Castle's −0.77 % is within its run spread (sd ≈ 1.5 %); the A/A (M0-T03) decides it.
+
+### Profile
+
+Lava room, game thread, over the scene's FPS window (M3-T02).
+
+| Measure | B | A | Change |
+|---|---:|---:|---:|
+| `ppc_guest_alias_resolve` share | 9.36 % | 2.52 % | |
+| Cycles per game frame | 114.4 M | 104.9 M | −8.30 % |
+| Instructions per game frame | 234.3 M | 193.0 M | −17.62 % |
