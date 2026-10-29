@@ -1,6 +1,6 @@
 # PROGRESS — Constant-time guest alias lookup
 
-Status: In progress (Deck A/B done: lava room +10.0 %, resolver 9.36 % → 2.52 %, identical checkpoints and pictures; A/A pending for the other scenes)
+Status: In progress (accepted: lava room +10.0 %, resolver 9.36 % → 2.52 %, identical checkpoints and pictures; next: RecompCore PR, then the pin)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -9,7 +9,7 @@ Status: In progress (Deck A/B done: lava room +10.0 %, resolver 9.36 % → 2.52 
 Architecture: [guest-to-host address resolution](../../architecture/GuestState.md#guest-to-host-address-resolution).
 - [x] M0-T01: Add `same_as_last`, page-scan-step and miss counters to the RecompCore census, plus an exported report call
 - [x] M0-T02: Make BlueWake call that report before exiting at `BLUEWAKE_MAX_RETRACES`; check a non-empty `[alias-cost]` line on the Deck
-- [ ] M0-T03: Deck A/A of the current stack (#495/#480), 5 states, `--warmup 1 --pairs 5`: record each scene's spread
+- [!] M0-T03: Deck A/A of the current stack (#495/#480), 5 states, `--warmup 1 --pairs 5`: record each scene's spread (skipped by the owner's decision, 2026-10-29: confident Hyrule Castle's −0.77 % is noise; covered by later testing)
 - [x] M0-T04: Census in the lava room and Hyrule Castle: calls per frame, last-hit rate, scan steps for 4 KiB pages
 - [x] M0-T05: Check whether the gather path resolves off the game thread during a REL load; record the M1 build mode (lazy or eager)
 
@@ -30,7 +30,7 @@ Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMak
 - [ ] M3-T01: RecompCore PR to `bluewake-next` with M1 and M2; CI green on Linux and Windows
 - [x] M3-T02: BlueWake build of the current stack with the new pin; census and `render_bench --cpu-profile` in the lava room
 - [x] M3-T03: Deck A/B against the same stack with the old pin, 5 states, `--warmup 1 --pairs 5`: FPS, checkpoints, pictures
-- [ ] M3-T04: Record the result against the PRD targets (pass, or no-go with numbers); BlueWake pin PR only on pass
+- [x] M3-T04: Record the result against the PRD targets (pass, or no-go with numbers); BlueWake pin PR only on pass
 
 ## Evidence ledger
 
@@ -50,6 +50,7 @@ Builds: A = `alias-lookup` `4a2158d` (RecompCore `abb3e31`), B = `alias-base` `8
 | M2-T02 | `guest_alias_lookup_test.c` | Edge cases; page start +1 mutation | Same CTest run | Edges pass; mutation caught |
 | M3-T02 | Build A; report `2026_10_29-145102` | `render_bench --cpu-profile` | Deck, 5 states | [Profile](#profile): resolver 9.36 % → 2.52 % |
 | M3-T03 | Builds A and B; same report | `render_bench --warmup 1 --pairs 5 --cpu-profile` | Deck, 5 states, 10 runs per build | [A/B](#ab): lava room +10.00 %, overall +2.97 % |
+| M3-T04 | Report `2026_10_29-145102` | PRD targets against the A/B | — | Pass: resolver 2.52 % (≤ 3 %), lava room +10.00 % beyond run spread, checkpoints and pictures identical; "no scene slower" accepted by the owner without the A/A (M0-T03 skipped) |
 
 ## Results
 
@@ -79,7 +80,7 @@ Game frames a second, median of 10 runs per build (M3-T03).
 | Shipwreck | 29.882 | 30.262 | +1.27 % |
 | Overall | 35.347 | 36.398 | +2.97 % |
 
-Checks: 20/20 runs loaded every scene; guest checkpoints identical in every run; pictures identical in all 5 scenes. Hyrule Castle's −0.77 % is within its run spread (sd ≈ 1.5 %); the A/A (M0-T03) decides it.
+Checks: 20/20 runs loaded every scene; guest checkpoints identical in every run; pictures identical in all 5 scenes. Hyrule Castle's −0.77 % is within its run spread (sd ≈ 1.5 %); the A/A that would measure the noise floor was skipped by the owner's decision (M0-T03), to be covered by later testing.
 
 ### Profile
 
