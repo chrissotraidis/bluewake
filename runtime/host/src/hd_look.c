@@ -783,6 +783,11 @@ static bool sky_pick(CPUState* cpu, u32 table) {
     for (u32 i = 0; i < 8u; ++i)
         current[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);
     int found = -1;
+    // Frozen Hyrule (Hyroom, Hyrule) is sepia in Wind Waker HD, and that look
+    // isn't in its palettes: with HD's alone, the room stayed grey and Link's
+    // hair turned green-yellow. Kept the GameCube's until the sepia is done.
+    if (strncmp(current, "Hyroom", 8) == 0 || strncmp(current, "Hyrule", 8) == 0)
+        return false;
     for (u32 i = 0; i < g_sky_count; ++i) {
         const SkyStage* stage = &g_skies[i];
         if (!guest_equals(cpu, table, stage->data, 0x2Cu) || !guest_equals(cpu, table, stage->data, stage->pale * 0x2Cu))
