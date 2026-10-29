@@ -229,3 +229,7 @@ Patch 0187 leaves a texture pack's top-level `optional/` folder out of the pack 
 `DOL_AURORA_TEXTURE_PACK_OPTIONAL` names (comma-separated) over it, at a higher priority. The HD importers put Wind
 Waker HD's own sky clouds there (`optional/hd-clouds`), for the HD look's **HD's clouds in the sky** switch. A
 missing folder is reported in the log and not created.
+
+Patch 0188 times the sun shadow map's shadows as Wind Waker HD does. It keeps the sun's shadows while the game draws
+its sun disk (they had stopped well before the sun set) and starts the moon's from 25 degrees up, and keeps the
+moon's shadows at dawn until it is down to 8 degrees, where they had gone as soon as the sun's began.

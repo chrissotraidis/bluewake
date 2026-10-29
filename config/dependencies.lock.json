@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "f013169b4dce10fa1b4526545532737dd9f92694",
+      "sha": "8e3626b0d2cede7e434a24b24121f0bfe9324e16",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -659,6 +659,13 @@
             "patches/recompcore/0187-Aurora-a-texture-pack-s-optional-folders-load-over-it-only-when-asked.patch"
           ],
           "evidence": "pdale-boop's: a texture pack leaves out its top-level optional/ folder, and DOL_AURORA_TEXTURE_PACK_OPTIONAL names folders of it to load over the pack at priority 1, for the HD look's HD's clouds in the sky switch (BLUEWAKE_HD_CLOUDS). Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered stage-select warps to Diamond Steppe at noon from a fresh native import: the pack loads its 3,546 replacements and nothing from optional/ with the switch off; with it on the log adds optional=hd-clouds replacements=6 and the sky shows HD's clouds. Windows and Mac not yet checked."
+        },
+        "hd_sun_fades": {
+          "runtime": "8e3626b0d2cede7e434a24b24121f0bfe9324e16",
+          "tracked_patches": [
+            "patches/recompcore/0188-Aurora-sun-shadows-timed-as-in-Wind-Waker-HD-the-sun-s-while-its-disk-shows-and-the-moon-s-from-25-degrees-down-to-8-at-dawn.patch"
+          ],
+          "evidence": "pdale-boop's: the sun shadow map's shadows timed against Wind Waker HD in Cemu (the stage select's warps with the clock tracked): the sun's last while the game draws its sun disk, the moon's start from 25 degrees up and last at dawn until it is down to 8 degrees. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk, night and dawn warps to Windfall's dock and the Private Oasis against HD's frames at the same times. Windows and Mac not yet checked."
         }
       }
     },
