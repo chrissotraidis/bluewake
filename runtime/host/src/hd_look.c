@@ -1067,8 +1067,29 @@ static void sky_layer_material(CPUState* cpu, u32 data, bool hd) {
     }
 }
 
+// HD's floating clouds (the sky's puffs, drawVrkumo) are larger than the
+// GameCube's. Their size is 0.45 + 0.55 times the weather's cloud strength,
+// two constants the game reads from its small data (0x803F8E10 and 0x803F8E14,
+// read by drawVrkumo alone); with HD's sky models they are scaled together by
+// BLUEWAKE_HD_SKY_PUFFS (1.4 by default), and put back with them.
+static void sky_puffs(CPUState* cpu, bool hd) {
+    static float s_scale = -1.0f;
+    if (s_scale < 0.0f) {
+        const char* value = getenv("BLUEWAKE_HD_SKY_PUFFS");
+        s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.4f;
+    }
+    const float base = read_float(cpu, 0x803F8E10u), grow = read_float(cpu, 0x803F8E14u);
+    const float want_base = hd ? 0.45f * s_scale : 0.45f, want_grow = hd ? 0.55f * s_scale : 0.55f;
+    const bool known = (base == 0.45f && grow == 0.55f) || (base == 0.45f * s_scale && grow == 0.55f * s_scale);
+    if (known && (base != want_base || grow != want_grow)) {
+        write_float(cpu, 0x803F8E10u, want_base);
+        write_float(cpu, 0x803F8E14u, want_grow);
+    }
+}
+
 static void sky_models(CPUState* cpu, bool hd) {
     const bool models_on = g_sky_models;
+    sky_puffs(cpu, hd && models_on);
     bool clouds_seen = false;
     u32 node = mem_read32(cpu, kActorQueue);
     for (u32 n = 0; n < kMaxActors && guest_pointer(node); ++n, node = mem_read32(cpu, node + kNodeNext)) {
