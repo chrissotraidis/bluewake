@@ -1221,7 +1221,23 @@ static void sky_linear_forget(void) {
         s_written_pale[i] = s_written_virt[i] = -1;
 }
 
-static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
+// HD's noon sky is brighter than its palette's colour (0,210,255 on Windfall's
+// dock against the palette's 00A5FF): the sky's colour in the Virt entries the
+// game is blending goes up by BLUEWAKE_HD_SKY_GAIN (1.27), as far as HD's
+// brightness for the hour is up from 1 toward noon's 1.65. Only the sky's
+// colour: brightening all that has no depth (the sky pass) took the floating
+// clouds to a clipped white where HD's keep their cream.
+static float sky_gain(float brightness) {
+    static float s_gain = -1.0f;
+    if (s_gain < 0.0f) {
+        const char* value = getenv("BLUEWAKE_HD_SKY_GAIN");
+        s_gain = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.27f;
+    }
+    const float up = (brightness - 1.0f) / 0.65f;
+    return 1.0f + (s_gain - 1.0f) * (up < 0.0f ? 0.0f : up > 1.0f ? 1.0f : up);
+}
+
+static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on, float gain) {
     if (g_sky_data == NULL) {
         sky_linear_forget();
         return;
@@ -1242,7 +1258,7 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
     }
     int pale[4];
     float ab, cb;
-    if (!on || !linear_on || !sky_blend_state(cpu, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
+    if (!on || !sky_blend_state(cpu, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
         return;
     const float w[4] = {(1.0f - ab) * (1.0f - cb), ab * (1.0f - cb), (1.0f - ab) * cb, ab * cb};
     int virt[4];
@@ -1263,14 +1279,23 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
         virt_out[c] = sky_gam(v);
     }
     for (int i = 0; i < 4; ++i) {
-        for (u32 c = 0; c < 0x21u; ++c)
-            mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, pale_out[c]);
-        s_written_pale[i] = pale[i];
-        if (virt_ok) {
-            for (u32 c = 0; c < sizeof kVirtColours; ++c)
-                mem_write8(cpu, virt_table + (u32)virt[i] * 0x24u + kVirtColours[c], virt_out[c]);
-            s_written_virt[i] = virt[i];
+        if (linear_on) {
+            for (u32 c = 0; c < 0x21u; ++c)
+                mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, pale_out[c]);
+            s_written_pale[i] = pale[i];
         }
+        if (!virt_ok)
+            continue;
+        // The blend, or without it each entry's own colours (the game's blend
+        // of them carries the sky's gain alike); the sky's colour (0x18-0x1A,
+        // kVirtColours 6-8) times the gain.
+        for (u32 c = 0; c < sizeof kVirtColours; ++c) {
+            float v = linear_on ? virt_out[c] : hd_virt[(u32)virt[i] * 0x24u + kVirtColours[c]];
+            if (c >= 6u && c <= 8u)
+                v = v * gain + 0.5f > 255.0f ? 255.0f : v * gain + 0.5f;
+            mem_write8(cpu, virt_table + (u32)virt[i] * 0x24u + kVirtColours[c], (u8)v);
+        }
+        s_written_virt[i] = virt[i];
     }
 }
 
@@ -1304,18 +1329,18 @@ static void sky(CPUState* cpu) {
         const u8* hd_virt = gc_virt + g_sky_virt * 0x24u;
         // Last retrace's linear blend comes out before the GameCube's go back.
         if (!g_sky && s_pale != 0u)
-            sky_linear(cpu, s_pale, s_virt, false);
+            sky_linear(cpu, s_pale, s_virt, false, 1.0f);
         pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, gc_pale, hd_pale, &s_pale);
         if (g_sky_virt != 0u)
             virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, &s_virt);
     }
     g_sky_shown = g_sky && pale != 0u;
-    sky_linear(cpu, pale, virt, g_sky_shown);
+    // HD's brightness goes with its palettes: only while they are in place.
+    const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
+    sky_linear(cpu, pale, virt, g_sky_shown, sky_gain(exposure));
     // The schedule goes with the palettes (back to the GameCube's when they go).
     sky_schedule(cpu, g_sky_shown);
     sky_models(cpu, g_sky_shown);
-    // HD's brightness goes with its palettes: only while they are in place.
-    const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
     static unsigned s_clock;
     if (g_trace && g_sky_shown && ++s_clock % 60u == 0u)
         fprintf(stderr, "[hd-look] clock %.1f, HD brightness %.3f\n", read_float(cpu, kEnvTime), exposure);
