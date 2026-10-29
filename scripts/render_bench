@@ -13,7 +13,11 @@ back here: the target keeps only the tour's state, for the next run.
 
 A build is an AppImage, or a folder holding BlueWake-x86_64.AppImage (or one
 *.AppImage). Its commit is read from build_script's paths
-(build/ALIAS-COMMIT/, build/artifacts/ALIAS/COMMIT/). On a Mac, a build is a
+(build/ALIAS-COMMIT/, build/artifacts/ALIAS/COMMIT/). A Linux folder build
+(the portable builder's: bluewake beside gGZLE01_recomp.so) is its folder, its
+BlueWake/ subfolder or its bluewake; its commit is the folder's
+BuilderProvenance.json, and on a target the folder is copied there without
+its user/ and logs/. On a Mac, a build is a
 BlueWake.app or a build folder holding packaged/BlueWake.app (build/macos),
 run here only; its commit is the app's own (BuilderProvenance.json).
 
@@ -104,6 +108,13 @@ find_image() {
         printf '%s\n' "$directory/BlueWake-x86_64.AppImage"
         return
     fi
+    # A Linux folder build: its bluewake (the folder, or the portable builder's BlueWake/ in it).
+    for folder in "$directory" "$directory/BlueWake"; do
+        if [[ -f "$folder/bluewake" && -x "$folder/bluewake" ]]; then
+            printf '%s\n' "$folder/bluewake"
+            return
+        fi
+    done
     images=()  # read, not mapfile: a Mac's bash is 3.2
     while IFS= read -r -d '' image; do
         images+=("$image")
@@ -261,6 +272,24 @@ CHECK
     printf 'Staging builds and harness in %s:%s...\n' "$target" "$root"
     apps=()
     for i in "${!images[@]}"; do
+        if [[ $(basename "${images[$i]}") == bluewake ]]; then
+            # A Linux folder build: the folder, without the player's user/ and the logs, as A/ or B/.
+            remote="$root/${names[$i]}/bluewake"
+            if [[ $i -eq 1 && "${images[1]}" == "${images[0]}" ]]; then
+                "${ssh_command[@]}" "$target" "cp -al $(quote "$root/A" "$root/B")"
+            else
+                folder=$(dirname "${images[$i]}")
+                hash=$(sha256 "${images[$i]}")
+                "${ssh_command[@]}" "$target" "mkdir -p $(quote "$root/${names[$i]}")"
+                tar czf - -C "$folder" --exclude=./user --exclude=./logs . </dev/null |
+                    "${ssh_command[@]}" "$target" "tar xzf - -C $(quote "$root/${names[$i]}")" ||
+                    die "could not copy $folder to $target"
+                "${ssh_command[@]}" "$target" "test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||
+                    die "the copy of $folder does not match"
+            fi
+            apps+=(--app "${names[$i]}=$remote")
+            continue
+        fi
         remote="$root/${names[$i]}.AppImage"
         if [[ $i -eq 1 && "${images[1]}" == "${images[0]}" ]]; then
             "${ssh_command[@]}" "$target" "ln $(quote "$root/A.AppImage" "$remote")"

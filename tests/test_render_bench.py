@@ -103,6 +103,25 @@ class Plan(unittest.TestCase):
                 self.assertEqual((info['commit'], info['path'], info['module_sha256']),
                                  ('82371ebf15ad', str(app.resolve()), '29' * 32), given)
 
+    def test_a_linux_folder_build_is_a_build_with_its_own_commit(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d) / 'build' / 'portable-new' / 'BlueWake'
+            folder.mkdir(parents=True)
+            (folder / 'bluewake').write_bytes(b'x')
+            (folder / 'bluewake').chmod(0o755)
+            (folder / 'BuilderProvenance.json').write_text(json.dumps(
+                {'source_commit': 'b1bf26a0b8a5c1c6e86b9351d658806ff9eb3c1c', 'source_modified': False,
+                 'module_sha256': '41' * 32}))
+            for given in (folder, folder.parent, folder / 'bluewake'):
+                info = render_bench.build_info(given)
+                self.assertEqual((info['commit'], info['path'], info['module_sha256']),
+                                 ('b1bf26a0b8a5', str(folder.resolve()), '41' * 32), given)
+            # Without a provenance file, build_script's paths as for an AppImage.
+            (folder / 'BuilderProvenance.json').unlink()
+            plain = Path(d) / 'gpr-8d8587b37c36'
+            folder.rename(plain)
+            self.assertEqual(render_bench.build_info(plain)['commit'], '8d8587b37c36')
+
     def test_a_file_that_is_not_a_state_has_no_retrace(self):
         with tempfile.NamedTemporaryFile() as f:
             f.write(b's\n')
@@ -292,6 +311,21 @@ class Wrapper(Work):
         self.assertIn('worst-Outset.png', (folder / 'report.md').read_text())
         self.assertIn('BlueWake A/B benchmark', done.stdout)  # report.txt, printed at the end
 
+
+    def test_linux_folder_builds_are_builds_to_the_wrapper(self):
+        folders = []
+        for name in ('bright', 'plain'):
+            folder = self.dir / name / 'BlueWake'
+            shutil.copytree(self.app(name).parent, folder)
+            (folder / f'{name}.AppImage').rename(folder / 'bluewake')
+            folders.append(str(folder.parent))  # the portable builder's folder, holding BlueWake/
+        here = self.dir / 'here'
+        here.mkdir()
+        done = subprocess.run(['bash', str(SCRIPTS / 'render_bench'), *folders, '--pairs', '1', '--display', 'desktop',
+                               '--card', str(self.dir / 'card')], cwd=here, env=wrapper_env(HOME=str(self.dir)),
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1, done.stdout[-2000:] + done.stderr)  # the pictures changed
+        self.assertIn('A: ' + str((self.dir / 'bright/BlueWake/bluewake').resolve()), done.stdout)
 
     def test_mac_apps_are_builds_to_the_wrapper(self):
         apps = []

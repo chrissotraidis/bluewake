@@ -70,7 +70,10 @@ render_bench [user@host] BUILD_A [BUILD_B] [--states DIR] [--card PATH] [--pairs
 Every path you give (the builds, `--states`, `--card`, `--out`) is on the machine you run it from; what the target
 needs is copied there for the run, and **everything comes back**: the target keeps only the tour's start state for
 the next run. A build is an AppImage or a folder with one; its commit is read from `build_script`'s paths
-(`build/ALIAS-COMMIT/`, `build/artifacts/ALIAS/COMMIT/`). On a Mac it runs here only: a build is a `BlueWake.app` or
+(`build/ALIAS-COMMIT/`, `build/artifacts/ALIAS/COMMIT/`). A Linux folder build, the portable builder's `bluewake`
+beside `gGZLE01_recomp.so`, is its folder, its `BlueWake/` subfolder or its `bluewake`; its commit is the folder's
+`BuilderProvenance.json`, and on a target the folder is copied there without its `user/` (your settings and saves)
+and `logs/`. On a Mac it runs here only: a build is a `BlueWake.app` or
 a build folder holding `packaged/BlueWake.app` (`build/macos`), its commit the app's own (`BuilderProvenance.json`),
 and the card `~/Library/Application Support/BlueWake/GZLE01.card`. The game's window opens on screen, so run it
 with the screen locked if it shouldn't be seen; rendered runs work locked. `--cpu-profile` needs Linux `perf`.
@@ -144,6 +147,9 @@ own processes in user space; `render_bench` checks for `perf` before it starts.
 
    # The same here (no SSH): the game windows open on your desktop if there's no gamescope
    scripts/render_bench build/artifacts/gather-candidate/latest build/artifacts/main-090/latest
+
+   # Two Linux folder builds, copied to the target for the run
+   scripts/render_bench deck@10.10.20.168 build/portable-new/BlueWake build/portable-main/BlueWake
 
    # One build only, five runs
    scripts/render_bench deck@10.10.20.168 build/artifacts/gather-candidate/latest --runs 5

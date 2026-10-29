@@ -399,17 +399,39 @@ def mac_app(path):
     return None
 
 
+def linux_folder(path):
+    """The folder a Linux folder build is (bluewake beside its game module, as the portable builder makes it): the
+    folder, its BlueWake/ subfolder, or its bluewake; None if PATH is not one."""
+    path = Path(path).resolve()
+    for folder in (path.parent if path.name == "bluewake" else path, path / "BlueWake"):
+        if (folder / "bluewake").is_file() and os.access(folder / "bluewake", os.X_OK) and \
+                not (folder / "BlueWake-x86_64.AppImage").is_file():
+            return folder
+    return None
+
+
 def build_image(path):
     """A build's AppImage: the file itself, or BlueWake-x86_64.AppImage (else the first *.AppImage) in a folder.
-    A Mac build's is its app's executable."""
+    A Mac build's is its app's executable, a Linux folder build's its bluewake."""
     path = Path(path).resolve()
     app = mac_app(path)
     if app:
         return app / "Contents" / "MacOS" / "BlueWake"
+    folder = linux_folder(path)
+    if folder:
+        return folder / "bluewake"
     if path.is_dir():
         images = sorted(path.glob("*.AppImage"))
         return path / "BlueWake-x86_64.AppImage" if (path / "BlueWake-x86_64.AppImage").is_file() else images[0]
     return path
+
+
+def provenance(path):
+    """BuilderProvenance.json, what the builder says a build was made from; {} without one."""
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
 
 
 def build_info(path):
@@ -417,14 +439,15 @@ def build_info(path):
     SHA-256 of its AppImage."""
     image = build_image(path)
     app = mac_app(image)
-    if app:
-        # A Mac app says what it was built from; its game module (Frameworks) is hashed there too.
-        try:
-            made = json.loads((app / "Contents" / "Resources" / "BuilderProvenance.json").read_text())
-        except (OSError, ValueError):
-            made = {}
+    folder = None if app else linux_folder(image)
+    if app or folder:
+        # A Mac app or a Linux folder build says what it was built from, its game module's hash too.
+        made = provenance(app / "Contents" / "Resources" / "BuilderProvenance.json" if app
+                          else folder / "BuilderProvenance.json")
         commit = (made.get("source_commit") or "")[:12] or None
-        return {"path": str(app), "commit": commit, "modified": made.get("source_modified"),
+        if folder and not commit:
+            commit = next((m.group(1) for part in reversed(folder.parts) for m in [COMMIT.match(part)] if m), None)
+        return {"path": str(app or folder), "commit": commit, "modified": made.get("source_modified"),
                 "sha256": hashlib.sha256(image.read_bytes()).hexdigest(), "module_sha256": made.get("module_sha256")}
     commit = next((m.group(1) for part in reversed(image.parent.parts) for m in [COMMIT.match(part)] if m), None)
     return {"path": str(image), "commit": commit, "sha256": hashlib.sha256(image.read_bytes()).hexdigest()}
