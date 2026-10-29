@@ -25,6 +25,8 @@ bool bluewake_hd_room_clip;
 static float g_sun_view[3] = {0.0f, 1.0f, 0.0f};  // toward the sun, in the camera's space (room culling)
 static float g_sun_up = 1.0f;  // the sun's direction's height (sine of its elevation)
 static bool g_trace;
+static bool g_sky;  // HD's sky and light palettes (BLUEWAKE_HD_SKY)
+static void sky_load(void);
 
 // A number setting, or `fallback` when it is unset or not a number in [lo, hi].
 static float setting_number(const char* key, float fallback, float lo, float hi) {
@@ -100,6 +102,9 @@ void bluewake_hd_look_reload(void) {
     g_room_cull = setting("BLUEWAKE_HD_ROOM_CULL");
     g_edge = part("BLUEWAKE_HD_EDGE_LIGHT", all);
     g_torch = part("BLUEWAKE_HD_TORCH_LIGHT", all);
+    g_sky = all == 1 && setting("BLUEWAKE_HD_SKY") == 1;
+    if (g_sky)
+        sky_load();
     if (bloom >= 0)
         aurora_set_bloom(bloom == 1);
     if (far_blur >= 0)
@@ -672,6 +677,166 @@ void bluewake_hd_look_room_clip(CPUState* cpu, u32 address) {
     cpu->pc = cpu->lr & ~3u;
 }
 
+// HD's sky and light palettes (BLUEWAKE_HD_SKY, off by default, needs the
+// look): HD retuned the sea stage's colour tables (stage dzs Pale and Virt),
+// the sky toward cyan with an aqua horizon, the fog sky blue. The importer
+// keeps them, in the GameCube's layout and gamma, in the HD pack's
+// optional/hd-sky/sea.bin with the GameCube's own beside them
+// (hd-sky/make_sky.py). The game reads the tables where the stage file was
+// loaded, every frame (its counts at +0x30 and +0x3C stay 0 in GZLE01, so
+// the tables are known by their bytes), so while they hold the GameCube's colours the host
+// writes HD's over them, and puts them back when the switch goes off.
+// g_dComIfG_gameInfo.play.mStageData (dStage_stageDt_c) is at 0x803C9D58.
+enum {
+    kPaletInfo = 0x803C9D74u,     // mpPaletInfo (stage_palet_info_class, 0x2C each)
+    kVrboxInfo = 0x803C9D80u,     // mpVrboxInfo (stage_vrbox_info_class, 0x24 each)
+};
+static u8* g_sky_data;  // the file: GC Pale, HD Pale, GC Virt, HD Virt, HD's Pale factors
+static u32 g_sky_pale, g_sky_virt;
+static bool g_sky_shown;  // the tables hold HD's (as last seen)
+static float g_sky_exposure;  // what aurora_set_exposure was last given
+
+static void sky_load(void) {
+    static bool tried;
+    if (tried)
+        return;
+    tried = true;
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (pack == NULL || pack[0] == '\0')
+        return;
+    char path[4096];
+    snprintf(path, sizeof path, "%s/optional/hd-sky/sea.bin", pack);
+    FILE* f = fopen(path, "rb");
+    if (f == NULL)
+        return;
+    u8 head[16];
+    if (fread(head, 1, 16, f) == 16 && memcmp(head, "BWSK", 4) == 0 && head[7] == 2u) {
+        g_sky_pale = (u32)head[8] << 24 | (u32)head[9] << 16 | (u32)head[10] << 8 | head[11];
+        g_sky_virt = (u32)head[12] << 24 | (u32)head[13] << 16 | (u32)head[14] << 8 | head[15];
+        const size_t size = 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + g_sky_pale * 24u;
+        if (g_sky_pale < 256u && g_sky_virt < 256u && (g_sky_data = malloc(size)) != NULL &&
+            fread(g_sky_data, 1, size, f) != size) {
+            free(g_sky_data);
+            g_sky_data = NULL;
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "[hd-look] HD sky palettes: %s\n", g_sky_data ? path : "none in the pack");
+}
+
+static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size) {
+    for (u32 i = 0; i < size; ++i)
+        if (mem_read8(cpu, address + i) != bytes[i])
+            return false;
+    return true;
+}
+
+// One table: when it holds `from`, write `to` over it.
+// One table: when it holds `from`, write `to` over it. True while it holds `to`.
+static bool sky_table(CPUState* cpu, u32 pointer, u32 want, u32 entry, const u8* from, const u8* to) {
+    const u32 table = mem_read32(cpu, pointer);
+    if (!guest_pointer(table))
+        return false;
+    if (guest_equals(cpu, table, to, entry))
+        return guest_equals(cpu, table, to, want * entry);
+    if (!guest_equals(cpu, table, from, entry) || !guest_equals(cpu, table, from, want * entry))
+        return false;
+    for (u32 i = 0; i < want * entry; ++i)
+        mem_write8(cpu, table + i, to[i]);
+    if (g_trace)
+        fprintf(stderr, "[hd-look] sky table at 0x%08X: %s\n", table, g_sky ? "HD" : "GameCube");
+    return true;
+}
+
+// HD's brightness now: its factor for the sun's light on scenery (BG0 K0) in
+// each palette the game is blending, blended as the game blends their colours
+// (dScnKy_env_light_c::setLight_palno_get and setLight): the hour's two
+// palettes of the last weather and of the new one, by the hour, then by the
+// weather's change. In g_env_light (0x803E4AB4). As the scene's brightness
+// after gamma (1/2.2): 3 at noon is 1.65, 2 in the morning 1.37.
+enum {
+    kEnvLight = 0x803E4AB4u,
+    kEnvPselect = kEnvLight + 0x008u,   // mpPselectInfo (0xC each: palette ids[8], change rate)
+    kEnvEnvr = kEnvLight + 0x00Cu,      // mpEnvrInfo (8 each: pselect ids)
+    kEnvSchedule = kEnvLight + 0x014u,  // mpSchejule (11 of 0xC: end time, begin time, palette slots 0 and 1)
+    kEnvColPatBlend = kEnvLight + 0xBE0u,
+    kEnvTime = kEnvLight + 0xC38u,
+    kEnvColpatPrev = kEnvLight + 0xC84u,
+    kEnvColpatCurr = kEnvLight + 0xC85u,
+    kEnvEnvrPrev = kEnvLight + 0xC88u,
+    kEnvEnvrCurr = kEnvLight + 0xC89u,
+};
+
+static float sky_factor(CPUState* cpu, u32 envr_idx, u32 colpat, u32 slot) {
+    const u32 envr = mem_read32(cpu, kEnvEnvr), pselect = mem_read32(cpu, kEnvPselect);
+    if (!guest_pointer(envr) || !guest_pointer(pselect) || colpat > 7u || slot > 5u)
+        return 1.0f;
+    const u32 psel = mem_read8(cpu, envr + envr_idx * 8u + colpat);
+    const u32 pale = mem_read8(cpu, pselect + psel * 0xCu + slot);
+    if (pale >= g_sky_pale)
+        return 1.0f;
+    const u8* f = g_sky_data + 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + pale * 24u + 3u * 4u;
+    const u32 bits = (u32)f[0] << 24 | (u32)f[1] << 16 | (u32)f[2] << 8 | f[3];
+    float value;
+    memcpy(&value, &bits, 4);
+    return value > 0.0f && value < 10.0f ? value : 1.0f;
+}
+
+static float sky_brightness(CPUState* cpu) {
+    const u32 schedule = mem_read32(cpu, kEnvSchedule);
+    if (!guest_pointer(schedule))
+        return 0.0f;
+    const float now = read_float(cpu, kEnvTime);
+    for (u32 i = 0; i < 11u; ++i) {
+        const u32 at = schedule + i * 0xCu;
+        const float end = read_float(cpu, at), begin = read_float(cpu, at + 4u);
+        if (!(now >= end && now <= begin))
+            continue;
+        const u32 slot0 = mem_read8(cpu, at + 8u), slot1 = mem_read8(cpu, at + 9u);
+        float ab = 1.0f;  // get_parcent(begin, end, now)
+        if (begin - end != 0.0f) {
+            ab = 1.0f - (begin - now) / (begin - end);
+            if (ab >= 1.0f)
+                ab = 1.0f;
+        }
+        const u32 envr0 = mem_read8(cpu, kEnvEnvrPrev), envr1 = mem_read8(cpu, kEnvEnvrCurr);
+        const u32 pat0 = mem_read8(cpu, kEnvColpatPrev), pat1 = mem_read8(cpu, kEnvColpatCurr);
+        const float a = sky_factor(cpu, envr0, pat0, slot0), b = sky_factor(cpu, envr0, pat0, slot1);
+        const float c = sky_factor(cpu, envr1, pat1, slot0), d = sky_factor(cpu, envr1, pat1, slot1);
+        float blend = read_float(cpu, kEnvColPatBlend);
+        blend = blend < 0.0f ? 0.0f : blend > 1.0f ? 1.0f : blend;
+        const float prev = a + ab * (b - a), curr = c + ab * (d - c);
+        const float factor = prev + blend * (curr - prev);
+        static float s_scale = -1.0f;  // BLUEWAKE_HD_SKY_GAMMA: the power the factor is taken to (1/2.2)
+        if (s_scale < 0.0f) {
+            const char* value = getenv("BLUEWAKE_HD_SKY_GAMMA");
+            s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.0f / 2.2f;
+        }
+        return powf(factor, s_scale);
+    }
+    return 0.0f;
+}
+
+static void sky(CPUState* cpu) {
+    if (g_sky_data == NULL)
+        return;
+    const u8* gc_pale = g_sky_data;
+    const u8* hd_pale = gc_pale + g_sky_pale * 0x2Cu;
+    const u8* gc_virt = hd_pale + g_sky_pale * 0x2Cu;
+    const u8* hd_virt = gc_virt + g_sky_virt * 0x24u;
+    const bool pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, g_sky ? gc_pale : hd_pale, g_sky ? hd_pale : gc_pale);
+    sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, g_sky ? gc_virt : hd_virt, g_sky ? hd_virt : gc_virt);
+    g_sky_shown = g_sky && pale;
+    // HD's brightness goes with its palettes: only while they are in place.
+    const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
+    if (fabsf(exposure - g_sky_exposure) > 0.001f) {
+        aurora_set_exposure(exposure);
+        if (g_trace && fabsf(exposure - g_sky_exposure) > 0.02f)
+            fprintf(stderr, "[hd-look] HD brightness %.3f at %.1f\n", exposure, read_float(cpu, kEnvTime));
+        g_sky_exposure = exposure;
+    }
+}
+
 void bluewake_hd_look_retrace(CPUState* cpu) {
     static unsigned long long retrace;
     retrace++;
@@ -684,6 +849,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
         palms(cpu, g_palms);
     g_palms_were_on = g_palms;
     clouds(cpu, retrace);
+    sky(cpu);
     if (g_trace && retrace % 300u == 0u)
         trace_islands(cpu, retrace);
 }

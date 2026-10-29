@@ -18,7 +18,9 @@
 // game's own point lights. Ambient occlusion (BLUEWAKE_HD_AO), far blur (BLUEWAKE_HD_FAR_BLUR) and
 // bloom (BLUEWAKE_HD_BLOOM): Aurora's post_fx, on the finished scene before
 // the HUD. HD's sky clouds (BLUEWAKE_HD_CLOUDS) are textures, from the HD
-// texture pack's optional/hd-clouds, and need the look and the pack.
+// texture pack's optional/hd-clouds, and need the look and the pack. HD's sky
+// and light (BLUEWAKE_HD_SKY): its sea palettes over the stage's own, and its
+// brightness for the hour, from the pack's optional/hd-sky (sky() in hd_look.c).
 // Read again by the settings menus.
 void bluewake_hd_look_reload(void);
 // The softer starting strengths for Aurora's parts; call before Aurora starts.
