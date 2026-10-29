@@ -83,7 +83,7 @@ sequenceDiagram
     end
 ```
 
-**Threads and lifecycle.** Aliases change on REL load and unload, the same writers as today's sorted index. The plan keeps today's rule: no resolve runs concurrently with an alias change. That's already required, since `_remove` rebuilds the index in place. The lazy page build runs on the first resolve after a change, which is the game thread for translated code. M0 checks whether the gather path (#495) can resolve from another thread during REL load, and if it can, M1 builds pages eagerly inside the alias change instead. `g_guest_alias_last` is a relaxed atomic. A stale or torn value only misses, because the holds-check is complete.
+**Threads and lifecycle.** Aliases change on REL load and unload, the same writers as today's sorted index, and the existing rule is that the index "is kept sorted by the mutators (never rebuilt lazily by a reader)". The page index follows the same rule: `ppc_guest_alias_pages_rebuild()` runs inside add, remove and clear, after the bounds are updated. No reader ever builds it, so the plan's open question about the gather path resolving off the game thread during a REL load doesn't arise (M0-T05). `g_guest_alias_last` is a relaxed atomic. A stale or torn value only misses, because the holds-check is complete.
 
 **Save states.** Aliases are restored through the same add path, so the index rebuilds and nothing new is serialized.
 
@@ -110,6 +110,7 @@ Critical path: M0 → M1 → M3. Concurrency limits: M1 alone edits `cpu.c`, and
 ## Decisions / gaps
 
 - **Stacking:** on RecompCore #45, not the pin. Same file and generation semantics, and #495 (unmerged, consistently positive) needs it. If #45 changes first, M1 rebases.
+- **Baseline build:** the earlier Deck numbers came from `8d8587b`, whose builder profile fetched RecompCore `47a5229`, an older #45 commit without the generation tracking #495 relies on. M0 and M3 therefore compare two fresh builds of #495's head `82371eb` (plus the host census commit), one at RecompCore `caeedd8` and one at `perf/alias-lookup` `57477db`, built the same way.
 - **Granularity:** 4 KiB pages. Smaller pages trade memory (fine up to 64 KiB of table) for shorter scans; M0's scan-step census decides.
 - **Not cached:** guest pointers or results. Only an index into the existing sorted array, so nothing can go stale silently.
 - **Gap:** no call stacks for the game module. The collision link is correlational until M0's census shows the lava room's call count.
