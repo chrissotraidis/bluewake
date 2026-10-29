@@ -767,6 +767,256 @@ enum {
     kEnvEnvrCurr = kEnvLight + 0xC89u,
 };
 
+// HD's day ends sooner: its light schedule (dKyd_schejule_getp's table, found in
+// HD's cking.rpx with the GameCube's values but these) holds the noon palette
+// to 17:00, not 18:00, goes to the evening's by 18:00 and takes two hours, not
+// one, to dusk's at 20:00. Dawn, morning and night are the GameCube's. Each
+// entry: end, begin (degrees, 15 an hour), palette slots 0 and 1. Written over
+// the game's table (mpSchejule, 11 of 0xC) while it holds the GameCube's, with
+// the palettes, and put back with them. Wind Waker HD's sunset at 17:30 on
+// Windfall's dock was ours at 18:30 before.
+static const float kScheduleGc[3][2] = {{150.0f, 270.0f}, {270.0f, 285.0f}, {285.0f, 300.0f}};
+static const float kScheduleHd[3][2] = {{150.0f, 255.0f}, {255.0f, 270.0f}, {270.0f, 300.0f}};
+
+static bool sky_schedule(CPUState* cpu, bool hd) {
+    const u32 table = mem_read32(cpu, kEnvSchedule);
+    if (!guest_pointer(table))
+        return false;
+    const float (*from)[2] = hd ? kScheduleGc : kScheduleHd;
+    const float (*to)[2] = hd ? kScheduleHd : kScheduleGc;
+    bool has_to = true, has_from = true;
+    for (u32 i = 0; i < 3u; ++i)
+        for (u32 k = 0; k < 2u; ++k) {
+            const float v = read_float(cpu, table + (4u + i) * 0xCu + k * 4u);
+            has_to = has_to && v == to[i][k];
+            has_from = has_from && v == from[i][k];
+        }
+    // The rest of the field schedule, so the boss's or another table is never touched.
+    if ((!has_to && !has_from) || read_float(cpu, table + 4u) != 90.0f || read_float(cpu, table + 3u * 0xCu + 4u) != 150.0f)
+        return false;
+    if (has_from)
+        for (u32 i = 0; i < 3u; ++i)
+            for (u32 k = 0; k < 2u; ++k)
+                write_float(cpu, table + (4u + i) * 0xCu + k * 4u, to[i][k]);
+    return true;
+}
+
+// HD's sky models are the GameCube's four, taller: the horizon's haze, the
+// band that carries the dawn's and dusk's lavender and noon's aqua, fades out
+// 17.7 degrees up in HD's vr_sky, 6.4 in ours; the front haze (vr_kasumi_mae)
+// at 7.9, not 4.9; the three cloud layers (vr_back_cloud) reach 11.3, 21.5
+// and 7.75 degrees, not 9.5, 10.3 and 4.4 (measured in HD's sea_Stage and the
+// GameCube's sea Stage.arc). Their joints' heights (J3DJoint's transform
+// scale y, +0x20) are set to match while HD's palettes are in, and put back
+// with them; only a joint holding the GameCube's or that height is touched.
+// The sky actors make the models again from their joints every frame
+// (mDoExt_modelUpdateDL). daVrbox (0x1BA in GZLE01, one below the decomp's
+// fpcNm list): vr_sky at +0x294; daVrbox2 (0x1BB): vr_back_cloud at +0x294,
+// vr_kasumi_mae at +0x29C.
+static const struct {
+    u16 proc;
+    u16 model;  // the actor's model pointer
+    u16 joints, joint;  // the model's joint count, and the joint
+    float gc, hd;  // its height (scale y)
+} kSkyJoints[] = {
+    {0x1BAu, 0x294u, 4u, 2u, 1.0f, 2.80f},      // vr_sky: the haze band
+    {0x1BBu, 0x29Cu, 3u, 2u, 0.951808f, 1.535f}, // vr_kasumi_mae
+    {0x1BBu, 0x294u, 5u, 2u, 1.0f, 1.20f},      // vr_back_cloud: the near mae layer
+    {0x1BBu, 0x294u, 5u, 3u, 1.0f, 2.16f},      // the naka layer, highest in HD
+    {0x1BBu, 0x294u, 5u, 4u, 0.45f, 0.80f},     // the low mae layer
+};
+
+// HD draws each cloud layer as one sheet of its texture, scrolling with the
+// wind. The GameCube's layer material (vr_back_cloud's three, 4 TEV stages)
+// samples its colour and alpha textures twice, once still and once scrolling
+// 0.2 along, and screens the colours and multiplies the alphas: clouds that
+// slowly change shape, and with HD's art only the overlaps left, scattered
+// blobs instead of HD's cirrus bands. With HD's palettes in, stage 1 takes
+// the scrolling sample's colour alone and stage 3 its alpha alone (J3DTevStage
+// bytes in the material's TEV block: model data +0x60 the materials, a
+// material +0x2C its TEV block, then the stages, 8 bytes each).
+// The material's own display list (J3DMaterial +0x48, J3DDisplayListObj: two
+// buffers, then the size) is what is drawn; it carries the same stages as GX
+// BP writes (0x61, the register, three bytes), made once at load. Patched in
+// both buffers: stage 1's colour (register 0xC2) and stage 3's alpha (0xC7).
+static void sky_layer_dl(CPUState* cpu, u32 material, bool hd) {
+    const u32 dl = mem_read32(cpu, material + 0x48u);
+    if (!guest_pointer(dl))
+        return;
+    const u32 size = mem_read32(cpu, dl + 0x08u);
+    for (u32 b = 0; b < 2u && size > 0u && size < 0x1000u; ++b) {
+        const u32 data = mem_read32(cpu, dl + b * 4u);
+        if (!guest_pointer(data))
+            continue;
+        for (u32 i = 0; i + 5u <= size; ++i) {
+            if (mem_read8(cpu, data + i) != 0x61u)
+                continue;
+            const u8 reg = mem_read8(cpu, data + i + 1u), x = mem_read8(cpu, data + i + 3u), y = mem_read8(cpu, data + i + 4u);
+            if (reg == 0xC2u) {
+                if (hd && x == 0x0Fu && y == 0x88u) {
+                    mem_write8(cpu, data + i + 3u, 0xFFu);
+                    mem_write8(cpu, data + i + 4u, 0xF8u);
+                } else if (!hd && x == 0xFFu && y == 0xF8u) {
+                    mem_write8(cpu, data + i + 3u, 0x0Fu);
+                    mem_write8(cpu, data + i + 4u, 0x88u);
+                }
+            } else if (reg == 0xC7u) {
+                if (hd && x == 0xE2u && (y & 0xF0u) == 0x70u) {
+                    mem_write8(cpu, data + i + 3u, 0xFFu);
+                    mem_write8(cpu, data + i + 4u, (u8)(0xC0u | (y & 0x0Fu)));
+                } else if (!hd && x == 0xFFu && (y & 0xF0u) == 0xC0u) {
+                    mem_write8(cpu, data + i + 3u, 0xE2u);
+                    mem_write8(cpu, data + i + 4u, (u8)(0x70u | (y & 0x0Fu)));
+                }
+            }
+        }
+    }
+}
+
+// The scrolling sample also starts 0.2 along (texture matrix 1's translation
+// x, +0x1C), for the GameCube's two copies to differ; one copy that far along
+// shows another part of the texture than HD's model, whose layers start at
+// 0 (72 degrees around the sky for the naka layer). With HD's palettes in it
+// starts at 0; the wind's scroll goes on adding to it. Which matrices are
+// shifted is kept, to put the 0.2 back.
+static u32 s_shifted[8];  // cleared while no sky actor is there (a stage change makes the models again)
+
+static void sky_layer_shift(CPUState* cpu, u32 mtx, bool hd) {
+    int at = -1, free_slot = -1;
+    for (int i = 0; i < 8; ++i) {
+        if (s_shifted[i] == mtx)
+            at = i;
+        else if (s_shifted[i] == 0u && free_slot < 0)
+            free_slot = i;
+    }
+    if (hd && at < 0 && free_slot >= 0) {
+        write_float(cpu, mtx + 0x1Cu, read_float(cpu, mtx + 0x1Cu) - 0.2f);
+        s_shifted[free_slot] = mtx;
+    } else if (!hd && at >= 0) {
+        write_float(cpu, mtx + 0x1Cu, read_float(cpu, mtx + 0x1Cu) + 0.2f);
+        s_shifted[at] = 0u;
+    }
+}
+
+// HD wraps its highest layer's texture (naka, the cirrus band) once around the
+// sky, the GameCube's four times: HD's streaks are four times as long, long
+// cirrus and cirrostratus, where four repeats left short patches. The mae
+// layers wrap alike (6 and 8). So the naka material's scrolling texture
+// matrix (texture matrix 1; J3DTexMtx: centre at +0x04, scale x at +0x10,
+// rebuilt each frame from these) is scaled to a quarter across. The material's
+// texture matrices are found among its texgen block's pointers by their
+// centre (0.5, 0.5).
+static void sky_layer_wrap(CPUState* cpu, u32 material, u32 m, bool hd) {
+    const u32 texgen = mem_read32(cpu, material + 0x28u);
+    if (!guest_pointer(texgen))
+        return;
+    u32 found = 0u;
+    for (u32 o = 0x04u; o < 0x80u; o += 4u) {
+        const u32 mtx = mem_read32(cpu, texgen + o);
+        if (!guest_pointer(mtx) || read_float(cpu, mtx + 0x04u) != 0.5f || read_float(cpu, mtx + 0x08u) != 0.5f)
+            continue;
+        if (found++ != 1u)
+            continue;
+        sky_layer_shift(cpu, mtx, hd);
+        if (m != 1u)
+            return;
+        const float now = read_float(cpu, mtx + 0x10u), want = hd ? 0.25f : 1.0f;
+        if (now != want && (now == 1.0f || now == 0.25f))
+            write_float(cpu, mtx + 0x10u, want);
+        return;
+    }
+}
+
+static void sky_layer_material(CPUState* cpu, u32 data, bool hd) {
+    if (mem_read16(cpu, data + 0x5Cu) != 3u)
+        return;
+    const u32 materials = mem_read32(cpu, data + 0x60u);
+    for (u32 m = 0; guest_pointer(materials) && m < 3u; ++m) {
+        const u32 material = mem_read32(cpu, materials + m * 4u);
+        const u32 tev = guest_pointer(material) ? mem_read32(cpu, material + 0x2Cu) : 0u;
+        if (!guest_pointer(tev))
+            continue;
+        // The stages, found by their register bytes (0xC0 stage 0's colour,
+        // 0xC1 its alpha, and on): the block's class sets where they start
+        // (+0x38 for this model's, with 8 TEV orders before them).
+        u32 s0 = 0u;
+        for (u32 o = 0x10u; o < 0x80u && s0 == 0u; o += 2u)
+            if (mem_read8(cpu, tev + o) == 0xC0u && mem_read8(cpu, tev + o + 4u) == 0xC1u &&
+                mem_read8(cpu, tev + o + 8u) == 0xC2u && mem_read8(cpu, tev + o + 28u) == 0xC7u)
+                s0 = tev + o;
+        if (s0 == 0u)
+            continue;
+        sky_layer_dl(cpu, material, hd);
+        sky_layer_wrap(cpu, material, m, hd);
+        const u32 s1 = s0 + 8u, s3 = s0 + 24u;
+        // Stage 1 colour: a, b | c, d. GameCube: CPREV, ZERO | TEXC, TEXC (screen); HD: ZERO, ZERO | ZERO, TEXC.
+        const u8 ab = mem_read8(cpu, s1 + 2u), cd = mem_read8(cpu, s1 + 3u);
+        // Stage 3 alpha: a<<5 | b<<2 | c>>1, then (c&1)<<7 | d<<4 | swap. GameCube: ZERO, APREV, TEXA, ZERO
+        // (a product); HD: ZERO, ZERO, ZERO, TEXA.
+        const u8 aab = mem_read8(cpu, s3 + 6u), sw = mem_read8(cpu, s3 + 7u);
+        const bool gc = ab == 0x0Fu && cd == 0x88u && aab == 0xE2u && (sw & 0xF0u) == 0x70u;
+        const bool is_hd = ab == 0xFFu && cd == 0xF8u && aab == 0xFFu && (sw & 0xF0u) == 0xC0u;
+        if (g_trace && !gc && !is_hd) {
+            static unsigned s_told;
+            if (s_told++ < 3u)
+                fprintf(stderr, "[hd-look] cloud layer material %u: stages unlike the GameCube's (%02X %02X %02X %02X)\n",
+                        m, ab, cd, aab, sw);
+        }
+        if (hd && gc) {
+            mem_write8(cpu, s1 + 2u, 0xFFu);
+            mem_write8(cpu, s1 + 3u, 0xF8u);
+            mem_write8(cpu, s3 + 6u, 0xFFu);
+            mem_write8(cpu, s3 + 7u, (u8)(0xC0u | (sw & 0x0Fu)));
+        } else if (!hd && is_hd) {
+            mem_write8(cpu, s1 + 2u, 0x0Fu);
+            mem_write8(cpu, s1 + 3u, 0x88u);
+            mem_write8(cpu, s3 + 6u, 0xE2u);
+            mem_write8(cpu, s3 + 7u, (u8)(0x70u | (sw & 0x0Fu)));
+        }
+    }
+}
+
+static void sky_models(CPUState* cpu, bool hd) {
+    static int s_on = -1;  // BLUEWAKE_HD_SKY_MODELS=0 leaves the models as they are
+    if (s_on < 0)
+        s_on = setting("BLUEWAKE_HD_SKY_MODELS") != 0;
+    bool clouds_seen = false;
+    u32 node = mem_read32(cpu, kActorQueue);
+    for (u32 n = 0; n < kMaxActors && guest_pointer(node); ++n, node = mem_read32(cpu, node + kNodeNext)) {
+        const u32 actor = mem_read32(cpu, node + kTagActor);
+        if (!guest_pointer(actor))
+            continue;
+        const u16 proc = mem_read16(cpu, actor + kProcName);
+        if (proc != 0x1BAu && proc != 0x1BBu)
+            continue;
+        if (proc == 0x1BBu) {
+            clouds_seen = true;
+            const u32 clouds = mem_read32(cpu, actor + 0x294u);
+            const u32 data = guest_pointer(clouds) ? mem_read32(cpu, clouds + 0x04u) : 0u;
+            if (guest_pointer(data) && mem_read16(cpu, data + 0x28u) == 5u)
+                sky_layer_material(cpu, data, hd && s_on);
+        }
+        for (u32 k = 0; k < sizeof kSkyJoints / sizeof kSkyJoints[0]; ++k) {
+            if (kSkyJoints[k].proc != proc)
+                continue;
+            const u32 model = mem_read32(cpu, actor + kSkyJoints[k].model);
+            const u32 data = guest_pointer(model) ? mem_read32(cpu, model + 0x04u) : 0u;
+            if (!guest_pointer(data) || mem_read16(cpu, data + 0x28u) != kSkyJoints[k].joints)
+                continue;
+            const u32 joints = mem_read32(cpu, data + 0x2Cu);
+            const u32 joint = guest_pointer(joints) ? mem_read32(cpu, joints + kSkyJoints[k].joint * 4u) : 0u;
+            if (!guest_pointer(joint))
+                continue;
+            const float now = read_float(cpu, joint + 0x20u);
+            const float want = hd && s_on ? kSkyJoints[k].hd : kSkyJoints[k].gc;
+            if (now != want && (now == kSkyJoints[k].gc || now == kSkyJoints[k].hd))
+                write_float(cpu, joint + 0x20u, want);
+        }
+    }
+    if (!clouds_seen)
+        memset(s_shifted, 0, sizeof s_shifted);
+}
+
 static float sky_factor(CPUState* cpu, u32 envr_idx, u32 colpat, u32 slot) {
     const u32 envr = mem_read32(cpu, kEnvEnvr), pselect = mem_read32(cpu, kEnvPselect);
     if (!guest_pointer(envr) || !guest_pointer(pselect) || colpat > 7u || slot > 5u)
@@ -827,8 +1077,14 @@ static void sky(CPUState* cpu) {
     const bool pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, g_sky ? gc_pale : hd_pale, g_sky ? hd_pale : gc_pale);
     sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, g_sky ? gc_virt : hd_virt, g_sky ? hd_virt : gc_virt);
     g_sky_shown = g_sky && pale;
+    // The schedule goes with the palettes (back to the GameCube's when they go).
+    sky_schedule(cpu, g_sky_shown);
+    sky_models(cpu, g_sky_shown);
     // HD's brightness goes with its palettes: only while they are in place.
     const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
+    static unsigned s_clock;
+    if (g_trace && g_sky_shown && ++s_clock % 60u == 0u)
+        fprintf(stderr, "[hd-look] clock %.1f, HD brightness %.3f\n", read_float(cpu, kEnvTime), exposure);
     if (fabsf(exposure - g_sky_exposure) > 0.001f) {
         aurora_set_exposure(exposure);
         if (g_trace && fabsf(exposure - g_sky_exposure) > 0.02f)
