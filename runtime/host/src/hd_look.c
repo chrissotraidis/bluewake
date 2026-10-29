@@ -732,20 +732,35 @@ static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size) 
 }
 
 // One table: when it holds `from`, write `to` over it.
-// One table: when it holds `from`, write `to` over it. True while it holds `to`.
-static bool sky_table(CPUState* cpu, u32 pointer, u32 want, u32 entry, const u8* from, const u8* to) {
+// One table (Pale or Virt). While it holds the GameCube's colours and HD's
+// are wanted, HD's go over it, and the host keeps it (`*owned`): the linear
+// blend below then changes its entries, so it is no longer HD's to the byte.
+// With HD's no longer wanted the GameCube's go back. A stage that loads again
+// over it puts the GameCube's back by itself, and is taken again. Returns the
+// table while the host keeps it, else 0.
+static u32 sky_table(CPUState* cpu, u32 pointer, u32 count, u32 entry, const u8* gc, const u8* hd, u32* owned) {
     const u32 table = mem_read32(cpu, pointer);
-    if (!guest_pointer(table))
-        return false;
-    if (guest_equals(cpu, table, to, entry))
-        return guest_equals(cpu, table, to, want * entry);
-    if (!guest_equals(cpu, table, from, entry) || !guest_equals(cpu, table, from, want * entry))
-        return false;
-    for (u32 i = 0; i < want * entry; ++i)
-        mem_write8(cpu, table + i, to[i]);
-    if (g_trace)
-        fprintf(stderr, "[hd-look] sky table at 0x%08X: %s\n", table, g_sky ? "HD" : "GameCube");
-    return true;
+    if (!guest_pointer(table)) {
+        *owned = 0u;
+        return 0u;
+    }
+    const bool is_gc = guest_equals(cpu, table, gc, entry) && guest_equals(cpu, table, gc, count * entry);
+    if (g_sky && is_gc) {
+        for (u32 i = 0; i < count * entry; ++i)
+            mem_write8(cpu, table + i, hd[i]);
+        *owned = table;
+        if (g_trace)
+            fprintf(stderr, "[hd-look] sky table at 0x%08X: HD\n", table);
+    } else if (!g_sky && *owned == table && !is_gc) {
+        for (u32 i = 0; i < count * entry; ++i)
+            mem_write8(cpu, table + i, gc[i]);
+        *owned = 0u;
+        if (g_trace)
+            fprintf(stderr, "[hd-look] sky table at 0x%08X: GameCube\n", table);
+    } else if (*owned != table) {
+        *owned = 0u;
+    }
+    return *owned;
 }
 
 // HD's brightness now: its factor for the sun's light on scenery (BG0 K0) in
@@ -1017,25 +1032,23 @@ static void sky_models(CPUState* cpu, bool hd) {
         memset(s_shifted, 0, sizeof s_shifted);
 }
 
-static float sky_factor(CPUState* cpu, u32 envr_idx, u32 colpat, u32 slot) {
+// The palette (Pale index) the game takes for a weather's slot, or -1.
+static int sky_palette(CPUState* cpu, u32 envr_idx, u32 colpat, u32 slot) {
     const u32 envr = mem_read32(cpu, kEnvEnvr), pselect = mem_read32(cpu, kEnvPselect);
     if (!guest_pointer(envr) || !guest_pointer(pselect) || colpat > 7u || slot > 5u)
-        return 1.0f;
+        return -1;
     const u32 psel = mem_read8(cpu, envr + envr_idx * 8u + colpat);
     const u32 pale = mem_read8(cpu, pselect + psel * 0xCu + slot);
-    if (pale >= g_sky_pale)
-        return 1.0f;
-    const u8* f = g_sky_data + 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + pale * 24u + 3u * 4u;
-    const u32 bits = (u32)f[0] << 24 | (u32)f[1] << 16 | (u32)f[2] << 8 | f[3];
-    float value;
-    memcpy(&value, &bits, 4);
-    return value > 0.0f && value < 10.0f ? value : 1.0f;
+    return pale < g_sky_pale ? (int)pale : -1;
 }
 
-static float sky_brightness(CPUState* cpu) {
+// The four palettes the game is blending now and how (setLight_palno_get):
+// the hour's two (slots) of the last weather, the same of the new one, by the
+// hour (ab), then by the weather's change (cb). False outside the schedule.
+static bool sky_blend_state(CPUState* cpu, int pale[4], float* ab, float* cb) {
     const u32 schedule = mem_read32(cpu, kEnvSchedule);
     if (!guest_pointer(schedule))
-        return 0.0f;
+        return false;
     const float now = read_float(cpu, kEnvTime);
     for (u32 i = 0; i < 11u; ++i) {
         const u32 at = schedule + i * 0xCu;
@@ -1043,28 +1056,119 @@ static float sky_brightness(CPUState* cpu) {
         if (!(now >= end && now <= begin))
             continue;
         const u32 slot0 = mem_read8(cpu, at + 8u), slot1 = mem_read8(cpu, at + 9u);
-        float ab = 1.0f;  // get_parcent(begin, end, now)
+        *ab = 1.0f;  // get_parcent(begin, end, now)
         if (begin - end != 0.0f) {
-            ab = 1.0f - (begin - now) / (begin - end);
-            if (ab >= 1.0f)
-                ab = 1.0f;
+            *ab = 1.0f - (begin - now) / (begin - end);
+            if (*ab >= 1.0f)
+                *ab = 1.0f;
         }
         const u32 envr0 = mem_read8(cpu, kEnvEnvrPrev), envr1 = mem_read8(cpu, kEnvEnvrCurr);
         const u32 pat0 = mem_read8(cpu, kEnvColpatPrev), pat1 = mem_read8(cpu, kEnvColpatCurr);
-        const float a = sky_factor(cpu, envr0, pat0, slot0), b = sky_factor(cpu, envr0, pat0, slot1);
-        const float c = sky_factor(cpu, envr1, pat1, slot0), d = sky_factor(cpu, envr1, pat1, slot1);
-        float blend = read_float(cpu, kEnvColPatBlend);
-        blend = blend < 0.0f ? 0.0f : blend > 1.0f ? 1.0f : blend;
-        const float prev = a + ab * (b - a), curr = c + ab * (d - c);
-        const float factor = prev + blend * (curr - prev);
-        static float s_scale = -1.0f;  // BLUEWAKE_HD_SKY_GAMMA: the power the factor is taken to (1/2.2)
-        if (s_scale < 0.0f) {
-            const char* value = getenv("BLUEWAKE_HD_SKY_GAMMA");
-            s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.0f / 2.2f;
-        }
-        return powf(factor, s_scale);
+        pale[0] = sky_palette(cpu, envr0, pat0, slot0);
+        pale[1] = sky_palette(cpu, envr0, pat0, slot1);
+        pale[2] = sky_palette(cpu, envr1, pat1, slot0);
+        pale[3] = sky_palette(cpu, envr1, pat1, slot1);
+        const float blend = read_float(cpu, kEnvColPatBlend);
+        *cb = blend < 0.0f ? 0.0f : blend > 1.0f ? 1.0f : blend;
+        return true;
     }
-    return 0.0f;
+    return false;
+}
+
+static float sky_factor_of(int pale) {
+    if (pale < 0)
+        return 1.0f;
+    const u8* f = g_sky_data + 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + (u32)pale * 24u + 3u * 4u;
+    const u32 bits = (u32)f[0] << 24 | (u32)f[1] << 16 | (u32)f[2] << 8 | f[3];
+    float value;
+    memcpy(&value, &bits, 4);
+    return value > 0.0f && value < 10.0f ? value : 1.0f;
+}
+
+static float sky_brightness(CPUState* cpu) {
+    int pale[4];
+    float ab, cb;
+    if (!sky_blend_state(cpu, pale, &ab, &cb))
+        return 0.0f;
+    const float a = sky_factor_of(pale[0]), b = sky_factor_of(pale[1]);
+    const float c = sky_factor_of(pale[2]), d = sky_factor_of(pale[3]);
+    const float prev = a + ab * (b - a), curr = c + ab * (d - c);
+    const float factor = prev + cb * (curr - prev);
+    static float s_scale = -1.0f;  // BLUEWAKE_HD_SKY_GAMMA: the power the factor is taken to (1/2.2)
+    if (s_scale < 0.0f) {
+        const char* value = getenv("BLUEWAKE_HD_SKY_GAMMA");
+        s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.0f / 2.2f;
+    }
+    return powf(factor, s_scale);
+}
+
+// HD blends its palettes in linear light (it keeps them linear), the game in
+// its gamma: halfway from noon's cyan sky to evening's orange is a grey teal
+// in the game's blend and HD's lavender in linear light (Windfall's dock at
+// 17:30), and dawn and dusk pass through purples and pinks in HD. The game
+// blends the four palettes sky_blend_state names with fixed weights, so the
+// host writes the linear blend of their colours into all four (their Pale
+// entries and the Virt entries those name): whatever the weights, the game's
+// blend is then HD's. Each retrace the entries written last time get HD's
+// own colours back first. BLUEWAKE_HD_SKY_LINEAR=0 leaves the game's blend.
+static float sky_lin(u8 v) { return powf(v / 255.0f, 2.2f); }
+static u8 sky_gam(float v) {
+    const float g = powf(v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v, 1.0f / 2.2f) * 255.0f + 0.5f;
+    return (u8)(g > 255.0f ? 255.0f : g);
+}
+
+static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
+
+static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on) {
+    static int s_on = -1;
+    if (s_on < 0)
+        s_on = setting("BLUEWAKE_HD_SKY_LINEAR") != 0;
+    static int s_written_pale[4] = {-1, -1, -1, -1}, s_written_virt[4] = {-1, -1, -1, -1};
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    const u8* hd_virt = hd_pale + g_sky_pale * 0x2Cu + g_sky_virt * 0x24u;
+    // HD's own colours back where they were blended.
+    for (int i = 0; i < 4; ++i) {
+        if (on && s_written_pale[i] >= 0)
+            for (u32 c = 0; c < 0x21u; ++c)
+                mem_write8(cpu, pale_table + (u32)s_written_pale[i] * 0x2Cu + c, hd_pale[(u32)s_written_pale[i] * 0x2Cu + c]);
+        if (on && s_written_virt[i] >= 0)
+            for (u32 c = 0; c < sizeof kVirtColours; ++c)
+                mem_write8(cpu, virt_table + (u32)s_written_virt[i] * 0x24u + kVirtColours[c],
+                           hd_virt[(u32)s_written_virt[i] * 0x24u + kVirtColours[c]]);
+        s_written_pale[i] = s_written_virt[i] = -1;
+    }
+    int pale[4];
+    float ab, cb;
+    if (!on || !s_on || !sky_blend_state(cpu, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
+        return;
+    const float w[4] = {(1.0f - ab) * (1.0f - cb), ab * (1.0f - cb), (1.0f - ab) * cb, ab * cb};
+    int virt[4];
+    for (int i = 0; i < 4; ++i)
+        virt[i] = hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] < g_sky_virt ? hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] : -1;
+    u8 pale_out[0x21], virt_out[sizeof kVirtColours];
+    for (u32 c = 0; c < 0x21u; ++c) {
+        float v = 0.0f;
+        for (int i = 0; i < 4; ++i)
+            v += w[i] * sky_lin(hd_pale[(u32)pale[i] * 0x2Cu + c]);
+        pale_out[c] = sky_gam(v);
+    }
+    const bool virt_ok = virt[0] >= 0 && virt[1] >= 0 && virt[2] >= 0 && virt[3] >= 0;
+    for (u32 c = 0; virt_ok && c < sizeof kVirtColours; ++c) {
+        float v = 0.0f;
+        for (int i = 0; i < 4; ++i)
+            v += w[i] * sky_lin(hd_virt[(u32)virt[i] * 0x24u + kVirtColours[c]]);
+        virt_out[c] = sky_gam(v);
+    }
+    for (int i = 0; i < 4; ++i) {
+        for (u32 c = 0; c < 0x21u; ++c)
+            mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, pale_out[c]);
+        s_written_pale[i] = pale[i];
+        if (virt_ok) {
+            for (u32 c = 0; c < sizeof kVirtColours; ++c)
+                mem_write8(cpu, virt_table + (u32)virt[i] * 0x24u + kVirtColours[c], virt_out[c]);
+            s_written_virt[i] = virt[i];
+        }
+    }
 }
 
 static void sky(CPUState* cpu) {
@@ -1074,9 +1178,14 @@ static void sky(CPUState* cpu) {
     const u8* hd_pale = gc_pale + g_sky_pale * 0x2Cu;
     const u8* gc_virt = hd_pale + g_sky_pale * 0x2Cu;
     const u8* hd_virt = gc_virt + g_sky_virt * 0x24u;
-    const bool pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, g_sky ? gc_pale : hd_pale, g_sky ? hd_pale : gc_pale);
-    sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, g_sky ? gc_virt : hd_virt, g_sky ? hd_virt : gc_virt);
-    g_sky_shown = g_sky && pale;
+    static u32 s_pale, s_virt;  // the tables the host keeps
+    // Last retrace's linear blend comes out before the GameCube's go back.
+    if (!g_sky && s_pale != 0u && s_virt != 0u)
+        sky_linear(cpu, s_pale, s_virt, false);
+    const u32 pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, gc_pale, hd_pale, &s_pale);
+    const u32 virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, &s_virt);
+    g_sky_shown = g_sky && pale != 0u;
+    sky_linear(cpu, pale, virt, g_sky_shown && virt != 0u);
     // The schedule goes with the palettes (back to the GameCube's when they go).
     sky_schedule(cpu, g_sky_shown);
     sky_models(cpu, g_sky_shown);
