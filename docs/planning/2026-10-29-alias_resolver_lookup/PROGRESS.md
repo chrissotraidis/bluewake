@@ -31,6 +31,7 @@ Parallel with M1; owns `GXRuntime/tests/guest_alias_lookup_test.c` and its `CMak
 - [x] M3-T02: BlueWake build of the current stack with the new pin; census and `render_bench --cpu-profile` in the lava room
 - [x] M3-T03: Deck A/B against the same stack with the old pin, 5 states, `--warmup 1 --pairs 5`: FPS, checkpoints, pictures
 - [x] M3-T04: Record the result against the PRD targets (pass, or no-go with numbers); BlueWake pin PR only on pass
+- [ ] M3-T05: With the pin (after #45, #48, #480, #495 land): register `bluewake_guest_alias_lookup_{plain,global}_test` in `runtime/host/CMakeLists.txt` from RecompCore's `GXRuntime/tests/guest_alias_lookup_test.c`, linked to `gxruntime` like the gather-memory tests, and add them to the build targets in `linux-host.yml` and `windows-host.yml`; CI then runs it on Linux and on Windows (MSVC)
 
 ## Evidence ledger
 
