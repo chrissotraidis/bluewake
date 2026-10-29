@@ -13,7 +13,9 @@ back here: the target keeps only the tour's state, for the next run.
 
 A build is an AppImage, or a folder holding BlueWake-x86_64.AppImage (or one
 *.AppImage). Its commit is read from build_script's paths
-(build/ALIAS-COMMIT/, build/artifacts/ALIAS/COMMIT/).
+(build/ALIAS-COMMIT/, build/artifacts/ALIAS/COMMIT/). On a Mac, a build is a
+BlueWake.app or a build folder holding packaged/BlueWake.app (build/macos),
+run here only; its commit is the app's own (BuilderProvenance.json).
 
 Scenes:
   (default)                 the benchmark tour of scripts/bench_tour.py:
@@ -51,8 +53,9 @@ Target:
   --card PATH               memory card to make the tour's state from;
                             without it, the target's own
                             (~/.local/share/BlueWake/GZLE01.card) is used for
-                            that, there. Only read, and only needed until the
-                            state exists
+                            that, there (on a Mac, ~/Library/Application
+                            Support/BlueWake/GZLE01.card). Only read, and only
+                            needed until the state exists
   --display auto|headless|desktop
                             headless runs the game under offscreen gamescope;
                             desktop uses the running session (DISPLAY=:0)
@@ -83,21 +86,35 @@ die() {
 }
 
 find_image() {
-    local given=$1 directory count
+    local given=$1 directory count app image
     if [[ -f "$given" ]]; then
         realpath "$given"
         return
     fi
     [[ -d "$given" ]] || die "no such build: $given"
     directory=$(realpath "$given")
+    # A Mac app, or a Mac build folder: the app's executable.
+    for app in "$directory" "$directory/BlueWake.app" "$directory/packaged/BlueWake.app"; do
+        if [[ $app == *.app && -x "$app/Contents/MacOS/BlueWake" ]]; then
+            printf '%s\n' "$app/Contents/MacOS/BlueWake"
+            return
+        fi
+    done
     if [[ -s "$directory/BlueWake-x86_64.AppImage" ]]; then
         printf '%s\n' "$directory/BlueWake-x86_64.AppImage"
         return
     fi
-    mapfile -d '' images < <(find "$directory" -maxdepth 2 -type f -name '*.AppImage' -print0)
+    images=()  # read, not mapfile: a Mac's bash is 3.2
+    while IFS= read -r -d '' image; do
+        images+=("$image")
+    done < <(find "$directory" -maxdepth 2 -type f -name '*.AppImage' -print0)
     count=${#images[@]}
     [[ $count -eq 1 ]] || die "$directory: expected BlueWake-x86_64.AppImage or one unique AppImage; found $count"
     printf '%s\n' "${images[0]}"
+}
+
+sha256() {
+    if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
 }
 
 # ssh joins its arguments into one command line: quote each one.
@@ -150,6 +167,11 @@ done
 [[ ${#builds[@]} -ge 1 && ${#builds[@]} -le 2 ]] || { usage >&2; exit 2; }
 [[ -z "$states" || -d "$states" ]] || die "no such folder: $states"
 [[ -z "$card" || -f "$card" ]] || die "no such card: $card"
+mac=0
+[[ $(uname -s) == Darwin ]] && mac=1
+if [[ -z "$target" && $mac -eq 1 && " ${options[*]-} " == *" --cpu-profile "* ]]; then
+    die "--cpu-profile needs Linux perf: run it on a Linux target"
+fi
 
 scripts=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 harness=(render_bench.py rendered_run.py bench_tour.py)
@@ -162,6 +184,7 @@ names=(A B)
 images=()
 for i in "${!builds[@]}"; do
     images+=("$(find_image "${builds[$i]}")")
+    [[ -n "$target" && ${images[$i]} == */Contents/MacOS/BlueWake ]] && die "a Mac app runs here only, not on $target"
     printf '%s%s: %s\n' "${names[$i]}" "$([[ $i -eq 1 ]] && echo ' (reference)')" "${images[$i]}"
 done
 # One folder for the run, here: YYYY_MM_DD-HHMMSS, the reports flat in it and the raw data in raw/.
@@ -183,14 +206,21 @@ if [[ -z "$target" ]]; then
         apps+=(--app "${names[$i]}=${images[$i]}")
     done
     [[ -n "$states" ]] && options+=(--states "$(realpath "$states")")
-    card=${card:-$HOME/.local/share/BlueWake/GZLE01.card}
+    if [[ $mac -eq 1 ]]; then
+        card=${card:-$HOME/Library/Application Support/BlueWake/GZLE01.card}
+    else
+        card=${card:-$HOME/.local/share/BlueWake/GZLE01.card}
+    fi
     [[ -f "$card" ]] && options+=(--card "$(realpath "$card")")
     printf 'Running here; results in %s\n' "$out"
-    python3 -u "$scripts/render_bench.py" collect "$raw" "${apps[@]}" "${options[@]}" </dev/null || status=$?
+    # ${options[@]+...}: an empty array is unbound to a Mac's bash 3.2 under set -u.
+    python3 -u "$scripts/render_bench.py" collect "$raw" "${apps[@]}" ${options[@]+"${options[@]}"} </dev/null ||
+        status=$?
 else
-    for dependency in ssh scp sha256sum tar; do
+    for dependency in ssh scp tar; do
         command -v "$dependency" >/dev/null || die "missing local dependency: $dependency"
     done
+    command -v sha256sum >/dev/null || command -v shasum >/dev/null || die "missing local dependency: sha256sum"
     control_directory=$(mktemp -d "${TMPDIR:-/tmp}/render-bench-ssh.XXXXXX")
     control_path="$control_directory/control"
     root=
@@ -214,7 +244,7 @@ else
 
     printf 'Checking %s...\n' "$target"
     need_perf=0
-    [[ " ${options[*]} " == *" --cpu-profile "* ]] && need_perf=1
+    [[ " ${options[*]-} " == *" --cpu-profile "* ]] && need_perf=1
     root=$("${ssh_command[@]}" "$target" "bash -s -- $(quote "$run_name" "$need_perf")" <<'CHECK'
 set -eu
 for command in python3 tar sha256sum; do
@@ -235,7 +265,7 @@ CHECK
         if [[ $i -eq 1 && "${images[1]}" == "${images[0]}" ]]; then
             "${ssh_command[@]}" "$target" "ln $(quote "$root/A.AppImage" "$remote")"
         else
-            hash=$(sha256sum "${images[$i]}" | cut -d' ' -f1)
+            hash=$(sha256 "${images[$i]}")
             "${scp_command[@]}" -q "${images[$i]}" "$target:$remote"
             "${ssh_command[@]}" "$target" "chmod 0755 $(quote "$remote") &&
                 test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||
@@ -263,13 +293,12 @@ CHECK
     "${ssh_command[@]}" "$target" "cd $(quote "$root") && tar czf - --exclude='*.ppm' --exclude='launch' \
         --exclude='data' out" </dev/null | tar xzf - -C "$raw" --strip-components=1 || true
     if [[ -s "$raw/collected.json" ]]; then
-        mapfile -t scenes < <(python3 "$scripts/render_bench.py" differing "$raw")
-        for scene in "${scenes[@]}"; do
+        while IFS= read -r scene; do
             [[ -n "$scene" ]] || continue
             printf 'Copying back the frames of %s (A and B differ)...\n' "$scene"
             "${ssh_command[@]}" "$target" "cd $(quote "$root/out") && tar czf - $(quote "frames/$scene")" \
                 </dev/null | tar xzf - -C "$raw"
-        done
+        done < <(python3 "$scripts/render_bench.py" differing "$raw")
     fi
     [[ $keep_remote -eq 1 ]] && printf 'Left on the target: %s:%s\n' "$target" "$root"
 fi
