@@ -630,7 +630,7 @@ int main(void) {
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.gather_alias_cache)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
                        + ("lean_blocks\n" if getattr(self.args, "lean_blocks", False) else "")
@@ -881,6 +881,7 @@ int main(void) {
                    "fixed_mem1": self.args.fixed_mem1,
                    "inline_fp": self.args.inline_fp,
                    "gather_pipe": self.args.gather_pipe,
+                   "gather_alias_cache": self.args.gather_alias_cache,
                    "direct_calls": self.args.direct_calls,
                    "inline_gpr": self.args.inline_gpr,
                    "native_j3d": self.args.native_j3d,
@@ -1006,6 +1007,7 @@ int main(void) {
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
@@ -1092,7 +1094,7 @@ int main(void) {
                                "mods": self.mods,
                                "options": {name: getattr(self.args, name, False) for name in
                                            ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp",
-                                            "gather_pipe", "direct_calls", "inline_gpr", "native_j3d",
+                                            "gather_pipe", "gather_alias_cache", "direct_calls", "inline_gpr", "native_j3d",
                                             "native_vec", "native_math", "native_skin", "native_game_math",
                                             "lean_memory", "native_entries", "lean_blocks")},
                                **({"lean_deadlines": True} if getattr(self.args, "lean_deadlines", False) else {}),
@@ -1373,6 +1375,7 @@ int main(void) {
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
+            "gather_alias_cache": self.args.gather_alias_cache,
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
             "native_j3d": self.args.native_j3d,
@@ -1520,7 +1523,8 @@ a user folder here instead (a rebuild leaves it alone).
 # CPU and RAM storage, inline floating point and gather-pipe writes, inlined
 # register saves, prepaid blocks, direct calls and the certified natives). The
 # app enables each one only where the module it loads was prepared with it.
-WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
+WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "gather_alias_cache",
+                                 "inline_gpr",
                                  "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                  "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
                                  "behaviour_timing")
@@ -1568,6 +1572,10 @@ def main():
                         help="opt into experimental inline floating-point helpers (off by default)")
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
+    parser.add_argument("--gather-alias-cache", action="store_true",
+                        help="cache gather-pipe alias-window overlap by registry generation (on by default; requires --gather-pipe)")
+    parser.add_argument("--no-gather-alias-cache", action="store_true",
+                        help="disable the default gather-pipe alias-window cache")
     parser.add_argument("--inline-gpr", action="store_true",
                         help="inline certified register saves/restores; requires --direct-calls")
     parser.add_argument("--direct-calls", action="store_true",
@@ -1639,6 +1647,8 @@ def main():
     if not args.conservative:
         for name in WINDOWS_DEFAULT_OPTIMIZATIONS:
             setattr(args, name, True)
+    if args.no_gather_alias_cache:
+        args.gather_alias_cache = False
     if args.no_lean_blocks:
         args.lean_blocks = False
     if args.no_lean_memory:
@@ -1651,6 +1661,8 @@ def main():
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
+    if args.gather_alias_cache and not args.gather_pipe:
+        parser.error("--gather-alias-cache requires --gather-pipe")
     if args.fixed_mem1 and not args.fixed_cpu:
         parser.error("--fixed-mem1 requires --fixed-cpu")
     if args.lean_blocks:
