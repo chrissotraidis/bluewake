@@ -42,6 +42,10 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Pinning test:** with the game thread alone on its core (sibling idle), the per-instruction gap halves (−8.4% → −4.6%), but game speed does not recover (29.84 → 28.86 FPS). SMT sharing is not the main factor. The remaining suspects are shared L3 and memory traffic from Smooth Motion's other threads, and spin-waiting on frame slots in `camera_steps`.
 
+**Memory bandwidth is the shared resource.** With Smooth Motion off, a synthetic memory-streaming load on CPUs 4–7 (≈ 12 GB/s) cuts the game thread's IPC by 38% (1.89 → 1.18) for the same instructions, and game speed to 19 FPS. On the Deck, the CPU and GPU share LPDDR5, so Smooth Motion's traffic counts on both sides: about 9.5 MB of vertex staging copies per game frame, the in-between data, the in-between replay, and twice the presents. This also explains why fixing the GPU at 1600 MHz made the game slower, not faster. Spin-waiting is ruled out: the frame-slot, staging and pacing waits sleep (`wait_for_gpu_progress`).
+
+**M2 direction:** reduce Smooth Motion's memory traffic, starting with the vertex staging copies (≈ 7× their Smooth-Motion-off cost), then what the replay and the helper thread stream per draw.
+
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
 ## Outcomes
