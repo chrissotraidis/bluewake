@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "379beb0f122c0014f7a6c26a44b9dc4852abd76e",
+      "sha": "e81e5800713309a5444ae234760732a7d7125e1c",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -680,6 +680,13 @@
             "patches/recompcore/0190-Aurora-sun-shadows-shaped-as-in-Wind-Waker-HD-held-at-24-degrees-soft-toward-their-tips-and-tinted-by-the-sky.patch"
           ],
           "evidence": "pdale-boop's: sun shadows shaped as Wind Waker HD's, measured in Cemu with Link's place and the camera tracked: the sun held at 24 degrees with its shadows thinning to half by -7 and gone by -8 (the Private Oasis, 17:15-17:25); long shadows soft toward their tips; the shadow a colour lit by the sky (0.22, 0.41, 0.60 of what is lit; HD's about 0.21, 0.39, 0.56 on Windfall's dock); two debug views; three cascades (a fourth shaded far islands in light-blue blocks through the haze); aurora_set_sun_shadow_strength for lighter shadows; a slope bias of 20 texels far off (acne on Ice Ring Isle's walls). Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk and noon warps and saved states against HD's frames; Windfall sailed toward from sea room 10 with three cascades and four. Windows and Mac not yet checked."
+        },
+        "gx_short_quads": {
+          "runtime": "e81e5800713309a5444ae234760732a7d7125e1c",
+          "tracked_patches": [
+            "patches/recompcore/0191-GX-three-vertices-left-over-in-a-quad-draw-draw-a-triangle-as-on-the-hardware.patch"
+          ],
+          "evidence": "pdale-boop's: GX_QUADS draws whose vertex count leaves three over draw them as a triangle, as the hardware does; the frontend had dropped them, and the game's night stars are three-vertex quads (dKyr_drawStar), so none showed. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered warps to Windfall's dock at 4:00 and 21:00: the stars show. Smooth Motion keeps them steady: a three-vertex quad is paired from the camera's eye and moved with each in-between camera's eye; sailing at night (Dale's state), 87-100% of an in-between frame's stars stand where the real frames' do, against 5-23% before. Windows and Mac not yet checked."
         }
       }
     },
