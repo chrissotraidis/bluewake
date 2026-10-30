@@ -48,7 +48,11 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Confirmed over 5 interleaved rounds with warm caches:** game-thread IPC versus off is −2.0% with matching only and −3.3% with full Smooth Motion, in that order in every round. Matching and blending are about 60% of the loss; the upload and the replay about 40%. Headless, that ≈ 3% fits within the game thread's headroom; in Game Mode, the compositor's and the display's memory traffic add to it and the game loses about 10%.
 
-**M2 direction:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
+**Sizing (per-draw counters):** ≈ 930 helper jobs per game frame, ≈ 720 full constants copies, ≈ 930 blended blocks: about 0.5 GB/s of traffic in all, spread across stages. No single copy is a large lever.
+
+**Direction (agreed 2026-10-30):** (1) a short Game Mode check of how much of the 10% the compositor and display add; (2) document automatic pacing as correct protection in this room, with the remaining effort on the game thread's own headroom; (3) then remove the intermediate constants copies as a measured, modest improvement.
+
+**Earlier M2 direction:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
 
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
