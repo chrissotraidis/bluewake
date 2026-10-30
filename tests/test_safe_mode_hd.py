@@ -42,6 +42,7 @@ void aurora_set_ambient_occlusion(bool on) { ao = on; }
 int map_on = -1;
 void aurora_set_sun_shadow_map(bool on) { map_on = on; }
 void aurora_set_sun_shadow_quality(int) {}
+void aurora_set_sun_shadow_strength(float) {}
 std::string read_file(const std::string& path) {
     std::ifstream file(path);
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};

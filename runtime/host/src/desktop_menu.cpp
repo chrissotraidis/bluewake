@@ -91,6 +91,9 @@ const char* const kScaleShown[] = {"Window", "1x", "2x", "3x", "4x"};
 const char* const kScaleStored[] = {"0", "1", "2", "3", "4"};
 const char* const kAnisoShown[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
 const char* const kAnisoStored[] = {"1", "2", "4", "8", "16"};
+// The HD look's sun shadows, as HD's or lighter (settings_table.h).
+const char* const kShadowShown[] = {"As in HD", "Lighter", "Much lighter"};
+const char* const kShadowStored[] = {"1", "0.8", "0.6"};
 const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "Largest"};
 const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
 
@@ -687,6 +690,12 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *shown = bw_desktop::kAnisoShown;
         *stored = bw_desktop::kAnisoStored;
         *count = 5;
+        return true;
+    }
+    if (std::strcmp(key, "BLUEWAKE_HD_SHADOW_STRENGTH") == 0) {
+        *shown = bw_desktop::kShadowShown;
+        *stored = bw_desktop::kShadowStored;
+        *count = 3;
         return true;
     }
     if (std::strcmp(key, "BLUEWAKE_MENU_TEXT_SIZE") == 0) {
