@@ -259,7 +259,7 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     endforeach()
 
     # Source-only contracts for helpers awaiting whole-module qualification.
-    foreach(_variant plain global)
+    foreach(_variant plain global cache)
         add_executable(bluewake_gather_memory_${_variant}_test
             ${BLUEWAKE_REPO_ROOT}/tests/gather_memory_test.c
             ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
@@ -269,6 +269,9 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         if(_variant STREQUAL "global")
             target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
                 BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+        elseif(_variant STREQUAL "cache")
+            target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
+                BLUEWAKE_GATHER_ALIAS_CACHE=1)
         endif()
         add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
     endforeach()
@@ -309,7 +312,7 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     target_link_libraries(bluewake_gather_dispatch_test PRIVATE gxruntime)
     target_compile_definitions(bluewake_gather_dispatch_test PRIVATE BLUEWAKE_GATHER_PIPE=1)
     add_test(NAME bluewake_gather_dispatch_test COMMAND bluewake_gather_dispatch_test)
-    foreach(_test bluewake_inline_gpr_memory_test bluewake_direct_calls_test bluewake_guest_checkpoint_test bluewake_gather_host_test bluewake_gather_memory_plain_test bluewake_gather_memory_global_test bluewake_gather_dispatch_test)
+    foreach(_test bluewake_inline_gpr_memory_test bluewake_direct_calls_test bluewake_guest_checkpoint_test bluewake_gather_host_test bluewake_gather_memory_plain_test bluewake_gather_memory_global_test bluewake_gather_memory_cache_test bluewake_gather_dispatch_test)
         target_include_directories(${_test} PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})
         target_compile_options(${_test} PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
         target_link_libraries(${_test} PRIVATE bluewake_posix_compat)
