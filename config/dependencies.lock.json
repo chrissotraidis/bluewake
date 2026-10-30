@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "ff56a15e2921e2c84842d296687a627435a1eba4",
+      "sha": "b406ab0e10d11d660e17d22e1c2e71dd8811daae",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49",
       "license": "GPL-3.0",
