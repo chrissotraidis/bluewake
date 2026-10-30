@@ -21,7 +21,8 @@ Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; performance baselin
 - **The game thread is the limit, through memory contention.** With Smooth Motion on, the game thread runs the same instructions at lower IPC (1.89 → 1.73, same 3.35 GHz). Pinning it alone on a core halves that loss but does not restore speed. A synthetic memory-streaming load with Smooth Motion off cuts its IPC by 38%. CPU and GPU share LPDDR5 on the Deck.
 - **Copies are not the source.** The same 9.5 MB of vertices are copied per game frame with Smooth Motion on and off; the in-between data is about 3.2 MB per game frame. The longer copy zone is queue wait behind the replay (queue ordering, [Graphics.md](../../architecture/Graphics.md#from-guest-bytes-to-a-gpu-resource)).
 - **Spin-waiting is ruled out by the source:** the frame-slot, staging and pacing waits sleep in `wait_for_gpu_progress`.
-- **Provisional:** runs that isolate parts of Smooth Motion pointed to matching and blending on the CPU (GX worker capture/keying plus the helper's blending) rather than the upload or the replay. Run-to-run IPC spread for one setup was up to 8% (1.858 vs 2.014), larger than the effect, so a 5-round interleaved repeat is required before this selects M2.
+- **Matching and blending are the larger share (5 interleaved rounds, warm cache).** Game-thread IPC versus off: matching only −2.0%, full Smooth Motion −3.3%, in that order in 5 of 5 rounds. Matching and blending on the CPU are about 60% of the loss; the upload and the replay about 40%. The earlier 8% came from a cold-cache pair.
+- **Headless understates the contention.** Headless, the ≈ 3% IPC loss fits within the game thread's ≈ 14% headroom and the game holds 30 FPS; in Game Mode, gamescope's compositing and scanout add memory traffic and the game loses about 10%. Final measurements for M2 must be taken in Game Mode.
 
 ### Earlier observations
 

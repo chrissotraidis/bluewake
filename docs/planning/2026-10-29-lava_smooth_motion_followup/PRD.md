@@ -46,9 +46,9 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Attribution by isolating parts of Smooth Motion (M2-T01):** the vertex bytes copied are the same with Smooth Motion on and off (9.5 MB per game frame); the copy zone's longer time is queue wait. The in-between data is about 3.2 MB per game frame. With `DOL_AURORA_FRAME_INTERP_ABLATE`, the game thread loses as much with matching and blending alone (IPC −5.3%) as with full Smooth Motion (−4.7%); adding the upload or the in-between redraw changes nothing measurable.
 
-**Provisional:** a later check found run-to-run spread of up to 8% in game-thread IPC for the same setup (1.858 vs 2.014), larger than the 5% seen in the matching-only runs. A 5-round interleaved repeat with warm pipeline caches decides whether this attribution holds.
+**Confirmed over 5 interleaved rounds with warm caches:** game-thread IPC versus off is −2.0% with matching only and −3.3% with full Smooth Motion, in that order in every round. Matching and blending are about 60% of the loss; the upload and the replay about 40%. Headless, that ≈ 3% fits within the game thread's headroom; in Game Mode, the compositor's and the display's memory traffic add to it and the game loses about 10%.
 
-**M2 direction, if it holds:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
+**M2 direction:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
 
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
