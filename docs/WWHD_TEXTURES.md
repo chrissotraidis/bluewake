@@ -189,8 +189,11 @@ The pack contains PNG textures, `_mipN` mipmaps and `import-report.json` with
 source checksums, tool/dependency records, matches and skipped conflicts.
 Each skipped conflict (`conflicts`) lists its GameCube originals and every HD
 texture that disagreed (HD has two or more under one name), for choosing one
-by eye; a chosen one goes in `PREFERRED` in `scripts/wwhd/matches.py` and
-`candidate_priority()` in `runtime/host/src/wwhd/ui.cpp`.
+by eye. The one chosen for a texture file goes in
+`runtime/host/src/wwhd/picked.inc`, which both importers read and prefer over
+`PREFERRED` (`scripts/wwhd/matches.py`, `candidate_priority()` in
+`runtime/host/src/wwhd/ui.cpp`, which choose by name); a conflict not there
+keeps the GameCube texture.
 When a fallback is supplied, its selected keys and file checksums are also
 recorded in the report. Unsupported fallback filenames are listed there.
 The detailed report is local game-derived metadata; keep it with your private

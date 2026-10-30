@@ -54,6 +54,29 @@ std::string parent_of(const std::string& path) {
 
 using Targets = std::map<std::pair<std::string, std::string>, std::vector<const GCTexture*>>;
 
+// Conflicts chosen by eye (picked.inc): {texture file, HD source}.
+struct Picked {
+    const char* file;
+    const char* source;
+};
+constexpr Picked kPicked[] = {
+#include "picked.inc"
+};
+
+// From Common/ on, as both importers name HD's files the same from there.
+std::string from_common(const std::string& source) {
+    const size_t at = source.find("Common/");
+    return at == std::string::npos ? source : source.substr(at);
+}
+
+// 2 for the HD texture chosen for this texture file, above candidate_priority()'s 1.
+int picked_priority(const std::string& key, const std::string& source) {
+    for (const Picked& p : kPicked)
+        if (key == p.file)
+            return from_common(source) == from_common(p.source) ? 2 : 0;
+    return 0;
+}
+
 const std::vector<const GCTexture*>& lookup(const Targets& targets, const std::string& resource, const std::string& name) {
     static const std::vector<const GCTexture*> kNone;
     const auto it = targets.find({resource, name});
@@ -694,13 +717,14 @@ ImportResult import_pack(const ImportOptions& o) {
                                     }
                                 }
                             }
-                            const int priority = candidate_priority(hd.name, resource(hd.source));
+                            const int preferred = candidate_priority(hd.name, resource(hd.source));
                             for (const GCTexture* original : gc) {
                                 check_cancel();
                                 const bool is_intensity = original->format == 0 || original->format == 1;
                                 const auto& variant = is_intensity ? intensity : images;
                                 const std::string& digest = digests[is_intensity];
                                 const std::string key = original->filename();
+                                const int priority = std::max(preferred, picked_priority(key, hd.source));
                                 std::vector<std::string> originals_for_key = {original->source}, alternatives;
                                 const auto previous = matches.find(key);
                                 if (previous != matches.end()) {
@@ -824,7 +848,9 @@ ImportResult import_pack(const ImportOptions& o) {
                         ", " + std::to_string(m.original_h) + "], \"hd_size\": [" + std::to_string(m.hd_w) + ", " +
                         std::to_string(m.hd_h) + "], \"mipmaps\": " + std::to_string(m.mipmaps) +
                         ", \"image_sha256\": " + json_string(m.image_sha256) + ", \"files_sha256\": " + files_sha +
-                        (m.priority ? ", \"selection\": \"audited shared-artwork variant\"" : "") + "}";
+                        (m.priority == 2   ? ", \"selection\": \"chosen by eye\""
+                         : m.priority ? ", \"selection\": \"audited shared-artwork variant\""
+                                      : "") + "}";
         }
         if (!accepted)
             throw FormatError("no compatible textures matched; nothing installed");

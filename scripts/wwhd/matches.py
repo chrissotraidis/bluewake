@@ -36,5 +36,22 @@ HD_CLOUDS_SOURCE = ("stage", "sea", "stage")
 HD_CLOUDS_FOLDER = "optional/hd-clouds"
 
 
+# Conflicts chosen by eye (runtime/host/src/wwhd/picked.inc): {texture file: HD source from Common/ on}.
+def _picked():
+    import re
+    from pathlib import Path
+    inc = Path(__file__).resolve().parents[2] / "runtime/host/src/wwhd/picked.inc"
+    return {f: s[s.find("Common/"):] for f, s in re.findall(r'\{"([^"]+)", "([^"]+)"\}', inc.read_text())}
+
+
+PICKED = _picked()
+
+
+def picked_priority(key, source):
+    """2 for the HD texture chosen for this texture file, above PREFERRED's 1."""
+    chosen = PICKED.get(key)
+    return 2 if chosen is not None and source[source.find("Common/"):] == chosen else 0
+
+
 def candidate_priority(hd, identity):
     return int(PREFERRED.get(hd.name.lower()) == identity)

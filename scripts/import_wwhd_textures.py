@@ -24,7 +24,7 @@ from wwhd.formats import FormatError, HDTexture, MAX_FILE, bfres, bflim, for_gc_
 from wwhd.fallback import add_fallback
 from wwhd.title import title_image
 from wwhd.layout import HEARTS, SWIM_ICONS, heart_image, inventory_names
-from wwhd.matches import HD_CLOUDS, HD_CLOUDS_FOLDER, HD_CLOUDS_SOURCE, candidate_priority
+from wwhd.matches import HD_CLOUDS, HD_CLOUDS_FOLDER, HD_CLOUDS_SOURCE, candidate_priority, picked_priority
 from wwhd.font import BitmapFont
 from wwhd.sky import HD_SKY_FILE, HD_SKY_FOLDER, find_dzs, pack_all
 from wwhd.ui import LAYOUT_SPRITES, OPENING_PANELS, fit_sprite, font_sprites, opening_sprite
@@ -368,7 +368,7 @@ def build(args) -> dict:
                             for original in gc:
                                 variant, digest = variants[original.format], digests[original.format]
                                 key = original.filename()
-                                priority = candidate_priority(hd, resource(hd.source))
+                                priority = max(candidate_priority(hd, resource(hd.source)), picked_priority(key, hd.source))
                                 originals_for_key, alternatives = [original.source], []
                                 if key in matches:
                                     previous = matches[key]
@@ -411,8 +411,9 @@ def build(args) -> dict:
         if not accepted:
             raise FormatError("no compatible textures matched; nothing installed")
         for texture in accepted:
-            if texture.pop("priority"):
-                texture["selection"] = "audited shared-artwork variant"
+            priority = texture.pop("priority")
+            if priority:
+                texture["selection"] = "chosen by eye" if priority == 2 else "audited shared-artwork variant"
             texture["alternatives"] = sorted(set(texture["alternatives"]))
             texture["originals"] = sorted(set(texture["originals"]))
             texture["files_sha256"] = {name: file_sha256(staging / name)
