@@ -440,6 +440,57 @@ there): CI runs `tests/test_render_bench.py`, which drives the same scripts with
   once (use `Start-Process $app -Wait -PassThru`), and `powershell -File script.ps1 -List a,b` passes `a,b` as
   **one** string.
 
+### From another machine, over SSH
+
+`render_bench` doesn't take a Windows PC as an SSH target (a Windows build runs only on the PC itself), so run it
+on the PC and start it from your machine:
+
+- **Not straight from the SSH session.** Windows runs an SSH login in session 0, which has no desktop. A rendered
+  run started there either loses its Direct3D 12 swap chain (`DXGI_ERROR_NOT_CURRENTLY_AVAILABLE`, then a lost
+  device) or finishes with numbers that are wrong: main from a save state at Outset went 25 game frames a second
+  with no GPU time, against 56-58 from the desktop. `Invoke-CimMethod Win32_Process -MethodName Create` from SSH
+  starts its process in session 0 too. Headless runs (`--headless`) are fine there.
+- **Start it as a scheduled task in the desktop session.** A task with an interactive principal runs in the
+  session of the account logged on at the desktop, even with the PC locked. Put the command in a `.cmd` file (a
+  file editor, not a heredoc; see the pitfalls) that writes the console to a file. Its folder must be a checkout
+  that has `render_bench`:
+
+  ```bat
+  @echo off
+  cd /d C:\src\bluewake
+  "C:\Program Files\Git\bin\bash.exe" -lc "scripts/render_bench build/candidate build/main --states /c/bench/states --out /c/bench/out/run1" > C:\bench\out\run1-console.txt 2>&1
+  ```
+
+  Then, over SSH (PowerShell is Windows' SSH shell), run it with
+  [`scripts/windows/desktop_task.ps1`](../scripts/windows/desktop_task.ps1):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File C:\src\bluewake\scripts\windows\desktop_task.ps1 -Command C:\bench\run1.cmd
+  ```
+
+  It registers the task, starts it, waits for it to end, returns the command's exit code and deletes the task. The
+  game's window opens on the PC's screen. Log in over SSH as the account that runs BlueWake at the desktop; then
+  it needs no password and no admin. It runs the task at normal priority: a task's default is below normal, which every process it starts
+  inherits, and `schtasks.exe` can't change that. Below normal skews A/B results, not only the speed: one pair
+  started with `schtasks` called A 2.7% faster, where at the desk it was 1.8% slower and through `desktop_task.ps1` 0.7% slower.
+- **Follow it** meanwhile, if you like, from a second SSH session: `Get-Content C:\bench\out\run1-console.txt -Tail 5`, and
+  each run's `raw/runs/NN-BUILD/SCENE/status.txt`. Then copy the results folder back with `scp -r`; `report.md` and
+  `summary.json` are the summary.
+- The PC needs Git Bash and `python` with numpy and Pillow (`python3` is often the Microsoft Store's stand-in there;
+  the wrapper uses `python`, and `PYTHON=` chooses another).
+
+Tested on Windows 11 (i5-12600KF, RTX 5070 Ti), from the Outset save state, 600 retraces:
+
+| Started | main (a773185) | A/B: a candidate against main |
+| --- | --- | --- |
+| at the desk | 58.1 game frames a second | 57.0 against 58.1: A 1.8% slower |
+| straight from SSH | 25.3, no GPU time | |
+| a task made with `schtasks /IT` | 56.3 | 54.6 against 53.1: A 2.7% faster |
+| `desktop_task.ps1` | 57.5 | 57.3 against 57.7: A 0.7% slower |
+
+Each A/B is one A/B/B/A pair; the other main runs are one run each, started from a Mac, and the desk's main is
+the B of its pair. Stopping a run partway hasn't been tried.
+
 ## Getting to a place
 
 The stage select can start a quest log and go straight somewhere ([STAGE_SELECT.md](STAGE_SELECT.md#for-tests-and-benchmarks)):
@@ -567,6 +618,8 @@ and 1.59).
 - Windows paths in shell heredocs lose their backslashes (`\b` became a control character in a path): write scripts
   with a file editor tool, not through `cat <<EOF`.
 - A wait loop that greps a shared status file can match an older run's "done": wait for the run's own line.
+- A rendered run started straight from an SSH session on Windows has no desktop: it fails or runs at half speed.
+  Start it as a scheduled task in the desktop session ([From another machine, over SSH](#from-another-machine-over-ssh)).
 - A shell whose working directory is inside a folder keeps Windows from moving or deleting that folder.
 - Keep the agent's own changes for a screenshot or a test out of commits: one change per commit, and say plainly
   what was measured, on what, and what wasn't checked.
