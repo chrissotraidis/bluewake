@@ -351,6 +351,9 @@ void gc_textures(const Bytes& data, const std::string& path, std::vector<GCTextu
     const uint32_t count = r.u32(12);
     for (uint32_t i = 0; i < count; ++i) {
         check_cancel();
+        // A material file (.bmt) can count a chunk it doesn't hold: it ends after MAT3, with no TEX1.
+        if (at == data.size())
+            break;
         const uint8_t* magic = r.take(at, 4);
         const size_t size = r.u32(at + 4);
         if (size < 8)

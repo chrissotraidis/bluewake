@@ -187,6 +187,10 @@ Texture Pack…**, turn on **HD Textures**, and restart.
 
 The pack contains PNG textures, `_mipN` mipmaps and `import-report.json` with
 source checksums, tool/dependency records, matches and skipped conflicts.
+Each skipped conflict (`conflicts`) lists its GameCube originals and every HD
+texture that disagreed (HD has two or more under one name), for choosing one
+by eye; a chosen one goes in `PREFERRED` in `scripts/wwhd/matches.py` and
+`candidate_priority()` in `runtime/host/src/wwhd/ui.cpp`.
 When a fallback is supplied, its selected keys and file checksums are also
 recorded in the report. Unsupported fallback filenames are listed there.
 The detailed report is local game-derived metadata; keep it with your private
@@ -251,6 +255,8 @@ including splitting HD's panorama into the two original sprite planes.
 RGBA8 and BC1-5 layout surfaces preserve color, luminance and alpha;
 unmapped redesigned HUD images and JPA particle textures remain
 unsupported. Unsupported resources and textures are listed in the report.
+A GameCube material file (`.bmt`) that counts a chunk it doesn't hold is read
+to its end: it holds no textures, and isn't listed.
 
 ## Source and verification
 

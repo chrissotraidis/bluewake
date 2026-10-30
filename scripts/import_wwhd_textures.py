@@ -437,7 +437,11 @@ def build(args) -> dict:
                   "original_texture_count": len(originals), "replacement_count": len(accepted),
                   "fallback": fallback,
                   "combined_replacement_count": len(accepted) + (fallback["texture_count"] if fallback else 0),
-                  "conflicts_skipped": sorted(conflicts), "unsupported": errors,
+                  "conflicts_skipped": sorted(conflicts),
+                  # For checking by eye: each skipped texture's GameCube originals and the HD textures that disagree.
+                  "conflicts": [{"file": key, "hd": sorted({matches[key]["hd"], *matches[key]["alternatives"]}),
+                                 "originals": sorted(set(matches[key]["originals"]))} for key in sorted(conflicts)],
+                  "unsupported": errors,
                   "unmatched": unmatched, "textures": accepted,
                   "optional": {"hd-clouds": [optional_clouds[k] for k in sorted(optional_clouds)]},
                   "limits": "Compatible BFRES artwork, audited shared-artwork variants, inventory/collection/chart icons, HUD hearts and swimming meter, adapted English title/opening layouts, font-derived English action/menu text, counters and A/B/X/Y symbols, and adapted key/cursor sprites; HD shaders, models, lighting and other redesigned HUD are not imported."}

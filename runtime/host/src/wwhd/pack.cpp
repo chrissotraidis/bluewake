@@ -785,12 +785,25 @@ ImportResult import_pack(const ImportOptions& o) {
                     throw WriteError("cannot remove generated texture " + name + ": " + ec.message());
             }
         }
-        std::string textures;
+        std::string textures, conflicting;
         size_t accepted = 0;
         for (auto& [key, m] : matches) {
             check_cancel();
-            if (conflicts.count(key))
+            if (conflicts.count(key)) {
+                // For checking by eye: the GameCube originals and the HD textures that disagree.
+                std::set<std::string> hd(m.alternatives.begin(), m.alternatives.end());
+                hd.insert(m.hd);
+                const std::set<std::string> origs(m.originals.begin(), m.originals.end());
+                const auto list = [](const std::set<std::string>& items) {
+                    std::string out = "[";
+                    for (const auto& s : items)
+                        out += (out.size() > 1 ? ", " : "") + json_string(s);
+                    return out + "]";
+                };
+                conflicting += std::string(conflicting.empty() ? "" : ",\n") + "    {\"file\": " + json_string(key) +
+                               ", \"hd\": " + list(hd) + ", \"originals\": " + list(origs) + "}";
                 continue;
+            }
             accepted++;
             std::set<std::string> alts(m.alternatives.begin(), m.alternatives.end());
             std::set<std::string> origs(m.originals.begin(), m.originals.end());
@@ -854,6 +867,7 @@ ImportResult import_pack(const ImportOptions& o) {
                                  "  \"tool\": \"BlueWake built-in importer\",\n  \"created_utc\": \"" + created + "\",\n" +
                                  "  \"replacement_count\": " + std::to_string(accepted) + ",\n" +
                                  "  \"conflicts_skipped\": " + std::to_string(conflicts.size()) + ",\n" +
+                                 "  \"conflicts\": [\n" + conflicting + "\n  ],\n" +
                                  "  \"unsupported\": [\n" + errors + "\n  ],\n" + "  \"textures\": [\n" + textures + "\n  ],\n" +
                                  "  \"optional\": {\"hd-clouds\": [" + clouds + "],\n" +
                                  "    \"hd-sky\": {\"file\": " + json_string(kHdSkyFile) + ", \"stages\": " +
