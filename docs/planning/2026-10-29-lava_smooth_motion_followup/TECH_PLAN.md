@@ -12,6 +12,9 @@ Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; performance baselin
 - #501's live check found continuous aggregate GPU saturation with Smooth Motion on and burst/idle behavior off, while BlueWake CPU remained about the same. This is evidence of interpolation/presentation pressure, not yet proof of the wrong overload source.
 - The [graphics architecture](../../architecture/Graphics.md#synchronization-and-completion) separates guest GX production, Aurora/Dawn GPU work and presentation; all three must be timed in the same window.
 
+- M0 (Deck, 2026-10-30): automatic pacing holds full game speed by pausing; never pause costs about 10% game speed. Retries drop on late drawables (`aurora.cpp` acquire ≥ 20 ms) and render-worker waits; content verdict rejects 0.2–0.3%. See the [PRD's M0 findings](PRD.md#m0-findings-2026-10-30).
+- `gpu_prof` brackets only the real frame (`frame_begin`/`frame_end` around the redraw encoder; `present_with_in_between` ends it before the "In-between frame encoder"), so `[gpu-prof]` omits the replayed passes. M1 must add a zone for the in-between replay before GPU cost can be attributed.
+
 ## Decision flow
 
 ```mermaid
@@ -42,6 +45,7 @@ flowchart TD
 | Existing | RecompCore `frame_interp.cpp::pace_steps`, `frame_verdict` | Preserve current control and expose which path suppressed interpolation | M0–M1 | [Smooth Motion](../../architecture/Graphics.md#textures-frame-buffers-and-presentation) |
 | Proposed | RecompCore `frame_interp.hpp/.cpp` | Replace unstructured overload strings at the internal boundary with typed causes and counters; keep readable logs | M1 | Pacing ownership |
 | Proposed | RecompCore `common.cpp` overload producers | Record wait duration and source for slot, staging, GPU-backlog and drawable events | M1 | [Synchronization](../../architecture/Graphics.md#synchronization-and-completion) |
+| Proposed | RecompCore `common.cpp::present_with_in_between`, `webgpu/gpu_prof` | Time the in-between replay as its own GPU zone so `[gpu-prof]` covers every presented frame | M1 | GPU attribution |
 | Proposed | RecompCore `frame_interp_test.cpp` | Cover classification, 3-of-8 policy, recovery and forced overload | M1–M2 | Source-only correctness |
 | Proposed | Cause-selected pacing/render path | Adjust only the source proven false or unnecessarily expensive | M2 | Determined by M1 |
 | Proposed | BlueWake dependency pin/patch and performance docs | Deliver the reviewed RecompCore change and document the measured policy | M3 | [Build dependencies](../../architecture/Build.md) |

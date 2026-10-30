@@ -10,6 +10,23 @@ The requested outcome is stable Smooth Motion in the Lava Room without slowing t
 
 The overlay's `paused` label is ambiguous. It can mean the pacing controller reduced its in-between-frame budget, or that the frame-content verdict rejected interpolation. Existing logs name pacing transitions, but the test must classify both paths before changing policy. [#470](https://github.com/chrissotraidis/bluewake/pull/470) exposes “Never pause” as an opt-in workaround; [#473](https://github.com/chrissotraidis/bluewake/issues/473) tracks the root cause.
 
+## M0 findings (2026-10-30)
+
+Same Lava Room view, same build (#501 alias-lookup AppImage `6fe3d1a7868b`), 5 × 10 s windows per mode in Game Mode, then 3 × 30 s runs per mode headless with `DOL_AURORA_GPU_PROF=1`.
+
+| Mode | Game speed | In-between frames | Present wait | GPU |
+|---|---|---|---|---|
+| Smooth Motion off | ≈100% | — | 6–11 ms/s | 69% busy at 1040 MHz; 5.26 ms GPU per frame headless |
+| Automatic pacing | ≈100% | paused nearly throughout; 3 retries each dropped within 0.25 s | 6–29 ms/s | 66% busy |
+| Never pause | 74–98% (mostly 84–92%) | nearly all delivered | 10–156 ms/s | 96% busy, clock up to 1.5 GHz |
+
+- Automatic pacing is working as intended here: it trades the in-between frames for full game speed. The premise of a false overload is not supported in this view.
+- The content verdict is not involved (0.2–0.3% rejected in every mode), nor the game's own GX wait (≈5 ms everywhere).
+- Retries fail on "a drawable came late" (a ≥ 20 ms swapchain acquire) and "the game waited for the render worker".
+- Headless reproduces the cost: present waits of 41–87 ms/s and present gaps up to 362–498 ms with Smooth Motion on. The game frame's own GPU work (EFB ≈ 4.6 ms) fits easily into 33 ms, and the GPU profiler does not time the in-between replay at all, so its cost is still unmeasured.
+
+The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
+
 ## Outcomes
 
 - Reproduce the same Lava Room view with automatic pacing, pacing disabled and Smooth Motion off.

@@ -19,6 +19,7 @@ RecompCore counters/tests and BlueWake log parsing may proceed in parallel and i
 
 - [ ] M1-T01: Add typed overload cause and wait-duration accounting without changing policy.
 - [ ] M1-T02: Count delivered, budget-skipped and content-verdict-rejected frames separately.
+- [ ] M1-T05: Time the in-between replay in `gpu_prof` (today only the real frame is profiled).
 - [ ] M1-T03: Extend frame-interpolation tests for cause classification, drop threshold and recovery.
 - [ ] M1-T04: Select one cause only when the fixed-window totals reconcile.
 
@@ -43,3 +44,4 @@ M0 finding: in this view automatic pacing is correct protection, not a false ove
 | M0-T01 | AppImage `6fe3d1a7868b` (#501 alias-lookup build, RecompCore `2e4e599`) | `/proc/<pid>/environ`, launcher script, `pp_dpm_sclk` | Steam Deck LCD, Game Mode, 60 Hz panel, 8 threads; Smooth Motion 60 Hz; never-pause via `DOL_AURORA_FRAME_INTERP_PACING=0`, automatic via the same launcher without it | Identities and settings recorded |
 | M0-T02 | Local samples `off.txt`, `never.txt`, `auto.txt` (private, not committed) | 5 × 10 s windows per mode, same Lava Room (`SubD51` room 1) view, camera still | Same build and launch path, modes captured back to back | Off: game ≈100% (one entry hitch), GPU 69% at 1040 MHz, CPU 142%. Never pause: game 74–98% (mostly 84–92%), nearly all frames interpolated, GPU 96% at up to 1.5 GHz, CPU 151%. Automatic: game ≈100%, interpolation paused nearly throughout, GPU 66%, CPU 145% |
 | M0-T03 | Same samples plus `[fps-dip]` and `[interp-pace]` session-log lines | Per-second sysfs GPU busy/clock, process CPU, fps-watch waits | Same windows | Content rejected 0.2–0.3% in every mode; gx wait ≈5 ms in every mode; present wait 6–11 ms/s off, 6–29 ms/s automatic, 10–156 ms/s never pause. Automatic retried 3 times, dropping again within 0.25 s each time (late drawable twice, render-worker wait once; calm 12 → 24 → 30 s) |
+| M0-T03 | Deck `~/bluewake-render/runs/gpu-075439/` (private) | `rendered_run.py` headless 1280×800, `--state 2-lava-room --gpu-prof --max-retraces 138013 --repeat 3`; off vs `--smooth 1` + `DOL_AURORA_FRAME_INTERP_PACING=0` | Same AppImage, gamescope headless | Off: 5.26 ms GPU busy/frame (EFB 4.64), frame 5.3 ms avg, 7–11 ms max. Never pause: 3.4–4.3 ms per profiled frame (in-between replay not profiled), present gaps 27–29 ms avg and 362–498 ms max, present wait 41–87 ms/s. Reproduces the Game Mode cost headless |
