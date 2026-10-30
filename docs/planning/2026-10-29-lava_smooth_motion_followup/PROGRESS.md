@@ -1,6 +1,6 @@
 # PROGRESS — Lava Room Smooth Motion follow-up
 
-Status: Planned  
+Status: In progress (M0 done)  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -9,9 +9,9 @@ Status: Planned
 
 Architecture: [graphics synchronization](../../architecture/Graphics.md#synchronization-and-completion).
 
-- [ ] M0-T01: Record #501/RecompCore/AppImage hashes, Deck mode, display rate, renderer and Smooth Motion settings.
-- [ ] M0-T02: Capture at least five fixed windows each with automatic pacing, never-pause pacing and Smooth Motion off.
-- [ ] M0-T03: Record game/display FPS, GPU busy/clock, present/slot/staging waits and current pacing logs.
+- [x] M0-T01: Record #501/RecompCore/AppImage hashes, Deck mode, display rate, renderer and Smooth Motion settings.
+- [x] M0-T02: Capture at least five fixed windows each with automatic pacing, never-pause pacing and Smooth Motion off.
+- [x] M0-T03: Record game/display FPS, GPU busy/clock, present/slot/staging waits and current pacing logs.
 
 ### M1: Separate pacing, verdict and overload causes (depends: M0)
 
@@ -21,6 +21,8 @@ RecompCore counters/tests and BlueWake log parsing may proceed in parallel and i
 - [ ] M1-T02: Count delivered, budget-skipped and content-verdict-rejected frames separately.
 - [ ] M1-T03: Extend frame-interpolation tests for cause classification, drop threshold and recovery.
 - [ ] M1-T04: Select one cause only when the fixed-window totals reconcile.
+
+M0 finding: in this view automatic pacing is correct protection, not a false overload. Keeping the in-between frames (never pause) costs about 10% of game speed with the GPU clocked up, while automatic pacing holds full speed by pausing. Each retry drops again within about 0.25 s ("a drawable came late", "the game waited for the render worker"). M1 therefore separates GPU time from presentation timing for those late drawables, and the likely M2 is a cheaper in-between frame rather than a pacing-rule change.
 
 ### M2: Correct the proven cause (depends: M1)
 
@@ -38,4 +40,6 @@ RecompCore counters/tests and BlueWake log parsing may proceed in parallel and i
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
-
+| M0-T01 | AppImage `6fe3d1a7868b` (#501 alias-lookup build, RecompCore `2e4e599`) | `/proc/<pid>/environ`, launcher script, `pp_dpm_sclk` | Steam Deck LCD, Game Mode, 60 Hz panel, 8 threads; Smooth Motion 60 Hz; never-pause via `DOL_AURORA_FRAME_INTERP_PACING=0`, automatic via the same launcher without it | Identities and settings recorded |
+| M0-T02 | Local samples `off.txt`, `never.txt`, `auto.txt` (private, not committed) | 5 × 10 s windows per mode, same Lava Room (`SubD51` room 1) view, camera still | Same build and launch path, modes captured back to back | Off: game ≈100% (one entry hitch), GPU 69% at 1040 MHz, CPU 142%. Never pause: game 74–98% (mostly 84–92%), nearly all frames interpolated, GPU 96% at up to 1.5 GHz, CPU 151%. Automatic: game ≈100%, interpolation paused nearly throughout, GPU 66%, CPU 145% |
+| M0-T03 | Same samples plus `[fps-dip]` and `[interp-pace]` session-log lines | Per-second sysfs GPU busy/clock, process CPU, fps-watch waits | Same windows | Content rejected 0.2–0.3% in every mode; gx wait ≈5 ms in every mode; present wait 6–11 ms/s off, 6–29 ms/s automatic, 10–156 ms/s never pause. Automatic retried 3 times, dropping again within 0.25 s each time (late drawable twice, render-worker wait once; calm 12 → 24 → 30 s) |
