@@ -58,7 +58,9 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Per pass:** the in-between replay's four EFB passes cost about the same as the real frame's (≈ 1.24 vs 1.16 ms each), and nothing else in it is significant. A cheaper in-between frame therefore has to draw less or draw more cheaply.
 
-**Player settings (Game Mode, 2026-10-30):** render scale 3, the Hypatia HD texture pack and 2× anisotropic filtering make the real frame cost ≈ 22 ms of GPU at the governor's clock; the in-between replay adds ≈ 17.5 ms at a higher clock. Headless used default settings and understated this about 5×. The GPU and power cost of Smooth Motion scales with these settings.
+**Player settings (Game Mode, 2026-10-30):** render scale 3 and 2× anisotropic filtering (no texture pack is active) make the real frame cost ≈ 22 ms of GPU at the governor's clock; the in-between replay adds ≈ 17.5 ms at a higher clock. Headless used default settings and understated this about 5×. The GPU and power cost of Smooth Motion scales with these settings.
+
+**Render scale is the driver (Game Mode):** at render scale 2, Smooth Motion costs no measurable game speed. The in-between frame takes ≈ 9.4 ms, the chip stays at 13.2–13.8 W under its 15 W cap and the game thread keeps 3.45 GHz. At scale 3 the in-between frame takes ≈ 17.5 ms, the chip reaches the cap and the game loses ≈ 10%. The room is pixel-bound at these settings; no texture pack was active.
 
 **Direction (agreed 2026-10-30):** (1) a short Game Mode check of how much of the 10% the compositor and display add; (2) document automatic pacing as correct protection in this room, with the remaining effort on the game thread's own headroom; (3) then remove the intermediate constants copies as a measured, modest improvement.
 
