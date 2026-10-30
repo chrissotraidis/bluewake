@@ -1,6 +1,6 @@
 # PROGRESS — Lava Room Smooth Motion follow-up
 
-Status: In progress (M0 done)  
+Status: In progress (M0 done; M1 code in RecompCore #49)  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -17,10 +17,10 @@ Architecture: [graphics synchronization](../../architecture/Graphics.md#synchron
 
 RecompCore counters/tests and BlueWake log parsing may proceed in parallel and integrate before M2.
 
-- [ ] M1-T01: Add typed overload cause and wait-duration accounting without changing policy.
-- [ ] M1-T02: Count delivered, budget-skipped and content-verdict-rejected frames separately.
-- [ ] M1-T05: Time the in-between replay in `gpu_prof` (today only the real frame is profiled).
-- [ ] M1-T03: Extend frame-interpolation tests for cause classification, drop threshold and recovery.
+- [x] M1-T01: Add typed overload cause and wait-duration accounting without changing policy.
+- [x] M1-T02: Count delivered, budget-skipped and content-verdict-rejected frames separately.
+- [x] M1-T05: Time the in-between replay in `gpu_prof` (today only the real frame is profiled).
+- [x] M1-T03: Extend frame-interpolation tests for cause classification, drop threshold and recovery.
 - [ ] M1-T04: Select one cause only when the fixed-window totals reconcile.
 
 M0 finding: in this view automatic pacing is correct protection, not a false overload. Keeping the in-between frames (never pause) costs about 10% of game speed with the GPU clocked up, while automatic pacing holds full speed by pausing. Each retry drops again within about 0.25 s ("a drawable came late", "the game waited for the render worker"). M1 therefore separates GPU time from presentation timing for those late drawables, and the likely M2 is a cheaper in-between frame rather than a pacing-rule change.
@@ -45,3 +45,7 @@ M0 finding: in this view automatic pacing is correct protection, not a false ove
 | M0-T02 | Local samples `off.txt`, `never.txt`, `auto.txt` (private, not committed) | 5 × 10 s windows per mode, same Lava Room (`SubD51` room 1) view, camera still | Same build and launch path, modes captured back to back | Off: game ≈100% (one entry hitch), GPU 69% at 1040 MHz, CPU 142%. Never pause: game 74–98% (mostly 84–92%), nearly all frames interpolated, GPU 96% at up to 1.5 GHz, CPU 151%. Automatic: game ≈100%, interpolation paused nearly throughout, GPU 66%, CPU 145% |
 | M0-T03 | Same samples plus `[fps-dip]` and `[interp-pace]` session-log lines | Per-second sysfs GPU busy/clock, process CPU, fps-watch waits | Same windows | Content rejected 0.2–0.3% in every mode; gx wait ≈5 ms in every mode; present wait 6–11 ms/s off, 6–29 ms/s automatic, 10–156 ms/s never pause. Automatic retried 3 times, dropping again within 0.25 s each time (late drawable twice, render-worker wait once; calm 12 → 24 → 30 s) |
 | M0-T03 | Deck `~/bluewake-render/runs/gpu-075439/` (private) | `rendered_run.py` headless 1280×800, `--state 2-lava-room --gpu-prof --max-retraces 138013 --repeat 3`; off vs `--smooth 1` + `DOL_AURORA_FRAME_INTERP_PACING=0` | Same AppImage, gamescope headless | Off: 5.26 ms GPU busy/frame (EFB 4.64), frame 5.3 ms avg, 7–11 ms max. Never pause: 3.4–4.3 ms per profiled frame (in-between replay not profiled), present gaps 27–29 ms avg and 362–498 ms max, present wait 41–87 ms/s. Reproduces the Game Mode cost headless |
+| M1-T01 | RecompCore [#49](https://github.com/chrissotraidis/RecompCore/pull/49) `45d0c05`; pinned in `0b5c60c` | Source review; `[interp-pace]` reasons unchanged in test output | Linux CI container (clang-18, libc++) | `note_overload(OverloadCause, waitMs)` at all four producers; pacing unchanged |
+| M1-T02 | Same | `frame_interp::stats()`, `DOL_AURORA_FRAME_INTERP_STATS=1` → `[interp-stats]` each second | Same | Delivered/skipped/cut/rejected/idle/unstaged per presenting frame, drops and raises |
+| M1-T03 | Same; Linux CI registration `4fbe8cf` | `bluewake_frame_interp_test` | Same | All checks pass, including cause counts and waits, 3-of-8 drop, skipped/cut/unstaged and raise after calm |
+| M1-T05 | Same | `[gpu-prof]` frame plus `In-between replay` zone on both present paths | Source review; Deck run pending | Replay cost becomes visible; measurement follows with the #504 AppImage |
