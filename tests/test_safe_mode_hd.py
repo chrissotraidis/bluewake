@@ -87,6 +87,7 @@ LAUNCH = {
 CHECK_HD = r'''
 // HD's sky palettes load from the pack (hd_look.c's sky part, left out here).
 static void sky_load(void) {}
+static void sky_sunlight_changed(void) {}
 void check_hd(int on, int bloom_on, int sun_on) {
     assert(bluewake_hd_distant_islands == bool(on));
     assert(bloom == bloom_on && far_blur == on && ao == on);

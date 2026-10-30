@@ -30,6 +30,14 @@ static bool g_sky_models;  // with them, HD's sky models (BLUEWAKE_HD_SKY_MODELS
 static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; off by default)
 static void sky_load(void);
 
+// HD's sunlight as the player chose it (BLUEWAKE_HD_SUNLIGHT, read at each
+// reload): the power its factor for the hour is taken to (sky_brightness()).
+static float g_sunlight = 0.37f;
+// HD's factor for the hour as last worked out (sky_brightness()), so a new
+// choice of sunlight shows at once, the game paused under the menu too.
+static float g_sky_factor;
+static void sky_sunlight_changed(void);
+
 // A number setting, or `fallback` when it is unset or not a number in [lo, hi].
 static float setting_number(const char* key, float fallback, float lo, float hi) {
     const char* value = getenv(key);
@@ -131,9 +139,14 @@ void bluewake_hd_look_reload(void) {
             s_quality = quality;
         }
     }
-    // How dark the sun shadows are, as the player chose in the menu (HD's own
-    // by default).
+    // How dark the sun shadows are and how strong HD's sunlight is, as the
+    // player chose in the menu (HD's own by default).
     aurora_set_sun_shadow_strength(setting_number("BLUEWAKE_HD_SHADOW_STRENGTH", 1.0f, 0.0f, 1.0f));
+    const float sunlight = setting_number("BLUEWAKE_HD_SUNLIGHT", 0.37f, 0.05f, 1.0f);
+    if (sunlight != g_sunlight) {
+        g_sunlight = sunlight;
+        sky_sunlight_changed();
+    }
     fprintf(stderr, "[hd-look] distant islands %s, ambient occlusion %s, sun shadows %s%s, edge light %s, torch light %s, cloud shadows %s, far blur %s, bloom %s\n",
             bluewake_hd_distant_islands ? "on" : "off", ao < 0 ? "unset" : ao ? "on" : "off",
             g_sun == 1 ? "on" : "off", g_sun == 1 && sun_map == 1 ? " (shadow map)" : "", g_edge == 1 ? "on" : "off", g_torch == 1 ? "on" : "off",
@@ -715,6 +728,16 @@ static u32 g_sky_pale, g_sky_virt;
 static bool g_sky_shown;  // the tables hold HD's (as last seen)
 static float g_sky_exposure;  // what aurora_set_exposure was last given
 
+// A new choice of HD sunlight, at once: the brightness is otherwise worked out
+// each game frame, and the menu pauses the game.
+static void sky_sunlight_changed(void) {
+    const char* override = getenv("BLUEWAKE_HD_SKY_GAMMA");
+    if (!g_sky_shown || g_sky_factor <= 0.0f || (override != NULL && atof(override) > 0.0))
+        return;
+    g_sky_exposure = powf(g_sky_factor, g_sunlight);
+    aurora_set_exposure(g_sky_exposure);
+}
+
 static void sky_load(void) {
     static bool tried;
     if (tried)
@@ -1199,12 +1222,15 @@ static float sky_brightness(CPUState* cpu) {
     const float c = sky_factor_of(pale[2]), d = sky_factor_of(pale[3]);
     const float prev = a + ab * (b - a), curr = c + ab * (d - c);
     const float factor = prev + cb * (curr - prev);
-    static float s_scale = -1.0f;  // BLUEWAKE_HD_SKY_GAMMA: the power the factor is taken to (0.37)
-    if (s_scale < 0.0f) {
+    // The power the factor is taken to: the menu's HD sunlight (0.37, HD's), or
+    // BLUEWAKE_HD_SKY_GAMMA over it for testing.
+    static float s_override = -1.0f;
+    if (s_override < 0.0f) {
         const char* value = getenv("BLUEWAKE_HD_SKY_GAMMA");
-        s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 0.37f;
+        s_override = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 0.0f;
     }
-    return powf(factor, s_scale);
+    g_sky_factor = factor;
+    return powf(factor, s_override > 0.0f ? s_override : g_sunlight);
 }
 
 // HD blends its palettes in linear light (it keeps them linear), the game in
