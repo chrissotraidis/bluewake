@@ -32,7 +32,9 @@ M1 attribution (headless, #504 build with RecompCore #49):
 - **In-between replay:** about 5 ms of GPU per game frame, roughly the real frame's EFB cost.
 - **Staging copies grow about 10× with Smooth Motion on** (≈ 0.4 ms → 3.4–5.5 ms per profiled frame, for the same bytes). This is the leading suspect: the copies then wait or contend instead of transferring. The zone covers the copy commands' GPU time, so contention with the replay is not yet separated from the copies themselves.
 
-Cause selected (M1-T04): with Mailbox presentation (`BLUEWAKE_VSYNC=0`) instead of the default FIFO, the render-worker waits disappear (42–101 per run → 0) and late drawables fall to 1–3, with the same frames delivered. Pausing is driven by **blocking FIFO presents on gamescope's 3-image swapchain**, the same class of problem BlueWake already avoids under Wayland (KWin), not by GPU capacity. The extra staging-copy cost remains as a secondary, smaller item.
+Headless result (M1-T04, later withdrawn for Game Mode): with Mailbox presentation (`BLUEWAKE_VSYNC=0`) instead of the default FIFO, the render-worker waits disappear (42–101 per run → 0) and late drawables fall to 1–3, with the same frames delivered. Pausing is driven by **blocking FIFO presents on gamescope's 3-image swapchain**, the same class of problem BlueWake already avoids under Wayland (KWin), not by GPU capacity. The extra staging-copy cost remains as a secondary, smaller item.
+
+In **Game Mode** the same Mailbox setting does not help: automatic pacing still pauses, and never pause still runs at 75–93% game speed, with 178 late drawables (4.8 s) in 50 s. The live compositor holds swapchain images in a way headless gamescope does not, so the cause is GPU and compositor capacity on the real display path, still to be attributed.
 
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
