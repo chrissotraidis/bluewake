@@ -25,6 +25,13 @@ Same Lava Room view, same build (#501 alias-lookup AppImage `6fe3d1a7868b`), 5 �
 - Retries fail on "a drawable came late" (a ≥ 20 ms swapchain acquire) and "the game waited for the render worker".
 - Headless reproduces the cost: present waits of 41–87 ms/s and present gaps up to 362–498 ms with Smooth Motion on. The game frame's own GPU work (EFB ≈ 4.6 ms) fits easily into 33 ms, and the GPU profiler does not time the in-between replay at all, so its cost is still unmeasured.
 
+M1 attribution (headless, #504 build with RecompCore #49):
+
+- **Content verdict ruled out:** 0 rejected across 6 runs; nearly every frame is delivered when pacing allows.
+- **Main trigger:** the game waiting on the render worker (42–112 overloads per 30 s run, up to 1.7 s of waiting), then late drawables. The GPU-staging trigger never fires.
+- **In-between replay:** about 5 ms of GPU per game frame, roughly the real frame's EFB cost.
+- **Staging copies grow about 10× with Smooth Motion on** (≈ 0.4 ms → 3.4–5.5 ms per profiled frame, for the same bytes). This is the leading suspect: the copies then wait or contend instead of transferring. The zone covers the copy commands' GPU time, so contention with the replay is not yet separated from the copies themselves.
+
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
 ## Outcomes
