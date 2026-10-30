@@ -3,6 +3,8 @@
 Status: Full BlueWake stack consolidated and measured; upstream RecompCore integration open
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · [parent tracker](https://github.com/chrissotraidis/bluewake/pull/421)
 
+Stacked on this PR: BlueWake [#495](https://github.com/chrissotraidis/bluewake/pull/495) (gather alias cache, on RecompCore #45), then [#501](https://github.com/chrissotraidis/bluewake/pull/501), which pins RecompCore [#48](https://github.com/chrissotraidis/RecompCore/pull/48) (constant-time alias lookup, stacked on #45). Merge order: RecompCore #45 → RecompCore #48 → this → #495 → #501. All three change the RecompCore pin; the final pin is #48's commit, which contains #45.
+
 ## Milestones
 
 ### M0: Freeze the contract
@@ -15,7 +17,7 @@ Status: Full BlueWake stack consolidated and measured; upstream RecompCore integ
 
 - [x] M1-T01: Implement and component-test `ppc_guest_alias_range_overlaps` on the candidate RecompCore fork.
 - [!] M1-T02: Submitted as [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45); blocked waiting for upstream review and merge.
-- [ ] M1-T03: Replace the fork-only pin with the accepted upstream RecompCore revision.
+- [ ] M1-T03: Replace the fork-only pin with the accepted upstream RecompCore revision. (In the stack, #501 carries the final pin, RecompCore #48 on #45.)
 
 ### M2: Validate one complete GPR frame (depends: M1)
 
@@ -44,7 +46,7 @@ Status: Full BlueWake stack consolidated and measured; upstream RecompCore integ
 
 - [ ] M5-T01: Rebase onto current BlueWake `main` and pin the upstream RecompCore revision.
 - [ ] M5-T02: Rebuild control/candidate with an explicitly matched PGO policy and repeat qualification.
-- [ ] M5-T03: Pass Linux and Windows CI; record any required Windows hardware follow-up.
+- [ ] M5-T03: Pass Linux and Windows CI; record any required Windows hardware follow-up. (CI passes at this branch's current head `73ef48e`; rerun after the M5-T01 rebase.)
 
 ## Evidence ledger
 
