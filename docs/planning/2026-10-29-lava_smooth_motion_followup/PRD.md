@@ -1,0 +1,36 @@
+# PRD — Lava Room Smooth Motion follow-up
+
+Status: Draft  
+Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured baseline is the combined [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack at `2749e6a194dcdba93846ebd925a33c4f95c695ab`.  
+Scope: diagnose and correct Lava Room Smooth Motion loss under live Steam Deck GPU/presentation pressure; excluded: Outset's CPU bottleneck and unconditional removal of overload protection.
+
+## Motivation
+
+The requested outcome is stable Smooth Motion in the Lava Room without slowing the 30 FPS game. On a first-revision Steam Deck in Game Mode, the #501 stack held 99–100% aggregate GPU load in 11/12 one-second samples with Smooth Motion enabled. Disabling it changed the same view to burst/idle GPU behavior while BlueWake CPU stayed near 144%. The controlled benchmark does not reproduce this because it disables interpolation unless `--smooth` is supplied.
+
+The overlay's `paused` label is ambiguous. It can mean the pacing controller reduced its in-between-frame budget, or that the frame-content verdict rejected interpolation. Existing logs name pacing transitions, but the test must classify both paths before changing policy. [#470](https://github.com/chrissotraidis/bluewake/pull/470) exposes “Never pause” as an opt-in workaround; [#473](https://github.com/chrissotraidis/bluewake/issues/473) tracks the root cause.
+
+## Outcomes
+
+- Reproduce the same Lava Room view with automatic pacing, pacing disabled and Smooth Motion off.
+- Attribute missing in-between frames to pacing budget, content verdict, staging exhaustion, render-worker wait, GPU wait, late drawable or true GPU backlog.
+- Correct only the misclassified or unnecessarily expensive path while preserving overload protection when interpolation reduces game speed.
+- Demonstrate the result in repeatable rendered measurements and a live Game Mode player test.
+
+## Success and constraints
+
+| Metric | Baseline | Target | Validation |
+|---|---:|---:|---|
+| Game rate | About 30 FPS in the reported live view | No worse than control by 2% | Fixed-view paired Game Mode captures |
+| Smooth Motion delivery | Automatic mode can report `paused`; exact cause not yet classified | Fewer missing in-between frames for the proven false-overload path | Pacing/verdict counters and displayed/interpolated frame ratio |
+| Pacing transitions | Existing `[interp-pace]` reason strings | Every budget drop attributable to a typed cause and measured wait | Session log plus focused test |
+| GPU/presentation | 11/12 samples at 99–100% with Smooth Motion | Lower wait/backlog or more delivered frames for equal game speed | GPU busy/clock, present, slot and staging waits |
+| Correctness | #501 rendered output/checkpoints | No guest, camera-cut or interpolation-content regression | Frame-interpolation tests, pictures and checkpoints |
+
+A continuously busy GPU is not itself a failure if it delivers the requested frames and leaves game speed intact. The plan does not assume the heuristic is wrong; a true sustained overload may correctly reduce interpolation. Private states, disc content and translated modules stay off GitHub.
+
+## Clarifications
+
+- “GPU-bound with Smoothness on” means the live Lava Room presentation path described in #501, not the headless or interpolation-disabled benchmark.
+- The fix belongs in RecompCore if it changes Aurora pacing or interpolation. BlueWake then pins the reviewed RecompCore commit and carries its exported patch according to repository policy.
+
