@@ -199,6 +199,45 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
+    # Source-only contracts for helpers awaiting whole-module qualification.
+    foreach(_variant plain global cache)
+        set(TEST_TARGET bluewake_gather_memory_${_variant}_test)
+        add_executable(${TEST_TARGET}
+            ${BLUEWAKE_REPO_ROOT}/tests/gather_memory_test.c
+            ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+        target_include_directories(${TEST_TARGET} PRIVATE
+            ${BLUEWAKE_REPO_ROOT}/cmake/composite ${GXRUNTIME_DIR}/tests)
+        target_link_libraries(${TEST_TARGET} PRIVATE gxruntime)
+        set_target_properties(${TEST_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
+        if(_variant STREQUAL "global")
+            target_compile_definitions(${TEST_TARGET} PRIVATE
+                BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+        elseif(_variant STREQUAL "cache")
+            target_compile_definitions(${TEST_TARGET} PRIVATE BLUEWAKE_GATHER_ALIAS_CACHE=1)
+        endif()
+        add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+    endforeach()
+
+    # RecompCore #48's guest-alias resolver against the registration-order rule it
+    # implements (11 million accesses, overlapping sets, removes, page edges).
+    foreach(_variant plain global)
+        set(TEST_TARGET bluewake_guest_alias_lookup_${_variant}_test)
+        add_executable(${TEST_TARGET} ${GXRUNTIME_DIR}/tests/guest_alias_lookup_test.c)
+        target_link_libraries(${TEST_TARGET} PRIVATE gxruntime)
+        set_target_properties(${TEST_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
+        if(_variant STREQUAL "global")
+            target_compile_definitions(${TEST_TARGET} PRIVATE
+                BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+        endif()
+        add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+    endforeach()
+
+    # Smooth Motion: blending, verdicts, pacing and its overload/verdict counts.
+    add_executable(bluewake_frame_interp_test ${GXRUNTIME_DIR}/graphics/aurora/tests/frame_interp_test.cpp)
+    target_link_libraries(bluewake_frame_interp_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+    add_test(NAME bluewake_frame_interp_test COMMAND bluewake_frame_interp_test)
+    set_tests_properties(bluewake_frame_interp_test PROPERTIES TIMEOUT 30)
+
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_link_libraries(bluewake_linux_disc_test PRIVATE gxruntime GXRuntime::aurora xxhash)

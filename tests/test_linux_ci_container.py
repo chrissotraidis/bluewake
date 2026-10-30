@@ -59,6 +59,23 @@ class ToolchainPolicyTest(unittest.TestCase):
         self.assertIn("--clang22 requires --ci-container", result.stderr)
 
 
+class GatherAliasCachePolicyTest(unittest.TestCase):
+    """Keep the measured gather optimization in normal Linux builds.
+
+    The plain conservative build remains available, and an explicit opt-out
+    keeps source-matched control builds possible without changing source.
+    """
+
+    def test_normal_linux_build_enables_the_cache(self):
+        self.assertIn("gather_alias_cache", BUILD.LINUX_DEFAULT_OPTIMIZATIONS)
+
+    def test_builder_exposes_an_explicit_control_opt_out(self):
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--help"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--no-gather-alias-cache", result.stdout)
+
+
 class LinuxContainerMountTest(unittest.TestCase):
     """The wrapper exposes only the paths the unchanged builder needs.
 
