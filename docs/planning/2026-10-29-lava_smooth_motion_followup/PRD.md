@@ -36,6 +36,8 @@ Headless result (M1-T04, later withdrawn for Game Mode): with Mailbox presentati
 
 In **Game Mode** the same Mailbox setting does not help: automatic pacing still pauses, and never pause still runs at 75–93% game speed, with 178 late drawables (4.8 s) in 50 s. The live compositor holds swapchain images in a way headless gamescope does not, so the cause is GPU and compositor capacity on the real display path, still to be attributed.
 
+**GPU fixed at 1600 MHz (Game Mode, never pause):** every GPU-side overload disappears (0 late drawables, 0 render-worker waits, 0 GPU behind, GPU 66% busy), yet game speed is 74–82% with the game thread 98% busy. The GPU has headroom, which fits Wind Waker HD running a steady 30 FPS on the Deck in Cemu with heavier lighting. The binding limit is the **game thread**: in this room it is about 97% busy with Smooth Motion off (≈ 10% headroom), and Smooth Motion's per-draw work on that thread exceeds it. The late drawables at automatic clocks are a secondary effect of the GPU governor holding 1040–1500 MHz.
+
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
 ## Outcomes
