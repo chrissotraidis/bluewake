@@ -465,6 +465,19 @@ required correctness steps. Mods, native replacements, and performance
 transformations are selectable additions. The BlueWake host remains a separate
 component, although Stage 6 may build it early to run PGO training playbacks.
 
+The supported Linux builder enables its certified optimization recipe by
+default, including inline GPR save/restore preparation and the generation-keyed
+gather-pipe alias cache. `--conservative` starts from the plain translation,
+and `--no-gather-alias-cache` disables that cache specifically. The Windows
+builder also enables inline GPR preparation by default; the gather-pipe alias
+cache is currently a Linux build option. Raw CMake keeps the low-level options
+off until a platform builder selects them. The constant-time guest-alias lookup
+is different: it belongs to the pinned RecompCore runtime and therefore needs
+no BlueWake build or runtime flag.
+[Linux defaults](../../scripts/linux/build.py),
+[Windows defaults](../../scripts/windows/build.py), and
+[module options](../../cmake/composite/CMakeLists.txt)
+
 ### Generate the composite source
 
 | Stage | What it does | Result | Artifact/output | Code reference |
@@ -480,6 +493,7 @@ component, although Stage 6 may build it early to run PGO training playbacks.
 | --- | --- | --- | --- | --- |
 | Build mod inputs | Applies the widescreen patches and Better Wind Waker option sites, then translates their changed DOL or REL inputs. | Translated source for each requested variant | `OUT/mods/*/translated/` | [`build_mod_variants.py`](../../scripts/mods/build_mod_variants.py), [Linux entry](../../scripts/linux/build.py) (`build_mods`), [Windows implementation](../../scripts/windows/build.py) (`build_mods`), [Apple hook](../../scripts/builder/profiles/bluewake.sh) (`profile_mods`) |
 | Add variants | Merges the selected alternatives into the base composite so the runtime can select them without separate modules. | Base, widescreen, Better Wind Waker, and combined variants | Variant source inside `OUT/composite-src/` | [Linux mod stage](../../scripts/linux/build.py) (`build_mods`), [Windows mod stage](../../scripts/windows/build.py) (`build_mods`), [Apple mod hook](../../scripts/builder/profiles/bluewake.sh) (`profile_mods`) |
+| Select the default recipe | Normal Linux builds select the certified optimization set, including inline GPR and the gather-pipe alias cache; conservative builds opt out. Windows selects its own certified default set. | Explicit platform-specific preparation flags | Builder arguments recorded in the preparation receipt | [Linux defaults](../../scripts/linux/build.py), [Windows defaults](../../scripts/windows/build.py) |
 | Prepare optimizations | Applies the selected native replacements and source transformations through a shared recipe. | Compile-ready optimized source | Updated `OUT/composite-src/` | [`module_optimizations.py`](../../scripts/builder/module_optimizations.py), [Linux preparation](../../scripts/linux/build.py) (`prepare_blocks`), [Windows preparation](../../scripts/windows/build.py) (`prepare_blocks`), [Apple dispatch](../../scripts/builder/build.sh) (step 6/9) |
 | Guard changes | Selected transformations check the source shape or digest they expect. Unselected transformations leave the verified base implementation in place; a failed selected transformation can stop the build. | Optional changes cannot silently target unknown generated code | Preparation logs and `OUT/composite-final.digest` | [`module_optimizations.py`](../../scripts/builder/module_optimizations.py), [Linux preparation](../../scripts/linux/build.py) (`prepare_blocks`), [Windows preparation](../../scripts/windows/build.py) (`prepare_blocks`), [Apple dispatch](../../scripts/builder/build.sh) (step 6/9) |
 
