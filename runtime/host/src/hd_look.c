@@ -851,8 +851,10 @@ static u32 sky_table(CPUState* cpu, u32 pointer, u32 count, u32 entry, const u8*
 // each palette the game is blending, blended as the game blends their colours
 // (dScnKy_env_light_c::setLight_palno_get and setLight): the hour's two
 // palettes of the last weather and of the new one, by the hour, then by the
-// weather's change. In g_env_light (0x803E4AB4). As the scene's brightness
-// after gamma (1/2.2): 3 at noon is 1.65, 2 in the morning 1.37.
+// weather's change. In g_env_light (0x803E4AB4). As the scene's brightness,
+// taken to the power 0.37: 3 at noon is 1.5, 2 in the morning 1.29. Gamma's
+// 1/2.2 (1.65 at noon) looked right on Windfall's dock and too strong in play,
+// on the islands' sand and rock; 0.25 lost HD's brilliance.
 enum {
     kEnvLight = 0x803E4AB4u,
     kEnvPselect = kEnvLight + 0x008u,   // mpPselectInfo (0xC each: palette ids[8], change rate)
@@ -1197,10 +1199,10 @@ static float sky_brightness(CPUState* cpu) {
     const float c = sky_factor_of(pale[2]), d = sky_factor_of(pale[3]);
     const float prev = a + ab * (b - a), curr = c + ab * (d - c);
     const float factor = prev + cb * (curr - prev);
-    static float s_scale = -1.0f;  // BLUEWAKE_HD_SKY_GAMMA: the power the factor is taken to (1/2.2)
+    static float s_scale = -1.0f;  // BLUEWAKE_HD_SKY_GAMMA: the power the factor is taken to (0.37)
     if (s_scale < 0.0f) {
         const char* value = getenv("BLUEWAKE_HD_SKY_GAMMA");
-        s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.0f / 2.2f;
+        s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 0.37f;
     }
     return powf(factor, s_scale);
 }
