@@ -56,6 +56,8 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Reframed question (2026-10-30):** a GameCube game at 720p should not need a second full render to show an in-between frame. The Lava Room has about 9,000 draws per game frame, and Smooth Motion redraws all of them, so it costs about as much power as rendering at a true 60 FPS. The goal becomes an in-between frame that costs much less than a real one.
 
+**Per pass:** the in-between replay's four EFB passes cost about the same as the real frame's (≈ 1.24 vs 1.16 ms each), and nothing else in it is significant. A cheaper in-between frame therefore has to draw less or draw more cheaply.
+
 **Direction (agreed 2026-10-30):** (1) a short Game Mode check of how much of the 10% the compositor and display add; (2) document automatic pacing as correct protection in this room, with the remaining effort on the game thread's own headroom; (3) then remove the intermediate constants copies as a measured, modest improvement.
 
 **Earlier M2 direction:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
