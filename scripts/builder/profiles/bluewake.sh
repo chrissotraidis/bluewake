@@ -43,8 +43,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The sea takes sun shadows but casts none, with no slope or normal bias, and the gap fill counts only what the sun shadow map holds: patches/recompcore/0189 (pdale-boop).
 # The sun shadow map's sun held at 24 degrees with its shadows thinning out from there, long shadows soft toward their tips, two debug views, its shadow a colour lit by the sky, as in Wind Waker HD, three cascades, a darkness the player chooses and less acne far off: patches/recompcore/0190 (pdale-boop).
 # A quad draw's three left-over vertices drawn as a triangle, as on the hardware (the stars), and the stars steady in Smooth Motion: patches/recompcore/0191 (pdale-boop).
+# The scene's brightness from the game, where there is depth and not the sea (Wind Waker HD's sunlight for the hour; the sea found by a mask from its textures): patches/recompcore/0192 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=e81e5800713309a5444ae234760732a7d7125e1c
+RECOMPCORE_SHA=259627f2d7f6fe34c9f22a74da4a92b35c55b890
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

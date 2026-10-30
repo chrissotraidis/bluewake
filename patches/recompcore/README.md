@@ -255,3 +255,14 @@ frontend dropped quads with fewer than four vertices, and the game draws each ni
 camera's eye plus its place on a small dome, and the in-between frames paired stars by their places in the world, so
 they jumped with the camera or half way to a neighbour; a three-vertex quad is now paired from the camera's eye and
 moved with each in-between camera's eye.
+
+Patch 0192 adds aurora_set_exposure: the scene brightened by the game's factor after the HD look's effects and before
+its bloom, where there is depth and not the sea. BlueWake sends Wind Waker HD's own factor for the hour's palettes,
+its sunlight 3 times at noon on actors and scenery, 1.65 after gamma. HD brightens the sun's light, not the sea or the
+sky. The sea is a mask, from the scene's draws drawn again: those that sample the sea's textures (d_a_sea's water,
+the island rooms' ring of sea and their beaches' surf, by the texture packs' hash) and the sea rooms' untextured
+square of sea, covered by what writes depth in front of them. A height band above the sea had left beaches below a
+swell's height unlit and lit the swells' crests. Pools, rivers and falls count as the sea, and the brightness fades out
+from 10,000 to 25,000 units away (`DOL_AURORA_EXPOSURE_FAR`), where islands are the haze's colour, and tapers off on what is already bright
+(`DOL_AURORA_EXPOSURE_HIGHLIGHTS`, ice and white rock). `DOL_AURORA_SEA_MASK_DEBUG=1`
+shows the mask.
