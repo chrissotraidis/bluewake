@@ -50,6 +50,8 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Sizing (per-draw counters):** ≈ 930 helper jobs per game frame, ≈ 720 full constants copies, ≈ 930 blended blocks: about 0.5 GB/s of traffic in all, spread across stages. No single copy is a large lever.
 
+**Game Mode cause (same session, Smooth Motion toggled in the menu):** the game thread's IPC is unchanged (≈ −1%), but its clock falls from 3.45 to ≈ 3.13 GHz (−9%). The Deck shares a 15 W budget between CPU and GPU; with Smooth Motion on it runs at the cap (13–16 W) with the GPU 99–100% busy, and the CPU clock gives way. The lever in Game Mode is the **power** Smooth Motion costs, mostly the GPU's in-between replay and presentation, not memory traffic.
+
 **Direction (agreed 2026-10-30):** (1) a short Game Mode check of how much of the 10% the compositor and display add; (2) document automatic pacing as correct protection in this room, with the remaining effort on the game thread's own headroom; (3) then remove the intermediate constants copies as a measured, modest improvement.
 
 **Earlier M2 direction:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
