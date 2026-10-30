@@ -38,6 +38,8 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **GPU fixed at 1600 MHz (Game Mode, never pause):** every GPU-side overload disappears (0 late drawables, 0 render-worker waits, 0 GPU behind, GPU 66% busy), yet game speed is 74–82% with the game thread 98% busy. The GPU has headroom, which fits Wind Waker HD running a steady 30 FPS on the Deck in Cemu with heavier lighting. The binding limit is the **game thread**: in this room it is about 97% busy with Smooth Motion off (≈ 10% headroom), and Smooth Motion's per-draw work on that thread exceeds it. The late drawables at automatic clocks are a secondary effect of the GPU governor holding 1040–1500 MHz.
 
+**Game-thread CPU profile (headless, off vs never pause):** the game thread runs the same instructions (115.5 G vs 114.7 G) but needs 8.3% more cycles at the same 3.35 GHz (IPC 1.89 → 1.73), and its busy share rises from 91% to 99%. No Smooth Motion function appears on it. Smooth Motion adds about 5.8 s of CPU per 20 s on other threads (GX worker, render worker, Smooth Motion helper), which most likely share the game thread's core (SMT sibling) or its cache. The working hypothesis for M2 is to keep that work off the game thread's core.
+
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
 ## Outcomes
