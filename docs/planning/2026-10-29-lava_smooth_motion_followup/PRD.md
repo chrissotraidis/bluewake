@@ -52,6 +52,10 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Game Mode cause (same session, Smooth Motion toggled in the menu):** the game thread's IPC is unchanged (≈ −1%), but its clock falls from 3.45 to ≈ 3.13 GHz (−9%). The Deck shares a 15 W budget between CPU and GPU; with Smooth Motion on it runs at the cap (13–16 W) with the GPU 99–100% busy, and the CPU clock gives way. The lever in Game Mode is the **power** Smooth Motion costs, mostly the GPU's in-between replay and presentation, not memory traffic.
 
+**Charger and settings ruled out:** on the retail charger (AC online, battery full) the result is the same, since the 15 W cap is the APU's own limit. The Game Mode settings are already light: 1280×720 frame buffer, render scale 1, every HD-look effect off.
+
+**Reframed question (2026-10-30):** a GameCube game at 720p should not need a second full render to show an in-between frame. The Lava Room has about 9,000 draws per game frame, and Smooth Motion redraws all of them, so it costs about as much power as rendering at a true 60 FPS. The goal becomes an in-between frame that costs much less than a real one.
+
 **Direction (agreed 2026-10-30):** (1) a short Game Mode check of how much of the 10% the compositor and display add; (2) document automatic pacing as correct protection in this room, with the remaining effort on the game thread's own headroom; (3) then remove the intermediate constants copies as a measured, modest improvement.
 
 **Earlier M2 direction:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
