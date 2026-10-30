@@ -1,6 +1,6 @@
 # TECH_PLAN — Lava Room Smooth Motion follow-up
 
-Status: Planning only  
+Status: M0 and M1 done; M2 attribution in progress  
 Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; performance baseline [#501](https://github.com/chrissotraidis/bluewake/pull/501) at `2749e6a194dcdba93846ebd925a33c4f95c695ab`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -12,30 +12,45 @@ Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; performance baselin
 - #501's live check found continuous aggregate GPU saturation with Smooth Motion on and burst/idle behavior off, while BlueWake CPU remained about the same. This is evidence of interpolation/presentation pressure, not yet proof of the wrong overload source.
 - The [graphics architecture](../../architecture/Graphics.md#synchronization-and-completion) separates guest GX production, Aurora/Dawn GPU work and presentation; all three must be timed in the same window.
 
+### Established by M0 and M1 (2026-10-30)
+
+- **Automatic pacing works as designed.** In the Lava Room it keeps full game speed by pausing in-between frames; never pause costs about 10% game speed in Game Mode.
+- **The content verdict is not involved:** 0 frames rejected across every run.
+- **Present mode is not the lever.** Headless gamescope showed FIFO backpressure, but on the live Game Mode display FIFO and Mailbox behave the same (late drawables 200 vs 178 per 50 s, game speed 75–92% vs 75–93%).
+- **GPU capacity is not the limit.** With the GPU fixed at 1600 MHz, all GPU-side overloads disappear (0 late drawables, 0 render-worker waits) and the GPU is 66% busy, yet game speed is 74–82%.
+- **The game thread is the limit, through memory contention.** With Smooth Motion on, the game thread runs the same instructions at lower IPC (1.89 → 1.73, same 3.35 GHz). Pinning it alone on a core halves that loss but does not restore speed. A synthetic memory-streaming load with Smooth Motion off cuts its IPC by 38%. CPU and GPU share LPDDR5 on the Deck.
+- **Copies are not the source.** The same 9.5 MB of vertices are copied per game frame with Smooth Motion on and off; the in-between data is about 3.2 MB per game frame. The longer copy zone is queue wait behind the replay (queue ordering, [Graphics.md](../../architecture/Graphics.md#from-guest-bytes-to-a-gpu-resource)).
+- **Spin-waiting is ruled out by the source:** the frame-slot, staging and pacing waits sleep in `wait_for_gpu_progress`.
+- **Provisional:** runs that isolate parts of Smooth Motion pointed to matching and blending on the CPU (GX worker capture/keying plus the helper's blending) rather than the upload or the replay. Run-to-run IPC spread for one setup was up to 8% (1.858 vs 2.014), larger than the effect, so a 5-round interleaved repeat is required before this selects M2.
+
+### Earlier observations
+
 - M0 (Deck, 2026-10-30): automatic pacing holds full game speed by pausing; never pause costs about 10% game speed. Retries drop on late drawables (`aurora.cpp` acquire ≥ 20 ms) and render-worker waits; content verdict rejects 0.2–0.3%. See the [PRD's M0 findings](PRD.md#m0-findings-2026-10-30).
-- `gpu_prof` brackets only the real frame (`frame_begin`/`frame_end` around the redraw encoder; `present_with_in_between` ends it before the "In-between frame encoder"), so `[gpu-prof]` omits the replayed passes. M1 must add a zone for the in-between replay before GPU cost can be attributed.
+- `gpu_prof` bracketed only the real frame, so `[gpu-prof]` omitted the replayed passes. M1 added a frame and an `In-between replay` zone for it ([RecompCore #49](https://github.com/chrissotraidis/RecompCore/pull/49)).
 
 ## Decision flow
 
 ```mermaid
 flowchart TD
-    Run["Same Lava view<br/>automatic pacing"]
-    Count["Count delivered, budget-skipped<br/>and verdict-rejected frames"]
-    Cause{"Why were frames missing?"}
-    Verdict["Content verdict<br/>camera cut / mismatch"]
-    Present["Present or drawable<br/>backpressure"]
-    GPU["Staging or real<br/>GPU backlog"]
-    Fix["Change only the<br/>proven cause"]
-    Protect["Forced-overload test<br/>still protects game speed"]
+    Loss["Smooth Motion on:<br/>game speed −10%, pauses"]
+    Verdict["Content verdict<br/>(0 rejected)"]
+    Present["Present mode<br/>(FIFO = Mailbox in Game Mode)"]
+    GPU["GPU capacity<br/>(1600 MHz: no overloads, still slow)"]
+    Spin["Spin-waiting<br/>(waits sleep)"]
+    Mem["Game thread IPC loss:<br/>shared memory contention"]
+    Match["Matching and blending on CPU<br/>(provisional: confirm over noise)"]
+    Upload["Upload / replay<br/>(no measurable extra loss)"]
+    Fix["M2: cut matching's<br/>per-draw work and traffic"]
+    Protect["Game-thread IPC within 2% of off;<br/>pacing still protects speed"]
 
-    Run --> Count --> Cause
-    Cause --> Verdict
-    Cause --> Present
-    Cause --> GPU
-    Verdict --> Fix
-    Present --> Fix
-    GPU --> Fix
-    Fix --> Protect
+    Loss -.->|ruled out| Verdict
+    Loss -.->|ruled out| Present
+    Loss -.->|ruled out| GPU
+    Loss -.->|ruled out| Spin
+    Loss --> Mem
+    Mem --> Match
+    Mem -.->|ruled out| Upload
+    Match --> Fix --> Protect
 ```
 
 ## Changes
@@ -43,11 +58,14 @@ flowchart TD
 | Status | File / symbol | Practical edit | Milestone | Architecture |
 |---|---|---|---|---|
 | Existing | RecompCore `frame_interp.cpp::pace_steps`, `frame_verdict` | Preserve current control and expose which path suppressed interpolation | M0–M1 | [Smooth Motion](../../architecture/Graphics.md#textures-frame-buffers-and-presentation) |
-| Proposed | RecompCore `frame_interp.hpp/.cpp` | Replace unstructured overload strings at the internal boundary with typed causes and counters; keep readable logs | M1 | Pacing ownership |
-| Proposed | RecompCore `common.cpp` overload producers | Record wait duration and source for slot, staging, GPU-backlog and drawable events | M1 | [Synchronization](../../architecture/Graphics.md#synchronization-and-completion) |
-| Proposed | RecompCore `common.cpp::present_with_in_between`, `webgpu/gpu_prof` | Time the in-between replay as its own GPU zone so `[gpu-prof]` covers every presented frame | M1 | GPU attribution |
-| Proposed | RecompCore `frame_interp_test.cpp` | Cover classification, 3-of-8 policy, recovery and forced overload | M1–M2 | Source-only correctness |
-| Proposed | Cause-selected pacing/render path | Adjust only the source proven false or unnecessarily expensive | M2 | Determined by M1 |
+| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)) | RecompCore `frame_interp.hpp/.cpp` | Replace unstructured overload strings at the internal boundary with typed causes and counters; keep readable logs | M1 | Pacing ownership |
+| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)) | RecompCore `common.cpp` overload producers | Record wait duration and source for slot, staging, GPU-backlog and drawable events | M1 | [Synchronization](../../architecture/Graphics.md#synchronization-and-completion) |
+| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)) | RecompCore `common.cpp::present_with_in_between`, `present_steps`, `webgpu/gpu_prof` | Time the in-between replay as its own GPU zone so `[gpu-prof]` covers every presented frame | M1 | GPU attribution |
+| Done for M1 ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)); M2 to extend | RecompCore `frame_interp_test.cpp`, BlueWake `linux/CMakeLists.txt` | Cover classification, 3-of-8 policy, recovery and forced overload; run the test in Linux CI | M1–M2 | Source-only correctness |
+| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)), diagnostic | RecompCore `common.cpp`, `DOL_AURORA_FRAME_INTERP_ABLATE` | `match` / `upload`: run matching (and the upload) but present the real frame again, to attribute cost | M2 | Measurement only |
+| Proposed | RecompCore `frame_interp.cpp` capture/blend, `gxcore_draw.cpp` job queue | Candidate 1: skip capture and blending for draws whose matrices did not change since the previous frame, reusing the real frame's constants in the replay | M2 | [Smooth Motion](../../PERFORMANCE_OPTIMIZATIONS.md#smooth-motion-in-between-frames) |
+| Proposed | RecompCore GX-worker capture (`capture_draw`, `queue_interp_job`) | Candidate 2: capture straight into the helper's job, without intermediate vectors | M2 | GX worker |
+| Proposed | BlueWake `scripts/rendered_run.py` | Option to keep the pipeline cache between runs; record cold/warm in results | M2–M3 | [Testing](../../architecture/Testing.md) |
 | Proposed | BlueWake dependency pin/patch and performance docs | Deliver the reviewed RecompCore change and document the measured policy | M3 | [Build dependencies](../../architecture/Build.md) |
 
 ## Contract and proposed interface
@@ -74,7 +92,8 @@ The controller may still print the existing player-readable reason. Typed cause,
 | M0 control | Same #501 build/state/view; automatic, never-pause and off | Build hashes, exact settings, ≥5 fixed windows per mode | Different camera/state makes comparison inconclusive |
 | Classification | Per-frame counters and `[interp-pace]` transitions | Delivered, budget-skipped, verdict-rejected and overload-cause counts sum consistently | Ambiguous `paused` alone cannot select M2 |
 | Source tests | RecompCore frame-interpolation test | Sparse overload does not drop; 3/8 does; recovery works; cuts still reject | Compile-only fails the gate |
-| Performance | Matched control/candidate with Smooth Motion on | Game FPS within 2%; more delivered frames or lower measured wait/backlog | Higher GPU use alone is neither pass nor fail |
+| Attribution | `rendered_run.py --cpu-profile`, Lava Room state, window 136600–137800, ≥ 5 interleaved rounds per mode, warm pipeline cache | Mean and spread of game-thread IPC; an effect counts only beyond the spread | 2 runs per mode is not enough (spread up to 8%) |
+| Performance | Matched control/candidate with Smooth Motion on, same method | Game-thread IPC with Smooth Motion on within 2% of off; Game Mode game speed within 2% of off with automatic pacing keeping in-between frames | Higher GPU use alone is neither pass nor fail |
 | Protection | Forced render load plus normal five-scene rendered run | Genuine overload still protects game speed; no image/checkpoint regression | Missing hardware run leaves M3 open |
 | Platform | Linux/Windows BlueWake CI after pin | RecompCore tests compile/run through supported host builds | Deck result does not replace Windows CI |
 
@@ -94,6 +113,9 @@ Critical path: M0 → M1 → M2 → M3. M2 cannot start from aggregate GPU load 
 - [#470](https://github.com/chrissotraidis/bluewake/pull/470) remains a workaround/control, not the root fix.
 - Open [#492](https://github.com/chrissotraidis/bluewake/pull/492) provides the rendered harness used by #501; until merged, record its exact revision with every run.
 - Aggregate AMD GPU busy includes Gamescope. Use BlueWake waits/counters and fixed-window comparisons for attribution.
+- Headless gamescope has no real scanout: it hid the Game Mode presentation behaviour. Presentation conclusions need Game Mode runs.
+- `rendered_run.py` starts every run with an empty data folder and pipeline cache. Reuse a folder per mode (warm after its first run) until the script has an option for it.
+- The Deck's memory-traffic counters need root, so memory attribution relies on runs that isolate parts of Smooth Motion and on the synthetic memory load.
 
 ## References
 

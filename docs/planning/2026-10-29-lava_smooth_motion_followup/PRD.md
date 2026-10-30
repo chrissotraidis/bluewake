@@ -44,9 +44,11 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Memory bandwidth is the shared resource.** With Smooth Motion off, a synthetic memory-streaming load on CPUs 4–7 (≈ 12 GB/s) cuts the game thread's IPC by 38% (1.89 → 1.18) for the same instructions, and game speed to 19 FPS. On the Deck, the CPU and GPU share LPDDR5, so Smooth Motion's traffic counts on both sides: about 9.5 MB of vertex staging copies per game frame, the in-between data, the in-between replay, and twice the presents. This also explains why fixing the GPU at 1600 MHz made the game slower, not faster. Spin-waiting is ruled out: the frame-slot, staging and pacing waits sleep (`wait_for_gpu_progress`).
 
-**Attribution by ablation (M2-T01):** the vertex bytes copied are the same with Smooth Motion on and off (9.5 MB per game frame); the copy zone's longer time is queue wait. The in-between data is about 3.2 MB per game frame. With `DOL_AURORA_FRAME_INTERP_ABLATE`, the game thread loses as much with matching and blending alone (IPC −5.3%) as with full Smooth Motion (−4.7%); adding the upload or the in-between redraw changes nothing measurable.
+**Attribution by isolating parts of Smooth Motion (M2-T01):** the vertex bytes copied are the same with Smooth Motion on and off (9.5 MB per game frame); the copy zone's longer time is queue wait. The in-between data is about 3.2 MB per game frame. With `DOL_AURORA_FRAME_INTERP_ABLATE`, the game thread loses as much with matching and blending alone (IPC −5.3%) as with full Smooth Motion (−4.7%); adding the upload or the in-between redraw changes nothing measurable.
 
-**M2 direction:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
+**Provisional:** a later check found run-to-run spread of up to 8% in game-thread IPC for the same setup (1.858 vs 2.014), larger than the 5% seen in the matching-only runs. A 5-round interleaved repeat with warm pipeline caches decides whether this attribution holds.
+
+**M2 direction, if it holds:** reduce the memory traffic of Smooth Motion's per-draw matching and blending on the CPU (the helper thread and the capture on the GX side), not the GPU replay.
 
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
