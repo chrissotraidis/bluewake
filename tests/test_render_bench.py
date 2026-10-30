@@ -122,6 +122,21 @@ class Plan(unittest.TestCase):
             folder.rename(plain)
             self.assertEqual(render_bench.build_info(plain)['commit'], '8d8587b37c36')
 
+    def test_a_windows_build_is_a_build_with_its_own_commit(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d) / 'build' / 'gpr-main' / 'BlueWake'
+            folder.mkdir(parents=True)
+            (folder / 'BlueWake.exe').write_bytes(b'x')
+            (folder / 'BuilderProvenance.json').write_text(json.dumps(
+                {'profile': 'bluewake-windows', 'source_commit': 'a7731853c197cc9763a86d62e731d65ca0b25556',
+                 'source_modified': False, 'module_sha256': 'd9' * 32}))
+            # The build folder scripts/windows/build.py makes (--out), its BlueWake/, or its BlueWake.exe.
+            for given in (folder.parent, folder, folder / 'BlueWake.exe'):
+                info = render_bench.build_info(given)
+                self.assertEqual((info['commit'], info['path'], info['module_sha256']),
+                                 ('a7731853c197', str(folder.resolve()), 'd9' * 32), given)
+                self.assertEqual(render_bench.build_image(given), (folder / 'BlueWake.exe').resolve(), given)
+
     def test_a_file_that_is_not_a_state_has_no_retrace(self):
         with tempfile.NamedTemporaryFile() as f:
             f.write(b's\n')

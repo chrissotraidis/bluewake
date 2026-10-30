@@ -19,7 +19,10 @@ BlueWake/ subfolder or its bluewake; its commit is the folder's
 BuilderProvenance.json, and on a target the folder is copied there without
 its user/ and logs/. On a Mac, a build is a
 BlueWake.app or a build folder holding packaged/BlueWake.app (build/macos),
-run here only; its commit is the app's own (BuilderProvenance.json).
+run here only; its commit is the app's own (BuilderProvenance.json). On
+Windows (run this under Git Bash), a build is a build folder (build/NAME),
+its BlueWake/ or its BlueWake.exe, run here only; its commit is the folder's
+BuilderProvenance.json.
 
 Scenes:
   (default)                 the benchmark tour of scripts/bench_tour.py:
@@ -58,8 +61,9 @@ Target:
                             without it, the target's own
                             (~/.local/share/BlueWake/GZLE01.card) is used for
                             that, there (on a Mac, ~/Library/Application
-                            Support/BlueWake/GZLE01.card). Only read, and only
-                            needed until the state exists
+                            Support/BlueWake/GZLE01.card; on Windows,
+                            %APPDATA%\BlueWake\GZLE01.card). Only read, and
+                            only needed until the state exists
   --display auto|headless|desktop
                             headless runs the game under offscreen gamescope;
                             desktop uses the running session (DISPLAY=:0)
@@ -77,6 +81,7 @@ report.html, summary.json and, for scenes whose pictures differ,
 worst-<scene>.png (A, B and their difference). raw/ holds what the analysis
 read: collected.json, each run's logs and the differing scenes' frames. Analysis needs numpy and Pillow
 here (pip install --user numpy pillow); the target needs python3 and tar.
+On Windows the analysis runs under python (set PYTHON to choose another).
 
 Remote runs use your SSH keys and ~/.ssh/config, or ask for the password once.
 Exit: 0 passed, 1 a check failed (a run failed, checkpoints differ, pictures
@@ -90,7 +95,7 @@ die() {
 }
 
 find_image() {
-    local given=$1 directory count app image
+    local given=$1 directory count app image folder
     if [[ -f "$given" ]]; then
         realpath "$given"
         return
@@ -101,6 +106,13 @@ find_image() {
     for app in "$directory" "$directory/BlueWake.app" "$directory/packaged/BlueWake.app"; do
         if [[ $app == *.app && -x "$app/Contents/MacOS/BlueWake" ]]; then
             printf '%s\n' "$app/Contents/MacOS/BlueWake"
+            return
+        fi
+    done
+    # A Windows build: its BlueWake.exe (in the folder, or in the build folder's BlueWake/).
+    for folder in "$directory" "$directory/BlueWake"; do
+        if [[ -f "$folder/BlueWake.exe" ]]; then
+            printf '%s\n' "$folder/BlueWake.exe"
             return
         fi
     done
@@ -179,23 +191,35 @@ done
 [[ -z "$states" || -d "$states" ]] || die "no such folder: $states"
 [[ -z "$card" || -f "$card" ]] || die "no such card: $card"
 mac=0
-[[ $(uname -s) == Darwin ]] && mac=1
-if [[ -z "$target" && $mac -eq 1 && " ${options[*]-} " == *" --cpu-profile "* ]]; then
+windows=0
+case $(uname -s) in
+    Darwin) mac=1 ;;
+    MINGW*|MSYS*|CYGWIN*) windows=1 ;;
+esac
+if [[ -z "$target" && $((mac + windows)) -eq 1 && " ${options[*]-} " == *" --cpu-profile "* ]]; then
     die "--cpu-profile needs Linux perf: run it on a Linux target"
 fi
+# The Python that runs the harness and the analysis here: on Windows python (python3 is often the Store's
+# stand-in), given paths it can read (C:/..., not Git Bash's /c/...).
+python=${PYTHON:-python3}
+[[ $windows -eq 1 ]] && python=${PYTHON:-python}
+native() {
+    if [[ $windows -eq 1 ]]; then cygpath -m "$1"; else printf '%s\n' "$1"; fi
+}
 
 scripts=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 harness=(render_bench.py rendered_run.py bench_tour.py)
 for file in "${harness[@]}" frame_compare.py; do
     [[ -f "$scripts/$file" ]] || die "missing beside render_bench: $file"
 done
-python3 -c 'import numpy, PIL' 2>/dev/null || die "the analysis here needs numpy and Pillow: pip install --user numpy pillow"
+"$python" -c 'import numpy, PIL' 2>/dev/null || die "the analysis here needs numpy and Pillow: pip install --user numpy pillow"
 
 names=(A B)
 images=()
 for i in "${!builds[@]}"; do
     images+=("$(find_image "${builds[$i]}")")
     [[ -n "$target" && ${images[$i]} == */Contents/MacOS/BlueWake ]] && die "a Mac app runs here only, not on $target"
+    [[ -n "$target" && ${images[$i]} == */BlueWake.exe ]] && die "a Windows build runs here only, not on $target"
     printf '%s%s: %s\n' "${names[$i]}" "$([[ $i -eq 1 ]] && echo ' (reference)')" "${images[$i]}"
 done
 # One folder for the run, here: YYYY_MM_DD-HHMMSS, the reports flat in it and the raw data in raw/.
@@ -207,26 +231,28 @@ out=$(realpath "$out")
 raw=$out/raw
 analyze=()
 for i in "${!images[@]}"; do
-    analyze+=(--build "${names[$i]}=${images[$i]}")
+    analyze+=(--build "${names[$i]}=$(native "${images[$i]}")")
 done
 status=0
 
 if [[ -z "$target" ]]; then
     apps=()
     for i in "${!images[@]}"; do
-        apps+=(--app "${names[$i]}=${images[$i]}")
+        apps+=(--app "${names[$i]}=$(native "${images[$i]}")")
     done
-    [[ -n "$states" ]] && options+=(--states "$(realpath "$states")")
+    [[ -n "$states" ]] && options+=(--states "$(native "$(realpath "$states")")")
     if [[ $mac -eq 1 ]]; then
         card=${card:-$HOME/Library/Application Support/BlueWake/GZLE01.card}
+    elif [[ $windows -eq 1 ]]; then
+        card=${card:-$(cygpath -u "${APPDATA:-}")/BlueWake/GZLE01.card}
     else
         card=${card:-$HOME/.local/share/BlueWake/GZLE01.card}
     fi
-    [[ -f "$card" ]] && options+=(--card "$(realpath "$card")")
+    [[ -f "$card" ]] && options+=(--card "$(native "$(realpath "$card")")")
     printf 'Running here; results in %s\n' "$out"
     # ${options[@]+...}: an empty array is unbound to a Mac's bash 3.2 under set -u.
-    python3 -u "$scripts/render_bench.py" collect "$raw" "${apps[@]}" ${options[@]+"${options[@]}"} </dev/null ||
-        status=$?
+    "$python" -u "$(native "$scripts/render_bench.py")" collect "$(native "$raw")" "${apps[@]}" \
+        ${options[@]+"${options[@]}"} </dev/null || status=$?
 else
     for dependency in ssh scp tar; do
         command -v "$dependency" >/dev/null || die "missing local dependency: $dependency"
@@ -327,14 +353,15 @@ CHECK
             printf 'Copying back the frames of %s (A and B differ)...\n' "$scene"
             "${ssh_command[@]}" "$target" "cd $(quote "$root/out") && tar czf - $(quote "frames/$scene")" \
                 </dev/null | tar xzf - -C "$raw"
-        done < <(python3 "$scripts/render_bench.py" differing "$raw")
+        done < <("$python" "$(native "$scripts/render_bench.py")" differing "$(native "$raw")")
     fi
     [[ $keep_remote -eq 1 ]] && printf 'Left on the target: %s:%s\n' "$target" "$root"
 fi
 
 [[ -s "$raw/collected.json" ]] || die "the target collected nothing (exit $status)"
 printf '\nAnalysing here...\n'
-python3 "$scripts/render_bench.py" analyze "$raw" "${analyze[@]}" --into "$out" || status=$?
+"$python" "$(native "$scripts/render_bench.py")" analyze "$(native "$raw")" "${analyze[@]}" --into "$(native "$out")" ||
+    status=$?
 printf '\n'
 cat "$out/report.txt"
 printf '\nResults: %s (report.md, report.txt, report.html, summary.json; raw/ has every run)\n' "$out"

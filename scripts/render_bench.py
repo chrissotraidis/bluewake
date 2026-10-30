@@ -129,6 +129,13 @@ def gpu_name():
                                  timeout=20).stdout
             names = [l.split(":", 1)[1].strip() for l in out.splitlines() if l.strip().startswith("Chipset Model:")]
             return names[0] if names else ""
+        if sys.platform == "win32":
+            out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  "(Get-CimInstance Win32_VideoController).Name"], capture_output=True, text=True,
+                                 timeout=20).stdout
+            names = [l.strip() for l in out.splitlines() if l.strip()]
+            # The first that isn't a display adapter only (Microsoft's basic one, a remote desktop's).
+            return next((n for n in names if not n.startswith("Microsoft ")), names[0] if names else "")
         out = subprocess.run(["vulkaninfo", "--summary"], capture_output=True, text=True, timeout=20).stdout
         names = [l.split("=", 1)[1].strip() for l in out.splitlines() if l.strip().startswith("deviceName")]
         return names[0] if names else ""
@@ -247,7 +254,7 @@ def collect(args):
     collected = {"host": socket.gethostname(), "machine": platform.platform(), "gpu": gpu_name(),
                  "mode": "headless" if args.headless else "rendered",
                  "display": {"headless": f"headless gamescope {size}",
-                             "desktop": "a window" if sys.platform == "darwin" else "desktop session",
+                             "desktop": "a window" if sys.platform in ("darwin", "win32") else "desktop session",
                              "none": "no renderer"}[mode],
                  "builds": builds, "apps": {name: app.name for name, app in apps},
                  "kind": "states" if args.states else "tour", "retraces": args.retraces, "every": args.every,
@@ -410,9 +417,20 @@ def linux_folder(path):
     return None
 
 
+def windows_folder(path):
+    """The folder a Windows build is (BlueWake.exe beside its game module, as scripts/windows/build.py packages it
+    in build/NAME/BlueWake): the folder, the build folder holding BlueWake/, or its BlueWake.exe; None if PATH is
+    not one."""
+    path = Path(path).resolve()
+    for folder in (path.parent if path.name.lower() == "bluewake.exe" else path, path / "BlueWake"):
+        if (folder / "BlueWake.exe").is_file():
+            return folder
+    return None
+
+
 def build_image(path):
     """A build's AppImage: the file itself, or BlueWake-x86_64.AppImage (else the first *.AppImage) in a folder.
-    A Mac build's is its app's executable, a Linux folder build's its bluewake."""
+    A Mac build's is its app's executable, a Linux folder build's its bluewake, a Windows build's its BlueWake.exe."""
     path = Path(path).resolve()
     app = mac_app(path)
     if app:
@@ -420,6 +438,9 @@ def build_image(path):
     folder = linux_folder(path)
     if folder:
         return folder / "bluewake"
+    folder = windows_folder(path)
+    if folder:
+        return folder / "BlueWake.exe"
     if path.is_dir():
         images = sorted(path.glob("*.AppImage"))
         return path / "BlueWake-x86_64.AppImage" if (path / "BlueWake-x86_64.AppImage").is_file() else images[0]
@@ -439,9 +460,9 @@ def build_info(path):
     SHA-256 of its AppImage."""
     image = build_image(path)
     app = mac_app(image)
-    folder = None if app else linux_folder(image)
+    folder = None if app else linux_folder(image) or windows_folder(image)
     if app or folder:
-        # A Mac app or a Linux folder build says what it was built from, its game module's hash too.
+        # A Mac app or a Linux or Windows folder build says what it was built from, its game module's hash too.
         made = provenance(app / "Contents" / "Resources" / "BuilderProvenance.json" if app
                           else folder / "BuilderProvenance.json")
         commit = (made.get("source_commit") or "")[:12] or None

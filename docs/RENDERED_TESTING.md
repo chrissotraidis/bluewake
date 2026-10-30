@@ -75,8 +75,12 @@ beside `gGZLE01_recomp.so`, is its folder, its `BlueWake/` subfolder or its `blu
 `BuilderProvenance.json`, and on a target the folder is copied there without its `user/` (your settings and saves)
 and `logs/`. On a Mac it runs here only: a build is a `BlueWake.app` or
 a build folder holding `packaged/BlueWake.app` (`build/macos`), its commit the app's own (`BuilderProvenance.json`),
-and the card `~/Library/Application Support/BlueWake/GZLE01.card`. The game's window opens on screen, so run it
-with the screen locked if it shouldn't be seen; rendered runs work locked. `--cpu-profile` needs Linux `perf`.
+and the card `~/Library/Application Support/BlueWake/GZLE01.card`. On Windows it runs here only, under Git Bash: a
+build is a build folder `scripts/windows/build.py` made (`build\NAME`), its `BlueWake\` or its `BlueWake.exe`, its
+commit the folder's `BuilderProvenance.json`, and the card `%APPDATA%\BlueWake\GZLE01.card`. The harness and the
+analysis run under `python` there (`python3` is often the Microsoft Store's stand-in; set `PYTHON` for another). The
+game's window opens on screen, so run it with the screen locked if it shouldn't be seen; rendered runs work locked.
+`--cpu-profile` needs Linux `perf`.
 
 **Scenes.** By default, the benchmark tour of [`bench_tour.py`](BENCHMARK_TOUR.md): Outset, Windfall, Dragon Roost
 Cavern, Forest Haven and the sea by the Fortress, one every 1800 retraces (`BLUEWAKE_TEST_WARP`), from a save state
@@ -150,6 +154,9 @@ own processes in user space; `render_bench` checks for `perf` before it starts.
 
    # Two Linux folder builds, copied to the target for the run
    scripts/render_bench deck@10.10.20.168 build/portable-new/BlueWake build/portable-main/BlueWake
+
+   # Two Windows builds, here (Git Bash), from your own states
+   scripts/render_bench build/candidate build/main --states test_render/states --card my.card
 
    # One build only, five runs
    scripts/render_bench deck@10.10.20.168 build/artifacts/gather-candidate/latest --runs 5
