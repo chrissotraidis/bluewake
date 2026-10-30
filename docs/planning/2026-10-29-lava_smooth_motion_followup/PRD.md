@@ -40,6 +40,8 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Game-thread CPU profile (headless, off vs never pause):** the game thread runs the same instructions (115.5 G vs 114.7 G) but needs 8.3% more cycles at the same 3.35 GHz (IPC 1.89 → 1.73), and its busy share rises from 91% to 99%. No Smooth Motion function appears on it. Smooth Motion adds about 5.8 s of CPU per 20 s on other threads (GX worker, render worker, Smooth Motion helper), which most likely share the game thread's core (SMT sibling) or its cache. The working hypothesis for M2 is to keep that work off the game thread's core.
 
+**Pinning test:** with the game thread alone on its core (sibling idle), the per-instruction gap halves (−8.4% → −4.6%), but game speed does not recover (29.84 → 28.86 FPS). SMT sharing is not the main factor. The remaining suspects are shared L3 and memory traffic from Smooth Motion's other threads, and spin-waiting on frame slots in `camera_steps`.
+
 The goal therefore narrows: make the in-between frames cheap enough (GPU replay or presentation path) that automatic pacing keeps them, rather than loosening pacing.
 
 ## Outcomes
