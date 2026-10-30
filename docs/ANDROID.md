@@ -190,7 +190,8 @@ same touch controls, the same settings under the same names.
   Resolution, Texture Filtering, Aspect Ratio), Gameplay (Jump & Sprint, Fast Transitions, Quick Doors), Mods
   (Widescreen 16:9 and 16:10, HD Texture Pack, Better Wind Waker and its settings, Install Texture Pack),
   Controller (Camera Stick, Button Mapping), Touch Controls (show or hide, Touch Control Settings, Move Controls),
-  Game Data & Saves (Back Up Saves, Restore Saves, Import Dolphin Save, Where Are My Files?, Remove Disc Image) and
+  Game Data & Saves (Back Up Saves, Restore Saves, Import Dolphin Save, Export Dolphin Save, Where Are My Files?,
+  Remove Disc Image) and
   Help & Feedback (Report a Problem on GitHub, Share Session Log). Back works the menu too: out of a submenu, and
   with nothing open it opens the menu. It never closes the game.
 - **Touch controls**: the iPhone app's buttons, colors and layouts, every GameCube button. On a phone, with the
