@@ -54,9 +54,11 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Charger and settings ruled out:** on the retail charger (AC online, battery full) the result is the same, since the 15 W cap is the APU's own limit. The Game Mode settings are already light: 1280×720 frame buffer, render scale 1, every HD-look effect off.
 
-**Reframed question (2026-10-30):** a GameCube game at 720p should not need a second full render to show an in-between frame. The Lava Room has about 9,000 draws per game frame, and Smooth Motion redraws all of them, so it costs about as much power as rendering at a true 60 FPS. The goal becomes an in-between frame that costs much less than a real one.
+**Reframed question (2026-10-30):** a GameCube game at 720p should not need a second full render to show an in-between frame. The Lava Room has about 930 draws per game frame, and Smooth Motion redraws all of them, so it costs about as much power as rendering at a true 60 FPS. The goal becomes an in-between frame that costs much less than a real one.
 
 **Per pass:** the in-between replay's four EFB passes cost about the same as the real frame's (≈ 1.24 vs 1.16 ms each), and nothing else in it is significant. A cheaper in-between frame therefore has to draw less or draw more cheaply.
+
+**Player settings (Game Mode, 2026-10-30):** render scale 3, the Hypatia HD texture pack and 2× anisotropic filtering make the real frame cost ≈ 22 ms of GPU at the governor's clock; the in-between replay adds ≈ 17.5 ms at a higher clock. Headless used default settings and understated this about 5×. The GPU and power cost of Smooth Motion scales with these settings.
 
 **Direction (agreed 2026-10-30):** (1) a short Game Mode check of how much of the 10% the compositor and display add; (2) document automatic pacing as correct protection in this room, with the remaining effort on the game thread's own headroom; (3) then remove the intermediate constants copies as a measured, modest improvement.
 
