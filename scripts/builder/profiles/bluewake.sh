@@ -38,10 +38,12 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # chrissotraidis 5c91d6e plus patches/dolrecomp/0019.
 # Dawn source/package compatibility: patches/recompcore/0184-0185 (RecompCore #44).
 # The guest-alias range query is under upstream review in RecompCore #45, and
-# the constant-time alias lookup in RecompCore #48, stacked on it; pin #48's
-# head, fetched from upstream, until both merge into bluewake-next.
+# the constant-time alias lookup in RecompCore #48, stacked on it, and Smooth
+# Motion's overload and replay attribution in RecompCore #49, stacked on #48;
+# pin #49's head, fetched from upstream, until all three merge into
+# bluewake-next.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=2e4e5998d4d0e7087b1f4d01b3512b594f11658c
+RECOMPCORE_SHA=45d0c0592eed96cb969b0c7b65f7dd42e3877ca2
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
