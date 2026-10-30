@@ -606,8 +606,8 @@ therefore refreshes both range checks before another cached decision is used.
 If either range can overlap an alias, BlueWake retains per-access resolution,
 including partial-alias and registration-precedence behavior. If neither can
 overlap, repeated FIFO stores skip that resolver work. [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45)
-defines the overlap query and generation contract. Normal optimized Linux
-builds enable this cache by default; `--conservative` or
+defines the overlap query and generation contract. Normal optimized Linux and
+Windows builds enable this cache by default; `--conservative` or
 `--no-gather-alias-cache` disables it. The remaining translated loads and
 stores use RecompCore #48's constant-time alias lookup rather than changing
 the GX transport contract. [BlueWake #495](https://github.com/chrissotraidis/bluewake/pull/495)
