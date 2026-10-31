@@ -22,6 +22,7 @@
     UIButton* _retry;
     BOOL _importing;
     BOOL _importFailed;
+    int _importStage;   // the stage the importer last reported, marked on failure
     NSTimer* _poll;
     unsigned long long _lastDiscSize;
     NSDate* _lastDiscModification;
@@ -162,6 +163,7 @@
 static void BWTVProgress(void* context, double fraction, const char* stage) {
     BWTVFirstRunController* controller = (__bridge BWTVFirstRunController*)context;
     const int current = bw_import_stage_for_report(stage, fraction);
+    controller->_importStage = current;
     char lines[512];
     bw_import_stage_lines(current, 0, 0, lines, sizeof lines);
     NSString* message = [NSString stringWithFormat:@"Preparing game files…\n%s", lines];
@@ -174,6 +176,7 @@ static void BWTVProgress(void* context, double fraction, const char* stage) {
 
 - (void)prepareFromDisc {
     _importing = YES;
+    _importStage = BW_IMPORT_STAGE_CHECK;
     _retry.enabled = NO;
     _progress.hidden = NO;
     _progress.progress = 0;
@@ -189,15 +192,19 @@ static void BWTVProgress(void* context, double fraction, const char* stage) {
             self->_importing = NO;
             self->_retry.enabled = YES;
             self->_progress.hidden = YES;
+            char lines[512];
             if (rc != 0) {
                 self->_importFailed = YES;
-                self->_status.text = message;
+                // The stage that failed stays marked, as the desktop windows show it.
+                bw_import_stage_lines(self->_importStage, 1, 0, lines, sizeof lines);
+                self->_status.text = [NSString stringWithFormat:@"%s\n\n%@", lines, message];
                 fprintf(stderr, "[first-run] preparation failed: %s\n", message.UTF8String);
             } else {
                 for (NSString* name in @[ @"main.dol", @"rels" ])
                     [[NSURL fileURLWithPath:[dir stringByAppendingPathComponent:name]]
                         setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
-                self->_status.text = @"Disc ready. Starting BlueWake…";
+                bw_import_stage_lines(BW_IMPORT_STAGE_COUNT - 1, 0, 1, lines, sizeof lines);
+                self->_status.text = [NSString stringWithFormat:@"%s\n\nDisc ready. Starting BlueWake…", lines];
                 fprintf(stderr, "[first-run] disc prepared\n");
                 self.finished = YES;
             }
