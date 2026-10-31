@@ -188,9 +188,12 @@ Critical path: M0 → M1 → M2 → M3. M2 cannot start from aggregate GPU load 
 - `rendered_run.py` starts every run with an empty data folder and pipeline cache. Reuse a folder per mode (warm after its first run) until the script has an option for it.
 - The Deck's memory-traffic counters need root, so memory attribution relies on runs that isolate parts of Smooth Motion and on the synthetic memory load.
 
+- **Outset is postponed here (2026-10-30).** Its blended sprites are interleaved with terrain, and its limit is the game thread, planned separately in [#503](https://github.com/chrissotraidis/bluewake/pull/503). Process lessons from this work that apply there: measure in Game Mode at the player's settings (headless hid the power cap and understated the GPU cost about 5×); sample APU power and clocks with the game thread (the clock can change while IPC does not); and prefer in-session A/A and A/B toggles to comparisons across launches.
+
 ## References
 
 - [#501 live Lava Room follow-up](https://github.com/chrissotraidis/bluewake/pull/501)
 - [Issue #473](https://github.com/chrissotraidis/bluewake/issues/473)
+- [#503 Outset game-thread follow-up](https://github.com/chrissotraidis/bluewake/pull/503)
 - [Steam Deck issue #215](https://github.com/chrissotraidis/bluewake/issues/215)
 - [Performance optimizations](../../PERFORMANCE_OPTIMIZATIONS.md#presentation-and-pacing)
