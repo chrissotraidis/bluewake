@@ -16081,6 +16081,16 @@ int main(int argc, char** argv) {
 
     printf("[run] stopped: %s after %llu blocks at pc=%#010x\n",
            stop_reason ? stop_reason : "normal", blocks, cpu.pc);
+    if (getenv("BLUEWAKE_TRACE_ALIAS_COST") != NULL) {
+        // The game module's resolver is the one translated code calls; its census
+        // is printed from that library's atexit, which runs only on some exits.
+        // RecompCore without the export (older pins) just prints nothing here.
+        typedef void (*AliasCostReportFn)(void);
+        AliasCostReportFn alias_cost_report =
+            (AliasCostReportFn)dlsym(lib, "ppc_guest_alias_cost_report_now");
+        if (alias_cost_report != NULL)
+            alias_cost_report();
+    }
     if (g_skip_fast_on && g_skip_verify) {
         typedef void (*SkipCountsFn)(unsigned long long*, unsigned long long*, unsigned long long*);
         SkipCountsFn skip_counts = (SkipCountsFn)dlsym(lib, "bluewake_composite_direct_skip_counts");

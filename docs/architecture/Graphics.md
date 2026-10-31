@@ -606,7 +606,13 @@ therefore refreshes both range checks before another cached decision is used.
 If either range can overlap an alias, BlueWake retains per-access resolution,
 including partial-alias and registration-precedence behavior. If neither can
 overlap, repeated FIFO stores skip that resolver work. [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45)
-defines the overlap query and generation contract.
+defines the overlap query and generation contract. Normal optimized Linux and
+Windows builds enable this cache by default; `--conservative` or
+`--no-gather-alias-cache` disables it. The remaining translated loads and
+stores use RecompCore #48's constant-time alias lookup rather than changing
+the GX transport contract. [BlueWake #495](https://github.com/chrissotraidis/bluewake/pull/495)
+introduces the gather-pipe cache, and [BlueWake #501](https://github.com/chrissotraidis/bluewake/pull/501)
+pins the general lookup.
 
 | Step | Runtime result | Code reference |
 | --- | --- | --- |
@@ -757,6 +763,8 @@ replaces an original game routine.
 | [PR #279](https://github.com/chrissotraidis/bluewake/pull/279) | Game/mod projection, camera, and HUD behavior feeds the same graphics path with ultrawide-aware state. | More world is framed at 21:9 and interface placement can be corrected. | Dawn and the native GPU do not decide the game's field of view. |
 | [PR #341](https://github.com/chrissotraidis/bluewake/pull/341) | EFB CPU-read coherence and the matching RecompCore pin. | Picto Box subject recognition sees the current rendered image rather than stale EFB data. | The host does not replace the game's subject-recognition decision. |
 | [PR #353](https://github.com/chrissotraidis/bluewake/pull/353) | Vulkan surface reconfiguration in the runtime renderer. | Rendering continues after a Linux window resize. | Guest GX state and the game's draw sequence do not need to change. |
+| [PR #495](https://github.com/chrissotraidis/bluewake/pull/495) | Caches whether aliases can overlap the gather-pipe windows, keyed by the alias generation. | Repeated safe FIFO stores avoid redundant guest-memory resolution. | Alias precedence, FIFO bytes, drains, and fallback routing remain unchanged. |
+| [PR #501](https://github.com/chrissotraidis/bluewake/pull/501) | Pins the remembered-hit and page-index alias lookup used by remaining translated memory accesses. | Alias-heavy scenes spend less CPU time locating REL storage. | Registration-order semantics and the resolved guest bytes remain unchanged. |
 
 These examples locate a visual feature or bug at its actual contract. Camera
 and widescreen work can change data before GX; EFB correctness sits at the

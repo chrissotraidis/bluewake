@@ -218,6 +218,20 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
+    # RecompCore #48's guest-alias resolver against the registration-order rule it
+    # implements (11 million accesses, overlapping sets, removes, page edges).
+    foreach(_variant plain global)
+        set(TEST_TARGET bluewake_guest_alias_lookup_${_variant}_test)
+        add_executable(${TEST_TARGET} ${GXRUNTIME_DIR}/tests/guest_alias_lookup_test.c)
+        target_link_libraries(${TEST_TARGET} PRIVATE gxruntime)
+        set_target_properties(${TEST_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
+        if(_variant STREQUAL "global")
+            target_compile_definitions(${TEST_TARGET} PRIVATE
+                BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+        endif()
+        add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+    endforeach()
+
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_link_libraries(bluewake_linux_disc_test PRIVATE gxruntime GXRuntime::aurora xxhash)
