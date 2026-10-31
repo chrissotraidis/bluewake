@@ -64,6 +64,8 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **One pass holds the cost (Game Mode, scale 3):** EFB pass 1, the main scene with 776 draws, takes 20.7–22.0 ms, 95% of the real frame. The next step locates which of its draws hold the time.
 
+**The cost is concentrated (chunked timing, Game Mode, scale 3):** four ranges of pass 1 hold ≈ 19 of its ≈ 21 ms: commands 700–749 (≈ 9 ms), 750–780 (≈ 4.7 ms), 50–99 (≈ 3.8 ms) and 650–699 (≈ 1.7 ms). About 180 of the 776 draws cost 90% of the pass, so the favourable case of the estimate below applies; the next step identifies those draws.
+
 **Estimated potential (before measuring it):** for scale 3 with Smooth Motion to behave like scale 2 does today, the real and in-between frames must drop from ≈ 39 ms to ≈ 20 ms per game frame, about half of pass 1. If one or two full-screen layers or shaders dominate, fixes such as tighter depth testing, cheaper shading or not redrawing an unchanged layer could save 30–50% of pass 1 (6–10 ms per real frame, as much per in-between frame), and less power with Smooth Motion off too. If the cost is spread evenly over the 776 draws, it is plain pixel work at about 3.7 million pixels and little (≈ 0–10%) is available without a broader renderer change. The per-chunk timing decides which case applies.
 
 **Direction (agreed 2026-10-30):** (1) a short Game Mode check of how much of the 10% the compositor and display add; (2) document automatic pacing as correct protection in this room, with the remaining effort on the game thread's own headroom; (3) then remove the intermediate constants copies as a measured, modest improvement.
