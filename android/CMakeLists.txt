@@ -99,6 +99,7 @@ add_library(main SHARED
     ${BLUEWAKE_IOS_SRC}/touch_controls.cpp
     ${BLUEWAKE_IOS_SRC}/controller_apply.cpp
     ${BLUEWAKE_IOS_SRC}/dolphin_save_import.c
+    ${BLUEWAKE_IOS_SRC}/disc_import.c
     ${BLUEWAKE_HOST_SOURCES})
 # The unchanged host keeps its own entry point under another name; the shim
 # owns SDL_main and hands over after setting the defaults.
