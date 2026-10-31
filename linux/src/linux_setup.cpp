@@ -248,7 +248,7 @@ bool validate_textures(const char* path, std::string& status, bool& valid) {
 // --- the preparation, on its own thread -------------------------------------
 
 const char* const kStageName[BW_SETUP_STAGE_COUNT] = {
-    "Checking the disc image",
+    "Checking the disc image and the data folder",
     "Reading the disc",
     "Unpacking the game modules",
     "Saving the settings",
