@@ -48,6 +48,7 @@ Design: [blended sprites at reduced resolution](TECH_PLAN.md#m2-design-blended-s
 - [ ] M3-T01: Game Mode A/A and A/B in one session (setting toggled), Lava Room and Shipwreck, Smooth Motion on. Lava Room done; Shipwreck remains.
 - [ ] M3-T02: Run the full rendered scene tour, pictures/checkpoints and Linux/Windows CI.
 - [ ] M3-T03: Pin the reviewed RecompCore change in BlueWake and record the retain/reject decision.
+- [ ] M3-T04: Before merge, remove the review images (`images/`) from the branch and its history, and force-push.
 
 ## Evidence ledger
 
