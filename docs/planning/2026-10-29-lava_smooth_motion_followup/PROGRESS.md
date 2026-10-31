@@ -40,7 +40,7 @@ Design: [blended sprites at reduced resolution](TECH_PLAN.md#m2-design-blended-s
 - [ ] M2-T02: Preserve camera-cut/content rejection and genuine-overload game-speed protection.
 - [x] M2-T03: Produce a stricter control: the same AppImage on both sides, with only the runtime setting changed.
 - [x] M2-T04: Selection rule for soft-effect sprites, unit-tested against the logged draw states.
-- [x] M2-T05: Half-size buffer and composite, real frame and in-between replay, behind the opt-in "Efficient soft effects" setting.
+- [x] M2-T05: Half-size buffer and composite, real frame and in-between replay, behind the off-by-default **Settings → Display → Efficient soft effects** switch.
 - [ ] M2-T06: Picture and GPU-time comparison in five scenes at scale 3; EFB alpha check. Five scenes complete; visual differences and the EFB-alpha check remain open.
 
 ### M3: Qualify and deliver (depends: M2)

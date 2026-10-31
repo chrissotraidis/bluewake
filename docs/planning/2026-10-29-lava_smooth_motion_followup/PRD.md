@@ -42,7 +42,7 @@ The same pattern is the largest cost in the Shipwreck (≈ 62% of its GPU time a
 
 ### Proposed solution: Efficient soft effects
 
-Draw each run of these quads into a buffer of half the frame's size, and blend that buffer over the frame once, in the same place in the draw order. The buffer accumulates the quads exactly as they would have blended onto the frame, so the result differs only in resolution: a soft veil loses nothing visible at half resolution. It is an opt-in setting, **Efficient soft effects**, off by default, applied live so it can be compared in one session.
+Draw each run of these quads into a buffer of half the frame's size, and blend that buffer over the frame once, in the same place in the draw order. The buffer accumulates the quads exactly as they would have blended onto the frame, so the result differs only in resolution: a soft veil loses nothing visible at half resolution. It is an opt-in setting, **Efficient soft effects**, under **Settings → Display**. It is off by default and applies live so it can be compared in one session.
 
 ### Result in Game Mode
 
