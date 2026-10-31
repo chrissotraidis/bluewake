@@ -214,6 +214,61 @@ int bw_disc_has_usable_source(const char* exe_dir, const char* data_dir) {
            is_file(remembered_disc);
 }
 
+// Checks the disc and prepares its game files into data_dir when the remembered
+// preparation is not already this disc's. The setup window calls this on a
+// thread, so its `progress` reports drive the window's stage list; the launcher
+// passes no callback and reads the same behaviour from the console log.
+int bw_disc_prepare_into(const char* data_dir, const char* disc,
+                         BlueWakeImportProgress progress, void* context,
+                         int* already_prepared, char* error, size_t error_size) {
+    g_data = data_dir;
+    if (already_prepared != NULL) *already_prepared = 0;
+    if (bluewake_disc_check(disc, error, error_size) != 0) return -1;
+
+    char game[900], game_record[4096], dol[4096], rels[4096], stamp_path[4096];
+    char stamp[4096 + 64], prepared[4096 + 64];
+    snprintf(game_record, sizeof game_record, "%sgame.txt", data_dir);
+    if (!read_line(game_record, game, sizeof game))
+        snprintf(game, sizeof game, "%sgame", data_dir);
+    snprintf(dol, sizeof dol, "%s/main.dol", game);
+    snprintf(rels, sizeof rels, "%s/rels", game);
+    snprintf(stamp_path, sizeof stamp_path, "%s/prepared.txt", game);
+    disc_stamp(disc, stamp, sizeof stamp);
+    read_line(stamp_path, prepared, sizeof prepared);
+    if (strcmp(stamp, prepared) == 0 && prepared_ready(dol, rels)) {
+        if (already_prepared != NULL) *already_prepared = 1;
+        return 0;
+    }
+
+    if (fresh_import_dir(game, sizeof game) != 0) {
+        fprintf(stderr, "[disc] could not create a new preparation folder\n");
+        snprintf(error, error_size,
+                 "BlueWake could not create a folder for the prepared game files in %s.", data_dir);
+        return -1;
+    }
+    snprintf(dol, sizeof dol, "%s/main.dol", game);
+    snprintf(rels, sizeof rels, "%s/rels", game);
+    snprintf(stamp_path, sizeof stamp_path, "%s/prepared.txt", game);
+    fprintf(stderr, "[disc] preparing %s\n", disc);
+    if (bluewake_disc_prepare(disc, game, progress, context, error, error_size) != 0) {
+        // Name where the files were going: a first import that fails for want
+        // of room should say so next to the folder, and that folder can be
+        // moved (#479).
+        fprintf(stderr,
+                "[disc] the files were being written to %s; "
+                "BLUEWAKE_DATA_DIR chooses the data folder\n",
+                data_dir);
+        return -1;
+    }
+    if (!write_line(stamp_path, stamp) || !write_line(game_record, game)) {
+        fprintf(stderr, "[disc] could not remember the prepared files\n");
+        snprintf(error, error_size,
+                 "The prepared game files could not be remembered in %s.", data_dir);
+        return -1;
+    }
+    return 0;
+}
+
 int bw_disc_setup(const char* exe_dir, const char* data_dir,
                   int remember_explicit_disc, int force_picker) {
     g_exe = exe_dir;
@@ -232,14 +287,13 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir,
     if (!force_picker && !explicit_disc && is_file(app_disc) && prepared_ready(app_dol, app_rels))
         return 0;
 
-    char remembered[4096], game[900], game_record[4096], dol[4096], rels[4096], stamp_path[4096];
+    char remembered[4096], game[900], game_record[4096], dol[4096], rels[4096];
     snprintf(remembered, sizeof remembered, "%sdisc.txt", data_dir);
     snprintf(game_record, sizeof game_record, "%sgame.txt", data_dir);
     if (!read_line(game_record, game, sizeof game))
         snprintf(game, sizeof game, "%sgame", data_dir);
     snprintf(dol, sizeof dol, "%s/main.dol", game);
     snprintf(rels, sizeof rels, "%s/rels", game);
-    snprintf(stamp_path, sizeof stamp_path, "%s/prepared.txt", game);
     char disc[4096] = "";
     if (force_picker)
         disc[0] = '\0';
@@ -286,38 +340,23 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir,
             why = "";
             continue;
         }
-        char stamp[4096 + 64], prepared[4096 + 64];
-        disc_stamp(disc, stamp, sizeof stamp);
-        read_line(stamp_path, prepared, sizeof prepared);
-        if (strcmp(stamp, prepared) != 0 || !prepared_ready(dol, rels)) {
-            if (fresh_import_dir(game, sizeof game) != 0) {
-                fprintf(stderr, "[disc] could not create a new preparation folder\n");
+        // The same call the setup window makes, so the window and the launcher
+        // check and prepare identically; here there is no progress to report.
+        int already_prepared = 0;
+        if (bw_disc_prepare_into(data_dir, disc, NULL, NULL, &already_prepared,
+                                 error, sizeof error) != 0) {
+            fprintf(stderr, "[disc] %s: %s\n", disc, error);
+            if (explicit_disc || scripted)
                 return -1;
-            }
-            snprintf(dol, sizeof dol, "%s/main.dol", game);
-            snprintf(rels, sizeof rels, "%s/rels", game);
-            snprintf(stamp_path, sizeof stamp_path, "%s/prepared.txt", game);
-            fprintf(stderr, "[disc] preparing %s\n", disc);
-            if (bluewake_disc_prepare(disc, game, NULL, NULL, error, sizeof error) != 0) {
-                fprintf(stderr, "[disc] %s: %s\n", disc, error);
-                // Name where the files were going: a first import that fails
-                // for want of room should say so next to the folder, and that
-                // folder can be moved (#479).
-                fprintf(stderr,
-                        "[disc] the files were being written to %s; "
-                        "BLUEWAKE_DATA_DIR chooses the data folder\n",
-                        data_dir);
-                if (explicit_disc || scripted)
-                    return -1;
-                disc[0] = '\0';
-                why = "";
-                continue;
-            }
-            if (!write_line(stamp_path, stamp) || !write_line(game_record, game)) {
-                fprintf(stderr, "[disc] could not remember the prepared files\n");
-                return -1;
-            }
+            disc[0] = '\0';
+            why = "";
+            continue;
         }
+        // A preparation writes into a fresh folder; read back where it went.
+        if (!read_line(game_record, game, sizeof game))
+            snprintf(game, sizeof game, "%sgame", data_dir);
+        snprintf(dol, sizeof dol, "%s/main.dol", game);
+        snprintf(rels, sizeof rels, "%s/rels", game);
         break;
     }
     if ((!explicit_disc || remember_explicit_disc) && !write_line(remembered, disc)) {

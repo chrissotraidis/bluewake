@@ -153,6 +153,18 @@ folder buttons use SDL's native dialog through an XDG
 portal or Zenity. Dragging an ISO/GCM onto the setup window and entering paths
 directly also work.
 
+**Start** opens the preparation screen, which lists the four stages BlueWake
+runs there: checking the disc image, reading the disc, unpacking the 415 game
+modules, and saving the settings. Each stage shows a tick when it is done and a
+mark while it is running, above a progress bar and the importer's own words for
+the current task, with the free space in the data folder underneath. **Show
+log** lists what happened with a timestamp. When the last stage finishes the
+window shows **Ready** and starts the game from there. A failure stays on the
+stage that failed with the importer's sentence, **Show log**, and **Back** to
+the form. Closing the window during the preparation lets it finish first (a few
+seconds): the importer has no abort hook yet, and a half-written preparation
+would have to be redone anyway.
+
 A first import measures the files it is about to write (main.dol and the 415
 `.rel` modules, about 10 MB) and checks the data folder has that much room
 before it starts, so a folder with no space is named as such, with the size
@@ -314,9 +326,11 @@ No ready-made Linux AppImage has been published yet; these steps work for one yo
    - Leave **Add or update application-menu and Desktop shortcuts** enabled if
      you want both launchers. The application-menu entry also gets a
      **Configure BlueWake** action that reopens this window.
-   - Once every enabled selection validates, select **Start BlueWake** to save
-     the choices, install the requested launchers, and start the game. The
-     launchers point to this AppImage, so keep it at the same path afterward.
+   - Once every enabled selection validates, select **Start**. The preparation
+     screen checks the disc and writes its game files the first time, then saves
+     the choices and installs the requested launchers; **Start BlueWake** on the
+     **Ready** screen starts the game. The launchers point to this AppImage, so
+     keep it at the same path afterward.
 
 4. **Start BlueWake later.** Selecting **Start BlueWake** records the original
    disc path in `$XDG_DATA_HOME/BlueWake/disc.txt` (normally
