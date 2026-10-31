@@ -223,6 +223,7 @@ void apply_live() {
     read_menu_pauses();
     aurora_set_frame_buffer_scale(static_cast<float>(env_int("DOL_AURORA_RENDER_SCALE", 0)));
     aurora_set_forced_anisotropy(static_cast<unsigned>(env_int("DOL_AURORA_FORCE_ANISO", 1)));
+    aurora_set_efficient_effects(env_on("DOL_AURORA_EFFICIENT_EFFECTS", false));
     refresh_smooth_rate();
     aurora_set_frame_interpolation(env_on("DOL_AURORA_FRAME_INTERP", false));
     aurora_set_fps_overlay(env_on("DOL_AURORA_SHOW_FPS", false));
@@ -261,6 +262,8 @@ void apply_now(const bw_settings::Setting& s) {
         aurora_set_frame_buffer_scale(static_cast<float>(std::atoi(value.c_str())));
     else if (std::strcmp(key, "DOL_AURORA_FORCE_ANISO") == 0)
         aurora_set_forced_anisotropy(static_cast<unsigned>(std::atoi(value.c_str())));
+    else if (std::strcmp(key, "DOL_AURORA_EFFICIENT_EFFECTS") == 0)
+        aurora_set_efficient_effects(value != "0");
     else if (std::strcmp(key, "BLUEWAKE_PAUSE_UNFOCUSED") == 0)
         aurora_set_pause_on_focus_lost(value != "0");
     else if (std::strcmp(key, "BLUEWAKE_BACKGROUND_INPUT") == 0)

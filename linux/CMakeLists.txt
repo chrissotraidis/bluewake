@@ -238,6 +238,13 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     add_test(NAME bluewake_frame_interp_test COMMAND bluewake_frame_interp_test)
     set_tests_properties(bluewake_frame_interp_test PROPERTIES TIMEOUT 30)
 
+    # Efficient soft effects: which draws take the half-size buffer, their runs,
+    # and that the buffer blended once equals each quad blended in turn.
+    add_executable(bluewake_soft_effects_test ${GXRUNTIME_DIR}/graphics/aurora/tests/soft_effects_test.cpp)
+    target_link_libraries(bluewake_soft_effects_test PRIVATE GXRuntime::gxcore)
+    add_test(NAME bluewake_soft_effects_test COMMAND bluewake_soft_effects_test)
+    set_tests_properties(bluewake_soft_effects_test PROPERTIES TIMEOUT 30)
+
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_link_libraries(bluewake_linux_disc_test PRIVATE gxruntime GXRuntime::aurora xxhash)

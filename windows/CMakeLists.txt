@@ -634,6 +634,13 @@ target_link_libraries(bluewake_memory_card_io_test PRIVATE bluewake_posix_compat
     add_test(NAME bluewake_frame_interp_test COMMAND bluewake_frame_interp_test)
     set_tests_properties(bluewake_frame_interp_test PROPERTIES TIMEOUT 30)
 
+    add_executable(bluewake_soft_effects_test ${GXRUNTIME_DIR}/graphics/aurora/tests/soft_effects_test.cpp)
+    target_include_directories(bluewake_soft_effects_test PRIVATE ${BLUEWAKE_COMPAT_INCLUDES})
+    target_compile_options(bluewake_soft_effects_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+    target_link_libraries(bluewake_soft_effects_test PRIVATE GXRuntime::gxcore bluewake_posix_compat)
+    add_test(NAME bluewake_soft_effects_test COMMAND bluewake_soft_effects_test)
+    set_tests_properties(bluewake_soft_effects_test PROPERTIES TIMEOUT 30)
+
     add_executable(bluewake_dsp_interpreter_layout_test
         ${BLUEWAKE_REPO_ROOT}/tests/dsp_interpreter_layout_test.cpp
         ${BLUEWAKE_REPO_ROOT}/tests/dsp_interpreter_layout_tables_first.cpp)
