@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "1446450c79046bd34e43abadc27522eeab768a6e",
+      "sha": "259627f2d7f6fe34c9f22a74da4a92b35c55b890",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -645,6 +645,55 @@
             "patches/recompcore/0185-Dawn-cache-callbacks-with-pinned-headers.patch"
           ],
           "evidence": "RecompCore#44 retains jslay88 RecompCore#43 and removes noexcept from two cache callback lambdas for the existing Dawn packages. Original callback failure reproduced with hash-verified iOS headers; fixed block passes Mac, iOS, tvOS and Android NDK source compilation and native callback forwarding. Contributor Clang 18/22 vendored-Dawn host links and synthetic AppImage checks passed on #43. BlueWake CI now covers x86-64-v3; updated host builds and gameplay/visual acceptance are separate checks."
+        },
+        "hd_look_491": {
+          "runtime": "e05ed3cee7819feefb8e30256441ab10c62612bb",
+          "tracked_patches": [
+            "patches/recompcore/0186-Aurora-HD-look-fixes-for-chrissotraidis-bluewake-491-AO-halo-bloom-on-clouds-flickering-shadows-the-far-blur-and-lightning.patch"
+          ],
+          "evidence": "pdale-boop's RecompCore #47, the HD look's fixes for #491, in one commit. pdale-boop's fix for #491: the HD look's ambient occlusion blurred and upscaled only along each surface, so Link's own shade no longer spreads onto the sea behind him, and faded out from 1,000 to 2,500 units, where the sea's swells darkened a band toward the horizon. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from the tour's setup state and stage-select warps, not yet played by hand: at Outset's pier the sea beside Link and the band on the sea are as with AO off (255 of 255 in the AO term, was 180-250), Link's own shading kept; AO's GPU time 0.085 ms a frame on main, 0.089 with this, at 2880x2160. pdale-boop's: the HD look's bloom screened onto the scene instead of added, so Wind Waker's near-white clouds no longer clip to flat white (a fifth of the clouds at Outset's pier did). Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from the tour's setup state and stage-select warps, not yet played by hand: clouds clipped to white at Outset's pier 21% to 0%, at Windfall at noon 8% to 0%. pdale-boop's: with the HD look's sky left sharp under the far blur (DOL_AURORA_FAR_BLUR_BACKGROUND=0), the blur stopped at the horizon's edge in a hard band, and a lightning strike's invisible model (dThunder_c's mInvisModel, depth only, about 100,000 units out) wrote depth into the sky, so the far blur and cloud shadows drew grey columns from the sea to the clouds. The far blur now eases off within 24 pixels of the sky, and a depth-only draw over 50,000 units out writes no depth while the HD look's effects are on. Arch Linux (Vulkan), saved states at sea in a storm and by islands at dusk: the band and the columns gone; twelve other states pixel for pixel as before. pdale-boop's fix for #491's flickering shadows: Wind Waker's motion blur (the camera shaking as a sword hits a tree) lays the previous frame's copy, which already holds the HD look's effects, back over the scene; the effects now go in before it instead of after. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), Smooth Motion frame dumps from a save state at Outset's small trees, two sword swings, 60 and 120 FPS, render scale 1 and 2: shadowed ground held 0.65 of its unshadowed brightness through the hit (main: 0.41 to 0.61, alternating each game frame); frames without the blur pixel-identical to before. Not yet played by hand. pdale-boop's fix for #491's dark patches from the HD look's ambient occlusion: a sample shades a pixel only when it is above the pixel's surface (a normal from the depth) and within the radius of it in the scene, not just on screen, so a floor seen at a low angle is no longer shaded in front of Link; DOL_AURORA_AO_DEBUG=2 tints what it darkens red over the scene. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from save states, not yet played by hand: in a test room (K_Test2) the floor in front of Link was 2.6% darker on average over 29.5% of it, now 0.5% over 7.6%; Outset's long grass 3.7% to 2.1%, creases kept and the halo gone. Bands across the screen in Dale's save states (samples read between depth texels) gone, each sample now read at a whole texel. AO's GPU time a frame 0.150 to 0.215 ms in the test room, 0.186 to 0.378 ms at Outset (render scale 4). pdale-boop's fixes for two sun shadow map artefacts found while tuning the HD look (#491). Near the camera, the lookup's normal offset (0.5 texels) and slope bias (1 texel) were smaller than far off (2 and 10); on a rock wall the sun only grazes, the map's texels showed through as light and dark vertical stripes that shifted with the camera. Near now uses the far values. And the scene's depth was read as near / depth, as if the far plane were infinitely far; with the game's far plane (400,000) the distance came out hundreds of units too far at 8,000 to 20,000, and an island ahead shaded itself in blocks from the waterline up that went as the boat came closer. The host passes the far plane (aurora_set_world_view_far) and the depth is read exactly. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from pdale-boop's save states: on two Outset rock walls a stripe score went from 2.07 to 1.18 and matched sun shadows off on both (1.18 and 1.11), with Link's shadow still meeting his feet; two states sailing toward islands lose the blocks. Known, not fixed here: gaps at the base of the boat's shadow, a blob at the foot of a sea platform's ladder, and detached streaks at Outset's sunrise."
+        },
+        "texture_pack_optional": {
+          "runtime": "f013169b4dce10fa1b4526545532737dd9f92694",
+          "tracked_patches": [
+            "patches/recompcore/0187-Aurora-a-texture-pack-s-optional-folders-load-over-it-only-when-asked.patch"
+          ],
+          "evidence": "pdale-boop's: a texture pack leaves out its top-level optional/ folder, and DOL_AURORA_TEXTURE_PACK_OPTIONAL names folders of it to load over the pack at priority 1, for the HD look's HD's clouds in the sky switch (BLUEWAKE_HD_CLOUDS). Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered stage-select warps to Diamond Steppe at noon from a fresh native import: the pack loads its 3,546 replacements and nothing from optional/ with the switch off; with it on the log adds optional=hd-clouds replacements=6 and the sky shows HD's clouds. Windows and Mac not yet checked."
+        },
+        "hd_sun_fades": {
+          "runtime": "8e3626b0d2cede7e434a24b24121f0bfe9324e16",
+          "tracked_patches": [
+            "patches/recompcore/0188-Aurora-sun-shadows-timed-as-in-Wind-Waker-HD-the-sun-s-while-its-disk-shows-and-the-moon-s-from-25-degrees-down-to-8-at-dawn.patch"
+          ],
+          "evidence": "pdale-boop's: the sun shadow map's shadows timed against Wind Waker HD in Cemu (the stage select's warps with the clock tracked): the sun's last while the game draws its sun disk, the moon's start from 25 degrees up and last at dawn until it is down to 8 degrees. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk, night and dawn warps to Windfall's dock and the Private Oasis against HD's frames at the same times. Windows and Mac not yet checked."
+        },
+        "hd_sun_sea": {
+          "runtime": "1cc1699c1c33e20015b759c32d11d0cf3ae51b35",
+          "tracked_patches": [
+            "patches/recompcore/0189-Aurora-sun-shadows-on-the-sea-as-in-Wind-Waker-HD-which-takes-them-but-casts-none.patch"
+          ],
+          "evidence": "pdale-boop's: sun shadows on the sea as Wind Waker HD's (HD's sea casts nothing): the sea's surface out of the sun shadow map, no slope or normal bias on it, and the gap fill counting only what the map holds. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), a grid of rendered save states (the boat, three sea platforms, the Outset jetty and sunrise, four under sail, one at dusk): the horizon specks, the trough shading, the hull's gap and the platforms' detached legs gone; nothing else changed. Windows and Mac not yet checked."
+        },
+        "hd_sun_look": {
+          "runtime": "379beb0f122c0014f7a6c26a44b9dc4852abd76e",
+          "tracked_patches": [
+            "patches/recompcore/0190-Aurora-sun-shadows-shaped-as-in-Wind-Waker-HD-held-at-24-degrees-soft-toward-their-tips-and-tinted-by-the-sky.patch"
+          ],
+          "evidence": "pdale-boop's: sun shadows shaped as Wind Waker HD's, measured in Cemu with Link's place and the camera tracked: the sun held at 24 degrees with its shadows thinning to half by -7 and gone by -8 (the Private Oasis, 17:15-17:25); long shadows soft toward their tips; the shadow a colour lit by the sky (0.22, 0.41, 0.60 of what is lit; HD's about 0.21, 0.39, 0.56 on Windfall's dock); two debug views; three cascades (a fourth shaded far islands in light-blue blocks through the haze); aurora_set_sun_shadow_strength for lighter shadows; a slope bias of 20 texels far off (acne on Ice Ring Isle's walls). Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk and noon warps and saved states against HD's frames; Windfall sailed toward from sea room 10 with three cascades and four. Windows and Mac not yet checked."
+        },
+        "gx_short_quads": {
+          "runtime": "e81e5800713309a5444ae234760732a7d7125e1c",
+          "tracked_patches": [
+            "patches/recompcore/0191-GX-three-vertices-left-over-in-a-quad-draw-draw-a-triangle-as-on-the-hardware.patch"
+          ],
+          "evidence": "pdale-boop's: GX_QUADS draws whose vertex count leaves three over draw them as a triangle, as the hardware does; the frontend had dropped them, and the game's night stars are three-vertex quads (dKyr_drawStar), so none showed. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered warps to Windfall's dock at 4:00 and 21:00: the stars show. Smooth Motion keeps them steady: a three-vertex quad is paired from the camera's eye and moved with each in-between camera's eye; sailing at night (Dale's state), 87-100% of an in-between frame's stars stand where the real frames' do, against 5-23% before. Windows and Mac not yet checked."
+        },
+        "hd_brightness": {
+          "runtime": "259627f2d7f6fe34c9f22a74da4a92b35c55b890",
+          "tracked_patches": [
+            "patches/recompcore/0192-Aurora-the-scene-s-brightness-from-the-game-where-there-is-depth-and-not-the-sea.patch"
+          ],
+          "evidence": "pdale-boop's: aurora_set_exposure brightens the scene by the game's factor where there is depth and not the sea, for Wind Waker HD's sunlight for the hour (BLUEWAKE_HD_SKY); the sea is a mask of the draws that sample its textures (d_a_sea's, the island rooms' ring of sea and surf) and the sea rooms' untextured square of sea, covered only by what the sun map takes as solid (an alpha-tested draw by its texture's cutout); still and running water left out too (the oasis pool, rivers, falls); fading out from 10,000 to 25,000 units, where the haze is; tapering off on what is already bright (ice, white rock), read before the effects. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), Windfall's dock from the stage select against HD in Cemu at 23 times from 4:00 to midnight: the deck, cliffs and sea within about 10% of HD's at most hours; the mask in its debug view at sea room 10's beach and swells, Dragon Roost's shore, the open sea from above at the Forsaken Fortress, and Hyrule Castle (nothing marked). Windows and Mac not yet checked."
         }
       }
     },

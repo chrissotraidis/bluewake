@@ -91,10 +91,13 @@ const char* const kScaleShown[] = {"Window", "1x", "2x", "3x", "4x"};
 const char* const kScaleStored[] = {"0", "1", "2", "3", "4"};
 const char* const kAnisoShown[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
 const char* const kAnisoStored[] = {"1", "2", "4", "8", "16"};
+// The HD look's sunlight and sun shadows, as HD's or softer (settings_table.h).
+const char* const kSunlightShown[] = {"As in HD", "Softer", "Much softer"};
+const char* const kSunlightStored[] = {"0.37", "0.3", "0.22"};
+const char* const kShadowShown[] = {"As in HD", "Lighter", "Much lighter"};
+const char* const kShadowStored[] = {"1", "0.8", "0.6"};
 const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "Largest"};
 const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
-const char* const kShadowQualityShown[] = {"Low", "Medium", "High"};
-const char* const kShadowQualityStored[] = {"low", "medium", "high"};
 const char* const kInterpPacingShown[] = {"Automatic", "Never pause"};
 const char* const kInterpPacingStored[] = {"", "0"};
 
@@ -151,17 +154,56 @@ void set_fullscreen(bool on) {
     }
 }
 
-// The controller's buttons as the player set them: the swaps, or a custom
-// layout instead of them, the triggers, and the camera stick inverted. Applied
-// whenever they or the controller on port 0 change; a mapping set elsewhere is
-// left alone until the player touches one of these.
+// A Nintendo controller's A is where an Xbox pad's B is, and the game takes each
+// button by where it is, so a new player pressing A at the first save prompt
+// backed out of it, with nothing to say why. A new settings file waits for its
+// first controller, at this launch or a later one (a first launch played on the
+// keyboard): a Nintendo controller turns the Nintendo button layout on, so its
+// buttons do what their letters say, and any other leaves it off. The player
+// changing the switch, choosing a custom layout, or a launch that set it ends
+// the wait too. A file from before this has no wait, so a player who already
+// plays with a Nintendo controller keeps what they chose.
+void first_controller_layout() {
+    static bool started = false;
+    static bool layout = false;  // the switch, as the wait last saw it
+    if (!started) {
+        started = true;
+        if (first_launch())
+            set_env("BLUEWAKE_PAD_LAYOUT_PENDING", "1");
+        layout = env_on("BLUEWAKE_PAD_SWAP_AB", false);
+    }
+    if (!env_on("BLUEWAKE_PAD_LAYOUT_PENDING", false))
+        return;
+    if (env_on("BLUEWAKE_PAD_SWAP_AB", false) != layout || !env("BLUEWAKE_BUTTON_MAP").empty() ||
+        launched("BLUEWAKE_PAD_SWAP_AB")) {
+        set_env("BLUEWAKE_PAD_LAYOUT_PENDING", "0");
+        return;
+    }
+    const SDL_JoystickID connection = bw_controller_connection(0);
+    if (connection == 0)
+        return;
+    const bool nintendo = bw_nintendo_face_layout(0);
+    set_env("BLUEWAKE_PAD_LAYOUT_PENDING", "0");
+    if (nintendo)
+        set_env("BLUEWAKE_PAD_SWAP_AB", "1");
+    const char* name = SDL_GetGamepadName(SDL_GetGamepadFromID(connection));
+    std::fprintf(stderr, "[pad] first controller: '%s' %s, so the Nintendo button layout is %s\n",
+                 name ? name : "controller", nintendo ? "has Nintendo's layout" : "doesn't have Nintendo's layout",
+                 nintendo ? "on" : "off");
+}
+
+// The controller's buttons as the player set them: the Nintendo layout (A and
+// B, and X and Y, swapped), or a custom layout instead of it, the triggers, and
+// the camera stick inverted. Applied whenever they or the controller on port 0
+// change; a mapping set elsewhere is left alone until the player touches one
+// of these.
 void apply_controller() {
     static SDL_JoystickID previous = 0;
     static bool applied = false;
     static std::string last;
     const SDL_JoystickID connection = bw_controller_connection(0);
     const std::string map_text = env("BLUEWAKE_BUTTON_MAP");
-    const bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = env_on("BLUEWAKE_PAD_SWAP_XY", false);
+    const bool ab = env_on("BLUEWAKE_PAD_SWAP_AB", false), xy = ab;
     const bool lr = env_on("BLUEWAKE_PAD_SWAP_LR", false);
     // The camera stick's inverts at the pad, for where the game's own camera
     // has the view. Still as each menu had it on main, until it is decided:
@@ -250,8 +292,7 @@ void apply_now(const bw_settings::Setting& s) {
         set_env("BLUEWAKE_FADE_FRAMES", value != "0" ? "6" : "0");
     if (next_launch(s))
         return;
-    if (std::strncmp(key, "BLUEWAKE_HD_", 12) == 0 ||  // the HD look and its parts (sun shadows)
-        std::strcmp(key, "DOL_AURORA_SUN_SHADOW_QUALITY") == 0)
+    if (std::strncmp(key, "BLUEWAKE_HD_", 12) == 0)  // the HD look and its parts (sun shadows)
         bluewake_hd_look_reload();
     else if (std::strcmp(key, "BLUEWAKE_MENU_PAUSES") == 0)
         read_menu_pauses();
@@ -655,9 +696,15 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *count = 5;
         return true;
     }
-    if (std::strcmp(key, "DOL_AURORA_SUN_SHADOW_QUALITY") == 0) {
-        *shown = bw_desktop::kShadowQualityShown;
-        *stored = bw_desktop::kShadowQualityStored;
+    if (std::strcmp(key, "BLUEWAKE_HD_SUNLIGHT") == 0) {
+        *shown = bw_desktop::kSunlightShown;
+        *stored = bw_desktop::kSunlightStored;
+        *count = 3;
+        return true;
+    }
+    if (std::strcmp(key, "BLUEWAKE_HD_SHADOW_STRENGTH") == 0) {
+        *shown = bw_desktop::kShadowShown;
+        *stored = bw_desktop::kShadowStored;
         *count = 3;
         return true;
     }
@@ -1083,6 +1130,7 @@ void draw_menu(const bw_platform::Look& look) {
                 ImGui::Dummy(ImVec2(1.f, ImGui::GetStyle().ItemSpacing.y * 2.f));
                 ImGui::PopTextWrapPos();
                 bw_menu_stick_scroll(pad.scroll);
+                bw_menu_scroll_past_ends();
                 ImGui::EndChild();
                 ImGui::PopID();
                 ImGui::EndTabItem();
@@ -1146,6 +1194,7 @@ void draw(void*) {
         refresh_smooth_rate();  // the display may have changed
         rate_checked = now;
     }
+    first_controller_layout();
     apply_controller();
     apply_key_map();
     test_hook();

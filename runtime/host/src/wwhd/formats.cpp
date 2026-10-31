@@ -351,6 +351,9 @@ void gc_textures(const Bytes& data, const std::string& path, std::vector<GCTextu
     const uint32_t count = r.u32(12);
     for (uint32_t i = 0; i < count; ++i) {
         check_cancel();
+        // A material file (.bmt) can count a chunk it doesn't hold: it ends after MAT3, with no TEX1.
+        if (at == data.size())
+            break;
         const uint8_t* magic = r.take(at, 4);
         const size_t size = r.u32(at + 4);
         if (size < 8)
@@ -419,7 +422,8 @@ std::string resource(std::string_view path) {
     return "object|" + (parts.empty() ? std::string() : stem(parts.back()));
 }
 
-std::vector<GCTexture> index_gc(const std::string& iso_path, std::vector<ImportError>& errors) {
+std::vector<GCTexture> index_gc(const std::string& iso_path, std::vector<ImportError>& errors,
+                                std::map<std::string, Bytes>* stages) {
     check_cancel();
     std::ifstream file(iso_path, std::ios::binary);
     if (!file)
@@ -486,6 +490,14 @@ std::vector<GCTexture> index_gc(const std::string& iso_path, std::vector<ImportE
         try {
             leaves(data, e.path, [&](const std::string& name, const Bytes& leaf) {
                 WWHD_CHECKPOINT("gc-leaf");
+                // res/Stage/STAGE/Stage.arc/.../stage.dzs: the stage's palettes, for HD's.
+                if (stages && ends_with(lower(name), "stage.dzs")) {
+                    const std::string prefix = "res/Stage/", arc = "/Stage.arc/";
+                    const size_t at = name.find(prefix), end = name.find(arc);
+                    if (at != std::string::npos && end != std::string::npos && end > at + prefix.size())
+                        (*stages)[name.substr(at + prefix.size(), end - at - prefix.size())] = leaf;
+                    return;
+                }
                 const size_t first = textures.size();
                 try {
                     gc_textures(leaf, name, textures);

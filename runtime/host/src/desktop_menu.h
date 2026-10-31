@@ -46,6 +46,10 @@ void load(const std::string& path, const std::string& read_instead = "");
 // (BLUEWAKE_STAGE_SELECT=1 arms the stage select's toggle); the file keeps
 // its own value.
 void launch_choice(const char* key, const std::string& value);
+// The launch chose this setting for this session.
+bool launched(const char* key);
+// No settings file was found at launch: BlueWake's first start here.
+bool first_launch();
 // The defaults this platform puts in the environment at launch (the table's
 // fill), so the game reads them rather than its own. After safe mode.
 void fill_defaults();

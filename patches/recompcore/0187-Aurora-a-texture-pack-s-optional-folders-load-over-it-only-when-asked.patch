@@ -1,0 +1,90 @@
+From f013169b4dce10fa1b4526545532737dd9f92694 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 18:31:24 -0500
+Subject: [PATCH] Aurora: a texture pack's optional/ folders load over it only
+ when asked
+
+The pack leaves out its top-level optional/ folder. DOL_AURORA_TEXTURE_PACK_OPTIONAL
+names folders of it (comma-separated) to load over the pack at priority 1, so
+BlueWake can keep alternative artwork, such as HD's sky clouds, behind a
+switch. A missing folder is reported and not created.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 29 +++++++++++++++++++
+ .../aurora/lib/gfx/texture_replacement.cpp    |  8 ++++-
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 2b141b2cca..2c64fda709 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -10,10 +10,15 @@
+ #endif
+ #include <SDL3/SDL_init.h>
+ #include <imgui.h>
++#include <algorithm>
+ #include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
++#include <filesystem>
++#include <string>
++#include <system_error>
++#include <vector>
+ #include <window.hpp>
+ #if defined(__APPLE__)
+ #include <TargetConditionals.h>
+@@ -386,6 +391,30 @@ bool dol_aurora_initialize(int argc, char** argv,
+         s_texture_pack = aurora::texture::load_replacement_directory(pack);
+         std::fprintf(stderr, "[mods] texture-pack=%s replacements=%zu\n", pack,
+                      s_texture_pack.registrations.size());
++        // DOL_AURORA_TEXTURE_PACK_OPTIONAL: comma-separated folders of the
++        // pack's optional/ (which the pack itself leaves out), loaded over it.
++        static std::vector<aurora::texture::ReplacementGroup> s_optional;
++        if (const char* names = std::getenv("DOL_AURORA_TEXTURE_PACK_OPTIONAL"); names != nullptr) {
++            std::string list = names;
++            for (size_t start = 0; start <= list.size();) {
++                const size_t end = std::min(list.find(',', start), list.size());
++                const std::string name = list.substr(start, end - start);
++                start = end + 1;
++                if (name.empty() || name.find_first_of("/\\") != std::string::npos || name == "..")
++                    continue;
++                const std::filesystem::path folder = std::filesystem::path(pack) / "optional" / name;
++                std::error_code ec;
++                if (!std::filesystem::is_directory(folder, ec)) {
++                    // A pack imported before it had this folder (the loader
++                    // would make an empty one).
++                    std::fprintf(stderr, "[mods] texture-pack optional=%s missing\n", name.c_str());
++                    continue;
++                }
++                s_optional.push_back(aurora::texture::load_replacement_directory(folder, {.priority = 1}));
++                std::fprintf(stderr, "[mods] texture-pack optional=%s replacements=%zu\n", name.c_str(),
++                             s_optional.back().registrations.size());
++            }
++        }
+     }
+ 
+     gx_aurora::g_graphics_log = backend_config->graphics_logging;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+index 40d939344f..205a9d3235 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+@@ -1163,9 +1163,15 @@ ReplacementGroup load_replacement_directory(const std::filesystem::path& root, R
+       continue;
+     }
+ 
++    // A pack's optional/ folder holds alternatives that load over it only when
++    // asked for (DOL_AURORA_TEXTURE_PACK_OPTIONAL, aurora_backend.cpp).
++    auto components = path_components(root, path);
++    if (components.size() > 1 && compare_ascii_ci(components.front(), "optional") == 0) {
++      continue;
++    }
+     candidates.push_back({
+         .path = path,
+-        .components = path_components(root, path),
++        .components = std::move(components),
+     });
+   }
+ 
+-- 
+2.56.0
+
