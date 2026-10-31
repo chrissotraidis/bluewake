@@ -43,7 +43,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # pin #49's head, fetched from upstream, until all three merge into
 # bluewake-next.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=e01f98c6828e48326b08e7e9ab5177f2bd4d7e0e
+RECOMPCORE_SHA=2bed438ebc6194a95948d835c40f16f17e47af37
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
