@@ -199,6 +199,25 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
+    # Source-only contracts for helpers awaiting whole-module qualification.
+    foreach(_variant plain global cache)
+        set(TEST_TARGET bluewake_gather_memory_${_variant}_test)
+        add_executable(${TEST_TARGET}
+            ${BLUEWAKE_REPO_ROOT}/tests/gather_memory_test.c
+            ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+        target_include_directories(${TEST_TARGET} PRIVATE
+            ${BLUEWAKE_REPO_ROOT}/cmake/composite ${GXRUNTIME_DIR}/tests)
+        target_link_libraries(${TEST_TARGET} PRIVATE gxruntime)
+        set_target_properties(${TEST_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
+        if(_variant STREQUAL "global")
+            target_compile_definitions(${TEST_TARGET} PRIVATE
+                BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+        elseif(_variant STREQUAL "cache")
+            target_compile_definitions(${TEST_TARGET} PRIVATE BLUEWAKE_GATHER_ALIAS_CACHE=1)
+        endif()
+        add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
+    endforeach()
+
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_link_libraries(bluewake_linux_disc_test PRIVATE gxruntime GXRuntime::aurora xxhash)

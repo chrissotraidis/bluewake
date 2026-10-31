@@ -559,9 +559,59 @@ The game writes commands and inline draw data to the emulated GX gather pipe.
 The bridge can send each write directly or batch consecutive bytes before they
 cross the module/host ABI. Both modes must deliver the same guest-order stream.
 
+Recognizing the hardware address is separate from deciding whether a store is
+actually hardware I/O. BlueWake recognizes stores in the 32-byte GX FIFO
+window at `0xCC008000–0xCC00801F`, but registered guest-memory aliases take
+precedence over that interpretation. The ordinary `get_ram_ptr()` check asks
+whether the particular access resolves to alias-backed storage; if it does,
+the store must remain on the normal guest-memory path. See
+[guest-to-host address resolution](GuestState.md#guest-to-host-address-resolution).
+
+Normal optimized Linux builds cache only whether *any* registered alias can
+overlap the FIFO window. The check covers both `0xCC008000–0xCC00801F` and its
+canonical `0x8C008000–0x8C00801F` form because the memory resolver accepts the
+mirrored address when applying alias precedence. Only the `0xCC008000` window
+is recognized here as the hardware gather-pipe address. The cached value is a
+boolean overlap decision, not a guest mapping or native pointer.
+
+```mermaid
+flowchart TD
+    Store["Translated<br/>guest store"]
+    FIFO{"GX FIFO<br/>address?"}
+    Writer{"GX writer<br/>configured?"}
+    Generation{"Alias generation<br/>changed?"}
+    Refresh["Recheck both<br/>FIFO windows"]
+    Overlap{"Cached alias<br/>overlap?"}
+    Resolve["Resolve this access<br/>with get_ram_ptr()"]
+    Mapped{"Alias-backed<br/>memory?"}
+    Normal["Normal memory<br/>or MMIO path"]
+    Transport["Configured GX transport<br/>direct or batched"]
+
+    Store --> FIFO
+    FIFO -->|"no"| Normal
+    FIFO -->|"yes"| Writer
+    Writer -->|"no"| Normal
+    Writer -->|"yes"| Generation
+    Generation -->|"yes"| Refresh --> Overlap
+    Generation -->|"no"| Overlap
+    Overlap -->|"no"| Transport
+    Overlap -->|"yes"| Resolve --> Mapped
+    Mapped -->|"yes"| Normal
+    Mapped -->|"no"| Transport
+```
+
+This is a contract map, not a literal call graph. RecompCore increments the
+guest-alias registry generation whenever aliases change. A generation change
+therefore refreshes both range checks before another cached decision is used.
+If either range can overlap an alias, BlueWake retains per-access resolution,
+including partial-alias and registration-precedence behavior. If neither can
+overlap, repeated FIFO stores skip that resolver work. [RecompCore #45](https://github.com/chrissotraidis/RecompCore/pull/45)
+defines the overlap query and generation contract.
+
 | Step | Runtime result | Code reference |
 | --- | --- | --- |
 | Recognize `0xCC008000` | A translated hardware store is identified as a gather-pipe write rather than guest RAM | [Translated writer](../../cmake/composite/gather_pipe.h) |
+| Preserve alias precedence | A generation-keyed overlap result skips resolution only when neither FIFO address form can overlap guest-backed storage | [Alias gate](../../cmake/composite/gather_pipe.h), [registry contract](https://github.com/chrissotraidis/RecompCore/pull/45) |
 | Preserve guest byte order | 1-, 2-, 4-, or 8-byte stores become the FIFO byte sequence expected by GXRuntime | [Batch encoding](../../cmake/composite/gather_pipe.h), [batch storage](../../cmake/composite/gather_pipe_batch.h) |
 | Select direct or batched mode | The host connects module exports to the active platform backend | [Bridge selection](../../runtime/host/src/main.c#L8289-L8300) |
 | Drain at an observable boundary | Earlier bytes reach the parser before hardware access, a host boundary, or a return can observe progress | [Writer contract](../../cmake/composite/gather_pipe.h), [flush implementation](../../cmake/composite/gather_pipe.c) |
@@ -574,7 +624,11 @@ cross the module/host ABI. Both modes must deliver the same guest-order stream.
 
 The bridge disables old writers before selecting a mode. Modules without the
 new exports retain the MMIO path, and diagnostic MMIO forces that fallback.
-This changes transport cost, not GX meaning.
+Writer selection happens before translated stores use this path. The alias
+gate decides whether a store may reach that already-configured writer; it does
+not select direct versus batched mode. It does not change FIFO byte ordering,
+batch drains, GX decoding, guest synchronization, or the original memory/MMIO
+fallback. This changes transport cost, not GX meaning.
 
 ### FIFO and display-list parsing
 

@@ -295,7 +295,7 @@ target_include_directories(bluewake_fast_blocks_test PRIVATE
 target_link_libraries(bluewake_fast_blocks_test PRIVATE ${CMAKE_DL_LIBS})
 
 # Source-only contracts for helpers awaiting whole-module qualification.
-foreach(_variant plain global)
+foreach(_variant plain global cache)
     add_executable(bluewake_gather_memory_${_variant}_test
         ${BLUEWAKE_REPO_ROOT}/tests/gather_memory_test.c
         ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
@@ -305,6 +305,9 @@ foreach(_variant plain global)
     if(_variant STREQUAL "global")
         target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
             BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+    elseif(_variant STREQUAL "cache")
+        target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
+            BLUEWAKE_GATHER_ALIAS_CACHE=1)
     endif()
     add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
 endforeach()
