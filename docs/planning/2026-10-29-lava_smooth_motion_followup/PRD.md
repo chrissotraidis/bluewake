@@ -1,6 +1,6 @@
 # PRD — Lava Room Smooth Motion follow-up
 
-Status: M0 and M1 done; M2 (Efficient soft effects) implemented, Deck measurement next\
+Status: M0 and M1 done; M2 (Efficient soft effects) measured in the Lava Room; Shipwreck and four-scene pictures next\
 Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured on the [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack and [RecompCore #49](https://github.com/chrissotraidis/RecompCore/pull/49)\
 Scope: why Smooth Motion stalls in the Lava Room on a Steam Deck, and a fix that keeps the picture and the game speed; excluded: Outset's game-thread limit ([#503](https://github.com/chrissotraidis/bluewake/pull/503))
 
@@ -43,6 +43,19 @@ The same pattern is the largest cost in the Shipwreck (≈ 62% of its GPU time a
 ### Proposed solution: Efficient soft effects
 
 Draw each run of these quads into a buffer of half the frame's size, and blend that buffer over the frame once, in the same place in the draw order. The buffer accumulates the quads exactly as they would have blended onto the frame, so the result differs only in resolution: a soft veil loses nothing visible at half resolution. It is an opt-in setting, **Efficient soft effects**, off by default, applied live so it can be compared in one session.
+
+### Result in Game Mode
+
+Same session, Lava Room, render scale 3, Smooth Motion on, the setting toggled from the menu (off, off, on, off, on):
+
+| | Efficient soft effects off | **On** |
+|---|---|---|
+| Game-thread clock | 3.08–3.18 GHz | **3.44–3.45 GHz** |
+| APU power (cap 15 W) | 14.5–15.5 W | **11.7–13.6 W** |
+| In-between frames per 15 s | 385–415 | **420–450** (450 = all) |
+| Seconds with a dip per 15 s | 15 of 15, at 85–89% | **2–5, at 91–96%** |
+
+The picture, compared on identical frames from the save state at scale 3, differs by 0.96/255 on average (none of it over 16/255); the player saw barely any difference, if any.
 
 ## Outcomes
 
