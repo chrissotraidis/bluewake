@@ -1,6 +1,6 @@
 # TECH_PLAN — Lava Room Smooth Motion follow-up
 
-Status: M0 and M1 done; M2 implemented in [RecompCore #49](https://github.com/chrissotraidis/RecompCore/pull/49) `2cc79f3`, Deck measurement next\
+Status: M0 and M1 done; M2 implemented and measured across five rendered scenes; visual qualification remains open\
 Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; measured on the [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack\
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -37,6 +37,48 @@ Hiding 700–780 (`DOL_AURORA_SKIP_DRAWS`) takes pass 1 from 21.3 to 6.1–7.0 m
 | Outset | 13.0 ms | 45, interleaved with terrain | not separated |
 | Hyrule Castle | 5.5 ms | 13 | small |
 | Butterfly room | 9.7 ms | inconclusive | — |
+
+### Five-scene rendered A/B (Steam Deck)
+
+Artifact: local run `2026_10_31-015052`, summarized here; paired review
+images are linked below. The AppImage and code were
+identical on both sides. A enabled Efficient soft effects; B left it at the
+default off value.
+
+| Control held constant | Value |
+|---|---|
+| AppImage | #504 `860c5996671f`, SHA-256 `4f0e008160f800507280017b9b51a499e5cbb35a168e534b2d6cc6d0a456e1cf` |
+| Workload | Five fixed save states, 1,800 retraces each |
+| Schedule | Four A and four B runs, interleaved A/B/B/A |
+| Shared settings | Render scale 3; Smooth Motion enabled; one in-between frame (60 FPS); unpaced measurement; vsync off |
+| Only A | `DOL_AURORA_EFFICIENT_EFFECTS=1` |
+| Correctness | 8/8 runs loaded every scene; six identical guest checkpoints per scene and run |
+
+| Scene | FPS B | FPS A | Change | GPU ms B | GPU ms A | Change |
+|---|---:|---:|---:|---:|---:|---:|
+| Outset | 26.909 | 27.018 | +0.41% | 21.636 | 18.906 | -12.62% |
+| Lava Room | 30.018 | 34.961 | **+16.47%** | 18.770 | 13.446 | **-28.36%** |
+| Hyrule Castle | 61.131 | 60.371 | -1.24% | 6.572 | 6.594 | +0.33% |
+| Butterfly Room | 44.100 | 44.879 | +1.77% | 14.233 | 13.634 | -4.21% |
+| Shipwreck | 29.559 | 30.294 | +2.49% | 20.053 | 13.603 | **-32.16%** |
+| **Geometric mean / median aggregate** | **36.521** | **37.922** | **+3.84%** | **18.770** | **13.603** | — |
+
+Picture comparison used one separate paced run per side and five frames per
+scene. Hyrule Castle was similar. Outset, Lava Room, and Butterfly Room crossed
+the PSNR threshold; Shipwreck detected 536 blinking pixels in A against 303 in
+B. These results establish performance benefit but leave visual acceptance
+and the EFB-alpha check open.
+
+Each review composite shows A (Efficient soft effects on), B (off), and an 8×
+amplified difference:
+
+| Outset | Lava Room | Hyrule Castle |
+|---|---|---|
+| [comparison](images/rendered-ab-1-outset.png) | [comparison](images/rendered-ab-2-lava-room.png) | [comparison](images/rendered-ab-3-hyrule-castle.png) |
+
+| Butterfly Room | Shipwreck |
+|---|---|
+| [comparison](images/rendered-ab-4-butterfly-room.png) | [comparison](images/rendered-ab-5-shipwreck.png) |
 
 ### Ruled out on the way
 
@@ -141,8 +183,8 @@ flowchart LR
 | Counters | `frame_interp_test` | All checks pass |
 | Setting | `settings_table_test` | Key in file order |
 | A/A and A/B | Game Mode, one session, setting toggled: off/off, then off/on/off/on, 15 s windows | A/B difference exceeds the A/A spread |
-| GPU and speed | Same session, Smooth Motion on, Lava Room and Shipwreck | Targets in the [PRD](PRD.md#success-and-constraints) |
-| Picture | Captures at scale 3, five scenes, on and off | Differences confined to soft effects, reviewed |
+| GPU and speed | Interleaved same-AppImage A/B, Smooth Motion on, five fixed scenes | Benefit recorded; intended heavy-effect scenes improve |
+| Picture | Paired captures at scale 3, five scenes, on and off | Review open: three changed scenes and increased Shipwreck flicker |
 
 ## Implementation order
 
@@ -159,7 +201,7 @@ Critical path: M0 → M1 → M2 → M3. RecompCore and BlueWake edits serialize 
 
 - **Game Mode at the player's settings is the reference.** Headless hid the power cap and understated the GPU cost about 5×; it stays useful for repeatable draw counts and captures.
 - **Profiler limits:** `gpu_prof`'s 4-deep readback ring drops frames with Smooth Motion on (per-instance costs hold, totals undercount); `frame_ms` is meaningless with chunking.
-- **Butterfly room and Outset** are unresolved; Outset's limit is the game thread ([#503](https://github.com/chrissotraidis/bluewake/pull/503)).
+- **Visual acceptance is unresolved.** Hyrule Castle is similar; Outset, Lava Room and Butterfly Room cross the PSNR threshold; Shipwreck reports increased flicker. Outset's performance limit remains with [#503](https://github.com/chrissotraidis/bluewake/pull/503).
 - **Builds:** renderer-only rebuilds keep the trained profile (`build_script --reuse`; builder provenance in [#515](https://github.com/chrissotraidis/bluewake/pull/515)), so A/B builds share the module's optimization.
 - `rendered_run.py` starts each run with an empty pipeline cache.
 

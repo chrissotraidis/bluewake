@@ -1,6 +1,6 @@
 # PRD — Lava Room Smooth Motion follow-up
 
-Status: M0 and M1 done; M2 (Efficient soft effects) measured in the Lava Room; Shipwreck and four-scene pictures next\
+Status: M0 and M1 done; M2 implemented and measured across five rendered scenes; visual qualification remains open\
 Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured on the [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack and [RecompCore #49](https://github.com/chrissotraidis/RecompCore/pull/49)\
 Scope: why Smooth Motion stalls in the Lava Room on a Steam Deck, and a fix that keeps the picture and the game speed; excluded: Outset's game-thread limit ([#503](https://github.com/chrissotraidis/bluewake/pull/503))
 
@@ -67,6 +67,27 @@ Gains, means of 6 windows off and 4 on:
 
 The picture, compared on identical frames from the save state at scale 3, differs by 0.96/255 on average (none of it over 16/255); the player saw barely any difference, if any.
 
+### Result across five rendered scenes
+
+The same AppImage ran as both sides of an interleaved A/B: render scale 3 and
+60 FPS Smooth Motion on both, with only `DOL_AURORA_EFFICIENT_EFFECTS=1` added
+to A. Four runs per side loaded all five states and produced identical guest
+checkpoints.
+
+| Scene | FPS change | GPU-time change | Picture result |
+|---|---:|---:|---|
+| Outset | +0.41% | -12.62% | changed |
+| Lava Room | **+16.47%** | **-28.36%** | changed |
+| Hyrule Castle | -1.24% | +0.33% | similar |
+| Butterfly Room | +1.77% | -4.21% | changed |
+| Shipwreck | +2.49% | **-32.16%** | increased flicker detected |
+| **Five-scene geometric mean** | **+3.84%** | — | review required |
+
+The performance hypothesis holds in the two intended heavy-effect scenes.
+The visual acceptance gate does not: Shipwreck reports more blinking pixels,
+and three other scenes cross the comparison threshold. The option therefore
+remains opt-in and the retain/reject decision remains open pending review.
+
 ## Outcomes
 
 - At render scale 3 in Game Mode, Smooth Motion keeps its in-between frames in the Lava Room and the Shipwreck at full game speed.
@@ -81,7 +102,7 @@ The picture, compared on identical frames from the save state at scale 3, differ
 | GPU per real frame | ≈ 23 ms | ≤ 14 ms (≥ 40% less) | `[gpu-prof]`, setting toggled in one session |
 | Game speed, Smooth Motion on | 83–87% | ≥ 98%, in-between frames delivered | `[interp-stats]`, `perf stat` |
 | APU power, Smooth Motion on | 14.1–16.0 W (at the 15 W cap) | under the cap | `power1_average` |
-| Picture | — | differences confined to the haze, reviewed side by side | captures, five scenes |
+| Picture | Five-scene baseline recorded | Differences acceptable to reviewers; no new flicker | Paired captures and amplified differences in `images/` |
 | A/B validity | — | the A/B difference exceeds the A/A spread | in-session toggles |
 
 Constraints: off by default until validated; no change to the game's own logic; the setting changes rendering only.

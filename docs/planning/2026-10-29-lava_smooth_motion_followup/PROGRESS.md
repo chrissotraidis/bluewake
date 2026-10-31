@@ -1,6 +1,6 @@
 # PROGRESS — Lava Room Smooth Motion follow-up
 
-Status: M0 and M1 done; M2 implemented (Efficient soft effects), Deck measurement next\
+Status: M0 and M1 done; M2 implemented and measured; M3 visual decision remains open\
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Where we are
@@ -9,8 +9,8 @@ Status: M0 and M1 done; M2 implemented (Efficient soft effects), Deck measuremen
 |---|---|---|
 | M0 | Done | Pacing protects game speed; never pause costs ≈ 10% in Game Mode |
 | M1 | Done | Causes observable; the Game Mode loss is the shared 15 W power cap |
-| M2 | Implemented, measuring | The heat haze is the cost; Efficient soft effects draws it at half resolution |
-| M3 | Not started | Deck A/B in one session, five-scene pictures, CI, pin and docs |
+| M2 | Implemented, measured | Efficient soft effects improves the five-scene geometric mean 3.84%; Lava +16.47%, Shipwreck +2.49% |
+| M3 | In progress | CI and rendered A/B complete; visual review, EFB-alpha check, final pin and retain/reject decision remain |
 
 ## Milestones
 
@@ -38,15 +38,15 @@ Design: [blended sprites at reduced resolution](TECH_PLAN.md#m2-design-blended-s
 
 - [x] M2-T01: Locate the cost at the player's settings: the heat haze (pass, chunk, draw log, hidden-draw capture).
 - [ ] M2-T02: Preserve camera-cut/content rejection and genuine-overload game-speed protection.
-- [ ] M2-T03: Produce matched control/candidate builds sharing one trained profile (`build_script --reuse`).
+- [x] M2-T03: Produce a stricter control: the same AppImage on both sides, with only the runtime setting changed.
 - [x] M2-T04: Selection rule for soft-effect sprites, unit-tested against the logged draw states.
 - [x] M2-T05: Half-size buffer and composite, real frame and in-between replay, behind the opt-in "Efficient soft effects" setting.
-- [ ] M2-T06: Picture and GPU-time comparison in five scenes at scale 3; EFB alpha check. Lava Room done; four scenes and the EFB alpha check remain.
+- [ ] M2-T06: Picture and GPU-time comparison in five scenes at scale 3; EFB alpha check. Five scenes complete; visual differences and the EFB-alpha check remain open.
 
 ### M3: Qualify and deliver (depends: M2)
 
 - [ ] M3-T01: Game Mode A/A and A/B in one session (setting toggled), Lava Room and Shipwreck, Smooth Motion on. Lava Room done; Shipwreck remains.
-- [ ] M3-T02: Run the full rendered scene tour, pictures/checkpoints and Linux/Windows CI.
+- [x] M3-T02: Run the full rendered scene tour, pictures/checkpoints and Linux/Windows CI.
 - [ ] M3-T03: Pin the reviewed RecompCore change in BlueWake and record the retain/reject decision.
 - [ ] M3-T04: Before merge, remove the review images (`images/`) from the branch and its history, and force-push.
 
@@ -91,3 +91,5 @@ Design: [blended sprites at reduced resolution](TECH_PLAN.md#m2-design-blended-s
 | M2-T05 | RecompCore #49 `2cc79f3` (`gxcore_draw.*`, `common.cpp`, `aurora.h`, config v14); BlueWake #504 `e58fea3` (`settings_table.h`, `desktop_menu.cpp`) | Build and tests in the CI container; `frame_interp_test`, `settings_table_test`, `settings_file_test`, `settings_state_test` | Linux CI container | Compiles without warnings in the changed files; all tests pass. Deck measurement pending (M2-T06, M3-T01) |
 | M3-T01 | AppImage `4f0e008160f8` (#504 `860c599`, RecompCore #49 `2cc79f3`); local `ab-A1.txt` … `ab-D1.txt`, `gm-full.sh` (private) | Game Mode, one session, Smooth Motion on (never pause), setting toggled in Mods → Experimental: off, off, on, (state reloaded) off, on; 2 × 15 s per step | Lava Room, render scale 3 | **Off** (A1, A2, C1; 6 windows): game thread 3.08–3.18 GHz, 14.5–15.5 W, GPU 1.22–1.33 GHz, 385–415 in-between frames per 15 s, dips in 15 of 15 s at 85–89%. **On** (B1, D1; 4 windows): game thread 3.44–3.45 GHz, 11.7–13.6 W, GPU 760–928 MHz, 420–450 in-between frames per 15 s, dips in 2–5 of 15 s at 91–96%. The A/B difference is far outside the A/A spread |
 | M2-T06 | Same AppImage; Deck `~/bluewake-render/runs/softcmp-010026/` (private); local `softcmp/` | Headless captures from the Lava Room state at scale 3 (1920×1440), setting off and on, same retraces | Deterministic playback | Same frame (retrace 136603): mean difference 0.96/255, 99th percentile 5, max 9, 1.5% of pixels over 4, none over 16; pairs 2–4 retraces apart: mean 0.8–1.2. The player saw barely any difference, if any. Profiler artifact found: with the pass split, the unused whole-pass `EFB 1` timestamp slot reads stale values, so `[gpu-prof]` totals are wrong with the setting on (parts are right) |
+| M2-T03 | #504 AppImage `860c5996671f`, SHA-256 `4f0e008160f800507280017b9b51a499e5cbb35a168e534b2d6cc6d0a456e1cf` | Same AppImage used as both A and B; shared scale 3 + 60 FPS Smooth Motion; only A sets `DOL_AURORA_EFFICIENT_EFFECTS=1` | Steam Deck, desktop session | Candidate and control differ only by the runtime option; all guest checkpoints match |
+| M3-T02 | Run `2026_10_31-015052`; [Outset](images/rendered-ab-1-outset.png), [Lava](images/rendered-ab-2-lava-room.png), [Hyrule](images/rendered-ab-3-hyrule-castle.png), [Butterfly](images/rendered-ab-4-butterfly-room.png), [Shipwreck](images/rendered-ab-5-shipwreck.png) | `scripts/render_bench`: five states × 1,800 retraces, 2 A/B/B/A pairs; one paced picture run per side; PR checks | Steam Deck, desktop session; unpaced/vsync-off measurement | 8/8 measured runs loaded all scenes; checkpoints identical. Geometric-mean FPS +3.84%; Lava +16.47%, Shipwreck +2.49%; GPU time -28.36% and -32.16%. Hyrule similar; Outset/Lava/Butterfly changed; Shipwreck flicker 536 A vs 303 B. CI checks pass; visual gate remains open |
