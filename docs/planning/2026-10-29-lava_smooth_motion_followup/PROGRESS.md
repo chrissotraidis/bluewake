@@ -28,6 +28,9 @@ M0 finding: in this view automatic pacing is correct protection, not a false ove
 ### M2: Correct the proven cause (depends: M1)
 
 - [ ] M2-T01: Change one pacing, presentation or GPU-resource behavior selected by M1. Attribution done: the CPU-side matching and blending is the cost; the change itself is still open.
+- [ ] M2-T04: Detection rule for veil sprites, unit-tested against the survey's draw logs ([design](TECH_PLAN.md#m2-design-blended-sprites-at-reduced-resolution)).
+- [ ] M2-T05: Low-res accumulation and composite in Aurora's pass encoding, opt-in setting, real frame and in-between replay.
+- [ ] M2-T06: Picture and GPU-time comparison in the five scenes at scale 3; EFB alpha check.
 - [ ] M2-T02: Preserve camera-cut/content rejection and genuine-overload game-speed protection.
 - [ ] M2-T03: Produce matched control/candidate builds with explicit dependency identities.
 

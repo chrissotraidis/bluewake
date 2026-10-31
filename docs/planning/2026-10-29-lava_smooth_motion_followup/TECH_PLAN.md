@@ -107,6 +107,58 @@ The controller may still print the existing player-readable reason. Typed cause,
 | Protection | Forced render load plus normal five-scene rendered run | Genuine overload still protects game speed; no image/checkpoint regression | Missing hardware run leaves M3 open |
 | Platform | Linux/Windows BlueWake CI after pin | RecompCore tests compile/run through supported host builds | Deck result does not replace Windows CI |
 
+## M2 design: blended sprites at reduced resolution
+
+### Problem
+
+At render scale 3, a block of about 80 large sprite quads (6 indices each, blended with source alpha over inverse source alpha, no depth test or write, one pipeline and texture) takes 62–69% of the GPU in the Lava Room and the Shipwreck, and about 30% in Outset. They are drawn after the scene, in the same EFB pass. Each covers much of the screen, so at scale 3 every layer blends millions of pixels. The effect is a soft veil (haze, smoke): its detail does not need full resolution.
+
+### Approach
+
+Draw a run of such sprites into a separate, lower-resolution colour buffer, then composite that buffer over the EFB once, at full resolution, in the same place in the draw order.
+
+```mermaid
+flowchart LR
+    Scene["EFB pass: draws before the run"]
+    Run{"Run of N or more<br/>veil sprites?"}
+    Low["Low-res buffer, cleared to (0,0,0,0)<br/>draw the run, premultiplied accumulation"]
+    Comp["Composite once over the EFB<br/>blend One, OneMinusSrcAlpha"]
+    Rest["Draws after the run, same pass"]
+    Scene --> Run
+    Run -->|"no"| Rest
+    Run -->|"yes"| Low --> Comp --> Rest
+```
+
+**Exact blending in the buffer.** For "source over" sprites drawn in order, accumulating in premultiplied form reproduces the result:
+
+- In the buffer: colour factors (SrcAlpha, OneMinusSrcAlpha) and alpha factors (One, OneMinusSrcAlpha), starting from (0,0,0,0). The buffer then holds the run's premultiplied colour and its total coverage.
+- Composite: colour factors (One, OneMinusSrcAlpha): `dst = acc.rgb + dst.rgb × (1 − acc.a)`, the same as blending each sprite onto the EFB in turn.
+- The only intended difference is resolution: the veil is shaded at half (or quarter) of the EFB's width and height and filtered up.
+
+**Detection (per draw, at encode).** A draw qualifies when its pipeline key has: blending on with (SrcAlpha, InvSrcAlpha); depth test and depth write off; colour write on; triangle topology; at most 12 indices; one TEV stage and no indirect stages. A run is a maximal sequence of consecutive qualifying draws in one EFB pass; only runs of at least N draws (initially 8) take the low-res path, so isolated sprites keep today's path. The draw logs from the survey are the test data for the rule: it must select the Lava Room's 700–780 and the Shipwreck's 1600–1699 blocks, Outset's 0–99 sprites, and nothing opaque.
+
+**Where it lives.** In Aurora's pass encoding (`common.cpp`, where `DOL_AURORA_SKIP_DRAWS` splits a pass): end the EFB pass before the run, encode the run into the low-res target, composite, and resume the EFB pass with `Load` (the same split already used for chunked timing). The real frame and the in-between replay take the same path.
+
+**Switch.** An opt-in setting first (render scale 2 or more only), off by default until the checks below pass; then a default-on decision.
+
+### Risks
+
+- **EFB alpha.** The sprites also write EFB alpha (with the same factors). The composite reproduces colour exactly; alpha follows `acc.a + dst.a × (1 − acc.a)`, which differs from per-sprite alpha blending. Check whether anything reads EFB alpha after the run (destination alpha, copies used as textures, bloom masks).
+- **Alpha test.** These sprites have an alpha test; it still discards per fragment in the low-res buffer, at coarser resolution.
+- **Edges and filtering.** Upscaling a half-resolution veil softens its edges; sprites with sharp edges or text must not match the rule.
+- **Interleaving.** Where qualifying sprites are interleaved with other draws (Lava Room 650–699), only the contiguous runs take the path, so the draw order is kept.
+- **Pass splits.** Ending and resuming the EFB pass costs a store and a load at full resolution, once per run; it must be small against the saving.
+
+### Verification
+
+| Check | Method | Pass |
+|---|---|---|
+| Rule | Unit test over the survey's draw logs | Selects the known veil blocks; selects no opaque or depth-tested draw |
+| Picture | Headless captures at scale 3, current vs low-res path, five scenes | Differences confined to the veil areas and small (mean and 99th percentile reported); reviewed side by side |
+| GPU time | `[gpu-prof]` per pass, five scenes, scale 3 | Lava Room and Shipwreck GPU per frame reduced by at least 40% |
+| Game Mode | Scale 3, Smoothness on (automatic pacing), Lava Room and Shipwreck | Full game speed with in-between frames delivered, under the 15 W cap |
+| CI | Linux and Windows BlueWake CI with the RecompCore pin | Builds and tests pass |
+
 ## Implementation order
 
 | Milestone | Depends | Can run with | Deliverable / integration gate |
