@@ -1,0 +1,116 @@
+# TECH_PLAN — Outset game-thread follow-up
+
+Status: Planning only  
+Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; performance baseline [#501](https://github.com/chrissotraidis/bluewake/pull/501) at `2749e6a194dcdba93846ebd925a33c4f95c695ab`  
+[PRD](PRD.md) · [Tracker](PROGRESS.md)
+
+## Inspected facts
+
+- The [game-thread architecture](../../architecture/GameThread.md#performance-model) keeps translated execution and host boundary work on one native thread; an idle GPU does not parallelize actor, collision or dispatch work.
+- #501 reports Outset at 26.971 FPS, about 129 M game-thread cycles/frame and 99% busy. Its alias resolver is not among Outset's ten largest costs.
+- The leading chunk includes collision work, but the partial native `GroundCrossGrpRp` experiment in [#436](https://github.com/chrissotraidis/bluewake/pull/436) covered only 28.1% of calls and made accepted calls slower.
+- Native routing currently checks host readiness before entering native math/vector implementations; examples are [`bluewake_native_game_math_try`](../../../cmake/composite/native_game_math.c), [`bluewake_native_math_try`](../../../cmake/composite/native_math.c) and [`bluewake_native_vec_try`](../../../cmake/composite/native_vec.c).
+- [`profile_deck.sh`](../../../scripts/linux/profile_deck.sh) identifies per-thread sampled costs. The fixed-state workflow and checkpoint contract are documented in the [performance guide](../../performance/Overview.md#worked-investigation).
+
+## Investigation flow
+
+```mermaid
+flowchart LR
+    Control["#501 control<br/>fixed Outset state"]
+    Noise["A/A noise<br/>and fixed window"]
+    Split["Game-thread cost split<br/>translated / host / routing / GX"]
+    Map["Map hot PCs<br/>to decomp symbols"]
+    Gate{"One removable cost<br/>above noise?"}
+    Change["One isolated<br/>candidate"]
+    Verify["A/B checkpoints<br/>cycles and FPS"]
+    Stop["Record no-go"]
+
+    Control --> Noise --> Split
+    Split --> Map --> Gate
+    Gate -->|yes| Change --> Verify
+    Gate -->|no| Stop
+```
+
+## Changes
+
+| Status | File / symbol | Practical edit | Milestone | Architecture |
+|---|---|---|---|---|
+| Existing | `scripts/linux/profile_deck.sh`, `scripts/bench_tour.py` | Reuse fixed-state CPU profiles and checkpoint comparisons | M0 | [Profiling](../../performance/Overview.md#profiling) |
+| Proposed | `runtime/host/src/main.c` and native `*_report` exports | Add opt-in counters only where sampling cannot separate attempted, accepted and declined routing cost | M1 | [Host/module boundary](../../architecture/GameThread.md#state-services-and-graphics) |
+| Proposed | Generated chunk/decomp mapping report | Resolve sampled PCs inside `func_802456E0`, `func_802ED6E0` and `func_800A56E0`; do not optimize an opaque chunk label | M1 | [Translated dispatch](../../architecture/GameThread.md#translated-dispatch) |
+| Proposed | Candidate-selected shared or RecompCore source | Implement exactly one measured reduction; keep fallback behavior unchanged | M2 | Determined by M1 ownership |
+| Proposed | Existing focused test plus five-scene Deck run | Prove semantic equivalence and measure the retained candidate | M3 | [Testing](../../architecture/Testing.md) |
+
+## Contracts and example
+
+The existing fallback contract must remain explicit. Instrumentation may count and time each branch, but cannot turn a decline into an acceptance:
+
+```c
+/* Existing routing shape; the selected candidate must preserve this result. */
+if (!bluewake_native_game_math_try(cpu, entry_address))
+    translated_entry(cpu);
+```
+
+M1 first separates `try` calls into accepted/declined counts and sampled self-time. If declined checks dominate, M2 may move a proven-invariant routing decision out of the per-call path. If accepted native work dominates, optimize that implementation instead. If translated chunks dominate, map their sampled PCs and work from the original function contract. Do not revive the partial #436 hook without new coverage and cost evidence.
+
+## Verification
+
+| Layer | Input / method | Required evidence | Failure / skip |
+|---|---|---|---|
+| Baseline | Same #501 AppImage against itself, fixed Outset state | Hashes, settings, warm-up, ≥5 interleaved A/A pairs and spread | Missing state/load/checkpoints makes M0 incomplete |
+| Attribution | Rendered Game Mode profile plus headless control | Correct game-thread TID, flat and call-graph reports, cycles/frame, activation counters | Process-wide-only samples are inconclusive |
+| Source tests | Existing focused guard/differential tests for the selected surface | Exact fallback and accepted-path results | Compile-only is insufficient |
+| Performance | Control/candidate A/B/B/A, ≥5 pairs | Outset gain exceeds 2% and A/A spread; selected cost and cycles/frame fall | Faster FPS without matching checkpoints fails |
+| Regression | Full five-scene rendered tour and Outset player tour | Identical checkpoints/images where applicable; no scene beyond noise | Unavailable Deck evidence leaves M3 open |
+
+## Implementation order
+
+| Milestone | Depends | Can run with | Deliverable / integration gate |
+|---|---|---|---|
+| M0 | — | — | Freeze control: #501 hashes, fixed Outset state, A/A distribution and valid measurement window |
+| M1 | M0 | PC mapping and routing counters run in parallel | Attribute costs: ranked, source-mapped costs with attempted/accepted/declined evidence |
+| M2 | M1 | Focused test work can accompany implementation | Isolated candidate: one change whose measured mechanism matches M1 |
+| M3 | M2 | Source/CI tests and Deck A/B can run independently | Qualify: correctness plus Outset and five-scene decision |
+
+Critical path: M0 → M1 → M2 → M3. Candidate implementation cannot safely begin before M1 because the profile is flat and prior collision work was a no-go. Concurrency is limited to evidence collection and focused tests; competing runtime candidates must remain separate A/B variables.
+
+## Decisions / gaps
+
+- **Shared runtime costs (M1-T04 survey, 2026-10-31).** Outset needs ≈ 129 M game-thread cycles per frame and 30 FPS needs ≈ 113 M. No game function is worth more than ≈ 2.3 M, and Outset differs from the open ocean by being more of everything, so candidates are costs every scene pays. M cycles per Outset frame:
+
+  | Cost | M/frame | Where | Removable? |
+  |---|---|---|---|
+  | Native routines (`*_try`, `native_skin`, `native_j3d`) | 10.8 | `cmake/composite/native_*` | Low: the routines' own work; routing is 0.33% |
+  | Direct-call check | 5.6 | `bw_direct_call_ready`, `cmake/composite/direct_calls.h` | **≈ 3**: one host-maintained "all clear" word in place of ≈ 17 loads and 12 branches; the target address is a constant per call site, so its watch test can be answered once and cached by a host generation number. Too big to inline at 32,604 sites as it is; a small fast part could be |
+  | GX command stream | 5.1 | `aurora_backend_gx_write` (host), `bw_gather_pipe` | Unknown: per-word parsing in the host; needs a look at batch parsing |
+  | Dispatch loop | 4.3 | `chassis_dispatch`, `host_chassis_requires_full`, `bw_call_translated`, `bw_find_chunk` | Unknown: the edges that still go round the loop; count them first |
+  | Native actor search | 2.9 | `host_actor_search_native`, `bw_search_word` (`main.c`) | ≈ 1: a `get_ram_ptr` per word where MEM1 is one pointer |
+  | Memory slow paths and aliases | 2.2 | `bw_mem_*_slow`, `ppc_guest_alias_*` | Unknown: why stores take the slow path |
+  | Paired-single quantized load/store | 2.1 | `ppc_psq_load_inline`/`store_inline` (582/351 bytes, out of line) | ≈ 1: an inline path for the float GQR type |
+  | FP helpers | 1.2 | `ppc_fctiw`, `ppc_frsp`, `ppc_frsqrte` | Small |
+
+  The removable part is ≈ 8–12 M per frame, 6–9% game FPS: it does not close the 13% gap alone. Order: the direct-call check first (largest, best understood, `BLUEWAKE_DIRECT_SKIP_VERIFY=1` checks every answer), then count the dispatch-loop edges and look at the GX stream.
+
+- **Prior work on these costs (checked 2026-10-31).**
+  - Direct-call check: [#274](https://github.com/chrissotraidis/bluewake/pull/274) made the host's answer address-only and readable inline (v3, +3.9% at Outset on a Mac). Before it, [`SPEED_PROFILE_2026-10-11.md`](https://github.com/chrissotraidis/bluewake/blob/main/docs/status/SPEED_PROFILE_2026-10-11.md#s2-the-hosts-per-call-checks-read-inline-october-12-no-gain) found that moving the question into the module saved nothing ("the cost is the question itself"), and that forcing the FP helpers inline made the module 11.5% larger and 1–2% slower. So the candidate must make the question smaller, not move or inline it; inlining at 32,604 call sites is ruled out.
+  - [#524](https://github.com/chrissotraidis/bluewake/pull/524) plans a versioned inline-answer handshake for the stage select on the same `BwHostSkipFast` contract. Both changes touch `direct_calls.h`/`direct_skip.h` and the v3 handshake: one handshake version, with a stated merge order.
+  - Gather pipe: [#495](https://github.com/chrissotraidis/bluewake/pull/495) already caches the alias test on gather writes (in this control build).
+  - Dispatch: [#448](https://github.com/chrissotraidis/bluewake/pull/448) found `selected_dispatch` is already an exact PC-keyed cache with no redundant readiness work.
+  - Collision: [#436](https://github.com/chrissotraidis/bluewake/pull/436)'s native `GroundCross` accepted 28% of calls and its accepted path was slower than translation on the Deck (226 vs 179 ns per call): no-go for collision hooks of that shape.
+  - Architecture ([GameThread](https://github.com/chrissotraidis/bluewake/blob/main/docs/architecture/GameThread.md#translated-dispatch)): direct calls stay conditional on exceptions, budgets, watched addresses and host observations. A smaller check must keep every one of those yields; `BLUEWAKE_DIRECT_SKIP_VERIFY=1` checks the answer against the host's on every call.
+  - Consequence: measure the ceiling first. A diagnostic-only module whose `bw_direct_call_ready` reads one combined word (not shippable) bounds the gain on the Deck. Below the 2% target, drop the candidate.
+
+- **Stage select and the direct-call fast path.** `main.c` enables the module's inline skip (`direct_calls_v3`) only when `!bluewake_stage_select_live`; with the stage select on, each direct call goes through `host_direct_can_skip_stage_select` (4.5% + `bluewake_stage_select_observes_body` 1.7% of the game thread in Outset). Candidate: keep v3 with the stage select on, by adding its fixed addresses to the fast path's watch table or switching to the host query only while its menu or a warp is active. Measured gain with it off: +10.9% game FPS.
+
+- **Fix Smooth Motion in every comparison.** It changes the game thread's IPC by about 5% in Outset (Game Mode, 2026-10-31), beyond the 2% target. Measure live with [`scripts/gamemode_measure.py`](https://github.com/chrissotraidis/bluewake/pull/522), which also records the game thread's clock: Outset was not power-limited, so clock changes there would point to a measurement problem.
+
+- `scripts/render_bench` used for #501 lives in open [#492](https://github.com/chrissotraidis/bluewake/pull/492), not current `main`; use that exact reviewed harness or document an equivalent command until it merges.
+- The private Outset state and translated module are required hardware inputs and cannot enter CI.
+- A RecompCore-owned candidate requires a companion RecompCore PR, followed by a BlueWake pin and exported patch under repository policy.
+
+## References
+
+- [#501 live follow-up and measurements](https://github.com/chrissotraidis/bluewake/pull/501)
+- [Steam Deck issue #215](https://github.com/chrissotraidis/bluewake/issues/215)
+- [Profiling guide](../../PROFILING.md)
+- [Performance overview](../../performance/Overview.md)
