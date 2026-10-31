@@ -24,12 +24,12 @@
 
 | You play on | What to do |
 | --- | --- |
-| **Windows** 10 or 11 | [Download the ready-made build](#windows) and choose your disc image |
+| **Windows** 10 or 11 | [Download the ready-made build](#windows): nothing to build, just choose your disc image |
 | **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it; a Windows build route is being validated |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/TVOS_BUILD.md) (experimental) |
 | **Linux** (x86-64) | [Build the native version](docs/LINUX.md); a ready-made download is not published yet |
-| **Android** (arm64) | [Build your own APK](docs/ANDROID.md) on a Windows PC (experimental) |
+| **Android** (arm64) | [Build your own APK](docs/ANDROID.md) on a Windows PC or a Mac (experimental) |
 
 On Mac, iPhone, iPad, Linux and Android, the app you build contains code translated from your disc. **It is yours
 alone: never share or upload it.**
@@ -42,7 +42,7 @@ alone: never share or upload it.**
 Wind Waker Recomp has moved here. Its creator, [Elliott](https://github.com/elliotttate), now
 maintains BlueWake together with Chris, and his work is part of BlueWake with his authorship kept.
 
-- **Windows:** BlueWake 0.8.0, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
+- **Windows:** BlueWake's Windows build, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
   is built from BlueWake itself and replaces Wind Waker Recomp 0.4.0. Smooth
   Motion is off by default (press **F10** to turn it on), and 0.4.0's experimental 60 FPS game logic
   is gone.
@@ -56,8 +56,9 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download `BlueWake-v0.8.0-windows-x64.zip` from the
-   [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest).
+1. Download [`BlueWake-v0.9.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.9.0/BlueWake-v0.9.0-windows-x64.zip)
+   from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play:
+   you don't need PadMint or a Mac.
 2. Unpack the whole ZIP and run `BlueWake.exe`.
 3. On first launch, choose your disc image (`.iso` or `.gcm`). A Dolphin `.rvz` must first be
    converted to ISO in Dolphin: right-click the game and choose **Convert File**.
@@ -82,6 +83,10 @@ You need:
 - your `GZLE01` revision 0 disc image
 - an A13 or newer iPhone or iPad on iOS/iPadOS 17 or later, with Developer Mode on
 - an Apple ID for signing (a free one works, but its apps expire after seven days)
+
+PadMint's GitHub Cloud Build, which makes some other games without a Mac, can't make BlueWake: the
+build turns code from your own disc into the app, so it has to run on your own Mac. Without one, you
+can play the [Windows](#windows) or [Linux](#linux) version.
 
 Then:
 
