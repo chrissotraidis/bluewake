@@ -450,6 +450,15 @@ Mark mark_for(const Job& job, int index) {
     return MarkRunning;
 }
 
+void begin_bottom_row(const ImGuiStyle& style) {
+    // The form is short and the preparation is long, so the action row sits on
+    // the window's bottom edge on every screen, as the TotK installer's does.
+    const float y = ImGui::GetWindowHeight() - ImGui::GetFrameHeight() - style.WindowPadding.y;
+    ImGui::SetCursorPosY(y - style.ItemSpacing.y);
+    ImGui::Separator();
+    ImGui::SetCursorPosY(y);
+}
+
 void stage_row(const Job& job, int index) {
     const Mark mark = mark_for(job, index);
     const float height = ImGui::GetTextLineHeight();
@@ -671,7 +680,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
                                     "You can also drag an ISO/GCM onto this window.");
             if (!message.empty()) ImGui::TextColored(kFailed, "%s", message.c_str());
 
-            ImGui::Separator();
+            begin_bottom_row(style);
             constexpr float kStartWidth = 130.0f, kQuitWidth = 90.0f;
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x -
                                  kStartWidth - kQuitWidth - style.ItemSpacing.x);
@@ -717,7 +726,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
             if (failed) ImGui::TextColored(kFailed, "%s", job->failure().c_str());
             if (show_log) log_pane(*job);
 
-            ImGui::Separator();
+            begin_bottom_row(style);
             if (ImGui::Button("Show log##preparing", ImVec2(110.0f, 0.0f))) show_log = !show_log;
             ImGui::SameLine();
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 110.0f);
@@ -747,7 +756,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
             if (job->textures_enabled) ImGui::TextDisabled("HD texture pack: %s", job->textures.c_str());
             if (show_log) log_pane(*job);
 
-            ImGui::Separator();
+            begin_bottom_row(style);
             if (ImGui::Button("Show log##ready", ImVec2(110.0f, 0.0f))) show_log = !show_log;
             constexpr float kPlayWidth = 150.0f, kQuitWidth = 90.0f;
             ImGui::SameLine();
