@@ -656,7 +656,14 @@ int main(void) {{
         saved = (o / "composite-final.digest").read_text().strip() if (o / "composite-final.digest").exists() else ""
         same_inputs = (o / "composite-inputs.digest").exists() and \
             (o / "composite-inputs.digest").read_text().strip() == inputs
-        if current.exists() and same_inputs and saved and tree_digest(current) == saved:
+        # generate() also records the plain tree for --source-only. A matching
+        # digest alone does not prove the later preparation phase completed.
+        try:
+            prepared = json.loads((o / "prepared-blocks.json").read_text())
+        except (OSError, ValueError):
+            prepared = {}
+        prepared_done = isinstance(prepared, dict) and prepared.get("final_digest") == saved
+        if current.exists() and same_inputs and saved and prepared_done and tree_digest(current) == saved:
             shutil.rmtree(new)
             print("the existing composite source is current")
             self.mods_pending = (o / "mods.done").read_text().strip() != "complete" \
@@ -672,6 +679,9 @@ int main(void) {{
             self.source_times = saved_times(o / "composite-src.times.json") or file_times(current)
             save_times(o / "composite-src.times.json", self.source_times)
             sync_tree(new, current)
+            # A former plain/conservative receipt can have this same base digest
+            # but different options. It no longer describes the reset source.
+            (o / "prepared-blocks.json").unlink(missing_ok=True)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
             (o / "composite-final.digest").write_text(digest + "\n")
@@ -1360,6 +1370,9 @@ int main(void) {{
             changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
             (self.out / "composite-src.times.json").unlink(missing_ok=True)
             print(f"composite source: {changed} of {total} files changed since the last build")
+        if getattr(args, "module_sources", False):
+            print(f"\nmodule sources ready: {self.out / 'composite-src'} (mods and preparations complete)")
+            return
         if args.host_only:
             step("local optimization training: kept from the last build (--host-only)")
             self.profile = self.kept_profile()
@@ -1533,6 +1546,8 @@ def main():
                              "(the individual --... options then add them one at a time)")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
+    parser.add_argument("--module-sources", action="store_true",
+                        help="stop after mods and module preparations, before training or platform compilation")
     parser.add_argument("--source-only", action="store_true",
                         help="stop after generating the source: checks tools, disc and translation in minutes")
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
@@ -1546,6 +1561,8 @@ def main():
     parser.add_argument("--appimage", action="store_true",
                         help="after the normal app-folder build, package it as an AppImage")
     args = parser.parse_args()
+    if args.module_sources and (args.source_only or args.host_only or args.check_only):
+        parser.error("--module-sources cannot be combined with --source-only, --host-only or --check-only")
     if args.clang22 and not args.ci_container:
         parser.error("--clang22 requires --ci-container")
     if args.ci_container and os.environ.get(CI_CONTAINER_ENV) != "1":

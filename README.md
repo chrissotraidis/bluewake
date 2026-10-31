@@ -25,7 +25,7 @@
 | You play on | What to do |
 | --- | --- |
 | **Windows** 10 or 11 | [Download the ready-made build](#windows): nothing to build, just choose your disc image |
-| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it |
+| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it; a Windows build route is being validated |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/TVOS_BUILD.md) (experimental) |
 | **Linux** (x86-64) | [Build the native version](docs/LINUX.md); a ready-made download is not published yet |
@@ -100,10 +100,11 @@ Then:
    ~~~
 
    Expect a first build of well over an hour. Add `--source-only` first to check your tools and
-   disc in a few minutes.
-2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode.
-3. **Copy the same disc image to your device:** in Finder, select the device, open **Files** and
-   drag it onto **BlueWake**. The app imports it on first launch.
+   disc in a few minutes. The Windows build route is still a draft; see [its validation status](docs/BUILD_YOUR_OWN.md#on-a-windows-pc-draft).
+2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode. On Windows, Sideloadly.
+3. **Copy the same disc image to your device:** in Finder on a Mac, or the Apple Devices app on
+   Windows, select the device, open **Files** and drag it onto **BlueWake**. The app imports it on
+   first launch.
 
 Step by step, with updating and troubleshooting: [Build your own BlueWake](docs/BUILD_YOUR_OWN.md).
 If you used PadMint, please tell us how it went in

@@ -135,6 +135,50 @@ it and prepares the game. Keep the imported disc on the device: the game reads i
 **⋯ › Game Data & Saves › Remove Disc Image…** removes the imported disc and extracted game files,
 keeps your saves and settings, and requires importing the disc again before playing.
 
+## On a Windows PC (draft)
+
+The Windows iPhone/iPad route in [PR #100](https://github.com/chrissotraidis/bluewake/pull/100)
+is being refreshed against current BlueWake. Its recipe keeps Windows and Linux marked **planned**
+until a current private-disc build, import check and IPA insertion pass. The existing Mac route
+still calls the same builder, with its local training, mods and packaging options.
+
+The draft requires PadMint's schema 2 module results and host selection, which are not in PadMint
+0.5.14. Older PadMint refuses this recipe. A future supported release will also need Visual Studio
+Build Tools with Desktop development with C++ and C++ Clang Compiler for Windows, your own GZLE01
+revision 0 disc, and enough space for the translation and compile (the recipe reserves 25 GB).
+
+The new `--module-sources` stage runs the existing platform builder through translation, mods and
+all selected preparation steps. The iOS compiler uses those completed preparation values; PadMint
+inserts the module and the matching `ModuleOptimizations` data into the app. `--source-only` still
+stops after translation. The off-Mac draft does not run Mac training or use a borrowed profile;
+no performance or gameplay equivalence is claimed.
+
+Validation on October 26: nine routing, preparation, result and configuration-cache tests pass
+with Apple Python 3.9 and the Windows packaged interpreter; the 25 prepared-cache checks cover
+source-only followed by a full build with mods disabled on both platform builders, including a
+previous conservative build whose plain-source receipt must be invalidated. The Mac host
+build and all 291 discovered host tests pass. The source archive passes the public-content gate.
+Hosted Windows, Linux, attribution, audit and sanitizer checks pass on source revision `dc4188b0`.
+
+A copy of an existing private extraction (the main executable and 415 RELs) passed current pinned
+translation, all mods and preparation: the base source matches the expected `54f54434…` digest,
+then the recorded final source is `af1c016e…` with `combined-v1`. The original extraction's hashes
+are unchanged. On a Mac, those copied inputs also completed the portable iOS module compile
+(860 build steps) and strict import checking against the verified public 0.9.0 app. PadMint's
+runtime-import follow-up at `d23c7e1` recognizes all 26 imported runtime names; no app callbacks or
+standard C++ imports are required. The iOS 16 module fits the app's iOS 17 minimum. Personal IPA
+insertion preserves all 14 original app entries and adds only the module and its `combined-v1`
+companion marker. The app's runtime and translator pins match the source.
+
+This is partial Mac compilation and packaging evidence from an existing extraction. Original-disc
+extraction, a complete Windows player build, module loading and gameplay remain unverified. The
+Mac full builder, its training and the recipe's planned Windows/Linux status are unchanged.
+
+Unknown or edited CMake configurations are refreshed; an exact known configuration and cache keeps
+its compiled objects. Refreshing every run would discard roughly 800 compiled chunks. Actual current
+Windows/Linux module builds and iPhone/iPad gameplay remain pending. The October 7 build is historical
+evidence only.
+
 ## Updating
 
 ```sh
