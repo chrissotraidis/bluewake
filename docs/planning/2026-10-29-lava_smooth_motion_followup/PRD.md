@@ -55,6 +55,16 @@ Same session, Lava Room, render scale 3, Smooth Motion on, the setting toggled f
 | In-between frames per 15 s | 385–415 | **420–450** (450 = all) |
 | Seconds with a dip per 15 s | 15 of 15, at 85–89% | **2–5, at 91–96%** |
 
+Gains, means of 6 windows off and 4 on:
+
+| | Off | On | Change |
+|---|---|---|---|
+| Game frames per second | 26.1 | 29.0 | +11% (87% → 97% of 30) |
+| Game-thread clock | 3.14 GHz | 3.45 GHz | +10% |
+| APU power | 14.8 W | 12.7 W | −15% |
+| Seconds with a dip, per 15 s | 15.0 | 3.2 | −79% |
+| In-between frame, GPU time | ≈ 16.2 ms | ≈ 9.3 ms | −43% |
+
 The picture, compared on identical frames from the save state at scale 3, differs by 0.96/255 on average (none of it over 16/255); the player saw barely any difference, if any.
 
 ## Outcomes
