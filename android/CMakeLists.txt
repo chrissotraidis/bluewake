@@ -50,6 +50,13 @@ set(AURORA_DAWN_LINKAGE static CACHE STRING "" FORCE)
 # libmain.so and the game module, so everything is static.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+# An <execinfo.h> for builds below API 33 (include/execinfo.h): GXRuntime's
+# Aurora backend includes it for the DOL_GX_STALL_STACKS watchdog, and bionic
+# only declares backtrace() from Android 13 (see the header). Directory-wide and
+# ahead of the NDK's sysroot, so it reaches that file inside GXRuntime too; an
+# API 33 or newer build still gets bionic's own header.
+include_directories(BEFORE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
 add_subdirectory(${GXRUNTIME_DIR} gxruntime_build EXCLUDE_FROM_ALL)
 
 set(BLUEWAKE_HOST_SOURCES
