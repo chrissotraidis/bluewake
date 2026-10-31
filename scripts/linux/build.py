@@ -1266,8 +1266,7 @@ int main(void) {{
             "native_math": self.args.native_math,
             "native_skin": self.args.native_skin,
             "native_game_math": self.args.native_game_math,
-            "local_training": self.profile is not None,
-            "composite_profile_sha256": sha256_file(self.profile) if self.profile else "",
+            **profile_provenance(self.args, self.profile),
             "compiler": self.clang_version,
             "module_sha256": sha256_file(app / MODULE),
             "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1425,6 +1424,17 @@ LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_p
                                "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
                                "behaviour_timing")
+
+
+def profile_provenance(args, profile):
+    """The optimization profile's part of BuilderProvenance.json. host_only: the profile was kept
+    from the last build in --out (--host-only), not trained for this source. Builds with the same
+    profile hash share the module's optimization, so an A/B between them compares only what changed."""
+    return {
+        "local_training": profile is not None,
+        "composite_profile_sha256": sha256_file(profile) if profile else "",
+        "host_only": bool(getattr(args, "host_only", False)),
+    }
 
 
 def main():

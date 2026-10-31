@@ -132,6 +132,10 @@ Useful options:
                    of training again, so only what the change reaches recompiles
 
 A rebuild recompiles only the parts of the game module whose source changed.
+`BuilderProvenance.json` records `host_only` and the profile's `composite_profile_sha256`:
+builds that share a profile hash share the module's optimization, so a performance
+comparison between them measures only the change, without the run-to-run variation a
+new training brings.
 After a change to the app alone, such as a new setting or mod hook, a normal
 rebuild still trains again (the training plays the game with the app), which takes
 most of the time; `--host-only` skips that. On an i5-12600KF the stage select's

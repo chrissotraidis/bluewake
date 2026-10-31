@@ -16,6 +16,30 @@ BUILD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BUILD)
 
 
+class ProfileProvenanceTest(unittest.TestCase):
+    """BuilderProvenance.json says which builds share a module profile (docs/LINUX.md)."""
+
+    def test_kept_profile_is_recorded_with_its_hash(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary) / "composite-abc.profdata"
+            profile.write_bytes(b"counts")
+            fields = BUILD.profile_provenance(argparse.Namespace(host_only=True), profile)
+            self.assertEqual(fields, {"local_training": True,
+                                      "composite_profile_sha256": BUILD.sha256_file(profile),
+                                      "host_only": True})
+
+    def test_trained_build_is_not_host_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary) / "composite.profdata"
+            profile.write_bytes(b"counts")
+            self.assertFalse(BUILD.profile_provenance(argparse.Namespace(host_only=False), profile)["host_only"])
+            self.assertFalse(BUILD.profile_provenance(argparse.Namespace(), profile)["host_only"])
+
+    def test_no_profile(self):
+        self.assertEqual(BUILD.profile_provenance(argparse.Namespace(host_only=False), None),
+                         {"local_training": False, "composite_profile_sha256": "", "host_only": False})
+
+
 class ToolchainPolicyTest(unittest.TestCase):
     """Protect the deliberate compiler split in the shared environment.
 
