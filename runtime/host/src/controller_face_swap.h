@@ -11,6 +11,28 @@ inline SDL_JoystickID bw_controller_connection(unsigned port) {
     SDL_Gamepad* pad = PADGetSDLGamepadForIndex(static_cast<unsigned>(index));
     return pad ? SDL_GetGamepadID(pad) : 0;
 }
+// A Nintendo controller (Switch Pro, Joy-Cons, a pad in Switch mode) in the
+// layout Aurora gives most pads: SDL reads its right face button as A and its
+// bottom one as B, and GameCube A and B are on those two buttons, either way
+// round. Aurora's layouts for the GameCube adapter and the NSO GameCube
+// controller put X there and are left out: they already match their letters.
+inline bool bw_nintendo_face_layout(unsigned port) {
+    int index = PADGetIndexForPort(port);
+    if (index < 0) return false;
+    SDL_Gamepad* pad = PADGetSDLGamepadForIndex(static_cast<unsigned>(index));
+    if (!pad || SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_EAST) != SDL_GAMEPAD_BUTTON_LABEL_A ||
+        SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_SOUTH) != SDL_GAMEPAD_BUTTON_LABEL_B)
+        return false;
+    u32 count = 0;
+    PADButtonMapping* buttons = PADGetButtonMappings(port, &count);
+    if (!buttons) return false;
+    u32 south = 0, east = 0;
+    for (u32 i = 0; i < count; ++i) {
+        if (buttons[i].nativeButton == SDL_GAMEPAD_BUTTON_SOUTH) south = buttons[i].padButton;
+        if (buttons[i].nativeButton == SDL_GAMEPAD_BUTTON_EAST) east = buttons[i].padButton;
+    }
+    return south != east && (south | east) == (PAD_BUTTON_A | PAD_BUTTON_B);
+}
 // Call after PADRestoreDefaultMapping. Copy first: setting by target while
 // iterating the borrowed map could otherwise overwrite a source mapping.
 inline void bw_apply_face_swaps(unsigned port, bool ab, bool xy) {

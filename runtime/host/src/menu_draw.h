@@ -31,8 +31,7 @@ void next_launch_note(const bw_settings::Setting& setting);
 bool choices(const char* key, const char* const** shown, const char* const** stored, int* count);
 
 inline bool on(const char* key, bool fallback) {
-    const std::string value = get(key, fallback ? "1" : "0");
-    return !value.empty() && value[0] != '0' && value != "off" && value != "false";
+    return bw_settings::switch_on(get(key, fallback ? "1" : "0").c_str(), fallback);
 }
 
 // The setting named `key`, or a complaint and a blank: an unknown name is a
@@ -75,7 +74,7 @@ inline void draw_control(const bw_settings::Setting& s);
 // Why the row just drawn (a group) is greyed, for the pointer over it: a
 // greyed item takes no hovering of its own, so an invisible button over the
 // row does. A pad and the keyboard skip greyed rows; the switch that turns
-// one on is beside it.
+// one on is beside it, or on another tab and named under it (draw_setting).
 inline void greyed_why(const char* why) {
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     ImGui::SetCursorScreenPos(a);
@@ -99,6 +98,8 @@ inline void draw_setting(const bw_settings::Setting& s) {
     for (const char* need = s.needs; need != nullptr && off_need == nullptr; need = setting(need).needs)
         if (!on(need, bw_settings::default_on(setting(need))))
             off_need = need;
+    if (off_need == nullptr && s.needs_set != nullptr && get(s.needs_set, "").empty())
+        off_need = s.needs_set;
     const bool waiting = off_need != nullptr;
     const bool overridden = s.dead_when != nullptr && !get(s.dead_when, "").empty();
     if (s.group != nullptr)
@@ -117,6 +118,10 @@ inline void draw_setting(const bw_settings::Setting& s) {
         ImGui::PushID(s.key);
         greyed_why(why);
         ImGui::PopID();
+        // A switch on another tab isn't beside the row, and a pad gets no
+        // pointer to ask: the reason is a quiet line under it instead.
+        if (waiting && setting(off_need).tab != s.tab)
+            ImGui::TextDisabled("%s", why);
     }
 }
 
@@ -167,21 +172,40 @@ inline void draw_control(const bw_settings::Setting& s) {
         changed(s);
 }
 
-// Every row of one tab, in the table's order. Experimental rows wait for the
-// Mods tab's last section (draw_experimental).
+// Every row of one tab, in the table's order. A pane's rows are drawn inside it,
+// set in, while it is open. Experimental rows wait for the Mods tab's last
+// section (draw_experimental), unless they are in a pane: there, their line
+// says they are experimental.
 inline void draw_tab(bw_settings::Tab tab) {
-    for (const bw_settings::Setting& s : bw_settings::kSettings)
-        if (s.tab == tab && s.experimental == nullptr)
+    const char* pane = nullptr;
+    bool open = false;
+    for (const bw_settings::Setting& s : bw_settings::kSettings) {
+        if (s.tab != tab || (s.experimental != nullptr && s.pane == nullptr))
+            continue;
+        if (s.pane != nullptr && (pane == nullptr || std::strcmp(pane, s.pane) != 0))
+            open = bw_menu_pane(s.pane);
+        pane = s.pane;
+        if (pane == nullptr) {
             draw_setting(s);
+            continue;
+        }
+        if (!open)
+            continue;
+        ImGui::Indent();
+        draw_setting(s);
+        if (s.experimental != nullptr)
+            ImGui::TextDisabled("Experimental: %s", s.experimental);
+        ImGui::Unindent();
+    }
 }
 
-// The Experimental section: every row with an experimental line, each with
-// that line under it saying what has not been checked yet.
+// The Experimental section: every row with an experimental line that is not
+// in a pane, each with that line under it saying what has not been checked yet.
 inline void draw_experimental() {
     ImGui::SeparatorText("Experimental");
     ImGui::TextDisabled("Off by default, and still being checked.");
     for (const bw_settings::Setting& s : bw_settings::kSettings) {
-        if (s.experimental == nullptr)
+        if (s.experimental == nullptr || s.pane != nullptr)
             continue;
         draw_setting(s);
         ImGui::TextDisabled("%s", s.experimental);

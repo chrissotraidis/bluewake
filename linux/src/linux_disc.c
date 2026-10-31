@@ -300,6 +300,13 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir,
             fprintf(stderr, "[disc] preparing %s\n", disc);
             if (bluewake_disc_prepare(disc, game, NULL, NULL, error, sizeof error) != 0) {
                 fprintf(stderr, "[disc] %s: %s\n", disc, error);
+                // Name where the files were going: a first import that fails
+                // for want of room should say so next to the folder, and that
+                // folder can be moved (#479).
+                fprintf(stderr,
+                        "[disc] the files were being written to %s; "
+                        "BLUEWAKE_DATA_DIR chooses the data folder\n",
+                        data_dir);
                 if (explicit_disc || scripted)
                     return -1;
                 disc[0] = '\0';

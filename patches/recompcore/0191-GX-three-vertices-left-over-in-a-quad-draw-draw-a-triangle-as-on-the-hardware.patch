@@ -1,0 +1,275 @@
+From e81e5800713309a5444ae234760732a7d7125e1c Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 02:30:18 -0500
+Subject: [PATCH 191/192] GX: three vertices left over in a quad draw draw a
+ triangle, as on the hardware
+
+Wind Waker draws each of its night stars (dKyr_drawStar) as GX_QUADS with
+three vertices. The quads were taken four vertices at a time and the rest
+ignored, so the stars' draws were dropped as incomplete quads and the night
+sky had none. Three left over now draw a triangle; one or two still draw
+nothing. Windfall's dock at 4:00 has its stars, as in Wind Waker HD.
+
+The rule that left them out said it matched Aurora's own quad loop, but
+that loop runs while v < count and emits 0,1,2 for three vertices (and a
+second triangle reading past the draw), so Aurora drew the stars; the
+frontend that replaced it dropped them. This draws the one real triangle.
+The gxcore, frontend and replay digest tests asserted the old rule on a
+three-vertex quad fixture; they now expect its triangle (three indices),
+and a two-vertex quad keeps the draws-nothing case.
+
+Smooth Motion keeps the stars steady. Each star is drawn at the camera's eye
+plus its place on a dome 300 units around it, so the stars go with the
+camera. The in-between frames paired them by their centres in the world:
+a star the camera carried more than a few units found none, or its neighbour,
+and the in-between frames drew them jumping with the camera or half way to
+another star (sailing at night, 5 to 23% of an in-between frame's stars
+stood where a real frame's did, and there were half as many again). A quad
+of three vertices, which only the stars draw, is now paired by its centre
+from the camera's eye, and its in-between frames draw it where it is now,
+moved as far as each in-between camera's eye is from this frame's: 87 to 100%
+of their stars stand where the real frames' do, and as many. The
+frame_interp tests pass.
+---
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 55 +++++++++++++++++++
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  3 +
+ .../graphics/frontend/src/render_sink.cpp     | 12 +++-
+ .../frontend/tests/frontend_replay_test.cpp   | 13 ++++-
+ .../frontend/tests/replay_digest_test.cpp     | 11 ++--
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 13 ++++-
+ 6 files changed, 95 insertions(+), 12 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index c864312b49..2f39174516 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -1336,6 +1336,20 @@ static bool trail_strip(const gxc::DrawPlan& plan) noexcept {
+          plan.match_primitive == 0x98 && plan.vertex_count >= kTrailVertices && !screen_space_sprite(plan);
+ }
+ 
++// A night star (dKyr_drawStar): a quad of three vertices, drawn with the view
++// matrix at the camera's eye plus its place on a dome 300 units around it, so
++// the stars go with the camera as it sails. Paired by their centres in the
++// world, a star the camera carried more than a few units found none or its
++// neighbour, and the in-between frames drew the stars jumping with the camera
++// or half way to another star. Nothing else draws a quad of three vertices.
++static bool camera_anchored(const gxc::DrawPlan& plan) noexcept {
++  return plan.match_direct_position && plan.draw_tag == 0 && plan.match_primitive == 0x80 &&
++         plan.vertex_count == 3 && !screen_space_sprite(plan);
++}
++
++// The camera's eye, from a view matrix (its inverse's translation).
++static bool view_eye(const float view[][4], double eye[3]) noexcept;
++
+ static uint64_t draw_key_of(const gxc::DrawPlan& plan) noexcept {
+   if (plan.match_payload == nullptr || plan.match_payload_size == 0)
+     return 0;
+@@ -1440,6 +1454,15 @@ bool blends_vertices(const gxc::DrawPlan& plan, bool positionsWritten) noexcept
+          (plan.match_direct_position || positionsWritten || plan.match_direct_texcoord_mask != 0);
+ }
+ 
++static bool view_eye(const float view[][4], double eye[3]) noexcept {
++  double back[3][4];
++  if (!affine_inverse(view, back))
++    return false;
++  for (int r = 0; r < 3; ++r)
++    eye[r] = back[r][3];
++  return std::isfinite(eye[0]) && std::isfinite(eye[1]) && std::isfinite(eye[2]);
++}
++
+ void capture_draw(const gxc::DrawPlan& plan, DrawInput& out, bool positionsWritten) noexcept {
+   out.key = draw_key_of(plan);
+   out.usedMatrixRows = used_matrix_rows(plan);
+@@ -1456,6 +1479,7 @@ void capture_draw(const gxc::DrawPlan& plan, DrawInput& out, bool positionsWritt
+   out.centre = {};
+   out.radius = 0.f;
+   out.trail = false;
++  out.cameraAnchored = false;
+   if (out.key == 0)
+     return;
+   // Screen sprites and particles the host tagged: an untagged world draw of one
+@@ -1525,6 +1549,12 @@ void capture_draw(const gxc::DrawPlan& plan, DrawInput& out, bool positionsWritt
+       }
+       out.radius = static_cast<float>(radius / double(decoded));
+       out.haveCentre = out.haveCentre && std::isfinite(out.radius);
++      double eye[3];
++      if (out.haveCentre && camera_anchored(plan) && view_eye(plan.constants.posnormalmatrix, eye)) {
++        out.cameraAnchored = true;
++        for (unsigned r = 0; r < 3; ++r)
++          out.centre[r] = static_cast<float>(out.centre[r] - eye[r]);
++      }
+       out.trail = out.haveCentre && trail_strip(plan);
+       if (out.haveCentre && centred_vertices(plan)) {
+         out.positions.resize(decoded * 3u);
+@@ -2169,6 +2199,31 @@ const gxc::VertexShaderConstants* blend_draw(const DrawInput& input, const gxc::
+     record.texcoordMask = input.texcoordMask;
+     frame.texcoords.insert(frame.texcoords.end(), input.texcoords.begin(), input.texcoords.end());
+   }
++  if (input.cameraAnchored) {
++    // A star: where it is now, moved as far as each in-between camera's eye
++    // is from this frame's (camera_anchored()).
++    double eyeNow[3];
++    if (result == nullptr || !view_eye(current.posnormalmatrix, eyeNow))
++      return result;
++    const float* now = input.positions.data();
++    bool moves = false;
++    for (int step = 0; step < g_frameSteps; ++step) {
++      double eye[3];
++      if (!view_eye(g_blended[step].posnormalmatrix, eye))
++        return result;
++      g_blendedPositions[step].resize(static_cast<size_t>(count) * 3u);
++      for (uint32_t i = 0; i < count; ++i)
++        for (unsigned r = 0; r < 3; ++r) {
++          const double shift = eye[r] - eyeNow[r];
++          g_blendedPositions[step][i * 3u + r] = static_cast<float>(now[i * 3u + r] + shift);
++          moves = moves || std::fabs(shift) > 1e-3;
++        }
++    }
++    g_haveBlendedPositions = moves;
++    if (moves)
++      ++g_frameCounts.positions;
++    return result;
++  }
+   const Record* before = g_match.record;
+   if (before == nullptr || g_match.block == nullptr || before->positions == kNoSamples ||
+       (before->positionCount != count && !input.trail))
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index f919bda5f7..f246012a21 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -91,6 +91,9 @@ struct DrawInput {
+   float radius = 0.f;
+   // A strip through an emitter's particles (trail_strip() in frame_interp.cpp).
+   bool trail = false;
++  // A night star (camera_anchored() in frame_interp.cpp): its centre is kept
++  // from the camera's eye, and its in-between frames go with the camera.
++  bool cameraAnchored = false;
+ };
+ // `positionsWritten`: whether the game wrote an indexed draw's position array
+ // this frame or the one before (gxcore_draw's positions_written()). Only such
+diff --git a/GXRuntime/graphics/frontend/src/render_sink.cpp b/GXRuntime/graphics/frontend/src/render_sink.cpp
+index 815daca391..1af7041492 100644
+--- a/GXRuntime/graphics/frontend/src/render_sink.cpp
++++ b/GXRuntime/graphics/frontend/src/render_sink.cpp
+@@ -553,8 +553,10 @@ std::uint32_t build_topology_indices(GxPrimitive primitive,
+   };
+   switch (primitive) {
+   case GxPrimitive::Quads:
+-    // Each quad -> two triangles {0,1,2} {2,3,0}. Trailing verts (< 4) ignored,
+-    // matching Aurora's v += 4 loop.
++    // Each quad -> two triangles {0,1,2} {2,3,0}. Three vertices left over
++    // draw a triangle, as on the hardware: Wind Waker draws each of its night
++    // stars as a quad of three vertices (dKyr_drawStar), and without it the
++    // sky had none. One or two left over draw nothing.
+     for (std::uint16_t v = 0; v + 4u <= vtx_count; v += 4u) {
+       const std::uint16_t i0 = static_cast<std::uint16_t>(vtx_start + v);
+       const std::uint16_t i1 = static_cast<std::uint16_t>(vtx_start + v + 1);
+@@ -567,6 +569,12 @@ std::uint32_t build_topology_indices(GxPrimitive primitive,
+       push(i3);
+       push(i0);
+     }
++    if (vtx_count % 4u == 3u) {
++      const std::uint16_t v = static_cast<std::uint16_t>(vtx_start + vtx_count - 3u);
++      push(v);
++      push(static_cast<std::uint16_t>(v + 1));
++      push(static_cast<std::uint16_t>(v + 2));
++    }
+     break;
+   case GxPrimitive::Triangles:
+     for (std::uint16_t v = 0; v < vtx_count; ++v)
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 7f5d4e4c1a..85c85e6d89 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -1218,6 +1218,12 @@ int main() {
+ 
+       // Count-only (out == nullptr) must agree.
+       assert(build_topology_indices(GxPrimitive::Quads, 0u, 8u, nullptr) == 12u);
++      // Three vertices left over draw a triangle (Wind Waker's stars); one or two nothing.
++      idx.clear();
++      assert(build_topology_indices(GxPrimitive::Quads, 5u, 3u, &idx) == 3u);
++      assert(idx[0] == 5u && idx[1] == 6u && idx[2] == 7u);
++      assert(build_topology_indices(GxPrimitive::Quads, 0u, 7u, nullptr) == 9u);
++      assert(build_topology_indices(GxPrimitive::Quads, 0u, 6u, nullptr) == 6u);
+       idx.clear();
+       assert(build_topology_indices(GxPrimitive::Lines, 3u, 5u, &idx) == 4u);
+       const std::uint16_t expect_lines[] = {3, 4, 5, 6};
+@@ -1248,12 +1254,13 @@ int main() {
+     // The live consumer accumulates the same draw-input byte extents an issued
+     // draw would submit, via the cutover builders, when a draw is assembled.
+     // flush_assembly() folds the frame's final draw. For this Quads/3-vertex
+-    // fixture: raw verts = 6 (3×2), topology indices = 0 (a quad needs 4 verts
+-    // so no complete primitive), storage = the single indexed span (72). These
++    // fixture: raw verts = 6 (3×2), topology indices = 6 (three vertices left
++    // over draw one triangle, three 16-bit indices), storage = the single
++    // indexed span (72). These
+     // are what the backend diffs against Aurora lastVertSize/Index/Storage.
+     consume_sink.flush_assembly();
+     assert(consume_sink.raw_vertex_bytes() == 6u);
+-    assert(consume_sink.topology_index_bytes() == 0u);
++    assert(consume_sink.topology_index_bytes() == 6u);
+     assert(consume_sink.storage_bytes() == 72u);
+ 
+     // Streaming mode keeps only the latest draw, but the cumulative count must
+diff --git a/GXRuntime/graphics/frontend/tests/replay_digest_test.cpp b/GXRuntime/graphics/frontend/tests/replay_digest_test.cpp
+index b254096085..db144c34bc 100644
+--- a/GXRuntime/graphics/frontend/tests/replay_digest_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/replay_digest_test.cpp
+@@ -222,15 +222,16 @@ void test_fixture_digest(const char* path) {
+   assert(!result.truncated);
+   assert(result.frames.size() == 2u);
+ 
+-  // Hand-checked frame 1: one 3-vertex quad draw, 3*2 payload bytes, no
+-  // complete quad -> no topology indices, indexed span 72 -> storage, 3
+-  // assembled elements (one indexed attr x 3 vertices).
++  // Hand-checked frame 1: one 3-vertex quad draw, 3*2 payload bytes, the
++  // three vertices left over drawn as one triangle -> three 16-bit topology
++  // indices (as on the hardware), indexed span 72 -> storage, 3 assembled
++  // elements (one indexed attr x 3 vertices).
+   const replay::FrameDigest& f1 = result.frames[0];
+   assert(f1.frame_index == 1u);
+   assert(f1.draws == 1u);
+   assert(f1.zero_draws == 1u);
+   assert(f1.vert_bytes == 6u);
+-  assert(f1.topo_bytes == 0u);
++  assert(f1.topo_bytes == 6u);
+   assert(f1.store_bytes == 72u);
+   assert(f1.elements == 3u);
+   assert(f1.has_stats);
+@@ -238,7 +239,7 @@ void test_fixture_digest(const char* path) {
+ 
+   const std::string line1 = replay::format_digest_line(f1);
+   const char* expected_prefix =
+-      "frame 1 draws 1 zdraws 1 verts 6 topo 0 store 72 elems 3 fnv ";
++      "frame 1 draws 1 zdraws 1 verts 6 topo 6 store 72 elems 3 fnv ";
+   assert(line1.compare(0u, std::strlen(expected_prefix), expected_prefix) ==
+          0);
+ 
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 0ed8ef218e..dee96b1044 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -387,9 +387,18 @@ void test_state_to_plan_and_wgsl() {
+     CHECK(point_plan.pipeline.primitive_topology == 2u);
+     CHECK(point_plan.indices.size() == 4u);
+ 
++    // Three vertices left over in a quad draw draw a triangle, as on the
++    // hardware (Wind Waker's night stars); two draw nothing.
++    ar::ConsumedDraw star = draw;
++    star.vertex_count = 3u;
++    star.vertex_payload.resize(3u * star.vertex_size);
++    const gxc::DrawPlan star_plan = state.build_draw_plan(star, counters);
++    CHECK(star_plan.ok);
++    CHECK(star_plan.indices.size() == 3u);
++
+     ar::ConsumedDraw partial_quad = draw;
+-    partial_quad.vertex_count = 3u;
+-    partial_quad.vertex_payload.resize(3u * partial_quad.vertex_size);
++    partial_quad.vertex_count = 2u;
++    partial_quad.vertex_payload.resize(2u * partial_quad.vertex_size);
+     const gxc::DrawPlan partial_plan =
+         state.build_draw_plan(partial_quad, counters);
+     CHECK(!partial_plan.ok);
+-- 
+2.56.0
+

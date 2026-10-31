@@ -295,7 +295,7 @@ target_include_directories(bluewake_fast_blocks_test PRIVATE
 target_link_libraries(bluewake_fast_blocks_test PRIVATE ${CMAKE_DL_LIBS})
 
 # Source-only contracts for helpers awaiting whole-module qualification.
-foreach(_variant plain global)
+foreach(_variant plain global cache)
     add_executable(bluewake_gather_memory_${_variant}_test
         ${BLUEWAKE_REPO_ROOT}/tests/gather_memory_test.c
         ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
@@ -305,6 +305,9 @@ foreach(_variant plain global)
     if(_variant STREQUAL "global")
         target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
             BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+    elseif(_variant STREQUAL "cache")
+        target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
+            BLUEWAKE_GATHER_ALIAS_CACHE=1)
     endif()
     add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
 endforeach()
@@ -825,6 +828,14 @@ add_executable(bluewake_settings_state_test ../../tests/settings_state_test.cpp)
 target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_20)
 target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
 add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
+
+add_executable(bluewake_settings_table_test ../../tests/settings_table_test.cpp)
+target_compile_features(bluewake_settings_table_test PRIVATE cxx_std_20)
+add_test(NAME bluewake_settings_table_test COMMAND bluewake_settings_table_test)
+
+add_executable(bluewake_settings_file_test ../../tests/settings_file_test.cpp)
+target_compile_features(bluewake_settings_file_test PRIVATE cxx_std_20)
+add_test(NAME bluewake_settings_file_test COMMAND bluewake_settings_file_test)
 if(UNIX)
     add_executable(bluewake_process_close_test ../../tests/process_close_test.c)
     target_include_directories(bluewake_process_close_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

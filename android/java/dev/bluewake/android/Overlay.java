@@ -392,7 +392,16 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         phone = getResources().getConfiguration().smallestScreenWidthDp < 600;
         Insets in = Insets.NONE;
         WindowInsets root = getRootWindowInsets();
-        if (root != null) in = root.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.systemBars());
+        if (root != null) {
+            if (Build.VERSION.SDK_INT >= 30) {
+                in = root.getInsets(WindowInsets.Type.displayCutout() | WindowInsets.Type.systemBars());
+            } else {
+                // Android 10 and 11, where WindowInsets.Type does not exist (API 30): the bars an app may not
+                // draw under, as the display cutout and the system bars together are above it.
+                in = Insets.of(root.getSystemWindowInsetLeft(), root.getSystemWindowInsetTop(),
+                               root.getSystemWindowInsetRight(), root.getSystemWindowInsetBottom());
+            }
+        }
         safe.set(in.left, in.top, w - in.right, h - in.bottom);
 
         // Where the picture is: the original picture keeps its shape, centered. Where the bars beside it are wide
@@ -902,6 +911,7 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
                         action("Back Up Saves…", data::backUpSaves),
                         action("Restore Saves…", data::chooseSavesToRestore),
                         action("Import Dolphin Save…", data::chooseDolphinSave),
+                        action("Export Dolphin Save…", data::exportDolphinSave),
                         action("Where Are My Files?", data::explainFiles)))),
                 action("Remove Disc Image…", data::confirmDataRemoval).destructive());
     }

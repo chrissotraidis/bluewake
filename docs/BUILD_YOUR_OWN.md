@@ -156,6 +156,9 @@ Export the save from Dolphin (**Tools › Memory Card Manager**, or the `.gci` f
 it to the device, then open **⋯ › Game Data & Saves › Import Dolphin Save…**. Choose the quest log and the
 BlueWake slot for it; your current saves are backed up first. USA saves only.
 
+**Export Dolphin Save…**, beside it, writes your save out as a `.gci` for Dolphin's Memory Card Manager, a
+real memory card, or another copy of BlueWake. It writes a new file and leaves your own card alone.
+
 ## Mods
 
 The build includes the Widescreen (16:9 and 16:10, and 21:9 on the Mac) and Better Wind Waker mods

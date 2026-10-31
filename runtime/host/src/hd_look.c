@@ -25,6 +25,28 @@ bool bluewake_hd_room_clip;
 static float g_sun_view[3] = {0.0f, 1.0f, 0.0f};  // toward the sun, in the camera's space (room culling)
 static float g_sun_up = 1.0f;  // the sun's direction's height (sine of its elevation)
 static bool g_trace;
+static bool g_sky;  // HD's sky and light palettes (BLUEWAKE_HD_SKY)
+static bool g_sky_models;  // with them, HD's sky models (BLUEWAKE_HD_SKY_MODELS=1; off by default)
+static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; off by default)
+static void sky_load(void);
+
+// HD's sunlight as the player chose it (BLUEWAKE_HD_SUNLIGHT, read at each
+// reload): the power its factor for the hour is taken to (sky_brightness()).
+static float g_sunlight = 0.37f;
+// HD's factor for the hour as last worked out (sky_brightness()), so a new
+// choice of sunlight shows at once, the game paused under the menu too.
+static float g_sky_factor;
+static void sky_sunlight_changed(void);
+
+// A number setting, or `fallback` when it is unset or not a number in [lo, hi].
+static float setting_number(const char* key, float fallback, float lo, float hi) {
+    const char* value = getenv(key);
+    if (value == NULL || value[0] == '\0')
+        return fallback;
+    char* end = NULL;
+    const float number = strtof(value, &end);
+    return end != value && number >= lo && number <= hi ? number : fallback;
+}
 
 static int setting(const char* key) {  // 1, 0, or -1 when unset
     const char* value = getenv(key);
@@ -33,40 +55,69 @@ static int setting(const char* key) {  // 1, 0, or -1 when unset
     return value[0] == '1';
 }
 
+// A part of the HD look: its own switch, else the look's. Turning the look off
+// (F2, or BLUEWAKE_HD_LOOK=0) takes every part with it, whatever its switch
+// says; with the look unset, a part's own variable alone still turns it on.
+static int part(const char* key, int all) {
+    if (all == 0)
+        return 0;
+    return setting(key) >= 0 ? setting(key) : all;
+}
+
 // The HD look's strengths, softer than Aurora's own starting values: at full
 // strength the look came out darker than the GameCube's, with a dark smudge
 // under Link. Aurora reads these once when it starts, so they are set before
 // that (main.c), whether or not the look is on yet; a value already set wins.
+// The far blur leaves the sky (no depth) sharp: blurred, its clouds looked out
+// of focus and the wind's lines faded. Torch light at Aurora's 0.35 washed the
+// Dragon Roost Cavern's walls pale yellow beside each torch.
 void bluewake_hd_look_defaults(void) {
     setenv("DOL_AURORA_AO_STRENGTH", "0.3", 0);
     setenv("DOL_AURORA_CLOUD_SHADOWS_STRENGTH", "0.15", 0);
     setenv("DOL_AURORA_BLOOM_STRENGTH", "0.3", 0);
     setenv("DOL_AURORA_FAR_BLUR_AMOUNT", "0.4", 0);
+    setenv("DOL_AURORA_FAR_BLUR_BACKGROUND", "0", 0);
+    setenv("DOL_AURORA_TORCH_LIGHT_STRENGTH", "0.2", 0);
+    // HD's sky clouds (BLUEWAKE_HD_CLOUDS, off by default, not on with the
+    // look): the importer keeps them in the pack's optional/hd-clouds, which
+    // Aurora loads over the pack only when asked, so they come only with the
+    // HD textures and the look both on. Textures load once, so this holds
+    // until BlueWake starts again.
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (setting("BLUEWAKE_HD_CLOUDS") == 1 && setting("BLUEWAKE_HD_LOOK") == 1 && pack != NULL && pack[0] != '\0')
+        setenv("DOL_AURORA_TEXTURE_PACK_OPTIONAL", "hd-clouds", 0);
 }
 
 void bluewake_hd_look_reload(void) {
     const int all = setting("BLUEWAKE_HD_LOOK");
-    const int islands = setting("BLUEWAKE_HD_DISTANT_ISLANDS");
-    bluewake_hd_distant_islands = islands >= 0 ? islands == 1 : all == 1;
+    bluewake_hd_distant_islands = part("BLUEWAKE_HD_DISTANT_ISLANDS", all) == 1;
     g_trace = setting("BLUEWAKE_HD_TRACE") == 1;
     // The renderer's parts (Aurora's post_fx). Left to DOL_AURORA_BLOOM and
     // DOL_AURORA_FAR_BLUR and DOL_AURORA_AO while neither the switch nor the part is set.
-    const int bloom = setting("BLUEWAKE_HD_BLOOM") >= 0 ? setting("BLUEWAKE_HD_BLOOM") : all;
-    const int far_blur = setting("BLUEWAKE_HD_FAR_BLUR") >= 0 ? setting("BLUEWAKE_HD_FAR_BLUR") : all;
-    const int ao = setting("BLUEWAKE_HD_AO") >= 0 ? setting("BLUEWAKE_HD_AO") : all;
-    g_clouds = setting("BLUEWAKE_HD_CLOUD_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_CLOUD_SHADOWS") : all;
+    const int bloom = part("BLUEWAKE_HD_BLOOM", all);
+    const int far_blur = part("BLUEWAKE_HD_FAR_BLUR", all);
+    const int ao = part("BLUEWAKE_HD_AO", all);
+    g_clouds = part("BLUEWAKE_HD_CLOUD_SHADOWS", all);
     // Sun shadows are worked out from what is on screen, and on open ground
     // they drew long dark streaks, so the HD look leaves them off; only
-    // BLUEWAKE_HD_SUN_SHADOWS=1 turns them on.
-    g_sun = setting("BLUEWAKE_HD_SUN_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_SUN_SHADOWS") : all >= 0 ? 0 : -1;
+    // BLUEWAKE_HD_SUN_SHADOWS=1 turns them on. They are part of the HD look,
+    // so turning the look off (F2, or BLUEWAKE_HD_LOOK=0) takes them too.
+    g_sun = all == 0 ? 0
+            : setting("BLUEWAKE_HD_SUN_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_SUN_SHADOWS") : all >= 0 ? 0 : -1;
     // Sun shadows come from a shadow map (Aurora's post_fx), so what is off
     // screen still casts. DOL_AURORA_SUN_SHADOW_MAP=0 keeps the screen's
     // version alone, for comparing the two.
     const int sun_map = setting("DOL_AURORA_SUN_SHADOW_MAP") >= 0 ? setting("DOL_AURORA_SUN_SHADOW_MAP") : g_sun;
     g_palm_cull = setting("BLUEWAKE_HD_PALM_CULL");
     g_room_cull = setting("BLUEWAKE_HD_ROOM_CULL");
-    g_edge = setting("BLUEWAKE_HD_EDGE_LIGHT") >= 0 ? setting("BLUEWAKE_HD_EDGE_LIGHT") : all;
-    g_torch = setting("BLUEWAKE_HD_TORCH_LIGHT") >= 0 ? setting("BLUEWAKE_HD_TORCH_LIGHT") : all;
+    g_edge = part("BLUEWAKE_HD_EDGE_LIGHT", all);
+    g_torch = part("BLUEWAKE_HD_TORCH_LIGHT", all);
+    g_sky = all == 1 && setting("BLUEWAKE_HD_SKY") == 1;
+    // Off until turned on, the HD look on or not (they are new).
+    g_sky_models = setting("BLUEWAKE_HD_SKY_MODELS") == 1;
+    g_sky_linear = setting("BLUEWAKE_HD_SKY_LINEAR") == 1;
+    if (g_sky)
+        sky_load();
     if (bloom >= 0)
         aurora_set_bloom(bloom == 1);
     if (far_blur >= 0)
@@ -75,8 +126,9 @@ void bluewake_hd_look_reload(void) {
         aurora_set_ambient_occlusion(ao == 1);
     if (sun_map >= 0)
         aurora_set_sun_shadow_map(sun_map == 1);
-    // The shadow quality (DOL_AURORA_SUN_SHADOW_QUALITY, also in the menu),
-    // handed over when it changes: the renderer makes its map again at once.
+    // The shadow quality (DOL_AURORA_SUN_SHADOW_QUALITY, for testing; the menu
+    // and the settings file keep none), handed over when it changes: the
+    // renderer makes its map again at once.
     {
         static int s_quality = -1;
         const char* value = getenv("DOL_AURORA_SUN_SHADOW_QUALITY");
@@ -86,6 +138,14 @@ void bluewake_hd_look_reload(void) {
             aurora_set_sun_shadow_quality(quality);
             s_quality = quality;
         }
+    }
+    // How dark the sun shadows are and how strong HD's sunlight is, as the
+    // player chose in the menu (HD's own by default).
+    aurora_set_sun_shadow_strength(setting_number("BLUEWAKE_HD_SHADOW_STRENGTH", 1.0f, 0.0f, 1.0f));
+    const float sunlight = setting_number("BLUEWAKE_HD_SUNLIGHT", 0.37f, 0.05f, 1.0f);
+    if (sunlight != g_sunlight) {
+        g_sunlight = sunlight;
+        sky_sunlight_changed();
     }
     fprintf(stderr, "[hd-look] distant islands %s, ambient occlusion %s, sun shadows %s%s, edge light %s, torch light %s, cloud shadows %s, far blur %s, bloom %s\n",
             bluewake_hd_distant_islands ? "on" : "off", ao < 0 ? "unset" : ao ? "on" : "off",
@@ -310,10 +370,11 @@ static void trace_islands(CPUState* cpu, unsigned long long retrace) {
 // its STAG info: outdoors 0 or the sea 7), with the game's camera.
 // GZLE01: g_dComIfG_gameInfo.play is at 0x803C5EA8; its mCurStage (the stage's
 // name first) at +0x3E94 and mCurrentView (view_class*) at +0x4A58. In the
-// view: mNear +0xC8, mFovy (degrees) +0xD0, mAspect +0xD4, mInvViewMtx +0x170.
+// view: mNear +0xC8, mFar +0xCC, mFovy (degrees) +0xD0, mAspect +0xD4, mInvViewMtx +0x170.
 enum {
     kCurrentView = 0x803CA900u,
     kViewNear = 0xC8u,
+    kViewFar = 0xCCu,
     kViewFovy = 0xD0u,
     kViewAspect = 0xD4u,
     kViewInvMtx = 0x170u,
@@ -392,10 +453,18 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
             const float near_plane = read_float(cpu, view + kViewNear);
             if (fovy > 1.f && fovy < 170.f && aspect > 0.1f && near_plane > 0.f) {
                 if (g_trace && retrace % 300u == 0u)
-                    fprintf(stderr, "[hd-look] camera eye %.0f %.0f %.0f fovy %.1f aspect %.3f near %.2f\n", inv[3],
-                            inv[7], inv[11], fovy, aspect, near_plane);
-                aurora_set_world_view(inv, tanf(fovy * 0.5f * 3.14159265f / 180.f), aspect, near_plane, 0.f,
-                                      (float)retrace / 59.94f);
+                    fprintf(stderr, "[hd-look] camera eye %.0f %.0f %.0f fovy %.1f aspect %.3f near %.2f far %.0f\n",
+                            inv[3], inv[7], inv[11], fovy, aspect, near_plane, read_float(cpu, view + kViewFar));
+                // The sea is at 0 outdoors; indoors there is none, and a floor near
+                // 0 would read as sea to the passes that leave the sea alone (HD's
+                // brightness for the hour), so the sea goes far below.
+                aurora_set_world_view(inv, tanf(fovy * 0.5f * 3.14159265f / 180.f), aspect, near_plane,
+                                      outdoors ? 0.f : -1.0e9f, (float)retrace / 59.94f);
+                // With the far plane the sun shadow map reads distances from the
+                // depth exactly: taken as infinitely far, an island 8,000 units
+                // off read hundreds of units too far and shaded itself in blocks.
+                const float far_plane = read_float(cpu, view + kViewFar);
+                aurora_set_world_view_far(far_plane > near_plane ? far_plane : 0.f);
                 const float sx = read_float(cpu, kSunPos) - inv[3];
                 const float sy = read_float(cpu, kSunPos + 4u) - inv[7];
                 const float sz = read_float(cpu, kSunPos + 8u) - inv[11];
@@ -629,6 +698,696 @@ void bluewake_hd_look_room_clip(CPUState* cpu, u32 address) {
     cpu->pc = cpu->lr & ~3u;
 }
 
+// HD's sky and light palettes (BLUEWAKE_HD_SKY, off by default, needs the
+// look): HD retuned the sea stage's colour tables (stage dzs Pale and Virt),
+// the sky toward cyan with an aqua horizon, the fog sky blue. The importer
+// keeps them, in the GameCube's layout and gamma, in the HD pack's
+// optional/hd-sky/sea.bin with the GameCube's own beside them
+// (hd-sky/make_sky.py). The game reads the tables where the stage file was
+// loaded, every frame (its counts at +0x30 and +0x3C stay 0 in GZLE01, so
+// the tables are known by their bytes), so while they hold the GameCube's colours the host
+// writes HD's over them, and puts them back when the switch goes off.
+// g_dComIfG_gameInfo.play.mStageData (dStage_stageDt_c) is at 0x803C9D58.
+enum {
+    kPaletInfo = 0x803C9D74u,     // mpPaletInfo (stage_palet_info_class, 0x2C each)
+    kVrboxInfo = 0x803C9D80u,     // mpVrboxInfo (stage_vrbox_info_class, 0x24 each)
+};
+// Every stage HD retuned (optional/hd-sky/stages.bin, else sea.bin alone): a
+// stage's GC Pale, HD Pale, GC Virt, HD Virt, HD's Pale factors. The stage in
+// play is known by its tables holding one stage's GameCube colours; its data
+// is then g_sky_data (Virt can be none: an interior has no sky).
+typedef struct SkyStage {
+    char name[16];
+    u8* data;
+    u32 pale, virt;
+} SkyStage;
+static SkyStage* g_skies;
+static u32 g_sky_count;
+static u8* g_sky_data;  // the stage in play's, or NULL
+static u32 g_sky_pale, g_sky_virt;
+static bool g_sky_shown;  // the tables hold HD's (as last seen)
+static float g_sky_exposure;  // what aurora_set_exposure was last given
+
+// A new choice of HD sunlight, at once: the brightness is otherwise worked out
+// each game frame, and the menu pauses the game.
+static void sky_sunlight_changed(void) {
+    const char* override = getenv("BLUEWAKE_HD_SKY_GAMMA");
+    if (!g_sky_shown || g_sky_factor <= 0.0f || (override != NULL && atof(override) > 0.0))
+        return;
+    g_sky_exposure = powf(g_sky_factor, g_sunlight);
+    aurora_set_exposure(g_sky_exposure);
+}
+
+static void sky_load(void) {
+    static bool tried;
+    if (tried)
+        return;
+    tried = true;
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (pack == NULL || pack[0] == '\0')
+        return;
+    char path[4096];
+    snprintf(path, sizeof path, "%s/optional/hd-sky/stages.bin", pack);
+    FILE* f = fopen(path, "rb");
+    u32 count = 1u;
+    bool all = false;
+    u8 head[16];
+    if (f != NULL && fread(head, 1, 8, f) == 8 && memcmp(head, "BWSA", 4) == 0) {
+        count = (u32)head[4] << 24 | (u32)head[5] << 16 | (u32)head[6] << 8 | head[7];
+        all = true;
+    } else {
+        if (f != NULL)
+            fclose(f);
+        snprintf(path, sizeof path, "%s/optional/hd-sky/sea.bin", pack);
+        f = fopen(path, "rb");
+    }
+    if (f == NULL || count == 0u || count > 512u || (g_skies = calloc(count, sizeof *g_skies)) == NULL) {
+        if (f != NULL)
+            fclose(f);
+        fprintf(stderr, "[hd-look] HD sky palettes: none in the pack\n");
+        return;
+    }
+    for (u32 i = 0; i < count; ++i) {
+        SkyStage* stage = &g_skies[g_sky_count];
+        if (all) {
+            u8 name[20];
+            if (fread(name, 1, 20, f) != 20)
+                break;
+            memcpy(stage->name, name, 15);
+        } else {
+            memcpy(stage->name, "sea", 4);
+        }
+        if (fread(head, 1, 16, f) != 16 || memcmp(head, "BWSK", 4) != 0 || head[7] != 2u)
+            break;
+        stage->pale = (u32)head[8] << 24 | (u32)head[9] << 16 | (u32)head[10] << 8 | head[11];
+        stage->virt = (u32)head[12] << 24 | (u32)head[13] << 16 | (u32)head[14] << 8 | head[15];
+        const size_t size = 2u * (stage->pale * 0x2Cu + stage->virt * 0x24u) + stage->pale * 24u;
+        if (stage->pale == 0u || stage->pale >= 256u || stage->virt >= 256u || (stage->data = malloc(size)) == NULL)
+            break;
+        if (fread(stage->data, 1, size, f) != size) {
+            free(stage->data);
+            break;
+        }
+        ++g_sky_count;
+    }
+    fclose(f);
+    fprintf(stderr, "[hd-look] HD sky palettes: %u stages from %s\n", g_sky_count, path);
+}
+
+static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size);
+
+// The stage whose GameCube Pale table the game's holds (the first entry, then
+// all of it), made the one in play; false if none. Several stages share the
+// GameCube's tables where HD retuned them apart (the fairy fountains, the
+// title's and the epilogue's sea against the sea's, two Triforce caves), so
+// the stage of that name is taken first (play.mCurStage, 0x803C9D3C).
+static bool sky_pick(CPUState* cpu, u32 table) {
+    char current[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        current[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);
+    int found = -1;
+    // Frozen Hyrule (Hyroom, Hyrule) is sepia in Wind Waker HD, and that look
+    // isn't in its palettes: with HD's alone, the room stayed grey and Link's
+    // hair turned green-yellow. Kept the GameCube's until the sepia is done.
+    if (strncmp(current, "Hyroom", 8) == 0 || strncmp(current, "Hyrule", 8) == 0)
+        return false;
+    for (u32 i = 0; i < g_sky_count; ++i) {
+        const SkyStage* stage = &g_skies[i];
+        if (!guest_equals(cpu, table, stage->data, 0x2Cu) || !guest_equals(cpu, table, stage->data, stage->pale * 0x2Cu))
+            continue;
+        if (found < 0 || strncmp(stage->name, current, 8) == 0)
+            found = (int)i;
+        if (strncmp(stage->name, current, 8) == 0)
+            break;
+    }
+    if (found < 0)
+        return false;
+    const SkyStage* stage = &g_skies[found];
+    if (g_sky_data != stage->data && g_trace)
+        fprintf(stderr, "[hd-look] sky palettes for stage %s\n", stage->name);
+    g_sky_data = stage->data;
+    g_sky_pale = stage->pale;
+    g_sky_virt = stage->virt;
+    return true;
+}
+
+static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size) {
+    for (u32 i = 0; i < size; ++i)
+        if (mem_read8(cpu, address + i) != bytes[i])
+            return false;
+    return true;
+}
+
+// One table: when it holds `from`, write `to` over it.
+// One table (Pale or Virt). While it holds the GameCube's colours and HD's
+// are wanted, HD's go over it, and the host keeps it (`*owned`): the linear
+// blend below then changes its entries, so it is no longer HD's to the byte.
+// With HD's no longer wanted the GameCube's go back. A stage that loads again
+// over it puts the GameCube's back by itself, and is taken again. Returns the
+// table while the host keeps it, else 0.
+static u32 sky_table(CPUState* cpu, u32 pointer, u32 count, u32 entry, const u8* gc, const u8* hd, u32* owned) {
+    const u32 table = mem_read32(cpu, pointer);
+    if (!guest_pointer(table)) {
+        *owned = 0u;
+        return 0u;
+    }
+    const bool is_gc = guest_equals(cpu, table, gc, entry) && guest_equals(cpu, table, gc, count * entry);
+    if (g_sky && is_gc) {
+        for (u32 i = 0; i < count * entry; ++i)
+            mem_write8(cpu, table + i, hd[i]);
+        *owned = table;
+        if (g_trace)
+            fprintf(stderr, "[hd-look] sky table at 0x%08X: HD\n", table);
+    } else if (!g_sky && *owned == table && !is_gc) {
+        for (u32 i = 0; i < count * entry; ++i)
+            mem_write8(cpu, table + i, gc[i]);
+        *owned = 0u;
+        if (g_trace)
+            fprintf(stderr, "[hd-look] sky table at 0x%08X: GameCube\n", table);
+    } else if (*owned != table) {
+        *owned = 0u;
+    }
+    return *owned;
+}
+
+// HD's brightness now: its factor for the sun's light on scenery (BG0 K0) in
+// each palette the game is blending, blended as the game blends their colours
+// (dScnKy_env_light_c::setLight_palno_get and setLight): the hour's two
+// palettes of the last weather and of the new one, by the hour, then by the
+// weather's change. In g_env_light (0x803E4AB4). As the scene's brightness,
+// taken to the power 0.37: 3 at noon is 1.5, 2 in the morning 1.29. Gamma's
+// 1/2.2 (1.65 at noon) looked right on Windfall's dock and too strong in play,
+// on the islands' sand and rock; 0.25 lost HD's brilliance.
+enum {
+    kEnvLight = 0x803E4AB4u,
+    kEnvPselect = kEnvLight + 0x008u,   // mpPselectInfo (0xC each: palette ids[8], change rate)
+    kEnvEnvr = kEnvLight + 0x00Cu,      // mpEnvrInfo (8 each: pselect ids)
+    kEnvSchedule = kEnvLight + 0x014u,  // mpSchejule (11 of 0xC: end time, begin time, palette slots 0 and 1)
+    kEnvColPatBlend = kEnvLight + 0xBE0u,
+    kEnvTime = kEnvLight + 0xC38u,
+    kEnvColpatPrev = kEnvLight + 0xC84u,
+    kEnvColpatCurr = kEnvLight + 0xC85u,
+    kEnvEnvrPrev = kEnvLight + 0xC88u,
+    kEnvEnvrCurr = kEnvLight + 0xC89u,
+};
+
+// HD's day ends sooner: its light schedule (dKyd_schejule_getp's table, found in
+// HD's cking.rpx with the GameCube's values but these) holds the noon palette
+// to 17:00, not 18:00, goes to the evening's by 18:00 and takes two hours, not
+// one, to dusk's at 20:00. Dawn, morning and night are the GameCube's. Each
+// entry: end, begin (degrees, 15 an hour), palette slots 0 and 1. Written over
+// the game's table (mpSchejule, 11 of 0xC) while it holds the GameCube's, with
+// the palettes, and put back with them. Wind Waker HD's sunset at 17:30 on
+// Windfall's dock was ours at 18:30 before.
+static const float kScheduleGc[3][2] = {{150.0f, 270.0f}, {270.0f, 285.0f}, {285.0f, 300.0f}};
+static const float kScheduleHd[3][2] = {{150.0f, 255.0f}, {255.0f, 270.0f}, {270.0f, 300.0f}};
+
+static bool sky_schedule(CPUState* cpu, bool hd) {
+    const u32 table = mem_read32(cpu, kEnvSchedule);
+    if (!guest_pointer(table))
+        return false;
+    const float (*from)[2] = hd ? kScheduleGc : kScheduleHd;
+    const float (*to)[2] = hd ? kScheduleHd : kScheduleGc;
+    bool has_to = true, has_from = true;
+    for (u32 i = 0; i < 3u; ++i)
+        for (u32 k = 0; k < 2u; ++k) {
+            const float v = read_float(cpu, table + (4u + i) * 0xCu + k * 4u);
+            has_to = has_to && v == to[i][k];
+            has_from = has_from && v == from[i][k];
+        }
+    // The rest of the field schedule, so the boss's or another table is never touched.
+    if ((!has_to && !has_from) || read_float(cpu, table + 4u) != 90.0f || read_float(cpu, table + 3u * 0xCu + 4u) != 150.0f)
+        return false;
+    if (has_from)
+        for (u32 i = 0; i < 3u; ++i)
+            for (u32 k = 0; k < 2u; ++k)
+                write_float(cpu, table + (4u + i) * 0xCu + k * 4u, to[i][k]);
+    return true;
+}
+
+// HD's sky models are the GameCube's four, taller: the horizon's haze, the
+// band that carries the dawn's and dusk's lavender and noon's aqua, fades out
+// 17.7 degrees up in HD's vr_sky, 6.4 in ours; the front haze (vr_kasumi_mae)
+// at 7.9, not 4.9; the three cloud layers (vr_back_cloud) reach 11.3, 21.5
+// and 7.75 degrees, not 9.5, 10.3 and 4.4 (measured in HD's sea_Stage and the
+// GameCube's sea Stage.arc). Their joints' heights (J3DJoint's transform
+// scale y, +0x20) are set to match while HD's palettes are in, and put back
+// with them; only a joint holding the GameCube's or that height is touched.
+// The sky actors make the models again from their joints every frame
+// (mDoExt_modelUpdateDL). daVrbox (0x1BA in GZLE01, one below the decomp's
+// fpcNm list): vr_sky at +0x294; daVrbox2 (0x1BB): vr_back_cloud at +0x294,
+// vr_kasumi_mae at +0x29C.
+static const struct {
+    u16 proc;
+    u16 model;  // the actor's model pointer
+    u16 joints, joint;  // the model's joint count, and the joint
+    float gc, hd;  // its height (scale y)
+} kSkyJoints[] = {
+    {0x1BAu, 0x294u, 4u, 2u, 1.0f, 2.80f},      // vr_sky: the haze band
+    {0x1BBu, 0x29Cu, 3u, 2u, 0.951808f, 1.535f}, // vr_kasumi_mae
+    {0x1BBu, 0x294u, 5u, 2u, 1.0f, 1.20f},      // vr_back_cloud: the near mae layer
+    {0x1BBu, 0x294u, 5u, 3u, 1.0f, 2.16f},      // the naka layer, highest in HD
+    {0x1BBu, 0x294u, 5u, 4u, 0.45f, 0.80f},     // the low mae layer
+};
+
+// HD draws each cloud layer as one sheet of its texture, scrolling with the
+// wind. The GameCube's layer material (vr_back_cloud's three, 4 TEV stages)
+// samples its colour and alpha textures twice, once still and once scrolling
+// 0.2 along, and screens the colours and multiplies the alphas: clouds that
+// slowly change shape, and with HD's art only the overlaps left, scattered
+// blobs instead of HD's cirrus bands. With HD's palettes in, stage 1 takes
+// the scrolling sample's colour alone and stage 3 its alpha alone (J3DTevStage
+// bytes in the material's TEV block: model data +0x60 the materials, a
+// material +0x2C its TEV block, then the stages, 8 bytes each).
+// The material's own display list (J3DMaterial +0x48, J3DDisplayListObj: two
+// buffers, then the size) is what is drawn; it carries the same stages as GX
+// BP writes (0x61, the register, three bytes), made once at load. Patched in
+// both buffers: stage 1's colour (register 0xC2) and stage 3's alpha (0xC7).
+static void sky_layer_dl(CPUState* cpu, u32 material, bool hd) {
+    const u32 dl = mem_read32(cpu, material + 0x48u);
+    if (!guest_pointer(dl))
+        return;
+    const u32 size = mem_read32(cpu, dl + 0x08u);
+    for (u32 b = 0; b < 2u && size > 0u && size < 0x1000u; ++b) {
+        const u32 data = mem_read32(cpu, dl + b * 4u);
+        if (!guest_pointer(data))
+            continue;
+        for (u32 i = 0; i + 5u <= size; ++i) {
+            if (mem_read8(cpu, data + i) != 0x61u)
+                continue;
+            const u8 reg = mem_read8(cpu, data + i + 1u), x = mem_read8(cpu, data + i + 3u), y = mem_read8(cpu, data + i + 4u);
+            if (reg == 0xC2u) {
+                if (hd && x == 0x0Fu && y == 0x88u) {
+                    mem_write8(cpu, data + i + 3u, 0xFFu);
+                    mem_write8(cpu, data + i + 4u, 0xF8u);
+                } else if (!hd && x == 0xFFu && y == 0xF8u) {
+                    mem_write8(cpu, data + i + 3u, 0x0Fu);
+                    mem_write8(cpu, data + i + 4u, 0x88u);
+                }
+            } else if (reg == 0xC7u) {
+                if (hd && x == 0xE2u && (y & 0xF0u) == 0x70u) {
+                    mem_write8(cpu, data + i + 3u, 0xFFu);
+                    mem_write8(cpu, data + i + 4u, (u8)(0xC0u | (y & 0x0Fu)));
+                } else if (!hd && x == 0xFFu && (y & 0xF0u) == 0xC0u) {
+                    mem_write8(cpu, data + i + 3u, 0xE2u);
+                    mem_write8(cpu, data + i + 4u, (u8)(0x70u | (y & 0x0Fu)));
+                }
+            }
+        }
+    }
+}
+
+// The scrolling sample also starts 0.2 along (texture matrix 1's translation
+// x, +0x1C), for the GameCube's two copies to differ; one copy that far along
+// shows another part of the texture than HD's model, whose layers start at
+// 0 (72 degrees around the sky for the naka layer). With HD's palettes in it
+// starts at 0; the wind's scroll goes on adding to it. Which matrices are
+// shifted is kept, to put the 0.2 back.
+static u32 s_shifted[8];  // cleared while no sky actor is there (a stage change makes the models again)
+
+static void sky_layer_shift(CPUState* cpu, u32 mtx, bool hd) {
+    int at = -1, free_slot = -1;
+    for (int i = 0; i < 8; ++i) {
+        if (s_shifted[i] == mtx)
+            at = i;
+        else if (s_shifted[i] == 0u && free_slot < 0)
+            free_slot = i;
+    }
+    if (hd && at < 0 && free_slot >= 0) {
+        write_float(cpu, mtx + 0x1Cu, read_float(cpu, mtx + 0x1Cu) - 0.2f);
+        s_shifted[free_slot] = mtx;
+    } else if (!hd && at >= 0) {
+        write_float(cpu, mtx + 0x1Cu, read_float(cpu, mtx + 0x1Cu) + 0.2f);
+        s_shifted[at] = 0u;
+    }
+}
+
+// HD wraps its highest layer's texture (naka, the cirrus band) once around the
+// sky, the GameCube's four times: HD's streaks are four times as long, long
+// cirrus and cirrostratus, where four repeats left short patches. The mae
+// layers wrap alike (6 and 8). So the naka material's scrolling texture
+// matrix (texture matrix 1; J3DTexMtx: centre at +0x04, scale x at +0x10,
+// rebuilt each frame from these) is scaled to a quarter across. The material's
+// texture matrices are found among its texgen block's pointers by their
+// centre (0.5, 0.5).
+static void sky_layer_wrap(CPUState* cpu, u32 material, u32 m, bool hd) {
+    const u32 texgen = mem_read32(cpu, material + 0x28u);
+    if (!guest_pointer(texgen))
+        return;
+    u32 found = 0u;
+    for (u32 o = 0x04u; o < 0x80u; o += 4u) {
+        const u32 mtx = mem_read32(cpu, texgen + o);
+        if (!guest_pointer(mtx) || read_float(cpu, mtx + 0x04u) != 0.5f || read_float(cpu, mtx + 0x08u) != 0.5f)
+            continue;
+        if (found++ != 1u)
+            continue;
+        sky_layer_shift(cpu, mtx, hd);
+        if (m != 1u)
+            return;
+        const float now = read_float(cpu, mtx + 0x10u), want = hd ? 0.25f : 1.0f;
+        if (now != want && (now == 1.0f || now == 0.25f))
+            write_float(cpu, mtx + 0x10u, want);
+        return;
+    }
+}
+
+static void sky_layer_material(CPUState* cpu, u32 data, bool hd) {
+    if (mem_read16(cpu, data + 0x5Cu) != 3u)
+        return;
+    const u32 materials = mem_read32(cpu, data + 0x60u);
+    for (u32 m = 0; guest_pointer(materials) && m < 3u; ++m) {
+        const u32 material = mem_read32(cpu, materials + m * 4u);
+        const u32 tev = guest_pointer(material) ? mem_read32(cpu, material + 0x2Cu) : 0u;
+        if (!guest_pointer(tev))
+            continue;
+        // The stages, found by their register bytes (0xC0 stage 0's colour,
+        // 0xC1 its alpha, and on): the block's class sets where they start
+        // (+0x38 for this model's, with 8 TEV orders before them).
+        u32 s0 = 0u;
+        for (u32 o = 0x10u; o < 0x80u && s0 == 0u; o += 2u)
+            if (mem_read8(cpu, tev + o) == 0xC0u && mem_read8(cpu, tev + o + 4u) == 0xC1u &&
+                mem_read8(cpu, tev + o + 8u) == 0xC2u && mem_read8(cpu, tev + o + 28u) == 0xC7u)
+                s0 = tev + o;
+        if (s0 == 0u)
+            continue;
+        sky_layer_dl(cpu, material, hd);
+        sky_layer_wrap(cpu, material, m, hd);
+        const u32 s1 = s0 + 8u, s3 = s0 + 24u;
+        // Stage 1 colour: a, b | c, d. GameCube: CPREV, ZERO | TEXC, TEXC (screen); HD: ZERO, ZERO | ZERO, TEXC.
+        const u8 ab = mem_read8(cpu, s1 + 2u), cd = mem_read8(cpu, s1 + 3u);
+        // Stage 3 alpha: a<<5 | b<<2 | c>>1, then (c&1)<<7 | d<<4 | swap. GameCube: ZERO, APREV, TEXA, ZERO
+        // (a product); HD: ZERO, ZERO, ZERO, TEXA.
+        const u8 aab = mem_read8(cpu, s3 + 6u), sw = mem_read8(cpu, s3 + 7u);
+        const bool gc = ab == 0x0Fu && cd == 0x88u && aab == 0xE2u && (sw & 0xF0u) == 0x70u;
+        const bool is_hd = ab == 0xFFu && cd == 0xF8u && aab == 0xFFu && (sw & 0xF0u) == 0xC0u;
+        if (g_trace && !gc && !is_hd) {
+            static unsigned s_told;
+            if (s_told++ < 3u)
+                fprintf(stderr, "[hd-look] cloud layer material %u: stages unlike the GameCube's (%02X %02X %02X %02X)\n",
+                        m, ab, cd, aab, sw);
+        }
+        if (hd && gc) {
+            mem_write8(cpu, s1 + 2u, 0xFFu);
+            mem_write8(cpu, s1 + 3u, 0xF8u);
+            mem_write8(cpu, s3 + 6u, 0xFFu);
+            mem_write8(cpu, s3 + 7u, (u8)(0xC0u | (sw & 0x0Fu)));
+        } else if (!hd && is_hd) {
+            mem_write8(cpu, s1 + 2u, 0x0Fu);
+            mem_write8(cpu, s1 + 3u, 0x88u);
+            mem_write8(cpu, s3 + 6u, 0xE2u);
+            mem_write8(cpu, s3 + 7u, (u8)(0x70u | (sw & 0x0Fu)));
+        }
+    }
+}
+
+// HD's floating clouds (the sky's puffs, drawVrkumo) are larger than the
+// GameCube's. Their size is 0.45 + 0.55 times the weather's cloud strength,
+// two constants the game reads from its small data (0x803F8E10 and 0x803F8E14,
+// read by drawVrkumo alone); with HD's sky models they are scaled together by
+// BLUEWAKE_HD_SKY_PUFFS (1.4 by default), and put back with them.
+static void sky_puffs(CPUState* cpu, bool hd) {
+    static float s_scale = -1.0f;
+    if (s_scale < 0.0f) {
+        const char* value = getenv("BLUEWAKE_HD_SKY_PUFFS");
+        s_scale = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.4f;
+    }
+    const float base = read_float(cpu, 0x803F8E10u), grow = read_float(cpu, 0x803F8E14u);
+    const float want_base = hd ? 0.45f * s_scale : 0.45f, want_grow = hd ? 0.55f * s_scale : 0.55f;
+    const bool known = (base == 0.45f && grow == 0.55f) || (base == 0.45f * s_scale && grow == 0.55f * s_scale);
+    if (known && (base != want_base || grow != want_grow)) {
+        write_float(cpu, 0x803F8E10u, want_base);
+        write_float(cpu, 0x803F8E14u, want_grow);
+    }
+}
+
+static void sky_models(CPUState* cpu, bool hd) {
+    const bool models_on = g_sky_models;
+    sky_puffs(cpu, hd && models_on);
+    bool clouds_seen = false;
+    u32 node = mem_read32(cpu, kActorQueue);
+    for (u32 n = 0; n < kMaxActors && guest_pointer(node); ++n, node = mem_read32(cpu, node + kNodeNext)) {
+        const u32 actor = mem_read32(cpu, node + kTagActor);
+        if (!guest_pointer(actor))
+            continue;
+        const u16 proc = mem_read16(cpu, actor + kProcName);
+        if (proc != 0x1BAu && proc != 0x1BBu)
+            continue;
+        if (proc == 0x1BBu) {
+            clouds_seen = true;
+            const u32 clouds = mem_read32(cpu, actor + 0x294u);
+            const u32 data = guest_pointer(clouds) ? mem_read32(cpu, clouds + 0x04u) : 0u;
+            if (guest_pointer(data) && mem_read16(cpu, data + 0x28u) == 5u)
+                sky_layer_material(cpu, data, hd && models_on);
+        }
+        for (u32 k = 0; k < sizeof kSkyJoints / sizeof kSkyJoints[0]; ++k) {
+            if (kSkyJoints[k].proc != proc)
+                continue;
+            const u32 model = mem_read32(cpu, actor + kSkyJoints[k].model);
+            const u32 data = guest_pointer(model) ? mem_read32(cpu, model + 0x04u) : 0u;
+            if (!guest_pointer(data) || mem_read16(cpu, data + 0x28u) != kSkyJoints[k].joints)
+                continue;
+            const u32 joints = mem_read32(cpu, data + 0x2Cu);
+            const u32 joint = guest_pointer(joints) ? mem_read32(cpu, joints + kSkyJoints[k].joint * 4u) : 0u;
+            if (!guest_pointer(joint))
+                continue;
+            const float now = read_float(cpu, joint + 0x20u);
+            const float want = hd && models_on ? kSkyJoints[k].hd : kSkyJoints[k].gc;
+            if (now != want && (now == kSkyJoints[k].gc || now == kSkyJoints[k].hd))
+                write_float(cpu, joint + 0x20u, want);
+        }
+    }
+    if (!clouds_seen)
+        memset(s_shifted, 0, sizeof s_shifted);
+}
+
+// The palette (Pale index) the game takes for a weather's slot, or -1.
+static int sky_palette(CPUState* cpu, u32 envr_idx, u32 colpat, u32 slot) {
+    const u32 envr = mem_read32(cpu, kEnvEnvr), pselect = mem_read32(cpu, kEnvPselect);
+    if (!guest_pointer(envr) || !guest_pointer(pselect) || colpat > 7u || slot > 5u)
+        return -1;
+    const u32 psel = mem_read8(cpu, envr + envr_idx * 8u + colpat);
+    const u32 pale = mem_read8(cpu, pselect + psel * 0xCu + slot);
+    return pale < g_sky_pale ? (int)pale : -1;
+}
+
+// The four palettes the game is blending now and how (setLight_palno_get):
+// the hour's two (slots) of the last weather, the same of the new one, by the
+// hour (ab), then by the weather's change (cb). False outside the schedule.
+static bool sky_blend_state(CPUState* cpu, int pale[4], float* ab, float* cb) {
+    const u32 schedule = mem_read32(cpu, kEnvSchedule);
+    if (!guest_pointer(schedule))
+        return false;
+    const float now = read_float(cpu, kEnvTime);
+    for (u32 i = 0; i < 11u; ++i) {
+        const u32 at = schedule + i * 0xCu;
+        const float end = read_float(cpu, at), begin = read_float(cpu, at + 4u);
+        if (!(now >= end && now <= begin))
+            continue;
+        const u32 slot0 = mem_read8(cpu, at + 8u), slot1 = mem_read8(cpu, at + 9u);
+        *ab = 1.0f;  // get_parcent(begin, end, now)
+        if (begin - end != 0.0f) {
+            *ab = 1.0f - (begin - now) / (begin - end);
+            if (*ab >= 1.0f)
+                *ab = 1.0f;
+        }
+        const u32 envr0 = mem_read8(cpu, kEnvEnvrPrev), envr1 = mem_read8(cpu, kEnvEnvrCurr);
+        const u32 pat0 = mem_read8(cpu, kEnvColpatPrev), pat1 = mem_read8(cpu, kEnvColpatCurr);
+        pale[0] = sky_palette(cpu, envr0, pat0, slot0);
+        pale[1] = sky_palette(cpu, envr0, pat0, slot1);
+        pale[2] = sky_palette(cpu, envr1, pat1, slot0);
+        pale[3] = sky_palette(cpu, envr1, pat1, slot1);
+        const float blend = read_float(cpu, kEnvColPatBlend);
+        *cb = blend < 0.0f ? 0.0f : blend > 1.0f ? 1.0f : blend;
+        return true;
+    }
+    return false;
+}
+
+static float sky_factor_of(int pale) {
+    if (pale < 0)
+        return 1.0f;
+    const u8* f = g_sky_data + 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + (u32)pale * 24u + 3u * 4u;
+    const u32 bits = (u32)f[0] << 24 | (u32)f[1] << 16 | (u32)f[2] << 8 | f[3];
+    float value;
+    memcpy(&value, &bits, 4);
+    return value > 0.0f && value < 10.0f ? value : 1.0f;
+}
+
+static float sky_brightness(CPUState* cpu) {
+    int pale[4];
+    float ab, cb;
+    if (!sky_blend_state(cpu, pale, &ab, &cb))
+        return 0.0f;
+    const float a = sky_factor_of(pale[0]), b = sky_factor_of(pale[1]);
+    const float c = sky_factor_of(pale[2]), d = sky_factor_of(pale[3]);
+    const float prev = a + ab * (b - a), curr = c + ab * (d - c);
+    const float factor = prev + cb * (curr - prev);
+    // The power the factor is taken to: the menu's HD sunlight (0.37, HD's), or
+    // BLUEWAKE_HD_SKY_GAMMA over it for testing.
+    static float s_override = -1.0f;
+    if (s_override < 0.0f) {
+        const char* value = getenv("BLUEWAKE_HD_SKY_GAMMA");
+        s_override = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 0.0f;
+    }
+    g_sky_factor = factor;
+    return powf(factor, s_override > 0.0f ? s_override : g_sunlight);
+}
+
+// HD blends its palettes in linear light (it keeps them linear), the game in
+// its gamma: halfway from noon's cyan sky to evening's orange is a grey teal
+// in the game's blend and HD's lavender in linear light (Windfall's dock at
+// 17:30), and dawn and dusk pass through purples and pinks in HD. The game
+// blends the four palettes sky_blend_state names with fixed weights, so the
+// host writes the linear blend of their colours into all four (their Pale
+// entries and the Virt entries those name): whatever the weights, the game's
+// blend is then HD's. Each retrace the entries written last time get HD's
+// own colours back first. Only with BLUEWAKE_HD_SKY_LINEAR=1.
+static float sky_lin(u8 v) { return powf(v / 255.0f, 2.2f); }
+static u8 sky_gam(float v) {
+    const float g = powf(v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v, 1.0f / 2.2f) * 255.0f + 0.5f;
+    return (u8)(g > 255.0f ? 255.0f : g);
+}
+
+static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
+
+static int s_written_pale[4] = {-1, -1, -1, -1}, s_written_virt[4] = {-1, -1, -1, -1};
+
+static void sky_linear_forget(void) {
+    for (int i = 0; i < 4; ++i)
+        s_written_pale[i] = s_written_virt[i] = -1;
+}
+
+// HD's noon sky is brighter than its palette's colour (0,210,255 on Windfall's
+// dock against the palette's 00A5FF): the sky's colour in the Virt entries the
+// game is blending goes up by BLUEWAKE_HD_SKY_GAIN (1.27), as far as HD's
+// brightness for the hour is up from 1 toward noon's 1.65. Only the sky's
+// colour: brightening all that has no depth (the sky pass) took the floating
+// clouds to a clipped white where HD's keep their cream.
+static float sky_gain(float brightness) {
+    static float s_gain = -1.0f;
+    if (s_gain < 0.0f) {
+        const char* value = getenv("BLUEWAKE_HD_SKY_GAIN");
+        s_gain = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 1.27f;
+    }
+    const float up = (brightness - 1.0f) / 0.65f;
+    return 1.0f + (s_gain - 1.0f) * (up < 0.0f ? 0.0f : up > 1.0f ? 1.0f : up);
+}
+
+static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on, float gain) {
+    if (g_sky_data == NULL) {
+        sky_linear_forget();
+        return;
+    }
+    const bool linear_on = g_sky_linear;
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    const u8* hd_virt = hd_pale + g_sky_pale * 0x2Cu + g_sky_virt * 0x24u;
+    // HD's own colours back where they were blended.
+    for (int i = 0; i < 4; ++i) {
+        if (on && s_written_pale[i] >= 0)
+            for (u32 c = 0; c < 0x21u; ++c)
+                mem_write8(cpu, pale_table + (u32)s_written_pale[i] * 0x2Cu + c, hd_pale[(u32)s_written_pale[i] * 0x2Cu + c]);
+        if (on && virt_table != 0u && s_written_virt[i] >= 0)
+            for (u32 c = 0; c < sizeof kVirtColours; ++c)
+                mem_write8(cpu, virt_table + (u32)s_written_virt[i] * 0x24u + kVirtColours[c],
+                           hd_virt[(u32)s_written_virt[i] * 0x24u + kVirtColours[c]]);
+        s_written_pale[i] = s_written_virt[i] = -1;
+    }
+    int pale[4];
+    float ab, cb;
+    if (!on || !sky_blend_state(cpu, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
+        return;
+    const float w[4] = {(1.0f - ab) * (1.0f - cb), ab * (1.0f - cb), (1.0f - ab) * cb, ab * cb};
+    int virt[4];
+    for (int i = 0; i < 4; ++i)
+        virt[i] = virt_table != 0u && hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] < g_sky_virt ? hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] : -1;
+    u8 pale_out[0x21], virt_out[sizeof kVirtColours];
+    for (u32 c = 0; c < 0x21u; ++c) {
+        float v = 0.0f;
+        for (int i = 0; i < 4; ++i)
+            v += w[i] * sky_lin(hd_pale[(u32)pale[i] * 0x2Cu + c]);
+        pale_out[c] = sky_gam(v);
+    }
+    const bool virt_ok = virt[0] >= 0 && virt[1] >= 0 && virt[2] >= 0 && virt[3] >= 0;
+    for (u32 c = 0; virt_ok && c < sizeof kVirtColours; ++c) {
+        float v = 0.0f;
+        for (int i = 0; i < 4; ++i)
+            v += w[i] * sky_lin(hd_virt[(u32)virt[i] * 0x24u + kVirtColours[c]]);
+        virt_out[c] = sky_gam(v);
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (linear_on) {
+            for (u32 c = 0; c < 0x21u; ++c)
+                mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, pale_out[c]);
+            s_written_pale[i] = pale[i];
+        }
+        if (!virt_ok)
+            continue;
+        // The blend, or without it each entry's own colours (the game's blend
+        // of them carries the sky's gain alike); the sky's colour (0x18-0x1A,
+        // kVirtColours 6-8) times the gain.
+        for (u32 c = 0; c < sizeof kVirtColours; ++c) {
+            float v = linear_on ? virt_out[c] : hd_virt[(u32)virt[i] * 0x24u + kVirtColours[c]];
+            if (c >= 6u && c <= 8u)
+                v = v * gain + 0.5f > 255.0f ? 255.0f : v * gain + 0.5f;
+            mem_write8(cpu, virt_table + (u32)virt[i] * 0x24u + kVirtColours[c], (u8)v);
+        }
+        s_written_virt[i] = virt[i];
+    }
+}
+
+// A kept Pale table is still the stage's while each entry's bytes after its
+// colours (its Virt index and fog distances, which the blend never writes)
+// are HD's: a stage loaded again at the same place brings the GameCube's.
+static bool sky_kept(CPUState* cpu, u32 table) {
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    for (u32 i = 0; i < g_sky_pale; ++i)
+        if (!guest_equals(cpu, table + i * 0x2Cu + 0x21u, hd_pale + i * 0x2Cu + 0x21u, 0x2Cu - 0x21u))
+            return false;
+    return true;
+}
+
+static void sky(CPUState* cpu) {
+    if (g_sky_count == 0u)
+        return;
+    static u32 s_pale, s_virt;  // the tables the host keeps
+    const u32 pale_now = mem_read32(cpu, kPaletInfo);
+    if (s_pale != 0u && (pale_now != s_pale || g_sky_data == NULL || !sky_kept(cpu, s_pale))) {
+        s_pale = s_virt = 0u;
+        sky_linear_forget();
+    }
+    if (s_pale == 0u && !(guest_pointer(pale_now) && sky_pick(cpu, pale_now)))
+        g_sky_data = NULL;
+    u32 pale = 0u, virt = 0u;
+    if (g_sky_data != NULL) {
+        const u8* gc_pale = g_sky_data;
+        const u8* hd_pale = gc_pale + g_sky_pale * 0x2Cu;
+        const u8* gc_virt = hd_pale + g_sky_pale * 0x2Cu;
+        const u8* hd_virt = gc_virt + g_sky_virt * 0x24u;
+        // Last retrace's linear blend comes out before the GameCube's go back.
+        if (!g_sky && s_pale != 0u)
+            sky_linear(cpu, s_pale, s_virt, false, 1.0f);
+        pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, gc_pale, hd_pale, &s_pale);
+        if (g_sky_virt != 0u)
+            virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, &s_virt);
+    }
+    g_sky_shown = g_sky && pale != 0u;
+    // HD's brightness goes with its palettes: only while they are in place.
+    const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
+    sky_linear(cpu, pale, virt, g_sky_shown, sky_gain(exposure));
+    // The schedule goes with the palettes (back to the GameCube's when they go).
+    sky_schedule(cpu, g_sky_shown);
+    sky_models(cpu, g_sky_shown);
+    static unsigned s_clock;
+    if (g_trace && g_sky_shown && ++s_clock % 60u == 0u)
+        fprintf(stderr, "[hd-look] clock %.1f, HD brightness %.3f\n", read_float(cpu, kEnvTime), exposure);
+    if (fabsf(exposure - g_sky_exposure) > 0.001f) {
+        aurora_set_exposure(exposure);
+        if (g_trace && fabsf(exposure - g_sky_exposure) > 0.02f)
+            fprintf(stderr, "[hd-look] HD brightness %.3f at %.1f\n", exposure, read_float(cpu, kEnvTime));
+        g_sky_exposure = exposure;
+    }
+}
+
 void bluewake_hd_look_retrace(CPUState* cpu) {
     static unsigned long long retrace;
     retrace++;
@@ -641,6 +1400,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
         palms(cpu, g_palms);
     g_palms_were_on = g_palms;
     clouds(cpu, retrace);
+    sky(cpu);
     if (g_trace && retrace % 300u == 0u)
         trace_islands(cpu, retrace);
 }

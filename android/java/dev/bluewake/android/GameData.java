@@ -29,7 +29,8 @@ import java.util.UUID;
  * closes, because the running game keeps the old card in memory.
  */
 final class GameData {
-    static final int REQUEST_BACKUP = 4101, REQUEST_RESTORE = 4102, REQUEST_DOLPHIN = 4103, REQUEST_TEXTURES = 4104;
+    static final int REQUEST_BACKUP = 4101, REQUEST_RESTORE = 4102, REQUEST_DOLPHIN = 4103, REQUEST_TEXTURES = 4104,
+            REQUEST_EXPORT = 4105;
     private static final int MAX_FILE = 64 * 1024 * 1024;
 
     private final Activity activity;
@@ -304,6 +305,45 @@ final class GameData {
         closeForSaves("Save Imported", "BlueWake will close now. Open it again and pick the quest log to play.");
     }
 
+    // ---------------------------------------------------------------- Dolphin export
+
+    private String pendingExportName;
+
+    /** Writes BlueWake's save out as a Dolphin .gci on demand; the card is only read. */
+    void exportDolphinSave() {
+        if (!cardFile().isFile()) {
+            overlay.showMessage("No Saves Yet", "BlueWake has no memory card yet. Save in the game first.");
+            return;
+        }
+        pendingExportName = "GZLE01-" + stamp("yyyy-MM-dd") + ".gci";
+        Intent pick = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("application/octet-stream");
+        pick.putExtra(Intent.EXTRA_TITLE, pendingExportName);
+        overlay.startPicker(pick, REQUEST_EXPORT);
+    }
+
+    private void finishExport(Uri uri) {
+        String[] error = new String[1];
+        byte[] card = readFile(cardFile());
+        byte[] gci = card != null ? Shell.nativeCardExport(card, error) : null;
+        if (gci == null) {
+            overlay.showMessage("Could Not Export",
+                    error[0] != null ? error[0] : "The memory card could not be read.");
+            return;
+        }
+        try (OutputStream out = activity.getContentResolver().openOutputStream(uri, "wt")) {
+            if (out == null) throw new IOException("The file could not be opened.");
+            out.write(gci);
+        } catch (IOException e) {
+            overlay.showMessage("Could Not Export", e.getMessage() != null ? e.getMessage() : "");
+            return;
+        }
+        Shell.log("[shell] save exported as " + pendingExportName);
+        overlay.showMessage("Save Exported", pendingExportName + " holds all three quest logs and opens in "
+                + "Dolphin's Memory Card Manager. Your own saves are unchanged.");
+    }
+
     // ---------------------------------------------------------------- files
 
     void explainFiles() {
@@ -311,7 +351,8 @@ final class GameData {
                 + "/files on this device (reach it with a USB cable from a computer, or adb).\n\n"
                 + "Your saves are GZLE01.card. Back Up Saves makes a copy you can keep anywhere, and Restore Saves "
                 + "brings one back; earlier cards are kept in Backups. Import Dolphin Save brings in a quest log from "
-                + "a Dolphin .gci or memory card file. The game folder holds your disc image (GZLE01.iso) and "
+                + "a Dolphin .gci or memory card file, and Export Dolphin Save writes one out as a .gci. "
+                + "The game folder holds your disc image (GZLE01.iso) and "
                 + "main.dol and rels, made from it. Texture packs live in Load, and the logs folder has the session "
                 + "logs.");
     }
@@ -338,13 +379,14 @@ final class GameData {
 
     boolean onActivityResult(int request, int result, Intent data) {
         if (request != REQUEST_BACKUP && request != REQUEST_RESTORE && request != REQUEST_DOLPHIN
-                && request != REQUEST_TEXTURES)
+                && request != REQUEST_TEXTURES && request != REQUEST_EXPORT)
             return false;
         Uri uri = result == Activity.RESULT_OK && data != null ? data.getData() : null;
         if (uri == null) return true;
         if (request == REQUEST_BACKUP) finishBackup(uri);
         else if (request == REQUEST_RESTORE) confirmRestoreFrom(uri);
         else if (request == REQUEST_DOLPHIN) readDolphinSave(uri);
+        else if (request == REQUEST_EXPORT) finishExport(uri);
         else installTexturePackFrom(uri);
         return true;
     }

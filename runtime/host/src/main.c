@@ -6381,8 +6381,12 @@ static bool host_bundle_defaults(char* module, size_t module_size) {
     host_apply_default_env("BLUEWAKE_DSP_IROM", contents, "Resources/DSP/dsp_rom.bin");
     host_apply_default_env("BLUEWAKE_DSP_COEF", contents, "Resources/DSP/dsp_coef.bin");
     // A player launch follows real time and uses the same HLE audio path as
-    // the desktop qualification routes. Explicit diagnostic choices win.
+    // the desktop qualification routes. Explicit diagnostic choices win. The
+    // clock paces the game, so the audio queue's own waits are turned off, as
+    // on Windows, Linux, iPhone and Android (#509): paced by both, the waits
+    // added up whenever the device drained a buffer.
     if (getenv("BLUEWAKE_WALL_PACE") == NULL) setenv("BLUEWAKE_WALL_PACE", "1", 0);
+    if (getenv("DOL_AUDIO_NO_THROTTLE") == NULL) setenv("DOL_AUDIO_NO_THROTTLE", "1", 0);
     if (getenv("BLUEWAKE_DSP_MODE") == NULL) setenv("BLUEWAKE_DSP_MODE", "hle", 0);
     // Only a builder-selected personal candidate opts in. Existing module
     // compatibility/readiness checks still govern each fast path, and explicit
@@ -16081,6 +16085,16 @@ int main(int argc, char** argv) {
 
     printf("[run] stopped: %s after %llu blocks at pc=%#010x\n",
            stop_reason ? stop_reason : "normal", blocks, cpu.pc);
+    if (getenv("BLUEWAKE_TRACE_ALIAS_COST") != NULL) {
+        // The game module's resolver is the one translated code calls; its census
+        // is printed from that library's atexit, which runs only on some exits.
+        // RecompCore without the export (older pins) just prints nothing here.
+        typedef void (*AliasCostReportFn)(void);
+        AliasCostReportFn alias_cost_report =
+            (AliasCostReportFn)dlsym(lib, "ppc_guest_alias_cost_report_now");
+        if (alias_cost_report != NULL)
+            alias_cost_report();
+    }
     if (g_skip_fast_on && g_skip_verify) {
         typedef void (*SkipCountsFn)(unsigned long long*, unsigned long long*, unsigned long long*);
         SkipCountsFn skip_counts = (SkipCountsFn)dlsym(lib, "bluewake_composite_direct_skip_counts");

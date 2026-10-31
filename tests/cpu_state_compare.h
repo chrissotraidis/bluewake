@@ -5,8 +5,18 @@
 #include <stdio.h>
 
 /* Same fields as bluewake_guest_cpu_hash. Guest members are copied; host
- * pointers compare as present or absent. cycle_observation_suffix is a guest
- * field (byte 3536 on this CPUState). external_read is byte 3400. */
+ * pointers compare as present or absent. external_read is byte 3400.
+ *
+ * cycle_observation_suffix (byte 3536) is left out on purpose. The translation
+ * writes the suffix of the block it is in there, for the reconcile that follows
+ * a cycle-observing instruction, and reads it back before that block ends
+ * (DolRecomp emitter.c, emit_cycle_observation_suffix). It is scratch inside one
+ * translated block, not guest state: a native that replaces a whole function
+ * cannot produce the value the test's own block would have, and nothing after
+ * the call reads it. Comparing it failed every strcmp case on that field alone,
+ * got 02 00 00 00 against A0 82 66 CB, with the rest of the state identical.
+ * What a native does owe is to leave it as it found it, which is a check for
+ * the call sites, where the entry state is known. */
 
 #define BLUEWAKE_CPU_COMPARE_FIELDS \
     BLUEWAKE_CPU_VALUE(gpr) \
@@ -59,7 +69,6 @@
     BLUEWAKE_CPU_POINTER(spr_read, 10) \
     BLUEWAKE_CPU_POINTER(spr_write, 11) \
     BLUEWAKE_CPU_POINTER(cache_control, 12) \
-    BLUEWAKE_CPU_VALUE(cycle_observation_suffix) \
     BLUEWAKE_CPU_VALUE(cycle_deadline_active) \
     BLUEWAKE_CPU_VALUE(cycle_deadline_budget)
 

@@ -1,0 +1,1018 @@
+From 259627f2d7f6fe34c9f22a74da4a92b35c55b890 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 16:12:10 -0500
+Subject: [PATCH 192/192] Aurora: the scene's brightness from the game, where
+ there is depth and not the sea
+
+aurora_set_exposure(gain) brightens the scene after the HD look's effects and
+before its bloom: kBoost, scene * (1 + gain - 1), where there is depth and not
+the sea. BlueWake sends Wind Waker HD's own factor for the hour's palettes (its
+sunlight 3 times at noon on actors and scenery, twice in the morning and
+evening, 1.65 and 1.37 after gamma). Off (0 or 1) the pass is left out. The
+gain rides in the pass's copy of the view's seconds, which it doesn't read.
+
+HD brightens the sun's light, not the sea: one gain over the whole scene
+washed the sea out to a pale cyan before the deck was bright enough, and over
+the sky it took the floating clouds to a clipped white.
+
+The sea is found by a mask, not by height: a band above the sea's height left
+beaches below a swell's height unlit and lit the swells' crests. The scene
+passes' draws go again into an 8-bit mask with a depth buffer of its own, the
+sea's marking it and the rest that write depth covering it. A sea draw is one
+that samples the sea's textures, by the texture packs' hash of their bytes:
+Always.arc's b_sea_tex0and2 (d_a_sea's water and foam lines), the island
+rooms' ring of sea (Txa_umi_kiwa_01, Txa_umi_kage_01) and their beaches' surf
+(Txa_nami_01, Txa_nami_02, Txa_nami_ia, Txa_namisoko_ia), and still and running
+water (the Private Oasis's pool, Txa_dummy_umi; the rivers' and falls' edge,
+flow and spray, Txa_test_kiwa_a, _nagare_j, _sibuki_a); or the sea rooms'
+untextured square of sea past the grid's edge (solid, 100,000 units across and
+flat). What covers the sea there is what the sun map takes as solid: a
+blended draw doesn't, and an alpha-tested one only where its texture is solid
+(a wave's small crest, whole, covered a box of sea that was then brightened).
+DOL_AURORA_SEA_MASK_DEBUG=1 shows the mask: the sea twice as bright.
+
+The brightness fades out from 10,000 to 25,000 units away
+(DOL_AURORA_EXPOSURE_FAR=start,end): what is that far is the haze's colour,
+and brightened, the islands seen from the Private Oasis stood out pale cyan
+against the sky.
+
+What is already bright takes less of the gain: it tapers from full where a
+colour's brightest channel is 0.4 to none at 1.0
+(DOL_AURORA_EXPOSURE_HIGHLIGHTS=from,to), gently enough that a brighter colour
+still comes out brighter. At 1.5 times, Ice Ring Isle's ice and white rock
+went flat white, a sixth of the screen clipped. The brightness is read from
+the frame buffer copied before the effects (a shadow, read after them, took
+more of the gain than the lit ice beside it and came out washed out).
+
+Arch (Vulkan), Windfall's dock from the stage select with HD's palettes,
+against Wind Waker HD in Cemu, 23 times from 4:00 to midnight: the deck,
+cliffs and sea within about 10% of HD's at most hours (noon's deck 203,160,99
+against 217,173,96, the sea 9,148,240 against 0,140,227). The mask, in its
+debug view and against the height band: a beach and swells at sea room 10,
+Dragon Roost's shore (the surf and the wet band under it), the open sea seen
+from high above at the Forsaken Fortress and Hyrule Castle (no sea, nothing
+marked). Sailing from sea room 10 into Windfall's room: the crests' boxes
+gone. Warped to the Private Oasis at noon: its pool deep blue as
+on the GameCube (it was pale cyan) and the far islands in the haze. Warped to Ice Ring Isle at noon: the ice keeps its
+shading, almost none of it clipped (2.5% of the screen before).
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   4 +
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  79 +++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 327 ++++++++++++++++--
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  14 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 224 +++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  14 +
+ 6 files changed, 625 insertions(+), 37 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index ccf0a5fa03..97508851b8 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -179,6 +179,10 @@ void aurora_set_ambient_occlusion(bool enabled);
+    passed to aurora_set_world_view. Takes effect at the next frame. */
+ void aurora_set_sun_shadows(bool enabled);
+ void aurora_set_sun_direction(float x, float y, float z);
++/* The scene's brightness, from the game (Wind Waker HD's factor for the hour):
++   what is lit and stands above the sea is multiplied by it, before bloom. 0
++   (or 1) leaves the scene as it is. */
++void aurora_set_exposure(float gain);
+ /* Sun shadows from a shadow map: with sun shadows on, the scene's solid draws
+    are drawn again from the sun, so what is off screen still casts. Takes
+    effect at the next frame. DOL_AURORA_SUN_SHADOW_MAP=1 sets the starting
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 99d0f5249f..c17cf751aa 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -2023,6 +2023,81 @@ static void encode_sun_map(const wgpu::CommandEncoder& cmd, const RenderPass& pa
+ }
+ #endif
+ 
++#ifdef AURORA_ENABLE_GXCORE
++// The sea mask for the HD look's brightness (post_fx.hpp sea_mask_target()):
++// a scene pass's draws up to `end` again, with their own cameras and a depth
++// buffer of the mask's own, the sea's marking the mask and the rest that
++// write depth covering it, so the mask is the sea where it is seen. The
++// frame's first scene pass clears it, while the scene is brightened.
++static void encode_sea_mask(const wgpu::CommandEncoder& cmd, const RenderPass& passInfo, size_t end,
++                            uint64_t frameKey) {
++  if (!post_fx::exposure_active() || passInfo.msaaSamples != 1)
++    return;
++  // Only the scene's passes, at the frame buffer's size (a pass of another size would make the mask anew).
++  if (passInfo.targetSize.width != webgpu::g_frameBuffer.texture.GetWidth() ||
++      passInfo.targetSize.height != webgpu::g_frameBuffer.texture.GetHeight())
++    return;
++  static uint64_t clearedFrame = UINT64_MAX;
++  const bool clear = clearedFrame != frameKey;
++  size_t seaDraws = 0, solidDraws = 0;
++  for (size_t i = 0; i < end && i < passInfo.commands.size(); ++i) {
++    const auto& command = passInfo.commands[i];
++    if (command.type != CommandType::Draw || command.data.draw.type != ShaderType::GXCore || command.flat)
++      continue;
++    seaDraws += command.data.draw.gxcore.seaSurface;
++    solidDraws += command.data.draw.gxcore.sunCaster || command.data.draw.gxcore.sunCasterAlpha;
++  }
++  if (seaDraws == 0 && solidDraws == 0 && !clear)
++    return;
++  clearedFrame = frameKey;
++  const webgpu::gpu_prof::Zone zone{cmd, "Sea mask"};
++  const std::array attachments{wgpu::RenderPassColorAttachment{
++      .view = post_fx::sea_mask_target(passInfo.targetSize),
++      .loadOp = clear ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  }};
++  const wgpu::RenderPassDepthStencilAttachment depth{
++      .view = post_fx::sea_mask_depth(passInfo.targetSize),
++      .depthLoadOp = clear ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
++      .depthStoreOp = wgpu::StoreOp::Store,
++      .depthClearValue = 0.f, // reversed Z: the far plane
++  };
++  const wgpu::RenderPassDescriptor descriptor{
++      .label = "Sea mask",
++      .colorAttachmentCount = attachments.size(),
++      .colorAttachments = attachments.data(),
++      .depthStencilAttachment = &depth,
++  };
++  auto pass = cmd.BeginRenderPass(&descriptor);
++  if (seaDraws != 0 || solidDraws != 0) {
++    gxcore::begin_sea_mask(pass);
++    // The pass's viewports (with the game's depth range) and scissors as render_pass() sets them, so each sea
++    // draw lands on the pixels and depths it drew.
++    for (size_t i = 0; i < end && i < passInfo.commands.size(); ++i) {
++      const auto& command = passInfo.commands[i];
++      if (command.type == CommandType::SetViewport) {
++        const auto& vp = command.data.setViewport;
++        const float minDepth = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
++        const float maxDepth = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
++        pass.SetViewport(vp.left, vp.top, vp.width, vp.height, minDepth, maxDepth);
++      } else if (command.type == CommandType::SetScissor) {
++        const auto& sc = command.data.setScissor;
++        const auto& size = passInfo.targetSize;
++        const auto x = std::clamp(static_cast<uint32_t>(sc.x), 0u, size.width);
++        const auto y = std::clamp(static_cast<uint32_t>(sc.y), 0u, size.height);
++        pass.SetScissorRect(x, y, std::clamp(static_cast<uint32_t>(sc.width), 0u, size.width - x),
++                            std::clamp(static_cast<uint32_t>(sc.height), 0u, size.height - y));
++      } else if (command.type == CommandType::Draw && command.data.draw.type == ShaderType::GXCore &&
++                 !command.flat) {
++        gxcore::render_sea_mask(command.data.draw.gxcore, pass);
++      }
++    }
++  }
++  pass.End();
++}
++#endif
++
+ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo, uint32_t passIndex) {
+   ZoneScoped;
+   if (!passInfo.sealed) {
+@@ -2166,6 +2241,10 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+   auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
+   render_pass(pass, frame, passInfo, 0, split);
+   pass.End();
++#ifdef AURORA_ENABLE_GXCORE
++  if (efbPass)
++    encode_sea_mask(cmd, passInfo, split == SIZE_MAX ? passInfo.commands.size() : split, frameKey);
++#endif
+ 
+   if (bloomBeforeCopy) {
+     post_fx::encode(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index d255061ff6..74a73a9056 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -29,6 +29,7 @@
+ #include <mutex>
+ #include <set>
+ #include <thread>
++#include <unordered_map>
+ #include <vector>
+ 
+ namespace aurora::gfx::gxcore {
+@@ -445,12 +446,8 @@ bool sun_caster_alpha(const gxc::PipelineKey& key) {
+ // HD it takes shadows but casts none: in the map a swell's crest shaded the
+ // trough behind it, and a tower standing there lost the foot of its shadow.
+ // DOL_AURORA_SUN_SHADOW_MAP_SEA_CASTS=1 puts it back in the map.
+-bool sea_surface(const gxc::DrawPlan& plan) {
+-  static const bool s_seaCasts = [] {
+-    const char* value = std::getenv("DOL_AURORA_SUN_SHADOW_MAP_SEA_CASTS");
+-    return value != nullptr && value[0] == '1';
+-  }();
+-  if (s_seaCasts || plan.constants.projection[3][3] == 1.f || plan.vertices.size() < 3)
++bool sea_shape(const gxc::DrawPlan& plan) {
++  if (plan.constants.projection[3][3] == 1.f || plan.vertices.size() < 3)
+     return false;
+   float lo[3] = {plan.vertices[0], plan.vertices[1], plan.vertices[2]};
+   float hi[3] = {lo[0], lo[1], lo[2]};
+@@ -462,6 +459,92 @@ bool sea_surface(const gxc::DrawPlan& plan) {
+   const float wide = std::max(hi[0] - lo[0], hi[2] - lo[2]);
+   return wide >= 20000.f && hi[1] - lo[1] <= 0.02f * wide;
+ }
++
++bool sea_surface(const gxc::DrawPlan& plan) {
++  static const bool s_seaCasts = [] {
++    const char* value = std::getenv("DOL_AURORA_SUN_SHADOW_MAP_SEA_CASTS");
++    return value != nullptr && value[0] == '1';
++  }();
++  return !s_seaCasts && sea_shape(plan);
++}
++
++// The sea's textures, by the texture packs' hash of their bytes (Dolphin's
++// tex1_WxH_hash_fmt): Always.arc's b_sea_tex0and2.bti, the open sea's water
++// and white foam lines (d_a_sea.cpp binds it to texmaps 0 and 2; models'
++// B_Sea share it); the island rooms' ring of sea, Txa_umi_kiwa_01 and
++// Txa_umi_kage_01; and their beaches' surf, Txa_nami_01, Txa_nami_02,
++// Txa_nami_ia and Txa_namisoko_ia (the wet band under it); and still and
++// running water, the Private Oasis's pool (Txa_dummy_umi) and the rivers' and
++// falls' edge, flow and spray (Txa_test_kiwa_a, _nagare_j, _sibuki_a: the
++// oasis, Hyrule, the Forest Haven), which came out pale cyan brightened. Kept
++// per guest address, checked again when the bytes there change.
++bool sea_texture(uint32_t address, uint32_t format, uint32_t width, uint32_t height, const void* data,
++                 uint32_t available) {
++  struct SeaTexture {
++    uint32_t format, width, height;
++    uint64_t hash;
++  };
++  static constexpr SeaTexture kSea[] = {
++      {0, 256, 256, 0x35b39510e63e0eddull}, // b_sea_tex0and2, B_Sea (I4)
++      {0, 128, 64, 0xae4b9cf3ade885aeull},  // Txa_umi_kiwa_01
++      {0, 128, 64, 0xa75016cd8d47c1f9ull},  // Txa_umi_kage_01
++      {0, 128, 128, 0xcb795d7577fa2a1eull}, // Txa_nami_01
++      {0, 128, 128, 0x6c7d2c9e6e7e34adull}, // Txa_nami_02
++      {2, 128, 128, 0x8d4cd80958bc6cd6ull}, // Txa_nami_ia (IA4)
++      {2, 128, 128, 0xb485ef6b2fed6f20ull}, // Txa_namisoko_ia
++      {14, 128, 128, 0xb8e02ad23e1b98b9ull}, // Txa_dummy_umi (CMPR)
++      {0, 128, 128, 0xb26b325c4b3c1a25ull}, // Txa_test_kiwa_a
++      {0, 128, 128, 0x6d34c29c2f22bc6dull}, // Txa_test_nagare_j
++      {0, 128, 128, 0xa1248d29670925e0ull}, // Txa_test_sibuki_a
++  };
++  bool shape = false;
++  for (const SeaTexture& sea : kSea)
++    shape = shape || (sea.format == format && sea.width == width && sea.height == height);
++  // I4 and CMPR are 4 bits a texel, IA4 8 (these sizes fill whole tiles).
++  const uint32_t bytes = format == 2u ? width * height : width * height / 2;
++  if (!shape || data == nullptr || available < bytes)
++    return false;
++  struct Seen {
++    uint64_t head = 0;
++    bool sea = false;
++  };
++  static std::unordered_map<uint32_t, Seen> s_seen;
++  const uint64_t head = XXH3_64bits(data, 64);
++  auto [it, fresh] = s_seen.try_emplace(address);
++  if (fresh || it->second.head != head) {
++    const uint64_t hash = XXH64(data, bytes, 0);
++    bool sea = false;
++    for (const SeaTexture& texture : kSea)
++      sea = sea || (texture.format == format && texture.width == width && texture.height == height &&
++                    texture.hash == hash);
++    it->second = Seen{head, sea};
++  }
++  return it->second.sea;
++}
++
++// A sea draw for the sea mask (post_fx.hpp), while the scene is brightened:
++// one that samples the sea's textures, or the sea rooms' own sea, an
++// untextured solid square of the environment's sea colour under d_a_sea's
++// grid (100,000 units across, at the sea's height), seen past the grid's edge.
++bool sea_mask_draw(const gxc::DrawPlan& plan) {
++  if (!post_fx::exposure_active() || plan.constants.projection[3][3] == 1.f)
++    return false;
++  bool sea = false;
++  if (plan.texmap_mask > 1u && (plan.texmap_mask & (plan.texmap_mask - 1u)) != 0u) {
++    for (uint32_t t = 0; t < 8 && !sea; ++t) {
++      const auto& texture = plan.textures[t];
++      sea = (plan.texmap_mask >> t & 1u) != 0u && texture.valid &&
++            sea_texture(texture.address, texture.format, texture.width, texture.height, texture.data,
++                        texture.available);
++    }
++  } else if (plan.has_texture) {
++    sea = sea_texture(plan.tex_address, plan.tex_format, plan.tex_width, plan.tex_height, plan.tex_data,
++                      plan.tex_available);
++  } else {
++    sea = plan.pipeline.depth_update != 0u && plan.pipeline.blend_enable == 0u && sea_shape(plan);
++  }
++  return sea;
++}
+ } // namespace
+ 
+ bool needs_early_depth_emulation(const gxc::PipelineKey& key) {
+@@ -1189,23 +1272,10 @@ void begin_sun_casters(const wgpu::RenderPassEncoder& pass, const float rows[12]
+   g_sunCasterState = SunCasterState{};
+ }
+ 
+-void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+-  const bool alpha = data.sunCasterAlpha && data.textureBindGroup != 0;
+-  if (!data.sunCaster && !alpha)
+-    return;
+-  SunCasterState& state = g_sunCasterState;
+-  const int pipeline = (alpha ? 2 : 0) + (data.posMtxIdx ? 1 : 0);
+-  if (state.pipeline != pipeline) {
+-    pass.SetPipeline(g_sunCasterPipelines[pipeline]);
+-    state.pipeline = pipeline;
+-  }
+-  if (alpha) {
+-    const auto& group = find_bind_group(data.textureBindGroup);
+-    if (group.Get() != state.group2) {
+-      pass.SetBindGroup(2, group);
+-      state.group2 = group.Get();
+-    }
+-  }
++namespace {
++// A draw's parts, as render() draws them: its own vertices and constants, or
++// in an in-between frame the blended ones (the sun map's casters, the sea mask).
++void draw_parts(const DrawData& data, const wgpu::RenderPassEncoder& pass, SunCasterState& state) {
+   static std::vector<DrawPart> parts;
+   collect_parts(data, parts);
+   for (const DrawPart& part : parts) {
+@@ -1244,6 +1314,212 @@ void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass
+   }
+ }
+ 
++} // namespace
++
++void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
++  const bool alpha = data.sunCasterAlpha && data.textureBindGroup != 0;
++  if (!data.sunCaster && !alpha)
++    return;
++  SunCasterState& state = g_sunCasterState;
++  const int pipeline = (alpha ? 2 : 0) + (data.posMtxIdx ? 1 : 0);
++  if (state.pipeline != pipeline) {
++    pass.SetPipeline(g_sunCasterPipelines[pipeline]);
++    state.pipeline = pipeline;
++  }
++  if (alpha) {
++    const auto& group = find_bind_group(data.textureBindGroup);
++    if (group.Get() != state.group2) {
++      pass.SetBindGroup(2, group);
++      state.group2 = group.Get();
++    }
++  }
++  draw_parts(data, pass, state);
++}
++
++namespace {
++constexpr const char* kSeaMaskShader = R"""(
++struct VertexShaderConstants {
++    posnormalmatrix: array<vec4f, 6>,
++    projection: array<vec4f, 4>,
++    texmatrices: array<vec4f, 24>,
++    transformmatrices: array<vec4f, 64>,
++};
++@group(1) @binding(0) var<uniform> vsc: VertexShaderConstants;
++struct VertexIn {
++    @location(0) rawpos: vec3f,
++    @location(1) posmtx: u32,
++};
++// As the game's own vertex shader (gxcore_shader.cpp vs_main).
++fn to_clip(p0: vec4f, p1: vec4f, p2: vec4f, raw: vec3f) -> vec4f {
++    let pos4 = vec4f(raw, 1.0);
++    let viewpos = vec4f(dot(p0, pos4), dot(p1, pos4), dot(p2, pos4), 1.0);
++    var clip = vec4f(dot(vsc.projection[0], viewpos), dot(vsc.projection[1], viewpos),
++                     dot(vsc.projection[2], viewpos), dot(vsc.projection[3], viewpos));
++    clip.z = -clip.z;
++    return clip;
++}
++@vertex
++fn vs_current(in: VertexIn) -> @builtin(position) vec4f {
++    return to_clip(vsc.posnormalmatrix[0], vsc.posnormalmatrix[1], vsc.posnormalmatrix[2], in.rawpos);
++}
++@vertex
++fn vs_indexed(in: VertexIn) -> @builtin(position) vec4f {
++    let i = i32(in.posmtx);
++    return to_clip(vsc.transformmatrices[i], vsc.transformmatrices[i + 1], vsc.transformmatrices[i + 2], in.rawpos);
++}
++@fragment
++fn fs_land() -> @location(0) vec4f {
++    return vec4f(0.0);
++}
++@fragment
++fn fs_sea() -> @location(0) vec4f {
++    return vec4f(1.0, 0.0, 0.0, 0.0);
++}
++// What is not the sea and alpha-tested (a wave's crest, leaves): it covers the
++// sea only where its texture is solid, as the sun map's cutout casters do.
++struct VertexInUv {
++    @location(0) rawpos: vec3f,
++    @location(1) posmtx: u32,
++    @location(2) uv0: vec2f,
++};
++struct VertexOutUv {
++    @builtin(position) pos: vec4f,
++    @location(0) uv: vec2f,
++};
++@vertex
++fn vs_current_uv(in: VertexInUv) -> VertexOutUv {
++    var out: VertexOutUv;
++    out.pos = to_clip(vsc.posnormalmatrix[0], vsc.posnormalmatrix[1], vsc.posnormalmatrix[2], in.rawpos);
++    out.uv = in.uv0;
++    return out;
++}
++@vertex
++fn vs_indexed_uv(in: VertexInUv) -> VertexOutUv {
++    let i = i32(in.posmtx);
++    var out: VertexOutUv;
++    out.pos = to_clip(vsc.transformmatrices[i], vsc.transformmatrices[i + 1], vsc.transformmatrices[i + 2], in.rawpos);
++    out.uv = in.uv0;
++    return out;
++}
++@group(2) @binding(0) var tex: texture_2d<f32>;
++@group(2) @binding(1) var samp: sampler;
++@fragment
++fn fs_land_alpha(in: VertexOutUv) -> @location(0) vec4f {
++    if (textureSample(tex, samp, in.uv).a < 0.5) {
++        discard;
++    }
++    return vec4f(0.0);
++}
++)""";
++
++wgpu::BindGroupLayout g_seaMaskLayout; // empty: the draws' constants are group 1, as render() has them
++wgpu::BindGroup g_seaMaskGroup;
++// [kind * 2 + indexed]: kind 0 what is not the sea, 1 the sea, 2 a sea draw that writes no depth, 3 what is
++// not the sea with its texture's cutout.
++std::array<wgpu::RenderPipeline, 8> g_seaMaskPipelines;
++SunCasterState g_seaMaskState;
++int g_seaMaskPipeline = -1;
++
++void make_sea_mask_pipelines() {
++  wgpu::ShaderSourceWGSL source{};
++  source.code = kSeaMaskShader;
++  const wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &source, .label = "Sea mask"};
++  const auto module = g_device.CreateShaderModule(&moduleDescriptor);
++  const wgpu::BindGroupLayoutDescriptor layoutDescriptor{.label = "Sea mask", .entryCount = 0, .entries = nullptr};
++  g_seaMaskLayout = g_device.CreateBindGroupLayout(&layoutDescriptor);
++  const wgpu::BindGroupDescriptor groupDescriptor{.layout = g_seaMaskLayout, .entryCount = 0, .entries = nullptr};
++  g_seaMaskGroup = g_device.CreateBindGroup(&groupDescriptor);
++  const std::array layouts{g_seaMaskLayout, g_uniformBindGroupLayout};
++  const wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{
++      .label = "Sea mask", .bindGroupLayoutCount = layouts.size(), .bindGroupLayouts = layouts.data()};
++  const auto pipelineLayout = g_device.CreatePipelineLayout(&pipelineLayoutDescriptor);
++  const std::array alphaLayouts{g_seaMaskLayout, g_uniformBindGroupLayout, texture_bind_group_layout(1u)};
++  const wgpu::PipelineLayoutDescriptor alphaLayoutDescriptor{
++      .label = "Sea mask (alpha)", .bindGroupLayoutCount = alphaLayouts.size(), .bindGroupLayouts = alphaLayouts.data()};
++  const auto alphaPipelineLayout = g_device.CreatePipelineLayout(&alphaLayoutDescriptor);
++  const std::array attributes{
++      wgpu::VertexAttribute{.format = wgpu::VertexFormat::Float32x3, .offset = gxc::kVertexPosOffset, .shaderLocation = 0},
++      wgpu::VertexAttribute{.format = wgpu::VertexFormat::Uint32, .offset = gxc::kVertexPosMtxOffset, .shaderLocation = 1},
++      wgpu::VertexAttribute{.format = wgpu::VertexFormat::Float32x2, .offset = gxc::kVertexUvOffset, .shaderLocation = 2},
++  };
++  const wgpu::VertexBufferLayout vertexLayout{
++      .arrayStride = gxc::kVertexStrideBytes,
++      .stepMode = wgpu::VertexStepMode::Vertex,
++      .attributeCount = 2,
++      .attributes = attributes.data(),
++  };
++  const wgpu::VertexBufferLayout alphaVertexLayout{
++      .arrayStride = gxc::kVertexStrideBytes,
++      .stepMode = wgpu::VertexStepMode::Vertex,
++      .attributeCount = attributes.size(),
++      .attributes = attributes.data(),
++  };
++  const wgpu::ColorTargetState target{.format = post_fx::kSeaMaskFormat, .writeMask = wgpu::ColorWriteMask::Red};
++  for (int kind = 0; kind < 4; ++kind) {
++    // Reversed Z: nearer is more; level surfaces drawn later win, as with the game's less-or-equal.
++    const wgpu::DepthStencilState depth{
++        .format = post_fx::kSeaMaskDepthFormat,
++        .depthWriteEnabled = kind != 2,
++        .depthCompare = wgpu::CompareFunction::GreaterEqual,
++    };
++    const bool alpha = kind == 3;
++    const wgpu::FragmentState fragment{.module = module,
++                                       .entryPoint = alpha ? "fs_land_alpha" : kind == 0 ? "fs_land" : "fs_sea",
++                                       .targetCount = 1,
++                                       .targets = &target};
++    for (int indexed = 0; indexed < 2; ++indexed) {
++      const wgpu::RenderPipelineDescriptor descriptor{
++          .label = "Sea mask",
++          .layout = alpha ? alphaPipelineLayout : pipelineLayout,
++          .vertex = {.module = module,
++                     .entryPoint = alpha ? (indexed != 0 ? "vs_indexed_uv" : "vs_current_uv")
++                                         : (indexed != 0 ? "vs_indexed" : "vs_current"),
++                     .bufferCount = 1,
++                     .buffers = alpha ? &alphaVertexLayout : &vertexLayout},
++          .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
++          .depthStencil = &depth,
++          .multisample = {.count = 1, .mask = UINT32_MAX},
++          .fragment = &fragment,
++      };
++      g_seaMaskPipelines[kind * 2 + indexed] = g_device.CreateRenderPipeline(&descriptor);
++    }
++  }
++}
++
++} // namespace
++
++void begin_sea_mask(const wgpu::RenderPassEncoder& pass) {
++  if (!g_seaMaskPipelines[0])
++    make_sea_mask_pipelines();
++  pass.SetBindGroup(0, g_seaMaskGroup);
++  pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16);
++  g_seaMaskState = SunCasterState{};
++  g_seaMaskPipeline = -1;
++}
++
++void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
++  // What covers the sea is what the sun map takes as solid: a blended draw
++  // doesn't, and an alpha-tested one only where its texture is solid (a wave's
++  // crest whole covered a box of sea, which was then brightened).
++  const bool cutout = !data.seaSurface && !data.sunCaster && data.sunCasterAlpha && data.textureBindGroup != 0;
++  if (!data.seaSurface && !data.sunCaster && !cutout)
++    return;
++  const int kind = data.seaSurface ? (data.depthWrite ? 1 : 2) : cutout ? 3 : 0;
++  const int pipeline = kind * 2 + (data.posMtxIdx ? 1 : 0);
++  if (g_seaMaskPipeline != pipeline) {
++    pass.SetPipeline(g_seaMaskPipelines[pipeline]);
++    g_seaMaskPipeline = pipeline;
++  }
++  if (cutout) {
++    const auto& group = find_bind_group(data.textureBindGroup);
++    if (group.Get() != g_seaMaskState.group2) {
++      pass.SetBindGroup(2, group);
++      g_seaMaskState.group2 = group.Get();
++    }
++  }
++  draw_parts(data, pass, g_seaMaskState);
++}
++
+ void note_frame_presented() {
+   g_textureVerifyFrame.fetch_add(1u, std::memory_order_relaxed);
+   frame_interp::end_game_frame();
+@@ -1284,6 +1560,9 @@ void shutdown() {
+   reset_texture_cache();
+   g_sunCasterPipelines = {};
+   g_sunCasterLayout = {};
++  g_seaMaskPipelines = {};
++  g_seaMaskGroup = {};
++  g_seaMaskLayout = {};
+ }
+ 
+ void set_texture_dirty_epoch_observer(TextureDirtyEpochObserver observer) {
+@@ -2682,6 +2961,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       // The cutout pipeline binds one texture and sampler at group 2, the
+       // single-texmap layout: a multi-texmap material keeps the screen's steps.
+       .sunCasterAlpha = plan.texmap_mask == 0u && textureBindGroup != 0 && sun_caster_alpha(plan.pipeline),
++      .seaSurface = sea_mask_draw(plan),
++      .depthWrite = plan.pipeline.depth_test != 0u && plan.pipeline.depth_update != 0u,
+   });
+   return true;
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 65f6542827..4675b4a88c 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -72,6 +72,12 @@ struct DrawData {
+   // Alpha-tested solid scenery (a roof, an awning, leaves, a fence): drawn
+   // into the map with its texture's cutout (sun_caster_alpha()).
+   bool sunCasterAlpha = false;
++  // A draw of the sea's texture (the sea's surface): the HD look's brightness
++  // leaves it out, by a mask of where it is on screen (render_sea_mask()).
++  bool seaSurface = false;
++  // It tests and writes depth (the sea mask's own depth: what stands in front
++  // of the sea there covers it).
++  bool depthWrite = false;
+ };
+ 
+ // Recording: the pass's last command, when it is a GXCore draw a following
+@@ -118,6 +124,14 @@ void reset_pass_state();
+ // in an in-between frame, the blended ones render() would use).
+ void begin_sun_casters(const wgpu::RenderPassEncoder& pass, const float rows[12]);
+ void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass);
++// The sea's mask for the HD look's brightness (post_fx.hpp): the frame's
++// solid draws again, with their own cameras, into the mask and a depth of its
++// own: the sea 1, what the sun map takes as solid 0 (an alpha-tested draw
++// with its texture's cutout), so the sea is marked where it is the nearest.
++// A sea draw that writes no depth tests it without writing it.
++// begin_sea_mask() sets up a pass; render_sea_mask() draws one draw.
++void begin_sea_mask(const wgpu::RenderPassEncoder& pass);
++void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass);
+ 
+ // Perform one EFB copy-to-texture (63/S16): resolve the current EFB region into
+ // a texture keyed by the copy destination address, so a later draw binding that
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 434e2c3df6..19e0156159 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -32,6 +32,21 @@ std::array<float, kMaxLights * 8> g_lights{};
+ uint32_t g_lightCount = 0;
+ float g_edgeStrength = 0.4f;  // how bright a sunlit edge gets
+ float g_sunStrength = 0.35f;  // how dark a sun shadow is
++// The scene's brightness the game asks for (aurora_set_exposure), after the
++// HD look's effects and before its bloom: Wind Waker HD's own factor for the
++// hour's palettes (its sunlight 3 times at noon on actors and scenery, 1.65
++// after gamma). 0 while unset, and the pass is left out. Under g_cameraMutex.
++float g_exposureGain = 0.f;
++// The frame buffer copied before the exposure, which reads its colours for
++// the highlights' roll-off (it can't read the target it draws into).
++wgpu::Texture g_exposureScene;
++wgpu::TextureView g_exposureSceneView;
++// The sea mask (sea_mask_target()) and its own depth.
++wgpu::Texture g_seaMask;
++wgpu::TextureView g_seaMaskView;
++wgpu::Texture g_seaMaskDepth;
++wgpu::TextureView g_seaMaskDepthView;
++wgpu::Extent3D g_seaMaskSize{};
+ // The sun shadow map's full shadow as a colour the scene is multiplied by, the
+ // shade lit by the sky as in Wind Waker HD: Link's shadow on Windfall's dock at
+ // noon kept 0.21, 0.39 and 0.56 of the sunlit planks' red, green and blue (0.65
+@@ -130,6 +145,7 @@ wgpu::Sampler g_sampler;
+ wgpu::TextureFormat g_format = wgpu::TextureFormat::Undefined;
+ wgpu::RenderPipeline g_bright, g_blurH, g_blurV;
+ wgpu::RenderPipeline g_composite;
++wgpu::RenderPipeline g_exposureDepth; // the scene brightened (g_exposureGain), where there is depth
+ wgpu::RenderPipeline g_down;           // the scene at a quarter of the size, unfiltered
+ wgpu::RenderPipeline g_farComposite;   // blended into the EFB by distance
+ wgpu::RenderPipeline g_aoPass;         // occlusion at a quarter of the size
+@@ -306,6 +322,7 @@ fn fs_far(in: VertexOutput) -> @location(0) vec4<f32> {
+     }
+     return vec4(textureSampleLevel(blurred, samp, in.uv, 0.0).rgb, f);
+ }
++
+ )""";
+ wgpu::ShaderModule g_farModule;
+ 
+@@ -551,7 +568,8 @@ struct View {
+ };
+ 
+ @group(0) @binding(0) var samp: sampler;
+-@group(0) @binding(1) var unused: texture_2d<f32>;
++@group(0) @binding(1) var sea_mask: texture_2d<f32>; // the exposure's sea mask; the cloud shadows leave it
++@group(0) @binding(4) var scene: texture_2d<f32>;    // the scene before the effects, for the exposure
+ @group(0) @binding(2) var depth: texture_depth_2d;
+ @group(0) @binding(3) var<uniform> view: View;
+ 
+@@ -655,6 +673,45 @@ fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
+     let shade = smoothstep(0.42, 0.6, n) * strength * (1.0 - smoothstep(60000.0, 160000.0, distance));
+     return vec4(vec3(1.0 - shade + select(0.0, dither(in.pos.xy), shade > 0.0)), 1.0);
+ }
++
++// DOL_AURORA_SEA_MASK_DEBUG=1: the sea mask over the scene instead (local debug).
++override sea_debug: bool = false;
++// Fading out from far_start to far_end units away (DOL_AURORA_EXPOSURE_FAR=start,end):
++// what is that far is the haze's colour, and brightened it stood out pale cyan
++// against the sky (the islands seen from the Private Oasis).
++override far_start: f32 = 10000.0;
++override far_end: f32 = 25000.0;
++// What is already bright takes less of it (DOL_AURORA_EXPOSURE_HIGHLIGHTS=from,to):
++// the gain tapers from full where a colour's brightest channel is `from` to
++// none at `to`, so ice and white rock keep their shading (at 1.5 times they
++// went flat white, a sixth of the screen clipped, at Ice Ring Isle), and the
++// taper is gentle enough that a brighter colour still comes out brighter.
++override highlight_from: f32 = 0.4;
++override highlight_to: f32 = 1.0;
++// The game's brightness (kBoost: scene * (1 + this) - the scene), carried in
++// time.x of this pass's view, where there is depth and not the sea's surface
++// (the sea mask): Wind Waker HD brightens the sun's light on actors and
++// scenery, not on the sea or the sky. A beach below a swell's height takes it,
++// and the swell doesn't.
++@fragment
++fn fs_exposure(in: VertexOutput) -> @location(0) vec4<f32> {
++    let p = vec2<i32>(in.pos.xy);
++    let d = textureLoad(depth, p, 0);
++    if (d <= 0.0) {
++        return vec4(0.0); // no depth: left as it is
++    }
++    let land = 1.0 - textureLoad(sea_mask, p, 0).r;
++    if (sea_debug) {
++        // The sea mask: the sea twice as bright, the rest left as it is (the pass scales the scene by
++        // one more than this; the target clamps what is below zero).
++        return vec4(select(vec3(0.0), vec3(1.0), land < 0.5), 0.0);
++    }
++    let near = 1.0 - smoothstep(far_start, far_end, view.lens.z / d);
++    var gain = (view.time.x - 1.0) * land * near;
++    let c = textureLoad(scene, p, 0).rgb;
++    gain *= 1.0 - smoothstep(highlight_from, highlight_to, max(max(c.r, c.g), c.b));
++    return vec4(vec3(select(0.0, gain + dither(in.pos.xy), gain > 0.0)), 0.0);
++}
+ )""";
+ wgpu::ShaderModule g_cloudModule;
+ 
+@@ -1460,12 +1517,20 @@ wgpu::RenderPipeline make_ao_pipeline(const char* label, const char* entry, wgpu
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
+-wgpu::RenderPipeline make_cloud_pipeline(wgpu::TextureFormat format, uint32_t samples) {
++wgpu::RenderPipeline make_cloud_pipeline(wgpu::TextureFormat format, uint32_t samples, bool exposure = false) {
+   const std::array constants{
+       wgpu::ConstantEntry{.key = "strength", .value = g_cloudStrength},
+       wgpu::ConstantEntry{.key = "scale", .value = g_cloudScale},
+       wgpu::ConstantEntry{.key = "debug_view", .value = g_cloudDebug ? 1.0 : 0.0},
+   };
++  const wgpu::BlendState boost{
++      .color = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Dst,
++                .dstFactor = wgpu::BlendFactor::One},
++      .alpha = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::One},
++  };
+   const wgpu::BlendState multiply{
+       .color = {.operation = wgpu::BlendOperation::Add,
+                 .srcFactor = wgpu::BlendFactor::Zero,
+@@ -1474,17 +1539,38 @@ wgpu::RenderPipeline make_cloud_pipeline(wgpu::TextureFormat format, uint32_t sa
+                 .srcFactor = wgpu::BlendFactor::Zero,
+                 .dstFactor = wgpu::BlendFactor::One},
+   };
+-  const std::array targets{wgpu::ColorTargetState{.format = format, .blend = &multiply, .writeMask = wgpu::ColorWriteMask::All}};
++  const std::array targets{
++      wgpu::ColorTargetState{.format = format, .blend = exposure ? &boost : &multiply, .writeMask = wgpu::ColorWriteMask::All}};
++  static const bool seaDebug = std::getenv("DOL_AURORA_SEA_MASK_DEBUG") != nullptr;
++  static const std::array<float, 2> exposureFar = [] {
++    std::array<float, 2> far{10000.f, 25000.f};
++    if (const char* value = std::getenv("DOL_AURORA_EXPOSURE_FAR"); value != nullptr)
++      if (std::sscanf(value, "%f,%f", &far[0], &far[1]) != 2 || !(far[1] > far[0]) || !(far[0] >= 0.f))
++        far = {10000.f, 25000.f};
++    return far;
++  }();
++  static const std::array<float, 2> exposureHighlights = [] {
++    std::array<float, 2> range{0.4f, 1.0f};
++    if (const char* value = std::getenv("DOL_AURORA_EXPOSURE_HIGHLIGHTS"); value != nullptr)
++      if (std::sscanf(value, "%f,%f", &range[0], &range[1]) != 2 || !(range[1] > range[0]))
++        range = {0.4f, 1.0f};
++    return range;
++  }();
++  const std::array exposureConstants{wgpu::ConstantEntry{.key = "sea_debug", .value = seaDebug ? 1.0 : 0.0},
++                                     wgpu::ConstantEntry{.key = "far_start", .value = exposureFar[0]},
++                                     wgpu::ConstantEntry{.key = "far_end", .value = exposureFar[1]},
++                                     wgpu::ConstantEntry{.key = "highlight_from", .value = exposureHighlights[0]},
++                                     wgpu::ConstantEntry{.key = "highlight_to", .value = exposureHighlights[1]}};
+   const wgpu::FragmentState fragment{
+       .module = g_cloudModule,
+-      .entryPoint = "fs_clouds",
+-      .constantCount = constants.size(),
+-      .constants = constants.data(),
++      .entryPoint = exposure ? "fs_exposure" : "fs_clouds",
++      .constantCount = exposure ? exposureConstants.size() : constants.size(),
++      .constants = exposure ? exposureConstants.data() : constants.data(),
+       .targetCount = targets.size(),
+       .targets = targets.data(),
+   };
+   const wgpu::RenderPipelineDescriptor descriptor{
+-      .label = "Cloud shadows",
++      .label = exposure ? "Exposure" : "Cloud shadows",
+       .layout = g_cloudPipelineLayout,
+       .vertex = {.module = g_cloudModule, .entryPoint = "vs_main"},
+       .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
+@@ -1721,6 +1807,7 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_torchPass = {};
+     g_composite = {};
+     g_farComposite = {};
++    g_exposureDepth = {};
+     g_aoApply = {};
+     g_size = {};
+   }
+@@ -1757,6 +1844,7 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+   }
+   if (!g_farComposite || samples != g_farSamples) {
+     g_farComposite = make_far_pipeline(format, samples);
++    g_exposureDepth = make_cloud_pipeline(format, samples, true);
+     g_farSamples = samples;
+   }
+   const wgpu::Extent3D size{std::max(1u, sceneSize.width / 4), std::max(1u, sceneSize.height / 4), 1};
+@@ -1851,18 +1939,22 @@ void draw_depth(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::
+ void draw_with_uniform(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
+                        const wgpu::BindGroupLayout& layout, const void* uniform, size_t uniformSize,
+                        const wgpu::TextureView& depthView, const wgpu::TextureView& target,
+-                       const wgpu::TextureView& resolve);
++                       const wgpu::TextureView& resolve, const wgpu::TextureView* texture = nullptr,
++                       const wgpu::TextureView* scene = nullptr);
+ 
+ void draw_with_view(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
+                     const std::array<float, 20>& view, const wgpu::TextureView& depthView,
+-                    const wgpu::TextureView& target, const wgpu::TextureView& resolve) {
+-  draw_with_uniform(cmd, label, pipeline, g_cloudLayout, view.data(), sizeof(view), depthView, target, resolve);
++                    const wgpu::TextureView& target, const wgpu::TextureView& resolve,
++                    const wgpu::TextureView* texture = nullptr, const wgpu::TextureView* scene = nullptr) {
++  draw_with_uniform(cmd, label, pipeline, g_cloudLayout, view.data(), sizeof(view), depthView, target, resolve,
++                    texture, scene);
+ }
+ 
+ void draw_with_uniform(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
+                        const wgpu::BindGroupLayout& layout, const void* uniform, size_t uniformSize,
+                        const wgpu::TextureView& depthView, const wgpu::TextureView& target,
+-                       const wgpu::TextureView& resolve) {
++                       const wgpu::TextureView& resolve, const wgpu::TextureView* texture,
++                       const wgpu::TextureView* scene) {
+   // A small buffer for each frame, so a frame still in flight keeps its camera.
+   const wgpu::BufferDescriptor bufferDescriptor{
+       .label = "Post effects view",
+@@ -1875,9 +1967,10 @@ void draw_with_uniform(const wgpu::CommandEncoder& cmd, const char* label, const
+   buffer.Unmap();
+   const std::array entries{
+       wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
+-      wgpu::BindGroupEntry{.binding = 1, .textureView = g_farView[0]},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = texture != nullptr ? *texture : g_farView[0]},
+       wgpu::BindGroupEntry{.binding = 2, .textureView = depthView},
+       wgpu::BindGroupEntry{.binding = 3, .buffer = buffer, .offset = 0, .size = uniformSize},
++      wgpu::BindGroupEntry{.binding = 4, .textureView = scene != nullptr ? *scene : g_farView[0]},
+   };
+   const wgpu::BindGroupDescriptor bindGroupDescriptor{
+       .layout = layout,
+@@ -2126,15 +2219,29 @@ void initialize() {
+   const wgpu::PipelineLayoutDescriptor depthPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                      .bindGroupLayouts = &g_depthLayout};
+   g_depthPipelineLayout = g_device.CreatePipelineLayout(&depthPipelineLayoutDescriptor);
++  // Binding 1 is the exposure's sea mask (read with textureLoad);
++  // the cloud shadows, sun shadows and edge light leave it.
+   const std::array cloudEntries{
+       depthEntries[0],
+-      depthEntries[1],
++      wgpu::BindGroupLayoutEntry{
++          .binding = 1,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                      .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
+       depthEntries[2],
+       wgpu::BindGroupLayoutEntry{
+           .binding = 3,
+           .visibility = wgpu::ShaderStage::Fragment,
+           .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = sizeof(g_camera)},
+       },
++      // The scene before the effects, for the exposure's highlights (read with textureLoad).
++      wgpu::BindGroupLayoutEntry{
++          .binding = 4,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                      .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
+   };
+   const wgpu::BindGroupLayoutDescriptor cloudLayoutDescriptor{
+       .label = "Cloud shadows",
+@@ -2201,7 +2308,7 @@ void initialize() {
+ }
+ 
+ void shutdown() {
+-  g_bright = g_blurH = g_blurV = g_composite = g_down = g_farComposite = g_aoPass = g_aoApply = {};
++  g_bright = g_blurH = g_blurV = g_composite = g_down = g_farComposite = g_aoPass = g_aoApply = g_exposureDepth = {};
+   g_aoBlurH = g_aoBlurV = g_aoUpscale = {};
+   g_aoTex = {};
+   g_aoView = {};
+@@ -2232,6 +2339,13 @@ void shutdown() {
+   g_cloudPipelineLayout = {};
+   g_cloudLayout = {};
+   g_cloudModule = {};
++  g_seaMaskView = {};
++  g_seaMask = {};
++  g_exposureSceneView = {};
++  g_exposureScene = {};
++  g_seaMaskDepthView = {};
++  g_seaMaskDepth = {};
++  g_seaMaskSize = {};
+   g_tex = {};
+   g_view = {};
+   g_farTex = {};
+@@ -2420,6 +2534,44 @@ bool edge_light_enabled() noexcept { return g_edge.load(std::memory_order_relaxe
+ 
+ void set_edge_light(bool enabled) noexcept { g_edge.store(enabled, std::memory_order_relaxed); }
+ 
++void set_exposure(float gain) noexcept {
++  std::lock_guard lock{g_cameraMutex};
++  g_exposureGain = gain > 0.f ? gain : 0.f;
++}
++
++bool exposure_active() noexcept {
++  std::lock_guard lock{g_cameraMutex};
++  return g_exposureGain > 1.f;
++}
++
++wgpu::TextureView sea_mask_target(const wgpu::Extent3D& sceneSize) {
++  if (!g_seaMask || g_seaMaskSize.width != sceneSize.width || g_seaMaskSize.height != sceneSize.height) {
++    const wgpu::TextureDescriptor descriptor{
++        .label = "Sea mask",
++        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++        .size = {sceneSize.width, sceneSize.height, 1},
++        .format = kSeaMaskFormat,
++    };
++    g_seaMask = g_device.CreateTexture(&descriptor);
++    g_seaMaskView = g_seaMask.CreateView();
++    const wgpu::TextureDescriptor depthDescriptor{
++        .label = "Sea mask depth",
++        .usage = wgpu::TextureUsage::RenderAttachment,
++        .size = {sceneSize.width, sceneSize.height, 1},
++        .format = kSeaMaskDepthFormat,
++    };
++    g_seaMaskDepth = g_device.CreateTexture(&depthDescriptor);
++    g_seaMaskDepthView = g_seaMaskDepth.CreateView();
++    g_seaMaskSize = sceneSize;
++  }
++  return g_seaMaskView;
++}
++
++wgpu::TextureView sea_mask_depth(const wgpu::Extent3D& sceneSize) {
++  sea_mask_target(sceneSize);
++  return g_seaMaskDepthView;
++}
++
+ void set_sun_direction(float x, float y, float z) noexcept {
+   const float length = std::sqrt(x * x + y * y + z * z);
+   std::lock_guard lock{g_cameraMutex};
+@@ -2454,6 +2606,7 @@ Camera current_camera() noexcept {
+   std::lock_guard lock{g_cameraMutex};
+   camera.view = g_camera;
+   camera.farPlane = g_cameraFar;
++  camera.exposure = g_exposureGain;
+   camera.valid = g_cameraValid;
+   camera.lights = g_lights;
+   camera.lightCount = g_lightCount;
+@@ -2477,9 +2630,38 @@ bool any_enabled() noexcept {
+          sun_shadows_enabled() || edge_light_enabled() || torch_light_enabled();
+ }
+ 
++// The frame buffer's colours before the effects, for the exposure's
++// highlights: taken after the sun shadows, a shadow on ice was darker than the
++// lit ice beside it, took more of the gain and came out washed out. False
++// where the target isn't the frame buffer (the exposure then has no taper).
++bool copy_exposure_scene(const wgpu::CommandEncoder& cmd, const wgpu::Extent3D& size, const wgpu::TextureView& dst) {
++  const auto& frame = webgpu::g_frameBuffer;
++  if (!frame.texture || dst.Get() != frame.view.Get() || frame.texture.GetWidth() != size.width ||
++      frame.texture.GetHeight() != size.height)
++    return false;
++  if (!g_exposureScene || g_exposureScene.GetWidth() != size.width || g_exposureScene.GetHeight() != size.height ||
++      g_exposureScene.GetFormat() != frame.texture.GetFormat()) {
++    const wgpu::TextureDescriptor descriptor{
++        .label = "Exposure scene",
++        .usage = wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::TextureBinding,
++        .size = {size.width, size.height, 1},
++        .format = frame.texture.GetFormat(),
++    };
++    g_exposureScene = g_device.CreateTexture(&descriptor);
++    g_exposureSceneView = g_exposureScene.CreateView();
++  }
++  const wgpu::TexelCopyTextureInfo from{.texture = frame.texture};
++  const wgpu::TexelCopyTextureInfo to{.texture = g_exposureScene};
++  const wgpu::Extent3D extent{size.width, size.height, 1};
++  cmd.CopyTextureToTexture(&from, &to, &extent);
++  return true;
++}
++
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+             const wgpu::TextureView& resolve, uint32_t msaaSamples, const Camera& camera, const SunMap* sunMap) {
++  const bool exposureScene = camera.exposure > 1.f && g_module && msaaSamples == 1 && camera.valid &&
++                             size.width >= 4 && size.height >= 4 && copy_exposure_scene(cmd, size, dst);
+   // Ambient occlusion and the far blur need single-sample depth (the depth
+   // buffer is multisampled with MSAA).
+   if (ambient_occlusion_enabled() && g_module && depthView && msaaSamples == 1 && size.width >= 4 && size.height >= 4) {
+@@ -2551,6 +2733,18 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+     }
+     draw_depth(cmd, "Far blur composite", g_farComposite, g_farView[0], depthView, dst, resolve, true);
+   }
++  if (camera.exposure > 1.f && g_module && size.width >= 4 && size.height >= 4) {
++    const webgpu::gpu_prof::Zone zone{cmd, "Exposure"};
++    ensure_targets(size, format, msaaSamples);
++    // The game's brightness rides in the seconds, which the pass doesn't use.
++    std::array<float, 20> view = camera.view;
++    view[16] = camera.exposure;
++    if (g_exposureDepth && depthView && msaaSamples == 1 && camera.valid && g_seaMaskView)
++    {
++      draw_with_view(cmd, "Exposure", g_exposureDepth, view, depthView, dst, resolve, &g_seaMaskView,
++                     exposureScene ? &g_exposureSceneView : &g_seaMaskView); // the mask: no taper where it is 0
++    }
++  }
+   if (bloom_enabled())
+     encode_bloom(cmd, scene, size, format, dst, resolve, msaaSamples);
+ }
+@@ -2591,6 +2785,8 @@ void aurora_set_sun_shadows(bool enabled) { aurora::gfx::post_fx::set_sun_shadow
+ 
+ void aurora_set_sun_direction(float x, float y, float z) { aurora::gfx::post_fx::set_sun_direction(x, y, z); }
+ 
++void aurora_set_exposure(float gain) { aurora::gfx::post_fx::set_exposure(gain); }
++
+ void aurora_set_sun_shadow_map(bool enabled) { aurora::gfx::post_fx::set_sun_shadow_map(enabled); }
+ 
+ void aurora_set_sun_shadow_quality(int quality) { aurora::gfx::post_fx::set_sun_shadow_quality(quality); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 3619523b43..252c01f6b9 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -69,6 +69,19 @@ void set_sun_shadow_map(bool enabled) noexcept;
+ void set_sun_shadow_quality(int level) noexcept;
+ void set_sun_shadow_strength(float strength) noexcept;
+ void set_sun_direction(float x, float y, float z) noexcept;
++void set_exposure(float gain) noexcept;
++// The scene is brightened this frame (the game's gain over 1): the sea's draws
++// are then marked for the sea mask (gxcore_draw.hpp render_sea_mask()).
++bool exposure_active() noexcept;
++// The sea mask the brightness leaves the sea out by: 1 where the sea is the
++// nearest surface, from the frame's solid draws and the sea drawn again into
++// it and a depth of its own (gxcore_draw.hpp render_sea_mask()), the scene's
++// size and single-sampled. common.cpp clears both at a frame's first scene
++// pass and adds each scene pass, before encode().
++constexpr wgpu::TextureFormat kSeaMaskFormat = wgpu::TextureFormat::R8Unorm;
++constexpr wgpu::TextureFormat kSeaMaskDepthFormat = wgpu::TextureFormat::Depth32Float;
++wgpu::TextureView sea_mask_target(const wgpu::Extent3D& sceneSize);
++wgpu::TextureView sea_mask_depth(const wgpu::Extent3D& sceneSize);
+ bool cloud_shadows_enabled() noexcept;
+ void set_cloud_shadows(bool enabled) noexcept;
+ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, float nearPlane, float seaLevel,
+@@ -84,6 +97,7 @@ constexpr uint32_t kMaxLights = 16;
+ struct Camera {
+   std::array<float, 20> view{};
+   float farPlane = 0.f;  // 0: infinitely far (aurora_set_world_view_far)
++  float exposure = 0.f;  // aurora_set_exposure; 0: unset
+   bool valid = false;
+   std::array<float, kMaxLights * 8> lights{};
+   uint32_t lightCount = 0;
+-- 
+2.56.0
+
