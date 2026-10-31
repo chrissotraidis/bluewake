@@ -101,6 +101,7 @@ endif()
 add_executable(BlueWake MACOSX_BUNDLE
     src/ios_entry.m
     src/disc_import.c
+    src/disc_import_stages.c
     ${BLUEWAKE_PLATFORM_SOURCES}
     ${BLUEWAKE_HOST_SOURCES})
 # The unchanged host keeps its own entry point under another name; the shim

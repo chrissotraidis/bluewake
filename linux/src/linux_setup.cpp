@@ -12,7 +12,7 @@
 #include "bluewake_version.h"
 #include "disc_import.h"
 #include "linux_disc.h"
-#include "linux_setup_steps.h"
+#include "disc_import_stages.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_dialog.h>
@@ -247,13 +247,6 @@ bool validate_textures(const char* path, std::string& status, bool& valid) {
 
 // --- the preparation, on its own thread -------------------------------------
 
-const char* const kStageName[BW_SETUP_STAGE_COUNT] = {
-    "Checking the disc image and the data folder",
-    "Reading the disc",
-    "Unpacking the game modules",
-    "Saving the settings",
-};
-
 // What the preparation writes: main.dol (~4 MB) and the 415 game modules (~7 MB).
 constexpr unsigned long long kPreparationBytes = 12ull << 20;
 
@@ -276,7 +269,7 @@ struct Job {
 
     SDL_Thread* thread = nullptr;
     std::atomic<int> state{Running};
-    std::atomic<int> stage{BW_SETUP_STAGE_CHECK};
+    std::atomic<int> stage{BW_IMPORT_STAGE_CHECK};
     std::atomic<int> permille{0};   // the running stage's own progress, 0..1000
     std::mutex lock;                // guards the strings and the log
     std::string stage_text;         // the importer's own stage name, when it has one
@@ -326,13 +319,13 @@ struct Job {
             }
             if (changed) note(name);
         }
-        stage.store(bw_setup_stage_for_report(name, fraction));
+        stage.store(bw_import_stage_for_report(name, fraction));
         permille.store(static_cast<int>(fraction * 1000.0));
     }
 
     double overall() const {
         const double within = state.load() == Succeeded ? 1.0 : permille.load() / 1000.0;
-        return bw_setup_overall_fraction(stage.load(), within);
+        return bw_import_overall_fraction(stage.load(), within);
     }
 
     std::string current_task() {
@@ -393,13 +386,13 @@ int SDLCALL prepare_thread(void* data) {
     }
     job->note(job->already_prepared ? "the game files were already prepared"
                                     : "the game files are prepared");
-    job->set_stage(BW_SETUP_STAGE_SAVE, 0.0, "Saving the settings");
+    job->set_stage(BW_IMPORT_STAGE_SAVE, 0.0, "Saving the settings");
     std::string why;
     if (!job->save_settings(why)) {
         job->fail(why);
         return 0;
     }
-    job->set_stage(BW_SETUP_STAGE_SAVE, 1.0, "Ready");
+    job->set_stage(BW_IMPORT_STAGE_SAVE, 1.0, "Ready");
     job->note("ready to play");
     job->state.store(Job::Succeeded);
     return 0;
@@ -441,13 +434,15 @@ void draw_mark(ImDrawList* list, ImVec2 centre, float radius, Mark mark) {
 }
 
 Mark mark_for(const Job& job, int index) {
-    const int current = job.stage.load();
-    const int state = job.state.load();
-    if (state == Job::Failed && index == current) return MarkFailed;
-    if (state == Job::Succeeded) return MarkDone;
-    if (index < current) return MarkDone;
-    if (index > current) return MarkPending;
-    return MarkRunning;
+    const int state = bw_import_stage_state(index, job.stage.load(),
+                                            job.state.load() == Job::Failed,
+                                            job.state.load() == Job::Succeeded);
+    switch (state) {
+    case BW_IMPORT_DONE: return MarkDone;
+    case BW_IMPORT_RUNNING: return MarkRunning;
+    case BW_IMPORT_FAILED: return MarkFailed;
+    default: return MarkPending;
+    }
 }
 
 void begin_bottom_row(const ImGuiStyle& style) {
@@ -468,10 +463,11 @@ void stage_row(const Job& job, int index) {
               ImVec2(position.x + radius + 2.0f, position.y + height * 0.5f), radius, mark);
     ImGui::Dummy(ImVec2(radius * 2.0f + 10.0f, height));
     ImGui::SameLine();
-    if (mark == MarkRunning) ImGui::TextColored(kRunning, "%s", kStageName[index]);
-    else if (mark == MarkPending) ImGui::TextDisabled("%s", kStageName[index]);
-    else if (mark == MarkFailed) ImGui::TextColored(kFailed, "%s", kStageName[index]);
-    else ImGui::TextUnformatted(kStageName[index]);
+    const char* name = bw_import_stage_name(index);
+    if (mark == MarkRunning) ImGui::TextColored(kRunning, "%s", name);
+    else if (mark == MarkPending) ImGui::TextDisabled("%s", name);
+    else if (mark == MarkFailed) ImGui::TextColored(kFailed, "%s", name);
+    else ImGui::TextUnformatted(name);
 }
 
 void notice_box(const char* text) {
@@ -712,7 +708,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
         } else if (screen == Screen::Preparing && job != nullptr) {
             ImGui::TextUnformatted("Preparing");
             ImGui::Separator();
-            for (int index = 0; index < BW_SETUP_STAGE_COUNT; ++index) stage_row(*job, index);
+            for (int index = 0; index < BW_IMPORT_STAGE_COUNT; ++index) stage_row(*job, index);
             ImGui::Spacing();
             const bool failed = job->state.load() == Job::Failed;
             const std::string task = failed ? std::string() : job->current_task();
@@ -749,7 +745,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
         } else if (job != nullptr) {
             ImGui::TextUnformatted("Ready");
             ImGui::Separator();
-            for (int index = 0; index < BW_SETUP_STAGE_COUNT; ++index) stage_row(*job, index);
+            for (int index = 0; index < BW_IMPORT_STAGE_COUNT; ++index) stage_row(*job, index);
             ImGui::Spacing();
             ImGui::TextWrapped("The game files are prepared. Later launches go straight to the game; "
                                "--setup reopens this window.");

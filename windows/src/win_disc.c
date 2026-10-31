@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "disc_import.h"
+#include "disc_import_stages.h"
 #include "win_disc.h"
 #include "atomic_file.h"
 
@@ -148,8 +149,11 @@ typedef struct Work {
     const char* disc;
     char out[MAX_PATH * 4];
     char error[1024];
-    volatile LONG fraction;  // 0-1000
-    char stage[128];
+    volatile LONG fraction;   // 0-1000 within the running stage
+    volatile LONG current;     // the stage the importer's last report belongs to
+    volatile LONG finished;    // 1 once the work returned
+    volatile LONG failed;      // 1 when the work returned an error
+    char report[128];          // the importer's own words for the current task
     HWND window;
     int result;
 } Work;
@@ -176,13 +180,27 @@ static unsigned __stdcall work_main(void* arg) {
 static void note_progress(void* context, double fraction, const char* stage) {
     Work* work = (Work*)context;
     InterlockedExchange(&work->fraction, (LONG)(fraction * 1000.0));
+    InterlockedExchange(&work->current, bw_import_stage_for_report(stage, fraction));
     if (stage != NULL)
-        snprintf(work->stage, sizeof work->stage, "%s", stage);
+        snprintf(work->report, sizeof work->report, "%s", stage);
     PostMessageW(work->window, WM_BW_PROGRESS, 0, 0);
 }
 
-// Runs work->run on a thread with a small window showing `title` and its
-// progress; returns its result.
+// The free space the preparation needs, and what the volume holding the data
+// folder has left, in the one line the window shows under the bar.
+static void space_text(char* out, size_t size) {
+    unsigned long long free_bytes = 0;
+    ULARGE_INTEGER free_to_caller = {0};
+    if (g_data != NULL && GetDiskFreeSpaceExA(g_data, &free_to_caller, NULL, NULL))
+        free_bytes = free_to_caller.QuadPart;
+    snprintf(out, size, "Free space needed in %s: %d MB (free: %.1f GB).",
+             g_data != NULL ? g_data : "", 12, (double)free_bytes / (1024.0 * 1024.0 * 1024.0));
+}
+
+// Runs work->run on a thread while this window shows the four stages the
+// preparation goes through (the same list Linux and the Apple apps show), the
+// importer's own words for the task in hand, the bar and the free space.
+// Returns work->result.
 static int with_progress(Work* work, const wchar_t* title) {
     if (getenv("BLUEWAKE_NO_DIALOG") != NULL) return work->run(work);
     INITCOMMONCONTROLSEX controls = {sizeof controls, ICC_PROGRESS_CLASS};
@@ -196,7 +214,7 @@ static int with_progress(Work* work, const wchar_t* title) {
     cls.lpszClassName = L"BlueWakeDiscProgress";
     RegisterClassW(&cls);
     const UINT dpi = GetDpiForSystem();
-    const int width = MulDiv(440, dpi, 96), height = MulDiv(130, dpi, 96);
+    const int width = MulDiv(520, dpi, 96), height = MulDiv(320, dpi, 96);
     HWND w = CreateWindowExW(0, cls.lpszClassName, L"BlueWake", WS_POPUP | WS_CAPTION | WS_VISIBLE,
                              (GetSystemMetrics(SM_CXSCREEN) - width) / 2, (GetSystemMetrics(SM_CYSCREEN) - height) / 2,
                              width, height, NULL, NULL, cls.hInstance, NULL);
@@ -204,13 +222,32 @@ static int with_progress(Work* work, const wchar_t* title) {
     SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof metrics, &metrics, 0, dpi);
     HFONT font = CreateFontIndirectW(&metrics.lfMessageFont);
     const int pad = MulDiv(16, dpi, 96);
-    HWND text = CreateWindowExW(0, L"STATIC", title, WS_CHILD | WS_VISIBLE, pad, pad, width - 2 * pad,
+    const int line = MulDiv(22, dpi, 96);
+    const int inner = width - 2 * pad - GetSystemMetrics(SM_CXFIXEDFRAME) * 2;
+    HWND text = CreateWindowExW(0, L"STATIC", title, WS_CHILD | WS_VISIBLE, pad, pad, inner,
                                 MulDiv(22, dpi, 96), w, NULL, cls.hInstance, NULL);
-    HWND bar = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE, pad, pad + MulDiv(30, dpi, 96),
-                               width - 2 * pad - GetSystemMetrics(SM_CXFIXEDFRAME) * 2, MulDiv(20, dpi, 96), w, NULL,
-                               cls.hInstance, NULL);
+    HWND report = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, pad, pad + MulDiv(30, dpi, 96),
+                                  inner, MulDiv(20, dpi, 96), w, NULL, cls.hInstance, NULL);
+    HWND stages[BW_IMPORT_STAGE_COUNT];
+    for (int index = 0; index < BW_IMPORT_STAGE_COUNT; ++index)
+        stages[index] = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE,
+                                        pad + MulDiv(6, dpi, 96),
+                                        pad + MulDiv(56, dpi, 96) + index * line, inner, MulDiv(20, dpi, 96),
+                                        w, NULL, cls.hInstance, NULL);
+    const int bar_y = pad + MulDiv(56, dpi, 96) + BW_IMPORT_STAGE_COUNT * line + MulDiv(10, dpi, 96);
+    HWND bar = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE, pad, bar_y, inner,
+                               MulDiv(18, dpi, 96), w, NULL, cls.hInstance, NULL);
+    HWND space = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE, pad, bar_y + MulDiv(26, dpi, 96),
+                                 inner, MulDiv(20, dpi, 96), w, NULL, cls.hInstance, NULL);
     SendMessageW(text, WM_SETFONT, (WPARAM)font, TRUE);
+    for (int index = 0; index < BW_IMPORT_STAGE_COUNT; ++index)
+        SendMessageW(stages[index], WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(report, WM_SETFONT, (WPARAM)font, TRUE);
+    SendMessageW(space, WM_SETFONT, (WPARAM)font, TRUE);
     SendMessageW(bar, PBM_SETRANGE32, 0, 1000);
+    char text_space[512];
+    space_text(text_space, sizeof text_space);
+    SetWindowTextA(space, text_space);
     work->window = w;
     HANDLE thread = (HANDLE)_beginthreadex(NULL, 0, work_main, work, 0, NULL);
     MSG message;
@@ -219,9 +256,24 @@ static int with_progress(Work* work, const wchar_t* title) {
         work->result = -1;
     while (!done && GetMessageW(&message, NULL, 0, 0) > 0) {
         if (message.hwnd == w && message.message == WM_BW_PROGRESS) {
-            SendMessageW(bar, PBM_SETPOS, (WPARAM)InterlockedCompareExchange(&work->fraction, 0, 0), 0);
-            if (message.wParam == 1)
+            if (message.wParam == 1) {
+                InterlockedExchange(&work->finished, 1);
+                InterlockedExchange(&work->failed, work->result != 0);
                 done = 1;
+                continue;
+            }
+            const int current = (int)InterlockedCompareExchange(&work->current, 0, 0);
+            const int finished = (int)InterlockedCompareExchange(&work->finished, 0, 0);
+            const int failed = (int)InterlockedCompareExchange(&work->failed, 0, 0);
+            for (int index = 0; index < BW_IMPORT_STAGE_COUNT; ++index) {
+                const int state = bw_import_stage_state(index, current, failed, finished);
+                char line_text[256];
+                snprintf(line_text, sizeof line_text, "%s %s", bw_import_stage_mark(state),
+                         bw_import_stage_name(index));
+                SetWindowTextA(stages[index], line_text);
+            }
+            SetWindowTextA(report, work->report);
+            SendMessageW(bar, PBM_SETPOS, (WPARAM)InterlockedCompareExchange(&work->fraction, 0, 0), 0);
             continue;
         }
         TranslateMessage(&message);

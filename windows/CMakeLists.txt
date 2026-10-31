@@ -113,6 +113,7 @@ add_executable(BlueWake
     src/win_entry.c
     src/win_disc.c
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c
     src/win_settings.cpp
     src/win_crash.cpp
     src/bluewake.rc

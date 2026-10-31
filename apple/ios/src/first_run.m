@@ -10,6 +10,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "disc_import.h"
+#include "disc_import_stages.h"
 #include "first_run.h"
 
 typedef NS_ENUM(NSInteger, BWItemState) { BWItemMissing, BWItemReady, BWItemBusy };
@@ -327,11 +328,17 @@ static void BWRow(BWRowView* row, BWItemState state, NSString* name, NSString* d
     return [self hasDisc] ? [text stringByAppendingString:@" The disc already imported is unchanged."] : text;
 }
 
+// The four stages every platform lists while the disc is prepared, with the
+// importer's own words for the task in hand under them.
 static void BWProgress(void* context, double fraction, const char* stage) {
     BWFirstRunController* controller = (__bridge BWFirstRunController*)context;
-    NSString* text = @(stage);
+    const int current = bw_import_stage_for_report(stage, fraction);
+    char lines[512];
+    bw_import_stage_lines(current, 0, 0, lines, sizeof lines);
+    NSString* text = [NSString stringWithFormat:@"Preparing game files\u2026\n%s", lines];
+    const double overall = bw_import_overall_fraction(current, fraction);
     dispatch_async(dispatch_get_main_queue(), ^{
-        [controller->_progress setProgress:(float)fraction animated:YES];
+        [controller->_progress setProgress:(float)overall animated:YES];
         [controller setStatus:text error:NO];
     });
 }

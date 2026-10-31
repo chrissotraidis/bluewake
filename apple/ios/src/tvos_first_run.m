@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include "disc_import.h"
+#include "disc_import_stages.h"
 #include "first_run.h"
 
 @interface BWTVFirstRunController : UIViewController
@@ -156,11 +157,17 @@
     }
 }
 
+// The same four stages the other platforms list, with the importer's own words
+// for the task in hand under them.
 static void BWTVProgress(void* context, double fraction, const char* stage) {
     BWTVFirstRunController* controller = (__bridge BWTVFirstRunController*)context;
-    NSString* message = stage != NULL ? @(stage) : @"Preparing game files…";
+    const int current = bw_import_stage_for_report(stage, fraction);
+    char lines[512];
+    bw_import_stage_lines(current, 0, 0, lines, sizeof lines);
+    NSString* message = [NSString stringWithFormat:@"Preparing game files…\n%s", lines];
+    const double overall = bw_import_overall_fraction(current, fraction);
     dispatch_async(dispatch_get_main_queue(), ^{
-        [controller->_progress setProgress:(float)fraction animated:YES];
+        [controller->_progress setProgress:(float)overall animated:YES];
         controller->_status.text = message;
     });
 }

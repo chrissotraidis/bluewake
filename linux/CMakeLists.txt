@@ -90,7 +90,7 @@ add_executable(bluewake
     src/linux_entry.c
     src/linux_disc.c
     src/linux_setup.cpp
-    src/linux_setup_steps.c
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
     src/linux_crash.cpp
     ${BLUEWAKE_HOST_SOURCES})
@@ -260,11 +260,11 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     add_test(NAME bluewake_disc_space_test COMMAND bluewake_disc_space_test)
     set_tests_properties(bluewake_disc_space_test PROPERTIES TIMEOUT 30)
 
-    add_executable(bluewake_linux_setup_steps_test
-        ${BLUEWAKE_REPO_ROOT}/tests/linux_setup_steps_test.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/linux_setup_steps.c)
-    target_include_directories(bluewake_linux_setup_steps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME bluewake_linux_setup_steps_test COMMAND bluewake_linux_setup_steps_test)
+    add_executable(bluewake_disc_import_stages_test
+        ${BLUEWAKE_REPO_ROOT}/tests/disc_import_stages_test.c
+        ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c)
+    target_include_directories(bluewake_disc_import_stages_test PRIVATE ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
+    add_test(NAME bluewake_disc_import_stages_test COMMAND bluewake_disc_import_stages_test)
 
     add_executable(bluewake_crash_text_test ${BLUEWAKE_REPO_ROOT}/tests/crash_text_test.c)
     add_test(NAME bluewake_crash_text_test COMMAND bluewake_crash_text_test)
