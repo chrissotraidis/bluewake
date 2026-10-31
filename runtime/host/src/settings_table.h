@@ -56,7 +56,12 @@ struct Setting {
     Control control = Control::None;     // how the shared draw_tab draws it; table order is display order
     const char* note = nullptr;          // the quiet line under it
     const char* needs = nullptr;         // a Bool setting that must be on for it to be changed
+    const char* needs_set = nullptr;     // and a setting that must have a value (the HD textures' folder)
     const char* group = nullptr;         // a heading drawn before it, "" for a plain line
+    // A pane that folds away under this name, closed until it is opened: this
+    // row and the ones after it that name it too are drawn inside it. An
+    // experimental row in a pane stays there, with its line saying so.
+    const char* pane = nullptr;
     const char* shown = nullptr;         // Slider: how its value reads ("%.0f seconds"), nullptr for "%.2f"
     const char* stored = nullptr;        // Slider: how it is written to the file, nullptr for "%.3f"
     const char* dead_when = nullptr;     // greyed while this setting has a value
@@ -80,7 +85,63 @@ inline constexpr Setting kSettings[] = {
      .label = "Widescreen", .tab = Tab::Mods, .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_HD_LOOK", .old_windows = "hd_look", .kind = Kind::Bool, .label = "Wind Waker HD look   (F2)",
      .control = Control::Switch,
-     .note = "The HD release's look, rebuilt piece by piece. So far: islands on the horizon from further away, soft shading, cloud shadows and edge light outdoors, torch light, a soft distance and bloom. Off by default."},
+     .note = "The HD release's look, rebuilt piece by piece. Its settings below turn each piece off on its own. Off by default."},
+    // The HD look's parts, on with it (hd_look.c): each can be turned off on
+    // its own, and turning the look off takes them all. Folded away under the
+    // look, with sun shadows, which are still experimental.
+    {.key = "BLUEWAKE_HD_DISTANT_ISLANDS", .kind = Kind::Bool, .on = Os::All,
+     .label = "Islands on the horizon from further away", .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_AO", .kind = Kind::Bool, .on = Os::All, .label = "Soft shading (ambient occlusion)",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_CLOUD_SHADOWS", .kind = Kind::Bool, .on = Os::All, .label = "Cloud shadows outdoors",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_EDGE_LIGHT", .kind = Kind::Bool, .on = Os::All, .label = "Edge light outdoors",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_TORCH_LIGHT", .kind = Kind::Bool, .on = Os::All, .label = "Torch light",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_FAR_BLUR", .kind = Kind::Bool, .on = Os::All, .label = "A soft distance (far blur)",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_BLOOM", .kind = Kind::Bool, .on = Os::All, .label = "Bloom", .control = Control::Switch,
+     .needs = "BLUEWAKE_HD_LOOK",
+     .pane = "Wind Waker HD look settings"},
+    // HD's sky clouds: textures the importer keeps apart (optional/hd-clouds),
+    // loaded at launch over the HD textures (hd_look.c).
+    {.key = "BLUEWAKE_HD_CLOUDS", .kind = Kind::Bool, .label = "HD's clouds in the sky", .control = Control::Switch,
+     .note = "Wind Waker HD's soft sky clouds, from the HD textures. A pack imported before this switch needs importing again.",
+     .needs = "BLUEWAKE_HD_LOOK", .needs_set = "DOL_AURORA_TEXTURE_PACK", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All},
+    // HD's sky and light (hd_look.c sky()): HD's palettes for every stage, its
+    // sunlight for the hour and its light schedule, from the HD textures'
+    // optional/hd-sky; with them HD's sky models and its blend in linear
+    // light. Each is off until turned on, the HD look on or not; all three
+    // follow the menu at once.
+    {.key = "BLUEWAKE_HD_SKY", .kind = Kind::Bool, .label = "HD's sky and light", .control = Control::Switch,
+     .note = "Wind Waker HD's colours for every place, its brighter sunlight and its earlier sunset. A pack imported before this switch needs importing again.",
+     .needs = "BLUEWAKE_HD_LOOK", .needs_set = "DOL_AURORA_TEXTURE_PACK", .pane = "Wind Waker HD look settings",
+     .experimental = "Checked on Linux (Vulkan) against Wind Waker HD at Windfall through the day, and at every stage select place once at noon; not yet on Windows or a Mac."},
+    {.key = "BLUEWAKE_HD_SKY_MODELS", .kind = Kind::Bool, .label = "HD's taller haze and cloud layers",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_SKY_LINEAR", .kind = Kind::Bool, .label = "HD's dawn and dusk colours (blended in linear light)",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
+    // How strong HD's brighter sunlight is (hd_look.c sky_brightness()): the
+    // power its factor for the hour is taken to, as HD's (0.37, 1.5 times at
+    // noon) or softer, for players who find it too bright.
+    {.key = "BLUEWAKE_HD_SUNLIGHT", .kind = Kind::Choice, .fallback = "0.37", .label = "HD sunlight",
+     .control = Control::Chooser, .note = "How much brighter HD's sun makes the scenery and Link.",
+     .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
+    {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK", .pane = "Wind Waker HD look settings",
+     .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},
+    // How dark the sun shadows are (aurora_set_sun_shadow_strength): HD's, or
+    // lighter, for players who find them too dark.
+    {.key = "BLUEWAKE_HD_SHADOW_STRENGTH", .kind = Kind::Choice, .fallback = "1", .label = "Sun shadow darkness",
+     .control = Control::Chooser, .needs = "BLUEWAKE_HD_SUN_SHADOWS", .pane = "Wind Waker HD look settings"},
     {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
      .label = "Show the frame rate   (F9)", .control = Control::Switch},
     {.key = "DOL_AURORA_ASPECT_FIT", .old_windows = "keep_aspect", .kind = Kind::Bool, .on = Os::Windows,
@@ -95,15 +156,6 @@ inline constexpr Setting kSettings[] = {
      .label = "A load time for loose RELs (the stage select's Wind Temple R04 and R08 load)", .tab = Tab::Mods,
      .control = Control::Switch, .next_launch = Os::All,
      .experimental = "Every stage select place checked headless on Windows and Linux; not yet played through, or on a Mac."},
-    {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
-     .tab = Tab::Mods, .control = Control::Switch,
-     .experimental = "From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac."},
-    // The sun shadow map's quality (hd_look.c hands it to Aurora's post_fx when it changes).
-    {.key = "DOL_AURORA_SUN_SHADOW_QUALITY", .kind = Kind::Choice, .fallback = "high", .label = "Sun shadow quality",
-     .tab = Tab::Mods, .control = Control::Chooser,
-     .note = "High is the sharpest, and keeps islands and palms behind the camera casting; Low is for slower graphics cards.",
-     .needs = "BLUEWAKE_HD_SUN_SHADOWS",
-     .experimental = "Low, Medium and High played on Linux (Vulkan); not yet on Windows or a Mac."},
     {.key = "BLUEWAKE_PAUSE_UNFOCUSED", .old_windows = "pause_unfocused", .kind = Kind::Bool,
      .label = "Pause while the window is in the background", .control = Control::Switch},
     {.key = "BLUEWAKE_SHADERS_FIRST", .old_windows = "compile_shaders_first", .kind = Kind::Bool,
@@ -120,6 +172,10 @@ inline constexpr Setting kSettings[] = {
      .label = "Smooth Motion (experimental)   (F10)", .control = Control::Custom},
     {.key = "DOL_AURORA_FRAME_INTERP_STEPS", .old_windows = "smooth_motion_fps", .kind = Kind::Choice,
      .fallback = "1"},
+    {.key = "DOL_AURORA_FRAME_INTERP_PACING", .kind = Kind::Choice,
+     .label = "Smooth Motion under sustained load", .control = Control::Chooser,
+     .note = "Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch.",
+     .next_launch = Os::All},
     {.key = "DOL_AURORA_FPS_POSITION", .old_windows = "fps_position", .kind = Kind::Choice,
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_FORCE_ANISO", .old_windows = "anisotropy", .kind = Kind::Int, .fallback = "1", .low = 1.f,
@@ -167,12 +223,17 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_SPRINT_CHOICE", .old_windows = "sprint_speed", .kind = Kind::Float, .fallback = "1.5",
      .low = 1.1f, .high = 2.f, .label = "Sprint speed", .tab = Tab::Gameplay, .needs = "BLUEWAKE_JUMP_BUTTON",
      .shown = "%.2fx", .stored = "%.2f"},
+    // A and B, and X and Y, swapped (desktop_menu.cpp, apply_controller); the
+    // key is the one Swap A and B had, so a file that turned it on keeps it.
     {.key = "BLUEWAKE_PAD_SWAP_AB", .old_windows = "controller_swap_ab", .kind = Kind::Bool,
-     .label = "Swap A and B", .tab = Tab::Controls, .control = Control::Switch, .group = "Controller",
-     .dead_when = "BLUEWAKE_BUTTON_MAP"},
-    {.key = "BLUEWAKE_PAD_SWAP_XY", .old_windows = "controller_swap_xy", .kind = Kind::Bool,
-     .label = "Swap X and Y", .tab = Tab::Controls, .control = Control::Switch,
-     .dead_when = "BLUEWAKE_BUTTON_MAP"},
+     .label = "Nintendo button layout", .tab = Tab::Controls, .control = Control::Switch,
+     .note = "For Switch controllers and Joy-Cons: A, B, X and Y do what their letters say. On by itself the "
+             "first time BlueWake starts with one.",
+     .group = "Controller", .dead_when = "BLUEWAKE_BUTTON_MAP"},
+    // A new settings file waits for its first controller to choose the Nintendo
+    // button layout (desktop_menu.cpp, first_controller_layout); an older file
+    // has no such line, so it never waits.
+    {.key = "BLUEWAKE_PAD_LAYOUT_PENDING", .kind = Kind::Bool, .tab = Tab::Controls},
     {.key = "BLUEWAKE_PAD_SWAP_LR", .old_windows = "controller_swap_lr", .kind = Kind::Bool,
      .label = "Swap L and R (the triggers)", .tab = Tab::Controls, .control = Control::Switch,
      .dead_when = "BLUEWAKE_BUTTON_MAP"},
@@ -200,6 +261,8 @@ inline constexpr Setting kSettings[] = {
      .tab = Tab::Controls, .control = Control::Custom, .needs = "BLUEWAKE_MOUSE_CAMERA"},
     {.key = "BLUEWAKE_STICK_CAMERA", .old_windows = "stick_camera", .kind = Kind::Bool, .on = Os::All,
      .label = "Direct right-stick camera and aiming", .tab = Tab::Controls, .control = Control::Switch,
+     .note = "On: the right stick turns and tilts the camera at once, with no easing, and its click is first "
+             "person. Off: the GameCube camera, where up/down zooms. Still zooming? Press L to center the camera.",
      .group = ""},
     {.key = "BLUEWAKE_STICK_CAMERA_SPEED", .old_windows = "stick_camera_speed", .kind = Kind::Float,
      .fallback = "360", .low = 120.f, .high = 720.f, .label = "Right-stick turn speed", .tab = Tab::Controls,
@@ -300,6 +363,16 @@ inline bool filled_on(const Setting& s, Os os = kThisOs) { return includes(s.fil
 inline bool default_on(const Setting& s, Os os = kThisOs) {
     const char* value = fallback_for(s, os);
     return value[0] != '\0' && value[0] != '0';
+}
+
+// A switch's value as the menus show it. Empty is the default, as the game's
+// own readers take it: an older settings file keeps a switch it never changed
+// as KEY=, which would otherwise read off in the menu while it is on (the
+// direct right-stick camera, whose reader is on unless 0).
+inline bool switch_on(const char* value, bool fallback) {
+    if (value == nullptr || value[0] == '\0')
+        return fallback;
+    return value[0] != '0' && std::strcmp(value, "off") != 0 && std::strcmp(value, "false") != 0;
 }
 
 } // namespace bw_settings

@@ -443,6 +443,17 @@ const char* heart_name(const std::string& filename) {
     return nullptr;
 }
 
+bool is_hd_cloud(const std::string& hd_name, const std::string& hd_resource) {
+    static const char* const kClouds[] = {"ws_naka06", "ws_mae08", "ws_mae09", "cloudtx_01", "cloudtx_02", "cloudtx_03"};
+    if (hd_resource != "stage|sea|stage")
+        return false;
+    const std::string name = lower(hd_name);
+    for (const char* c : kClouds)
+        if (name == c)
+            return true;
+    return false;
+}
+
 int candidate_priority(const std::string& hd_name, const std::string& hd_resource) {
     static const std::pair<const char*, const char*> kPreferred[] = {
         {"dk_kamen1", "object|demo_dk"},          {"test_grass_ktga", "stage|a_mori|room0"},

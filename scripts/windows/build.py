@@ -64,6 +64,51 @@ def step(title):
     print(f"\n==> {title}", flush=True)
 
 
+def windows_kits_root():
+    """Windows Kits 10 folder from the registry, or None."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    for view in (winreg.KEY_WOW64_32KEY, winreg.KEY_WOW64_64KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows Kits\Installed Roots",
+                                0, winreg.KEY_READ | view) as key:
+                return Path(winreg.QueryValueEx(key, "KitsRoot10")[0])
+        except OSError:
+            continue
+    return None
+
+
+def add_windows_sdk(env, root=None):
+    """Add the Windows SDK to a developer environment that lacks it.
+
+    vcvars finds the SDK with reg.exe, which the "Prevent access to registry
+    editing tools" policy blocks on some managed PCs; the SDK is still installed
+    and Python can read the same key. Uses the newest complete x64 SDK.
+    """
+    root = root or windows_kits_root()
+    if root is None:
+        return
+    def complete(version):
+        return all((root / part).is_file() for part in (
+            f"Include/{version}/ucrt/stdlib.h", f"Include/{version}/um/windows.h",
+            f"Lib/{version}/ucrt/x64/ucrt.lib", f"Lib/{version}/um/x64/kernel32.lib"))
+    versions = [p.name for p in (root / "Include").glob("10.*") if complete(p.name)]
+    if not versions:
+        return
+    version = max(versions, key=lambda v: tuple(int(x) for x in v.split(".")))
+    include, lib = root / "Include" / version, root / "Lib" / version
+    def prepend(name, paths):
+        env[name] = os.pathsep.join([str(p) for p in paths if p.is_dir()] + ([env[name]] if env.get(name) else []))
+    prepend("INCLUDE", [include / part for part in ("ucrt", "shared", "um", "winrt", "cppwinrt")])
+    prepend("LIB", [lib / "ucrt/x64", lib / "um/x64"])
+    prepend("PATH", [root / "bin" / version / "x64"])
+    env.update(WindowsSdkDir=f"{root}\\", WindowsSDKVersion=f"{version}\\", UniversalCRTSdkDir=f"{root}\\",
+               UCRTVersion=version)
+    print(f"Windows SDK {version} added from {root} (vcvars could not find it)")
+
+
 def default_jobs():
     """All cores, but no more parallel compiles than memory allows: the large
     translated chunks take 1 to 3 GB each in clang, and running out of commit
@@ -350,6 +395,8 @@ class Builder:
             key, sep, value = line.partition("=")
             if sep and key:
                 env[key] = value
+        if not env.get("WindowsSdkDir"):
+            add_windows_sdk(env)
         env["PATH"] = str(install / "VC/Tools/Llvm/x64/bin") + os.pathsep + env.get("PATH", "")
         print(f"Visual Studio: {install}")
         return env

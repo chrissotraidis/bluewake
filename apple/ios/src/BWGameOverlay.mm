@@ -768,6 +768,9 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
                            identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf chooseSavesToRestore]; }],
             [UIAction actionWithTitle:@"Import Dolphin Save…" image:[UIImage systemImageNamed:@"square.and.arrow.down"]
                            identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf chooseDolphinSave]; }],
+            [UIAction actionWithTitle:@"Export Dolphin Save…"
+                                image:[UIImage systemImageNamed:@"square.and.arrow.up.on.square"]
+                           identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf exportDolphinSave]; }],
             [UIAction actionWithTitle:@"Where Are My Files?" image:[UIImage systemImageNamed:@"folder"]
                            identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf explainFiles]; }],
         ]],
@@ -1497,6 +1500,42 @@ static NSString* BWDateStamp(NSString* format) {
     }];
 }
 
+// BlueWake's save written out as a Dolphin .gci, on demand: the card is only
+// read, and the file goes wherever the player sends it.
+- (void)exportDolphinSave {
+    __weak BWGameOverlay* weakSelf = self;
+    NSData* card = [NSData dataWithContentsOfFile:[self cardPath]];
+    if (card == nil) {
+        [self showMessage:@"No Saves Yet" text:@"BlueWake has no memory card yet. Save in the game first."];
+        return;
+    }
+    uint8_t* bytes = NULL;
+    size_t size = 0;
+    const char* error = bw_card_export((const uint8_t*)card.bytes, card.length, &bytes, &size);
+    if (error != NULL) {
+        [self showMessage:@"Could Not Export" text:@(error)];
+        return;
+    }
+    NSData* gci = [NSData dataWithBytes:bytes length:size];
+    free(bytes);
+    NSString* name = [NSString stringWithFormat:@"GZLE01-%@.gci", BWDateStamp(@"yyyy-MM-dd")];
+    NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    if (![gci writeToFile:path atomically:YES]) {
+        [self showMessage:@"Could Not Export" text:@"The file could not be written."];
+        return;
+    }
+    UIDocumentPickerViewController* picker =
+        [[UIDocumentPickerViewController alloc] initForExportingURLs:@[ [NSURL fileURLWithPath:path] ] asCopy:YES];
+    [self presentPicker:picker handler:^(NSArray<NSURL*>* urls) {
+        (void)urls;
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        [weakSelf showMessage:@"Save Exported"
+                         text:[NSString stringWithFormat:@"%@ holds all three quest logs and opens in Dolphin's "
+                                                         @"Memory Card Manager. Your own saves are unchanged.", name]];
+    }];
+}
+
 - (void)chooseSavesToRestore {
     __weak BWGameOverlay* weakSelf = self;
     UIDocumentPickerViewController* picker =
@@ -1772,7 +1811,8 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
                          message:@"In the Files app, open On My iPad › BlueWake › BlueWake.\n\n"
                                   "Your live saves are protected in BlueWake’s private storage. Back Up Saves makes a copy you can keep anywhere, "
                                   "and Restore Saves brings one back; earlier cards are kept in Backups. "
-                                  "Import Dolphin Save brings in a quest log from a Dolphin .gci or memory card file. "
+                                  "Import Dolphin Save brings in a quest log from a Dolphin .gci or memory card file, "
+                                  "and Export Dolphin Save writes one out as a .gci. "
                                   "GZLE01.iso is your disc image, and main.dol and rels are made from it. "
                                   "Mods and texture packs live in Mods and Load."
                   preferredStyle:UIAlertControllerStyleAlert];

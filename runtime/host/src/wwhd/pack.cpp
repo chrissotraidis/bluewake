@@ -9,6 +9,7 @@
 #include "hd.h"
 #include "imaging.h"
 #include "sha256.h"
+#include "sky.h"
 #include "ui.h"
 #include "wiiu_disc.h"
 
@@ -52,6 +53,29 @@ std::string parent_of(const std::string& path) {
 }
 
 using Targets = std::map<std::pair<std::string, std::string>, std::vector<const GCTexture*>>;
+
+// Conflicts chosen by eye (picked.inc): {texture file, HD source}.
+struct Picked {
+    const char* file;
+    const char* source;
+};
+constexpr Picked kPicked[] = {
+#include "picked.inc"
+};
+
+// From Common/ on, as both importers name HD's files the same from there.
+std::string from_common(const std::string& source) {
+    const size_t at = source.find("Common/");
+    return at == std::string::npos ? source : source.substr(at);
+}
+
+// 2 for the HD texture chosen for this texture file, above candidate_priority()'s 1.
+int picked_priority(const std::string& key, const std::string& source) {
+    for (const Picked& p : kPicked)
+        if (key == p.file)
+            return from_common(source) == from_common(p.source) ? 2 : 0;
+    return 0;
+}
 
 const std::vector<const GCTexture*>& lookup(const Targets& targets, const std::string& resource, const std::string& name) {
     static const std::vector<const GCTexture*> kNone;
@@ -578,7 +602,9 @@ ImportResult import_pack(const ImportOptions& o) {
     check_cancel();
     report("Reading the GameCube disc");
     check_cancel();
-    const std::vector<GCTexture> originals = index_gc(o.gc_disc, result.errors);
+    std::map<std::string, Bytes> gc_stages;
+    std::map<std::string, std::pair<Bytes, Bytes>> sky_stages;  // stage: GameCube's and HD's dzs
+    const std::vector<GCTexture> originals = index_gc(o.gc_disc, result.errors, &gc_stages);
     Targets targets;
     for (const GCTexture& t : originals) {
         check_cancel();
@@ -590,6 +616,7 @@ ImportResult import_pack(const ImportOptions& o) {
 
     std::map<std::string, Match> matches;
     std::set<std::string> conflicts;
+    std::map<std::string, std::string> optional_clouds; // file: HD source and GameCube original
     try {
         // Declared in the try block, so an error or a cancel stops its threads
         // before the staging folder is removed.
@@ -624,6 +651,17 @@ ImportResult import_pack(const ImportOptions& o) {
                 }
                 const auto handle = [&](const std::string& path, const Bytes& data) {
                     check_cancel();
+                    // .../STAGE_Stage.szs/Stage.bfres: HD's palettes for that stage.
+                    if (ends_with(path, "_Stage.szs/Stage.bfres")) {
+                        const size_t end = path.size() - std::string("_Stage.szs/Stage.bfres").size();
+                        const size_t slash = path.rfind('/', end);
+                        const std::string stage = path.substr(slash == std::string::npos ? 0 : slash + 1,
+                                                              end - (slash == std::string::npos ? 0 : slash + 1));
+                        const auto gc = gc_stages.find(stage);
+                        if (gc != gc_stages.end() && !sky_stages.count(stage))
+                            if (const auto at = find_dzs(data))
+                                sky_stages[stage] = {gc->second, Bytes(data.begin() + long(*at), data.end())};
+                    }
                     const auto l = layouts.find(parent_of(path));
                     const Layout* layout = keep && l != layouts.end() ? &l->second : nullptr;
                     source_textures(data, path, targets, layout, [&](HDTexture&& hd, std::vector<const GCTexture*> candidates) {
@@ -652,13 +690,41 @@ ImportResult import_pack(const ImportOptions& o) {
                                         intensity = for_gc_format(images, t->format, mask);
                                     digests[is_intensity] = digest_of(is_intensity ? intensity : images, o.exact_report);
                                 }
-                            const int priority = candidate_priority(hd.name, resource(hd.source));
+                            if (is_hd_cloud(hd.name, resource(hd.source))) {
+                                // The cirrus layer's colour (naka07) is HD's naka06 too: HD
+                                // draws each cloud layer as one texture, its own colour and
+                                // alpha (the HD look's one-sheet layers).
+                                std::vector<const GCTexture*> clouds = gc;
+                                if (lower(hd.name) == "ws_naka06")
+                                    if (const auto n = targets.find({resource(hd.source), "ws_naka07"}); n != targets.end())
+                                        clouds.insert(clouds.end(), n->second.begin(), n->second.end());
+                                for (const GCTexture* original : clouds) {
+                                    check_cancel();
+                                    const std::string key = original->filename();
+                                    if (!optional_clouds.emplace(key, hd.source + "\n" + original->source).second)
+                                        continue;
+                                    const fs::path folder = staging / kHdCloudsFolder;
+                                    fs::create_directories(folder, ec);
+                                    if (ec)
+                                        throw WriteError("cannot make " + folder.string() + ": " + ec.message());
+                                    for (size_t i = 0; i < images.size(); i++) {
+                                        const std::string name =
+                                            i == 0 ? key : key.substr(0, key.size() - 4) + "_mip" + std::to_string(i) + ".png";
+                                        if (o.exact_report)
+                                            write_file(folder / name, encode_png(images[i]));
+                                        else
+                                            writer.add(folder / name, images[i]);
+                                    }
+                                }
+                            }
+                            const int preferred = candidate_priority(hd.name, resource(hd.source));
                             for (const GCTexture* original : gc) {
                                 check_cancel();
                                 const bool is_intensity = original->format == 0 || original->format == 1;
                                 const auto& variant = is_intensity ? intensity : images;
                                 const std::string& digest = digests[is_intensity];
                                 const std::string key = original->filename();
+                                const int priority = std::max(preferred, picked_priority(key, hd.source));
                                 std::vector<std::string> originals_for_key = {original->source}, alternatives;
                                 const auto previous = matches.find(key);
                                 if (previous != matches.end()) {
@@ -743,12 +809,25 @@ ImportResult import_pack(const ImportOptions& o) {
                     throw WriteError("cannot remove generated texture " + name + ": " + ec.message());
             }
         }
-        std::string textures;
+        std::string textures, conflicting;
         size_t accepted = 0;
         for (auto& [key, m] : matches) {
             check_cancel();
-            if (conflicts.count(key))
+            if (conflicts.count(key)) {
+                // For checking by eye: the GameCube originals and the HD textures that disagree.
+                std::set<std::string> hd(m.alternatives.begin(), m.alternatives.end());
+                hd.insert(m.hd);
+                const std::set<std::string> origs(m.originals.begin(), m.originals.end());
+                const auto list = [](const std::set<std::string>& items) {
+                    std::string out = "[";
+                    for (const auto& s : items)
+                        out += (out.size() > 1 ? ", " : "") + json_string(s);
+                    return out + "]";
+                };
+                conflicting += std::string(conflicting.empty() ? "" : ",\n") + "    {\"file\": " + json_string(key) +
+                               ", \"hd\": " + list(hd) + ", \"originals\": " + list(origs) + "}";
                 continue;
+            }
             accepted++;
             std::set<std::string> alts(m.alternatives.begin(), m.alternatives.end());
             std::set<std::string> origs(m.originals.begin(), m.originals.end());
@@ -769,7 +848,9 @@ ImportResult import_pack(const ImportOptions& o) {
                         ", " + std::to_string(m.original_h) + "], \"hd_size\": [" + std::to_string(m.hd_w) + ", " +
                         std::to_string(m.hd_h) + "], \"mipmaps\": " + std::to_string(m.mipmaps) +
                         ", \"image_sha256\": " + json_string(m.image_sha256) + ", \"files_sha256\": " + files_sha +
-                        (m.priority ? ", \"selection\": \"audited shared-artwork variant\"" : "") + "}";
+                        (m.priority == 2   ? ", \"selection\": \"chosen by eye\""
+                         : m.priority ? ", \"selection\": \"audited shared-artwork variant\""
+                                      : "") + "}";
         }
         if (!accepted)
             throw FormatError("no compatible textures matched; nothing installed");
@@ -781,6 +862,30 @@ ImportResult import_pack(const ImportOptions& o) {
             errors += std::string(errors.empty() ? "" : ",\n") + "    {\"source\": " + json_string(e.source) +
                       ", \"reason\": " + json_string(e.reason) + "}";
         }
+        std::string clouds;
+        for (const auto& [file, from] : optional_clouds) {
+            const size_t split = from.find('\n');
+            clouds += std::string(clouds.empty() ? "\n    " : ",\n    ") + "{\"file\": " + json_string(file) +
+                      ", \"hd\": " + json_string(from.substr(0, split)) +
+                      ", \"original\": " + json_string(from.substr(split + 1)) + "}";
+        }
+        if (!clouds.empty())
+            clouds += "\n  ";
+        // HD's sky and light palettes for every stage on both discs (BLUEWAKE_HD_SKY).
+        std::vector<std::pair<std::string, std::string>> sky_skipped;
+        // Written only with stages to write, as the clouds are only with clouds.
+        const Bytes sky = pack_sky(sky_stages, sky_skipped);
+        if (!sky_stages.empty()) {
+            fs::create_directories(staging / kHdSkyFolder, ec);
+            if (ec)
+                throw WriteError("cannot make " + (staging / kHdSkyFolder).string() + ": " + ec.message());
+            write_file(staging / kHdSkyFolder / kHdSkyFile, sky);
+        }
+        std::string skipped;
+        for (const auto& [stage, why] : sky_skipped)
+            skipped += std::string(skipped.empty() ? "" : ", ") + "{\"stage\": " + json_string(stage) +
+                       ", \"reason\": " + json_string(why) + "}";
+        const uint32_t sky_count = uint32_t(sky[4]) << 24 | uint32_t(sky[5]) << 16 | uint32_t(sky[6]) << 8 | sky[7];
         const std::time_t now = std::time(nullptr);
         char created[32];
         std::strftime(created, sizeof created, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
@@ -788,7 +893,11 @@ ImportResult import_pack(const ImportOptions& o) {
                                  "  \"tool\": \"BlueWake built-in importer\",\n  \"created_utc\": \"" + created + "\",\n" +
                                  "  \"replacement_count\": " + std::to_string(accepted) + ",\n" +
                                  "  \"conflicts_skipped\": " + std::to_string(conflicts.size()) + ",\n" +
-                                 "  \"unsupported\": [\n" + errors + "\n  ],\n" + "  \"textures\": [\n" + textures + "\n  ]\n}\n";
+                                 "  \"conflicts\": [\n" + conflicting + "\n  ],\n" +
+                                 "  \"unsupported\": [\n" + errors + "\n  ],\n" + "  \"textures\": [\n" + textures + "\n  ],\n" +
+                                 "  \"optional\": {\"hd-clouds\": [" + clouds + "],\n" +
+                                 "    \"hd-sky\": {\"file\": " + json_string(kHdSkyFile) + ", \"stages\": " +
+                                 std::to_string(sky_count) + ", \"skipped\": [" + skipped + "]}}\n}\n";
         write_file(staging / "import-report.json", Bytes(json.begin(), json.end()));
         const std::string readme = "Private artwork extracted from your own Wind Waker HD disc.\n"
                                    "Choose this folder in Mods > Wind Waker HD textures, then restart.\n"

@@ -28,8 +28,9 @@
 // hook writes the place over it and the game starts there, as it would from
 // the menu. The place is "stage:room:point[:layer]" (the game's own codes),
 // or "group.room" or a name from the names file below, whose lines carry the
-// codes. BLUEWAKE_WARP_TIME sets the time of day (an hour, or morning, noon,
-// evening, night). BLUEWAKE_WARP_FILE=N presses A until the file starts and
+// codes. BLUEWAKE_WARP_TIME sets the time of day (an hour or HH:MM, or morning,
+// noon, evening, night) and BLUEWAKE_WARP_DATE the save's day (the moon's phase
+// is the day mod 7, the day before until noon). BLUEWAKE_WARP_FILE=N presses A until the file starts and
 // picks quest log N in the file select, so no one has to be at the controls.
 #define BLUEWAKE_STAGE_SELECT_CHANGE 0x80029E6Cu    // fopScnM_ChangeReq
 #define BLUEWAKE_STAGE_SELECT_NAME_RETURN 0x802322ECu // after its call in changeGameScene
@@ -227,6 +228,7 @@ static char bluewake_warp_stage[8];
 static s8 bluewake_warp_room;
 static s16 bluewake_warp_point;
 static s8 bluewake_warp_layer;
+static int bluewake_warp_date = -1; // BLUEWAKE_WARP_DATE: the save's day (the moon's phase is it mod 7); -1 keeps it
 static int bluewake_warp_time = -1; // degrees, 15 an hour; -1 keeps the save's
 static unsigned bluewake_warp_file; // 1-3; 0 when no one presses for the player
 static bool bluewake_warp_file_pending;
@@ -347,12 +349,27 @@ static inline void bluewake_stage_select_attach(void) {
                 bluewake_warp_time = named[k].hour * 15;
         char* end = NULL;
         const long hour = strtol(time, &end, 10);
+        long minute = 0;  // HH:MM, to the nearest degree (four minutes)
+        if (end != time && *end == ':') {
+            char* after = NULL;
+            minute = strtol(end + 1, &after, 10);
+            end = after != end + 1 && minute >= 0 && minute < 60 ? after : end;
+        }
         if (bluewake_warp_time < 0 && end != time && *end == '\0' && hour >= 0 && hour < 24)
-            bluewake_warp_time = (int)hour * 15;
+            bluewake_warp_time = (int)(hour * 15 + (minute + 2) / 4);
         if (bluewake_warp_time < 0)
             fprintf(stderr,
-                    "[warp] cannot read BLUEWAKE_WARP_TIME=%s: expected 0-23, morning, noon, evening or night\n",
+                    "[warp] cannot read BLUEWAKE_WARP_TIME=%s: expected 0-23 or HH:MM, morning, noon, evening or night\n",
                     time);
+    }
+    const char* date = getenv("BLUEWAKE_WARP_DATE");
+    if (bluewake_warp_set && date != NULL && date[0] != '\0') {
+        char* end = NULL;
+        const long day = strtol(date, &end, 10);
+        if (end != date && *end == '\0' && day >= 0 && day < 65536)
+            bluewake_warp_date = (int)day;
+        else
+            fprintf(stderr, "[warp] cannot read BLUEWAKE_WARP_DATE=%s: expected a day, 0-65535\n", date);
     }
     const char* stop_after = getenv("BLUEWAKE_WARP_STOP_AFTER");
     if (bluewake_warp_set && stop_after != NULL && stop_after[0] != '\0')
@@ -707,6 +724,9 @@ static inline void bluewake_stage_select_warp(CPUState* cpu) {
         memcpy(&bits, &degrees, sizeof bits);
         mem_write32(cpu, BLUEWAKE_STAGE_SELECT_SAVE_TIME, bits);
     }
+    // The day (dSv_player_status_b_c::mDate) follows the time (mTime).
+    if (bluewake_warp_date >= 0)
+        mem_write16(cpu, BLUEWAKE_STAGE_SELECT_SAVE_TIME + 4u, (u16)bluewake_warp_date);
     bluewake_warp_applied = true;
     bluewake_card_runtime_refuse_writes(cpu, "BLUEWAKE_WARP went to a place");
     cpu->gpr[4] = BLUEWAKE_STAGE_SELECT_PLAY; // a new game skips its opening too

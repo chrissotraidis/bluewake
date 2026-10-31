@@ -78,7 +78,7 @@ jobs:
                 bluewake_gather_memory_cache_test \
                 bluewake_guest_alias_lookup_plain_test bluewake_guest_alias_lookup_global_test \
                 bluewake_frame_interp_test bluewake_soft_effects_test \
-                bluewake_linux_disc_test bluewake_crash_text_test \
+                bluewake_linux_disc_test bluewake_disc_space_test bluewake_crash_text_test \
                 bluewake_launch_marker_test bluewake_settings_state_test bluewake_settings_table_test bluewake_settings_file_test \
                 bluewake_save_state_test bluewake_host_state_save_failure_test bluewake_restart_request_test \
                 bluewake_dvd_completion_test bluewake_cache_flush_fallback_test bluewake_wwhd_import_job_test bluewake_wwhd_disc_image_test bluewake_wwhd_disc_crypto_test bluewake_wwhd_wiiu_disc_test bluewake_wwhd_cancellation_test bluewake_wwhd_output_staging_test bluewake_wwhd_native_import --parallel 2

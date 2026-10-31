@@ -79,7 +79,8 @@ Adreno), game controllers on Android (they go through SDL, as on Windows), the H
     same path in the code but are untested.
   - Python 3.10+, Git, CMake 3.25+ (Ninja from the Android SDK's CMake is used if none is on PATH)
 - The Android SDK with the NDK (r27 or newer), build-tools and a platform, and a JDK 17
-- An arm64 Android device on Android 13 (API 33) or newer with Vulkan
+- An arm64 Android device on Android 10 (API 29) or newer with Vulkan 1.1. The APK declares API 29, but the
+  build has only been run on the Fold 7 above (Android 16): nothing here has played the game on Android 10 yet.
 - Your disc image of *The Legend of Zelda: The Wind Waker*, GameCube USA (`GZLE01`, revision 0), as an `.iso`.
   Convert an `.rvz` with Dolphin first: `DolphinTool convert -i GAME.rvz -o GZLE01.iso -f iso`
 
@@ -102,7 +103,9 @@ The steps and their logs (`build/android/logs`) are the Windows builder's, then:
   the PC above, 35 with an optimization profile.
 - **9 app**: `libmain.so` from `android/CMakeLists.txt`: the unchanged host (`runtime/host/src`), GXRuntime,
   Aurora with Dawn (Aurora's prebuilt `dawn-android-aarch64` package) and SDL3 (built from source), the donor DSP
-  and the Android entry shim and touch bridge (`android/src`).
+  and the Android entry shim and touch bridge (`android/src`). Below API 33 `android/include/execinfo.h` also
+  stands in for bionic's `backtrace()`, which the GX stall watchdog uses and Android 13 introduced: the real fix
+  is a guard in RecompCore's `bluewake-next`, and the header goes with it.
 - **10 package**: the APK, built without Gradle: SDL's Java (from the SDL source Aurora fetched) and
   `android/java`, compiled with `javac` and `d8`, linked with `aapt2` with Aurora's bundled pipeline cache as an
   asset, the two libraries stripped of debug information, stored uncompressed, 16 KB aligned and signed with a
@@ -190,7 +193,8 @@ same touch controls, the same settings under the same names.
   Resolution, Texture Filtering, Aspect Ratio), Gameplay (Jump & Sprint, Fast Transitions, Quick Doors), Mods
   (Widescreen 16:9 and 16:10, HD Texture Pack, Better Wind Waker and its settings, Install Texture Pack),
   Controller (Camera Stick, Button Mapping), Touch Controls (show or hide, Touch Control Settings, Move Controls),
-  Game Data & Saves (Back Up Saves, Restore Saves, Import Dolphin Save, Where Are My Files?, Remove Disc Image) and
+  Game Data & Saves (Back Up Saves, Restore Saves, Import Dolphin Save, Export Dolphin Save, Where Are My Files?,
+  Remove Disc Image) and
   Help & Feedback (Report a Problem on GitHub, Share Session Log). Back works the menu too: out of a submenu, and
   with nothing open it opens the menu. It never closes the game.
 - **Touch controls**: the iPhone app's buttons, colors and layouts, every GameCube button. On a phone, with the

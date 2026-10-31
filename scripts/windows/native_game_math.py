@@ -200,14 +200,17 @@ def prepare(root):
     for path, converted in prepared.items():
         if path.read_text() != converted:
             temporary = path.with_suffix('.c.tmp')
-            temporary.write_text(converted, encoding='utf-8', newline='\n')
+            with temporary.open('w', encoding='utf-8', newline='\n') as stream:
+                stream.write(converted)
             temporary.replace(path)
         files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     manifest = root / 'native_game_math.json'
     data = json.dumps({'abi': 1, 'entries': sorted(entries), 'files': files}, indent=2) + '\n'
     if not manifest.exists() or manifest.read_text() != data:
         temporary = manifest.with_suffix('.json.tmp')
-        temporary.write_text(data, newline='\n'); temporary.replace(manifest)
+        with temporary.open('w', encoding='utf-8', newline='\n') as stream:
+            stream.write(data)
+        temporary.replace(manifest)
     marker = '#define BLUEWAKE_NATIVE_GAME_MATH_PREPARED 1\n'
     if marker not in header.read_text():
         header.write_text(header.read_text() + '\n' + marker)

@@ -415,6 +415,31 @@ inline void bw_menu_stick_scroll(float scroll) {
         ImGui::SetScrollY(ImGui::GetScrollY() + scroll * 900.f * ImGui::GetIO().DeltaTime);
 }
 
+// Down (the D-pad, the left stick or the arrow key) on a tab's last setting
+// moves the cursor nowhere, so the notes and greyed rows under it were never
+// shown: a press that leaves the cursor where it was scrolls the body instead,
+// and so does Up on the first. ImGui moves the cursor a frame or two after the
+// press, so the press is looked at again two frames later. Call it inside the
+// tab's body, after its rows.
+inline void bw_menu_scroll_past_ends() {
+    static ImGuiID s_from = 0;
+    static int s_dir = 0, s_wait = 0;
+    const ImGuiID now = ImGui::GetFocusID();
+    if (s_dir != 0 && --s_wait <= 0) {
+        if (now == s_from && now != 0)
+            ImGui::SetScrollY(ImGui::GetScrollY() + s_dir * ImGui::GetTextLineHeightWithSpacing() * 3.f);
+        s_dir = 0;
+    }
+    if (s_dir == 0 && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        const int dir = ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) ? 1 : ImGui::IsKeyPressed(ImGuiKey_UpArrow, true) ? -1 : 0;
+        if (dir != 0) {
+            s_from = now;
+            s_dir = dir;
+            s_wait = 2;
+        }
+    }
+}
+
 // The game's B (BwMenuPad::back) ends an edit or closes an open dropdown, and
 // otherwise closes the menu. Call it inside the menu's window; true: close.
 inline bool bw_menu_back(bool pressed) {
