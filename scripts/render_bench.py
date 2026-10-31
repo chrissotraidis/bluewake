@@ -257,6 +257,7 @@ def collect(args):
                              "desktop": "a window" if sys.platform in ("darwin", "win32") else "desktop session",
                              "none": "no renderer"}[mode],
                  "builds": builds, "apps": {name: app.name for name, app in apps},
+                 "settings": {"both": args.set, "A": args.set_a, "B": args.set_b},
                  "kind": "states" if args.states else "tour", "retraces": args.retraces, "every": args.every,
                  "tour_start": tour_start, "stops": [s._asdict() for s in stops] if tour_start else None,
                  "scenes": [], "states": {}, "runs": []}
@@ -302,6 +303,9 @@ def collect(args):
                 options += ["--max-retraces", start + args.retraces]
             if args.headless:
                 options += ["--set", "BLUEWAKE_RENDERER=headless"]
+            # --set for both builds, --set-a / --set-b for one: the same app can be A and B, a setting apart.
+            for item in args.set + (args.set_a if build == "A" else args.set_b if build == "B" else []):
+                options += ["--set", item]
             if not capture:
                 # Unpaced and without vsync (on X11 it is on by default, and holds the game at 60 frames a second).
                 options += ["--unpaced", "--set", "BLUEWAKE_VSYNC=0"] + ([] if args.headless else ["--gpu-prof"])
@@ -585,6 +589,7 @@ def analyze(out, build_paths, into=None):
                               f"{first_run['index']} ({first_run['build']}) at retrace {at}")
     counts = sorted({len(points) for found in checkpoints.values() for _, points in found})
     summary = {key: collected[key] for key in ("host", "machine", "gpu", "mode", "display", "kind", "retraces")}
+    summary["settings"] = collected.get("settings", {})
     summary.update(builds=builds, measured=len(measured),
                    warmups=sum(not r["measured"] and not r["captured"] and not r.get("profiled")
                                for r in collected["runs"]),
@@ -679,6 +684,10 @@ def report_blocks(summary):
     if summary.get("profile_runs"):
         method.append(f"{summary['profile_runs']} separate Linux perf runs, excluded from FPS results")
     method.append(f"{summary['loaded_runs']}/{summary['measured']} runs loaded every scene")
+    settings = summary.get("settings") or {}
+    for who, label in (("both", "Both builds"), ("A", "Build A"), ("B", "Build B")):
+        if settings.get(who):
+            method.append(f"{label} ran with " + ", ".join(f"`{item}`" for item in settings[who]))
     if summary["checkpoint_differences"]:
         method.append(f"**Guest checkpoints differ**: {summary['checkpoint_differences'][0]}")
     else:
@@ -900,6 +909,10 @@ def main():
     p.add_argument("--timeout", type=int, default=1200)
     p.add_argument("--display", choices=("auto", "headless", "desktop"), default="auto")
     p.add_argument("--size")
+    p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="a variable for every run of both builds (e.g. DOL_AURORA_RENDER_SCALE=3)")
+    p.add_argument("--set-a", action="append", default=[], metavar="KEY=VALUE", help="a variable for build A's runs")
+    p.add_argument("--set-b", action="append", default=[], metavar="KEY=VALUE", help="a variable for build B's runs")
     p = sub.add_parser("make-state")
     p.add_argument("state", help="the state file to write, e.g. states/2-windfall.bwstate")
     p.add_argument("--app", required=True)

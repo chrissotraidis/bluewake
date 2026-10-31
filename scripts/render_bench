@@ -69,6 +69,10 @@ Target:
                             desktop uses the running session (DISPLAY=:0)
                             (default: auto, gamescope if there is one)
   --size WxH                headless size (default 1280x800 on a Deck)
+  --set KEY=VALUE           a variable for every run of both builds, such as
+                            DOL_AURORA_RENDER_SCALE=3 (repeatable)
+  --set-a KEY=VALUE         a variable for build A's runs only; with the same
+  --set-b KEY=VALUE         build as A and B, an A/B of one setting
   --ssh-key PATH            SSH private key for user@host
   --keep-remote             leave the run's folder on the target
 
@@ -180,6 +184,9 @@ while [[ $# -gt 0 ]]; do
             options+=("$1" "$2"); shift ;;
         --size)
             [[ ${2:-} =~ ^[0-9]+x[0-9]+$ ]] || die "--size must be WxH"
+            options+=("$1" "$2"); shift ;;
+        --set|--set-a|--set-b)
+            [[ ${2:-} =~ ^[A-Z_][A-Z0-9_]*=.*$ ]] || die "$1 needs KEY=VALUE"
             options+=("$1" "$2"); shift ;;
         -h|--help) usage; exit 0 ;;
         -*) die "unknown option: $1" ;;

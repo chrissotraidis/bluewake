@@ -215,6 +215,123 @@ export BLUEWAKE_TRACE_ALIAS_COST=1
 export BLUEWAKE_TEST_WARP=retrace:stage:room:point
 ```
 
+## Measuring in Game Mode
+
+Steps 1–4 measure a headless or desktop run. A change aimed at what players see on the Deck (a frame-rate loss
+with Smooth Motion, a heavy room at a high render scale) has to be measured **in Game Mode, with the player's own
+settings**: headless gamescope has no real scanout and does not reach the APU's power limit, and the defaults
+render at scale 1. In the Lava Room, headless runs understated the real frame's GPU cost about 5× and showed
+neither the power cap nor its effect on the CPU clock (bluewake [#504](https://github.com/chrissotraidis/bluewake/pull/504)).
+
+### What decides the speed on a Deck
+
+The APU shares one **15 W** budget between the CPU and the GPU. When the GPU is busy enough to hold the chip at
+the cap, the CPU's clock falls, and the game thread with it, even though nothing on the CPU changed. Measure the
+game thread's **clock** next to its IPC, and the APU's power and clocks: in the Lava Room at render scale 3 with
+Smooth Motion on, the game thread ran at the same IPC but at 3.1 GHz instead of 3.45, with the APU at 14–16 W,
+and the game lost about 10%. A GPU-side saving then comes back as CPU clock. Two corollaries:
+
+- Fixing the GPU clock higher can make the game **slower** (more of the budget goes to the GPU).
+- The charger does not change the cap (`power1_cap` is the APU's own limit).
+
+### The kit: `scripts/gamemode_measure.py`
+
+It runs here and measures the BlueWake already running on the Deck, over SSH; the results stay here. Each window
+(15 s by default) records the game thread's clock, IPC and busy share (`perf stat -t` on the main thread, no root
+needed), the APU's power and GPU clock and the cores' mean clock (sampled each second from sysfs), the session
+log's `[interp-stats]`, `[fps-dip]` and last `[gpu-prof]` lines during the window, the settings under test from
+`settings.ini`, and the process's `DOL_`/`BLUEWAKE_` variables. The settings are what the file holds: a build
+that predates a setting ignores it, so check which build the shortcut runs. Game frames a second come from the
+`[fps-dip]` lines (`game=`), which are written only for seconds below the game's target.
+
+1. **Launch with the diagnostics you need.** Game Mode starts the AppImage from its Steam shortcut, so put the
+   variables in the script the shortcut runs (keep a copy of the original):
+
+   ```sh
+   #!/bin/sh
+   export DOL_AURORA_FRAME_INTERP_PACING=0   # never pause: every game frame gets its in-between frame
+   export DOL_AURORA_FRAME_INTERP_STATS=1    # [interp-stats] each second (RecompCore #49)
+   export DOL_AURORA_GPU_PROF=2              # [gpu-prof]: each pass's GPU time (=1 sums passes of a kind)
+   exec /home/deck/BlueWake-x86_64.AppImage "$@"
+   ```
+
+2. **Go to the scene** (a state loaded from the menu keeps the view repeatable) and keep the camera still.
+3. **A/A, then A/B, in one session.** Sample the base twice, change the setting from the menu (it applies live),
+   sample, change it back, sample again:
+
+   ```sh
+   scripts/gamemode_measure.py sample deck@steamdeck off --out lava-room
+   scripts/gamemode_measure.py sample deck@steamdeck off2 --out lava-room
+   # Efficient soft effects on, from the menu
+   scripts/gamemode_measure.py sample deck@steamdeck on --out lava-room
+   # off again, then on again
+   scripts/gamemode_measure.py sample deck@steamdeck off3 --out lava-room
+   scripts/gamemode_measure.py sample deck@steamdeck on2 --out lava-room
+   ```
+
+4. **Report:**
+
+   ```sh
+   scripts/gamemode_measure.py report lava-room --base off,off2,off3 --test on,on2
+   ```
+
+   It prints every window and, for each metric, the base and test means, the change and the base windows'
+   spread (the A/A); a change counts only beyond that spread. With never pause, the in-between frames delivered
+   per second are the game's frame rate.
+
+### Diagnostics for attribution
+
+These come with RecompCore [#49](https://github.com/chrissotraidis/RecompCore/pull/49) unless noted; each is off
+unless set.
+
+| Variable | What it shows |
+|---|---|
+| `DOL_AURORA_GPU_PROF=1` (in main) / `=2` | GPU time per pass kind / per pass (`EFB 1`, `EFB 3`); the in-between replay as `IB …` |
+| `DOL_AURORA_GPU_PROF_CHUNK=N` | A long pass timed in chunks of N commands (`EFB 1 @700`): which draws hold the time |
+| `DOL_AURORA_DRAW_LOG=PASS:FIRST-LAST` | Those draws once, with each pipeline's state (blend, depth, TEV stages), indices and textures |
+| `DOL_AURORA_SKIP_DRAWS=PASS:FIRST-LAST` | Those draws left out: what they draw (compare captures) and what they cost |
+| `DOL_AURORA_FRAME_INTERP_STATS=1` | Smooth Motion each second: frames delivered, skipped, rejected; overloads by cause, with waits; per-draw jobs |
+| `DOL_AURORA_FRAME_INTERP_ABLATE=match` / `upload` | Smooth Motion's matching (and upload) without drawing the in-between frame |
+
+The path that found the Lava Room's cost: per pass (`=2`) → chunks of 50 → draw log of the hot chunks → skip
+them and compare captures. Pass numbers can differ from frame to frame in some rooms; check the draw log's pass
+before trusting a chunk's name.
+
+### Pictures
+
+- **Screenshot in Game Mode:** `XDG_RUNTIME_DIR=/run/user/1000 gamescopectl screenshot /tmp/shot.png` over SSH,
+  at the size shown. The game keeps animating and the camera can move while a menu is open, so Game Mode
+  screenshots show the look, not a pixel comparison.
+- **Pixel comparison:** identical frames come from a save state played deterministically
+  (`scripts/rendered_run.py --state … --capture FIRST:EVERY`, or `render_bench`'s pictures run), with
+  **Smooth Motion off**: with it on, a capture can land on an in-between frame in one run and a real frame in the
+  other.
+
+### Example: Outset (bluewake #503)
+
+Smooth Motion on, then off, then on again, in one session on the #501 build:
+
+| | Smooth Motion on (6 windows) | Off (2 windows) |
+|---|---|---|
+| Game FPS | 23.8–23.9 | 25.1 |
+| Game-thread clock | 3.445–3.451 GHz | 3.456–3.457 GHz |
+| Game-thread IPC | 1.646–1.659 | 1.735–1.742 |
+| APU power | 12.2–13.8 W | 11.4–12.2 W |
+
+Outset is not power-limited (full clock, under the cap): its limit is the game thread's work, and Smooth Motion
+costs it about 5% through shared cache and memory, not clock. Compare with the Lava Room, where the clock fell.
+
+### Pitfalls met in #504
+
+- **Settings:** read `~/.config/BlueWake/settings.ini` before comparing to headless runs (render scale, texture
+  pack: `DOL_AURORA_TEXTURE_PACK` empty means none is active, whatever the folder setting says).
+- **`gpu_busy_percent` near 100%** does not mean the GPU is saturated: the governor runs a light load busy at a
+  low clock. Power and clock are the honest measures.
+- **Profiler limits:** `gpu_prof`'s 4-deep readback ring drops frames with Smooth Motion on (per-instance costs
+  hold, totals undercount); `frame_ms` is meaningless with chunked passes.
+- **A run that exits at once:** a `rendered_run.py` stop retrace (`--max-retraces`) counts from the state's own
+  retrace, which is usually far above zero.
+
 ## Gotchas
 
 These each cost real time the first time around:

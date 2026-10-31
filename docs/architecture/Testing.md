@@ -218,6 +218,18 @@ backend or are intended for focused visual/readback investigation. The CMake
 target definition, CTest registration, and CI target list together determine
 whether a test is automatic.
 
+#### Hardware performance in Steam Deck Game Mode
+
+Rendered benchmarks ([`render_bench`](../RENDERED_TESTING.md)) compare builds repeatably, but a headless or
+desktop run cannot show what limits a Deck in Game Mode: the APU's shared 15 W budget, the real display path
+and the player's render scale. Changes aimed at that are measured on the running game with
+[`scripts/gamemode_measure.py`](../../scripts/gamemode_measure.py): the game thread's clock and IPC, the APU's
+power and clocks, and Smooth Motion's and the GPU profiler's log lines, window by window, with the setting under
+test toggled in one session (an A/A for the noise, then the A/B). Its parsing and report are covered by
+[`tests/test_gamemode_measure.py`](../../tests/test_gamemode_measure.py) in the audit workflow; the
+measurement itself is hardware evidence, outside CI. The procedure is in
+[Profiling](../PROFILING.md#measuring-in-game-mode).
+
 ### Packaging and process tests
 
 | Area | Source references | What they protect | Execution model |

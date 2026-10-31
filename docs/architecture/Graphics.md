@@ -29,6 +29,10 @@
 - [Textures, frame buffers, and presentation](#textures-frame-buffers-and-presentation)
   - [Textures and palettes](#textures-and-palettes)
   - [EFB, copies, and VI presentation](#efb-copies-and-vi-presentation)
+- [Cost at high render scales](#cost-at-high-render-scales)
+  - [Where a heavy frame's time goes](#where-a-heavy-frames-time-goes)
+  - [The shared power budget on a handheld](#the-shared-power-budget-on-a-handheld)
+  - [Soft effects at reduced resolution](#soft-effects-at-reduced-resolution)
 - [Synchronization and completion](#synchronization-and-completion)
 - [Contribution case studies](#contribution-case-studies)
 - [State, fallback, and shutdown](#state-fallback-and-shutdown)
@@ -731,6 +735,62 @@ content as gameplay data, while a window resize changes the native surface but
 must not discard subsequent GX work. [PR #341](https://github.com/chrissotraidis/bluewake/pull/341)
 and [PR #353](https://github.com/chrissotraidis/bluewake/pull/353) exercise those
 different sides of the boundary.
+
+## Cost at high render scales
+
+The render scale multiplies the EFB's pixels by its square (scale 3: nine times the game's 640×480 picture,
+about 3.7 million pixels in 16:9). Opaque scenery pays that once per pixel. A **full-screen transparent effect**
+pays it once per layer: the game draws haze, smoke, fog and cloud veils as large blended quads, often dozens of
+them over the same pixels, without depth testing. At the game's own resolution they are cheap; at scale 3 they
+can dominate the frame.
+
+### Where a heavy frame's time goes
+
+Measured on a Steam Deck in Game Mode, Lava Room, scale 3 (bluewake [#504](https://github.com/chrissotraidis/bluewake/pull/504)):
+
+| EFB pass | Draws | GPU time | Content |
+| --- | ---: | ---: | --- |
+| 0 | 31 | 0.03 ms | cleared first |
+| 1 | 776 | 20.7–22.0 ms | the scene, then the haze |
+| 2 | 0 | ≈ 0 | — |
+| 3 | 84 | ≈ 0.9 ms | the HUD, presented |
+
+Inside pass 1, 81 quads drawn last (blended source alpha over inverse source alpha, no depth test or write) took
+≈ 13.7 ms of the ≈ 21 ms. The same pattern was ≈ 62% of the Shipwreck's GPU time. Smooth Motion's in-between
+frame redraws every pass of the real frame, so it pays the effect again.
+
+### The shared power budget on a handheld
+
+On the Steam Deck the CPU and the GPU share one 15 W budget. When GPU work holds the APU at that cap, the CPU's
+clock falls and the game thread, the frame-rate limit in heavy scenes, slows with it at the same IPC:
+
+```mermaid
+flowchart LR
+    Effect["Full-screen blended layers"]
+    Scale["High render scale"]
+    Twice["Real + in-between frame"]
+    Cap["APU at its 15 W cap"]
+    Clock["CPU clock falls"]
+    Slow["Game thread slows"]
+    Effect --> Scale --> Twice --> Cap --> Clock --> Slow
+```
+
+GPU time saved therefore returns partly as CPU clock. This holds only on the real display path: headless runs
+stay under the cap. How to measure it is in [Profiling](../PROFILING.md#measuring-in-game-mode).
+
+### Soft effects at reduced resolution
+
+"Efficient soft effects" (RecompCore [#49](https://github.com/chrissotraidis/RecompCore/pull/49), the setting in
+bluewake [#504](https://github.com/chrissotraidis/bluewake/pull/504); opt-in) draws each run of eight or more such
+quads into a buffer of half the EFB's size and blends it over the EFB once, in the same place in the draw order:
+
+| Step | Blend | Result |
+| --- | --- | --- |
+| The run, into the buffer from (0,0,0,0) | colour (SrcAlpha, OneMinusSrcAlpha), alpha (One, OneMinusSrcAlpha) | premultiplied colour `C`, coverage `A` |
+| The buffer over the EFB | (One, OneMinusSrcAlpha) | `dst = C + dst × (1 − A)`, the same colour as each quad blended in turn |
+
+Only the resolution differs. In the Lava Room at scale 3 it brought the game thread back to 3.45 GHz, the APU to
+≈ 12.7 W and Smooth Motion to full speed, with identical frames differing by under 1/255 on average.
 
 ## Synchronization and completion
 
