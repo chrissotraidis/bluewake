@@ -14,6 +14,16 @@ if(NOT UNIX OR APPLE OR WIN32)
 endif()
 
 get_filename_component(BLUEWAKE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+
+# The setup window shows the release number, as the Windows build shows it under
+# BlueWake.exe's properties. Both read version.json, so neither can fall behind.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${BLUEWAKE_REPO_ROOT}/version.json)
+file(READ ${BLUEWAKE_REPO_ROOT}/version.json BLUEWAKE_VERSION_JSON)
+string(JSON BLUEWAKE_VERSION GET "${BLUEWAKE_VERSION_JSON}" version)
+if(NOT BLUEWAKE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "version.json: expected a version like 0.9.0, got '${BLUEWAKE_VERSION}'")
+endif()
+configure_file(src/bluewake_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/bluewake_version.h @ONLY)
 set(BLUEWAKE_RECOMPCORE ${BLUEWAKE_REPO_ROOT}/ref/recompcore CACHE PATH "The RecompCore checkout to build with")
 set(GXRUNTIME_DIR ${BLUEWAKE_RECOMPCORE}/GXRuntime)
 set(BLUEWAKE_HOST_SRC ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
@@ -80,6 +90,7 @@ add_executable(bluewake
     src/linux_entry.c
     src/linux_disc.c
     src/linux_setup.cpp
+    src/linux_setup_steps.c
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
     src/linux_crash.cpp
     ${BLUEWAKE_HOST_SOURCES})
@@ -95,6 +106,8 @@ if(TARGET imgui)
 endif()
 set_target_properties(bluewake PROPERTIES LINKER_LANGUAGE CXX OUTPUT_NAME bluewake)
 target_include_directories(bluewake PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${BLUEWAKE_HOST_SRC}
     ${BLUEWAKE_REPO_ROOT}/windows/src
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src
@@ -246,6 +259,12 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     set_target_properties(bluewake_disc_space_test PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME bluewake_disc_space_test COMMAND bluewake_disc_space_test)
     set_tests_properties(bluewake_disc_space_test PROPERTIES TIMEOUT 30)
+
+    add_executable(bluewake_linux_setup_steps_test
+        ${BLUEWAKE_REPO_ROOT}/tests/linux_setup_steps_test.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/linux_setup_steps.c)
+    target_include_directories(bluewake_linux_setup_steps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    add_test(NAME bluewake_linux_setup_steps_test COMMAND bluewake_linux_setup_steps_test)
 
     add_executable(bluewake_crash_text_test ${BLUEWAKE_REPO_ROOT}/tests/crash_text_test.c)
     add_test(NAME bluewake_crash_text_test COMMAND bluewake_crash_text_test)

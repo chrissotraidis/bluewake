@@ -1,5 +1,10 @@
 // BlueWake for Linux: the player's disc image. See linux_disc.c.
 #pragma once
+
+#include <stddef.h>
+
+#include "disc_import.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,6 +29,18 @@ int bw_disc_has_usable_source(const char* exe_dir, const char* data_dir);
 //   BLUEWAKE_DISC_CHOICE=FILE   testing: the file picker's answer, no dialogs
 int bw_disc_setup(const char* exe_dir, const char* data_dir,
                   int remember_explicit_disc, int force_picker);
+
+// Checks `disc` and, when the preparation remembered in data_dir is not
+// already this disc's, unpacks its game files (main.dol and the 415 RELs) into
+// a fresh folder there and remembers it. bw_disc_setup calls this, and so does
+// the setup window, which runs it on a thread so it can show the importer's
+// progress: the reports arrive through `progress` when it is not NULL, with
+// `context` as given. *already_prepared (when given) is 1 when the remembered
+// preparation was current and nothing had to be written. Returns 0 on success,
+// otherwise -1 with a sentence for the player in `error`.
+int bw_disc_prepare_into(const char* data_dir, const char* disc,
+                         BlueWakeImportProgress progress, void* context,
+                         int* already_prepared, char* error, size_t error_size);
 #ifdef __cplusplus
 }
 #endif

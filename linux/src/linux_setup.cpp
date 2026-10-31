@@ -1,9 +1,18 @@
-// BlueWake's Linux first-run/configuration window. SDL owns the window and input,
-// Dear ImGui supplies the widgets, and SDL's file dialogs use XDG Portal when
-// the desktop provides it. Manual entry and drag-and-drop remain available.
+// BlueWake's Linux first-run/configuration window: a setup wizard in the shape
+// of the TotK port's installer (valentderah/totk-pc-recomp, installer/): a form,
+// a preparing screen with its stage checklist, progress bar and log, and a ready
+// screen. SDL owns the window and input, Dear ImGui supplies the widgets, and
+// SDL's file dialogs use XDG Portal when the desktop provides it. Manual entry
+// and drag-and-drop remain available.
+//
+// The preparation runs on an SDL thread so the loop keeps drawing; the importer
+// reports its stage and fraction into Job, which the preparing screen renders.
 #include "linux_setup.h"
 
+#include "bluewake_version.h"
 #include "disc_import.h"
+#include "linux_disc.h"
+#include "linux_setup_steps.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_dialog.h>
@@ -12,13 +21,20 @@
 #include <imgui.h>
 
 #include <atomic>
+#include <cfloat>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
+
+#include <sys/statvfs.h>
 
 namespace {
 
@@ -229,6 +245,244 @@ bool validate_textures(const char* path, std::string& status, bool& valid) {
     return true;
 }
 
+// --- the preparation, on its own thread -------------------------------------
+
+const char* const kStageName[BW_SETUP_STAGE_COUNT] = {
+    "Checking the disc image",
+    "Reading the disc",
+    "Unpacking the game modules",
+    "Saving the settings",
+};
+
+// What the preparation writes: main.dol (~4 MB) and the 415 game modules (~7 MB).
+constexpr unsigned long long kPreparationBytes = 12ull << 20;
+
+double seconds_since(std::chrono::steady_clock::time_point then) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - then).count();
+}
+
+std::string free_space_in(const std::string& folder) {
+    struct statvfs info {};
+    if (folder.empty() || statvfs(folder.c_str(), &info) != 0) return {};
+    const double free_bytes = static_cast<double>(info.f_bavail) * static_cast<double>(info.f_frsize);
+    char text[512];
+    std::snprintf(text, sizeof text, "Free space needed in %s: %llu MB (free: %.1f GB).",
+                  folder.c_str(), kPreparationBytes >> 20, free_bytes / (1024.0 * 1024.0 * 1024.0));
+    return text;
+}
+
+struct Job {
+    enum State { Running = 0, Succeeded = 1, Failed = 2 };
+
+    SDL_Thread* thread = nullptr;
+    std::atomic<int> state{Running};
+    std::atomic<int> stage{BW_SETUP_STAGE_CHECK};
+    std::atomic<int> permille{0};   // the running stage's own progress, 0..1000
+    std::mutex lock;                // guards the strings and the log
+    std::string stage_text;         // the importer's own stage name, when it has one
+    std::string error;
+    std::vector<std::string> log;
+
+    // The form's answers, copied before the thread starts.
+    std::string data_dir, disc, textures, appimage, config;
+    bool textures_enabled = false;
+    bool install_shortcuts = false;
+    std::map<std::string, std::string>* settings = nullptr;
+    std::chrono::steady_clock::time_point started;
+    int already_prepared = 0;
+
+    void note(const std::string& line) {
+        if (line.empty()) return;
+        char stamp[32];
+        std::snprintf(stamp, sizeof stamp, "[%5.1fs] ", seconds_since(started));
+        std::lock_guard<std::mutex> guard(lock);
+        log.push_back(std::string(stamp) + line);
+    }
+
+    // Also records the text in the log the first time a stage is entered.
+    void set_stage(int index, double fraction, const char* text) {
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            changed = stage_text != text;
+            if (changed) stage_text = text;
+        }
+        stage.store(index);
+        permille.store(static_cast<int>(fraction * 1000.0));
+        if (changed) note(text);
+    }
+
+    // The importer's callback: which stage its report belongs to, how far along
+    // that stage is, and its own words for the current task.
+    void report(const char* name, double fraction) {
+        if (fraction < 0.0) fraction = 0.0;
+        if (fraction > 1.0) fraction = 1.0;
+        if (name != nullptr && name[0] != '\0') {
+            bool changed = false;
+            {
+                std::lock_guard<std::mutex> guard(lock);
+                changed = stage_text != name;
+                if (changed) stage_text = name;
+            }
+            if (changed) note(name);
+        }
+        stage.store(bw_setup_stage_for_report(name, fraction));
+        permille.store(static_cast<int>(fraction * 1000.0));
+    }
+
+    double overall() const {
+        const double within = state.load() == Succeeded ? 1.0 : permille.load() / 1000.0;
+        return bw_setup_overall_fraction(stage.load(), within);
+    }
+
+    std::string current_task() {
+        std::lock_guard<std::mutex> guard(lock);
+        return stage_text;
+    }
+
+    std::vector<std::string> log_lines() {
+        std::lock_guard<std::mutex> guard(lock);
+        return log;
+    }
+
+    std::string failure() {
+        std::lock_guard<std::mutex> guard(lock);
+        return error;
+    }
+
+    void fail(const std::string& why) {
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            error = why;
+        }
+        note("failed: " + why);
+        state.store(Failed);
+    }
+
+    // The settings file, the texture-pack variable the host reads, and the
+    // application-menu shortcuts: the work the last stage covers.
+    bool save_settings(std::string& why) {
+        if (settings != nullptr) {
+            (*settings)["DOL_AURORA_TEXTURE_PACK"] = textures_enabled ? textures : std::string();
+            setenv("DOL_AURORA_TEXTURE_PACK", (*settings)["DOL_AURORA_TEXTURE_PACK"].c_str(), 1);
+            if (config != "none" && !write_settings(config, *settings, why)) {
+                why = "Could not save the settings: " + why;
+                return false;
+            }
+        }
+        if (install_shortcuts && !install_application_shortcuts(appimage, why)) {
+            why = "Could not install the application shortcuts: " + why;
+            return false;
+        }
+        return true;
+    }
+};
+
+void report_progress(void* context, double fraction, const char* stage) {
+    static_cast<Job*>(context)->report(stage, fraction);
+}
+
+int SDLCALL prepare_thread(void* data) {
+    auto* job = static_cast<Job*>(data);
+    job->note("checking " + job->disc);
+    char error[1024] = "";
+    if (bw_disc_prepare_into(job->data_dir.c_str(), job->disc.c_str(), report_progress, job,
+                             &job->already_prepared, error, sizeof error) != 0) {
+        job->fail(error[0] != '\0' ? error : "The disc image could not be prepared.");
+        return 0;
+    }
+    job->note(job->already_prepared ? "the game files were already prepared"
+                                    : "the game files are prepared");
+    job->set_stage(BW_SETUP_STAGE_SAVE, 0.0, "Saving the settings");
+    std::string why;
+    if (!job->save_settings(why)) {
+        job->fail(why);
+        return 0;
+    }
+    job->set_stage(BW_SETUP_STAGE_SAVE, 1.0, "Ready");
+    job->note("ready to play");
+    job->state.store(Job::Succeeded);
+    return 0;
+}
+
+// --- what the screens draw --------------------------------------------------
+
+enum Mark { MarkPending, MarkRunning, MarkDone, MarkFailed };
+
+const ImVec4 kDone(0.15f, 0.64f, 0.41f, 1.0f);
+const ImVec4 kRunning(0.25f, 0.52f, 0.95f, 1.0f);
+const ImVec4 kPending(0.55f, 0.55f, 0.55f, 1.0f);
+const ImVec4 kFailed(0.85f, 0.23f, 0.20f, 1.0f);
+const ImVec4 kNoticeBackground(0.24f, 0.20f, 0.06f, 1.0f);
+const ImVec4 kNoticeText(1.00f, 0.86f, 0.45f, 1.0f);
+
+// The tick/arrow/circle the checklist uses. Drawn rather than typed, because
+// ImGui's default font has no glyphs for them.
+void draw_mark(ImDrawList* list, ImVec2 centre, float radius, Mark mark) {
+    const ImVec4& colour = mark == MarkDone      ? kDone
+                           : mark == MarkFailed  ? kFailed
+                           : mark == MarkRunning ? kRunning
+                                                 : kPending;
+    const ImU32 ink = ImGui::GetColorU32(colour);
+    list->AddCircle(centre, radius, ink, 16, 1.6f);
+    if (mark == MarkDone) {
+        const float t = radius * 0.62f;
+        list->AddLine(ImVec2(centre.x - t, centre.y), ImVec2(centre.x - t * 0.15f, centre.y + t * 0.75f), ink, 2.0f);
+        list->AddLine(ImVec2(centre.x - t * 0.15f, centre.y + t * 0.75f), ImVec2(centre.x + t, centre.y - t * 0.8f), ink, 2.0f);
+    } else if (mark == MarkFailed) {
+        const float t = radius * 0.55f;
+        list->AddLine(ImVec2(centre.x - t, centre.y - t), ImVec2(centre.x + t, centre.y + t), ink, 2.0f);
+        list->AddLine(ImVec2(centre.x - t, centre.y + t), ImVec2(centre.x + t, centre.y - t), ink, 2.0f);
+    } else if (mark == MarkRunning) {
+        list->AddTriangleFilled(ImVec2(centre.x - radius * 0.35f, centre.y - radius * 0.6f),
+                               ImVec2(centre.x - radius * 0.35f, centre.y + radius * 0.6f),
+                               ImVec2(centre.x + radius * 0.65f, centre.y), ink);
+    }
+}
+
+Mark mark_for(const Job& job, int index) {
+    const int current = job.stage.load();
+    const int state = job.state.load();
+    if (state == Job::Failed && index == current) return MarkFailed;
+    if (state == Job::Succeeded) return MarkDone;
+    if (index < current) return MarkDone;
+    if (index > current) return MarkPending;
+    return MarkRunning;
+}
+
+void stage_row(const Job& job, int index) {
+    const Mark mark = mark_for(job, index);
+    const float height = ImGui::GetTextLineHeight();
+    const float radius = height * 0.32f;
+    const ImVec2 position = ImGui::GetCursorScreenPos();
+    draw_mark(ImGui::GetWindowDrawList(),
+              ImVec2(position.x + radius + 2.0f, position.y + height * 0.5f), radius, mark);
+    ImGui::Dummy(ImVec2(radius * 2.0f + 10.0f, height));
+    ImGui::SameLine();
+    if (mark == MarkRunning) ImGui::TextColored(kRunning, "%s", kStageName[index]);
+    else if (mark == MarkPending) ImGui::TextDisabled("%s", kStageName[index]);
+    else if (mark == MarkFailed) ImGui::TextColored(kFailed, "%s", kStageName[index]);
+    else ImGui::TextUnformatted(kStageName[index]);
+}
+
+void notice_box(const char* text) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, kNoticeBackground);
+    ImGui::PushStyleColor(ImGuiCol_Text, kNoticeText);
+    ImGui::BeginChild("notice", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 2.6f),
+                      ImGuiChildFlags_Borders);
+    ImGui::TextWrapped("%s", text);
+    ImGui::EndChild();
+    ImGui::PopStyleColor(2);
+}
+
+void log_pane(Job& job) {
+    ImGui::BeginChild("log", ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 7.0f),
+                      ImGuiChildFlags_Borders);
+    for (const std::string& line : job.log_lines()) ImGui::TextUnformatted(line.c_str());
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f) ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
+}
+
 } // namespace
 
 extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size) {
@@ -252,7 +506,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
         std::fprintf(stderr, "[setup] SDL initialization failed: %s\n", SDL_GetError());
         return -1;
     }
-    SDL_Window* window = SDL_CreateWindow("BlueWake Setup", 820, 520,
+    SDL_Window* window = SDL_CreateWindow("BlueWake Setup", 900, 660,
                                            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     SDL_Renderer* renderer = window != nullptr ? SDL_CreateRenderer(window, nullptr) : nullptr;
     if (window == nullptr || renderer == nullptr) {
@@ -284,16 +538,27 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
     else disc_status = "Choose your GZLE01 revision-0 .iso or .gcm file.";
     if (textures_enabled) validate_textures(textures, texture_status, textures_valid);
 
+    enum class Screen { Form, Preparing, Ready };
+    Screen screen = Screen::Form;
+    bool show_log = false;
+    std::unique_ptr<Job> job;
     bool done = false, start = false;
+
     while (!done) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL3_ProcessEvent(&event);
+            const bool preparing =
+                job != nullptr && job->thread != nullptr && job->state.load() == Job::Running;
+            // Closing the window while the disc is being prepared would leave
+            // the preparation writing into a window that is gone; it finishes
+            // first (a few seconds), then the window closes.
             if ((event.type == SDL_EVENT_QUIT ||
                 (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
                  event.window.windowID == SDL_GetWindowID(window))) &&
-                pick_kind == PickKind::None) done = true;
-            if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr) {
+                pick_kind == PickKind::None && !preparing) done = true;
+            if (event.type == SDL_EVENT_DROP_FILE && event.drop.data != nullptr &&
+                screen == Screen::Form) {
                 copy_text(disc, disc_size, event.drop.data);
                 validate_disc(disc, disc_status, disc_valid);
             }
@@ -314,6 +579,15 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
             picker.path[0] = picker.error[0] = '\0';
             pick_kind = PickKind::None;
         }
+        // A finished preparation keeps a failure on its own stage row and moves
+        // a success on to the ready screen.
+        if (job != nullptr && job->state.load() != Job::Running) {
+            if (job->thread != nullptr) {
+                SDL_WaitThread(job->thread, nullptr);
+                job->thread = nullptr;
+            }
+            if (job->state.load() == Job::Succeeded) screen = Screen::Ready;
+        }
 
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -323,66 +597,169 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
         ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::Begin("BlueWake Setup", nullptr, ImGuiWindowFlags_NoDecoration |
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
-        ImGui::Text("BlueWake Setup");
+        ImGui::TextUnformatted("BlueWake Setup");
+        ImGui::SameLine();
+        ImGui::TextDisabled("version " BLUEWAKE_VERSION_STRING);
         ImGui::Separator();
-        ImGui::TextWrapped("Choose your own USA GameCube Wind Waker disc. BlueWake validates and prepares it once.");
-        if (ImGui::InputText("Disc image", disc, disc_size))
-            validate_disc(disc, disc_status, disc_valid);
-        ImGui::SameLine();
-        ImGui::BeginDisabled(pick_kind != PickKind::None);
-        if (ImGui::Button("Browse disc...")) {
-            static const SDL_DialogFileFilter filters[] = {{"GameCube disc images", "iso;gcm"}};
-            picker.result.store(0); pick_kind = PickKind::Disc; SDL_ClearError();
-            SDL_ShowOpenFileDialog(picked, &picker, window, filters, 1, nullptr, false);
-        }
-        ImGui::EndDisabled();
-        ImGui::TextColored(disc_valid ? ImVec4(.35f, .9f, .45f, 1.f) : ImVec4(1.f, .65f, .25f, 1.f),
-                           "%s", disc_status.c_str());
-        ImGui::TextDisabled("You can also drag an ISO/GCM onto this window.");
-        ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
-        if (ImGui::Checkbox("Enable HD texture pack", &textures_enabled)) {
-            if (textures_enabled) validate_textures(textures, texture_status, textures_valid);
-            else { textures_valid = true; texture_status = "Optional"; }
-        }
-        ImGui::BeginDisabled(!textures_enabled);
-        if (ImGui::InputText("Texture folder", textures, sizeof textures))
-            validate_textures(textures, texture_status, textures_valid);
-        ImGui::SameLine();
-        ImGui::BeginDisabled(pick_kind != PickKind::None);
-        if (ImGui::Button("Browse textures...")) {
-            picker.result.store(0); pick_kind = PickKind::Textures; SDL_ClearError();
-            SDL_ShowOpenFolderDialog(picked, &picker, window, nullptr, false);
-        }
-        ImGui::EndDisabled();
-        ImGui::TextDisabled("Select a Dolphin-format pack's GZL or GZLE01 folder.");
-        ImGui::TextWrapped("%s", texture_status.c_str());
-        ImGui::EndDisabled();
-        ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
-        ImGui::BeginDisabled(!can_install_shortcuts);
-        ImGui::Checkbox("Add or update application-menu and Desktop shortcuts", &install_shortcuts);
-        ImGui::EndDisabled();
-        if (can_install_shortcuts)
-            ImGui::TextDisabled("Keep the AppImage at its current path so the shortcut can find it.");
-        else
-            ImGui::TextDisabled("Application-menu and Desktop integration requires running setup from the AppImage.");
-        if (!message.empty()) ImGui::TextColored(ImVec4(1.f, .4f, .35f, 1.f), "%s", message.c_str());
-        ImGui::Separator();
-        if (ImGui::Button("Quit")) done = true;
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!disc_valid || !textures_valid);
-        if (ImGui::Button("Start BlueWake")) {
-            settings["DOL_AURORA_TEXTURE_PACK"] = textures_enabled ? textures : "";
-            setenv("DOL_AURORA_TEXTURE_PACK", settings["DOL_AURORA_TEXTURE_PACK"].c_str(), 1);
-            std::string error;
-            if (config != "none" && !write_settings(config, settings, error))
-                message = "Could not save settings: " + error;
-            else if (install_shortcuts && !install_application_shortcuts(appimage, error))
-                message = "Could not install the application shortcuts: " + error;
-            else {
-                start = true; done = true;
+
+        const ImGuiStyle& style = ImGui::GetStyle();
+        if (screen == Screen::Form) {
+            ImGui::TextWrapped("Plays The Legend of Zelda: The Wind Waker from your own GameCube disc. "
+                               "BlueWake checks the disc and prepares its game files once.");
+            ImGui::Spacing();
+            notice_box("The folder this setup prepares holds the game's own files. "
+                       "It is for your own use only; do not share or upload it.");
+            ImGui::Spacing();
+
+            if (ImGui::BeginTable("form", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+                ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Disc image");
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(-96.0f);
+                if (ImGui::InputText("##disc", disc, disc_size)) validate_disc(disc, disc_status, disc_valid);
+                ImGui::SameLine();
+                ImGui::BeginDisabled(pick_kind != PickKind::None);
+                if (ImGui::Button("Browse...##disc", ImVec2(88.0f, 0.0f))) {
+                    static const SDL_DialogFileFilter filters[] = {{"GameCube disc images", "iso;gcm"}};
+                    picker.result.store(0); pick_kind = PickKind::Disc; SDL_ClearError();
+                    SDL_ShowOpenFileDialog(picked, &picker, window, filters, 1, nullptr, false);
+                }
+                ImGui::EndDisabled();
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("HD texture pack");
+                ImGui::TableNextColumn();
+                if (ImGui::Checkbox("Enable", &textures_enabled)) {
+                    if (textures_enabled) validate_textures(textures, texture_status, textures_valid);
+                    else { textures_valid = true; texture_status = "Optional"; }
+                }
+                ImGui::BeginDisabled(!textures_enabled);
+                ImGui::SetNextItemWidth(-96.0f);
+                if (ImGui::InputText("##textures", textures, sizeof textures))
+                    validate_textures(textures, texture_status, textures_valid);
+                ImGui::SameLine();
+                ImGui::BeginDisabled(pick_kind != PickKind::None);
+                if (ImGui::Button("Browse...##textures", ImVec2(88.0f, 0.0f))) {
+                    picker.result.store(0); pick_kind = PickKind::Textures; SDL_ClearError();
+                    SDL_ShowOpenFolderDialog(picked, &picker, window, nullptr, false);
+                }
+                ImGui::EndDisabled();
+                ImGui::EndDisabled();
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Shortcuts");
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(!can_install_shortcuts);
+                ImGui::Checkbox("Add or update application-menu and Desktop shortcuts", &install_shortcuts);
+                ImGui::EndDisabled();
+                ImGui::EndTable();
+            }
+            ImGui::TextColored(disc_valid ? kDone : ImVec4(1.f, .65f, .25f, 1.f), "%s", disc_status.c_str());
+            if (textures_enabled)
+                ImGui::TextDisabled("%s", texture_status.c_str());
+            else
+                ImGui::TextDisabled("Optional: a Dolphin-format pack's GZL or GZLE01 folder. "
+                                    "You can also drag an ISO/GCM onto this window.");
+            if (!message.empty()) ImGui::TextColored(kFailed, "%s", message.c_str());
+
+            ImGui::Separator();
+            constexpr float kStartWidth = 130.0f, kQuitWidth = 90.0f;
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x -
+                                 kStartWidth - kQuitWidth - style.ItemSpacing.x);
+            if (ImGui::Button("Quit##form", ImVec2(kQuitWidth, 0.0f))) done = true;
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!disc_valid || !textures_valid);
+            if (ImGui::Button("Start", ImVec2(kStartWidth, 0.0f))) {
+                job = std::make_unique<Job>();
+                job->data_dir = data_dir;
+                job->disc = disc;
+                job->textures_enabled = textures_enabled;
+                job->textures = textures;
+                job->install_shortcuts = install_shortcuts;
+                job->appimage = appimage;
+                job->config = config;
+                job->settings = &settings;
+                job->started = std::chrono::steady_clock::now();
+                job->thread = SDL_CreateThread(prepare_thread, "bw-setup", job.get());
+                if (job->thread == nullptr) {
+                    message = std::string("The preparation could not start: ") + SDL_GetError();
+                    job.reset();
+                } else {
+                    message.clear();
+                    show_log = false;
+                    screen = Screen::Preparing;
+                }
+            }
+            ImGui::EndDisabled();
+        } else if (screen == Screen::Preparing && job != nullptr) {
+            ImGui::TextUnformatted("Preparing");
+            ImGui::Separator();
+            for (int index = 0; index < BW_SETUP_STAGE_COUNT; ++index) stage_row(*job, index);
+            ImGui::Spacing();
+            const bool failed = job->state.load() == Job::Failed;
+            const std::string task = failed ? std::string() : job->current_task();
+            if (!task.empty()) ImGui::TextDisabled("%s", task.c_str());
+            char overlay[64];
+            const double overall = job->overall();
+            std::snprintf(overlay, sizeof overlay, "%d%%", static_cast<int>(overall * 100.0));
+            ImGui::ProgressBar(static_cast<float>(overall), ImVec2(-FLT_MIN, 0.0f), overlay);
+            const std::string space = free_space_in(data_dir);
+            if (!space.empty()) ImGui::TextDisabled("%s", space.c_str());
+            if (failed) ImGui::TextColored(kFailed, "%s", job->failure().c_str());
+            if (show_log) log_pane(*job);
+
+            ImGui::Separator();
+            if (ImGui::Button("Show log##preparing", ImVec2(110.0f, 0.0f))) show_log = !show_log;
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - 110.0f);
+            if (failed) {
+                if (ImGui::Button("Back", ImVec2(110.0f, 0.0f))) {
+                    job.reset();
+                    screen = Screen::Form;
+                }
+            } else {
+                // The importer has no abort hook yet, so the preparation runs to
+                // its end; a few seconds is shorter than recovering from a
+                // half-written one.
+                ImGui::BeginDisabled();
+                ImGui::Button("Cancel", ImVec2(110.0f, 0.0f));
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                    ImGui::SetTooltip("The game files are prepared once and this takes a few seconds, "
+                                      "so the preparation finishes before the window closes.");
+            }
+        } else if (job != nullptr) {
+            ImGui::TextUnformatted("Ready");
+            ImGui::Separator();
+            for (int index = 0; index < BW_SETUP_STAGE_COUNT; ++index) stage_row(*job, index);
+            ImGui::Spacing();
+            ImGui::TextWrapped("The game files are prepared. Later launches go straight to the game; "
+                               "--setup reopens this window.");
+            if (job->textures_enabled) ImGui::TextDisabled("HD texture pack: %s", job->textures.c_str());
+            if (show_log) log_pane(*job);
+
+            ImGui::Separator();
+            if (ImGui::Button("Show log##ready", ImVec2(110.0f, 0.0f))) show_log = !show_log;
+            constexpr float kPlayWidth = 150.0f, kQuitWidth = 90.0f;
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x -
+                                 kPlayWidth - kQuitWidth - style.ItemSpacing.x);
+            if (ImGui::Button("Quit##ready", ImVec2(kQuitWidth, 0.0f))) done = true;
+            ImGui::SameLine();
+            if (ImGui::Button("Start BlueWake", ImVec2(kPlayWidth, 0.0f))) {
+                start = true;
+                done = true;
             }
         }
-        ImGui::EndDisabled();
         ImGui::End();
 
         ImGui::Render();
@@ -391,6 +768,9 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
     }
+
+    if (job != nullptr && job->thread != nullptr) SDL_WaitThread(job->thread, nullptr);
+    job.reset();
 
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
