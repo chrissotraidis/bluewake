@@ -164,6 +164,7 @@ flowchart LR
 | Rule | Unit test over the survey's draw logs | Selects the known veil blocks; selects no opaque or depth-tested draw |
 | Picture | Headless captures at scale 3, current vs low-res path, five scenes | Differences confined to the veil areas and small (mean and 99th percentile reported); reviewed side by side |
 | GPU time | `[gpu-prof]` per pass, five scenes, scale 3 | Lava Room and Shipwreck GPU per frame reduced by at least 40% |
+| In-session A/A and A/B | Game Mode, one session, same view: toggle the setting live in 15 s windows, off/off (A/A noise floor), then off/on/off/on, with `perf stat -t`, power, `[interp-stats]` and `[gpu-prof]` sampled per window | The A/B difference in GPU time, power and game-thread clock exceeds the A/A spread |
 | Game Mode | Scale 3, Smoothness on (automatic pacing), Lava Room and Shipwreck | Full game speed with in-between frames delivered, under the 15 W cap |
 | CI | Linux and Windows BlueWake CI with the RecompCore pin | Builds and tests pass |
 
