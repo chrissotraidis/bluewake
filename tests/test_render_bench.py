@@ -210,6 +210,18 @@ class Tour(Work):
         self.assertIn('<td class=num><strong>+140.00%</strong></td>', page)
         self.assertIn('<code>aaaaaaaaaaaa</code>', page)
 
+    def test_one_build_a_setting_apart(self):
+        # The same app as A and B: --set-b slows B, --set reaches both, and the report says so.
+        code, summary, report = self.bench('plain', 'plain', extra=(
+            '--pairs', '1', '--set', 'BLUEWAKE_SOMETHING=1', '--set-b', 'FAKE_BLUEWAKE_SLOW=1'))
+        self.assertEqual(code, 0, report)
+        self.assertEqual(summary['overall']['A']['fps'], 60.0)
+        self.assertEqual(summary['overall']['B']['fps'], 25.0)
+        self.assertEqual(summary['settings'], {'both': ['BLUEWAKE_SOMETHING=1'], 'A': [], 'B': ['FAKE_BLUEWAKE_SLOW=1']})
+        self.assertIn('Both builds ran with `BLUEWAKE_SOMETHING=1`', report)
+        self.assertIn('Build B ran with `FAKE_BLUEWAKE_SLOW=1`', report)
+        self.assertNotIn('Build A ran with', report)
+
     def test_frames_a_retrace_apart_are_the_same_capture(self):
         code, summary, _ = self.bench('plain', 'plain-late', extra=('--pairs', '1'))
         self.assertEqual(code, 0)

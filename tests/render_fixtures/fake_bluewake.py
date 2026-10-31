@@ -7,7 +7,7 @@ a second instead of 120 with a GPU twice as busy, "diverge" reports a different 
 game waits at the file select), "empty12" finds quest logs 1 and 2 empty, "late" captures each frame a retrace late, "realtime" works 50 ms
 for each [perf] line (60 retraces) for a profiler to attach to. From a state (BLUEWAKE_LOAD_STATE) it runs from the state's
 retrace to BLUEWAKE_MAX_RETRACES, with a [load] line 30 retraces after each test warp. A stage-select warp
-arrives at retrace 840. BLUEWAKE_SAVE_STATE writes a state with only its header, on the retrace after the one
+arrives at retrace 840. FAKE_BLUEWAKE_SLOW=1 is "slow" whatever the name. BLUEWAKE_SAVE_STATE writes a state with only its header, on the retrace after the one
 asked for, as the game does.
 """
 import gzip
@@ -61,8 +61,10 @@ if env.get("BLUEWAKE_CAPTURE_OPENING_FRAME"):
         (folder / f"frame-{retrace + ('late' in name)}.ppm").write_bytes(picture(n))
 warps = [item.split(":") for item in env.get("BLUEWAKE_TEST_WARP", "").split(",") if item]
 saves = [item.rpartition("@") for item in env.get("BLUEWAKE_SAVE_STATE", "").split(",") if item]
-rate = 50.0 if "slow" in name else 120.0
-gpu = 8.0 if "slow" in name else 4.0
+# FAKE_BLUEWAKE_SLOW=1 makes any of them slow too: one app, a setting apart (render_bench --set-a / --set-b).
+slow = "slow" in name or env.get("FAKE_BLUEWAKE_SLOW") == "1"
+rate = 50.0 if slow else 120.0
+gpu = 8.0 if slow else 4.0
 checkpoint = int(env.get("BLUEWAKE_GUEST_CHECKPOINT_INTERVAL", "0"))
 for retrace in range(start - start % 60 + 60, end, 60):
     for at, stage, *_ in warps:

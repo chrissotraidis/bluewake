@@ -173,9 +173,22 @@ own processes in user space; `render_bench` checks for `perf` before it starts.
    # The same rendered A/B plus separate CPU-attribution passes for every scene
    scripts/render_bench deck@10.10.20.168 new.AppImage main.AppImage \
        --states test_render/states --cpu-profile
+
+   # One build, a setting apart: the same AppImage as A and B, at the player's render scale,
+   # with the setting under test on A only (the report lists what each build ran with)
+   scripts/render_bench deck@10.10.20.168 new.AppImage new.AppImage --states test_render/states \
+       --set DOL_AURORA_RENDER_SCALE=3 --set-a DOL_AURORA_EFFICIENT_EFFECTS=1
    ```
 
-4. **Read the results** in the new `YYYY_MM_DD-HHMMSS/` folder: `report.txt` is also printed at the end,
+   `--set KEY=VALUE` reaches every run of both builds and `--set-a` / `--set-b` one build's; each is repeatable.
+   Settings matter: a run without `--set DOL_AURORA_RENDER_SCALE` renders at the default scale, and the GPU cost
+   of a full-screen effect grows with the square of the scale (the Lava Room's heat haze was about 15 of 23 ms of
+   GPU time at scale 3, little at scale 1). Measure at the scale the change is for.
+
+4. **Pictures with Smooth Motion on:** a capture can land on an in-between frame in one build and on a real frame in
+   the other, so the two pictures show different moments (a low PSNR from moving particles, with identical guest
+   checkpoints). To judge a rendering change, compare with `--set DOL_AURORA_FRAME_INTERP=0`.
+5. **Read the results** in the new `YYYY_MM_DD-HHMMSS/` folder: `report.txt` is also printed at the end,
    `report.md` is ready to paste into a pull request, `report.html` opens in a browser.
 
 A run of two builds with the defaults is 4 measured runs and 2 pictures runs: about 15 minutes on a Deck, 8 on a

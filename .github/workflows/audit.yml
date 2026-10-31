@@ -37,6 +37,8 @@ jobs:
         run: python3 tests/test_guest_checkpoints.py
       - name: Check the benchmark tour on synthetic logs
         run: python3 tests/test_bench_tour.py
+      - name: Check the Game Mode measurement kit's parsing and A/B report
+        run: python3 tests/test_gamemode_measure.py
       - name: Check the rendered benchmark on a fake app
         run: |
           python3 -m venv "$RUNNER_TEMP/render-tests"
