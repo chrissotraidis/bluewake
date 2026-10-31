@@ -1,0 +1,433 @@
+From abb3e31d4f31d69172b40bb7dfae49ccfae6b99c Mon Sep 17 00:00:00 2001
+From: irregularthanis <343663069+irregularthanis@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 13:12:13 -0500
+Subject: [PATCH 195/196] GXRuntime: guest alias lookup in constant time (last
+ hit, then a page index)
+
+ppc_guest_alias_resolve binary-searched the sorted alias index on every
+access to REL data: with Wind Waker's ~1,900 aliases, about 11 dependent
+loads per guest load or store. Where the game thread walks REL data (the
+lava room's collision objects on a Steam Deck), that was 10% of the thread.
+
+While no two aliases overlap:
+- the alias the last lookup found is tried first (RecompCore #34): at most
+  one alias holds an access, so if it does it is the answer; a relaxed
+  atomic, as a thread-local costs a call per access in a Mach-O dylib;
+- otherwise a page index, rebuilt by the mutators like the sorted index,
+  gives the search's starting position for the address's 4 KiB page, and a
+  short forward scan reaches the same position the search would.
+Overlapping sets keep the registration-order scan; a span wider than 32 MiB
+keeps the binary search. Results are unchanged for every input.
+
+BLUEWAKE_TRACE_ALIAS_COST adds last_hits, page_lookups and page_steps, and
+ppc_guest_alias_cost_report_now() prints the census for hosts that exit
+without this library's atexit handlers.
+
+tests/guest_alias_lookup_test.c checks the resolver against the
+registration-order rule for 11.2 million accesses (a Wind Waker-like layout,
+removes and re-adds, 4,096 aliases, page edges, sizes 1-8, a span over
+32 MiB, overlapping sets), in both BW_GUEST_MEM1 variants.
+
+Planned in BlueWake docs/planning/2026-10-29-alias_resolver_lookup.
+Stacked on #45.
+---
+ GXRuntime/CMakeLists.txt                  |   7 +
+ GXRuntime/include/core/cpu.h              |   3 +
+ GXRuntime/src/core/cpu.c                  | 122 +++++++++++++++--
+ GXRuntime/tests/guest_alias_lookup_test.c | 160 ++++++++++++++++++++++
+ 4 files changed, 280 insertions(+), 12 deletions(-)
+ create mode 100644 GXRuntime/tests/guest_alias_lookup_test.c
+
+diff --git a/GXRuntime/CMakeLists.txt b/GXRuntime/CMakeLists.txt
+index 5a778c8300..00bec6a3f2 100644
+--- a/GXRuntime/CMakeLists.txt
++++ b/GXRuntime/CMakeLists.txt
+@@ -149,6 +149,13 @@ if(BUILD_TESTING)
+                 BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+         endif()
+         add_test(NAME gxruntime_guest_memory_${_variant}_test COMMAND gxruntime_guest_memory_${_variant}_test)
++        add_executable(gxruntime_guest_alias_lookup_${_variant}_test tests/guest_alias_lookup_test.c)
++        target_link_libraries(gxruntime_guest_alias_lookup_${_variant}_test PRIVATE GXRuntime::runtime)
++        if(_variant STREQUAL "global")
++            target_compile_definitions(gxruntime_guest_alias_lookup_${_variant}_test PRIVATE
++                BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
++        endif()
++        add_test(NAME gxruntime_guest_alias_lookup_${_variant}_test COMMAND gxruntime_guest_alias_lookup_${_variant}_test)
+     endforeach()
+ 
+ endif()
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index cc21fa8da8..c24874de7b 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -120,6 +120,9 @@ bool ppc_guest_alias_resolve(u32 address, u32 size, u8** pointer,
+ // This does not apply the 0x40000000 mirror; callers that accept mirrored
+ // addresses must query the original and canonical ranges as appropriate.
+ bool ppc_guest_alias_range_overlaps(u32 address, u32 size);
++// Prints the BLUEWAKE_TRACE_ALIAS_COST census now (once), for hosts that exit
++// without this library's atexit handlers.
++void ppc_guest_alias_cost_report_now(void);
+ extern bool g_ppc_guest_aliases_overlap_mem1;
+ // Moves whenever the alias set is touched; see the definition.
+ extern u32 g_ppc_guest_alias_generation;
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 1559c0c840..ad288fbe2b 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -63,6 +63,31 @@ bool g_ppc_guest_aliases_overlap_mem1;
+ static u32 g_guest_alias_sorted[PPC_GUEST_ALIAS_MAX];
+ static bool g_guest_alias_overlapping;
+ 
++// Page index over the sorted index, for the resolver (BlueWake
++// docs/planning/2026-10-29-alias_resolver_lookup).
++//
++// Wind Waker's REL data sits behind about 1,900 aliases, and a scene whose game
++// thread walks it (the lava room's collision objects) pays the binary search on
++// almost every load: 10% of the Steam Deck's game thread there. For each 4 KiB
++// page of [g_guest_alias_page_base, g_guest_alias_max_end), the entry is how
++// many sorted aliases start at or below the page's first byte: the search's
++// answer for that address. A lookup starts there and steps over the few aliases
++// that start inside the page, reaching the same position the search would. Like
++// the sorted index, it is rebuilt by the mutators, never by a reader. A span
++// wider than the table (32 MiB) leaves it off and the search in place.
++#define PPC_GUEST_ALIAS_PAGE_SHIFT 12u
++#define PPC_GUEST_ALIAS_PAGES ((0x02000000u >> PPC_GUEST_ALIAS_PAGE_SHIFT) + 1u)
++static u16 g_guest_alias_page_first[PPC_GUEST_ALIAS_PAGES];
++static u32 g_guest_alias_page_base;
++static u32 g_guest_alias_page_count; // 0: no page index, use the search
++
++// The alias the last lookup found (a registry index), tried first. Without
++// overlaps at most one alias holds an access, so if this one holds it, it is
++// the answer; a stale index (another thread's store, a remove that moved the
++// registry) is only a miss. A relaxed atomic rather than a thread-local: a
++// thread-local in a Mach-O dylib costs a call per access (RecompCore #34).
++static _Atomic u32 g_guest_alias_last = PPC_GUEST_ALIAS_MAX;
++
+ static bool ppc_guest_alias_pair_overlaps(const PPCGuestAlias* a,
+                                           const PPCGuestAlias* b) {
+     return (u64)a->linked_start < (u64)b->linked_start + b->size &&
+@@ -101,6 +126,28 @@ static void ppc_guest_alias_index_rebuild(void) {
+         ppc_guest_alias_index_insert(i);
+ }
+ 
++// After the sorted index and the bounds have changed.
++static void ppc_guest_alias_pages_rebuild(void) {
++    atomic_store_explicit(&g_guest_alias_last, PPC_GUEST_ALIAS_MAX, memory_order_relaxed);
++    g_guest_alias_page_count = 0u;
++    if (g_guest_alias_count == 0u || g_guest_alias_overlapping)
++        return;
++    const u32 base = g_guest_alias_min_start & ~((1u << PPC_GUEST_ALIAS_PAGE_SHIFT) - 1u);
++    const u64 pages = ((g_guest_alias_max_end - base) >> PPC_GUEST_ALIAS_PAGE_SHIFT) + 1u;
++    if (pages > PPC_GUEST_ALIAS_PAGES)
++        return;
++    u32 below = 0u;
++    for (u32 page = 0u; page < (u32)pages; ++page) {
++        const u64 first_byte = (u64)base + ((u64)page << PPC_GUEST_ALIAS_PAGE_SHIFT);
++        while (below < g_guest_alias_count &&
++               g_guest_aliases[g_guest_alias_sorted[below]].linked_start <= first_byte)
++            below++;
++        g_guest_alias_page_first[page] = (u16)below;
++    }
++    g_guest_alias_page_base = base;
++    g_guest_alias_page_count = (u32)pages;
++}
++
+ // Guest-alias generation, for readers that cache a resolved host pointer.
+ //
+ // The host's per-block overlap observation caches the pointer it resolved for a
+@@ -126,6 +173,9 @@ static u64 g_alias_cost_calls;
+ static u64 g_alias_cost_pruned;
+ static u64 g_alias_cost_iterations;
+ static u64 g_alias_cost_hits;
++static u64 g_alias_cost_last_hits;   // answered by the alias found last
++static u64 g_alias_cost_page_steps;  // aliases stepped over after the page start
++static u64 g_alias_cost_page_lookups;
+ static bool g_alias_cost_reported;
+ 
+ static void ppc_guest_alias_cost_report(void);
+@@ -146,12 +196,22 @@ static void ppc_guest_alias_cost_report(void) {
+     g_alias_cost_reported = true;
+     fprintf(stderr,
+             "[alias-cost] resolve_calls=%llu pruned_by_bounds=%llu "
+-            "iterations=%llu hits=%llu aliases=%u overlap_mem1=%d\n",
++            "iterations=%llu hits=%llu last_hits=%llu page_lookups=%llu "
++            "page_steps=%llu aliases=%u pages=%u overlap_mem1=%d\n",
+             (unsigned long long)g_alias_cost_calls,
+             (unsigned long long)g_alias_cost_pruned,
+             (unsigned long long)g_alias_cost_iterations,
+-            (unsigned long long)g_alias_cost_hits, g_guest_alias_count,
+-            g_ppc_guest_aliases_overlap_mem1 ? 1 : 0);
++            (unsigned long long)g_alias_cost_hits,
++            (unsigned long long)g_alias_cost_last_hits,
++            (unsigned long long)g_alias_cost_page_lookups,
++            (unsigned long long)g_alias_cost_page_steps, g_guest_alias_count,
++            g_guest_alias_page_count, g_ppc_guest_aliases_overlap_mem1 ? 1 : 0);
++}
++
++// For hosts that end without running atexit handlers in this module (a game
++// module's copy is unloaded or the process exits from another library).
++GXRUNTIME_EXPORT void ppc_guest_alias_cost_report_now(void) {
++    ppc_guest_alias_cost_report();
+ }
+ 
+ static void ppc_guest_alias_recompute_bounds(void) {
+@@ -182,6 +242,7 @@ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+     g_guest_alias_max_end = 0u;
+     g_guest_alias_overlapping = false;
+     ppc_guest_alias_set_overlap_mem1(false);
++    ppc_guest_alias_pages_rebuild();
+     g_ppc_guest_alias_generation++;
+ }
+ 
+@@ -205,6 +266,7 @@ static bool ppc_guest_alias_add_storage(u32 linked_start, u32 size,
+     if (alias->linked_start < GC_MEM1_ADDRESS_END &&
+         alias_end > GC_RAM_BASE)
+         ppc_guest_alias_set_overlap_mem1(true);
++    ppc_guest_alias_pages_rebuild();
+     g_ppc_guest_alias_generation++;
+     if (getenv("BLUEWAKE_TRACE_GUEST_ALIASES") != NULL &&
+         alias->linked_start < 0x81516E20u &&
+@@ -266,6 +328,7 @@ GXRUNTIME_EXPORT bool ppc_guest_alias_remove(u32 linked_start, u32 size) {
+         g_guest_aliases[g_guest_alias_count] = (PPCGuestAlias){0};
+         ppc_guest_alias_index_rebuild();
+         ppc_guest_alias_recompute_bounds();
++        ppc_guest_alias_pages_rebuild();
+         g_ppc_guest_alias_generation++;
+         return true;
+     }
+@@ -287,22 +350,57 @@ GXRUNTIME_EXPORT bool ppc_guest_alias_resolve(u32 address, u32 size,
+         return false;
+     }
+     if (!g_guest_alias_overlapping) {
+-        u32 lo = 0u, hi = g_guest_alias_count;
+-        while (lo < hi) { // last alias whose start is at or below the address
+-            const u32 mid = lo + (hi - lo) / 2u;
++        // The alias the last lookup found, first (see g_guest_alias_last).
++        const u32 last = atomic_load_explicit(&g_guest_alias_last, memory_order_relaxed);
++        if (last < g_guest_alias_count) {
++            const PPCGuestAlias* alias = &g_guest_aliases[last];
++            if (address >= alias->linked_start && size <= alias->size &&
++                address - alias->linked_start <= alias->size - size) {
++                if (cost) {
++                    g_alias_cost_hits++;
++                    g_alias_cost_last_hits++;
++                }
++                *pointer = alias->storage + (address - alias->linked_start);
++                if (journal_offset != NULL)
++                    *journal_offset = address - GC_RAM_BASE;
++                return true;
++            }
++        }
++        // lo: how many sorted aliases start at or below the address.
++        u32 lo = 0u;
++        if (g_guest_alias_page_count != 0u) {
++            // address >= min_start >= page_base, and address < max_end, so the
++            // page is inside the table; step over aliases starting in the page.
++            lo = g_guest_alias_page_first[(address - g_guest_alias_page_base) >>
++                                          PPC_GUEST_ALIAS_PAGE_SHIFT];
+             if (cost)
+-                g_alias_cost_iterations++;
+-            if (g_guest_aliases[g_guest_alias_sorted[mid]].linked_start <= address)
+-                lo = mid + 1u;
+-            else
+-                hi = mid;
++                g_alias_cost_page_lookups++;
++            while (lo < g_guest_alias_count &&
++                   g_guest_aliases[g_guest_alias_sorted[lo]].linked_start <= address) {
++                if (cost)
++                    g_alias_cost_page_steps++;
++                lo++;
++            }
++        } else {
++            u32 hi = g_guest_alias_count;
++            while (lo < hi) { // last alias whose start is at or below the address
++                const u32 mid = lo + (hi - lo) / 2u;
++                if (cost)
++                    g_alias_cost_iterations++;
++                if (g_guest_aliases[g_guest_alias_sorted[mid]].linked_start <= address)
++                    lo = mid + 1u;
++                else
++                    hi = mid;
++            }
+         }
+         if (lo == 0u)
+             return false;
+-        const PPCGuestAlias* alias = &g_guest_aliases[g_guest_alias_sorted[lo - 1u]];
++        const u32 found = g_guest_alias_sorted[lo - 1u];
++        const PPCGuestAlias* alias = &g_guest_aliases[found];
+         if (size > alias->size ||
+             address - alias->linked_start > alias->size - size)
+             return false;
++        atomic_store_explicit(&g_guest_alias_last, found, memory_order_relaxed);
+         if (cost)
+             g_alias_cost_hits++;
+         *pointer = alias->storage + (address - alias->linked_start);
+diff --git a/GXRuntime/tests/guest_alias_lookup_test.c b/GXRuntime/tests/guest_alias_lookup_test.c
+new file mode 100644
+index 0000000000..28912b27b1
+--- /dev/null
++++ b/GXRuntime/tests/guest_alias_lookup_test.c
+@@ -0,0 +1,160 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// ppc_guest_alias_resolve against the rule it implements: the first alias, in
++// registration order, that holds the whole access. The resolver's shortcuts
++// (the alias found last, the page index, the sorted search) must give that
++// answer for every alias set and access, including after removes.
++#ifdef NDEBUG
++#undef NDEBUG
++#endif
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include "core/cpu.h"
++
++u8 bw_test_mem1[0x02000000u];
++
++typedef struct { u32 start, size; u8* storage; } Alias;
++static Alias model[4096];
++static u32 model_count;
++static u8 pool[1]; // storage identities only: the resolver never reads them
++static u64 rng = 0x9E3779B97F4A7C15ull;
++static u64 queries;
++
++static u32 next(void) {
++    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
++    return (u32)rng;
++}
++
++static u8* storage_for(u32 index) { return pool + (uintptr_t)index * 64u; }
++
++static bool reference(u32 address, u32 size, u8** pointer) {
++    for (u32 i = 0; i < model_count; ++i) {
++        const Alias* a = &model[i];
++        if (address >= a->start && size <= a->size && address - a->start <= a->size - size) {
++            *pointer = a->storage + (address - a->start);
++            return true;
++        }
++    }
++    return false;
++}
++
++static void check(u32 address, u32 size) {
++    u8* want = NULL;
++    u8* got = (u8*)1;
++    u32 offset = 0xFFFFFFFFu;
++    const bool expected = reference(address, size, &want);
++    const bool found = ppc_guest_alias_resolve(address, size, &got, &offset);
++    queries++;
++    if (found != expected || (found && (got != want || offset != address - GC_RAM_BASE))) {
++        fprintf(stderr, "mismatch at 0x%08X size %u: got %d %p, want %d %p\n",
++                address, size, found, (void*)got, expected, (void*)want);
++        assert(false);
++    }
++}
++
++static void add(u32 start, u32 size) {
++    assert(model_count < 4096u);
++    model[model_count] = (Alias){start, size, storage_for(model_count)};
++    assert(ppc_guest_alias_add_shared(start, size, model[model_count].storage));
++    model_count++;
++}
++
++static void remove_at(u32 i) {
++    assert(ppc_guest_alias_remove(model[i].start, model[i].size));
++    for (u32 j = i; j + 1u < model_count; ++j)
++        model[j] = model[j + 1u];
++    model_count--;
++}
++
++static void reset(void) {
++    ppc_guest_alias_clear();
++    model_count = 0u;
++}
++
++// Edges of every alias, then random accesses across the span, each size twice
++// in a row (the second is answered by the alias found last when it holds it).
++static void probe(u32 low, u32 high, u32 random_count) {
++    static const u32 sizes[] = {1u, 2u, 4u, 8u};
++    for (u32 i = 0; i < model_count; ++i) {
++        const u32 s = model[i].start, end = model[i].start + model[i].size;
++        const u32 edges[] = {s - 1u, s, s + 1u, end - 8u, end - 4u, end - 1u, end, end + 1u,
++                             (s & ~0xFFFu) - 1u, s & ~0xFFFu, (end + 0xFFFu) & ~0xFFFu};
++        for (u32 e = 0; e < sizeof edges / sizeof edges[0]; ++e)
++            for (u32 z = 0; z < 4u; ++z) {
++                check(edges[e], sizes[z]);
++                check(edges[e], sizes[z]);
++            }
++    }
++    for (u32 n = 0; n < random_count; ++n) {
++        const u32 address = low + next() % (high - low);
++        const u32 size = sizes[next() & 3u];
++        check(address, size);
++        check(address, size);
++    }
++}
++
++// Non-overlapping aliases laid out like Wind Waker's linked REL data: packed
++// small ones (several per page) and a few large ones, with gaps.
++static void layout(u32 base, u32 count, u32 max_size) {
++    u32 at = base;
++    for (u32 i = 0; i < count; ++i) {
++        at += next() % 3u == 0u ? next() % 0x3000u : next() % 64u;
++        const u32 size = next() % 8u == 0u ? 1u + next() % max_size : 1u + next() % 256u;
++        add(at, size);
++        at += size;
++    }
++}
++
++int main(void) {
++    // About 1,900 aliases in the uncached window, as the game registers them.
++    reset();
++    layout(0xC0400FD0u, 1900u, 0x0000C000u);
++    probe(0xC0400000u, model[model_count - 1u].start + model[model_count - 1u].size + 0x2000u, 400000u);
++
++    // Removes and re-adds keep the answers (the registry moves; the alias found
++    // last may then be another one).
++    for (u32 round = 0; round < 50u; ++round) {
++        const u32 i = next() % model_count;
++        const Alias gone = model[i];
++        remove_at(i);
++        probe(gone.start - 0x100u, gone.start + gone.size + 0x100u, 200u);
++        add(gone.start, gone.size);
++    }
++    probe(0xC0400000u, 0xC2000000u, 100000u);
++
++    // The registry's capacity, small aliases packed into a few pages.
++    reset();
++    for (u32 i = 0; i < 4096u; ++i)
++        add(0x81820000u + i * 24u, 1u + next() % 24u);
++    probe(0x8181F000u, 0x81820000u + 4096u * 24u + 0x1000u, 200000u);
++
++    // One alias; then one per page boundary.
++    reset();
++    add(0x81F00000u, 16u);
++    probe(0x81EFF000u, 0x81F02000u, 10000u);
++    reset();
++    for (u32 i = 0; i < 64u; ++i)
++        add(0xC1000000u + i * 0x1000u - 4u, 8u);
++    probe(0xC0FFF000u, 0xC1042000u, 50000u);
++
++    // A span wider than the page table: the sorted search answers.
++    reset();
++    add(0x80001000u, 64u);
++    add(0xC1F00000u, 64u);
++    layout(0xC0000000u, 200u, 0x1000u);
++    probe(0x80000000u, 0xC2000000u, 100000u);
++
++    // Overlapping aliases: registration order decides (the shortcuts are off).
++    reset();
++    layout(0xC0400000u, 300u, 0x4000u);
++    for (u32 i = 0; i < 100u; ++i) {
++        const Alias* a = &model[next() % model_count];
++        add(a->start + a->size / 2u, a->size + 32u);
++    }
++    probe(0xC0400000u, model[299].start + model[299].size + 0x1000u, 200000u);
++
++    reset();
++    check(0xC0400000u, 4u);
++    printf("guest alias lookup: %llu accesses matched the reference\n", (unsigned long long)queries);
++    return 0;
++}
+-- 
+2.46.0
+
