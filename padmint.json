@@ -20,8 +20,8 @@
         "macos-arm64": "experimental",
         "linux-x86_64": "planned",
         "linux-arm64": "planned",
-        "windows-x86_64": "planned",
-        "windows-arm64": "planned"
+        "windows-x86_64": "experimental",
+        "windows-arm64": "experimental"
       },
       "tools": [
         "git",
