@@ -220,3 +220,37 @@ Both authorized assets are on the existing v0.10.0 draft, with matching GitHub d
 assets remain present. Only the Windows ZIP and Linux AppImage were uploaded in this run. Repository audit (WSL) and
 `git diff --check` passed. No source-code changes were made. Windows CI on the results PR remains the pre-merge check;
 this hand-off does not merge the PR or publish the release.
+
+## Afterwards: repackage the AppImage with its licenses
+
+The Mac's gate found that the AppImage carried only MbedTLS's license (#520 fixes `make_appimage.sh`). Chris only has
+to say:
+
+> Pull the latest chrissotraidis/bluewake and follow "Afterwards: repackage the AppImage with its licenses" in
+> docs/status/WINDOWS_BUILD_0.10.0.md.
+
+This repackages the app folder already built in WSL: no rebuild, so the game module and every binary stay exactly as
+built from `edd88f1`; only the packaging script is newer. In the Ubuntu shell:
+
+```
+cd ~/bluewake-0.10.0
+git fetch origin && git checkout --detach origin/main && git status --short
+git log -1 --format='%h %s' -- scripts/linux/make_appimage.sh
+docker run --rm --init --platform linux/amd64 --user "$(id -u):$(id -g)" --env HOME=/tmp \
+  --volume "$PWD:$PWD" --workdir "$PWD" bluewake-linux-ci:local bash -c \
+  'scripts/linux/make_appimage.sh build/linux-0.10.0 build/linux-0.10.0/BlueWake-x86_64.AppImage && python3 scripts/linux/check_appimage_abi.py build/linux-0.10.0/BlueWake-x86_64.AppImage 2.39'
+cp build/linux-0.10.0/BlueWake-x86_64.AppImage /mnt/c/BlueWake-private/BlueWake-v0.10.0-linux-x86_64.AppImage
+sha256sum /mnt/c/BlueWake-private/BlueWake-v0.10.0-linux-x86_64.AppImage
+```
+
+Passes when the `git log` line is "Linux AppImage: carry the licenses of everything it bundles", the script ends
+without an error (it stops if a bundled library has no license), and the audit prints `no private game files` with
+GLIBC no higher than 2.39. Then from PowerShell:
+
+```
+gh release upload v0.10.0 C:\BlueWake-private\BlueWake-v0.10.0-linux-x86_64.AppImage --clobber
+gh release view v0.10.0 --json isDraft,assets
+```
+
+It must still be a draft with all five assets. Tell Chris the new SHA-256, and stop: the Mac compares every file in
+the new image with the old one, and only the license folder may differ.
