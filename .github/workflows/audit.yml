@@ -43,8 +43,10 @@ jobs:
           python3 tests/test_inline_gpr.py
           python3 tests/test_lean_deadlines.py
           python3 tests/native_j3d_source_test.py
-          python3 tests/native_game_math_source_test.py
-          python3 tests/native_skin_source_test.py
+          # Match the Apple Python used by PadMint.command.
+          /usr/bin/python3 --version
+          /usr/bin/python3 tests/native_game_math_source_test.py
+          /usr/bin/python3 tests/native_skin_source_test.py
           python3 tests/native_vec_source_test.py
           python3 tests/native_math_source_test.py
       - name: Step past the four cache operations
