@@ -139,7 +139,15 @@ flowchart LR
 
 **Where it lives.** In Aurora's pass encoding (`common.cpp`, where `DOL_AURORA_SKIP_DRAWS` splits a pass): end the EFB pass before the run, encode the run into the low-res target, composite, and resume the EFB pass with `Load` (the same split already used for chunked timing). The real frame and the in-between replay take the same path.
 
-**Switch.** An opt-in setting first (render scale 2 or more only), off by default until the checks below pass; then a default-on decision.
+**Setting.** An opt-in option in the settings menu, off by default until the checks below pass; then a default-on decision. It takes effect only at render scale 2 or more.
+
+| Field | Value |
+|---|---|
+| Label | **Efficient haze and smoke** |
+| Note | "Draws haze, smoke and other soft see-through layers at lower resolution and blends them in once. Much faster at high render resolutions, with a slightly softer veil. Off by default." |
+| Experimental note | "Measured in the Lava Room and the Shipwreck on a Steam Deck; not yet tested on Windows or a Mac." |
+| Key | `DOL_AURORA_EFFICIENT_HAZE` (`Kind::Bool`, `Control::Switch`, fallback off) in `runtime/host/src/settings_table.h` |
+| Applies | Immediately, through an Aurora setter (like `aurora_set_forced_anisotropy`), so it can be toggled in a room to compare |
 
 ### Risks
 
