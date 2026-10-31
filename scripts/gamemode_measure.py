@@ -13,6 +13,7 @@ Each window records:
 - from the session log, the lines the build writes during the window: Smooth Motion's [interp-stats]
   (DOL_AURORA_FRAME_INTERP_STATS=1), [fps-dip] seconds and the last [gpu-prof] report (DOL_AURORA_GPU_PROF=1/2);
 - the settings under test, read from ~/.config/BlueWake/settings.ini, and the process's DOL_/BLUEWAKE_ variables.
+  The settings are what the file holds: a build that predates a setting ignores it, so check the build too.
 
 Change a setting from the in-game menu between labels (it applies live) and sample again: the same session,
 view and clocks, so an A/B is not confounded by a relaunch. Sample the base twice (an A/A) to see the noise.
@@ -100,9 +101,12 @@ def parse_interp_stats(lines):
 
 
 def parse_fps_dips(lines):
-    """[fps-dip] seconds: how many, and the game's mean speed (%) in them."""
-    speeds = [int(s) for line in lines if "[fps-dip]" in line for s in re.findall(r"\bspeed=(\d+)%", line)]
-    return {"seconds": len(speeds), "speed": round(sum(speeds) / len(speeds), 1) if speeds else None}
+    """[fps-dip] seconds: how many, and the game's mean speed (%) and game frames a second in them."""
+    dips = [line for line in lines if "[fps-dip]" in line]
+    speeds = [int(s) for line in dips for s in re.findall(r"\bspeed=(\d+)%", line)]
+    games = [int(g) for line in dips for g in re.findall(r"\bgame=(\d+)\b", line)]
+    return {"seconds": len(speeds), "speed": round(sum(speeds) / len(speeds), 1) if speeds else None,
+            "game_fps": round(sum(games) / len(games), 1) if games else None}
 
 
 def parse_gpu_prof(line):
@@ -233,7 +237,7 @@ def one_line(record):
     prof = record.get("gpu_prof") or {}
     return (f"{record['label']} w{record['window']}: game {thread.get('ghz', '?')} GHz ipc {thread.get('ipc', '?')} | "
             f"{record.get('power_w')} W gpu {record.get('gpu_mhz')} MHz | delivered {interp.get('delivered', '-')} "
-            f"| dips {dips.get('seconds', 0)} | gpu busy {prof.get('busy_ms', '-')} ms | {record.get('settings')}")
+            f"| dips {dips.get('seconds', 0)} game {dips.get('game_fps', '-')} FPS | gpu busy {prof.get('busy_ms', '-')} ms | {record.get('settings')}")
 
 
 METRICS = (  # (name, value of a window, unit, decimals)
@@ -245,6 +249,7 @@ METRICS = (  # (name, value of a window, unit, decimals)
     ("In-between frames per second",
      lambda r: (((r.get("interp") or {}).get("counts") or {}).get("delivered") or 0) / r["seconds"]
      if (r.get("interp") or {}).get("counts") else None, "", 1),
+    ("Game FPS in dip seconds", lambda r: (r.get("dips") or {}).get("game_fps"), "", 1),
     ("Seconds with a dip, per window", lambda r: (r.get("dips") or {}).get("seconds"), "", 1),
     ("GPU busy per profiled frame", lambda r: (r.get("gpu_prof") or {}).get("busy_ms"), "ms", 1),
 )

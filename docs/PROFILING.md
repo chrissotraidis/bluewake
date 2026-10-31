@@ -240,7 +240,9 @@ It runs here and measures the BlueWake already running on the Deck, over SSH; th
 (15 s by default) records the game thread's clock, IPC and busy share (`perf stat -t` on the main thread, no root
 needed), the APU's power and GPU clock and the cores' mean clock (sampled each second from sysfs), the session
 log's `[interp-stats]`, `[fps-dip]` and last `[gpu-prof]` lines during the window, the settings under test from
-`settings.ini`, and the process's `DOL_`/`BLUEWAKE_` variables.
+`settings.ini`, and the process's `DOL_`/`BLUEWAKE_` variables. The settings are what the file holds: a build
+that predates a setting ignores it, so check which build the shortcut runs. Game frames a second come from the
+`[fps-dip]` lines (`game=`), which are written only for seconds below the game's target.
 
 1. **Launch with the diagnostics you need.** Game Mode starts the AppImage from its Steam shortcut, so put the
    variables in the script the shortcut runs (keep a copy of the original):
@@ -304,6 +306,20 @@ before trusting a chunk's name.
   (`scripts/rendered_run.py --state … --capture FIRST:EVERY`, or `render_bench`'s pictures run), with
   **Smooth Motion off**: with it on, a capture can land on an in-between frame in one run and a real frame in the
   other.
+
+### Example: Outset (bluewake #503)
+
+Smooth Motion on, then off, then on again, in one session on the #501 build:
+
+| | Smooth Motion on (6 windows) | Off (2 windows) |
+|---|---|---|
+| Game FPS | 23.8–23.9 | 25.1 |
+| Game-thread clock | 3.445–3.451 GHz | 3.456–3.457 GHz |
+| Game-thread IPC | 1.646–1.659 | 1.735–1.742 |
+| APU power | 12.2–13.8 W | 11.4–12.2 W |
+
+Outset is not power-limited (full clock, under the cap): its limit is the game thread's work, and Smooth Motion
+costs it about 5% through shared cache and memory, not clock. Compare with the Lava Room, where the clock fell.
 
 ### Pitfalls met in #504
 

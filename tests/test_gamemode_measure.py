@@ -60,8 +60,8 @@ class ParsingTest(unittest.TestCase):
         self.assertEqual(stats["overloads"]["render_worker"], {"count": 5, "wait_ms": 119.0})
 
     def test_fps_dips(self):
-        self.assertEqual(GM.parse_fps_dips(LOG), {"seconds": 2, "speed": 90.0})
-        self.assertEqual(GM.parse_fps_dips([]), {"seconds": 0, "speed": None})
+        self.assertEqual(GM.parse_fps_dips(LOG), {"seconds": 2, "speed": 90.0, "game_fps": 27.0})
+        self.assertEqual(GM.parse_fps_dips([]), {"seconds": 0, "speed": None, "game_fps": None})
 
     def test_gpu_prof(self):
         prof = GM.parse_gpu_prof(LOG[-1])
