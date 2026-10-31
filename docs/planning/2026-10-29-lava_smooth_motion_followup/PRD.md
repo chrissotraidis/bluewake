@@ -70,7 +70,7 @@ In **Game Mode** the same Mailbox setting does not help: automatic pacing still 
 
 **Confirmed in Game Mode:** with the haze hidden, scale 3 with Smoothness on delivers every in-between frame (450 of 450 per 15 s) at full game speed (game thread 3.45 GHz, 0–1 dip seconds), at 12.8–13.8 W under the cap; the player saw 60 FPS. At these settings, the Lava Room's Smoothness problem is the haze.
 
-**Survey of the five benchmark scenes (scale 3, headless):** the same pattern dominates the heaviest scenes: in the Shipwreck, 82 such quads take ≈ 11.2 of 18.1 ms (≈ 62%); in the Lava Room ≈ 13 of 18.9 ms (≈ 69%); in Outset ≈ 3.9 of 13.0 ms (≈ 30%). Hyrule Castle is cheap overall; the butterfly room is inconclusive. A cheaper path for this one kind of draw would cut the heaviest scenes' GPU time at high render scales by more than half, in real and in-between frames alike.
+**Survey of the five benchmark scenes (scale 3, headless):** the same pattern dominates the heaviest scenes: in the Shipwreck, 82 such quads take ≈ 11.2 of 18.1 ms (≈ 62%); in the Lava Room ≈ 13 of 18.9 ms (≈ 69%); in Outset the same kind of sprite is interleaved with the island's terrain, so its cost is not yet separated (an earlier ≈ 30% was wrong). Hyrule Castle is cheap overall; the butterfly room is inconclusive. A cheaper path for this one kind of draw would cut the heaviest scenes' GPU time at high render scales by more than half, in real and in-between frames alike.
 
 **Proposed fix:** draw runs of these veil sprites into a lower-resolution buffer with exact premultiplied accumulation, and composite it over the EFB once; opt-in first. See the [technical design](TECH_PLAN.md#m2-design-blended-sprites-at-reduced-resolution).
 

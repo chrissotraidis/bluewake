@@ -111,7 +111,7 @@ The controller may still print the existing player-readable reason. Typed cause,
 
 ### Problem
 
-At render scale 3, a block of about 80 large sprite quads (6 indices each, blended with source alpha over inverse source alpha, no depth test or write, one pipeline and texture) takes 62–69% of the GPU in the Lava Room and the Shipwreck, and about 30% in Outset. They are drawn after the scene, in the same EFB pass. Each covers much of the screen, so at scale 3 every layer blends millions of pixels. The effect is a soft veil (haze, smoke): its detail does not need full resolution.
+At render scale 3, a block of about 80 large sprite quads (6 indices each, blended with source alpha over inverse source alpha, no depth test or write, one pipeline and texture) takes 62–69% of the GPU in the Lava Room and the Shipwreck. In Outset the same kind of sprite (likely clouds) is interleaved with terrain and its cost is not yet separated. They are drawn after the scene, in the same EFB pass. Each covers much of the screen, so at scale 3 every layer blends millions of pixels. The effect is a soft veil (haze, smoke): its detail does not need full resolution.
 
 ### Approach
 
@@ -135,7 +135,7 @@ flowchart LR
 - Composite: colour factors (One, OneMinusSrcAlpha): `dst = acc.rgb + dst.rgb × (1 − acc.a)`, the same as blending each sprite onto the EFB in turn.
 - The only intended difference is resolution: the veil is shaded at half (or quarter) of the EFB's width and height and filtered up.
 
-**Detection (per draw, at encode).** A draw qualifies when its pipeline key has: blending on with (SrcAlpha, InvSrcAlpha); depth test and depth write off; colour write on; triangle topology; at most 12 indices; one TEV stage and no indirect stages. A run is a maximal sequence of consecutive qualifying draws in one EFB pass; only runs of at least N draws (initially 8) take the low-res path, so isolated sprites keep today's path. The draw logs from the survey are the test data for the rule: it must select the Lava Room's 700–780 and the Shipwreck's 1600–1699 blocks, Outset's 0–99 sprites, and nothing opaque.
+**Detection (per draw, at encode).** A draw qualifies when its pipeline key has: blending on with (SrcAlpha, InvSrcAlpha); depth test and depth write off; colour write on; triangle topology; at most 12 indices; one TEV stage and no indirect stages. A run is a maximal sequence of consecutive qualifying draws in one EFB pass; only runs of at least N draws (initially 8) take the low-res path, so isolated sprites keep today's path. The draw logs from the survey are the test data for the rule: it must select the Lava Room's 700–780 and the Shipwreck's 1600–1699 blocks and nothing opaque. Outset's cloud-like sprites are interleaved with terrain, so they would only qualify where they form runs.
 
 **Where it lives.** In Aurora's pass encoding (`common.cpp`, where `DOL_AURORA_SKIP_DRAWS` splits a pass): end the EFB pass before the run, encode the run into the low-res target, composite, and resume the EFB pass with `Load` (the same split already used for chunked timing). The real frame and the in-between replay take the same path.
 
@@ -143,10 +143,10 @@ flowchart LR
 
 | Field | Value |
 |---|---|
-| Label | **Efficient haze and smoke** |
-| Note | "Draws haze, smoke and other soft see-through layers at lower resolution and blends them in once. Much faster at high render resolutions, with a slightly softer veil. Off by default." |
+| Label | **Efficient soft effects** |
+| Note | "Draws soft see-through effects, such as haze, smoke, fog and clouds, at lower resolution and blends them in once. Much faster at high render resolutions, slightly softer effects. Off by default." |
 | Experimental note | "Measured in the Lava Room and the Shipwreck on a Steam Deck; not yet tested on Windows or a Mac." |
-| Key | `DOL_AURORA_EFFICIENT_HAZE` (`Kind::Bool`, `Control::Switch`, fallback off) in `runtime/host/src/settings_table.h` |
+| Key | `DOL_AURORA_EFFICIENT_EFFECTS` (`Kind::Bool`, `Control::Switch`, fallback off) in `runtime/host/src/settings_table.h` |
 | Applies | Immediately, through an Aurora setter (like `aurora_set_forced_anisotropy`), so it can be toggled in a room to compare |
 
 ### Risks
