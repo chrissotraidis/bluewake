@@ -54,9 +54,6 @@ mkdir -p "$appdir/usr/bin" "$appdir/usr/lib" "$appdir/usr/share/icons/hicolor/25
 # itself are deliberately absent: the launcher validates and prepares them from
 # the player's own disc on first run.
 cp "$app/bluewake" "$appdir/usr/bin/bluewake"
-mkdir -p "$appdir/usr/share/licenses/BlueWake"
-cp "$root/ref/recompcore/Externals/mbedtls/LICENSE" \
-    "$appdir/usr/share/licenses/BlueWake/MbedTLS-Apache-2.0.txt"
 if [ -f "$app/initial_pipeline_cache.db" ]; then
     cp "$app/initial_pipeline_cache.db" "$appdir/usr/bin/"
 fi
@@ -75,6 +72,57 @@ while IFS= read -r lib; do
     esac
     cp "$lib" "$appdir/usr/lib/"
 done < <(ldd "$app/bluewake" | awk '/=> \// {print $3}' | sort -u)
+
+# The licenses of BlueWake and of everything the image carries, as the Windows
+# zip has them (scripts/windows/package_release.py): the fixed set, each fetched
+# dependency's own license file, and, for each library bundled above, its
+# package's copyright file. A bundled library without one stops the build.
+licenses="$appdir/usr/share/licenses/BlueWake"
+mkdir -p "$licenses"
+while read -r name source; do
+    if [ ! -f "$root/$source" ]; then
+        echo "make_appimage: no license text for $name ($root/$source)" >&2
+        exit 1
+    fi
+    cp "$root/$source" "$licenses/$name"
+done <<'EOF'
+BlueWake-GPL-3.0.txt LICENSE
+RecompCore-COPYING.txt ref/recompcore/COPYING
+Aurora-MIT.txt ref/recompcore/GXRuntime/graphics/aurora/LICENSE
+MbedTLS-Apache-2.0.txt ref/recompcore/Externals/mbedtls/LICENSE
+Dawn-BSD-3-Clause.txt windows/licenses/Dawn-BSD-3-Clause.txt
+EOF
+for deps in "$build_dir/app-appimage/_deps" "$build_dir/app/_deps"; do
+    [ -d "$deps" ] || continue
+    for dep in "$deps"/*-src; do
+        [ -d "$dep" ] || continue
+        name=$(basename "$dep" -src)
+        [ "$name" = googletest ] && continue
+        for f in "$dep"/*; do
+            case "$(basename "$f")" in
+                LICENSE|LICENSE.*|LICENCE|LICENCE.*|COPYING|COPYING.*|NOTICE|NOTICE.*)
+                    [ -f "$f" ] && [ ! -e "$licenses/$name-$(basename "$f")" ] &&
+                        cp "$f" "$licenses/$name-$(basename "$f")" ;;
+            esac
+        done
+    done
+    break
+done
+for lib in "$appdir"/usr/lib/*; do
+    base=$(basename "$lib")
+    source=$(ldd "$app/bluewake" | awk -v b="$base" '$1 == b {print $3; exit}')
+    package=""
+    if command -v dpkg >/dev/null 2>&1 && [ -n "$source" ]; then
+        package=$( { dpkg -S "$(readlink -f "$source")" 2>/dev/null || dpkg -S "$source" 2>/dev/null; } |
+                   head -1 | cut -d: -f1)
+    fi
+    if [ -n "$package" ] && [ -f "/usr/share/doc/$package/copyright" ]; then
+        cp "/usr/share/doc/$package/copyright" "$licenses/$package-copyright.txt"
+    else
+        echo "make_appimage: no license found for bundled $base (package '${package:-unknown}')" >&2
+        exit 1
+    fi
+done
 
 # AppRun: resolve the image's mount, set the library path, and exec the host.
 # The launcher inside bluewake already handles first-run disc prep and paths.
