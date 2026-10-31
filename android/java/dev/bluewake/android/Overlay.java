@@ -902,6 +902,7 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
                         action("Back Up Saves…", data::backUpSaves),
                         action("Restore Saves…", data::chooseSavesToRestore),
                         action("Import Dolphin Save…", data::chooseDolphinSave),
+                        action("Export Dolphin Save…", data::exportDolphinSave),
                         action("Where Are My Files?", data::explainFiles)))),
                 action("Remove Disc Image…", data::confirmDataRemoval).destructive());
     }
