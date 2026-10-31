@@ -174,6 +174,26 @@ In that same folder (`files/`):
 | `launch.env` | optional launch settings, one `NAME=value` a line (`install.py --env NAME=value`) |
 | `logs/session-*.log` | the newest eight sessions (also in logcat, tag `BlueWake`) |
 
+## First run, and the log a crash leaves
+
+With no `main.dol` or rels yet, the app opens its first-run screen instead of SDL (`FirstRunActivity`): the player
+picks their own `GZLE01.iso`, it is copied into `files/game`, and `main.dol` and `rels/` are extracted from it on the
+device. That runs before the game and its menu exist, so the session log starts with the first-run screen:
+`logs/session-*.log` then holds the disc import and the game after it in one file, with the copy's size and the free
+space logged as it goes.
+
+The copy is checked before and after it runs. Before, the space left in `files/` must cover the size the provider
+reports for the picked file plus 32 MB for the extraction, and the screen says both sizes when it does not. After,
+the copy must be that same size: a provider that ends the stream early — a cloud-backed file, a cancelled download —
+leaves a short image that passes the disc's header check and then dies when the game reads past its end. The image
+is written beside the real name as `GZLE01.iso.part` and renamed once it is whole, so a copy that a kill or a full
+filesystem interrupts leaves nothing for the game to read. When a provider cannot report a size, the log says so and
+the copy is only checked against the free space the filesystem reports.
+
+A session that ends properly deletes `logs/session-in-progress`; one that does not leaves it there naming its log,
+and the next first-run screen offers **Share Its Log** (through `LogProvider`, as Help & Feedback > Share Session Log
+does). A crash before the menu is reportable that way instead of existing only in logcat and the tombstone.
+
 **Uninstalling the app deletes this folder, saves included.** Back up the card first:
 `python scripts/android/install.py --pull-saves backup/`. Installing a new build over the old one keeps it.
 

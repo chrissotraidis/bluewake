@@ -41,6 +41,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "disc_import.h"
+
 int bluewake_host_main(int argc, char** argv);
 // The shell's frame hook and the hold (apple/ios/src/touch_controls.cpp, shared
 // with the iPhone app): the touch pad, the pause reasons and the FPS count.
@@ -59,8 +61,10 @@ static char g_data_dir[1024];
 static char g_internal_dir[1024];
 static char g_game_dir[1100];
 static FILE* g_log_file;
+static int g_log_started;   // a session log has been opened (the first run, or main)
 static int g_log_pumping;   // the pump thread runs and stdout/stderr go to it
 static int g_log_pump_done; // set by the pump at the pipe's end
+static char g_log_marker[1400]; // logs/session-in-progress: the log a crash leaves, and the next start shares
 
 static int file_exists(const char* path) {
     struct stat st;
@@ -144,6 +148,10 @@ static void prune_logs(const char* dir, int keep) {
 }
 
 static void start_session_log(void) {
+    g_log_started = 1;
+    // The log is the player's to send, so it is readable when it is pulled with
+    // adb. The mode goes on the files this function creates: a process-wide
+    // umask would also change the saves and settings written later.
     char dir[1100];
     snprintf(dir, sizeof dir, "%s/logs", g_data_dir);
     mkdir(dir, 0755);
@@ -155,6 +163,19 @@ static void start_session_log(void) {
     snprintf(path, sizeof path, "%s/session-%04d%02d%02d-%02d%02d%02d.log", dir, t.tm_year + 1900,
              t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
     g_log_file = fopen(path, "w");
+    if (g_log_file != NULL)
+        fchmod(fileno(g_log_file), 0644);
+    // The log a crash would leave behind: named now, removed when the run ends
+    // properly, so the first-run screen can offer to share whatever this still
+    // names on the next start (FirstRunActivity.java).
+    snprintf(g_log_marker, sizeof g_log_marker, "%s/session-in-progress", dir);
+    FILE* marker = fopen(g_log_marker, "w");
+    if (marker != NULL) {
+        fchmod(fileno(marker), 0644);
+        const char* name = strrchr(path, '/');
+        fprintf(marker, "%s\n", name != NULL ? name + 1 : path);
+        fclose(marker);
+    }
     int fds[2];
     if (pipe(fds) != 0)
         return;
@@ -176,6 +197,20 @@ static void start_session_log(void) {
     fprintf(stderr, "[android] session log %s\n", path);
 }
 
+// Start this run's session log. A normal run calls it twice: the first-run
+// screen first, before the disc is read (the share it makes possible is
+// FirstRunActivity.java's), then main() once SDL is up. The first call wins, so
+// one app run is one log, from the disc pick through the game.
+void bw_session_log_start(const char* data_dir) {
+    if (g_log_started)
+        return;
+    if (data_dir != NULL && data_dir[0] != '\0' && g_data_dir[0] == '\0')
+        snprintf(g_data_dir, sizeof g_data_dir, "%s", data_dir);
+    if (g_data_dir[0] == '\0')
+        return;
+    start_session_log();
+}
+
 // Before the process ends: stdout and stderr leave the pipe, which closes its
 // last writers, and the pump writes what is left and stops at the pipe's end.
 // It is waited for up to five seconds (something else holding a copy of the
@@ -194,6 +229,11 @@ static void finish_session_log(void) {
     for (int waited = 0; waited < 500 && !__atomic_load_n(&g_log_pump_done, __ATOMIC_ACQUIRE); waited++)
         usleep(10000);
     g_log_pumping = 0;
+    // This run ended properly: there is nothing for the next start to report.
+    if (g_log_marker[0] != '\0')
+        unlink(g_log_marker);
+    g_log_marker[0] = '\0';
+    g_log_started = 0;
 }
 
 static void resolve_dirs(void) {
@@ -248,7 +288,7 @@ static void fatal_box(const char* message) {
 int main(int argc, char** argv) {
     resolve_dirs();
     if (getenv("BLUEWAKE_SESSION_LOG") == NULL || strcmp(getenv("BLUEWAKE_SESSION_LOG"), "0") != 0)
-        start_session_log();
+        bw_session_log_start(NULL);
 
     // Optional launch overrides the adb helper can write, one NAME=value per
     // line (scripts/android/install.py --env): the same switches the Windows
@@ -313,15 +353,29 @@ int main(int argc, char** argv) {
         missing_path = getenv("BLUEWAKE_DISC");
     }
     if (missing != NULL) {
-        char message[2048];
-        snprintf(message, sizeof message,
-                 "BlueWake cannot start: %s is missing.\n\n%s\n\n"
-                 "Push the game files from your PC with\n"
-                 "python scripts/android/install.py",
-                 missing, missing_path);
-        fprintf(stderr, "[android] %s\n", message);
-        fatal_box(message);
+        // The launcher activity shows the first-run screen for this (FirstRunActivity.java):
+        // it copies the player's disc and extracts main.dol + rels on the device.
+        // Return quietly so the screen owns the flow rather than a native dialog.
+        fprintf(stderr, "[android] %s is missing at %s; the first-run screen will import the disc\n",
+                missing, missing_path);
+        finish_session_log();
         return 1;
+    }
+
+    // Present is not the same as whole: the image the first run copied can end
+    // early (a provider that ended the stream, an interrupted push), and the game
+    // reads the disc itself, so it dies somewhere inside the host instead of
+    // saying anything. Check it here, where there is a screen to say it on.
+    {
+        char disc_error[512] = {0};
+        if (bluewake_disc_check_complete(getenv("BLUEWAKE_DISC"), disc_error,
+                                         sizeof disc_error) != 0) {
+            fprintf(stderr, "[android] the disc image cannot be used: %s\n", disc_error);
+            fprintf(stderr, "[android] choose the disc image again from the first-run screen\n");
+            fatal_box(disc_error);
+            finish_session_log();
+            return 1;
+        }
     }
 
     // The module is found by name in the APK's native library folder.
