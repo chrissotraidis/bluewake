@@ -31,6 +31,7 @@ The candidate may improve Outset without reaching 30 FPS; relative improvement a
 
 ## Clarifications
 
+- **The developer stage select costs about 11% (2026-10-31):** with `BLUEWAKE_STAGE_SELECT_TOGGLE` on, the module's inline direct-call skip is disabled and every direct guest call asks the host; Outset runs 23.6 game FPS with it on and 26.1 off. It is off by default, so a default player's Outset baseline is about 26 FPS and the gap to 30 is about 13%. Keeping the fast path with the stage select on is a cheap candidate for players who use it; every comparison must fix this setting.
 - **Game Mode baseline (2026-10-31):** Outset is not power-limited (game thread at 3.45 GHz, APU under its 15 W cap). Smooth Motion costs the game thread about 5% through shared cache and memory (IPC 1.74 off, 1.65 on; 25.1 vs 23.9 game FPS), more than the 2% acceptance threshold, so every A/A and A/B must fix the Smooth Motion setting. Either way the game thread does 17–20% too much work per frame for 30 FPS (≈ 138–145 M cycles against ≤ 115 M).
 
 - Motivation and platform are confirmed by the requested #501 live-game follow-up: first-revision Steam Deck, current SteamOS, Outset below its 30 FPS game target.

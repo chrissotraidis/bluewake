@@ -76,6 +76,8 @@ Critical path: M0 → M1 → M2 → M3. Candidate implementation cannot safely b
 
 ## Decisions / gaps
 
+- **Stage select and the direct-call fast path.** `main.c` enables the module's inline skip (`direct_calls_v3`) only when `!bluewake_stage_select_live`; with the stage select on, each direct call goes through `host_direct_can_skip_stage_select` (4.5% + `bluewake_stage_select_observes_body` 1.7% of the game thread in Outset). Candidate: keep v3 with the stage select on, by adding its fixed addresses to the fast path's watch table or switching to the host query only while its menu or a warp is active. Measured gain with it off: +10.9% game FPS.
+
 - **Fix Smooth Motion in every comparison.** It changes the game thread's IPC by about 5% in Outset (Game Mode, 2026-10-31), beyond the 2% target. Measure live with [`scripts/gamemode_measure.py`](https://github.com/chrissotraidis/bluewake/pull/522), which also records the game thread's clock: Outset was not power-limited, so clock changes there would point to a measurement problem.
 
 - `scripts/render_bench` used for #501 lives in open [#492](https://github.com/chrissotraidis/bluewake/pull/492), not current `main`; use that exact reviewed harness or document an equivalent command until it merges.
