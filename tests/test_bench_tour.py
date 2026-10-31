@@ -1,8 +1,13 @@
 """Synthetic checks for the benchmark tour. No disc, card, or app."""
 
+from contextlib import contextmanager
+import hashlib
+import json
 from pathlib import Path
+import os
 import re
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
@@ -188,6 +193,112 @@ class BenchTourTests(unittest.TestCase):
         argv = bench_tour.card_restart_argv('in.card', 'out.card')
         script = Path(__file__).parents[1] / 'scripts' / 'card_set_restart.py'
         self.assertEqual(argv, [sys.executable, str(script), 'in.card', 'out.card', 'sea', '44', '0'])
+
+
+FAKE_APP = r"""#!/usr/bin/env python3
+import hashlib
+import os
+from pathlib import Path
+import sys
+
+here = Path(__file__).resolve().parent
+counter = here / "invocations.txt"
+count = int(counter.read_text().strip() or 0) if counter.exists() else 0
+count += 1
+counter.write_text(str(count))
+
+save = os.environ.get("BLUEWAKE_SAVE_STATE")
+if save:
+    path, _, at = save.rpartition("@")
+    Path(path).write_bytes(b"setup-%d" % count)
+    print("[state] saved %s retrace=%s" % (path, at))
+    sys.exit(0)
+
+state = Path(os.environ["BLUEWAKE_LOAD_STATE"]).read_bytes()
+cpu = hashlib.md5(state).hexdigest().upper()
+
+warp = os.environ.get("BLUEWAKE_TEST_WARP", "")
+stops = []
+for part in warp.split(","):
+    if not part:
+        continue
+    at, stage = part.split(":")[0], part.split(":")[1]
+    stops.append((int(at), stage))
+end = (stops[-1][0] + 1800) if stops else 4200
+stage_at = dict(stops)
+for retrace in range(2400, end + 1, 100):
+    print("[perf] retrace=%d rate=60.0 worst_ms=16.0 hitches=0 busy=99%%" % retrace)
+    if retrace in stage_at:
+        print("[load] retrace=%d overlap=0 stage=%s cpu_us=1 wall_us=1" % (retrace, stage_at[retrace]))
+    if retrace % 300 == 0 and retrace >= 2400:
+        print("[guest-checkpoint] version=1 retrace=%d cycle=%d cpu=%s mem1=%s mem2=%s "
+              "aliases=%s alias_spans=1 alias_bytes=8"
+              % (retrace, retrace * 1000, cpu, "1" * 32, "2" * 32, "3" * 32))
+"""
+
+
+@contextmanager
+def working_directory(path):
+    previous = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+@unittest.skipIf(sys.platform == 'win32', 'the fake app is a POSIX script')
+class SetupStateTests(unittest.TestCase):
+    """--setup-state: one card route, then the same guest state for every run."""
+
+    def setUp(self):
+        # A temporary directory the fake app can be executed from: some
+        # sandboxes mount /tmp noexec.
+        self.directory = tempfile.TemporaryDirectory(dir=Path.home())
+        self.root = Path(self.directory.name)
+        self.app = self.root / 'fake_app.py'
+        self.app.write_text(FAKE_APP)
+        self.app.chmod(0o755)
+        self.state = self.root / 'tour.bwstate'
+        self.card_argv = bench_tour.card_restart_argv
+        bench_tour.card_restart_argv = lambda source, dest: [
+            sys.executable, '-c', 'import sys; sys.exit(0)']
+
+    def tearDown(self):
+        bench_tour.card_restart_argv = self.card_argv
+        self.directory.cleanup()
+
+    def invocations(self):
+        counter = self.root / 'invocations.txt'
+        return int(counter.read_text().strip()) if counter.exists() else 0
+
+    def run_twice(self, setup_state):
+        for name in ('run1', 'run2'):
+            (self.root / name).mkdir()
+            with working_directory(self.root / name):
+                code = bench_tour.run_tour(
+                    'card', str(self.app), stop_retraces=600, untrained=False,
+                    mode='headless', state=None, setup_state=setup_state,
+                )
+                self.assertEqual(code, 0)
+        left = json.loads((self.root / 'run1' / 'summary.json').read_text())
+        right = json.loads((self.root / 'run2' / 'summary.json').read_text())
+        return left, right
+
+    def test_a_kept_state_serves_the_later_run(self):
+        left, right = self.run_twice(str(self.state))
+        self.assertTrue(self.state.is_file())
+        self.assertEqual(self.invocations(), 3)
+        code, text = bench_tour.compare_summaries(left, right)
+        self.assertEqual(code, 0, text)
+        self.assertIn('checkpoints match', text)
+
+    def test_without_it_each_run_plays_the_card_route(self):
+        left, right = self.run_twice(None)
+        self.assertEqual(self.invocations(), 4)
+        code, text = bench_tour.compare_summaries(left, right)
+        self.assertNotEqual(code, 0)
+        self.assertIn('checkpoints differ', text)
 
 
 if __name__ == '__main__':
