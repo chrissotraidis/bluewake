@@ -76,6 +76,21 @@ Critical path: M0 → M1 → M2 → M3. Candidate implementation cannot safely b
 
 ## Decisions / gaps
 
+- **Shared runtime costs (M1-T04 survey, 2026-10-31).** Outset needs ≈ 129 M game-thread cycles per frame and 30 FPS needs ≈ 113 M. No game function is worth more than ≈ 2.3 M, and Outset differs from the open ocean by being more of everything, so candidates are costs every scene pays. M cycles per Outset frame:
+
+  | Cost | M/frame | Where | Removable? |
+  |---|---|---|---|
+  | Native routines (`*_try`, `native_skin`, `native_j3d`) | 10.8 | `cmake/composite/native_*` | Low: the routines' own work; routing is 0.33% |
+  | Direct-call check | 5.6 | `bw_direct_call_ready`, `cmake/composite/direct_calls.h` | **≈ 3**: one host-maintained "all clear" word in place of ≈ 17 loads and 12 branches; the target address is a constant per call site, so its watch test can be answered once and cached by a host generation number. Too big to inline at 32,604 sites as it is; a small fast part could be |
+  | GX command stream | 5.1 | `aurora_backend_gx_write` (host), `bw_gather_pipe` | Unknown: per-word parsing in the host; needs a look at batch parsing |
+  | Dispatch loop | 4.3 | `chassis_dispatch`, `host_chassis_requires_full`, `bw_call_translated`, `bw_find_chunk` | Unknown: the edges that still go round the loop; count them first |
+  | Native actor search | 2.9 | `host_actor_search_native`, `bw_search_word` (`main.c`) | ≈ 1: a `get_ram_ptr` per word where MEM1 is one pointer |
+  | Memory slow paths and aliases | 2.2 | `bw_mem_*_slow`, `ppc_guest_alias_*` | Unknown: why stores take the slow path |
+  | Paired-single quantized load/store | 2.1 | `ppc_psq_load_inline`/`store_inline` (582/351 bytes, out of line) | ≈ 1: an inline path for the float GQR type |
+  | FP helpers | 1.2 | `ppc_fctiw`, `ppc_frsp`, `ppc_frsqrte` | Small |
+
+  The removable part is ≈ 8–12 M per frame, 6–9% game FPS: it does not close the 13% gap alone. Order: the direct-call check first (largest, best understood, `BLUEWAKE_DIRECT_SKIP_VERIFY=1` checks every answer), then count the dispatch-loop edges and look at the GX stream.
+
 - **Stage select and the direct-call fast path.** `main.c` enables the module's inline skip (`direct_calls_v3`) only when `!bluewake_stage_select_live`; with the stage select on, each direct call goes through `host_direct_can_skip_stage_select` (4.5% + `bluewake_stage_select_observes_body` 1.7% of the game thread in Outset). Candidate: keep v3 with the stage select on, by adding its fixed addresses to the fast path's watch table or switching to the host query only while its menu or a warp is active. Measured gain with it off: +10.9% game FPS.
 
 - **Fix Smooth Motion in every comparison.** It changes the game thread's IPC by about 5% in Outset (Game Mode, 2026-10-31), beyond the 2% target. Measure live with [`scripts/gamemode_measure.py`](https://github.com/chrissotraidis/bluewake/pull/522), which also records the game thread's clock: Outset was not power-limited, so clock changes there would point to a measurement problem.
