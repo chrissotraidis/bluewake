@@ -1,172 +1,146 @@
 # TECH_PLAN — Lava Room Smooth Motion follow-up
 
-Status: M0 and M1 done; M2 attribution in progress  
-Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; performance baseline [#501](https://github.com/chrissotraidis/bluewake/pull/501) at `2749e6a194dcdba93846ebd925a33c4f95c695ab`  
+Status: M0 and M1 done; M2 implemented in [RecompCore #49](https://github.com/chrissotraidis/RecompCore/pull/49) `2cc79f3`, Deck measurement next\
+Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; measured on the [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack\
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
 ## Inspected facts
 
-- Aurora's [`pace_steps`](https://github.com/chrissotraidis/RecompCore/blob/1446450c79046bd34e43abadc27522eeab768a6e/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp#L2369-L2451) reduces the budget after overloads in 3 of 8 frames. On an 8-thread Deck, the slow-game rule is disabled by default; render/present/GPU overloads still count.
-- [`frame_verdict`](https://github.com/chrissotraidis/RecompCore/blob/1446450c79046bd34e43abadc27522eeab768a6e/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp#L2454-L2471) can independently reject a frame for a cut/content mismatch. The overlay combines this with pacing-budget skips.
-- Overload producers in `common.cpp` include frame-slot waits, staging-buffer/GPU waits, a GPU one game frame behind and a late drawable. They currently report string reasons through `note_overload`.
-- #501's live check found continuous aggregate GPU saturation with Smooth Motion on and burst/idle behavior off, while BlueWake CPU remained about the same. This is evidence of interpolation/presentation pressure, not yet proof of the wrong overload source.
-- The [graphics architecture](../../architecture/Graphics.md#synchronization-and-completion) separates guest GX production, Aurora/Dawn GPU work and presentation; all three must be timed in the same window.
+### The frame at the player's settings
 
-### Established by M0 and M1 (2026-10-30)
+Game Mode, Lava Room, render scale 3, Smooth Motion off:
 
-- **Automatic pacing works as designed.** In the Lava Room it keeps full game speed by pausing in-between frames; never pause costs about 10% game speed in Game Mode.
-- **The content verdict is not involved:** 0 frames rejected across every run.
-- **Present mode is not the lever.** Headless gamescope showed FIFO backpressure, but on the live Game Mode display FIFO and Mailbox behave the same (late drawables 200 vs 178 per 50 s, game speed 75–92% vs 75–93%).
-- **GPU capacity is not the limit.** With the GPU fixed at 1600 MHz, all GPU-side overloads disappear (0 late drawables, 0 render-worker waits) and the GPU is 66% busy, yet game speed is 74–82%.
-- **The game thread is the limit, through memory contention.** With Smooth Motion on, the game thread runs the same instructions at lower IPC (1.89 → 1.73, same 3.35 GHz). Pinning it alone on a core halves that loss but does not restore speed. A synthetic memory-streaming load with Smooth Motion off cuts its IPC by 38%. CPU and GPU share LPDDR5 on the Deck.
-- **Copies are not the source.** The same 9.5 MB of vertices are copied per game frame with Smooth Motion on and off; the in-between data is about 3.2 MB per game frame. The longer copy zone is queue wait behind the replay (queue ordering, [Graphics.md](../../architecture/Graphics.md#from-guest-bytes-to-a-gpu-resource)).
-- **Spin-waiting is ruled out by the source:** the frame-slot, staging and pacing waits sleep in `wait_for_gpu_progress`.
-- **Matching and blending are the larger share (5 interleaved rounds, warm cache).** Game-thread IPC versus off: matching only −2.0%, full Smooth Motion −3.3%, in that order in 5 of 5 rounds. Matching and blending on the CPU are about 60% of the loss; the upload and the replay about 40%. The earlier 8% came from a cold-cache pair.
-- **In Game Mode the loss is the power limit, not IPC.** With Smooth Motion toggled in the same session, the game thread's IPC barely changes (1.89–1.90 → 1.88–1.90), but its clock falls from 3.45 to 3.11–3.16 GHz. The APU runs at its 15 W cap (13–16 W) with the GPU at 99–100% and 1.1–1.4 GHz, so the CPU cores drop to 2.9–3.3 GHz; with Smooth Motion off, the chip draws 9–15 W and the CPU holds 3.3–3.5 GHz. This also explains why fixing the GPU at 1600 MHz slowed the game, and why headless (no compositing or scanout) did not reproduce it.
-- **The player's settings set the GPU cost.** In Game Mode with render scale 3 and 2× anisotropic filtering (no texture pack is active), the real frame's EFB passes take ≈ 22 ms at the governor's 0.82–0.93 GHz, two thirds of a 33 ms frame. With Smooth Motion on, the in-between replay adds ≈ 17.5 ms at 1.2–1.3 GHz, which drives the clock and power to the cap. Headless runs used default settings (scale 1, stock textures) and understated the real frame's cost about 5×. The Lava Room draws ≈ 930 draws per game frame (an earlier "9,000" misread a log field).
-- **Render scale is the driver.** At scale 2, Smooth Motion costs no measurable game speed in Game Mode (in-between ≈ 9.4 ms, 13.2–13.8 W, game thread 3.45 GHz); at scale 3 it costs ≈ 10% (in-between ≈ 17.5 ms, 14.1–16.0 W at the cap, game thread ≈ 3.1 GHz). The cost per pass follows the pixel count, so the room is pixel-bound at these settings.
-- **The heat haze is the cost.** The draw log shows commands 700–780 are 81 quads (6 indices each), one pipeline and one texture, alpha-blended without depth test or write. Hiding them (`DOL_AURORA_SKIP_DRAWS=1:700-780`) cuts pass 1 from 21.3 to 6.1–7.0 ms in Game Mode; captures show the room's haze/smoke veil (97–99% of pixels change slightly). Candidate M2: draw such full-screen alpha sprites into a reduced-resolution buffer and composite once, keeping the look.
-- **A few draw ranges hold the pass.** Timed in 50-command chunks, pass 1's commands 700–780 take ≈ 13.7 ms, 50–99 ≈ 3.8 ms and 650–699 ≈ 1.7 ms; the other ≈ 500 commands take well under 1 ms together. About 180 draws hold 90% of the pass.
-- **One pass holds the cost.** In Game Mode at scale 3, EFB pass 1 (776 draws, the main scene) takes 20.7–22.0 ms, 95% of the real frame; the other three passes take about 1 ms together. Next: time pass 1 in chunks of about 50 draws (a diagnostic split into timed sub-passes, each loading the previous result) to find which draws hold the time, then trace their textures, shaders and blending.
-- **The in-between frame is a full second render.** By pass, the replay's four EFB passes cost ≈ 1.24 ms each against ≈ 1.16 ms for the real frame's; copy conversion and presentation are negligible on both sides, and the HD-look effects are off. Making it cheaper means drawing less (reusing what did not change) or drawing it more cheaply (for example at a lower resolution), not skipping passes. `gpu_prof`'s 4-deep readback ring drops frames with Smooth Motion on, so its per-frame totals then undercount; per-pass-instance costs hold.
-- **No single large copy.** About 930 draws per game frame reach the helper; ≈ 720 copy the full 2,832-byte constants block through the job ring, the helper and the pool, and ≈ 930 produce a blended block. Together that is ≈ 0.5 GB/s, consistent with a ≈ 2% IPC loss at the game thread's measured sensitivity. Skipping unchanged draws saves almost nothing here; removing the job-ring and helper copies saves ≈ 0.12 GB/s (≈ 0.5% IPC headless).
-- **Headless understates the contention.** Headless, the ≈ 3% IPC loss fits within the game thread's ≈ 14% headroom and the game holds 30 FPS; in Game Mode, gamescope's compositing and scanout add memory traffic and the game loses about 10%. Final measurements for M2 must be taken in Game Mode.
+| Pass | Draws | GPU | Content |
+|---|---|---|---|
+| EFB 0 | 31 | 0.03 ms | cleared first |
+| **EFB 1** | **776** | **20.7–22.0 ms** | the scene, then the haze |
+| EFB 2 | 0 | ≈ 0 | — |
+| EFB 3 | 84 | ≈ 0.9 ms | presented (HUD) |
 
-### Earlier observations
+Pass 1 timed in chunks of 50 commands (`DOL_AURORA_GPU_PROF_CHUNK`):
 
-- M0 (Deck, 2026-10-30): automatic pacing holds full game speed by pausing; never pause costs about 10% game speed. Retries drop on late drawables (`aurora.cpp` acquire ≥ 20 ms) and render-worker waits; content verdict rejects 0.2–0.3%. See the [PRD's M0 findings](PRD.md#m0-findings-2026-10-30).
-- `gpu_prof` bracketed only the real frame, so `[gpu-prof]` omitted the replayed passes. M1 added a frame and an `In-between replay` zone for it ([RecompCore #49](https://github.com/chrissotraidis/RecompCore/pull/49)).
+| Commands | GPU | What the draw log shows |
+|---|---|---|
+| **700–780** | **≈ 13.7 ms** | 81 quads, 6 indices each, one pipeline and texture, blended (SrcAlpha, InvSrcAlpha), **no depth test or write** |
+| 50–99 | ≈ 3.8 ms | 50 opaque meshes, 27k indices |
+| 650–699 | ≈ 1.7 ms | 33 opaque meshes and 14 more of the quads |
+| the other ≈ 500 | < 1 ms | — |
 
-## Decision flow
+Hiding 700–780 (`DOL_AURORA_SKIP_DRAWS`) takes pass 1 from 21.3 to 6.1–7.0 ms. Captures show the room's heat haze. The in-between replay has the same hot range (≈ 11.6 ms with Smooth Motion on).
+
+### Across scenes (headless, scale 3)
+
+| Scene | GPU per frame | Haze-like quads in the hot range | Share |
+|---|---|---|---|
+| Lava Room | 18.9 ms | 80 | ≈ 69% |
+| Shipwreck | 18.1 ms | 82 | ≈ 62% |
+| Outset | 13.0 ms | 45, interleaved with terrain | not separated |
+| Hyrule Castle | 5.5 ms | 13 | small |
+| Butterfly room | 9.7 ms | inconclusive | — |
+
+### Ruled out on the way
+
+| Suspect | Test | Why ruled out |
+|---|---|---|
+| Content verdict | `[interp-stats]` outcomes | 0 rejected in every run |
+| Present mode | FIFO vs Mailbox in Game Mode | Same late drawables and game speed |
+| GPU capacity | Clock fixed at 1600 MHz | No GPU overloads, game slower |
+| Spin-waiting | Source | Frame-slot, staging and pacing waits sleep in `wait_for_gpu_progress` |
+| Vertex copies | `[gpu-prof]` bytes | Same 9.5 MB per frame on and off; the longer zone is queue wait |
+| Matching and blending (CPU) | Isolation runs, 5 rounds | ≈ 2% IPC; real but small, and secondary to power in Game Mode |
+
+### Mechanism
 
 ```mermaid
-flowchart TD
-    Loss["Smooth Motion on:<br/>game speed −10%, pauses"]
-    Verdict["Content verdict<br/>(0 rejected)"]
-    Present["Present mode<br/>(FIFO = Mailbox in Game Mode)"]
-    GPU["GPU capacity<br/>(1600 MHz: no overloads, still slow)"]
-    Spin["Spin-waiting<br/>(waits sleep)"]
-    Mem["Game thread IPC loss:<br/>shared memory contention"]
-    Match["Matching and blending on CPU<br/>(provisional: confirm over noise)"]
-    Upload["Upload / replay<br/>(no measurable extra loss)"]
-    Fix["M2: cut matching's<br/>per-draw work and traffic"]
-    Protect["Game-thread IPC within 2% of off;<br/>pacing still protects speed"]
-
-    Loss -.->|ruled out| Verdict
-    Loss -.->|ruled out| Present
-    Loss -.->|ruled out| GPU
-    Loss -.->|ruled out| Spin
-    Loss --> Mem
-    Mem --> Match
-    Mem -.->|ruled out| Upload
-    Match --> Fix --> Protect
+flowchart LR
+    Haze["~80 haze quads<br/>blended, no depth"]
+    Scale["Render scale 3:<br/>millions of pixels each"]
+    Twice["Drawn twice per game frame<br/>(real + in-between)"]
+    Cap["APU at its 15 W cap"]
+    Clock["CPU clock 3.45 → 3.1 GHz"]
+    Slow["Game thread falls behind:<br/>83–87% speed, or pacing pauses"]
+    Haze --> Scale --> Twice --> Cap --> Clock --> Slow
 ```
 
 ## Changes
 
-| Status | File / symbol | Practical edit | Milestone | Architecture |
-|---|---|---|---|---|
-| Existing | RecompCore `frame_interp.cpp::pace_steps`, `frame_verdict` | Preserve current control and expose which path suppressed interpolation | M0–M1 | [Smooth Motion](../../architecture/Graphics.md#textures-frame-buffers-and-presentation) |
-| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)) | RecompCore `frame_interp.hpp/.cpp` | Replace unstructured overload strings at the internal boundary with typed causes and counters; keep readable logs | M1 | Pacing ownership |
-| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)) | RecompCore `common.cpp` overload producers | Record wait duration and source for slot, staging, GPU-backlog and drawable events | M1 | [Synchronization](../../architecture/Graphics.md#synchronization-and-completion) |
-| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)) | RecompCore `common.cpp::present_with_in_between`, `present_steps`, `webgpu/gpu_prof` | Time the in-between replay as its own GPU zone so `[gpu-prof]` covers every presented frame | M1 | GPU attribution |
-| Done for M1 ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)); M2 to extend | RecompCore `frame_interp_test.cpp`, BlueWake `linux/CMakeLists.txt` | Cover classification, 3-of-8 policy, recovery and forced overload; run the test in Linux CI | M1–M2 | Source-only correctness |
-| Done ([#49](https://github.com/chrissotraidis/RecompCore/pull/49)), diagnostic | RecompCore `common.cpp`, `DOL_AURORA_FRAME_INTERP_ABLATE` | `match` / `upload`: run matching (and the upload) but present the real frame again, to attribute cost | M2 | Measurement only |
-| Proposed | RecompCore `frame_interp.cpp` capture/blend, `gxcore_draw.cpp` job queue | Candidate 1: skip capture and blending for draws whose matrices did not change since the previous frame, reusing the real frame's constants in the replay | M2 | [Smooth Motion](../../PERFORMANCE_OPTIMIZATIONS.md#smooth-motion-in-between-frames) |
-| Proposed | RecompCore GX-worker capture (`capture_draw`, `queue_interp_job`) | Candidate 2: capture straight into the helper's job, without intermediate vectors | M2 | GX worker |
-| Proposed (diagnostic) | RecompCore `common.cpp` pass encoding, `webgpu/gpu_prof` | Split a pass into timed sub-passes of N draws (load, not clear) to locate expensive draw ranges | M2 | GPU attribution |
-| Proposed | BlueWake `scripts/rendered_run.py` | Option to keep the pipeline cache between runs; record cold/warm in results | M2–M3 | [Testing](../../architecture/Testing.md) |
-| Proposed | BlueWake dependency pin/patch and performance docs | Deliver the reviewed RecompCore change and document the measured policy | M3 | [Build dependencies](../../architecture/Build.md) |
-
-## Contract and proposed interface
-
-Current code loses structure at the call boundary:
-
-```cpp
-frame_interp::note_overload("the game waited for the GPU");
-```
-
-Proposed diagnostic contract; exact names may follow RecompCore conventions:
-
-```cpp
-enum class OverloadCause { FrameSlot, StagingBuffer, GpuBacklog, LateDrawable };
-void note_overload(OverloadCause cause, double wait_ms) noexcept;
-```
-
-The controller may still print the existing player-readable reason. Typed cause, duration, budget before/after and verdict outcome make the measurement unambiguous. Instrumentation stays opt-in or low-frequency and must not alter pacing. M2 is gated: if content rejection causes `paused`, modify verdict reporting or matching rather than pacing; if a present wait is incorrectly treated as interpolation capacity, separate that signal; if the GPU is genuinely behind, optimize the measured resource path or retain the drop.
-
-## Verification
-
-| Layer | Input / method | Required evidence | Failure / skip |
+| Status | Where | What | Milestone |
 |---|---|---|---|
-| M0 control | Same #501 build/state/view; automatic, never-pause and off | Build hashes, exact settings, ≥5 fixed windows per mode | Different camera/state makes comparison inconclusive |
-| Classification | Per-frame counters and `[interp-pace]` transitions | Delivered, budget-skipped, verdict-rejected and overload-cause counts sum consistently | Ambiguous `paused` alone cannot select M2 |
-| Source tests | RecompCore frame-interpolation test | Sparse overload does not drop; 3/8 does; recovery works; cuts still reject | Compile-only fails the gate |
-| Attribution | `rendered_run.py --cpu-profile`, Lava Room state, window 136600–137800, ≥ 5 interleaved rounds per mode, warm pipeline cache | Mean and spread of game-thread IPC; an effect counts only beyond the spread | 2 runs per mode is not enough (spread up to 8%) |
-| Performance | Matched control/candidate with Smooth Motion on, same method | Game-thread IPC with Smooth Motion on within 2% of off; Game Mode game speed within 2% of off with automatic pacing keeping in-between frames | Higher GPU use alone is neither pass nor fail |
-| Protection | Forced render load plus normal five-scene rendered run | Genuine overload still protects game speed; no image/checkpoint regression | Missing hardware run leaves M3 open |
-| Platform | Linux/Windows BlueWake CI after pin | RecompCore tests compile/run through supported host builds | Deck result does not replace Windows CI |
+| Done | RecompCore `frame_interp.*`, `common.cpp`, `aurora.cpp` | Typed overload causes with waits; per-frame outcomes and per-draw counters in `[interp-stats]` | M1 |
+| Done | RecompCore `common.cpp`, `webgpu/gpu_prof.*`, `webgpu/gpu.cpp` | GPU zones: in-between replay, `IB` names, each pass (`=2`), chunks of draws | M1–M2 |
+| Done | RecompCore `common.cpp` | Diagnostics: `DOL_AURORA_FRAME_INTERP_ABLATE`, `DOL_AURORA_SKIP_DRAWS`, `DOL_AURORA_DRAW_LOG` | M2 |
+| Done | RecompCore `soft_effects.hpp`, `gxcore_draw.*`, `common.cpp`, `aurora.h` | **Efficient soft effects** (design below) | M2 |
+| Done | RecompCore `tests/frame_interp_test.cpp`, `tests/soft_effects_test.cpp` | Counters; selection rule, runs and blend identity | M1–M2 |
+| Done | BlueWake `settings_table.h`, `desktop_menu.cpp`, `tests/settings_table_test.cpp` | The "Efficient soft effects" setting, applied live | M2 |
+| Done | BlueWake `linux/` and `windows/` CMake, both workflows | `frame_interp_test` and `soft_effects_test` in CI | M1–M2 |
+| Next | BlueWake pin, docs | Deliver after the Deck A/B | M3 |
+
+Dropped approaches:
+
+| Approach | Why dropped |
+|---|---|
+| Change pacing thresholds | Pacing was correct: it protects game speed |
+| Mailbox presentation | No effect in Game Mode |
+| Skip matching for unchanged draws | Nearly every Lava Room draw blends (≈ 930 of 930) |
+| Lower-resolution whole in-between frame | Rejected by the player |
+
+## Contracts and examples
+
+Setting (BlueWake → Aurora), applied live:
+
+```cpp
+// settings.ini: DOL_AURORA_EFFICIENT_EFFECTS=1  ("Efficient soft effects", off by default)
+void aurora_set_efficient_effects(bool on);
+```
+
+The blend identity the buffer relies on, for quads in draw order:
+
+| Where | Colour factors | Alpha factors | Holds after the run |
+|---|---|---|---|
+| Buffer, from (0,0,0,0) | SrcAlpha, OneMinusSrcAlpha | One, OneMinusSrcAlpha | premultiplied colour `C`, coverage `A` |
+| Composite over the EFB | One, OneMinusSrcAlpha | as the run writes alpha | `dst = C + dst × (1 − A)`, equal to blending each quad in turn |
 
 ## M2 design: blended sprites at reduced resolution
 
-### Problem
-
-At render scale 3, a block of about 80 large sprite quads (6 indices each, blended with source alpha over inverse source alpha, no depth test or write, one pipeline and texture) takes 62–69% of the GPU in the Lava Room and the Shipwreck. In Outset the same kind of sprite (likely clouds) is interleaved with terrain and its cost is not yet separated. They are drawn after the scene, in the same EFB pass. Each covers much of the screen, so at scale 3 every layer blends millions of pixels. The effect is a soft veil (haze, smoke): its detail does not need full resolution.
-
-### Approach
-
-Draw a run of such sprites into a separate, lower-resolution colour buffer, then composite that buffer over the EFB once, at full resolution, in the same place in the draw order.
-
 ```mermaid
 flowchart LR
-    Scene["EFB pass: draws before the run"]
-    Run{"Run of N or more<br/>veil sprites?"}
-    Low["Low-res buffer, cleared to (0,0,0,0)<br/>draw the run, premultiplied accumulation"]
-    Comp["Composite once over the EFB<br/>blend One, OneMinusSrcAlpha"]
-    Rest["Draws after the run, same pass"]
-    Scene --> Run
-    Run -->|"no"| Rest
-    Run -->|"yes"| Low --> Comp --> Rest
+    Before["EFB pass:<br/>draws before the run"]
+    Run{"≥ 8 soft-effect<br/>draws in a row?"}
+    Buffer["Half-size buffer from (0,0,0,0):<br/>the run, viewports halved"]
+    Composite["Composite once<br/>over the EFB"]
+    After["EFB pass resumes (Load)"]
+    Before --> Run
+    Run -->|"no"| After
+    Run -->|"yes"| Buffer --> Composite --> After
 ```
 
-**Exact blending in the buffer.** For "source over" sprites drawn in order, accumulating in premultiplied form reproduces the result:
-
-- In the buffer: colour factors (SrcAlpha, OneMinusSrcAlpha) and alpha factors (One, OneMinusSrcAlpha), starting from (0,0,0,0). The buffer then holds the run's premultiplied colour and its total coverage.
-- Composite: colour factors (One, OneMinusSrcAlpha): `dst = acc.rgb + dst.rgb × (1 − acc.a)`, the same as blending each sprite onto the EFB in turn.
-- The only intended difference is resolution: the veil is shaded at half (or quarter) of the EFB's width and height and filtered up.
-
-**Detection (per draw, at encode).** A draw qualifies when its pipeline key has: blending on with (SrcAlpha, InvSrcAlpha); depth test and depth write off; colour write on; triangle topology; at most 12 indices; one TEV stage and no indirect stages. A run is a maximal sequence of consecutive qualifying draws in one EFB pass; only runs of at least N draws (initially 8) take the low-res path, so isolated sprites keep today's path. The draw logs from the survey are the test data for the rule: it must select the Lava Room's 700–780 and the Shipwreck's 1600–1699 blocks and nothing opaque. Outset's cloud-like sprites are interleaved with terrain, so they would only qualify where they form runs.
-
-**Where it lives.** In Aurora's pass encoding (`common.cpp`, where `DOL_AURORA_SKIP_DRAWS` splits a pass): end the EFB pass before the run, encode the run into the low-res target, composite, and resume the EFB pass with `Load` (the same split already used for chunked timing). The real frame and the in-between replay take the same path.
-
-**Setting.** An opt-in option in the settings menu, off by default until the checks below pass; then a default-on decision. It takes effect only at render scale 2 or more.
-
-| Field | Value |
+| Part | Implementation |
 |---|---|
-| Label | **Efficient soft effects** |
-| Note | "Draws soft see-through effects, such as haze, smoke, fog and clouds, at lower resolution and blends them in once. Much faster at high render resolutions, slightly softer effects. Off by default." |
-| Experimental note | "Measured in the Lava Room and the Shipwreck on a Steam Deck; not yet tested on Windows or a Mac." |
-| Key | `DOL_AURORA_EFFICIENT_EFFECTS` (`Kind::Bool`, `Control::Switch`, fallback off) in `runtime/host/src/settings_table.h` |
-| Applies | Immediately, through an Aurora setter (like `aurora_set_forced_anisotropy`), so it can be toggled in a room to compare |
+| Selection (record time) | `soft_effects::qualifies_key`: blend SrcAlpha/InvSrcAlpha, no subtract, no depth test or write, colour written, triangles, 1 TEV stage, no indirect stages, no destination alpha |
+| Selection (encode time) | `qualifies_size`: ≤ 12 indices per batched draw; `find_runs`: ≥ 8 in a row, split where alpha writing changes; the variant must be compiled |
+| Pipeline variant | `PipelineConfig::softTarget` (config v14): alpha (One, OneMinusSrcAlpha), one sample, no depth attachment, RGBA written |
+| Encoding | The EFB pass is split around each run, like the chunked timing; only the last part resolves |
+| Composite | Full-screen triangle sampling the buffer at `fragcoord × 0.5 / size`, blend (One, OneMinusSrcAlpha) |
+| Scope | EFB passes ≥ 1280 pixels wide (scale 2 and up), no bloom split; real and in-between frames |
+| Fallback | A run whose variants are still compiling keeps the EFB |
 
-### Risks
+| Risk | Mitigation |
+|---|---|
+| EFB alpha after the run differs from per-quad blending | The composite writes alpha only where the run did; check nothing reads EFB alpha afterwards |
+| Alpha test at half resolution | Accepted for soft veils; edges reviewed in captures |
+| Sharp sprites matching the rule | The rule requires no depth test, one TEV stage and long runs; captures in five scenes |
+| Pass split cost | One extra store and load of the EFB per run, measured in `[gpu-prof]` |
 
-- **EFB alpha.** The sprites also write EFB alpha (with the same factors). The composite reproduces colour exactly; alpha follows `acc.a + dst.a × (1 − acc.a)`, which differs from per-sprite alpha blending. Check whether anything reads EFB alpha after the run (destination alpha, copies used as textures, bloom masks).
-- **Alpha test.** These sprites have an alpha test; it still discards per fragment in the low-res buffer, at coarser resolution.
-- **Edges and filtering.** Upscaling a half-resolution veil softens its edges; sprites with sharp edges or text must not match the rule.
-- **Interleaving.** Where qualifying sprites are interleaved with other draws (Lava Room 650–699), only the contiguous runs take the path, so the draw order is kept.
-- **Pass splits.** Ending and resuming the EFB pass costs a store and a load at full resolution, once per run; it must be small against the saving.
-
-### Verification
+## Verification
 
 | Check | Method | Pass |
 |---|---|---|
-| Rule | Unit test over the survey's draw logs | Selects the known veil blocks; selects no opaque or depth-tested draw |
-| Picture | Headless captures at scale 3, current vs low-res path, five scenes | Differences confined to the veil areas and small (mean and 99th percentile reported); reviewed side by side |
-| GPU time | `[gpu-prof]` per pass, five scenes, scale 3 | Lava Room and Shipwreck GPU per frame reduced by at least 40% |
-| In-session A/A and A/B | Game Mode, one session, same view: toggle the setting live in 15 s windows, off/off (A/A noise floor), then off/on/off/on, with `perf stat -t`, power, `[interp-stats]` and `[gpu-prof]` sampled per window | The A/B difference in GPU time, power and game-thread clock exceeds the A/A spread |
-| Game Mode | Scale 3, Smoothness on (automatic pacing), Lava Room and Shipwreck | Full game speed with in-between frames delivered, under the 15 W cap |
-| CI | Linux and Windows BlueWake CI with the RecompCore pin | Builds and tests pass |
+| Rule, runs, blend identity | `soft_effects_test` in Linux and Windows CI | All checks pass |
+| Counters | `frame_interp_test` | All checks pass |
+| Setting | `settings_table_test` | Key in file order |
+| A/A and A/B | Game Mode, one session, setting toggled: off/off, then off/on/off/on, 15 s windows | A/B difference exceeds the A/A spread |
+| GPU and speed | Same session, Smooth Motion on, Lava Room and Shipwreck | Targets in the [PRD](PRD.md#success-and-constraints) |
+| Picture | Captures at scale 3, five scenes, on and off | Differences confined to soft effects, reviewed |
 
 ## Implementation order
 
@@ -174,26 +148,21 @@ flowchart LR
 |---|---|---|---|
 | M0 | — | — | Reproduce: matched live modes and a classified measurement window |
 | M1 | M0 | RecompCore source tests and BlueWake log parsing can proceed in parallel | Make causes observable: typed cause/duration plus verdict/budget counters with no policy change |
-| M2 | M1 | Focused tests alongside implementation | Fix proven cause: one isolated policy or resource-path change |
-| M3 | M2 | CI and Deck measurements can run independently | Qualify and deliver: RecompCore PR, BlueWake pin/patch, hardware decision and docs |
+| M2 | M1 | Focused tests alongside implementation | Fix the proven cause: Efficient soft effects, opt-in, with tests |
+| M3 | M2 | CI and Deck measurements can run independently | Qualify and deliver: Deck A/B, CI, pin and docs |
 
-Critical path: M0 → M1 → M2 → M3. M2 cannot start from aggregate GPU load or the overlay label because both collapse distinct causes. RecompCore and BlueWake edits serialize at the pin: review the runtime change first, then update the dependency.
+Critical path: M0 → M1 → M2 → M3. RecompCore and BlueWake edits serialize at the pin.
 
 ## Decisions / gaps
 
-- [#470](https://github.com/chrissotraidis/bluewake/pull/470) remains a workaround/control, not the root fix.
-- Open [#492](https://github.com/chrissotraidis/bluewake/pull/492) provides the rendered harness used by #501; until merged, record its exact revision with every run.
-- Aggregate AMD GPU busy includes Gamescope. Use BlueWake waits/counters and fixed-window comparisons for attribution.
-- Headless gamescope has no real scanout: it hid the Game Mode presentation behaviour. Presentation conclusions need Game Mode runs.
-- `rendered_run.py` starts every run with an empty data folder and pipeline cache. Reuse a folder per mode (warm after its first run) until the script has an option for it.
-- The Deck's memory-traffic counters need root, so memory attribution relies on runs that isolate parts of Smooth Motion and on the synthetic memory load.
-
-- **Outset is postponed here (2026-10-30).** Its blended sprites are interleaved with terrain, and its limit is the game thread, planned separately in [#503](https://github.com/chrissotraidis/bluewake/pull/503). Process lessons from this work that apply there: measure in Game Mode at the player's settings (headless hid the power cap and understated the GPU cost about 5×); sample APU power and clocks with the game thread (the clock can change while IPC does not); and prefer in-session A/A and A/B toggles to comparisons across launches.
+- **Game Mode at the player's settings is the reference.** Headless hid the power cap and understated the GPU cost about 5×; it stays useful for repeatable draw counts and captures.
+- **Profiler limits:** `gpu_prof`'s 4-deep readback ring drops frames with Smooth Motion on (per-instance costs hold, totals undercount); `frame_ms` is meaningless with chunking.
+- **Butterfly room and Outset** are unresolved; Outset's limit is the game thread ([#503](https://github.com/chrissotraidis/bluewake/pull/503)).
+- **Builds:** renderer-only rebuilds keep the trained profile (`build_script --reuse`; builder provenance in [#515](https://github.com/chrissotraidis/bluewake/pull/515)), so A/B builds share the module's optimization.
+- `rendered_run.py` starts each run with an empty pipeline cache.
 
 ## References
 
-- [#501 live Lava Room follow-up](https://github.com/chrissotraidis/bluewake/pull/501)
-- [Issue #473](https://github.com/chrissotraidis/bluewake/issues/473)
-- [#503 Outset game-thread follow-up](https://github.com/chrissotraidis/bluewake/pull/503)
-- [Steam Deck issue #215](https://github.com/chrissotraidis/bluewake/issues/215)
-- [Performance optimizations](../../PERFORMANCE_OPTIMIZATIONS.md#presentation-and-pacing)
+- [#504](https://github.com/chrissotraidis/bluewake/pull/504) (this plan), [RecompCore #49](https://github.com/chrissotraidis/RecompCore/pull/49) (the code)
+- [#501](https://github.com/chrissotraidis/bluewake/pull/501), [#503](https://github.com/chrissotraidis/bluewake/pull/503), [#515](https://github.com/chrissotraidis/bluewake/pull/515), [issue #473](https://github.com/chrissotraidis/bluewake/issues/473)
+- [Graphics architecture](../../architecture/Graphics.md), [Performance optimizations](../../PERFORMANCE_OPTIMIZATIONS.md#presentation-and-pacing)

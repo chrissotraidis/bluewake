@@ -1,7 +1,16 @@
 # PROGRESS — Lava Room Smooth Motion follow-up
 
-Status: In progress (M0 done; M1 code in RecompCore #49)  
+Status: M0 and M1 done; M2 implemented (Efficient soft effects), Deck measurement next\
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
+
+## Where we are
+
+| Milestone | State | Outcome |
+|---|---|---|
+| M0 | Done | Pacing protects game speed; never pause costs ≈ 10% in Game Mode |
+| M1 | Done | Causes observable; the Game Mode loss is the shared 15 W power cap |
+| M2 | Implemented, measuring | The heat haze is the cost; Efficient soft effects draws it at half resolution |
+| M3 | Not started | Deck A/B in one session, five-scene pictures, CI, pin and docs |
 
 ## Milestones
 
@@ -19,26 +28,26 @@ RecompCore counters/tests and BlueWake log parsing may proceed in parallel and i
 
 - [x] M1-T01: Add typed overload cause and wait-duration accounting without changing policy.
 - [x] M1-T02: Count delivered, budget-skipped and content-verdict-rejected frames separately.
-- [x] M1-T05: Time the in-between replay in `gpu_prof` (today only the real frame is profiled).
 - [x] M1-T03: Extend frame-interpolation tests for cause classification, drop threshold and recovery.
 - [x] M1-T04: Select one cause only when the fixed-window totals reconcile.
-
-M0 finding: in this view automatic pacing is correct protection, not a false overload. Keeping the in-between frames (never pause) costs about 10% of game speed with the GPU clocked up, while automatic pacing holds full speed by pausing. Each retry drops again within about 0.25 s ("a drawable came late", "the game waited for the render worker"). M1 therefore separates GPU time from presentation timing for those late drawables, and the likely M2 is a cheaper in-between frame rather than a pacing-rule change.
+- [x] M1-T05: Time the in-between replay in `gpu_prof`.
 
 ### M2: Correct the proven cause (depends: M1)
 
-- [ ] M2-T01: Change one pacing, presentation or GPU-resource behavior selected by M1. Attribution done: the CPU-side matching and blending is the cost; the change itself is still open.
-- [ ] M2-T04: Detection rule for veil sprites, unit-tested against the survey's draw logs ([design](TECH_PLAN.md#m2-design-blended-sprites-at-reduced-resolution)).
-- [ ] M2-T05: Low-res accumulation and composite in Aurora's pass encoding, real frame and in-between replay, behind the opt-in "Efficient soft effects" setting (`DOL_AURORA_EFFICIENT_EFFECTS`, applied live).
-- [ ] M2-T06: Picture and GPU-time comparison in the five scenes at scale 3; EFB alpha check.
+Design: [blended sprites at reduced resolution](TECH_PLAN.md#m2-design-blended-sprites-at-reduced-resolution).
+
+- [x] M2-T01: Locate the cost at the player's settings: the heat haze (pass, chunk, draw log, hidden-draw capture).
 - [ ] M2-T02: Preserve camera-cut/content rejection and genuine-overload game-speed protection.
-- [ ] M2-T03: Produce matched control/candidate builds with explicit dependency identities.
+- [ ] M2-T03: Produce matched control/candidate builds sharing one trained profile (`build_script --reuse`).
+- [x] M2-T04: Selection rule for soft-effect sprites, unit-tested against the logged draw states.
+- [x] M2-T05: Half-size buffer and composite, real frame and in-between replay, behind the opt-in "Efficient soft effects" setting.
+- [ ] M2-T06: Picture and GPU-time comparison in five scenes at scale 3; EFB alpha check.
 
 ### M3: Qualify and deliver (depends: M2)
 
-- [ ] M3-T01: Run fixed-view Lava Room A/B with Smooth Motion on and forced-overload protection checks.
+- [ ] M3-T01: Game Mode A/A and A/B in one session (setting toggled), Lava Room and Shipwreck, Smooth Motion on.
 - [ ] M3-T02: Run the full rendered scene tour, pictures/checkpoints and Linux/Windows CI.
-- [ ] M3-T03: Open the RecompCore change, pin/export it in BlueWake and record retain/reject evidence.
+- [ ] M3-T03: Pin the reviewed RecompCore change in BlueWake and record the retain/reject decision.
 
 ## Evidence ledger
 
@@ -77,3 +86,5 @@ M0 finding: in this view automatic pacing is correct protection, not a false ove
 | M2-T01 | Same AppImage, Game Mode, `DOL_AURORA_SKIP_DRAWS=1:700-780`; `gmfull-skip-on.txt` (private) | Smoothness toggled on (never pause), 3 × 15 s; off baseline 2 × 15 s | Scale 3, Lava Room | Haze hidden, Smoothness off: GPU ≈ 8.5 ms per frame at 536 MHz, 10.5–11.6 W, no dips. **Haze hidden, Smoothness on: 450 of 450 in-between frames per 15 s, 0–1 dip seconds, game thread 3.44–3.45 GHz, 12.8–13.8 W (under the cap), GPU 704–855 MHz**, in-between replay ≈ 9 ms. The player saw 60 FPS. At these settings the Lava Room's Smoothness problem is the haze |
 | M2-T01 | AppImage `8be7805df3aa`; local `survey.sh`, `survey/` (private); Deck `~/bluewake-render/runs/survey-224210/` | Per state: 45 s chunked timing (`GPU_PROF=2`, `CHUNK=50`), then 45 s draw log of the most expensive pass | Headless, scale 3, Smoothness off, five benchmark states | Haze-like draws (6-index quads, blended, no depth test or write): Lava Room 80 quads ≈ 13 of 18.9 ms (≈ 69%); Shipwreck 82 quads ≈ 11.2 of 18.1 ms (≈ 62%); Outset 45 quads ≈ 3.9 of 13.0 ms (≈ 30%); Hyrule Castle small (5.5 ms scene); butterfly room inconclusive (the logged pass had 7 draws while the timing shows more; pass numbering appears to vary between frames) |
 | M2-T01 | Deck `~/bluewake-render/runs/outsetcmp-225906/` (private); local `outsetcmp/` | Outset at scale 3, headless, with and without `DOL_AURORA_SKIP_DRAWS=4:14-147`, captures and `[gpu-prof]` | State retrace 9919, captures from 10522 | **Correction:** hiding 14–147 removes the island's ground, sea, house and some clouds, not only sprites: pass 4 11.3 → 5.8 ms, but the 45 blended no-depth sprites there are interleaved with terrain. The survey's "Outset ≈ 30%" is withdrawn; their own cost needs a pipeline-based skip. The setting is renamed "Efficient soft effects" (`DOL_AURORA_EFFICIENT_EFFECTS`) to cover haze, smoke, fog and clouds |
+| M2-T04 | RecompCore #49 `2cc79f3` (`soft_effects.hpp`, `tests/soft_effects_test.cpp`); BlueWake #504 `e58fea3` (Linux and Windows CMake, both workflows) | `bluewake_soft_effects_test` | Linux CI container (clang-18, libc++) | All checks pass: the rule selects the Lava Room and Shipwreck haze states and rejects opaque, depth-tested, additive, destination-alpha, multi-stage and indirect draws; runs of ≥ 8 split on alpha-writing changes; blend identity holds over 2,000 random stacks (error < 1e-9) |
+| M2-T05 | RecompCore #49 `2cc79f3` (`gxcore_draw.*`, `common.cpp`, `aurora.h`, config v14); BlueWake #504 `e58fea3` (`settings_table.h`, `desktop_menu.cpp`) | Build and tests in the CI container; `frame_interp_test`, `settings_table_test`, `settings_file_test`, `settings_state_test` | Linux CI container | Compiles without warnings in the changed files; all tests pass. Deck measurement pending (M2-T06, M3-T01) |
