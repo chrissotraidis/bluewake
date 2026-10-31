@@ -37,6 +37,11 @@ jobs:
         run: python3 tests/test_guest_checkpoints.py
       - name: Check the benchmark tour on synthetic logs
         run: python3 tests/test_bench_tour.py
+      - name: Check the rendered benchmark on a fake app
+        run: |
+          python3 -m venv "$RUNNER_TEMP/render-tests"
+          "$RUNNER_TEMP/render-tests/bin/python" -m pip install --quiet numpy pillow
+          "$RUNNER_TEMP/render-tests/bin/python" tests/test_render_bench.py
       - name: Preserve direct-call host boundaries and preparation
         run: |
           python3 tests/test_direct_calls.py
