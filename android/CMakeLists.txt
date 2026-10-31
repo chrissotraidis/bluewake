@@ -17,7 +17,8 @@ if(NOT ANDROID)
 endif()
 
 get_filename_component(BLUEWAKE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-set(GXRUNTIME_DIR ${BLUEWAKE_REPO_ROOT}/ref/recompcore/GXRuntime)
+set(GXRUNTIME_DIR "${BLUEWAKE_REPO_ROOT}/ref/recompcore/GXRuntime" CACHE PATH "Pinned RecompCore GXRuntime source")
+get_filename_component(_donor "${GXRUNTIME_DIR}/.." ABSOLUTE)
 set(BLUEWAKE_HOST_SRC ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
 set(BLUEWAKE_ANDROID_CPU "cortex-a78" CACHE STRING "-mcpu for the app")
 
@@ -49,6 +50,9 @@ set(AURORA_DAWN_LINKAGE static CACHE STRING "" FORCE)
 # shared libraries when BUILD_SHARED_LIBS is unset; the APK carries only
 # libmain.so and the game module, so everything is static.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+# Host pkg-config packages (for example Homebrew zstd) cannot be linked into
+# Android. Aurora can build its pinned dependency from source instead.
+set(CMAKE_DISABLE_FIND_PACKAGE_PkgConfig TRUE CACHE BOOL "Do not use host pkg-config packages for Android")
 
 add_subdirectory(${GXRUNTIME_DIR} gxruntime_build EXCLUDE_FROM_ALL)
 
@@ -86,7 +90,18 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/hd_look.c
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c
-    ${BLUEWAKE_HOST_SRC}/save_state.c)
+    ${BLUEWAKE_HOST_SRC}/save_state.c
+    ${BLUEWAKE_HOST_SRC}/wwhd/formats.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/addrlib.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/hd.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/imaging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/sha256.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/ui.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/pack.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/output_staging.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/import_job.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/disc_image.cpp
+    ${BLUEWAKE_HOST_SRC}/wwhd/wiiu_disc.cpp)
 # The shell (the touch controls and the ⋯ menu) is the iPhone app's, so the
 # desktop options menu (settings_menu.cpp) is left out, as on iOS.
 set(BLUEWAKE_IOS_SRC ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
@@ -96,6 +111,7 @@ set(BLUEWAKE_IOS_SRC ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
 add_library(main SHARED
     src/android_entry.c
     src/android_shell.cpp
+    src/hd_import.cpp
     ${BLUEWAKE_IOS_SRC}/touch_controls.cpp
     ${BLUEWAKE_IOS_SRC}/controller_apply.cpp
     ${BLUEWAKE_IOS_SRC}/dolphin_save_import.c
@@ -106,6 +122,8 @@ set_source_files_properties(${BLUEWAKE_HOST_SRC}/main.c PROPERTIES
     COMPILE_DEFINITIONS "main=bluewake_host_main")
 # Save states (save_state.c) are gzip files: the system's zlib, as on iOS.
 target_link_libraries(main PRIVATE gxruntime GXRuntime::aurora android log dl m z)
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_crypto.cmake")
+target_link_libraries(main PRIVATE bluewake_wwhd_disc_crypto xxhash)
 if(TARGET imgui)
     target_link_libraries(main PRIVATE imgui)
 endif()
@@ -114,7 +132,7 @@ target_include_directories(main PRIVATE
     ${GXRUNTIME_DIR}/include
     ${BLUEWAKE_HOST_SRC}
     ${BLUEWAKE_IOS_SRC}
-    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+    ${_donor}/Source/Core/Core/PowerPC/StaticRecomp)
 target_compile_definitions(main PRIVATE
     DOLRECOMP_CPU_HEADER="core/cpu.h"
     BLUEWAKE_ENABLE_DEVELOPER_TRACING=0
@@ -137,7 +155,6 @@ endif()
 
 # The donor DSP (Dolphin's DSP interpreter and its high-level Zelda ucode, from
 # RecompCore) compiled from source, as on iOS and Windows.
-set(_donor ${BLUEWAKE_REPO_ROOT}/ref/recompcore)
 set(_dsp ${_donor}/Source/Core/Core/DSP)
 add_library(bluewake_dsp_donor STATIC
     ${_dsp}/DSPAccelerator.cpp ${_dsp}/DSPAnalyzer.cpp ${_dsp}/DSPAssembler.cpp
