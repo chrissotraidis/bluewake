@@ -76,6 +76,8 @@ Critical path: M0 → M1 → M2 → M3. Candidate implementation cannot safely b
 
 ## Decisions / gaps
 
+- **Fix Smooth Motion in every comparison.** It changes the game thread's IPC by about 5% in Outset (Game Mode, 2026-10-31), beyond the 2% target. Measure live with [`scripts/gamemode_measure.py`](https://github.com/chrissotraidis/bluewake/pull/522), which also records the game thread's clock: Outset was not power-limited, so clock changes there would point to a measurement problem.
+
 - `scripts/render_bench` used for #501 lives in open [#492](https://github.com/chrissotraidis/bluewake/pull/492), not current `main`; use that exact reviewed harness or document an equivalent command until it merges.
 - The private Outset state and translated module are required hardware inputs and cannot enter CI.
 - A RecompCore-owned candidate requires a companion RecompCore PR, followed by a BlueWake pin and exported patch under repository policy.

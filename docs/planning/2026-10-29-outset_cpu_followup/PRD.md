@@ -31,6 +31,8 @@ The candidate may improve Outset without reaching 30 FPS; relative improvement a
 
 ## Clarifications
 
+- **Game Mode baseline (2026-10-31):** Outset is not power-limited (game thread at 3.45 GHz, APU under its 15 W cap). Smooth Motion costs the game thread about 5% through shared cache and memory (IPC 1.74 off, 1.65 on; 25.1 vs 23.9 game FPS), more than the 2% acceptance threshold, so every A/A and A/B must fix the Smooth Motion setting. Either way the game thread does 17–20% too much work per frame for 30 FPS (≈ 138–145 M cycles against ≤ 115 M).
+
 - Motivation and platform are confirmed by the requested #501 live-game follow-up: first-revision Steam Deck, current SteamOS, Outset below its 30 FPS game target.
 - Candidate selection remains open until M0/M1 attribution. The rejected partial `GroundCrossGrpRp` hook from [#436](https://github.com/chrissotraidis/bluewake/pull/436) is evidence against repeating that exact implementation, not evidence against all work in the surrounding chunk.
 

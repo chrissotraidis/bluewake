@@ -10,7 +10,7 @@ Status: Planned
 Architecture: [performance workflow](../../performance/Overview.md#performance-workflow).
 
 - [ ] M0-T01: Record BlueWake/RecompCore/AppImage/module hashes, build flags, PGO identity and Deck settings.
-- [ ] M0-T02: Load the fixed Outset state and verify the expected stage, room, checkpoints and game-thread bottleneck.
+- [x] M0-T02: Load the fixed Outset state and verify the expected stage, room, checkpoints and game-thread bottleneck.
 - [ ] M0-T03: Run at least five interleaved A/A pairs and record FPS/cycles noise.
 
 ### M1: Attribute the flat game-thread profile (depends: M0)
@@ -38,4 +38,5 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
-
+| M0-T02 | #501 AppImage `6fe3d1a7868b` (`BlueWake-alias-lookup`, the Game Mode shortcut); `scripts/gamemode_measure.py` from [#522](https://github.com/chrissotraidis/bluewake/pull/522) | `gamemode_measure.py sample` (2 × 15 s per label), plus the session log's `[fps-dip]` lines | Steam Deck Game Mode, Outset (`stage=sea room=44`), render scale 3, camera still | Verified: Outset, game-thread bound (`cause=game-thread`, game thread 98% busy). Game thread at 3.445–3.457 GHz with the APU at 11.4–13.8 W, below its 15 W cap: **not power-limited** (unlike the Lava Room, bluewake #504) |
+| M0-T03 | Same build and session (local `measure-503/outset/windows.jsonl`, private) | Game Mode A/A: labels `aa1`, `aa2` and `smooth-on-again` (Smooth Motion on, 6 windows); `smooth-off` between them (2 windows) | As above | Partial (Game Mode, not yet the ≥ 5 rendered A/A pairs). Smooth Motion on: IPC 1.646–1.659 (spread 0.013), clock spread 0.01 GHz, 23.8–23.9 game FPS. **Smooth Motion off: IPC 1.735–1.742 (+5.2%, beyond the spread), clock unchanged, 25.1 game FPS (+5%)**: its helper threads cost the game thread through shared cache and memory, not clock. Cycles per frame ≈ 145 M (on) and ≈ 138 M (off); 30 FPS at 3.45 GHz needs ≤ 115 M, **17–20% less** |
