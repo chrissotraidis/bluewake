@@ -114,6 +114,9 @@ int main() {
     const Setting* pacing = find("DOL_AURORA_FRAME_INTERP_PACING");
     assert(pacing != nullptr && pacing->kind == Kind::Choice && pacing->control == Control::Chooser);
     assert(std::strcmp(fallback_for(*pacing), "") == 0 && next_launch_on(*pacing));
+    const Setting* efficient_effects = find("DOL_AURORA_EFFICIENT_EFFECTS");
+    assert(efficient_effects != nullptr && efficient_effects->tab == Tab::Display);
+    assert(efficient_effects->experimental == nullptr);
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

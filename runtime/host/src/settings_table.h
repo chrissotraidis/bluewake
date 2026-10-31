@@ -183,8 +183,7 @@ inline constexpr Setting kSettings[] = {
     // RecompCore #49's soft-effects buffer (aurora_set_efficient_effects), applied live.
     {.key = "DOL_AURORA_EFFICIENT_EFFECTS", .kind = Kind::Bool, .label = "Efficient soft effects",
      .control = Control::Switch,
-     .note = "Draws soft see-through effects, such as haze, smoke, fog and clouds, at lower resolution and blends them in once. Much faster at high render resolutions, slightly softer effects. Off by default.",
-     .experimental = "Measured in the Lava Room and the Shipwreck on a Steam Deck; not yet tested on Windows or a Mac."},
+     .note = "Experimental. Draws soft see-through effects, such as haze, smoke, fog and clouds, at lower resolution and blends them in once. Much faster at high render resolutions, slightly softer effects. Off by default; measured on a Steam Deck, not yet on Windows or a Mac."},
     {.key = "BLUEWAKE_MODS", .old_windows = "betterww", .label = "Better Wind Waker", .tab = Tab::Mods,
      .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_OPTIONS", .tab = Tab::Mods, .next_launch = Os::All}, // Windows: option.NAME
