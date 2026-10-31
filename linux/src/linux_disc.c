@@ -294,7 +294,6 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir,
         snprintf(game, sizeof game, "%sgame", data_dir);
     snprintf(dol, sizeof dol, "%s/main.dol", game);
     snprintf(rels, sizeof rels, "%s/rels", game);
-    snprintf(stamp_path, sizeof stamp_path, "%s/prepared.txt", game);
     char disc[4096] = "";
     if (force_picker)
         disc[0] = '\0';
