@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: Retained stack (+1.8% Outset game FPS); rendered checkpoint run pending  
+Status: Retained stack: +1.8% Game Mode, +1.6% rendered, checkpoints identical  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -30,8 +30,8 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 
 ### M3: Qualify and decide (depends: M2)
 
-- [ ] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints. Game Mode A/B done: **+1.8%** (beyond the spread). Rendered run (3 pairs, five states) in progress; `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run still to do.
-- [ ] M3-T02: Run the full five-scene rendered tour and focused CI tests.
+- [ ] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints. Game Mode A/B done: **+1.8%** (beyond the spread). Rendered run (3 pairs, five states): +1.6% overall, Outset +1.9%, checkpoints identical. `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run still to do.
+- [x] M3-T02: Run the full five-scene rendered tour and focused CI tests. No scene slower; checkpoints identical; `direct_calls_test` in Windows and Linux CI.
 - [ ] M3-T03: Perform the Outset walk/camera player test and record retain/reject reasoning. Decision (2026-10-31): **retain the stack** at +1.8%, slightly under the 2% target, as an exact improvement; the remaining saving (the interrupt test) is a separate follow-up.
 
 ## Evidence ledger
@@ -54,4 +54,5 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 | M3-T01 | Candidate v1 (`3a1b500` on the control, AppImage `90be42c17480`, same composite profile `35c4f7bc`); local `measure-503/plain/windows.jsonl` (private) | `gamemode_measure.py` 3 × 15 s per launch, control → candidate → control, Steam shortcut, worst-angle Outset state | Game Mode, scale 3, Smooth Motion and Efficient soft effects on, 4:3 | **Slower: 26.6 → 25.8 game FPS (−2.9%, spread 0.5)**; IPC 1.678 → 1.569. ≈ 8 M fewer instructions per frame but more cycles. Cause: the reused profile does not know `_plain`/`_full`, so the plain check was inlined at every call site (`func_802456E0`'s hot code 0xC4704 → 0xDA154 bytes, +11%) and the full check left the hot section. Fix `6ce8b35`: both out of line and `hot`, as the single check was |
 | M3-T01 | Candidate v2 (`6ce8b35`: both checks out of line and `hot`; AppImage `76447012ed27`, same composite profile); hot code of `func_802456E0`'s object 0xC2764 bytes (control 0xC4704); local `measure-503/plain2/windows.jsonl` (private) | Same Game Mode A/B/A as v1 | As v1 | **26.5 → 26.7 game FPS (+0.7%, spread 0.6: within noise)**; IPC 1.676 → 1.645. Layout fixed, but the exact check saves too little to clear the 2% bar on its own; the ceiling's +3.1% came mostly from the interrupt and address tests it skipped |
 | M3-T01 | Stack: candidate v2 + actor-search inline (`1c41c6b`; AppImage `47c7f3077292`, same composite profile); local `measure-503/plain3/windows.jsonl` (private) | Same Game Mode A/B/A | As v1 | **26.1 → 26.6 game FPS (+1.8%, spread 0.4: beyond it)**; IPC 1.648 → 1.614. Control ran 0.4 FPS lower this session than the previous one; the interleaved control-twice runs absorb it. The paired-single path was dropped: its plain-float fast path already exists, leaving only call overhead (≈ 0.2 M per frame) |
+| M3-T01/T02 | Control (A, `e237759c`) against the retained stack (B, `47c7f3077292`); local `2026_10_31-232547/` (private) | `render_bench` rendered, desktop session, unpaced, 5 states × 1,800 retraces, 3 pairs A/B/B/A (12 measured + 2 picture runs), scale 3, Smooth Motion on (1 step), Efficient soft effects on | Steam Deck Desktop Mode | **B +1.6% overall**: Outset +1.9%, Lava Room +3.0%, Hyrule Castle +1.8%, Butterfly Room +0.5%, Shipwreck +0.7%; busy equal. **Guest checkpoints identical across all 14 runs of both builds in every scene**, and equal to the control's hashes from the ceiling run. Picture flags are capture timing, not state: the Butterfly Room shows a different attack moment with identical checkpoints (paced Smooth Motion capture), and the Outset and Lava Room flicker is equal in both builds (28,245 vs 27,893; 11,875 vs 11,542 pixels) |
 | M1-T03 | Same session's exit reports (`[native-*]` lines; local `measure-503/m1-native-counts.txt`) | Accepted/declined counts over the session (22,417 retraces, ≈ 8,500 game frames) | As above | ≈ 304 M native runs and ≈ 10.7 M declines: **≈ 37,000 routing decisions per game frame**. The readiness callback (`host_can_skip_observation`) is only 0.33% of the game thread, so the `*_try` functions' 7.5% is mostly the native routines' own (inlined) work. Declines are dominated by `key-s` (79% declined) and `transform-simple` (80%), ≈ 1,060 per frame: a minor candidate. The 13% gap to 30 FPS has to come from the translated chunks (M1-T02) |

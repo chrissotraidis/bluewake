@@ -1,6 +1,6 @@
 # TECH_PLAN — Outset game-thread follow-up
 
-Status: Retained stack, +1.8% Outset game FPS in Game Mode; rendered checkpoint run pending  
+Status: Retained stack: +1.8% Game Mode, +1.6% rendered (Outset +1.9%), checkpoints identical  
 Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; control build = [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0 (local `f4bda45`)  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -60,6 +60,8 @@ Every A/B ran in Game Mode from the worst-angle Outset state, launched through t
 | v1 | Range tests settled at build time | 26.6 → 25.8 | **−2.9%** | 0.5 | The plain check was inlined at ≈ 448 sites per chunk (+11% hot code): layout, not logic |
 | v2 | v1, both checks out of line and `hot` | 26.5 → 26.7 | +0.7% | 0.6 | Exact, but too small alone |
 | **Stack (retained)** | **v2 + actor-search lookup inlined** | **26.1 → 26.6** | **+1.8%** | 0.4 | Two exact shared-cost cuts add up |
+
+Rendered, five states, 3 pairs (unpaced): the stack is **+1.6% overall** (Outset +1.9%, Lava Room +3.0%, Hyrule Castle +1.8%, Butterfly Room +0.5%, Shipwreck +0.7%), with **guest checkpoints identical to the control in every run and scene**.
 
 Considered and dropped: the paired-single plain-float path already exists; only call overhead remains (≈ 0.2 M cycles per frame), and inlining such helpers was slower in October.
 
@@ -124,14 +126,14 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPU
 | Layer | Method | Required evidence | Status |
 |---|---|---|---|
 | Unit | `direct_calls_test`, -O0 and -O2/Release, Linux and Windows CI | Plain = full in every state | Passing locally and in CI |
-| Exactness | render_bench, five states | Guest checkpoints identical to the control in every scene | Pending |
+| Exactness | render_bench, five states | Guest checkpoints identical to the control in every scene | Passed: identical in all 14 runs × 5 scenes |
 | Safety | `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run | Zero unsafe answers | Pending |
-| Performance | Game Mode A/B/A (Outset), rendered A/B/B/A ≥ 5 pairs | Outset gain above 2% and the A/A spread | Game Mode +1.8% (beyond spread); rendered pending |
+| Performance | Game Mode A/B/A (Outset), rendered A/B/B/A ≥ 5 pairs | Outset gain above 2% and the A/A spread | Game Mode +1.8% (beyond spread); rendered +1.6% overall, Outset +1.9% (3 pairs) |
 | Regression | Five-scene tour, Outset walk | No scene beyond noise; no player-visible issue | Pending |
 
 ## Next steps
 
-1. **Exactness:** the rendered run across the five states (in progress) must show guest checkpoints identical to the control in every scene; then one `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run with zero unsafe answers.
+1. **Safety:** one `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run with zero unsafe answers (exactness already shown by identical checkpoints).
 2. **Player check:** an Outset walk on the Deck with the stack.
 3. **Follow-up, separate change:** the interrupt test. A host-maintained "interrupt may be pending" word would replace three of its reads. It needs every write site kept in sync (≈ 17 in `main.c`, 5 in RecompCore's `interrupts.c`), a RecompCore companion PR and a handshake bump coordinated with [#524](https://github.com/chrissotraidis/bluewake/pull/524). Estimated ≈ +1%.
 4. **Later:** count the dispatch-loop edges and look at the GX command stream.
