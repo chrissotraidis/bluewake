@@ -1,0 +1,571 @@
+From dd54bc7b4a2294095a20b6e71b3f56a2a49af0d6 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:51:48 -0600
+Subject: [PATCH] Sun shadows: the palms shaded and lit as Wind Waker HD's
+
+DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY=1: only the toon-shaded draws (the mask's green 1: Link, the
+islanders) are characters to the sun pass; skinned-only ones (green 0.6: a palm's swaying leaves) are
+scenery, as HD lights Outset's palms with its scenery's shader: they take the facing term, terrain mix and
+the scenery's caster bias and lookup (with the characters' their thin leaves shaded themselves), and smooth
+normals made on the CPU like solid scenery's, drawn by the mask's pass (kind 9: a cut-out part with its
+normal). A leaf is lit from either side (the mask turns a normal to the side seen; HD's leaf normals point off
+the frond's top whichever side is seen); without normals of its own and none made, no facing term.
+
+DOL_AURORA_HD_VERTEX_COLOURS: a table of HD's vertex colours by the same exact positions ('BWHC': x, y, z, r,
+g, b, a). A draw that takes smooth normals and mixes its shade colour (C0) to its light colour by its vertex
+colour (first stage lerp(C0, KONST, RASC) from colour channel 0; no later stage reads C0) takes HD's light:
+C0 black and HD's colour as its vertex colour, so it gives texture x HD's colour x the light colour and the
+sun pass makes the light (a position the table lacks keeps its own result). Its in-between frames take the
+same constants.
+
+DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1: skinned scenery's ambient mixed from sky to ground by its smooth
+normal, as HD's per-vertex light is, not by the depth's normal of a cut-out leaf card.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 243 ++++++++++++++++--
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp |  55 +++-
+ 2 files changed, 272 insertions(+), 26 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 993ed0b67d..eb1b0eacfb 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -597,6 +597,16 @@ static bool toon_draw(const gxc::PipelineKey& key) {
+ // mask.
+ static bool character_draw(const gxc::PipelineKey& key) { return key.shader.has_pos_mtx_idx != 0u || toon_draw(key); }
+ 
++// DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY=1: the sun pass takes a skinned draw that isn't toon-shaded (a palm, whose
++// leaves sway) as scenery, as Wind Waker HD draws its palms with the terrain's shader.
++static bool skinned_scenery() {
++  static const bool value = [] {
++    const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY");
++    return env != nullptr && env[0] == '1';
++  }();
++  return value;
++}
++
+ // DOL_AURORA_TERRAIN_NORMAL_LOG=1 (local debug): whether the scenery the sun shadows' facing term shades
+ // carries vertex normals and lights with them, a line per distinct vertex format, lighting and texture.
+ static void log_terrain_normals(const gxc::PipelineKey& key, uint32_t texture, uint32_t texmapMask) {
+@@ -1460,7 +1470,10 @@ void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass
+   if (!data.sunCaster && !alpha)
+     return;
+   SunCasterState& state = g_sunCasterState;
+-  const int pipeline = (data.character ? 4 : 0) + (alpha ? 2 : 0) + (data.posMtxIdx ? 1 : 0);
++  // Skinned scenery (skinned_scenery(), a palm's leaves) casts with the scenery's bias and HD's lookup (no slope
++  // term), or its thin leaves shaded themselves.
++  const bool character = data.character && (data.toon || !skinned_scenery());
++  const int pipeline = (character ? 4 : 0) + (alpha ? 2 : 0) + (data.posMtxIdx ? 1 : 0);
+   if (state.pipeline != pipeline) {
+     pass.SetPipeline(g_sunCasterPipelines[pipeline]);
+     state.pipeline = pipeline;
+@@ -1656,6 +1669,46 @@ fn seen_normal(in: VertexOutN) -> vec4f {
+ fn fs_land_smooth_n(in: VertexOutN) -> MaskOut {
+     return MaskOut(vec4f(0.0, 0.0, bloom_b, 0.0), seen_normal(in));
+ }
++// A character's cut-out part with its own normals (a palm's leaves): kind 5's cutout, kind 8's normal.
++struct VertexInUvN {
++    @location(0) rawpos: vec3f,
++    @location(1) posmtx: u32,
++    @location(2) uv0: vec2f,
++    @location(3) normal: vec3f,
++};
++struct VertexOutUvN {
++    @builtin(position) pos: vec4f,
++    @location(0) viewpos: vec3f,
++    @location(1) normal: vec3f,
++    @location(2) uv: vec2f,
++};
++fn smooth_uv_out(p0: vec4f, p1: vec4f, p2: vec4f, in: VertexInUvN) -> VertexOutUvN {
++    var out: VertexOutUvN;
++    out.pos = to_clip(p0, p1, p2, in.rawpos);
++    let pos4 = vec4f(in.rawpos, 1.0);
++    out.viewpos = vec3f(dot(p0, pos4), dot(p1, pos4), dot(p2, pos4));
++    out.normal = vec3f(dot(p0.xyz, in.normal), dot(p1.xyz, in.normal), dot(p2.xyz, in.normal));
++    out.uv = in.uv0;
++    return out;
++}
++@vertex
++fn vs_current_uvn(in: VertexInUvN) -> VertexOutUvN {
++    return smooth_uv_out(vsc.posnormalmatrix[0], vsc.posnormalmatrix[1], vsc.posnormalmatrix[2], in);
++}
++@vertex
++fn vs_indexed_uvn(in: VertexInUvN) -> VertexOutUvN {
++    let i = i32(in.posmtx);
++    return smooth_uv_out(vsc.transformmatrices[i], vsc.transformmatrices[i + 1], vsc.transformmatrices[i + 2], in);
++}
++@fragment
++fn fs_actor_alpha_smooth_n(in: VertexOutUvN) -> MaskOut {
++    // The normal (its derivatives) and the texture before the discard, in uniform control flow.
++    let n = seen_normal(VertexOutN(in.pos, in.viewpos, in.normal));
++    if (textureSample(tex, samp, in.uv).a < 0.5) {
++        discard;
++    }
++    return MaskOut(vec4f(0.0, actor_g, 0.0, 0.0), n);
++}
+ // A character with its own normals (Wind Waker HD's rim light): green in the mask, its normal beside it. Its
+ // position matrix turns the normal (a skinned part's is a rotation, as the scenery's is).
+ @fragment
+@@ -1670,10 +1723,11 @@ wgpu::BindGroup g_seaMaskGroup;
+ // is not the sea, 1 the sea, 2 a sea draw that writes no depth, 3 what is not the sea with its texture's cutout, 4 a
+ // character (skinned: green in the mask), 5 a character's part with its texture's cutout, 6 scenery with smooth
+ // normals (as 0 without the normals' target), 7 what is solid but writes no depth (the sky, for HD's bloom mask),
+-// 8 a character with its own normals (as 4 without the normals' target); normals 1: the pass has the normals'
++// 8 a character with its own normals (as 4 without the normals' target), 9 a character's cut-out part with its own
++// normals (a palm's leaves; as 5 without the normals' target); normals 1: the pass has the normals'
+ // second target; variant 1: blue 0.5 (HD's bloom mask: it may glow), or for a character green 0.6 (skinned, not
+ // toon-shaded).
+-constexpr int kSeaMaskKinds = 9;
++constexpr int kSeaMaskKinds = 10;
+ std::array<wgpu::RenderPipeline, 2 * 2 * kSeaMaskKinds * 2> g_seaMaskPipelines;
+ wgpu::ShaderModule g_seaMaskModule;
+ wgpu::PipelineLayout g_seaMaskPipelineLayout;
+@@ -1723,6 +1777,13 @@ const wgpu::RenderPipeline& sea_mask_pipeline(int normals, int bloom, int kind,
+       .attributeCount = normalAttributes.size(),
+       .attributes = normalAttributes.data(),
+   };
++  const std::array uvNormalAttributes{attributes[0], attributes[1], attributes[2], normalAttributes[2]};
++  const wgpu::VertexBufferLayout uvNormalVertexLayout{
++      .arrayStride = gxc::kVertexStrideBytes,
++      .stepMode = wgpu::VertexStepMode::Vertex,
++      .attributeCount = uvNormalAttributes.size(),
++      .attributes = uvNormalAttributes.data(),
++  };
+   const wgpu::VertexBufferLayout vertexLayout{
+       .arrayStride = gxc::kVertexStrideBytes,
+       .stepMode = wgpu::VertexStepMode::Vertex,
+@@ -1747,15 +1808,17 @@ const wgpu::RenderPipeline& sea_mask_pipeline(int normals, int bloom, int kind,
+       .depthWriteEnabled = kind != 2 && kind != 7,
+       .depthCompare = wgpu::CompareFunction::GreaterEqual,
+   };
+-  const bool alpha = kind == 3 || kind == 5;
++  const bool alpha = kind == 3 || kind == 5 || kind == 9;
+   const bool smooth = (kind == 6 || kind == 8) && normals != 0;
+-  const char* entry = kind == 5                             ? "fs_actor_alpha"
++  const bool alphaSmooth = kind == 9 && normals != 0;
++  const char* entry = kind == 5 || kind == 9              ? "fs_actor_alpha"
+                       : alpha                               ? "fs_land_alpha"
+                       : kind == 0 || kind == 6 || kind == 7 ? "fs_land"
+                       : kind == 4 || kind == 8              ? "fs_actor"
+                                                             : "fs_sea";
+-  const std::string entryN =
+-      smooth ? (kind == 8 ? "fs_actor_smooth_n" : "fs_land_smooth_n") : std::string(entry) + "_n";
++  const std::string entryN = alphaSmooth ? "fs_actor_alpha_smooth_n"
++                             : smooth    ? (kind == 8 ? "fs_actor_smooth_n" : "fs_land_smooth_n")
++                                         : std::string(entry) + "_n";
+   const std::array constants{wgpu::ConstantEntry{.key = "bloom_b", .value = bloom != 0 ? 0.5 : 0.0},
+                              wgpu::ConstantEntry{.key = "actor_g", .value = bloom != 0 ? 0.6 : 1.0}};
+   const wgpu::FragmentState fragment{.module = g_seaMaskModule,
+@@ -1768,11 +1831,15 @@ const wgpu::RenderPipeline& sea_mask_pipeline(int normals, int bloom, int kind,
+       .label = "Sea mask",
+       .layout = alpha ? g_seaMaskAlphaPipelineLayout : g_seaMaskPipelineLayout,
+       .vertex = {.module = g_seaMaskModule,
+-                 .entryPoint = smooth  ? (indexed != 0 ? "vs_indexed_n" : "vs_current_n")
++                 .entryPoint = alphaSmooth ? (indexed != 0 ? "vs_indexed_uvn" : "vs_current_uvn")
++                               : smooth  ? (indexed != 0 ? "vs_indexed_n" : "vs_current_n")
+                                : alpha ? (indexed != 0 ? "vs_indexed_uv" : "vs_current_uv")
+                                        : (indexed != 0 ? "vs_indexed" : "vs_current"),
+                  .bufferCount = 1,
+-                 .buffers = smooth ? &normalVertexLayout : alpha ? &alphaVertexLayout : &vertexLayout},
++                 .buffers = alphaSmooth ? &uvNormalVertexLayout
++                            : smooth    ? &normalVertexLayout
++                            : alpha     ? &alphaVertexLayout
++                                        : &vertexLayout},
+       .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList, .cullMode = wgpu::CullMode::None},
+       .depthStencil = &depth,
+       .multisample = {.count = 1, .mask = UINT32_MAX},
+@@ -1811,7 +1878,8 @@ void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass)
+   if (!data.seaSurface && !data.sunCaster && !cutout && !character && !cover)
+     return;
+   const int kind = data.seaSurface ? (data.depthWrite ? 1 : 2)
+-                   : character     ? (cutout ? 5 : data.hasNormal && g_seaMaskNormals ? 8 : 4)
++                   : character     ? (cutout ? (data.hasNormal && g_seaMaskNormals ? 9 : 5)
++                                             : data.hasNormal && g_seaMaskNormals ? 8 : 4)
+                    : cutout        ? 3
+                    : cover         ? 7
+                    : data.smoothNormal && g_seaMaskNormals ? 6
+@@ -2335,8 +2403,8 @@ bool positions_written(const gxc::DrawPlan& plan) {
+   return written;
+ }
+ 
+-uint32_t queue_interp_job(const gxc::DrawPlan& plan, bool repeatsLastDraw, bool tev, bool pixelRepeats,
+-                          bool positionsWritten) {
++uint32_t queue_interp_job(const gxc::DrawPlan& plan, const gxc::PixelShaderConstants& pixel, bool repeatsLastDraw,
++                          bool tev, bool pixelRepeats, bool positionsWritten) {
+   InterpHelper* h = g_interpHelper.load(std::memory_order_acquire);
+   if (h == nullptr) {
+     h = new InterpHelper;
+@@ -2374,7 +2442,7 @@ uint32_t queue_interp_job(const gxc::DrawPlan& plan, bool repeatsLastDraw, bool
+   job.tev = tev;
+   job.pixelCopied = tev && (!pixelRepeats || !h->pixelCarried);
+   if (job.pixelCopied) {
+-    std::memcpy(&job.pixel, &plan.pixel_constants, sizeof(plan.pixel_constants));
++    std::memcpy(&job.pixel, &pixel, sizeof(pixel));
+     h->pixelCarried = true;
+   }
+   h->produced.store(head + 1, std::memory_order_release);
+@@ -2521,9 +2589,13 @@ static void dump_draw(const gxc::DrawPlan& plan) {
+ // sea's, or a skinned draw's. Off, nothing is done.
+ static bool smooth_normal_draw(const gxc::DrawPlan& plan, bool sea) {
+   const auto& shader = plan.pipeline.shader;
++  // Skinned scenery (a palm) too, its cut-out leaves included: its positions are each bone's own, and the mask's
++  // pass turns the normals by the same matrices.
++  const bool skinned = shader.has_pos_mtx_idx != 0u && skinned_scenery() && !toon_draw(plan.pipeline);
++  const bool solid = shader.has_pos_mtx_idx == 0u && sun_caster(plan.pipeline) && !character_draw(plan.pipeline);
+   return post_fx::sun_normals_wanted() && !sea && plan.constants.projection[3][3] != 1.f &&
+          plan.pipeline.depth_update != 0u && shader.has_vertex_normal == 0u && shader.raw_tex_hi_in_nbt == 0u &&
+-         shader.has_pos_mtx_idx == 0u && sun_caster(plan.pipeline) && !character_draw(plan.pipeline) &&
++         (solid || (skinned && (sun_caster(plan.pipeline) || sun_caster_alpha(plan.pipeline)))) &&
+          plan.indices.size() >= 3 && plan.vertices.size() >= gxc::kVertexFloats * 3u;
+ }
+ 
+@@ -2594,6 +2666,130 @@ static std::shared_ptr<const HdNormals> hd_normals() {
+   return g_hdNormals;
+ }
+ 
++// Wind Waker HD's own vertex colours, by the same exact positions (local test: one fixed table,
++// DOL_AURORA_HD_VERTEX_COLOURS). Format: b'BWHC', u32 version 1, u32 count, then count x f32 x, y, z, r, g, b, a.
++// HD lights its palms as texture x vertex colour x (sky-to-ground ambient + sun x N.L x shadow); the sun pass makes
++// the light, so the draw gives texture x vertex colour x the light colour: the GameCube's palms go from the shade
++// colour (C0) to the light one (KONST) by their vertex colour, so such a draw takes C0 black and HD's colour (a
++// vertex the table hasn't keeps its own result). Only in the draws that take smooth normals, so only while the HD
++// sun shadows' facing term is on.
++using HdColours = absl::flat_hash_map<std::array<uint32_t, 3>, std::array<float, 4>>;
++
++static const HdColours* hd_colours() {
++  static const std::unique_ptr<const HdColours> table = []() -> std::unique_ptr<const HdColours> {
++    const char* path = std::getenv("DOL_AURORA_HD_VERTEX_COLOURS");
++    if (path == nullptr || path[0] == '\0')
++      return nullptr;
++    FILE* f = std::fopen(path, "rb");
++    if (f == nullptr)
++      return nullptr;
++    char magic[4]{};
++    uint32_t version = 0, count = 0;
++    bool ok = std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "BWHC", 4) == 0 &&
++              std::fread(&version, 4, 1, f) == 1 && version == 1 && std::fread(&count, 4, 1, f) == 1;
++    std::vector<std::array<float, 7>> rows(ok ? count : 0);
++    ok = ok && std::fread(rows.data(), sizeof(rows[0]), rows.size(), f) == rows.size();
++    std::fclose(f);
++    if (!ok)
++      return nullptr;
++    auto out = std::make_unique<HdColours>();
++    for (const auto& r : rows) {
++      std::array<uint32_t, 3> key{};
++      std::memcpy(key.data(), r.data(), sizeof(key));
++      out->try_emplace(key, std::array<float, 4>{r[3], r[4], r[5], r[6]});
++    }
++    std::fprintf(stderr, "[sun-facing] HD vertex colours: %zu positions from %s\n", out->size(), path);
++    return out;
++  }();
++  return table.get();
++}
++
++// A konst colour selector's rgb (0..255).
++static std::array<int, 3> konst_rgb(const gxc::PixelShaderConstants& pc, uint8_t sel) {
++  if (sel < 8) {
++    const int v = sel == 0 ? 255 : 255 - sel * 32 + (sel >= 4 ? 1 : 0);
++    return {v, v, v};
++  }
++  if (sel < 12)
++    return {0, 0, 0};
++  if (sel < 16)
++    return {pc.kcolors[sel - 12][0], pc.kcolors[sel - 12][1], pc.kcolors[sel - 12][2]};
++  const int v = pc.kcolors[sel & 3][((sel - 16) >> 2) & 3];
++  return {v, v, v};
++}
++
++// Whether a draw takes HD's light: its first stage is lerp(C0, KONST, RASC) from colour channel 0 (the palms'), no
++// later stage reads C0's colour, and the table has some of its positions.
++static bool hd_light_draw(const gxc::DrawPlan& plan) {
++  const HdColours* table = hd_colours();
++  const auto& shader = plan.pipeline.shader;
++  if (table == nullptr || shader.tev_valid == 0u || shader.num_tev_stages == 0u)
++    return false;
++  const gxc::TevStageKey& s = shader.tev_stages[0];
++  // a C0, b KONST, c RASC, d ZERO; add, no bias or scale; colour channel 0
++  if (s.cc_a != 2 || s.cc_b != 14 || s.cc_c != 10 || s.cc_d != 15 || s.cc_bias != 0 || s.cc_op != 0 ||
++      s.cc_scale != 0 || (s.tevorders_colorchan != 0 && s.tevorders_colorchan != 4))
++    return false;
++  for (uint32_t n = 1; n < shader.num_tev_stages; ++n) {
++    const gxc::TevStageKey& t = shader.tev_stages[n];
++    for (const uint8_t arg : {t.cc_a, t.cc_b, t.cc_c, t.cc_d})
++      if (arg == 2 || arg == 3)
++        return false;
++  }
++  const size_t count = plan.vertices.size() / gxc::kVertexFloats;
++  for (size_t v = 0; v < count; ++v) {
++    std::array<uint32_t, 3> key{};
++    std::memcpy(key.data(), &plan.vertices[v * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float)],
++                sizeof(key));
++    if (table->contains(key))
++      return true;
++  }
++  return false;
++}
++
++// Such a draw's pixel constants: C0's colour black.
++static const gxc::PixelShaderConstants& hd_light_constants(const gxc::DrawPlan& plan) {
++  static thread_local gxc::PixelShaderConstants pc;
++  pc = plan.pixel_constants;
++  pc.colors[1][0] = pc.colors[1][1] = pc.colors[1][2] = 0;
++  return pc;
++}
++
++// Such a draw's vertex colours: HD's, and, where the table hasn't the position, the fraction of the light colour
++// the GameCube's mix gave (shade + (light - shade) x own) / light.
++static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vertices) {
++  if (!hd_light_draw(plan))
++    return;
++  const HdColours* table = hd_colours();
++  const gxc::TevStageKey& s = plan.pipeline.shader.tev_stages[0];
++  const auto& pc = plan.pixel_constants;
++  const std::array<int, 3> k = konst_rgb(pc, s.ksel_kc);
++  const std::array<int, 3> c{pc.colors[1][0], pc.colors[1][1], pc.colors[1][2]};
++  static const bool log = std::getenv("DOL_AURORA_SUN_SHADOW_FACING_LOG") != nullptr;
++  static thread_local uint64_t s_draws = 0;
++  const size_t count = vertices.size() / gxc::kVertexFloats;
++  size_t hits = 0;
++  for (size_t v = 0; v < count; ++v) {
++    float* vert = &vertices[v * gxc::kVertexFloats];
++    std::array<uint32_t, 3> key{};
++    std::memcpy(key.data(), vert + gxc::kVertexPosOffset / sizeof(float), sizeof(key));
++    float* col = vert + gxc::kVertexColor0Offset / sizeof(float);
++    const auto it = table->find(key);
++    if (it != table->end())
++      ++hits;
++    for (int ch = 0; ch < 3; ++ch) {
++      if (it != table->end()) {
++        col[ch] = it->second[ch];
++      } else if (k[ch] > 0) {
++        col[ch] = std::clamp((c[ch] + (k[ch] - c[ch]) * col[ch]) / static_cast<float>(k[ch]), 0.f, 1.f);
++      }
++    }
++  }
++  if (log && ++s_draws % 600 == 1)
++    std::fprintf(stderr, "[sun-facing] HD light: %zu of %zu vertices HD's colours, shade %d,%d,%d light %d,%d,%d\n",
++                 hits, count, c[0], c[1], c[2], k[0], k[1], k[2]);
++}
++
+ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan) {
+   using Vec = std::array<float, 3>;
+   static thread_local std::vector<float> vertices;
+@@ -2705,6 +2901,7 @@ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan)
+     for (int k = 0; k < 3; ++k)
+       out[k] = length > 0.f ? n[k] / length : 0.f;
+   }
++  apply_hd_colours(plan, vertices);
+   return vertices;
+ }
+ 
+@@ -3253,14 +3450,19 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       g_vertexUniformCache, reinterpret_cast<const uint8_t*>(&plan.constants),
+       sizeof(plan.constants), repeatsLast ? 1 : 0);
+   g_pushedConstantsId = plan.constants_id;
++  const bool seaSurface = sea_mask_draw(plan);
++  const bool smoothNormal = smooth_normal_draw(plan, seaSurface);
++  // A palm with Wind Waker HD's light (apply_hd_colours()): its shade colour black.
++  const gxc::PixelShaderConstants& pixelConstants =
++      smoothNormal && hd_light_draw(plan) ? hd_light_constants(plan) : plan.pixel_constants;
+   Range pixelUniformRange{};
+   bool pixelRepeats = false;
+   if (tev) {
+     const uint64_t hits = g_pixelUniformCache.hits;
+     pixelUniformRange = push_uniform_dedup(
+         g_pixelUniformCache,
+-        reinterpret_cast<const uint8_t*>(&plan.pixel_constants),
+-        sizeof(plan.pixel_constants));
++        reinterpret_cast<const uint8_t*>(&pixelConstants),
++        sizeof(pixelConstants));
+     pixelRepeats = g_pixelUniformCache.hits != hits;
+   }
+   // A lightning strike (dThunder_c) draws, with its bolt, an invisible model
+@@ -3374,7 +3576,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       uberConfig.depthOnly = 2u;
+       uberPipeline = pipeline_ref(uberConfig);
+       static gxc::UberPixelConstants block; // one recording thread at a time
+-      std::memcpy(&block.psc, &plan.pixel_constants, sizeof block.psc);
++      std::memcpy(&block.psc, &pixelConstants, sizeof block.psc);
+       std::memset(block.key, 0, sizeof block.key);
+       std::memcpy(block.key, &plan.pipeline.shader, sizeof plan.pipeline.shader);
+       block.extra[0] = gxc::texmap_popcount(gxc::used_texmap_mask(plan.pipeline.shader)) > 1u ? 1u : 0u;
+@@ -3395,8 +3597,6 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     return env == nullptr || env[0] != '0';
+   }();
+   const size_t vertexOffset = next_vertex_offset(gxc::kVertexStrideBytes);
+-  const bool seaSurface = sea_mask_draw(plan);
+-  const bool smoothNormal = smooth_normal_draw(plan, seaSurface);
+   DrawData* batch = nullptr;
+   uint32_t firstVertex = 0;
+   // Independently blended vertices cannot share a batch's rebased index
+@@ -3445,7 +3645,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+         g_interpUniformCache, current_frame_id(), recording_frame_slot(), reinterpret_cast<const uint8_t*>(interpConstants),
+         sizeof(*interpConstants), frame_interp::last_blend_repeated());
+   else if (interpolating && !matchHere)
+-    interpJob = queue_interp_job(plan, repeatsLast, tev, pixelRepeats, positionsWritten);
++    interpJob = queue_interp_job(plan, pixelConstants, repeatsLast, tev, pixelRepeats, positionsWritten);
+ 
+   const auto indexCount = static_cast<uint32_t>(plan.indices.size());
+   if (batch != nullptr) {
+@@ -3500,7 +3700,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       .maskCover = plan.pipeline.depth_update == 0u && plan.pipeline.color_update != 0u &&
+                    plan.pipeline.blend_enable == 0u && plan.pipeline.blend_subtract == 0u &&
+                    plan.pipeline.primitive_topology == 0u,
+-      .hasNormal = plan.pipeline.shader.has_vertex_normal != 0u && plan.pipeline.shader.raw_tex_hi_in_nbt == 0u,
++      .hasNormal = (plan.pipeline.shader.has_vertex_normal != 0u && plan.pipeline.shader.raw_tex_hi_in_nbt == 0u) ||
++                   smoothNormal,
+       .toon = toon_draw(plan.pipeline),
+   });
+   return true;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index e93ccb71ed..c289fc7285 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -153,6 +153,9 @@ float g_sunFacingMul = 10.f;         // DOL_AURORA_SUN_SHADOW_FACING_MUL: fully
+ // (DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL, local test).
+ float g_sunFacingDepthMul = 0.f;
+ float g_sunFacingDepthBlur = 8.f; // DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR: its blur, pixels at 1080 lines (0 none)
++// Skinned scenery (a palm) takes its ambient's sky-to-ground mix from its smooth normal, as HD's per-vertex light
++// does, not from the depth's normal of a cut-out leaf card (DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1, local test).
++bool g_sunSmoothAmbient = false;
+ float g_sunFacingFarStart = 12000.f; // DOL_AURORA_SUN_SHADOW_FACING_FAR_START / _END: where it fades out
+ float g_sunFacingFarEnd = 14000.f;
+ // With the facing term, HD's terrain curve for its shadow (its terrain shaders' 0.5 x pow(2 x shadow, e), e
+@@ -203,6 +206,12 @@ float g_sunMapRanges[kSunMapCascades] = {}; // each cascade's range when set (0:
+ // camera still, and stood still with the clock held). Last frame's place comes from its camera and the depth the
+ // blend keeps in alpha; a place that was hidden then (another depth there) takes this frame's alone.
+ bool g_sunTemporal = false;
++// DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY=1 (local test): only the toon-shaded draws (the mask's green 1: Link, the
++// islanders) are characters to the sun pass; the skinned-only (green 0.6: a palm's swaying leaves) are scenery.
++// Wind Waker HD lights Outset's palms with its terrain shader (a RenderDoc capture at the bridge: the scenery's
++// light x 3, per-vertex N.L, the shadow pre-pass and the cloud texture); as characters here their leaves took no
++// facing term or terrain mix and came out flat green.
++bool g_sunSkinnedScenery = false;
+ float g_sunTemporalRange[3] = {300.f, 1500.f, 0.9f};
+ wgpu::Texture g_sunHist;
+ wgpu::TextureView g_sunHistView;
+@@ -1162,6 +1171,10 @@ override mix_e_near: f32 = 4.0; // the curve's power near the camera (HD's 4; 2
+ // size, one hardware-filtered lookup per pixel in the cascade its distance picks (hd_split0/1: HD's 420 and 1395),
+ // blurred; the main pass takes every pixel's shadow from it, as HD's materials read its pre-pass.
+ override hd_prepass: f32 = 0.0;
++// The mask's green from which a pixel is a character (keeps its own shading, BlueWake's bias, no facing term or
++// terrain mix): 0.5 takes the skinned (green 0.6) as well as the toon-shaded (1); 0.8 the toon-shaded alone
++// (g_sunSkinnedScenery), as Wind Waker HD draws Outset's palms with its scenery's shader.
++override character_g: f32 = 0.5;
+ override sea_shadow: f32 = 1.0; // the sea's shadow strength (HD's cPrimShadowIntensity: 0.5 in HD's pass)
+ override hd_split0: f32 = 420.0;
+ override hd_split1: f32 = 1395.0;
+@@ -1183,6 +1196,7 @@ override facing_on: f32 = 0.0;
+ override facing_mul: f32 = 10.0;
+ override facing_depth_mul: f32 = 0.0;
+ override facing_depth_blur: f32 = 8.0;
++override smooth_ambient: f32 = 0.0;
+ override facing_far_start: f32 = 12000.0;
+ override facing_far_end: f32 = 14000.0;
+ override shape_on: f32 = 1.0;
+@@ -1637,7 +1651,7 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         if (view.facing.x > 0.5) {
+             let csize = vec2<f32>(textureDimensions(mask));
+             let cp = clamp(vec2<i32>(in.uv * csize), vec2<i32>(0), vec2<i32>(csize) - vec2<i32>(1));
+-            character = textureLoad(mask, cp, 0).g > 0.5;
++            character = textureLoad(mask, cp, 0).g > character_g;
+         }
+         if (hd_bias > 0.5 && !character) {
+             let graze = pow(clamp(1.0 - abs(ndl), 0.0, 1.0), 9.0);
+@@ -1784,7 +1798,7 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         if (view.facing.x > 0.5) {
+             let csize = vec2<f32>(textureDimensions(mask));
+             let cp = clamp(vec2<i32>(in.uv * csize), vec2<i32>(0), vec2<i32>(csize) - vec2<i32>(1));
+-            chr = textureLoad(mask, cp, 0).g > 0.5;
++            chr = textureLoad(mask, cp, 0).g > character_g;
+         }
+         if (!chr) {
+             var b = textureSampleLevel(shadow_blur, samp, in.uv, 0.0);
+@@ -1811,7 +1825,7 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         let msize = vec2<f32>(textureDimensions(mask));
+         let mp = clamp(vec2<i32>(in.uv * msize), vec2<i32>(0), vec2<i32>(msize) - vec2<i32>(1));
+         let mk = textureLoad(mask, mp, 0);
+-        terrain = mk.r < 0.5 && mk.g < 0.5;
++        terrain = mk.r < 0.5 && mk.g < character_g;
+         if (terrain) {
+             // The scenery's smooth normal where its draw gave one (blended across each triangle, as HD's
+             // models' per-vertex light is), else the depth's (one per triangle).
+@@ -1837,6 +1851,19 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+                     turned = min(turned, clamp(dot(ndw, sun) * facing_depth_mul, 0.0, 1.0));
+                 }
+             }
++            // Skinned scenery without normals of its own (the mask's green 0.6: a palm's leaves, whose draws carry
++            // none) has no facing term: the depth's normal on a cut-out leaf card faces anywhere, and it left the
++            // crowns in shade (Outset, 10:00). Wind Waker HD lights them by its own model's normals, which this
++            // doesn't have; the shadow map alone shades their undersides.
++            if (!smoothed && mk.g > 0.3) {
++                turned = 1.0;
++            }
++            // With smooth normals made for it, a leaf is lit from either side: the mask's pass turns the normal to
++            // the side seen, and from below that is away from the sun, which left the crowns dark. HD's leaf normals
++            // point off the frond's top whichever side is seen.
++            if (smoothed && mk.g > 0.3) {
++                turned = clamp(abs(dot(nw, sun)) * facing_mul, 0.0, 1.0);
++            }
+             facing = mix(1.0, turned, away);
+             // HD multiplies its light amount by the shadow (R2.w x shade); BlueWake's own takes the lesser.
+             lit = select(min(lit, facing), lit * facing, hd_mix > 0.5);
+@@ -1941,8 +1968,20 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         // Wind Waker HD's light (its terrain shaders, read in Cemu): its shade takes the sky's light from above
+         // and the ambient from the side (0.5 + 0.5 N.y between them), against its sunlight; that ratio, in the
+         // scene's gamma, is what a shaded pixel is multiplied by.
+-        let nv = depth_normal(in.uv, p, tx, ty);
+-        let up = dot(vec3(view.rows[1].x, view.rows[1].y, view.rows[1].z), nv);
++        var nv = depth_normal(in.uv, p, tx, ty);
++        var up = dot(vec3(view.rows[1].x, view.rows[1].y, view.rows[1].z), nv);
++        // Skinned scenery with smooth normals (a palm): by them, as HD's per-vertex light, either side of a leaf
++        // as up as the side seen (the mask's pass turned the normal to it; HD's leaf normals point off the top).
++        if (smooth_ambient > 0.5 && view.facing.x > 0.5 && view.facing.z > 0.5) {
++            let asize = vec2<f32>(textureDimensions(mask));
++            let ap = clamp(vec2<i32>(in.uv * asize), vec2<i32>(0), vec2<i32>(asize) - vec2<i32>(1));
++            let sn = textureLoad(normals, ap, 0);
++            let am = textureLoad(mask, ap, 0);
++            if (sn.a > 0.5 && am.r < 0.5 && am.g > 0.3 && am.g < character_g) {
++                nv = normalize(sn.xyz * 2.0 - 1.0);
++                up = abs(dot(vec3(view.rows[1].x, view.rows[1].y, view.rows[1].z), nv));
++            }
++        }
+         let ambient = mix(view.palette.rgb, view.shade.rgb, 0.5 + 0.5 * up);
+         let ratio = clamp(ambient / max(view.lit.rgb, vec3(1e-3)), vec3(0.0), vec3(1.0));
+         shade = pow(mix(vec3(1.0), ratio * ao_term, (1.0 - lit) * fade), vec3(1.0 / 2.2));
+@@ -2412,6 +2451,7 @@ wgpu::RenderPipeline make_sun_map_pipeline(wgpu::TextureFormat format, bool dire
+       wgpu::ConstantEntry{.key = "low_pass", .value = low ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "hd_mix", .value = hd_mix_on() && !low ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "hd_prepass", .value = g_sunHdPrepass ? 1.0 : 0.0},
++      wgpu::ConstantEntry{.key = "character_g", .value = g_sunSkinnedScenery ? 0.8 : 0.5},
+       wgpu::ConstantEntry{.key = "sea_shadow", .value = g_sunSeaShadow >= 0.f ? g_sunSeaShadow : g_sunHdPrepass ? 0.5 : 1.0},
+       wgpu::ConstantEntry{.key = "mix_e_start", .value = g_sunHdMixFades[0]},
+       wgpu::ConstantEntry{.key = "mix_e_near", .value = g_sunHdMixNearPower},
+@@ -2441,6 +2481,7 @@ wgpu::RenderPipeline make_sun_map_pipeline(wgpu::TextureFormat format, bool dire
+       wgpu::ConstantEntry{.key = "facing_mul", .value = g_sunFacingMul},
+       wgpu::ConstantEntry{.key = "facing_depth_mul", .value = g_sunFacingDepthMul},
+       wgpu::ConstantEntry{.key = "facing_depth_blur", .value = g_sunFacingDepthBlur},
++      wgpu::ConstantEntry{.key = "smooth_ambient", .value = g_sunSmoothAmbient ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "facing_far_start", .value = g_sunFacingFarStart},
+       wgpu::ConstantEntry{.key = "facing_far_end", .value = g_sunFacingFarEnd},
+       wgpu::ConstantEntry{.key = "shape_on", .value = g_sunShape ? 1.0 : 0.0},
+@@ -3639,6 +3680,8 @@ void initialize() {
+   g_sunHdMixBlurs = static_cast<int>(env_float("DOL_AURORA_SUN_SHADOW_HD_MIX_BLURS", 1.f, 0.f, 8.f));
+   g_sunSeaShadow = env_float("DOL_AURORA_SUN_SHADOW_SEA_STRENGTH", g_sunSeaShadow, 0.f, 1.f);
+   g_sunHdMixNearPower = env_float("DOL_AURORA_SUN_SHADOW_HD_MIX_NEAR_POWER", g_sunHdMixNearPower, 1.f, 8.f);
++  if (const char* skinned = std::getenv("DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY"))
++    g_sunSkinnedScenery = skinned[0] == '1';
+   if (const char* temporal = std::getenv("DOL_AURORA_SUN_SHADOW_TEMPORAL"))
+     g_sunTemporal = temporal[0] == '1';
+   if (const char* range = std::getenv("DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE"))
+@@ -3678,6 +3721,8 @@ void initialize() {
+   g_sunFacingMul = env_float("DOL_AURORA_SUN_SHADOW_FACING_MUL", g_sunFacingMul, 0.5f, 1000.f);
+   g_sunFacingDepthMul = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL", g_sunFacingDepthMul, 0.f, 1000.f);
+   g_sunFacingDepthBlur = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR", g_sunFacingDepthBlur, 0.f, 200.f);
++  if (const char* ambient = std::getenv("DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT"))
++    g_sunSmoothAmbient = ambient[0] == '1';
+   g_sunFacingFarStart = env_float("DOL_AURORA_SUN_SHADOW_FACING_FAR_START", g_sunFacingFarStart, 0.f, 1e7f);
+   g_sunFacingFarEnd = env_float("DOL_AURORA_SUN_SHADOW_FACING_FAR_END", g_sunFacingFarEnd, g_sunFacingFarStart + 1.f, 1e7f);
+   if (const char* shape = std::getenv("DOL_AURORA_SUN_SHADOW_SHAPE"))
+-- 
+2.56.0
+

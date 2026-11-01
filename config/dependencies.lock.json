@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "8530dbdd4285b5522822d10b678d63f97aeafd85",
+      "sha": "dd54bc7b4a2294095a20b6e71b3f56a2a49af0d6",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -747,6 +747,13 @@
             "patches/recompcore/0211-Sun-shadows-the-shadow-pre-pass-blended-with-the-last-frames-by-distance.patch"
           ],
           "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_TEMPORAL, the pre-pass blended with the last frame's through the last camera, within the neighbours' range, more with distance; the sea clock's turning sun showed the 1024 map's texels as jumps along shadow edges (Sector 0A, 14:00). Off by default."
+        },
+        "hd_palms": {
+          "runtime": "dd54bc7b4a2294095a20b6e71b3f56a2a49af0d6",
+          "tracked_patches": [
+            "patches/recompcore/0212-Sun-shadows-the-palms-shaded-and-lit-as-Wind-Waker-HD-s.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY (a palm's leaves are scenery to the sun pass, as HD lights them), smooth normals for skinned scenery lit from either side, DOL_AURORA_HD_VERTEX_COLOURS (HD's colours by position; a draw mixing C0 to KONST by its vertex colour takes HD's light), DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT. Off by default."
         }
       }
     },
