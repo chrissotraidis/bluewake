@@ -283,3 +283,7 @@ what faces away from the sun is in shade too, from the scenery's smooth normals 
 then HD's terrain curve. Characters, marked in the sea mask, keep their own shading. `aurora_set_sun_palette` gives
 the shade HD's light for the hour: its ambient (the palette's shadow colour from above, BG0 C0 from the side) over
 its sunlight. The gap fill is off (it shaded Link's own front) and the slope term is 20 near the camera as far off.
+
+Patch 0208 reads a table of Wind Waker HD's normals keyed by the GameCube's exact vertex positions (`BWHN`;
+`DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS` for tests), for the facing term. It also tries the depth's own facing
+(`DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL`, `_BLUR`), which HD turned out not to have; off by default.

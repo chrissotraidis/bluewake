@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "39f8651ca59db4761006cd7f2efb9872c49a8581",
+      "sha": "50a19cd01edaaa295c731936d87eff80607694f7",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -719,6 +719,13 @@
             "patches/recompcore/0207-Sun-shadows-Wind-Waker-HD-s-facing-term-and-its-light-for-the-hour.patch"
           ],
           "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_FACING (off by default) shades what faces away from the sun, from the scenery's smooth normals made on the CPU; characters, marked in the sea mask, keep their own shading; aurora_set_sun_palette multiplies the shade by HD's ambient over its sunlight for the hour (stages.bin version 3); the gap fill off (it shaded Link's own front); the near slope term 20. Windows 11 (RTX 5070 Ti, Direct3D 12): Outset's bridge and east wall at 10:00 against Cemu's HD."
+        },
+        "hd_normals_by_position": {
+          "runtime": "50a19cd01edaaa295c731936d87eff80607694f7",
+          "tracked_patches": [
+            "patches/recompcore/0208-Sun-shadows-the-facing-term-from-Wind-Waker-HD-s-own-normals.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS, a table of HD's normals keyed by the GameCube's raw joint-local positions; and the depth's own facing (DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL, _BLUR), which HD's own shader source later showed it doesn't have; both off by default."
         }
       }
     },
