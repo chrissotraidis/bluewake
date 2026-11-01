@@ -3,7 +3,7 @@
 The record for 0.10.0: what it contains, the exact artifacts, and every check with its status. Previous release:
 [0.9.0](RELEASE_0.9.0.md), October 25. Only Chris publishes.
 
-**Status, November 1, 2026:** frozen at `edd88f1`. The v0.10.0 draft holds all six artifacts below, each checked against GitHub's digest and passed through the content gate. Waiting on Chris's approval to publish. Until it is published, only docs and fixes for what the checks find go into `main`.
+**Status, November 1, 2026:** published by Chris at 01:19 UTC from `edd88f1` (the `v0.10.0` tag), with the six artifacts below; `releases/latest` leads to it.
 
 ## The release
 
@@ -118,7 +118,7 @@ testing with an agent and `render_bench` (#492), the native comparison without `
 
 | Check | Status |
 | --- | --- |
-| PadMint `player-check.sh` without a checkout, from `releases/latest` | Pending |
-| Every asset downloads without signing in and matches `SHA256SUMS`; `releases/latest` leads to v0.10.0 | Pending |
-| README and WINDOWS.md name 0.10.0's downloads, and the Linux AppImage | Pending |
-| Replies on the fixed issues; #459 and #497 closed with a note | Pending (Chris approved posting) |
+| PadMint `player-check.sh` without a checkout, from `releases/latest` | Running: PadMint `main` `7b76793`, Apple Python 3.9.6, an empty PadMint folder; it picked up v0.10.0 |
+| Every asset downloads without signing in and matches `SHA256SUMS`; `releases/latest` leads to v0.10.0 | Passed: all six through `releases/latest/download` with no token (HTTP 200), all five lines of `SHA256SUMS` OK |
+| README and WINDOWS.md name 0.10.0's downloads, and the Linux AppImage | #527 |
+| Replies on the fixed issues; #459 and #497 closed with a note | Done: #511, #509, #496, #491, #479, #508, #474 and #458 asked to confirm (left open until they do); #473, #215 and #427 updated and left open; #505 asked for details; #459 and #497 closed with a note |
