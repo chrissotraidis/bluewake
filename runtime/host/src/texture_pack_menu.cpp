@@ -90,6 +90,7 @@ bool import_controls(SDL_Window* window, const std::string& textures_dir, std::s
     static bool failed = false;
     // Kept beside the message, which outlives the job that made the pack.
     static size_t skipped_names = 0, skipped_unread = 0;
+    static std::string left_out;  // the HD look's optional parts the import did not find
     static ImageImport form;
     wwhd::ImportJob& job = wwhd::import_job();
 
@@ -145,6 +146,7 @@ bool import_controls(SDL_Window* window, const std::string& textures_dir, std::s
         failed = result.failed;
         skipped_names = result.failed ? 0 : result.conflicts;
         skipped_unread = result.failed ? 0 : result.unsupported;
+        left_out = result.failed ? std::string() : result.left_out;
         if (!result.failed) {
             folder = result.output;
             finished = true;
@@ -160,8 +162,19 @@ bool import_controls(SDL_Window* window, const std::string& textures_dir, std::s
         char label[96];
         std::snprintf(label, sizeof label, "%zu of %zu files", now.files_read, now.files_total);
         ImGui::ProgressBar(done, ImVec2(-1.f, 0.f), label);
-        ImGui::TextDisabled("%s: %zu textures so far. You can close the menu and play; it carries on.",
-                            now.message.c_str(), now.replacements);
+        // The HD look's parts as they turn up: HD's sky and light by place, its
+        // shading by model, its cloud shadows once.
+        std::string parts;
+        if (now.sky_stages)
+            parts += ", sky and light for " + std::to_string(now.sky_stages) + (now.sky_stages == 1 ? " place" : " places");
+        if (now.shaded_models)
+            parts += ", shading for " + std::to_string(now.shaded_models) + (now.shaded_models == 1 ? " model" : " models");
+        if (now.cloud_shadow)
+            parts += ", cloud shadows";
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 34.0f);
+        ImGui::TextDisabled("%s: %zu textures%s so far. You can close the menu and play; it carries on.",
+                            now.message.c_str(), now.replacements, parts.c_str());
+        ImGui::PopTextWrapPos();
         if (ImGui::SmallButton("Cancel the import"))
             job.cancel();
         return finished;
@@ -253,6 +266,8 @@ bool import_controls(SDL_Window* window, const std::string& textures_dir, std::s
         if (!failed && skipped_unread)
             ImGui::TextColored(skipped_color(), "%zu skipped: could not be read; import-report.json lists them.",
                                skipped_unread);
+        if (!failed && !left_out.empty())
+            ImGui::TextColored(skipped_color(), "%s", left_out.c_str());
     }
     ImGui::PopTextWrapPos();
     return finished;
