@@ -325,3 +325,22 @@ HD's light: texture x HD's colour x the light, the sun pass making the light.
 Patch 0213 adds `aurora_set_sun_cascade_splits`: the HD shadow quality's two cascade splits and the first two
 cascades' sizes each frame, as Wind Waker HD sets them from its camera; with fixed ones, a camera zoomed out past
 HD's left the ground around Link in the far cascade, where grass shadows crawled as the sun turned.
+
+Patch 0214 adds `aurora_set_hd_object_tables`: Wind Waker HD's normals and vertex colours for the game's object
+models (the HD pack's `optional/hd-normals/objects.bin` and `optional/hd-colours/objects.bin`), looked up after the
+stage's; and HD's light on the scenery (`DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT=1`, off by default): HD's terrain
+material is texture x vertex colour x light, where the GameCube's mix never goes below the shade colour.
+
+Patch 0214 also gives all scenery with a smooth normal Wind Waker HD's hemisphere per vertex
+(`DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1`, which the HD look sets): the mask pass normalizes each vertex's normal
+and writes the blend across the triangle as it is, and the hemisphere (0.5 + 0.5 N.y between the ambient and the
+sky's light) takes its y without renormalizing, as HD's terrain shader does. Before, the ground took N.y from the
+depth's face (about 1: the sky's colour alone), bluer in the shade than HD's where its normals lean. Palms keep
+theirs; `=skinned` keeps the old rule.
+
+Patch 0214 also keeps the sun shadows' smooth normals and Wind Waker HD's vertex colours per draw from frame to frame
+(`smooth_normal_cache.hpp`). They were made again for every lit scenery draw every frame, a weld map and a lookup
+per vertex in HD's tables: 66 draws and 47,000 vertices a game frame in Hyrule Castle's hall. A draw that comes
+again with the same bytes and the same tables and light colours takes the vertices made the first time; it is
+compared in full, so the picture is the same. Lava draws always make them. Entries unused for 120 game frames go.
+`DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0` makes them every frame, as before.

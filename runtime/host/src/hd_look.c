@@ -573,9 +573,29 @@ static void hd_cloud_texture(void) {
         fprintf(stderr, "[hd-look] HD cloud shadow texture: %s\n", path);
 }
 
+// Wind Waker HD's normals and vertex colours for the game's object models (palms, rocks, trees): the HD pack's
+// optional/hd-normals/objects.bin and optional/hd-colours/objects.bin (made by the importer), handed to the renderer
+// once. BLUEWAKE_HD_OBJECT_NORMALS=0 leaves them out (testing).
+static void hd_object_tables(void) {
+    static bool s_done;
+    if (s_done)
+        return;
+    s_done = true;
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (pack == NULL || pack[0] == '\0' || setting("BLUEWAKE_HD_OBJECT_NORMALS") == 0)
+        return;
+    char normals[4096], colours[4096];
+    snprintf(normals, sizeof normals, "%s/optional/hd-normals/objects.bin", pack);
+    snprintf(colours, sizeof colours, "%s/optional/hd-colours/objects.bin", pack);
+    aurora_set_hd_object_tables(normals, colours);
+    if (g_trace)
+        fprintf(stderr, "[hd-look] HD object normals and colours from %s/optional\n", pack);
+}
+
 static void clouds(CPUState* cpu, unsigned long long retrace) {
     hd_normals_stage(cpu);
     hd_cloud_texture();
+    hd_object_tables();
     bool show = false;
     bool torch_view = false;
     if (g_clouds == 1 || g_sun == 1 || g_edge == 1 || g_torch == 1) {

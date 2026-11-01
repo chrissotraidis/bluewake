@@ -1,0 +1,823 @@
+From 09a55c7e62758796398e62993029d26a69dae001 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:51:48 -0600
+Subject: [PATCH] Sun shadows: Wind Waker HD's normals and colours for the
+ objects and the rooms, and its light on the scenery
+
+Sun shadows: Wind Waker HD's normals and colours for the objects, and its light on the scenery
+
+aurora_set_hd_object_tables(normals, colours): the HD pack's optional/hd-normals/objects.bin and
+optional/hd-colours/objects.bin (from the player's HD dump), by the GameCube's raw joint-local positions as the
+stage tables are. The normals are looked up after the stage's for the draws that take smooth normals; the
+colours light the draws of the palms' kind as HD lights them. DOL_AURORA_HD_VERTEX_COLOURS still overrides the
+colours for tests.
+
+DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT=1: every draw of the palms' kind that takes smooth normals
+takes HD's light, the scenery's too: its shade colour black, its own vertex colour kept where no table has HD's.
+HD's terrain material is the palms' rule, albedo x vertex colour x mix(ambient, sun, N.L x shadow), and its
+vertex colours are the GameCube's baked greys (a Cemu probe): the GameCube's mix never goes below the shade
+colour, so its greys under 1 stood lighter than HD's. Outset's bridge at 10:00, median brightness of the left
+cliff: HD 64, before 76, after 62.
+
+aurora_set_hd_stage_colours: the stage's rooms' own HD vertex colours, which the
+draws with HD's light take before the objects' table, in the game's gamma (HD
+multiplies its colours raw in linear light, the TEV in the game's gamma). With
+them a dungeon room's floors and walls come within about 10% of HD's (Ganon's
+Tower's entrance from 0.39 to 0.94 of HD's brightness).
+
+HD's terrain VS takes its hemisphere (0.5 + 0.5 N.y between the ambient and the sky's light) per vertex from its own unit normals, blended linearly across each triangle. The sun pass took N.y from the depth's face (about 1 on the ground: the sky's colour alone, bluer than HD's where HD's ground normals lean, Windfall's spawn 7 path and the arch path). With DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1 all scenery with a smooth normal now takes it; the mask pass normalizes each vertex's normal and writes the blend as it is, and the hemisphere takes its y without renormalizing (HD's per-vertex value). Palms keep theirs. =skinned keeps the old rule for comparison.
+
+The smooth normals and HD's colours kept from frame to frame. with_smooth_normals() made them again for every lit
+scenery draw every frame: a weld map over the draw's positions, its faces' normals, and a lookup per vertex in HD's
+normals and colours. Hyrule Castle's hall is 66 such draws and 47,000 vertices a game frame, the same every frame, and
+on an i5-6500 that was 7 ms of the GX worker's 20 and the 6% late frames there at 30 FPS.
+
+Now a draw that comes again with the same bytes and the same inputs (the stage's and the objects' tables, and for HD's
+light its shade and light colours) takes the vertices made the first time. The hash only picks the entry; the draw is
+compared in full, so the vertices are the very ones the old path makes. Lava draws (their glow follows the game frame)
+always take the old path. Entries not used for 120 game frames go, and past 1024 entries a new draw isn't kept.
+
+- The cache is smooth_normal_cache.hpp, with tests (smooth_normal_cache_tests): a hit is the uncached bytes, any
+  changed float, index or input misses, unused entries go, a full cache makes new draws uncached.
+- DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0 makes them every frame, as before. _CACHE_LOG=1 prints the draws, vertices and
+  hits a game frame.
+- Debian i5-6500 + GTX 1660 SUPER, Hyrule Castle layer 2: 22.2 to 15.0 ms CPU per game frame unpaced; frames over 34
+  ms at 30 FPS 5.8% to 0.1%, and the same turning the camera or walking (100% hits after the arrival). The frozen hall
+  is the emulation thread's: -0.35 ms still, -1.3 turning. The pictures are the same.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   9 +
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 234 ++++++++++++++----
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp |  34 ++-
+ .../aurora/lib/gfx/smooth_normal_cache.hpp    | 125 ++++++++++
+ .../graphics/aurora/tests/CMakeLists.txt      |   6 +
+ .../aurora/tests/smooth_normal_cache_test.cpp | 154 ++++++++++++
+ 6 files changed, 507 insertions(+), 55 deletions(-)
+ create mode 100644 GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp
+ create mode 100644 GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 2a79d1b6b7..dc11e785ab 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -221,6 +221,15 @@ void aurora_set_sun_hd_light(int on, int night, float fade);
+    importer from the player's HD dump), for the sun shadows' facing term; NULL or a missing file: none, and
+    the facing term makes its own. Loaded at once; call it as the stage changes. */
+ void aurora_set_hd_normals(const char* path);
++/* Wind Waker HD's own vertex colours for the stage in play's rooms (the HD pack's optional/hd-colours/<stage>.bin,
++   made by the importer): HD remade its rooms' colours, so the draws with HD's light take HD's (in the game's gamma)
++   where a position has one, before the objects' table. NULL or a missing file: none. Call it as the stage changes. */
++void aurora_set_hd_stage_colours(const char* path);
++/* Wind Waker HD's normals and vertex colours for the game's object models (the HD pack's
++   optional/hd-normals/objects.bin and optional/hd-colours/objects.bin, made by the importer from the player's HD
++   dump): the normals are looked up after the stage's, the colours light draws as HD lights its palms. NULL or a
++   missing file: none. Loaded at once; call it once. */
++void aurora_set_hd_object_tables(const char* normals_path, const char* colours_path);
+ /* Wind Waker HD's cloud shadow texture for the cloud shadows on HD's rule (the HD pack's
+    optional/hd-cloud-shadow/ww_shadow_clouds.dds, made by the importer from the player's HD dump); NULL or a
+    missing file: none, and BlueWake's own noise. Loaded by the render thread at its next frame. */
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index f99235293b..8365515b4b 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -8,6 +8,7 @@
+ #include "pipeline_cache.hpp"
+ #include "post_fx.hpp" // the sun shadow map
+ #include "soft_effects.hpp"
++#include "smooth_normal_cache.hpp"
+ #include "thread_cpu.hpp"
+ #include "texture.hpp"
+ #include "tex_copy_conv.hpp" // EFB-copy format conversion (63/S16)
+@@ -1669,7 +1670,10 @@ fn smooth_out(p0: vec4f, p1: vec4f, p2: vec4f, in: VertexInN) -> VertexOutN {
+     out.pos = to_clip(p0, p1, p2, in.rawpos);
+     let pos4 = vec4f(in.rawpos, 1.0);
+     out.viewpos = vec3f(dot(p0, pos4), dot(p1, pos4), dot(p2, pos4));
+-    out.normal = vec3f(dot(p0.xyz, in.normal), dot(p1.xyz, in.normal), dot(p2.xyz, in.normal));
++    // Unit at each vertex, as HD's VS normalizes its turned normal: blended across the triangle, its y is then HD's
++    // per-vertex N.y blended (its hemisphere colour is per vertex, so linear across the triangle).
++    let nv = vec3f(dot(p0.xyz, in.normal), dot(p1.xyz, in.normal), dot(p2.xyz, in.normal));
++    out.normal = select(vec3f(0.0), nv / max(length(nv), 1e-12), length(nv) > 1e-6);
+     return out;
+ }
+ @vertex
+@@ -1682,7 +1686,8 @@ fn vs_indexed_n(in: VertexInN) -> VertexOutN {
+     return smooth_out(vsc.transformmatrices[i], vsc.transformmatrices[i + 1], vsc.transformmatrices[i + 2], in);
+ }
+ // The normal turned to the side the camera sees, by the triangle's own facing (a model's winding isn't known
+-// here); alpha 0 where the draw gives none.
++// here); alpha 0 where the draw gives none. Left as blended, not renormalized (its users normalize it): the sun
++// pass's hemisphere takes its y as is, HD's per-vertex N.y blended across the triangle.
+ fn seen_normal(in: VertexOutN) -> vec4f {
+     var face = cross(dpdx(in.viewpos), dpdy(in.viewpos));
+     if (dot(face, -in.viewpos) < 0.0) {
+@@ -1693,7 +1698,6 @@ fn seen_normal(in: VertexOutN) -> vec4f {
+     if (len < 1e-6) {
+         return vec4f(0.0);
+     }
+-    n = n / len;
+     if (dot(n, face) < 0.0) {
+         n = -n;
+     }
+@@ -2700,8 +2704,18 @@ static std::shared_ptr<const HdNormals> hd_normals() {
+   return g_hdNormals;
+ }
+ 
+-// Wind Waker HD's own vertex colours, by the same exact positions (local test: one fixed table,
+-// DOL_AURORA_HD_VERTEX_COLOURS). Format: b'BWHC', u32 version 1, u32 count, then count x f32 x, y, z, r, g, b, a.
++// Wind Waker HD's normals for the game's object models (the HD pack's optional/hd-normals/objects.bin, from the
++// importer; aurora_set_hd_object_tables), the same format, looked up after the stage's.
++std::shared_ptr<const HdNormals> g_hdObjectNormals;
++
++static std::shared_ptr<const HdNormals> hd_object_normals() {
++  std::lock_guard lock{g_hdNormalsMutex};
++  return g_hdObjectNormals;
++}
++
++// Wind Waker HD's own vertex colours, by the same exact positions: the objects' (the HD pack's
++// optional/hd-colours/objects.bin; aurora_set_hd_object_tables), or one fixed table for tests
++// (DOL_AURORA_HD_VERTEX_COLOURS). Format: b'BWHC', u32 version 1, u32 count, then count x f32 x, y, z, r, g, b, a.
+ // HD lights its palms as texture x vertex colour x (sky-to-ground ambient + sun x N.L x shadow); the sun pass makes
+ // the light, so the draw gives texture x vertex colour x the light colour: the GameCube's palms go from the shade
+ // colour (C0) to the light one (KONST) by their vertex colour, so such a draw takes C0 black and HD's colour (a
+@@ -2709,33 +2723,61 @@ static std::shared_ptr<const HdNormals> hd_normals() {
+ // sun shadows' facing term is on.
+ using HdColours = absl::flat_hash_map<std::array<uint32_t, 3>, std::array<float, 4>>;
+ 
+-static const HdColours* hd_colours() {
+-  static const std::unique_ptr<const HdColours> table = []() -> std::unique_ptr<const HdColours> {
++// gamma: the stage's rooms' colours (aurora_set_hd_stage_colours), which HD multiplies raw in linear light, taken to
++// the game's gamma (^ 1/2.2) for the TEV, which multiplies in it.
++static std::shared_ptr<const HdColours> load_hd_colours(const char* path, bool gamma = false) {
++  FILE* f = std::fopen(path, "rb");
++  if (f == nullptr)
++    return nullptr;
++  char magic[4]{};
++  uint32_t version = 0, count = 0;
++  bool ok = std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "BWHC", 4) == 0 &&
++            std::fread(&version, 4, 1, f) == 1 && version == 1 && std::fread(&count, 4, 1, f) == 1;
++  std::vector<std::array<float, 7>> rows(ok ? count : 0);
++  ok = ok && std::fread(rows.data(), sizeof(rows[0]), rows.size(), f) == rows.size();
++  std::fclose(f);
++  if (!ok)
++    return nullptr;
++  auto out = std::make_shared<HdColours>();
++  for (const auto& r : rows) {
++    std::array<uint32_t, 3> key{};
++    std::memcpy(key.data(), r.data(), sizeof(key));
++    const auto g = [&](float v) { return gamma ? std::pow(std::clamp(v, 0.f, 1.f), 1.f / 2.2f) : v; };
++    out->try_emplace(key, std::array<float, 4>{g(r[3]), g(r[4]), g(r[5]), r[6]});
++  }
++  std::fprintf(stderr, "[sun-facing] HD vertex colours: %zu positions from %s\n", out->size(), path);
++  return out;
++}
++
++std::shared_ptr<const HdColours> g_hdObjectColours;  // aurora_set_hd_object_tables
++std::shared_ptr<const HdColours> g_hdStageColours;   // aurora_set_hd_stage_colours, in the game's gamma
++
++// The stage's rooms' colour for a position, then the objects'.
++static const std::array<float, 4>* hd_colour(const HdColours* stage, const HdColours* objects,
++                                             const std::array<uint32_t, 3>& key) {
++  if (stage != nullptr)
++    if (const auto it = stage->find(key); it != stage->end())
++      return &it->second;
++  if (objects != nullptr)
++    if (const auto it = objects->find(key); it != objects->end())
++      return &it->second;
++  return nullptr;
++}
++
++static std::shared_ptr<const HdColours> hd_stage_colours() {
++  std::lock_guard lock{g_hdNormalsMutex};
++  return g_hdStageColours;
++}
++
++static std::shared_ptr<const HdColours> hd_colours() {
++  static const std::shared_ptr<const HdColours> fixed = []() -> std::shared_ptr<const HdColours> {
+     const char* path = std::getenv("DOL_AURORA_HD_VERTEX_COLOURS");
+-    if (path == nullptr || path[0] == '\0')
+-      return nullptr;
+-    FILE* f = std::fopen(path, "rb");
+-    if (f == nullptr)
+-      return nullptr;
+-    char magic[4]{};
+-    uint32_t version = 0, count = 0;
+-    bool ok = std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "BWHC", 4) == 0 &&
+-              std::fread(&version, 4, 1, f) == 1 && version == 1 && std::fread(&count, 4, 1, f) == 1;
+-    std::vector<std::array<float, 7>> rows(ok ? count : 0);
+-    ok = ok && std::fread(rows.data(), sizeof(rows[0]), rows.size(), f) == rows.size();
+-    std::fclose(f);
+-    if (!ok)
+-      return nullptr;
+-    auto out = std::make_unique<HdColours>();
+-    for (const auto& r : rows) {
+-      std::array<uint32_t, 3> key{};
+-      std::memcpy(key.data(), r.data(), sizeof(key));
+-      out->try_emplace(key, std::array<float, 4>{r[3], r[4], r[5], r[6]});
+-    }
+-    std::fprintf(stderr, "[sun-facing] HD vertex colours: %zu positions from %s\n", out->size(), path);
+-    return out;
++    return path != nullptr && path[0] != '\0' ? load_hd_colours(path) : nullptr;
+   }();
+-  return table.get();
++  if (fixed)
++    return fixed;
++  std::lock_guard lock{g_hdNormalsMutex};
++  return g_hdObjectColours;
+ }
+ 
+ // A konst colour selector's rgb (0..255).
+@@ -2754,10 +2796,22 @@ static std::array<int, 3> konst_rgb(const gxc::PixelShaderConstants& pc, uint8_t
+ 
+ // Whether a draw takes HD's light: its first stage is lerp(C0, KONST, RASC) from colour channel 0 (the palms'), no
+ // later stage reads C0's colour, and the table has some of its positions.
++// DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT=1 (local test): every such draw takes HD's light, the scenery's too, its own
++// vertex colour kept where no table has HD's. HD's terrain material is the palms' rule, albedo x vertex colour x
++// mix(ambient, sun, N.L x shadow), and its vertex colours are the GameCube's baked greys (Cemu probe v4, Oct 30): the
++// GameCube's mix never went below the shade colour, so its greys under 1 stood lighter than HD's.
++static bool hd_terrain_light() {
++  static const bool on = [] {
++    const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT");
++    return env != nullptr && env[0] == '1';
++  }();
++  return on;
++}
++
+ static bool hd_light_draw(const gxc::DrawPlan& plan) {
+-  const HdColours* table = hd_colours();
++  const std::shared_ptr<const HdColours> table = hd_colours();
+   const auto& shader = plan.pipeline.shader;
+-  if (table == nullptr || shader.tev_valid == 0u || shader.num_tev_stages == 0u)
++  if ((table == nullptr && !hd_terrain_light()) || shader.tev_valid == 0u || shader.num_tev_stages == 0u)
+     return false;
+   const gxc::TevStageKey& s = shader.tev_stages[0];
+   // a C0, b KONST, c RASC, d ZERO; add, no bias or scale; colour channel 0
+@@ -2770,6 +2824,8 @@ static bool hd_light_draw(const gxc::DrawPlan& plan) {
+       if (arg == 2 || arg == 3)
+         return false;
+   }
++  if (hd_terrain_light())
++    return true;
+   const size_t count = plan.vertices.size() / gxc::kVertexFloats;
+   for (size_t v = 0; v < count; ++v) {
+     std::array<uint32_t, 3> key{};
+@@ -2790,11 +2846,15 @@ static const gxc::PixelShaderConstants& hd_light_constants(const gxc::DrawPlan&
+ }
+ 
+ // Such a draw's vertex colours: HD's, and, where the table hasn't the position, the fraction of the light colour
+-// the GameCube's mix gave (shade + (light - shade) x own) / light.
++// the GameCube's mix gave (shade + (light - shade) x own) / light; with HD's terrain light, its own.
+ static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vertices) {
+   if (!hd_light_draw(plan))
+     return;
+-  const HdColours* table = hd_colours();
++  const std::shared_ptr<const HdColours> table = hd_colours();
++  // With HD's terrain light, the stage's rooms' own colours first (HD remade them).
++  const std::shared_ptr<const HdColours> stage = hd_terrain_light() ? hd_stage_colours() : nullptr;
++  if (table == nullptr && stage == nullptr)
++    return; // HD's terrain light without tables: the draw's own vertex colours
+   const gxc::TevStageKey& s = plan.pipeline.shader.tev_stages[0];
+   const auto& pc = plan.pixel_constants;
+   const std::array<int, 3> k = konst_rgb(pc, s.ksel_kc);
+@@ -2808,13 +2868,13 @@ static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vert
+     std::array<uint32_t, 3> key{};
+     std::memcpy(key.data(), vert + gxc::kVertexPosOffset / sizeof(float), sizeof(key));
+     float* col = vert + gxc::kVertexColor0Offset / sizeof(float);
+-    const auto it = table->find(key);
+-    if (it != table->end())
++    const std::array<float, 4>* hd = hd_colour(stage.get(), table.get(), key);
++    if (hd != nullptr)
+       ++hits;
+     for (int ch = 0; ch < 3; ++ch) {
+-      if (it != table->end()) {
+-        col[ch] = it->second[ch];
+-      } else if (k[ch] > 0) {
++      if (hd != nullptr) {
++        col[ch] = (*hd)[ch];
++      } else if (k[ch] > 0 && !hd_terrain_light()) {
+         col[ch] = std::clamp((c[ch] + (k[ch] - c[ch]) * col[ch]) / static_cast<float>(k[ch]), 0.f, 1.f);
+       }
+     }
+@@ -2824,7 +2884,7 @@ static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vert
+                  hits, count, c[0], c[1], c[2], k[0], k[1], k[2]);
+ }
+ 
+-static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan) {
++static const std::vector<float>& smooth_normals_uncached(const gxc::DrawPlan& plan) {
+   using Vec = std::array<float, 3>;
+   static thread_local std::vector<float> vertices;
+   static thread_local std::vector<uint32_t> group;       // each vertex's position
+@@ -2887,22 +2947,27 @@ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan)
+   // A vertex's normal: HD's at its position when the table has it (the one nearest its own faces' at one of
+   // HD's hard edges), else the faces at its position that turn within the crease of its own faces.
+   const float crease = smooth_crease_cos();
++  // The stage's table first, then the objects' (the same position in a stage model and an object is the stage's).
+   const std::shared_ptr<const HdNormals> hdTable = hd_normals();
+-  const HdNormals* hd = hdTable.get();
++  const std::shared_ptr<const HdNormals> objectTable = hd_object_normals();
++  const std::array<const HdNormals*, 2> tables{hdTable.get(), objectTable.get()};
+   // DOL_AURORA_SUN_SHADOW_FACING_LOG=1 (local debug): how many scenery vertices found HD's normal.
+   static const bool log = std::getenv("DOL_AURORA_SUN_SHADOW_FACING_LOG") != nullptr;
+   static thread_local uint64_t s_hdHits = 0, s_vertices = 0, s_calls = 0;
+   s_vertices += count;
+-  if (log && hd != nullptr && ++s_calls % 4000 == 0)
++  if (log && (tables[0] != nullptr || tables[1] != nullptr) && ++s_calls % 4000 == 0)
+     std::fprintf(stderr, "[sun-facing] HD normals for %llu of %llu scenery vertices\n",
+                  static_cast<unsigned long long>(s_hdHits), static_cast<unsigned long long>(s_vertices));
+   for (size_t v = 0; v < count; ++v) {
+     float* out = &vertices[v * gxc::kVertexFloats + gxc::kVertexNormalOffset / sizeof(float)];
+     const Vec& ref = own[v];
+     const float refLength = std::sqrt(ref[0] * ref[0] + ref[1] * ref[1] + ref[2] * ref[2]);
+-    if (hd != nullptr) {
+-      std::array<uint32_t, 3> key{};
+-      std::memcpy(key.data(), &vertices[v * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float)], sizeof(key));
++    std::array<uint32_t, 3> key{};
++    std::memcpy(key.data(), &vertices[v * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float)], sizeof(key));
++    bool fromHd = false;
++    for (const HdNormals* hd : tables) {
++      if (hd == nullptr)
++        continue;
+       if (const auto it = hd->at.find(key); it != hd->at.end()) {
+         const Vec* best = &hd->normals[it->second.first];
+         float bestDot = -2.f;
+@@ -2918,9 +2983,12 @@ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan)
+         for (int k = 0; k < 3; ++k)
+           out[k] = (*best)[k];
+         ++s_hdHits;
+-        continue;
++        fromHd = true;
++        break;
+       }
+     }
++    if (fromHd)
++      continue;
+     Vec n{0.f, 0.f, 0.f};
+     if (refLength > 0.f) {
+       for (uint32_t j = groupStart[group[v]]; j < groupStart[group[v] + 1]; ++j) {
+@@ -2939,6 +3007,62 @@ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan)
+   return vertices;
+ }
+ 
++// What smooth_normals_uncached() reads besides the draw's vertices and indices, for SmoothNormalCache's compare: the
++// stage's and the objects' tables (a new table is a new pointer; the entries hold the old one), and whether the draw
++// takes HD's light, with apply_hd_colours()'s shade and light colours if so.
++struct SmoothNormalInputs {
++  std::shared_ptr<const HdNormals> normals, objectNormals;
++  std::shared_ptr<const HdColours> colours, stageColours;
++  bool light = false;
++  std::array<int, 3> k{}, c{};
++  bool operator==(const SmoothNormalInputs& o) const {
++    return normals == o.normals && objectNormals == o.objectNormals && colours == o.colours &&
++           stageColours == o.stageColours && light == o.light && k == o.k && c == o.c;
++  }
++};
++
++// The draw's vertices with smooth normals, made once while the draw stays the same (smooth_normal_cache.hpp): a
++// still room's lit scenery made them every frame, Hyrule Castle's hall 66 draws and 47,000 vertices a game frame
++// (on an i5-6500, 7 ms of the GX worker's 20).
++// DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0: made every frame, as before.
++// DOL_AURORA_SUN_SHADOW_NORMAL_CACHE_LOG=1 (local debug): draws, vertices and hits a game frame, every 600 frames.
++static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan) {
++  static const bool cacheOn = [] {
++    const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_NORMAL_CACHE");
++    return env == nullptr || env[0] != '0';
++  }();
++  if (!cacheOn)
++    return smooth_normals_uncached(plan);
++  static thread_local SmoothNormalCache<SmoothNormalInputs> cache;
++  const uint64_t frame = frame_interp::game_frame_number();
++  SmoothNormalInputs inputs{hd_normals(), hd_object_normals(), hd_colours(),
++                            hd_terrain_light() ? hd_stage_colours() : nullptr};
++  // apply_hd_colours()'s own tests and colours.
++  if ((inputs.colours != nullptr || inputs.stageColours != nullptr) && hd_light_draw(plan)) {
++    inputs.light = true;
++    const gxc::TevStageKey& s = plan.pipeline.shader.tev_stages[0];
++    inputs.k = konst_rgb(plan.pixel_constants, s.ksel_kc);
++    inputs.c = {plan.pixel_constants.colors[1][0], plan.pixel_constants.colors[1][1],
++                plan.pixel_constants.colors[1][2]};
++  }
++  static const bool log = std::getenv("DOL_AURORA_SUN_SHADOW_NORMAL_CACHE_LOG") != nullptr;
++  if (log) {
++    static thread_local uint64_t s_vertices = 0, s_frames = 0, s_logFrame = 0;
++    s_vertices += plan.vertices.size() / gxc::kVertexFloats;
++    if (frame != s_logFrame) {
++      s_logFrame = frame;
++      if (++s_frames % 600 == 0) {
++        const auto [draws, hits] = cache.take_counts();
++        std::fprintf(stderr, "[sun-normals] a game frame: %.0f draws, %.0f vertices, %.1f%% cache hits, %zu cached\n",
++                     draws / 600.0, s_vertices / 600.0, draws ? 100.0 * hits / draws : 0.0, cache.size());
++        s_vertices = 0;
++      }
++    }
++  }
++  return cache.get(plan.vertices, plan.indices, std::move(inputs), frame,
++                   [&]() -> const std::vector<float>& { return smooth_normals_uncached(plan); });
++}
++
+ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   if (!plan.ok || plan.vertex_count == 0 || plan.indices.empty()) {
+     return false;
+@@ -3773,6 +3897,24 @@ void aurora_set_hd_normals(const char* path) {
+   g_hdNormals = std::move(table);
+ }
+ 
++void aurora_set_hd_stage_colours(const char* path) {
++  using namespace aurora::gfx::gxcore;
++  std::shared_ptr<const HdColours> table = path != nullptr && path[0] != '\0' ? load_hd_colours(path, true) : nullptr;
++  std::lock_guard lock{g_hdNormalsMutex};
++  g_hdStageColours = std::move(table);
++}
++
++void aurora_set_hd_object_tables(const char* normals_path, const char* colours_path) {
++  using namespace aurora::gfx::gxcore;
++  std::shared_ptr<const HdNormals> normals =
++      normals_path != nullptr && normals_path[0] != '\0' ? load_hd_normals(normals_path) : nullptr;
++  std::shared_ptr<const HdColours> colours =
++      colours_path != nullptr && colours_path[0] != '\0' ? load_hd_colours(colours_path) : nullptr;
++  std::lock_guard lock{g_hdNormalsMutex};
++  g_hdObjectNormals = std::move(normals);
++  g_hdObjectColours = std::move(colours);
++}
++
+ void aurora_set_forced_anisotropy(unsigned samples) {
+   aurora::gfx::gxcore::g_forcedAnisotropy.store(
+       static_cast<std::uint16_t>(std::clamp(samples, 1u, 16u)), std::memory_order_relaxed);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 749ad1d56f..39fdc0d547 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -173,9 +173,11 @@ float g_sunFacingMul = 10.f;         // DOL_AURORA_SUN_SHADOW_FACING_MUL: fully
+ // (DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL, local test).
+ float g_sunFacingDepthMul = 0.f;
+ float g_sunFacingDepthBlur = 8.f; // DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR: its blur, pixels at 1080 lines (0 none)
+-// Skinned scenery (a palm) takes its ambient's sky-to-ground mix from its smooth normal, as HD's per-vertex light
+-// does, not from the depth's normal of a cut-out leaf card (DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1, local test).
++// Scenery takes its ambient's sky-to-ground mix from its smooth normal, as HD's per-vertex light does, not from the
++// depth's normal (a face, or a palm's cut-out leaf card) (DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1, local test;
++// =skinned: skinned scenery only, the rest by the depth's normal, as before Nov 3, for comparison).
+ bool g_sunSmoothAmbient = false;
++bool g_sunSmoothAmbientSkinned = false;
+ // HD's pre-pass takes the farthest of the four depths under each of its pixels (agl's shadow_pre_pass.sh, USE_FETCH_4):
+ // on a palm's lacy crown that is often what lies behind a leaf, so its leaves barely shade each other
+ // (DOL_AURORA_SUN_SHADOW_PREPASS_FAR=1, local test; HD's pass only).
+@@ -2047,16 +2049,30 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         // scene's gamma, is what a shaded pixel is multiplied by.
+         var nv = depth_normal(in.uv, p, tx, ty);
+         var up = dot(vec3(view.rows[1].x, view.rows[1].y, view.rows[1].z), nv);
+-        // Skinned scenery with smooth normals (a palm): by them, as HD's per-vertex light, either side of a leaf
+-        // as up as the side seen (the mask's pass turned the normal to it; HD's leaf normals point off the top).
++        // Scenery with smooth normals: by them, as HD's per-vertex light (its terrain VS takes the hemisphere from
++        // its own vertex normals, blended across each triangle), not by the depth's face. HD's ground normals lean
++        // where the ground meets a slope or a wall, so its shade there takes some of the ambient from the side (at
++        // Windfall's spawn 7 path 0.5 + 0.5 N.y is 0.94-0.96, not 1); by the depth's face the ground took the sky's
++        // colour alone, bluer than HD's. Skinned scenery (a palm): either side of a leaf as up as the side seen (the
++        // mask's pass turned the normal to it; HD's leaf normals point off the top). smooth_ambient 2: skinned only.
+         if (smooth_ambient > 0.5 && view.facing.x > 0.5 && view.facing.z > 0.5) {
+             let asize = vec2<f32>(textureDimensions(mask));
+             let ap = clamp(vec2<i32>(in.uv * asize), vec2<i32>(0), vec2<i32>(asize) - vec2<i32>(1));
+             let sn = textureLoad(normals, ap, 0);
+             let am = textureLoad(mask, ap, 0);
+-            if (sn.a > 0.5 && am.r < 0.5 && am.g > 0.3 && am.g < character_g) {
+-                nv = normalize(sn.xyz * 2.0 - 1.0);
+-                up = abs(dot(vec3(view.rows[1].x, view.rows[1].y, view.rows[1].z), nv));
++            if (sn.a > 0.5 && am.r < 0.5 && am.g < character_g) {
++                let row = vec3(view.rows[1].x, view.rows[1].y, view.rows[1].z);
++                let snv = normalize(sn.xyz * 2.0 - 1.0);
++                if (am.g > 0.3) {
++                    nv = snv;
++                    up = abs(dot(row, nv));
++                } else if (smooth_ambient < 1.5) {
++                    // HD's hemisphere is per vertex (0.5 + 0.5 N.y at each, blended linearly), so the blended
++                    // normal's y as written, not renormalized: renormalizing leans it up between vertices whose
++                    // normals differ (Windfall's spawn 7 path: (-0.93, 0, -0.37) to (-0.60, 0.80, 0.05)).
++                    nv = snv;
++                    up = dot(row, sn.xyz * 2.0 - 1.0);
++                }
+             }
+         }
+         let ambient = mix(view.palette.rgb, view.shade.rgb, 0.5 + 0.5 * up);
+@@ -2558,7 +2574,7 @@ wgpu::RenderPipeline make_sun_map_pipeline(wgpu::TextureFormat format, bool dire
+       wgpu::ConstantEntry{.key = "facing_mul", .value = g_sunFacingMul},
+       wgpu::ConstantEntry{.key = "facing_depth_mul", .value = g_sunFacingDepthMul},
+       wgpu::ConstantEntry{.key = "facing_depth_blur", .value = g_sunFacingDepthBlur},
+-      wgpu::ConstantEntry{.key = "smooth_ambient", .value = g_sunSmoothAmbient ? 1.0 : 0.0},
++      wgpu::ConstantEntry{.key = "smooth_ambient", .value = g_sunSmoothAmbient ? (g_sunSmoothAmbientSkinned ? 2.0 : 1.0) : 0.0},
+       wgpu::ConstantEntry{.key = "prepass_far", .value = g_sunPrepassFar ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "facing_far_start", .value = g_sunFacingFarStart},
+       wgpu::ConstantEntry{.key = "facing_far_end", .value = g_sunFacingFarEnd},
+@@ -3808,7 +3824,7 @@ void initialize() {
+   g_sunFacingDepthMul = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL", g_sunFacingDepthMul, 0.f, 1000.f);
+   g_sunFacingDepthBlur = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR", g_sunFacingDepthBlur, 0.f, 200.f);
+   if (const char* ambient = std::getenv("DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT"))
+-    g_sunSmoothAmbient = ambient[0] == '1';
++    g_sunSmoothAmbient = ambient[0] == '1' || ambient[0] == 's', g_sunSmoothAmbientSkinned = ambient[0] == 's';
+   if (const char* prepassFar = std::getenv("DOL_AURORA_SUN_SHADOW_PREPASS_FAR"))
+     g_sunPrepassFar = prepassFar[0] == '1';
+   g_sunFacingFarStart = env_float("DOL_AURORA_SUN_SHADOW_FACING_FAR_START", g_sunFacingFarStart, 0.f, 1e7f);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp b/GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp
+new file mode 100644
+index 0000000000..3dc1469abe
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp
+@@ -0,0 +1,125 @@
++#pragma once
++
++#include <gxruntime/gxcore/shader.hpp> // the vertex layout
++
++#include <absl/container/flat_hash_map.h>
++#include <xxhash.h>
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <utility>
++#include <vector>
++
++namespace aurora::gfx::gxcore {
++
++// The sun shadows' smooth normals (gxcore_draw.cpp with_smooth_normals()) kept from frame to frame. A draw's smooth
++// normals and HD colours are a function of its vertices and indices and of `Inputs` (the stage's and the objects'
++// tables, and for HD's light the draw's shade and light colours), so a still room's draws (Hyrule Castle's hall: 66
++// draws and 47,000 welded, looked-up vertices a frame) make them once. A hit is the same bytes in and the same inputs,
++// compared in full (the hash only picks the entry), so the vertices out are the very ones make() made for them.
++// make() may change only colour 0 and the normal (smooth_normals_uncached() writes nothing else but a lava draw's
++// colour 1, and lava draws don't come here): an entry keeps the rest of the draw's vertices in `out` and only those two
++// of its own beside it, so the cache holds about one copy of the room's vertices, not two. Were make() to change
++// anything else, the draw would never match again and would be made every frame, as without the cache.
++// Entries not used for 120 game frames go (looked at every 60); past 1024 entries a new draw isn't kept.
++template <typename Inputs>
++class SmoothNormalCache {
++public:
++  static constexpr uint64_t kSweepFrames = 60;
++  static constexpr uint64_t kKeepFrames = 120;
++  static constexpr size_t kMaxEntries = 1024;
++
++  template <typename Make>
++  const std::vector<float>& get(const std::vector<float>& vertices, const std::vector<uint16_t>& indices,
++                                Inputs inputs, uint64_t frame, Make&& make) {
++    ++draws_;
++    if (frame - lastSweep_ >= kSweepFrames) {
++      lastSweep_ = frame;
++      absl::erase_if(entries_, [&](const auto& kv) { return frame - kv.second.used > kKeepFrames; });
++    }
++    const uint64_t key = key_of(vertices, indices);
++    auto it = entries_.find(key);
++    if (it != entries_.end() && it->second.inputs == inputs && same_draw(it->second, vertices, indices)) {
++      it->second.used = frame;
++      ++hits_;
++      return it->second.out;
++    }
++    if (it == entries_.end()) {
++      if (entries_.size() >= kMaxEntries)
++        return make();
++      it = entries_.try_emplace(key).first;
++    }
++    Entry& entry = it->second;
++    entry.out = make();
++    const size_t count = vertices.size() / gxruntime::gxcore::kVertexFloats;
++    entry.own.resize(count * kOwnFloats);
++    for (size_t v = 0; v < count; ++v) {
++      const float* in = &vertices[v * gxruntime::gxcore::kVertexFloats];
++      std::memcpy(&entry.own[v * kOwnFloats], in + kColor0Float, kColor0Floats * sizeof(float));
++      std::memcpy(&entry.own[v * kOwnFloats + kColor0Floats], in + kNormalFloat, kNormalFloats * sizeof(float));
++    }
++    entry.indices.assign(indices.begin(), indices.end());
++    entry.inputs = std::move(inputs);
++    entry.used = frame;
++    return entry.out;
++  }
++
++  size_t size() const { return entries_.size(); }
++  // Draws asked for and draws found, since the last take_counts().
++  std::pair<uint64_t, uint64_t> take_counts() { return {std::exchange(draws_, 0), std::exchange(hits_, 0)}; }
++
++private:
++  static constexpr size_t kColor0Float = gxruntime::gxcore::kVertexColor0Offset / sizeof(float);
++  static constexpr size_t kColor0Floats = 4;
++  static constexpr size_t kNormalFloat = gxruntime::gxcore::kVertexNormalOffset / sizeof(float);
++  static constexpr size_t kNormalFloats = 3;
++  static constexpr size_t kOwnFloats = kColor0Floats + kNormalFloats;
++  static_assert(kColor0Float + kColor0Floats <= kNormalFloat &&
++                kNormalFloat + kNormalFloats <= gxruntime::gxcore::kVertexFloats);
++
++  struct Entry {
++    std::vector<float> out; // the vertices made: the draw's own but for colour 0 and the normal
++    std::vector<float> own; // the draw's own colour 0 and normal, kOwnFloats a vertex
++    std::vector<uint16_t> indices;
++    Inputs inputs{};
++    uint64_t used = 0;
++  };
++
++  // Only picks the entry (same_draw() compares it all): the indices, the size and the vertices' two ends.
++  static uint64_t key_of(const std::vector<float>& vertices, const std::vector<uint16_t>& indices) {
++    const size_t bytes = vertices.size() * sizeof(float);
++    const size_t ends = std::min<size_t>(bytes, 1024);
++    const auto* data = reinterpret_cast<const uint8_t*>(vertices.data());
++    return XXH3_64bits_withSeed(indices.data(), indices.size() * sizeof(uint16_t), bytes) ^
++           XXH3_64bits(data, ends) * 0x9E3779B97F4A7C15ull ^ XXH3_64bits(data + bytes - ends, ends);
++  }
++
++  // Whether `vertices` and `indices` are the draw `entry` was made from.
++  static bool same_draw(const Entry& entry, const std::vector<float>& vertices, const std::vector<uint16_t>& indices) {
++    constexpr size_t F = gxruntime::gxcore::kVertexFloats;
++    if (entry.out.size() != vertices.size() || entry.indices.size() != indices.size() ||
++        std::memcmp(entry.indices.data(), indices.data(), indices.size() * sizeof(uint16_t)) != 0)
++      return false;
++    const size_t count = vertices.size() / F;
++    const float* in = vertices.data();
++    const float* out = entry.out.data();
++    const float* own = entry.own.data();
++    constexpr size_t afterColor0 = kColor0Float + kColor0Floats, afterNormal = kNormalFloat + kNormalFloats;
++    for (size_t v = 0; v < count; ++v, in += F, out += F, own += kOwnFloats) {
++      if (std::memcmp(in, out, kColor0Float * sizeof(float)) != 0 ||
++          std::memcmp(in + afterColor0, out + afterColor0, (kNormalFloat - afterColor0) * sizeof(float)) != 0 ||
++          std::memcmp(in + afterNormal, out + afterNormal, (F - afterNormal) * sizeof(float)) != 0 ||
++          std::memcmp(in + kColor0Float, own, kColor0Floats * sizeof(float)) != 0 ||
++          std::memcmp(in + kNormalFloat, own + kColor0Floats, kNormalFloats * sizeof(float)) != 0)
++        return false;
++    }
++    return true;
++  }
++
++  absl::flat_hash_map<uint64_t, Entry> entries_;
++  uint64_t lastSweep_ = 0, draws_ = 0, hits_ = 0;
++};
++
++} // namespace aurora::gfx::gxcore
+diff --git a/GXRuntime/graphics/aurora/tests/CMakeLists.txt b/GXRuntime/graphics/aurora/tests/CMakeLists.txt
+index eac9cb7828..de9ae266c1 100644
+--- a/GXRuntime/graphics/aurora/tests/CMakeLists.txt
++++ b/GXRuntime/graphics/aurora/tests/CMakeLists.txt
+@@ -125,4 +125,10 @@ if (TARGET GXRuntime::gxcore)
+   target_link_libraries(gxcore_viewport_tests PRIVATE GXRuntime::gxcore gtest gtest_main
+     fmt::fmt xxhash absl::flat_hash_map dawn::dawncpp_headers TracyClient ${AURORA_SDL3_TARGET})
+   gtest_discover_tests(gxcore_viewport_tests)
++
++  add_executable(smooth_normal_cache_tests smooth_normal_cache_test.cpp)
++  target_include_directories(smooth_normal_cache_tests PRIVATE ../lib)
++  target_link_libraries(smooth_normal_cache_tests PRIVATE GXRuntime::gxcore gtest gtest_main xxhash
++    absl::flat_hash_map)
++  gtest_discover_tests(smooth_normal_cache_tests)
+ endif()
+diff --git a/GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp b/GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp
+new file mode 100644
+index 0000000000..6770255a8b
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp
+@@ -0,0 +1,154 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include <gtest/gtest.h>
++#include "gfx/smooth_normal_cache.hpp"
++
++#include <cstring>
++#include <vector>
++
++namespace {
++
++namespace gxc = gxruntime::gxcore;
++using aurora::gfx::gxcore::SmoothNormalCache;
++
++constexpr size_t F = gxc::kVertexFloats;
++constexpr size_t kColor0 = gxc::kVertexColor0Offset / sizeof(float);
++constexpr size_t kNormal = gxc::kVertexNormalOffset / sizeof(float);
++constexpr size_t kUv0 = gxc::kVertexUvOffset / sizeof(float);
++
++// A draw of `count` vertices, every float its own value.
++std::vector<float> make_vertices(size_t count, float seed = 0.f) {
++  std::vector<float> v(count * F);
++  for (size_t i = 0; i < v.size(); ++i)
++    v[i] = seed + 0.25f * static_cast<float>(i);
++  return v;
++}
++
++// smooth_normals_uncached()'s stand-in: only colour 0 and the normal change, from the draw's positions and the input.
++struct Maker {
++  int calls = 0;
++  std::vector<float> out;
++  const std::vector<float>& operator()(const std::vector<float>& in, int input) {
++    ++calls;
++    out = in;
++    for (size_t v = 0; v < in.size() / F; ++v) {
++      float* vert = &out[v * F];
++      for (int k = 0; k < 3; ++k) {
++        vert[kNormal + k] = vert[k] * 0.5f + static_cast<float>(input);
++        vert[kColor0 + k] = vert[k] * 0.125f;
++      }
++    }
++    return out;
++  }
++};
++
++const std::vector<float>& get(SmoothNormalCache<int>& cache, Maker& maker, const std::vector<float>& vertices,
++                              const std::vector<uint16_t>& indices, int input, uint64_t frame) {
++  return cache.get(vertices, indices, input, frame,
++                   [&]() -> const std::vector<float>& { return maker(vertices, input); });
++}
++
++TEST(SmoothNormalCache, HitIsTheUncachedBytes) {
++  SmoothNormalCache<int> cache;
++  Maker maker;
++  const auto vertices = make_vertices(40);
++  const std::vector<uint16_t> indices{0, 1, 2, 2, 3, 0, 4, 5, 6};
++  const std::vector<float> first = get(cache, maker, vertices, indices, 1, 10);
++  const std::vector<float> uncached = Maker{}(vertices, 1);
++  ASSERT_EQ(first.size(), uncached.size());
++  EXPECT_EQ(std::memcmp(first.data(), uncached.data(), first.size() * sizeof(float)), 0);
++  for (uint64_t frame = 11; frame < 400; ++frame) {
++    const std::vector<float>& again = get(cache, maker, vertices, indices, 1, frame);
++    ASSERT_EQ(std::memcmp(again.data(), uncached.data(), again.size() * sizeof(float)), 0) << frame;
++  }
++  EXPECT_EQ(maker.calls, 1);
++  EXPECT_EQ(cache.size(), 1u);
++  const auto [draws, hits] = cache.take_counts();
++  EXPECT_EQ(draws, 390u);
++  EXPECT_EQ(hits, 389u);
++}
++
++TEST(SmoothNormalCache, AnyChangedFloatMisses) {
++  const auto base = make_vertices(40);
++  const std::vector<uint16_t> indices{0, 1, 2, 3, 4, 5};
++  // A position, colour 0 (made over by make(), but its own value is kept), colour 1, a texture coordinate, the normal
++  // and the last float, in the middle vertex and in the last.
++  for (const size_t vertex : {size_t{20}, size_t{39}}) {
++    for (const size_t f : {size_t{1}, kColor0 + 1, kColor0 + 3, kColor0 + 5, kUv0 + 1, kNormal + 2, F - 1}) {
++      SmoothNormalCache<int> cache;
++      Maker maker;
++      get(cache, maker, base, indices, 1, 5);
++      auto changed = base;
++      changed[vertex * F + f] += 1.f;
++      const std::vector<float>& out = get(cache, maker, changed, indices, 1, 6);
++      EXPECT_EQ(maker.calls, 2) << "vertex " << vertex << " float " << f;
++      const std::vector<float> uncached = Maker{}(changed, 1);
++      EXPECT_EQ(std::memcmp(out.data(), uncached.data(), out.size() * sizeof(float)), 0);
++      // And the first draw again: its own vertices, whether its entry was the changed one's (the same key) or not.
++      const std::vector<float>& back = get(cache, maker, base, indices, 1, 7);
++      const std::vector<float> baseUncached = Maker{}(base, 1);
++      EXPECT_EQ(std::memcmp(back.data(), baseUncached.data(), back.size() * sizeof(float)), 0);
++    }
++  }
++}
++
++TEST(SmoothNormalCache, ChangedIndicesOrInputsMiss) {
++  SmoothNormalCache<int> cache;
++  Maker maker;
++  const auto vertices = make_vertices(16);
++  get(cache, maker, vertices, {0, 1, 2, 3, 4, 5}, 1, 1);
++  get(cache, maker, vertices, {0, 1, 2, 3, 5, 4}, 1, 2);
++  EXPECT_EQ(maker.calls, 2);
++  const std::vector<float>& out = get(cache, maker, vertices, {0, 1, 2, 3, 5, 4}, 2, 3);
++  EXPECT_EQ(maker.calls, 3);
++  const std::vector<float> uncached = Maker{}(vertices, 2);
++  EXPECT_EQ(std::memcmp(out.data(), uncached.data(), out.size() * sizeof(float)), 0);
++  get(cache, maker, vertices, {0, 1, 2, 3, 5, 4}, 2, 4);
++  EXPECT_EQ(maker.calls, 3);
++}
++
++TEST(SmoothNormalCache, UnusedEntriesGoAfter120Frames) {
++  SmoothNormalCache<int> cache;
++  Maker maker;
++  const auto a = make_vertices(8, 1.f), b = make_vertices(8, 2.f), c = make_vertices(8, 3.f);
++  const std::vector<uint16_t> indices{0, 1, 2};
++  get(cache, maker, a, indices, 1, 0);
++  get(cache, maker, b, indices, 1, 0);
++  // b is drawn every frame, a isn't: at frame 120 (a sweep) a is 120 frames unused, so it stays.
++  for (uint64_t frame = 1; frame <= 120; ++frame)
++    get(cache, maker, b, indices, 1, frame);
++  EXPECT_EQ(cache.size(), 2u);
++  get(cache, maker, a, indices, 1, 120);
++  EXPECT_EQ(maker.calls, 2);
++  // Unused from 120 on: the sweeps at 180 and 240 keep it (60, 120 frames), the one at 300 drops it (180).
++  for (uint64_t frame = 121; frame <= 300; ++frame)
++    get(cache, maker, b, indices, 1, frame);
++  EXPECT_EQ(cache.size(), 1u);
++  get(cache, maker, a, indices, 1, 301);
++  EXPECT_EQ(maker.calls, 3);
++  // A frame count that goes back (a new game) drops them all at the next draw.
++  get(cache, maker, c, indices, 1, 5);
++  EXPECT_EQ(cache.size(), 1u);
++  EXPECT_EQ(maker.calls, 4);
++}
++
++TEST(SmoothNormalCache, FullCacheMakesNewDrawsUncached) {
++  using Cache = SmoothNormalCache<int>;
++  Cache cache;
++  Maker maker;
++  const std::vector<uint16_t> indices{0, 1, 2};
++  for (size_t i = 0; i < Cache::kMaxEntries; ++i)
++    get(cache, maker, make_vertices(4, static_cast<float>(i)), indices, 1, 1);
++  EXPECT_EQ(cache.size(), Cache::kMaxEntries);
++  const auto extra = make_vertices(4, -7.f);
++  const std::vector<float>& out = get(cache, maker, extra, indices, 1, 1);
++  EXPECT_EQ(cache.size(), Cache::kMaxEntries);
++  const std::vector<float> uncached = Maker{}(extra, 1);
++  EXPECT_EQ(std::memcmp(out.data(), uncached.data(), out.size() * sizeof(float)), 0);
++  const int calls = maker.calls;
++  get(cache, maker, extra, indices, 1, 1);
++  EXPECT_EQ(maker.calls, calls + 1);
++  get(cache, maker, make_vertices(4, 0.f), indices, 1, 1);
++  EXPECT_EQ(maker.calls, calls + 1);
++}
++
++} // namespace
+-- 
+2.49.0.windows.1
+
