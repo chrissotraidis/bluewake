@@ -73,7 +73,10 @@ static inline bool bw_host_quiet(const CPUState* cpu) {
 
 /* The chassis loop's checks before a dispatch (an exception, the turn's
  * budget), and the edge service's before it would have nothing to do. */
-static inline bool bw_direct_call_ready_full(const CPUState* cpu, u32 address) {
+/* Both checks stay out of line and with the hot code, as the single check was:
+ * inlined at every call site the chunks grow about 11% and run slower (#503,
+ * Steam Deck), and the trained profile does not know these names. */
+static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_full(const CPUState* cpu, u32 address) {
     if (!bw_direct_enabled || cpu == NULL || bw_host_can_skip == NULL ||
         bw_direct_depth >= BW_DIRECT_DEPTH_MAX)
         return false;
@@ -100,7 +103,7 @@ static inline bool bw_direct_call_ready_full(const CPUState* cpu, u32 address) {
  * bw_host_skip_fast is set only while direct calls are on, so it stands for
  * bw_direct_enabled and the host's query; the translated code's cpu is never
  * NULL. Anything else (the answer off, verify) is the full check. */
-static inline bool bw_direct_call_ready_plain(const CPUState* cpu, u32 address) {
+static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_plain(const CPUState* cpu, u32 address) {
     const volatile BwHostSkipFast* fast = bw_host_skip_fast;
     if (__builtin_expect(fast != NULL, 1) && fast->simple && !bw_host_skip_verify) {
         if (bw_direct_depth >= BW_DIRECT_DEPTH_MAX || cpu->exception != 0u ||
