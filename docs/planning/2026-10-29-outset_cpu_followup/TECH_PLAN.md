@@ -133,11 +133,97 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPU
 | Performance | Game Mode A/B/A (Outset), rendered A/B/B/A ≥ 5 pairs | Outset gain above 2% and the A/A spread | Game Mode +1.8% (beyond spread); rendered +1.6% overall, Outset +1.9% (3 pairs) |
 | Regression | Five-scene tour, Outset walk | No scene beyond noise; no player-visible issue | Passed |
 
+## M4: the interrupt test (specification)
+
+### Why
+
+The plain direct-call check (stack 1) still asks, on every call, whether an interrupt could be taken. That costs four reads through four host pointers, `bw_host_quiet` in [`direct_calls.h`](../../../cmake/composite/direct_calls.h):
+
+```c
+if (*bw_host_sources_dirty) return false;                     /* host flag */
+return (cpu->msr & PPC_MSR_EE) == 0u ||                        /* guest state */
+       (!*bw_host_decrementer_pending &&                       /* host flag */
+        (*bw_host_pi_cause & *bw_host_pi_mask) == 0u);         /* RecompCore registers */
+```
+
+The first ceiling skipped this test along with the two single-address tests and gained +3.1% (stack 1 kept both and gained +0.7% from the check). M4-T01 bounds this test alone.
+
+### Design
+
+One host-owned word answers the three host-side reads at once; the guest's interrupt-enable bit stays a live read.
+
+| Bit | Meaning | Module action |
+|---|---|---|
+| `BW_IRQ_DIRTY` (1) | Interrupt sources not yet recomputed | Not quiet |
+| `BW_IRQ_PENDING` (2) | Decrementer pending, or `pi_cause & pi_mask` non-zero | Not quiet when `MSR.EE` is set |
+
+```c
+/* direct_calls.h, plain check only; the full check is unchanged. */
+const u32 irq = fast->irq;
+if ((irq & BW_IRQ_DIRTY) || ((irq & BW_IRQ_PENDING) && (cpu->msr & PPC_MSR_EE)))
+    return false;
+```
+
+**Where the word lives.** A new trailing field `irq` in `BwHostSkipFast` (`direct_skip.h`). The module already holds a pointer to that struct, so no new export or handshake version is needed. The host advertises the field by setting bit 1 of `simple` (`BW_SKIP_FAST_IRQ`); a module that sees it clear keeps today's four reads. This avoids colliding with [#524](https://github.com/chrissotraidis/bluewake/pull/524)'s handshake bump, though both touch the same struct.
+
+### Exactness: the invariant
+
+The word must equal what the four reads would give at every direct call. The host keeps this invariant:
+
+> While `g_interrupt_sources_dirty` is false, the PI cause and mask have not changed since `host_refresh_interrupt_sources` last ran.
+
+With it, the word needs updating only where the host writes its own two flags, and at the end of a refresh. Every write path to the PI registers was checked:
+
+| PI cause/mask writer (RecompCore `interrupts.c`) | Host caller | Covered by |
+|---|---|---|
+| `dol_interrupts_set_source` | `interrupt_sources.c`, from `host_refresh_interrupt_sources` | The refresh recomputes the word at its end |
+| `dol_interrupts_mmio_write` (mask write, cause acknowledge) | `host_mmio_write` | Same function sets the dirty flag at the block boundary |
+| `dol_interrupts_assert_vi_retrace` | `host_sync_vi_cycles`, from `host_sync_cycle_devices` | `host_sync_cycle_devices` sets the dirty flag first |
+| `dol_interrupts_init` | `main`, at start-up | Word initialized dirty |
+
+Host flag writes, each to go through one setter that also updates the word:
+
+| Flag | Sites in `main.c` |
+|---|---|
+| `g_interrupt_sources_dirty` | `host_dsp_run_cpu_cycles`, `host_dsp_sync_mailbox_read`, `host_refresh_interrupt_sources` (clears), `host_mmio_read`, `host_mmio_write` (2), `host_sync_cycle_devices`, `host_sync_cycle_devices_end_turn`, `host_dsp_interrupt`, state load |
+| `g_guest_decrementer_pending` | `host_spr_write`, `deliver_decrementer_exception`, `guest_clock_advance`, `main` |
+
+**No RecompCore change**: its writes are all covered by the host paths above.
+
+### Open question (M4-T02)
+
+**Does `host_dsp_interrupt` run on another thread?** It sets the dirty flag directly. If it runs off the game thread, the word update must be a single atomic store, as the flag already is. This needs confirming before implementation.
+
+### Changes (planned)
+
+| File | Change | Why |
+|---|---|---|
+| `cmake/composite/direct_skip.h` | `irq` field, `BW_IRQ_DIRTY`, `BW_IRQ_PENDING`, `BW_SKIP_FAST_IRQ` | Shared contract, no new export |
+| `cmake/composite/direct_calls.h` | Plain check reads `fast->irq` when `BW_SKIP_FAST_IRQ` is set, else the four reads | One read instead of six |
+| `runtime/host/src/main.c` | `host_set_sources_dirty()`, `host_set_decrementer_pending()`, word recompute at the end of the refresh; `BW_SKIP_FAST_IRQ` in `host_skip_fast_refresh` | Keeps the invariant at every write |
+| `cmake/composite/direct_calls.c` | Verify mode also compares the word with the four reads and counts disagreements | Runtime proof on the Deck |
+| `tests/direct_calls_test.c` | Plain check with the word against the four reads over all flag, cause, mask and EE combinations; word cleared/advertised paths | Unit proof, in Windows and Linux CI |
+
+### Verification
+
+| Layer | Required evidence |
+|---|---|
+| Unit | Word answer = four-read answer in every state; old-host fallback (`BW_SKIP_FAST_IRQ` clear) unchanged |
+| Runtime | `BLUEWAKE_DIRECT_SKIP_VERIFY=1` in Outset and a scene change: zero word disagreements, zero unsafe answers |
+| Exactness | render_bench: guest checkpoints identical to `outset-503-stack1` in all five scenes |
+| Performance | Ahead of `outset-503-stack1` in every interleaved Game Mode launch (at least six); no minimum size |
+| Player | Outset walk |
+
+### Risks
+
+- **A missed write path** would leave the word stale, and an interrupt would be taken late. That's caught by the verify counter, plus checkpoints that drift. Mitigation: the setters replace every direct write, so a new direct assignment shows up in review (and a grep check in CI is possible).
+- **Revert:** one commit; the module falls back to the four reads whenever the capability bit is clear.
+
 ## Next steps
 
 1. **Safety:** done; the verify run found 0 unsafe answers in 1.1 billion.
 2. **Player check:** done, no issue.
-3. **M4, in progress: the interrupt test.** A host-maintained "interrupt may be pending" word would replace three of its four reads. Before writing it, a diagnostic module bounds the gain. The real version needs every write site kept in sync (≈ 17 in `main.c`, 5 in RecompCore's `interrupts.c`), a RecompCore companion PR and a handshake bump coordinated with [#524](https://github.com/chrissotraidis/bluewake/pull/524). It is measured against the tag `outset-503-stack1`, and kept if consistent and exact, whatever the size.
+3. **M4, in progress: the interrupt test** ([specification](#m4-the-interrupt-test-specification)). Bound the gain first (diagnostic module), then implement the host-owned word; host-only, measured against the tag `outset-503-stack1`, kept if consistent and exact whatever the size.
 4. **Later:** count the dispatch-loop edges and look at the GX command stream.
 
 ## Implementation order

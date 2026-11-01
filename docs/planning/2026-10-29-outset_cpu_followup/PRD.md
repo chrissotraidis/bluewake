@@ -62,4 +62,5 @@ A candidate may help Outset without reaching 30 FPS: consistency and exactness d
 - **Candidates must be exact:** the unsafe ceiling changed when interrupts are taken, so its guest state drifted. A shippable change keeps every runtime test.
 - **Retain at +1.8% (2026-10-31):** slightly under the 2% target, but exact and beyond noise. The interrupt test is the next, separate change.
 - **One PR:** the code is stacked on this PR, as #504 did. [#528](https://github.com/chrissotraidis/bluewake/pull/528) was closed.
+- **Next (M4): the interrupt test.** One host-owned word replaces the plain check's three host-side interrupt reads; host-only, no RecompCore change ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification)).
 - **Platform:** first-revision Steam Deck, current SteamOS, Game Mode, render scale 3.

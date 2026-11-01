@@ -36,11 +36,13 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 
 ### M4: The interrupt test (depends: M3; known-good tag `outset-503-stack1`)
 
+Specification: [TECH_PLAN M4](TECH_PLAN.md#m4-the-interrupt-test-specification).
+
 Acceptance: the candidate ahead of the control in every interleaved Game Mode launch (at least six), identical checkpoints, zero unsafe verify answers, focused tests in CI. No minimum gain.
 
 - [ ] M4-T01: Bound the gain: a diagnostic module whose plain check reads one host flag instead of the four interrupt values (local `bench/503-irq-ceiling`, not shippable), A/B against the tagged stack.
-- [ ] M4-T02: Map every write to the four values (host `main.c`, RecompCore `interrupts.c`) and design one host-maintained "interrupt may be pending" word.
-- [ ] M4-T03: Implement with focused tests; RecompCore companion PR and pin; handshake version coordinated with #524.
+- [x] M4-T02: Map every write to the four values and design the word ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification)). Every RecompCore write is covered by a host path, so no RecompCore change is needed. Open: whether `host_dsp_interrupt` runs off the game thread.
+- [ ] M4-T03: Implement with focused tests: the word in `BwHostSkipFast` behind a capability bit (no handshake bump), host setters, and a verify-mode comparison.
 - [ ] M4-T04: Qualify: Game Mode launches, checkpoints, verify run, player check.
 
 ## Evidence ledger
