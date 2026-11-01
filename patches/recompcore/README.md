@@ -300,3 +300,11 @@ its sunlight. The gap fill is off (it shaded Link's own front) and the slope ter
 Patch 0208 reads a table of Wind Waker HD's normals keyed by the GameCube's exact vertex positions (`BWHN`;
 `DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS` for tests), for the facing term. It also tries the depth's own facing
 (`DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL`, `_BLUR`), which HD turned out not to have; off by default.
+
+Patch 0209 adds Wind Waker HD's shadow bias and terrain shadow mix (test switches), `aurora_set_sun_hd_light` (HD's
+light rule: the sun by day, the moon's side by night, its day/night fade) and `aurora_set_hd_normals` (HD's normals
+for the stage in play, from the HD pack's `optional/hd-normals/<stage>.bin`).
+
+Patch 0209's pre-pass takes its grazing term from the edge-aware depth normal (`depth_normal()`), and characters
+none: its neighbours lie four pixels apart, and across a silhouette their normal came out edge-on, so Link's outline
+grazed and the blur spread that onto the ground around him, a lit hole in his shape in the soft shadow.

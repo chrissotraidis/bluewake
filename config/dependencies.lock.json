@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "10d1669c31dcc4c646eafdac42a9f2adf072ad0d",
+      "sha": "01aebe25dd45a0a529a5a0be7201e3cf3bed88b5",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -741,6 +741,20 @@
             "patches/recompcore/0208-Sun-shadows-the-facing-term-from-Wind-Waker-HD-s-own-normals.patch"
           ],
           "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS, a table of HD's normals keyed by the GameCube's raw joint-local positions; and the depth's own facing (DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL, _BLUR), which HD's own shader source later showed it doesn't have; both off by default."
+        },
+        "hd_shadow_rule": {
+          "runtime": "01aebe25dd45a0a529a5a0be7201e3cf3bed88b5",
+          "tracked_patches": [
+            "patches/recompcore/0209-Sun-shadows-Wind-Waker-HD-s-bias-terrain-mix-and-light-rule-its-stage-normals-from-the-host.patch"
+          ],
+          "evidence": "pdale-boop's: HD's bias (DOL_AURORA_SUN_SHADOW_MAP_HD_BIAS, _CASTER_BIAS 80,3 as HD draws its map), HD's terrain shadow mix (DOL_AURORA_SUN_SHADOW_HD_MIX), aurora_set_sun_hd_light (HD's sun by day, the moon's side by night, its day/night fade) and aurora_set_hd_normals (the pack's optional/hd-normals/<stage>.bin); all off by default."
+        },
+        "hd_prepass_graze": {
+          "runtime": "01aebe25dd45a0a529a5a0be7201e3cf3bed88b5",
+          "tracked_patches": [
+            "patches/recompcore/0209-Sun-shadows-Wind-Waker-HD-s-bias-terrain-mix-and-light-rule-its-stage-normals-from-the-host.patch"
+          ],
+          "evidence": "pdale-boop's: Link's outline no longer leaves a lit hole in his shape in the soft shadow round him (Windows, Nov 10, in play)."
         }
       }
     },

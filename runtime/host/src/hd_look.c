@@ -440,7 +440,76 @@ static void point_lights(CPUState* cpu, const float eye[3]) {
     }
 }
 
+// Wind Waker HD's light for the sun shadows (BLUEWAKE_HD_SUN_RULE=1, local test; HD's setLightPosHD in its
+// d_kankyo_3.cpp): from the camera's eye, by day (06:30-19:30) the sun at (sin a, -cos a, -0.6 cos a) x 80,000
+// with a the time less 15 degrees, its height held at 40,000 before 09:00 and after 17:00; by night the
+// opposite side, held at 40,000. Crossing 06:30 or 19:30, the light stays where it was while a fade rises
+// (0.01 a game frame), changes sides at the top and the fade falls: the renderer takes the lit side down to
+// the shade by it (aurora_set_sun_hd_light). Out: the direction toward the light.
+static void hd_sun_rule(CPUState* cpu, unsigned long long retrace, float out[3]) {
+    static bool started, night;
+    static float fade, target, light[3];
+    static unsigned long long last;
+    const float t = read_float(cpu, 0x803E56ECu);  // g_env_light.mCurTime
+    const bool day = t > 97.5f && t < 292.5f;
+    unsigned long long frames = started && retrace > last ? (retrace - last) / 2u : 0u;
+    if (frames > 0u || !started)
+        last = retrace;
+    if (!started) {
+        started = true;
+        night = !day;
+    }
+    if (day == night) {  // crossed 06:30 or 19:30
+        night = !day;
+        target = 1.0f;
+    }
+    for (; frames > 0u; --frames) {
+        fade += target > fade ? 0.01f : -0.01f;
+        fade = fade < 0.0f ? 0.0f : fade > 1.0f ? 1.0f : fade;
+        if (fade >= 1.0f)
+            target = 0.0f;
+    }
+    if (target <= 0.0f) {
+        const float a = (t > 15.0f ? t - 15.0f : t + 345.0f) * 3.14159265f / 180.0f;
+        const float x = sinf(a) * 80000.0f, z = cosf(a) * -48000.0f;
+        if (day) {
+            const float y = (t < 135.0f || t > 255.0f) ? cosf(240.0f * 3.14159265f / 180.0f) * 80000.0f : cosf(a) * 80000.0f;
+            light[0] = x, light[1] = -y, light[2] = z;
+        } else {
+            light[0] = -x, light[1] = cosf(300.0f * 3.14159265f / 180.0f) * 80000.0f, light[2] = -z;
+        }
+    }
+    out[0] = light[0], out[1] = light[1], out[2] = light[2];
+    aurora_set_sun_hd_light(1, night ? 1 : 0, fade);
+}
+
+// Wind Waker HD's own normals for the stage in play, for the sun shadows' facing term: the HD pack's
+// optional/hd-normals/<stage>.bin (made by the importer), handed to the renderer as the stage changes.
+static void hd_normals_stage(CPUState* cpu) {
+    static char s_stage[9];
+    char stage[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+    if (strcmp(stage, s_stage) == 0)
+        return;
+    memcpy(s_stage, stage, sizeof s_stage);
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    char path[4096];
+    if (stage[0] == '\0' || pack == NULL || pack[0] == '\0') {
+        aurora_set_hd_normals(NULL);
+        return;
+    }
+    snprintf(path, sizeof path, "%s/optional/hd-normals/%s.bin", pack, stage);
+    FILE* f = fopen(path, "rb");
+    if (f != NULL)
+        fclose(f);
+    aurora_set_hd_normals(f != NULL ? path : NULL);
+    if (g_trace)
+        fprintf(stderr, "[hd-look] HD normals for %s: %s\n", stage, f != NULL ? path : "none");
+}
+
 static void clouds(CPUState* cpu, unsigned long long retrace) {
+    hd_normals_stage(cpu);
     bool show = false;
     bool torch_view = false;
     if (g_clouds == 1 || g_sun == 1 || g_edge == 1 || g_torch == 1) {
@@ -474,7 +543,18 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                 const float sx = read_float(cpu, kSunPos) - inv[3];
                 const float sy = read_float(cpu, kSunPos + 4u) - inv[7];
                 const float sz = read_float(cpu, kSunPos + 8u) - inv[11];
-                aurora_set_sun_direction(sx, sy, sz);
+                static int s_hd_rule = -1;
+                if (s_hd_rule < 0) {
+                    const char* rule = getenv("BLUEWAKE_HD_SUN_RULE");
+                    s_hd_rule = rule != NULL && rule[0] == '1';
+                }
+                if (s_hd_rule) {
+                    float light[3];
+                    hd_sun_rule(cpu, retrace, light);
+                    aurora_set_sun_direction(light[0], light[1], light[2]);
+                } else {
+                    aurora_set_sun_direction(sx, sy, sz);
+                }
                 // The same in the camera's space (its axes are inv's columns),
                 // for the room culling below.
                 const float sl = sqrtf(sx * sx + sy * sy + sz * sz);
