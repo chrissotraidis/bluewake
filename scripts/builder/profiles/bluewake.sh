@@ -59,8 +59,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Wind Waker HD's bloom, SSAO, rim light and cloud shadows (with its cloud texture from the host), and its own shadow pass as the "hd" shadow quality: patches/recompcore/0210 (pdale-boop).
 # The shadow pre-pass blended with the last frames' by distance (test switch): patches/recompcore/0211 (pdale-boop).
 # The palms shaded and lit as Wind Waker HD's (skinned scenery as scenery, smooth normals, HD's vertex colours and light; test switches): patches/recompcore/0212 (pdale-boop).
+# Wind Waker HD's shadow cascade splits from the game's camera each frame (aurora_set_sun_cascade_splits): patches/recompcore/0213 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=8a147e0dda5c42ac2032798c2093b2db84d27435
+RECOMPCORE_SHA=be967b1ecea6095c723102e21467128a61219fd8
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
