@@ -49,8 +49,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The HD look's sun shadows, occlusion and cloud shadows leave the effects drawn over the scene alone (the spin attack's rings, the Master Sword's glow), as Wind Waker HD does: patches/recompcore/0206 (pdale-boop).
 # Wind Waker HD's facing term in the sun shadows, and its light for the hour in their shade (aurora_set_sun_palette); the gap fill off; the slope term as far off near the camera: patches/recompcore/0207 (pdale-boop).
 # The facing term from Wind Waker HD's own normals, by the GameCube's vertex positions (test switch): patches/recompcore/0208 (pdale-boop).
+# Wind Waker HD's shadow bias, terrain shadow mix and light rule (aurora_set_sun_hd_light), and its normals for the stage in play from the host (aurora_set_hd_normals): patches/recompcore/0209 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=50a19cd01edaaa295c731936d87eff80607694f7
+RECOMPCORE_SHA=8bf0c5da3f80a200f696787603b77259a7d9af4e
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
