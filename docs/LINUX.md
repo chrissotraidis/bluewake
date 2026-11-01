@@ -153,6 +153,15 @@ folder buttons use SDL's native dialog through an XDG
 portal or Zenity. Dragging an ISO/GCM onto the setup window and entering paths
 directly also work.
 
+**Install folder** is where the game goes: the prepared game files, and with them
+your saved games, the memory card, the caches and the logs. It starts at
+`~/.local/share/BlueWake` (or whatever `BLUEWAKE_DATA_DIR` names) and can be
+browsed to another folder; the line under it says how much room the game files
+need and how much the folder has. Setup creates the folder when it does not
+exist yet, and remembers the choice in `install.txt` beside the settings file, so
+later launches use it without `BLUEWAKE_DATA_DIR`. Moving it later does not move
+the saves already in the old folder: copy them across, or keep using the old one.
+
 **Start** opens the preparation screen, which lists the four stages BlueWake
 runs there: checking the disc image, reading the disc, unpacking the 415 game
 modules, and saving the settings. Each stage shows a tick when it is done and a
@@ -321,6 +330,9 @@ No ready-made Linux AppImage has been published yet; these steps work for one yo
 
    - Select your USA GZLE01 revision-0 `.iso` or `.gcm` with **Browse disc...**,
      by typing its path, or by dragging it onto the window.
+   - **Install folder** is where the game is installed; browse to another folder
+     if the default one is on a small or full filesystem. Setup creates it and
+     remembers it for later launches.
    - To use an HD texture pack, enable it and select the pack's `GZL` or
      `GZLE01` folder with **Browse textures...**.
    - Leave **Add or update application-menu and Desktop shortcuts** enabled if
