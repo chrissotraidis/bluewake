@@ -5,8 +5,9 @@
  * the chassis loop (dispatch_loop.h). It counts the host's entries, each
  * boundary the loop takes (by target address, and whether the edge service was
  * skipped or asked) and why the loop returned. It only counts: the loop takes
- * the same path with it as without it (#530). A report goes to stderr when the
- * module unloads or the process exits.
+ * the same path with it as without it (#530). The host prints the report at
+ * exit through bluewake_composite_loop_census_report (module_export.c): the
+ * app's shutdown does not run shared-library destructors.
  *
  * No identifier here may be `ctx`: the chunks define it as a macro. */
 
@@ -58,7 +59,7 @@ static inline int bw_loop_census_exit(int reason, int result) {
 }
 
 /* Every target, one line each, so a script can sort and map them. */
-__attribute__((destructor)) static void bw_loop_census_report(void) {
+__attribute__((unused)) static void bw_loop_census_report(void) {
     if (bw_loop_entries == 0u)
         return;
     fprintf(stderr,
