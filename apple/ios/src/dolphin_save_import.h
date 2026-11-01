@@ -1,4 +1,4 @@
-// Import Wind Waker (GZLE01) saves made by Dolphin into BlueWake's memory card.
+// Move Wind Waker (GZLE01) saves between Dolphin and BlueWake's memory card.
 //
 // Dolphin exports a save as a .gci (a 64-byte GameCube directory entry, then
 // the file's blocks) and keeps whole cards as .raw images. The game's save is
@@ -6,7 +6,7 @@
 // of three 0x770-byte quest logs, each with its own checksum, followed by a
 // checksum of the block (zeldaret/tww m_Do_MemCardRWmng.h). BlueWake's card is
 // the GXRuntime container (magic DOLCARD1, ref/recompcore memory_card.c).
-// build/device-setup/ww_save.py is the reference this ports.
+// build/device-setup/ww_save.py is the reference the import ports.
 #ifndef BLUEWAKE_DOLPHIN_SAVE_IMPORT_H
 #define BLUEWAKE_DOLPHIN_SAVE_IMPORT_H
 
@@ -54,6 +54,15 @@ const char* bw_card_quest_logs(const uint8_t* card, size_t size, bool* has_saves
 // added instead and the slots are ignored. *out is malloc'd; the caller frees.
 const char* bw_card_import(const uint8_t* card, size_t size, const BWDolphinSave* save,
                            int src_slot, int dst_slot, uint8_t** out, size_t* out_size);
+
+// Writes the card's gczelda file out as a .gci (the 64-byte directory entry and
+// the 98,304 bytes of save data), on demand: the card is only read, never
+// changed. All three quest logs go, so a save made in BlueWake opens in Dolphin
+// and copies to a real memory card. The bookkeeping that says where a file sits
+// on a card (the copy counter and the first block) is not part of the container
+// and Dolphin reassigns both when it imports, so they are written as 0 and the
+// first user block. *out is malloc'd; the caller frees.
+const char* bw_card_export(const uint8_t* card, size_t size, uint8_t** out, size_t* out_size);
 
 #ifdef __cplusplus
 }

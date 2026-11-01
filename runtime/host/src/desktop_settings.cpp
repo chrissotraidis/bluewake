@@ -53,6 +53,7 @@ bool g_dirty = false;
 long long g_dirty_at = 0;
 bool g_safe_mode = false;
 bool g_safe_backed_up = false;
+bool g_first_launch = false;
 
 // The file keeps the folder HD textures were on with while they are off.
 constexpr const char* kPackFolderKey = "BLUEWAKE_TEXTURE_PACK_FOLDER";
@@ -110,6 +111,11 @@ void read_line(const std::string& key, const std::string& value) {
     // turns HD textures off for this session, and the folder is kept.
     if (key == "DOL_AURORA_TEXTURE_PACK" && !value.empty())
         g_choices.last_pack = value;
+    // Sun shadows have one quality for now, the HD look's (high); a Low a
+    // player chose in 0.9.0's menu is dropped, not kept out of sight. Lite
+    // and Enhanced come later.
+    if (key == "DOL_AURORA_SUN_SHADOW_QUALITY")
+        return;
     const bw_settings::Setting* row = bw_settings::find(key.c_str());
     const bool known = row != nullptr && bw_settings::exists_on(*row);
     const auto launched = g_launch.find(key);
@@ -292,6 +298,7 @@ void load(const std::string& path, const std::string& read_instead) {
             g_launch[s.key] = "";
     Lines lines;
     const bool found = read_file(path, &lines) || read_file(read_instead, &lines);
+    g_first_launch = !found;
     if (!found) {
         if (!path.empty())
             std::fprintf(stderr, "[settings] no settings file yet (%s)\n", path.c_str());
@@ -347,6 +354,9 @@ void launch_choice(const char* key, const std::string& value) {
     put_env(key, value);
 }
 
+bool launched(const char* key) { return g_launch.count(key) != 0; }
+bool first_launch() { return g_first_launch; }
+
 void apply_safe_mode() {
     g_safe_mode = true;
     g_safe_backed_up = !g_path.empty() && bw_launch_backup(g_path.c_str());
@@ -362,11 +372,14 @@ void apply_safe_mode() {
         {"BLUEWAKE_FADE_FRAMES", "0"},       {"BLUEWAKE_QUICK_DOORS", "0"},
         {"BLUEWAKE_STAGE_SELECT_TOGGLE", "0"},
         {"BLUEWAKE_HD_LOOK", "0"},
-        // Clear overrides so the HD switch can enable every effect again later.
-        {"BLUEWAKE_HD_DISTANT_ISLANDS", ""}, {"BLUEWAKE_HD_BLOOM", ""},
-        {"BLUEWAKE_HD_FAR_BLUR", ""},        {"BLUEWAKE_HD_AO", ""},
-        {"BLUEWAKE_HD_CLOUD_SHADOWS", ""},   {"BLUEWAKE_HD_SUN_SHADOWS", ""},
-        {"BLUEWAKE_HD_EDGE_LIGHT", ""},      {"BLUEWAKE_HD_TORCH_LIGHT", ""},
+        // Every part back to its default, on with the look, so the HD switch
+        // turns every effect on again later; sun shadows' override is cleared.
+        {"BLUEWAKE_HD_DISTANT_ISLANDS", "1"}, {"BLUEWAKE_HD_BLOOM", "1"},
+        {"BLUEWAKE_HD_FAR_BLUR", "1"},        {"BLUEWAKE_HD_AO", "1"},
+        {"BLUEWAKE_HD_CLOUD_SHADOWS", "1"},   {"BLUEWAKE_HD_SUN_SHADOWS", ""},
+        {"BLUEWAKE_HD_EDGE_LIGHT", "1"},      {"BLUEWAKE_HD_TORCH_LIGHT", "1"},
+        {"BLUEWAKE_HD_CLOUDS", ""},           {"BLUEWAKE_HD_SKY", ""},
+        {"BLUEWAKE_HD_SKY_MODELS", ""},       {"BLUEWAKE_HD_SKY_LINEAR", ""},
     };
     for (const auto& pair : kSafe) {
         if (g_safe_backed_up) {

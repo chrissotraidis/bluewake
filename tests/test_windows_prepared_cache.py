@@ -136,7 +136,7 @@ class PreparedCacheTest(unittest.TestCase):
             (self.base / "chunks_dol" / name).write_text(CHUNK, newline="\n")
         self.out = self.root / "build"
         self.out.mkdir()
-        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False, native_skin=False, native_game_math=False, lean_memory=False, native_entries=False)
+        self.args = SimpleNamespace(out=self.out, accept_new_composite=False, prepared_blocks=False, fixed_cpu=False, fixed_mem1=False, inline_fp=False, gather_pipe=False, gather_alias_cache=False, direct_calls=False, inline_gpr=False, native_j3d=False, native_vec=False, native_math=False, native_skin=False, native_game_math=False, lean_memory=False, native_entries=False)
         self.builder = bw.Builder(self.args)
         self.builder.mods = False
         self.builder.composite = lambda *args: shutil.copytree(self.base, args[-2])

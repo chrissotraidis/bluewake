@@ -187,6 +187,13 @@ Texture Pack…**, turn on **HD Textures**, and restart.
 
 The pack contains PNG textures, `_mipN` mipmaps and `import-report.json` with
 source checksums, tool/dependency records, matches and skipped conflicts.
+Each skipped conflict (`conflicts`) lists its GameCube originals and every HD
+texture that disagreed (HD has two or more under one name), for choosing one
+by eye. The one chosen for a texture file goes in
+`runtime/host/src/wwhd/picked.inc`, which both importers read and prefer over
+`PREFERRED` (`scripts/wwhd/matches.py`, `candidate_priority()` in
+`runtime/host/src/wwhd/ui.cpp`, which choose by name); a conflict not there
+keeps the GameCube texture.
 When a fallback is supplied, its selected keys and file checksums are also
 recorded in the report. Unsupported fallback filenames are listed there.
 The detailed report is local game-derived metadata; keep it with your private
@@ -215,7 +222,16 @@ expects. Missing levels down to 1x1 are generated. Conflicting artwork for the s
 texture key is skipped, except for explicitly audited shared-artwork variants.
 Those choices preserve the original UV composition instead of HD debug-room,
 figurine or photographic-cloud variants. Selected alternatives are recorded
-in the report. Tiny placeholders and shader ramp textures stay
+in the report. HD's own sky clouds (the sea's `ws_naka06`, `ws_mae08`, `ws_mae09` and `cloudtx_01`-`03`) are written
+apart, in the pack's `optional/hd-clouds`, in HD's own colour and alpha: two of them are GameCube intensity
+bands that HD draws from colour with the cloud in alpha, so the GameCube's intensity would turn them into a grey
+haze. HD's `ws_naka06` is written for the GameCube's `ws_naka07` too: HD draws each cloud layer from one
+texture, its own colour and alpha, and the HD look's sky draws the GameCube's layers the same way. The pack
+leaves that folder out; the HD look's **HD's clouds in the sky** switch loads it over the pack
+([WWHD_LOOK.md](WWHD_LOOK.md)), and the report lists them under `optional`. HD's sky and light palettes for
+every stage on both discs (each stage's Pale and Virt tables, 130 stages) go in `optional/hd-sky/stages.bin`
+for the HD look's `BLUEWAKE_HD_SKY`; the report gives their count under `optional.hd-sky`. Both importers make
+the same bytes (`scripts/wwhd/sky.py`, `runtime/host/src/wwhd/sky.h`). Tiny placeholders and shader ramp textures stay
 original. Different UV layouts or changed names need separate, verified
 mappings and are not guessed.
 
@@ -242,6 +258,8 @@ including splitting HD's panorama into the two original sprite planes.
 RGBA8 and BC1-5 layout surfaces preserve color, luminance and alpha;
 unmapped redesigned HUD images and JPA particle textures remain
 unsupported. Unsupported resources and textures are listed in the report.
+A GameCube material file (`.bmt`) that counts a chunk it doesn't hold is read
+to its end: it holds no textures, and isn't listed.
 
 ## Source and verification
 

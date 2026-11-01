@@ -42,6 +42,8 @@ final class Shell {
     /** Rows "empty\tchecksum_ok\tmax_life\trupees\tname" for each quest log, or null with error[0] set. */
     static native String[] nativeQuestLogs(byte[] bytes, boolean dolphin, String[] error);
     static native byte[] nativeCardImport(byte[] card, byte[] save, int source, int destination, String[] error);
+    /** The card written out as a Dolphin .gci, or null with error[0] set. The card is only read. */
+    static native byte[] nativeCardExport(byte[] card, String[] error);
 
     static void log(String line) {
         try {

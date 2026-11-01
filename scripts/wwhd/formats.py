@@ -236,6 +236,9 @@ def gc_textures(data: bytes, path: str):
         r = Reader(data)
         at, count = 32, r.u32(12)
         for _ in range(count):
+            # A material file (.bmt) can count a chunk it doesn't hold: it ends after MAT3, with no TEX1.
+            if at == len(data):
+                break
             magic, size = r.take(at, 4), r.u32(at + 4)
             if size < 8:
                 raise FormatError("invalid J3D chunk size")
