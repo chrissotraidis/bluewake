@@ -35,6 +35,7 @@ set(BLUEWAKE_COMPAT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/compat)
 
 option(BLUEWAKE_WINDOWS_CONSOLE "Build a console-subsystem executable (logs on the terminal)" OFF)
 option(BLUEWAKE_WINDOWS_DEVELOPER_TRACING "Compile BLUEWAKE_TRACE_* probes into the host" OFF)
+option(BLUEWAKE_WINDOWS_EXTRACTOR_ONLY "Build only the disc extractor, without the desktop renderer" OFF)
 option(BLUEWAKE_WINDOWS_REGRESSION_TESTS "Build source-only Windows host regressions" OFF)
 
 # Source paths compiled into the app (assert and log messages) are written
@@ -42,20 +43,37 @@ option(BLUEWAKE_WINDOWS_REGRESSION_TESTS "Build source-only Windows host regress
 add_compile_options("-ffile-prefix-map=${BLUEWAKE_REPO_ROOT}/=")
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE _USE_MATH_DEFINES _WIN32_WINNT=0x0A00)
 
-add_subdirectory(${GXRUNTIME_DIR} gxruntime_build EXCLUDE_FROM_ALL)
-
 # POSIX calls the host makes (threads, clocks, dlopen, dirent): force-included
 # into BlueWake's own sources only, never into third-party code.
 add_library(bluewake_posix_compat STATIC ${BLUEWAKE_COMPAT_DIR}/bw_posix_compat.c)
 target_include_directories(bluewake_posix_compat PRIVATE ${BLUEWAKE_COMPAT_DIR})
 set(BLUEWAKE_COMPAT_INCLUDES ${BLUEWAKE_COMPAT_DIR}/include ${BLUEWAKE_COMPAT_DIR})
-set(BLUEWAKE_COMPAT_FORCE_INCLUDE "SHELL:-include ${BLUEWAKE_COMPAT_DIR}/bw_posix_compat.h")
+set(BLUEWAKE_COMPAT_FORCE_INCLUDE "SHELL:-include \"${BLUEWAKE_COMPAT_DIR}/bw_posix_compat.h\"")
+# Tools the builder runs on the player's disc.
+add_executable(bluewake_disc_extract
+    ${BLUEWAKE_REPO_ROOT}/scripts/ios/disc_extract.c
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c)
+target_include_directories(bluewake_disc_extract PRIVATE
+    ${BLUEWAKE_COMPAT_INCLUDES} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
+target_compile_options(bluewake_disc_extract PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt)
+if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+    target_sources(bluewake_disc_extract PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools-utf8.manifest")
+endif()
+
+# Module preparation needs the same extractor, without configuring Dawn or SDL.
+if(BLUEWAKE_WINDOWS_EXTRACTOR_ONLY)
+    return()
+endif()
+
+add_subdirectory(${GXRUNTIME_DIR} gxruntime_build EXCLUDE_FROM_ALL)
+
 # GXRuntime's own C runtime (the disc reader uses fseeko and off_t) needs the
 # same few declarations, and remembers its getenv answers (the Windows C
 # runtime's getenv is slow on hot paths); its C++ graphics code builds
 # unchanged.
 target_compile_options(gxruntime PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE}
-    "SHELL:-include ${BLUEWAKE_COMPAT_DIR}/bw_getenv_cache.h")
+    "SHELL:-include \"${BLUEWAKE_COMPAT_DIR}/bw_getenv_cache.h\"")
 
 set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/main.c
@@ -216,15 +234,6 @@ target_compile_options(bluewake_dsp_adapter PRIVATE -fno-ms-compatibility)
 target_link_libraries(bluewake_dsp_adapter PUBLIC bluewake_dsp_donor bluewake_posix_compat)
 target_compile_definitions(BlueWake PRIVATE BLUEWAKE_HAS_DSP_ADAPTER=1)
 target_link_libraries(BlueWake PRIVATE bluewake_dsp_adapter)
-
-# Tools the builder runs on the player's disc.
-add_executable(bluewake_disc_extract
-    ${BLUEWAKE_REPO_ROOT}/scripts/ios/disc_extract.c
-    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c)
-target_include_directories(bluewake_disc_extract PRIVATE
-    ${BLUEWAKE_COMPAT_INCLUDES} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
-target_compile_options(bluewake_disc_extract PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
-target_link_libraries(bluewake_disc_extract PRIVATE bluewake_posix_compat bcrypt)
 
 if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     # Run manually against two private own-disc modules; no game code in CI.
