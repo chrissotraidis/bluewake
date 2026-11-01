@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: Planned  
+Status: In progress (M2)  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -24,13 +24,13 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 
 ### M2: Implement one isolated candidate (depends: M1)
 
-- [ ] M2-T01: Add the smallest source change matching the selected cost and preserve fallback behavior.
-- [ ] M2-T02: Add or extend the surface's focused correctness test.
-- [ ] M2-T03: Build matched control/candidate artifacts and record identities.
+- [x] M2-T01: Add the smallest source change matching the selected cost and preserve fallback behavior. The direct-call range tests settled at build time (`3a1b500`): constant targets outside the two fixed ranges take `bw_direct_call_ready_plain`; everything else keeps the full check.
+- [x] M2-T02: Add or extend the surface's focused correctness test. `direct_calls_test` compares the plain and full answers in all 256 host/CPU states; passes at -O0 and -O2.
+- [ ] M2-T03: Build matched control/candidate artifacts and record identities. Candidate module building over the control folder with the same composite profile (local `bench/503-plain` = control + `3a1b500`).
 
 ### M3: Qualify and decide (depends: M2)
 
-- [ ] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints.
+- [ ] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints. Also a Game Mode A/B (control → candidate → control, worst-angle Outset state) and `BLUEWAKE_DIRECT_SKIP_VERIFY=1` with zero unsafe answers.
 - [ ] M3-T02: Run the full five-scene rendered tour and focused CI tests.
 - [ ] M3-T03: Perform the Outset walk/camera player test and record retain/reject reasoning.
 
@@ -50,4 +50,5 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 | M1-T04 | Same control, stage select off; `perf-nostage.data` resolved against the build's own module and host binary (local `measure-503/m1-samples.txt`, private); call-site counts from the 84 line-table chunk objects | Runtime and host symbols in M cycles per Outset game frame (≈ 129 M total; 30 FPS needs ≈ 113 M) | As above | **Shared runtime costs ≈ 44 M per frame, removable part ≈ 8–12 M.** Native routines 10.8 (their own work); direct-call check 5.6 (`bw_direct_call_ready`, 32,604 call sites, 252 bytes, kept out of line); GX command stream 5.1 (`aurora_backend_gx_write` 3.5, `bw_gather_pipe` 1.4); dispatch loop 4.3 (`chassis_dispatch` 2.3, `host_chassis_requires_full` 1.0, `bw_call_translated` 0.6, `bw_find_chunk` 0.3); native actor search 2.9 (`bw_search_word` 1.7, one `get_ram_ptr` per word); memory slow paths and aliases 2.2; paired-single quantized load/store 2.1 (generic GQR path, ≈ 3,500 call sites); FP helpers 1.2 (`fctiw`, `frsp`, `frsqrte`) |
 | M1-T04 | Ceiling module (local `bench/503-ceiling` `7e8c7cc`, AppImage `a30ce8c7cef2`, not shippable): `bw_direct_call_ready` reduced to depth, exception, budget and one host flag (70 bytes, was 252), same composite profile `35c4f7bc` as control (`--reuse`); local `measure-503/ceiling/windows.jsonl` (private) | `gamemode_measure.py` 3 × 15 s per launch, control → ceiling → control, each launched through the Steam shortcut with `BLUEWAKE_LOAD_STATE` = `1-outset.bwstate` (the worst Outset angle) | Game Mode, scale 3, Smooth Motion on, Efficient soft effects on, stage select off; the settings file had `BLUEWAKE_ASPECT=4:3` for all three launches | **Game FPS 26.4 → 27.2 (+3.1%, A/A spread 0.5, beyond it)**; IPC 1.667 → 1.555 (fewer, easier instructions); clock 3.44 GHz both; power within spread. The ceiling clears the 2% bar; a shippable check keeps the interrupt and watched-address tests, so its gain lies between 0 and +3.1% |
 | M1-T04 | Same control (A, `e237759c`) against the ceiling module (B, `a30ce8c7`); local `2026_10_31-161620/` (private) | `render_bench` rendered, desktop session, unpaced, 5 states × 1,800 retraces, 3 pairs interleaved A/B/B/A (12 measured runs + 2 picture runs), both with scale 3, Smooth Motion on (1 step), Efficient soft effects on | Steam Deck Desktop Mode | **B 4.5% faster overall** (A −4.31%): Outset +4.3%, Lava Room +6.8%, Hyrule Castle +2.4%, Butterfly Room +2.7%, Shipwreck +5.5%; busy 98% both. **Guest checkpoints differ between builds in every scene from the first one** (≈ 300 retraces in), while each build matches itself in all 7 runs: the ceiling's skipped interrupt and watched-address tests change when interrupts are taken. Pictures follow the drift (Butterfly Room PSNR 15: same frame, different attack phase; Lava Room flicker present equally in both, 11,985 vs 11,659 pixels). No crash, safe mode or hang in 70 scene runs. The gain is an upper bound; the shippable check must match the control's checkpoints exactly |
+| M2-T01/T02 | `3a1b500` (this PR): `direct_calls.h`, `direct_skip.h`, `direct_calls.c`, `main.c`, `tests/direct_calls_test.c` | Local clang build of `direct_calls_test` at -O0 and -O2 | Linux workstation | Test passes; plain and full answers agree for six addresses × 256 states. Handshake unchanged; independent of #524 |
 | M1-T03 | Same session's exit reports (`[native-*]` lines; local `measure-503/m1-native-counts.txt`) | Accepted/declined counts over the session (22,417 retraces, ≈ 8,500 game frames) | As above | ≈ 304 M native runs and ≈ 10.7 M declines: **≈ 37,000 routing decisions per game frame**. The readiness callback (`host_can_skip_observation`) is only 0.33% of the game thread, so the `*_try` functions' 7.5% is mostly the native routines' own (inlined) work. Declines are dominated by `key-s` (79% declined) and `transform-simple` (80%), ≈ 1,060 per frame: a minor candidate. The 13% gap to 30 FPS has to come from the translated chunks (M1-T02) |

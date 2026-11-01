@@ -38,7 +38,11 @@ flowchart LR
 | Existing | `scripts/linux/profile_deck.sh`, `scripts/bench_tour.py` | Reuse fixed-state CPU profiles and checkpoint comparisons | M0 | [Profiling](../../performance/Overview.md#profiling) |
 | Proposed | `runtime/host/src/main.c` and native `*_report` exports | Add opt-in counters only where sampling cannot separate attempted, accepted and declined routing cost | M1 | [Host/module boundary](../../architecture/GameThread.md#state-services-and-graphics) |
 | Proposed | Generated chunk/decomp mapping report | Resolve sampled PCs inside `func_802456E0`, `func_802ED6E0` and `func_800A56E0`; do not optimize an opaque chunk label | M1 | [Translated dispatch](../../architecture/GameThread.md#translated-dispatch) |
-| Proposed | Candidate-selected shared or RecompCore source | Implement exactly one measured reduction; keep fallback behavior unchanged | M2 | Determined by M1 ownership |
+| Changed | [`cmake/composite/direct_calls.h`](../../../cmake/composite/direct_calls.h) `bw_direct_call_ready`, `_plain`, `_full` | Always-inline wrapper: a constant address outside both fixed ranges takes the plain check (depth, exception, budget, interrupts, the two singles); anything else keeps the full check unchanged | M2 | [Translated dispatch](../../architecture/GameThread.md#translated-dispatch) |
+| Changed | [`cmake/composite/direct_skip.h`](../../../cmake/composite/direct_skip.h) `BW_SKIP_RANGE*` | The two observed ranges as constants shared by host and module | M2 | [Translated dispatch](../../architecture/GameThread.md#translated-dispatch) |
+| Changed | [`runtime/host/src/main.c`](../../../runtime/host/src/main.c) | `_Static_assert` that the shared ranges equal `draw_tags.h`'s | M2 | [Host/module boundary](../../architecture/GameThread.md#state-services-and-graphics) |
+| Changed | [`cmake/composite/direct_calls.c`](../../../cmake/composite/direct_calls.c) | Every disabling path clears `bw_host_skip_fast`, so non-NULL means direct calls are on | M2 | — |
+| Changed | [`tests/direct_calls_test.c`](../../../tests/direct_calls_test.c) | v3 cases on the shared ranges; plain vs full agreement in all 256 states | M2 | [Testing](../../architecture/Testing.md) |
 | Proposed | Existing focused test plus five-scene Deck run | Prove semantic equivalence and measure the retained candidate | M3 | [Testing](../../architecture/Testing.md) |
 
 ## Contracts and example
@@ -62,6 +66,14 @@ M1 first separates `try` calls into accepted/declined counts and sampled self-ti
 | Source tests | Existing focused guard/differential tests for the selected surface | Exact fallback and accepted-path results | Compile-only is insufficient |
 | Performance | Control/candidate A/B/B/A, ≥5 pairs | Outset gain exceeds 2% and A/A spread; selected cost and cycles/frame fall | Faster FPS without matching checkpoints fails |
 | Regression | Full five-scene rendered tour and Outset player tour | Identical checkpoints/images where applicable; no scene beyond noise | Unavailable Deck evidence leaves M3 open |
+
+## Next steps (2026-10-31)
+
+1. **M2-T03:** finish the candidate module (same composite profile as the control) and record its hashes.
+2. **M3-T01, Game Mode:** control → candidate → control from the worst-angle Outset state, 3 × 15 s each, launched through the Steam shortcut. Expect +1–2% (the ceiling was +3.1%; the interrupt tests stay).
+3. **M3-T01, exactness:** render_bench across the five states. Guest checkpoints must equal the control's in every scene; then a `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run with zero unsafe answers.
+4. **Decide:** retain if the Outset gain clears 2% and the A/A spread. If it falls short, either keep it as one of several small wins, or stack the next shared costs on it (paired-single float fast path, actor-search word reads) and measure them together.
+5. **Then:** the remaining shared costs from the M1-T04 survey (GX command stream, dispatch loop), each counted before any change.
 
 ## Implementation order
 
