@@ -316,3 +316,8 @@ per pixel in the cascade its distance picks, blurred.
 
 Patch 0211 blends the shadow pre-pass with the last frames' by distance (`DOL_AURORA_SUN_SHADOW_TEMPORAL=1`, off by
 default): at sea the clock turns the sun every frame and shadow edges jumped by the map's texels.
+
+Patch 0212 shades and lights the palms as Wind Waker HD does (test switches, off by default): skinned draws that
+aren't toon-shaded are scenery to the sun pass, with smooth normals lit from either side; a table of HD's vertex
+colours by position (`BWHC`) gives the draws that mix their shade colour to their light colour by the vertex colour
+HD's light: texture x HD's colour x the light, the sun pass making the light.
