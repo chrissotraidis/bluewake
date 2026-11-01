@@ -296,3 +296,6 @@ Patch 0210 adds Wind Waker HD's bloom chain, SSAO, rim light and cloud shadows (
 default; the cloud texture from the host, `aurora_set_hd_cloud_texture`), and HD's own shadow pass as a fourth
 shadow quality (`hd`, `set_sun_shadow_quality(3)`): three 1024 maps, a half-size pre-pass with one filtered lookup
 per pixel in the cascade its distance picks, blurred.
+
+Patch 0211 blends the shadow pre-pass with the last frames' by distance (`DOL_AURORA_SUN_SHADOW_TEMPORAL=1`, off by
+default): at sea the clock turns the sun every frame and shadow edges jumped by the map's texels.
