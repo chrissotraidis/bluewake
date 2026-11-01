@@ -102,7 +102,7 @@ const char* const kDistanceBlurShown[] = {"Off", "Light", "Default", "Strong", "
 const char* const kDistanceBlurStored[] = {"0", "1", "2", "3", "4"};
 // The HD look's sunlight and sun shadows, as HD's or softer (settings_table.h).
 const char* const kSunlightShown[] = {"As in HD", "Softer", "Much softer"};
-const char* const kSunlightStored[] = {"0.37", "0.3", "0.22"};
+const char* const kSunlightStored[] = {"0.4545", "0.37", "0.3"};
 const char* const kShadowShown[] = {"As in HD", "Lighter", "Much lighter"};
 const char* const kShadowStored[] = {"1", "0.8", "0.6"};
 const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "Largest"};
