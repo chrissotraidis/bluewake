@@ -1,6 +1,6 @@
 # PRD — Train the optimization profile on Outset
 
-Status: Draft (planning)  
+Status: M0 done (coverage); M2 next  
 Source: BlueWake `main` at `6b429fea9e60`; follows [#503](https://github.com/chrissotraidis/bluewake/pull/503)  
 Scope: what the composite module's profile-guided optimization (PGO) training plays, and whether training on Outset makes Outset faster. Excluded: game logic, runtime code, Smooth Motion.
 
@@ -15,15 +15,18 @@ That layout comes from the PGO training run in the Linux builder ([`build.py`](.
 | Opening | The new-game opening, about 23,000 retraces | Outset, early-game and story-driven |
 | Tour | 10 stops of 1,500 retraces each, reached by warp: Windfall, Dragon Roost, its cavern, Forest Haven, the Forbidden Woods, the Tower of the Gods, the Forsaken Fortress, the sea near it, Hyrule Castle, Outset | One stop at Outset's arrival point |
 
-Two gaps follow:
+What M0 found (2026-11-01):
 
-- **Outset in play is a small share of training.** The heaviest view (#503's worst-angle state) is never played.
-- **Warps keep the stage-select logic live.** That turns off the module's inline direct-call path (#503 measured that state as ≈ 11% slower), so the tour trains a code path players never take.
+- **Coverage is good at the chunk level.** Every chunk Outset runs was trained, and all 50 of its hottest chunks are in training's top 100. Nothing Outset needs is compiled cold.
+- **Character work is under-weighted.** The chunks that hold skinning, animation and environment lighting take 2–6× more of Outset's time than of training's. Outset has more animated villagers on screen than the tour's stops.
+- **The planned warp fix is not needed.** The tour warps with `BLUEWAKE_TEST_WARP` (fast load), which leaves the stage-select logic off; the profile shows the player's inline direct-call path was trained.
+
+So the remaining lever is the balance inside those chunks: which branches and blocks the compiler favours. Expect a small effect.
 
 ## Outcomes
 
 - Know how much of Outset's hot code the current profile already treats as hot, before changing anything.
-- A training change that adds Outset play as players see it, and does not keep the stage-select logic live during the tour.
+- A training change that adds Outset play with its villagers on screen.
 - A measured result in Outset and in the other benchmark scenes.
 
 ## Success and constraints

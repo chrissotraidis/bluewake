@@ -1,6 +1,6 @@
 # TECH_PLAN — Train the optimization profile on Outset
 
-Status: Planning  
+Status: M0 done; M2 next  
 Source: BlueWake `main` at `6b429fea9e60`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -11,16 +11,18 @@ The Linux builder builds an instrumented module, plays it headless, merges the c
 | Fact | Consequence for Outset |
 |---|---|
 | One tour stop at `sea:44:0`, 1,500 retraces | Outset in normal play is a small share of all training samples |
-| Stops are reached with `BLUEWAKE_TEST_WARP` | The stage-select logic stays live, which turns off the inline direct-call path (`main.c`, `want_fast … && !bluewake_stage_select_live`), so the tour trains the slow path |
+| Stops are reached with `BLUEWAKE_TEST_WARP` (fast load, `fast_load.c`) | The stage-select logic stays off (only `BLUEWAKE_WARP` makes it live), so the tour trains the player's inline direct-call path; confirmed in M0 |
 | Module functions the profile lacks are compiled as cold | #503 saw this cost 2.9% when two renamed helpers lost their profile entries |
 
 ## Approach
 
 1. **Coverage report (no build change).** From an existing build's `composite.profdata` (`llvm-profdata show --all-functions`), rank functions by count. Join that with #503's Outset samples (`measure-503/m1-functions.txt`, private), and report what share of Outset's hot chunks the profile already treats as hot.
-2. **Warp without the stage select.** Let tour warps skip `bluewake_stage_select_live` once the warp has arrived, so the rest of the stop runs the player's path. This may overlap with [#524](https://github.com/chrissotraidis/bluewake/pull/524), which plans the same release for benchmarks.
+2. ~~**Warp without the stage select.**~~ Dropped after M0: the tour's warps never made the stage-select logic live.
 3. **Add an Outset play stop.** Two options:
-   - a second `sea:44` stop with runs through the village, the same `TOUR_STOP` length;
+   - a second `sea:44` stop whose scripted runs pass the villagers (M0: skinning, animation and lighting are what is under-weighted), the same `TOUR_STOP` length;
    - or, when a private state is available, a state-based stop like #503's worst-angle view (`BLUEWAKE_LOAD_STATE`).
+
+   Measure the M2 effect on the under-weighted chunks with the M0 report (their training share should rise toward Outset's).
 
    The fingerprint (`TRAINING_VERSION`) changes so old profiles are not reused.
 4. **Measure:** a full build of each, the same commit, only the training different.
@@ -30,7 +32,6 @@ The Linux builder builds an instrumented module, plays it headless, merges the c
 | File | Change | Why |
 |---|---|---|
 | `scripts/linux/build.py` | `TRAINING_TOUR` gains an Outset play stop; `TRAINING_VERSION` bump | More Outset play in the profile |
-| `scripts/linux/build.py` / host warp code | Tour warps release the stage-select logic after arrival | Train the inline direct-call path players use |
 | `tests/` (builder tests) | The tour's generated warps and moves for the new stop; fingerprint changes with the tour | Builder logic covered in CI without game data |
 | `scripts/profile_coverage.py` (new, optional) | Ranks profile counts against a sample list | Repeatable step 1 |
 
@@ -48,11 +49,9 @@ The Linux builder builds an instrumented module, plays it headless, merges the c
 | Milestone | Depends | Deliverable |
 |---|---|---|
 | M0 | — | Coverage report on the current profile |
-| M1 | M0 | Warp release for training, with tests |
-| M2 | M0 | Outset play stop, with tests |
-| M3 | M1, M2 | Full builds and A/B; retain or record no-go |
-
-M1 and M2 are measured separately first, then together.
+| ~~M1~~ | — | Dropped after M0 |
+| M2 | M0 | Outset play stop with the villagers, with tests |
+| M3 | M2 | Full build and A/B; retain or record no-go |
 
 ## Gaps
 
