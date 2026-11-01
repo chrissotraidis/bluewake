@@ -32,7 +32,8 @@ The Linux builder builds an instrumented module, plays it headless, merges the c
 | File | Change | Why |
 |---|---|---|
 | `scripts/linux/build.py` | `--train-state FILE` (repeatable): `state_retrace`, `state_stop`, an extra playback per state in `train`, the state's hash in `training_fingerprint`, a read-only container mount, and argument checks | Outset play as players see it (the busy view the tour does not reach), without changing the default training |
-| `tests/test_linux_ci_container.py` | The stop's moves and end from a synthetic state; non-states refused; states mounted read-only | Builder logic covered in CI (audit workflow) without game data |
+| `scripts/linux/build.py` `TRAINING_MODS`, `state_stop_mods` | State stops play with the mods playback's mods (widescreen, Better Wind Waker) when the build has mods | Without them, the state trained plain variants the player's mods replace (M2-T02) |
+| `tests/test_linux_ci_container.py` | The stop's moves and end from a synthetic state; non-states refused; states mounted read-only; stops' mods follow the build | Builder logic covered in CI (audit workflow) without game data |
 | `scripts/profile_coverage.py` (new, optional) | Ranks profile counts against a sample list | Repeatable step 1 |
 
 ## Verification
