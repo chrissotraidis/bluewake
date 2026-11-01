@@ -64,7 +64,7 @@ hosts use Docker's `linux/amd64` emulation, which is substantially slower.
 - **"failed to extract layer", "content digest ... not found" or another image error:** Docker's build cache is
   damaged, often after a run with `sudo`. Your disc image is fine. Run `docker builder prune -af` and build again.
 - **Bazzite, Fedora Atomic and other read-only systems:** build inside a Distrobox (for example Ubuntu 24.04) with the
-  native steps below, or use the ready-made AppImage once it is published.
+  native steps below, or use the ready-made AppImage from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest).
 
 ## Native build
 
@@ -294,7 +294,8 @@ it under the Linux release exception, after it passes the release asset check:
 
 ### Run the AppImage
 
-No ready-made Linux AppImage has been published yet; these steps work for one you built.
+The [latest release](https://github.com/chrissotraidis/bluewake/releases/latest) has a ready-made AppImage
+(`BlueWake-v0.10.0-linux-x86_64.AppImage` since 0.10.0); these steps work for it and for one you built.
 
 1. Make the AppImage executable (you only need to do this once):
 
