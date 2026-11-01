@@ -1,43 +1,63 @@
 # PRD — Outset game-thread follow-up
 
-Status: Draft  
-Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured baseline is the combined [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack at `2749e6a194dcdba93846ebd925a33c4f95c695ab`.  
-Scope: identify and improve the remaining Outset CPU bottleneck on Steam Deck; excluded: Smooth Motion/GPU pacing and unrelated build-recipe changes.
+Status: In progress (M2)  
+Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured baseline is the combined [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack, re-measured on a control build of [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0.  
+Scope: the CPU cost of Outset's game thread on the Steam Deck. Excluded: Smooth Motion and GPU pacing ([#504](https://github.com/chrissotraidis/bluewake/pull/504)), and build-recipe changes.
 
-## Motivation
+## Problem
 
-The requested outcome is smoother Steam Deck play in Outset, the slowest remaining scene after the current optimization stack. The controlled rendered benchmark reaches 26.971 FPS, while live Game Mode reports 24–26 FPS with the game thread at about 98% busy. GPU, GX-worker and presentation waits are small, so this is a broad CPU-side game-thread problem rather than the alias lookup fixed by #501.
+Outset is the slowest remaining scene on the Steam Deck. It runs at **about 26 game FPS against the game's 30**, with the game thread busy 98–99% of the time. The GPU, the GX worker and presentation all wait very little, so the limit is the CPU work the game thread does in each frame:
 
-The profile is flat: `func_802456E0` is about 3.6%, `bluewake_native_game_math_try` 2.4%, `func_802ED6E0` 2.1% and `func_800A56E0` 2.1%. The native game-math, math and vector routing checks total about 4.9%. No single item is yet proven to be the correct optimization.
+| | Game-thread cycles per frame | Game FPS |
+|---|---:|---:|
+| Outset today (default settings, Game Mode) | ≈ 129–131 M | ≈ 26 |
+| What 30 FPS allows at the measured 3.44 GHz | ≈ 113 M | 30 |
+| **Gap** | **≈ 16–18 M (about 13%)** | |
+
+Nothing obvious is wrong:
+
+- **Not power-limited:** the game thread holds 3.44 GHz, unlike the Lava Room in #504.
+- **No single hot spot:** the largest game function is ≈ 2.3 M cycles per frame.
+- **More of everything:** compared with the open ocean at the same settings (a steady 30 FPS), Outset's extra ≈ 28 M cycles are spread over collision, skinning, actor checks and the runtime's own per-call costs.
+
+So the 13% has to come from costs every scene pays, removed one at a time without changing what the game does.
+
+## What we found
+
+| Finding | Evidence | Consequence |
+|---|---|---|
+| Outset is not power-limited | Game thread at 3.44–3.45 GHz, APU under 15 W | CPU work, not clocks, is the lever |
+| Smooth Motion costs ≈ 5% of game-thread IPC | 25.1 → 23.9 game FPS with it on | Every comparison fixes this setting |
+| The developer stage select costs ≈ 11% | 23.6 → 26.1 game FPS with it off | Off by default; baselines use it off. Its fix is out of scope (handoff written) |
+| No game function dominates | Top: `calcWeightEnvelopeMtx` 2.1%, then collision checks ≤ 1.5% | Hooking one game function cannot close the gap; [#436](https://github.com/chrissotraidis/bluewake/pull/436) showed a collision hook can even be slower |
+| Outset is "more of everything" than the ocean | 131 M vs 103 M cycles per frame | Target costs every scene pays |
+| The runtime's shared costs are ≈ 44 M per frame, ≈ 8–12 M of it removable | Survey of runtime and host symbols | Worth 6–9%: several changes, not one |
+| The direct-call check is the largest removable piece | Ceiling test: +3.1% (Game Mode), +4.5% (rendered) | First candidate, now written |
+
+Details and raw numbers are in the [tracker's evidence ledger](PROGRESS.md#evidence-ledger).
 
 ## Outcomes
 
-- Reproduce Outset from the same private state on the #501 stack and establish A/A noise before selecting a candidate.
-- Attribute game-thread time by translated guest range, host/native routing, dispatch, services and GX submission; unknown chunks must be mapped to verified decomp symbols.
-- Change one measured cost, preserve guest checkpoints and rendered output, then compare it against the unchanged control.
-- Reject an optimization that is inside noise, shifts cost elsewhere, skips work, or regresses another benchmark scene.
+- A fixed Outset control and a measured noise level, before any candidate is judged.
+- Game-thread time attributed to game functions, runtime costs and host work.
+- One measured cost removed at a time, with guest checkpoints and pictures unchanged.
+- A no-go recorded for any candidate that is inside noise, moves cost elsewhere, skips work, or slows another scene.
 
 ## Success and constraints
 
 | Metric | Baseline | Target | Validation |
 |---|---:|---:|---|
-| Outset rendered FPS | 26.971 on the combined stack | Improvement greater than both 2% and the measured A/A spread | Interleaved rendered A/B/B/A, at least 5 pairs after warm-up |
-| Game-thread cycles/frame | About 129 M | Lower in proportion to FPS; selected cost visibly reduced | Same-window `perf stat` and sampled call graph |
-| Guest behavior | #501 checkpoints | Identical at every checkpoint | Fixed-state benchmark comparison |
-| Other scenes | #501 five-scene results | No slowdown beyond their A/A spread | Full rendered five-scene tour |
-| Player experience | 24–26 FPS in Game Mode | No new visual, input, audio or timing issue | Outset walk/camera tour on first-revision Deck |
+| Outset game FPS | ≈ 26.4 (worst-angle state, Game Mode) | Gain above both 2% and the A/A spread | Game Mode A/B/A, plus rendered A/B/B/A with at least 5 pairs |
+| Game-thread cycles per frame | ≈ 129 M | Lower in proportion; the targeted cost visibly smaller | Same-window `perf stat` and samples |
+| Guest behaviour | Control checkpoints | Identical at every checkpoint, every scene | Fixed-state benchmark comparison |
+| Other scenes | Five-scene results | No slowdown beyond their spread | Full rendered five-scene tour |
+| Player experience | ≈ 26 FPS in Game Mode | No new visual, input, audio or timing issue | Outset walk on a first-revision Deck |
 
-The candidate may improve Outset without reaching 30 FPS; relative improvement and correctness decide retention. Builds must use the same compiler, PGO inputs, flags, state, settings and #501 dependency pins. Private disc, state and translated-module artifacts stay off GitHub.
+A candidate may help Outset without reaching 30 FPS: relative gain and exactness decide retention. Control and candidate share compiler, optimization profile, flags, state and settings. Private disc, state and module artifacts stay off GitHub.
 
-## Clarifications
+## Decisions
 
-- **First candidate written (2026-10-31):** the direct-call check, made smaller without changing any answer: the range tests are settled at build time for constant call targets. An unsafe ceiling bounded the gain at +3.1% (Game Mode) to +4.5% (rendered), but shifted interrupt timing, so the shippable version keeps every runtime test and must match the control's checkpoints exactly. The code is stacked on this PR rather than a separate one ([#528](https://github.com/chrissotraidis/bluewake/pull/528) closed).
-- **Shared runtime costs are worth 6–9%, not 13% (2026-10-31):** of ≈ 44 M cycles per Outset frame spent in the runtime and host, ≈ 8–12 M look removable (TECH_PLAN, Decisions). The first candidate is the direct-call check (≈ 3 M, about +2% game FPS); reaching 30 FPS will take several changes, and possibly game-function work after them.
-- **Outset is more of everything (2026-10-31):** against the open ocean at a steady 30 FPS (same build and settings), Outset needs ≈ 131 M game-thread cycles per frame against ≈ 103 M. The extra 28 M is spread across collision (+6.7 M), J3D animation/skinning (+4.0 M), native helpers (+2.7 M), other game code (+2.4 M) and the runtime's per-call and helper costs (+3.1 M); no single game function explains it. The first candidate is therefore a cost every scene pays: the runtime's direct-call overhead (`bw_direct_call_ready`, ≈ 5.5 M per frame in Outset), then the native routines' own work (their routing check is only 0.33%). Game-function hooks (collision, as tried in [#436](https://github.com/chrissotraidis/bluewake/pull/436), or skinning) come after.
-- **Stage select fix dropped (2026-10-31):** the stage select is a debugging tool, off by default; its cost is not worth optimizing. Baselines use it off.
-- **The developer stage select costs about 11% (2026-10-31):** with `BLUEWAKE_STAGE_SELECT_TOGGLE` on, the module's inline direct-call skip is disabled and every direct guest call asks the host; Outset runs 23.6 game FPS with it on and 26.1 off. It is off by default, so a default player's Outset baseline is about 26 FPS and the gap to 30 is about 13%. Keeping the fast path with the stage select on is a cheap candidate for players who use it; every comparison must fix this setting.
-- **Game Mode baseline (2026-10-31):** Outset is not power-limited (game thread at 3.45 GHz, APU under its 15 W cap). Smooth Motion costs the game thread about 5% through shared cache and memory (IPC 1.74 off, 1.65 on; 25.1 vs 23.9 game FPS), more than the 2% acceptance threshold, so every A/A and A/B must fix the Smooth Motion setting. Either way the game thread does 17–20% too much work per frame for 30 FPS (≈ 138–145 M cycles against ≤ 115 M).
-
-- Motivation and platform are confirmed by the requested #501 live-game follow-up: first-revision Steam Deck, current SteamOS, Outset below its 30 FPS game target.
-- Candidate selection remains open until M0/M1 attribution. The rejected partial `GroundCrossGrpRp` hook from [#436](https://github.com/chrissotraidis/bluewake/pull/436) is evidence against repeating that exact implementation, not evidence against all work in the surrounding chunk.
-
+- **Stage select fix dropped:** a debugging tool, off by default. Its handoff is kept outside this PR.
+- **Candidates must be exact:** the unsafe ceiling changed when interrupts are taken, so its guest state drifted. A shippable change keeps every runtime test.
+- **One PR:** the code is stacked on this PR, as #504 did. [#528](https://github.com/chrissotraidis/bluewake/pull/528) was closed.
+- **Platform:** first-revision Steam Deck, current SteamOS, Game Mode, render scale 3.
