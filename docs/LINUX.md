@@ -104,7 +104,7 @@ final outputs are:
 
 | Output | Created by | Host path | Contents |
 | --- | --- | --- | --- |
-| Playable app folder | Every complete build | `build/linux/BlueWake/` | `bluewake`, the translated module, DSP files and your disc under `game/` |
+| Playable app folder | Every complete build | `build/linux/BlueWake/` | `bluewake`, the translated module, the DSP files and the stage names; the game files are prepared from your disc on the first run |
 | AppImage | A build with `--appimage` | `build/linux/BlueWake-x86_64.AppImage` | Portable Linux app and translated module; the disc itself is excluded |
 | Update metadata | A build with `--appimage` | `build/linux/BlueWake-x86_64.AppImage.zsync` | Delta-update metadata for that AppImage |
 | Build logs | Every build step | `build/linux/logs/` | Compiler, training, packaging and ABI-audit logs |
@@ -144,8 +144,10 @@ build it updates.
 
     build/linux/BlueWake/bluewake
 
-On an AppImage's first launch, **BlueWake Setup** opens automatically when no
-usable disc has been remembered. Choose the USA revision-0 disc image and,
+On the first launch of either kind of build, **BlueWake Setup** opens
+automatically when no usable disc has been remembered: no build carries the
+game files, so the window checks your disc and prepares them. Choose the USA
+revision-0 disc image and,
 optionally, a Dolphin-format HD texture-pack folder, then press **Start
 BlueWake**. Display, gameplay, controls and other preferences remain in the
 shared F1/Esc settings menu used on every desktop platform. The setup file and
@@ -263,9 +265,11 @@ for delta-capable update tools). It bundles the host, the translated game
 module, the DSP roms and every shared library the host links except the
 glibc/libstdc++ baseline. Build release artifacts on a suitably conservative
 Linux system: like other AppImages, compatibility is limited by the glibc and
-CPU baseline of the build host. The player's disc is not bundled: on first run
-the launcher asks for it and prepares it into the data dir (a disc and files
-extracted from it are never distributed).
+CPU baseline of the build host. The player's disc is not bundled, and neither
+are the files prepared from one: the first run asks for the disc and prepares
+them into the install folder (a disc and files extracted from it are never
+distributed). The app folder a folder build writes carries none of them
+either, so both kinds of build are clean.
 
 ### Build the AppImage
 

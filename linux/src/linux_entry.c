@@ -9,9 +9,11 @@
 // contains code translated from your disc, never share it):
 //   bluewake, libSDL3.so.*, libwebgpu_dawn.so    the host and its runtime
 //   gGZLE01_recomp.so                           the translated game module
-//   game/GZLE01.iso                              the disc image the game reads
-//   game/main.dol, game/rels/                    prepared from that disc
+//   stage_select/                                the stage select's English names
 //   dsp/dsp_rom.bin, dsp/dsp_coef.bin            only for BLUEWAKE_DSP_MODE=lle
+// No part of the player's disc is in it: the first launch's setup window checks
+// the disc, prepares main.dol and the RELs from it into the install folder, and
+// the game reads the disc image where the player keeps it.
 // Player data, kept outside the app folder so a rebuild never touches it:
 //   ~/.local/share/BlueWake/GZLE01.card          the memory card (saves)
 //   ~/.local/share/BlueWake/sram.bin             the console's settings
@@ -448,15 +450,16 @@ int main(int argc, char** argv) {
     if (mods[0] != '\0')
         setenv("BLUEWAKE_MODS", mods, 1);
 
-    const char* appimage = getenv("APPIMAGE");
     const char* explicit_disc = getenv("BLUEWAKE_DISC");
     const int has_explicit_disc = explicit_disc != NULL && explicit_disc[0] != '\0';
-    // A downloaded AppImage guides a first-time player through disc selection,
-    // optional textures and shortcut installation. Once its remembered disc is
-    // usable, an ordinary launch goes straight to the game. --setup always
-    // reopens the populated window; --iso preserves the former simple picker.
+    // The setup window guides a first-time player through disc selection, the
+    // install folder, optional textures and shortcut installation. Any build
+    // opens it on the first launch, because no build carries the files prepared
+    // from a disc; once a remembered disc's preparation is usable an ordinary
+    // launch goes straight to the game. --setup always reopens the populated
+    // window; --iso preserves the former simple picker.
     const int use_setup = setup_requested ||
-        (!iso_picker_requested && !has_explicit_disc && appimage != NULL && appimage[0] != '\0' &&
+        (!iso_picker_requested && !has_explicit_disc &&
          !bw_disc_has_usable_source(g_exe_dir, g_data_dir));
     const int use_iso_picker = iso_picker_requested && !use_setup;
     if (use_setup) {

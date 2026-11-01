@@ -28,9 +28,12 @@ Steps, each logged under OUT/logs:
  12 package      the app folder OUT/BlueWake, ready to run
  13 AppImage     optional with --appimage; package and audit the personal image
 
-The app folder contains code translated from YOUR disc and a copy of the disc:
-it is yours alone. Never share or upload it. Your saves live in
-~/.local/share/BlueWake, outside the build, so rebuilding never touches them.
+The app folder holds no part of your disc: the first launch's setup window
+checks your disc and prepares main.dol and the RELs from it into the install
+folder. What is in the folder is code translated from YOUR disc (the game
+module, and the host that runs it): it is yours alone, never share or upload
+it. Your saves live in ~/.local/share/BlueWake, outside the build, so
+rebuilding never touches them.
 """
 import argparse
 import concurrent.futures
@@ -1224,9 +1227,14 @@ int main(void) {{
 
     # --- 11 package ----------------------------------------------------------
     def package(self, module):
+        """The app folder: the host and its runtime, the module, the DSP roms, the stage names.
+
+        Nothing the builder made from the disc goes in it. main.dol, the RELs and the disc image
+        stay in OUT, and the launcher's setup window prepares main.dol and the RELs from the
+        player's own disc into the install folder on the first run. An older build's app folder
+        is cleared of them, so a rebuild into the same --out cannot leave them behind."""
         app = self.out / "BlueWake"
-        (app / "game").mkdir(parents=True, exist_ok=True)
-        (app / "dsp").mkdir(exist_ok=True)
+        (app / "dsp").mkdir(parents=True, exist_ok=True)
         for f in sorted(self.app_build.iterdir()):
             if f.is_file() and f.name in ("bluewake", "bluewake_disc_extract"):
                 shutil.copy2(f, app / f.name)
@@ -1235,20 +1243,19 @@ int main(void) {{
             elif f.is_file() and (f.name.startswith("libSDL3") or f.name.startswith("libwebgpu_dawn")):
                 shutil.copy2(f, app / f.name)
         shutil.copy2(module, app / MODULE)
-        shutil.copy2(self.out / "game/main.dol", app / "game/main.dol")
-        rels = app / "game/rels"
-        shutil.rmtree(rels, ignore_errors=True)
-        shutil.copytree(self.out / "game/rels", rels)
+        # Older builds copied main.dol, the RELs and the disc in here (the disc alone is 4.4 GB).
+        shutil.rmtree(app / "game", ignore_errors=True)
         for name in ("dsp_rom.bin", "dsp_coef.bin"):
             shutil.copy2(self.recompcore / "Data/Sys/GC" / name, app / "dsp" / name)
         # The stage select's English names; the app finds them beside itself (linux_entry.c).
         shutil.rmtree(app / "stage_select", ignore_errors=True)
         shutil.copytree(ROOT / "config/stage_select", app / "stage_select")
-        self.place(self.iso, app / "game/GZLE01.iso")
         dirty = bool(self.git("status", "--porcelain"))
         provenance = {
             "profile": "bluewake-linux",
             "containsTranslatedGameCode": True,
+            # The app folder carries no part of the disc; the first run prepares them.
+            "containsGameFiles": False,
             "source_commit": self.git("rev-parse", "HEAD"),
             "source_modified": dirty,
             "composite_digest": (self.out / "composite-src.digest").read_text().strip(),
@@ -1293,21 +1300,6 @@ int main(void) {{
             die("AppImage packaging did not produce " + ", ".join(str(path) for path in missing))
         self.run("appimage-abi", [sys.executable, ROOT / "scripts/linux/check_appimage_abi.py", image, "2.39"])
         return image, zsync
-
-    @staticmethod
-    def place(source, target):
-        """The disc goes beside the game: a hard link when it can, else a copy."""
-        if target.exists():
-            if os.path.samefile(source, target) or \
-                    (target.stat().st_size == source.stat().st_size and
-                     target.stat().st_mtime_ns >= source.stat().st_mtime_ns):
-                return
-            target.unlink()
-        try:
-            os.link(source, target)
-        except OSError:
-            print(f"copying {source.name} into the app folder ({source.stat().st_size >> 20} MB)")
-            shutil.copy2(source, target)
 
     # --- the pipeline ------------------------------------------------------------
     def build(self):
@@ -1397,7 +1389,11 @@ README = """BlueWake for Linux: The Legend of Zelda: The Wind Waker (GameCube US
 statically recompiled from your own disc. See docs/LINUX.md in the source.
 
 This folder is a personal build: gGZLE01_recomp.so is code translated from
-your disc and game/ holds your disc image. Never share or upload it.
+your disc. Never share or upload it.
+
+The first launch opens BlueWake Setup: choose your own GZLE01 revision-0 disc
+image, and it prepares the game files from that disc into the install folder.
+Nothing from the disc is in this folder.
 
 Run ./bluewake. Options (./bluewake --help lists them all):
   --widescreen    16:9 (--aspect 16:10 or --aspect 21:9 for those)
