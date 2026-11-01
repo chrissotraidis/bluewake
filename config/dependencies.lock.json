@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "2187d62191bda863ad33921e2f50fd8844430654",
+      "sha": "b84a53a8d34205cb2de9a4f5c076fbcc185bd499",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -761,6 +761,13 @@
             "patches/recompcore/0213-Sun-shadows-Wind-Waker-HD-s-cascade-splits-from-the-game-s-camera-each-frame.patch"
           ],
           "evidence": "pdale-boop's: aurora_set_sun_cascade_splits, HD's splits each frame (calculateShadowRanges in the WWHD decompilation, its tuning read from cking.rpx); the HD quality's splits and first two cascades follow them. Star Island at the mouse wheel's 2x zoom on Windows: the shadow's change frame to frame over the grass 3.6 to 2.4."
+        },
+        "hd_object_tables": {
+          "runtime": "b84a53a8d34205cb2de9a4f5c076fbcc185bd499",
+          "tracked_patches": [
+            "patches/recompcore/0214-Sun-shadows-Wind-Waker-HD-s-normals-and-colours-for-the-objects-and-the-rooms-and-its-light-on-the-scenery.patch"
+          ],
+          "evidence": "pdale-boop's: aurora_set_hd_object_tables (the pack's optional/hd-normals/objects.bin and optional/hd-colours/objects.bin, the importer's), looked up after the stage's; DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT, HD's light on every draw of the palms' kind (Outset's left cliff at 10:00, median brightness: HD 64, before 76, after 62)."
         }
       }
     },

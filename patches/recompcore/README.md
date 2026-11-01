@@ -308,3 +308,8 @@ HD's light: texture x HD's colour x the light, the sun pass making the light.
 Patch 0213 adds `aurora_set_sun_cascade_splits`: the HD shadow quality's two cascade splits and the first two
 cascades' sizes each frame, as Wind Waker HD sets them from its camera; with fixed ones, a camera zoomed out past
 HD's left the ground around Link in the far cascade, where grass shadows crawled as the sun turned.
+
+Patch 0214 adds `aurora_set_hd_object_tables`: Wind Waker HD's normals and vertex colours for the game's object
+models (the HD pack's `optional/hd-normals/objects.bin` and `optional/hd-colours/objects.bin`), looked up after the
+stage's; and HD's light on the scenery (`DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT=1`, off by default): HD's terrain
+material is texture x vertex colour x light, where the GameCube's mix never goes below the shade colour.
