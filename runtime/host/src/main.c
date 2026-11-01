@@ -1954,7 +1954,9 @@ static bool g_actor_search_native = true;
 static u64 g_actor_search_native_nodes;
 static u64 g_actor_search_native_runs;
 
-static inline const u8* bw_search_word(CPUState* cpu, u32 address) {
+// Inline: out of line, the call and its three saved registers were most of its
+// cost (#503, Steam Deck: every word took the plain-RAM path); seven call sites.
+static inline __attribute__((always_inline)) const u8* bw_search_word(CPUState* cpu, u32 address) {
     if ((address & 3u) != 0u)
         return NULL;
     return get_ram_ptr(cpu, address, 4u, NULL);
