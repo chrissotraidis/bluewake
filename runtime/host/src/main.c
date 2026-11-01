@@ -2112,6 +2112,11 @@ static void host_skip_fast_refresh(void) {
     g_skip_fast.simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
                          !g_overlap_watch_until_control;
 }
+_Static_assert(BW_SKIP_RANGE0_FIRST == BLUEWAKE_PARTICLE_DRAW_FIRST &&
+               BW_SKIP_RANGE0_LAST == BLUEWAKE_PARTICLE_DRAW_LAST &&
+               BW_SKIP_RANGE1_FIRST == BLUEWAKE_WAKE_DRAW_FIRST &&
+               BW_SKIP_RANGE1_LAST == BLUEWAKE_WAKE_DRAW_LAST,
+               "direct_skip.h's ranges are the ones host_skip_fast_refresh hands over");
 static u64 g_direct_call_queries, g_direct_call_allowed;
 
 /* Read-only handshake for direct calls. Use the same dynamic predicate as
