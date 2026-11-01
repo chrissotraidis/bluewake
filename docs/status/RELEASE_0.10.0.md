@@ -3,9 +3,7 @@
 The record for 0.10.0: what it contains, the exact artifacts, and every check with its status. Previous release:
 [0.9.0](RELEASE_0.9.0.md), October 25. Only Chris publishes.
 
-**Status, October 31, 2026:** the candidate (#514) and its runtime (RecompCore#50) are merged and 0.10.0 is frozen by
-#516. Checked on the Mac and the iPad. Waiting on the Windows and Linux builds on Chris's PC
-([WINDOWS_BUILD_0.10.0.md](WINDOWS_BUILD_0.10.0.md)), PadMint's player check, and Chris's approval to publish.
+**Status, November 1, 2026:** frozen at `edd88f1`. The v0.10.0 draft holds all six artifacts below, each checked against GitHub's digest and passed through the content gate. Waiting on Chris's approval to publish. Until it is published, only docs and fixes for what the checks find go into `main`.
 
 ## The release
 
@@ -27,9 +25,9 @@ and PadMint `audit` (`main` `44a3704`, Apple Python 3.9.6) passed each.
 | `BlueWake-v0.10.0-ios-unsigned.ipa` | `73d433b8ea17565506a8c7c51a43c506453f455be8fe150e9871869c70c265bf` | `build.sh --app-only` from a clean checkout of `edd88f1`; reports 0.10.0 (9); its provenance names `edd88f1`, unmodified, `containsTranslatedGameCode: false`; no game module | Pass; PadMint `audit` pass (0 address-named functions) |
 | `BlueWake-v0.10.0-source.zip` | `8d84193c3a3e8ebf896042e7e446f45cbe57b26ad8c961eff3d4d10b5effde39` | `git archive --format=zip --prefix=bluewake-0.10.0/` of `edd88f1` | Pass; PadMint `audit` pass (10 address-named functions, 0.9.0's had 8) |
 | `BlueWake-v0.10.0-padmint.json` | `a8508bd7db4c4cdbc907be918cdcfcdc61678b174ecbd1a34f359da2b6098715` | `padmint.json` at `edd88f1`, byte-identical to 0.9.0's (PadMint fills in the version) | Pass; PadMint `audit` pass |
-| `BlueWake-v0.10.0-windows-x64.zip` | Pending | Chris's Windows PC, from `edd88f1` and his own disc | Pending: the only accepted finding is `containsTranslatedGameCode: true` |
-| `BlueWake-v0.10.0-linux-x86_64.AppImage` | Pending | WSL with Docker on Chris's PC, the CI container, from `edd88f1` and the same disc | Pending: unpacked with `7zz` on the Mac and the folder gated; the only accepted finding is translated game code |
-| `SHA256SUMS` | Pending | Made from the downloaded files | Pending |
+| `BlueWake-v0.10.0-windows-x64.zip` | `c56325884ef6f3f4cc502dd6c129e16a6d66316082a546bb3a99476dcd668f66` | Chris's Windows PC, from `edd88f1` and his own disc ([results](WINDOWS_BUILD_0.10.0.md#results)); module `2918a64b…` | The only finding is the accepted `containsTranslatedGameCode: true` (its `BuilderProvenance.json`, which names `edd88f1`, unmodified). 35 members, as in 0.9.0: no disc image, disc files, saves, cards, keys, `nodtool.exe` or signing files; `dsp_rom.bin` and `dsp_coef.bin` byte-identical to RecompCore's open replacements in `Data/Sys/GC` |
+| `BlueWake-v0.10.0-linux-x86_64.AppImage` | `2f5c1305de1bf934fdbace34e559fe1c3781380323380c17b73135e3ad1510fc` | WSL with Docker on Chris's PC, the CI container (clang 18.1.3), from `edd88f1` and the same disc; module `8d33248b…`. Repackaged on November 1 from the same app folder with #520's `make_appimage.sh` (below) | Unpacked with `7zz` on the Mac: the gate's only finding is `usr/bin/gGZLE01_recomp.so`'s 592 address-named symbols (the translated game code, accepted); every other file, the 20 licenses included, passes. `check_appimage_abi.py`'s checks on the unpacked image in an Ubuntu 24.04 container: no errors, 14 ELF files, GLIBC 2.38 at most. It carries its own libc++, libc++abi and libunwind |
+| `SHA256SUMS` | `18d061429d2a56149c08fbca11e685f64da6135ea86974d91d84db249359017d` | The five lines above, made from the downloaded files and checked with `shasum -c` | Pass |
 
 No Mac or iPhone/iPad build with game code is attached; personal builds stay local.
 
@@ -84,6 +82,20 @@ testing with an agent and `render_bench` (#492), the native comparison without `
   91.1-92.1, 92.6-93.2, 133.4-135.8, 75.3-76.1 and 68.2-68.5 on October 24 (+8 to 11%). Every stop loaded with no dips
   and no fatal lines. Not interleaved, and the iPad route starts from a card continue, which even two runs of one build
   don't repeat (checkpoints differ from retrace 300), so these support the Mac result rather than repeat its proof.
+- **Windows:** built from `edd88f1` in 95 min 59.5 s, 6 jobs, clang 22.1.3, fresh local training. Check a is partial: a
+  1.8-minute portable Direct3D 12 run at Outset with draw fusion on, no fatal lines and a clean quit. The speed check against
+  0.9.0 did not run (the PC's test card started a new game, which the tour refuses), and checks b to f were skipped at Chris's
+  direction; they are not passes. [Results](WINDOWS_BUILD_0.10.0.md#results).
+- **The AppImage's licenses:** the first upload carried only MbedTLS's license. #520 made `make_appimage.sh` carry the Windows
+  zip's set, each fetched dependency's license file and each bundled library's Debian copyright file (CI ran it on a real
+  build); #521 gave the PC the steps, and it repackaged the app folder it had built, with no rebuild. Every one of the 32
+  other files in the new image is byte-identical to the first upload's, with the same modes and links; only 19 license files
+  were added (`c4337ce4…` before, `2f5c1305…` after). The AppImage builds Dawn from source with its vendored
+  abseil, which has no license file of its own there (the Windows zip has one); the Apache-2.0 text it needs is there as MbedTLS's.
+- **PadMint player check before tagging:** PadMint `main` `44a3704` (0.5.26), Apple Python 3.9.6, an empty PadMint folder, a
+  clean clone of `edd88f1` and the release IPA: completed in 8,761.68 s (2 h 26 min). Its record names `edd88f1` and 0.10.0
+  build 9, status completed; its own publication gate labels the personal app "personal build, not publishable", which is
+  correct. That app was deleted.
 - **CI on #514:** Linux host and AppImage, Windows host, macOS audit, sanitizers and attribution all passed.
 
 ## Checks before publishing
@@ -93,13 +105,14 @@ testing with an agent and `render_bench` (#492), the native comparison without `
 | Frozen commit and version | Passed | `edd88f1`, 0.10.0 build 9; the IPA names it |
 | Mac: build, tour, sweep, pictures | Passed | Above |
 | iPad | Passed (tour); hands-on play not done | Above |
-| Windows build and checks | Pending | [WINDOWS_BUILD_0.10.0.md](WINDOWS_BUILD_0.10.0.md) |
-| Linux AppImage build and audit | Pending | Same file, step 6; on the Mac it is unpacked and the folder gated |
-| Content gate on every artifact | Mac-side passed; Windows and Linux pending | Artifacts above |
+| Windows build | Passed | 95 min, from `edd88f1` |
+| Windows play checks and speed | Partial: a partial, the tour and b to f not done | Skipped at Chris's direction; not passes |
+| Linux AppImage build and audit | Passed | Built and started to the title headless in WSL; repackaged with its licenses; audit on the PC and on the Mac |
+| Content gate on every artifact | Passed | The Apple, source and checksum files pass outright; the Windows zip and the AppImage have only the accepted finding |
 | PadMint `audit` | Passed | IPA, source zip, recipe |
-| PadMint `player-check.sh` before tagging | Running | PadMint `main` `44a3704`, Apple Python 3.9.6, an empty PadMint folder, a clean clone of `edd88f1`, the release IPA |
-| Release notes reconciled | Pending | On the draft, with the Windows and Linux numbers still to fill in |
-| Draft state | Draft, untagged, three of six assets | |
+| PadMint `player-check.sh` before tagging | Passed | 2 h 26 min, from `edd88f1` with the release IPA (above) |
+| Release notes reconciled | Passed | The hashes, what Windows did and didn't get, and the speed figures match this record |
+| Draft state | Passed | Draft, untagged, six assets |
 
 ## After publishing
 
