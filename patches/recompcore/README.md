@@ -304,3 +304,7 @@ Patch 0212 shades and lights the palms as Wind Waker HD does (test switches, off
 aren't toon-shaded are scenery to the sun pass, with smooth normals lit from either side; a table of HD's vertex
 colours by position (`BWHC`) gives the draws that mix their shade colour to their light colour by the vertex colour
 HD's light: texture x HD's colour x the light, the sun pass making the light.
+
+Patch 0213 adds `aurora_set_sun_cascade_splits`: the HD shadow quality's two cascade splits and the first two
+cascades' sizes each frame, as Wind Waker HD sets them from its camera; with fixed ones, a camera zoomed out past
+HD's left the ground around Link in the far cascade, where grass shadows crawled as the sun turned.
