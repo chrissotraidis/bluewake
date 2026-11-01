@@ -25,7 +25,7 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 ### M2: Implement one isolated candidate (depends: M1)
 
 - [x] M2-T01: Add the smallest source change matching the selected cost and preserve fallback behavior. The direct-call range tests settled at build time (`3a1b500`): constant targets outside the two fixed ranges take `bw_direct_call_ready_plain`; everything else keeps the full check.
-- [x] M2-T02: Add or extend the surface's focused correctness test. `direct_calls_test` compares the plain and full answers in all 256 host/CPU states; passes at -O0 and -O2.
+- [x] M2-T02: Add or extend the surface's focused correctness test. `direct_calls_test` compares the plain and full answers in all 256 host/CPU states; passes at -O0 and -O2. CI: Windows host job (existing) and, new, the Linux host job (Release, so constant addresses take the plain path).
 - [ ] M2-T03: Build matched control/candidate artifacts and record identities. Candidate module building over the control folder with the same composite profile (local `bench/503-plain` = control + `3a1b500`).
 
 ### M3: Qualify and decide (depends: M2)
