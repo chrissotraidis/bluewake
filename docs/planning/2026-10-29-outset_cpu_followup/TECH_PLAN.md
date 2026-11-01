@@ -190,9 +190,14 @@ Host flag writes, each to go through one setter that also updates the word:
 
 **No RecompCore change**: its writes are all covered by the host paths above.
 
-### Open question (M4-T02)
+### Threading (answered in M4-T02)
 
-**Does `host_dsp_interrupt` run on another thread?** It sets the dirty flag directly. If it runs off the game thread, the word update must be a single atomic store, as the flag already is. This needs confirming before implementation.
+`host_dsp_interrupt` sets the dirty flag directly, so it mattered whether it runs off the game thread. It doesn't, in either DSP mode:
+
+- **HLE (the default):** queued, then delivered synchronously from `HleBackend::run_cycles` ([`dsp_hle_backend.cpp`](../../../runtime/host/src/dsp_hle_backend.cpp)), which the host calls from `host_dsp_run_cpu_cycles`.
+- **LLE:** delivered from a control-register write in the interpreter step ([`dsp_adapter.cpp`](../../../runtime/host/src/dsp_adapter.cpp), `deliver_pending_external_interrupt`), also driven by the host.
+
+Every writer runs on the game thread, the same thread that runs the module's check, so a plain store keeps the word exact.
 
 ### Changes (planned)
 

@@ -41,7 +41,7 @@ Specification: [TECH_PLAN M4](TECH_PLAN.md#m4-the-interrupt-test-specification).
 Acceptance: the candidate ahead of the control in every interleaved Game Mode launch (at least six), identical checkpoints, zero unsafe verify answers, focused tests in CI. No minimum gain.
 
 - [ ] M4-T01: Bound the gain: a diagnostic module whose plain check reads one host flag instead of the four interrupt values (local `bench/503-irq-ceiling`, not shippable), A/B against the tagged stack.
-- [x] M4-T02: Map every write to the four values and design the word ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification)). Every RecompCore write is covered by a host path, so no RecompCore change is needed. Open: whether `host_dsp_interrupt` runs off the game thread.
+- [x] M4-T02: Map every write to the four values and design the word ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification)). Every RecompCore write is covered by a host path, so no RecompCore change is needed. `host_dsp_interrupt` runs on the game thread in both DSP modes, so plain stores suffice.
 - [ ] M4-T03: Implement with focused tests: the word in `BwHostSkipFast` behind a capability bit (no handshake bump), host setters, and a verify-mode comparison.
 - [ ] M4-T04: Qualify: Game Mode launches, checkpoints, verify run, player check.
 
