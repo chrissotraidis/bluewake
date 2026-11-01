@@ -1,6 +1,6 @@
 # TECH_PLAN — Outset game-thread follow-up
 
-Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) in progress  
+Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) closed as no-go  
 Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; control build = [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0 (local `f4bda45`)  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -133,7 +133,9 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPU
 | Performance | Game Mode A/B/A (Outset), rendered A/B/B/A ≥ 5 pairs | Outset gain above 2% and the A/A spread | Game Mode +1.8% (beyond spread); rendered +1.6% overall, Outset +1.9% (3 pairs) |
 | Regression | Five-scene tour, Outset walk | No scene beyond noise; no player-visible issue | Passed |
 
-## M4: the interrupt test (specification)
+## M4: the interrupt test (specification, closed as no-go)
+
+> **Outcome (2026-11-01):** the bound (M4-T01) was +0.3% and inconsistent: a perfect word does not beat stack 1 in every launch, so this was not implemented. The first ceiling's +3.1% came mostly from taking interrupts late, not from cheaper reads. The specification is kept for the record.
 
 ### Why
 
@@ -228,8 +230,8 @@ Every writer runs on the game thread, the same thread that runs the module's che
 
 1. **Safety:** done; the verify run found 0 unsafe answers in 1.1 billion.
 2. **Player check:** done, no issue.
-3. **M4, in progress: the interrupt test** ([specification](#m4-the-interrupt-test-specification)). Bound the gain first (diagnostic module), then implement the host-owned word; host-only, measured against the tag `outset-503-stack1`, kept if consistent and exact whatever the size.
-4. **Later:** count the dispatch-loop edges and look at the GX command stream.
+3. **M4, closed:** the interrupt test's bound was +0.3% and inconsistent ([outcome](#m4-the-interrupt-test-specification-closed-as-no-go)).
+4. **Next:** count the dispatch-loop edges and look at the GX command stream, bounding each with a ceiling first.
 
 ## Implementation order
 

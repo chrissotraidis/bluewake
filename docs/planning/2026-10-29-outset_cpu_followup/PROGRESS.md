@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: Stack 1 complete (tag `outset-503-stack1`: +1.4–1.8% Game Mode, +1.6% rendered, exact); M4 in progress  
+Status: Stack 1 complete (tag `outset-503-stack1`: +1.4–1.8% Game Mode, +1.6% rendered, exact); M4 closed as no-go  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -40,10 +40,10 @@ Specification: [TECH_PLAN M4](TECH_PLAN.md#m4-the-interrupt-test-specification).
 
 Acceptance: the candidate ahead of the control in every interleaved Game Mode launch (at least six), identical checkpoints, zero unsafe verify answers, focused tests in CI. No minimum gain.
 
-- [ ] M4-T01: Bound the gain: a diagnostic module whose plain check reads one host flag instead of the four interrupt values (local `bench/503-irq-ceiling`, not shippable), A/B against the tagged stack.
+- [x] M4-T01: Bound the gain: a diagnostic module whose plain check reads one host flag instead of the four interrupt values (local `bench/503-irq-ceiling`, not shippable), A/B against the tagged stack. **+0.3%, not consistent (lost one of three pairs): no-go.**
 - [x] M4-T02: Map every write to the four values and design the word ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification)). Every RecompCore write is covered by a host path, so no RecompCore change is needed. `host_dsp_interrupt` runs on the game thread in both DSP modes, so plain stores suffice.
-- [ ] M4-T03: Implement with focused tests: the word in `BwHostSkipFast` behind a capability bit (no handshake bump), host setters, and a verify-mode comparison.
-- [ ] M4-T04: Qualify: Game Mode launches, checkpoints, verify run, player check.
+- [ ] ~~M4-T03~~: Not implemented: M4-T01 showed even a perfect word does not beat the stack consistently.
+- [ ] ~~M4-T04~~: Not needed.
 
 ## Evidence ledger
 
@@ -69,4 +69,5 @@ Acceptance: the candidate ahead of the control in every interleaved Game Mode la
 | M3-T01 | Retained stack (`47c7f3077292`) with `BLUEWAKE_DIRECT_SKIP_VERIFY=1`; Deck log `~/bluewake-ab.log` (private) | One Game Mode launch through the Steam shortcut from the worst-angle Outset state, ≈ 100 s, then SIGTERM; the exit report's `[direct-skip] verify` line | Game Mode, Outset | **1,107,330,401 inline answers, 0 unsafe, 0 conservative**: the plain and full checks agreed with the host on every direct call |
 | M3-T03 | Retained stack (`47c7f3077292`) | Outset walk and camera by the player | Steam Deck, Game Mode | No issue reported |
 | M3-T01 | Re-check on current `main`: control `6b429fe` (AppImage `49df97eeefaf`, full build, composite profile `68112e95`) against #503's merged head `72d288f` (AppImage `274b6290a1e2`, same profile); local `measure-503/main-ab/windows.jsonl` (private) | `gamemode_measure.py` 3 × 15 s per launch, six launches: control → candidate → control, then candidate → control → candidate | Game Mode, worst-angle Outset state; #504 not in `main`, so no Efficient soft effects | **26.4 → 26.8 game FPS (+1.4%)**. The candidate beat the control in every launch, by launch: control 26.6, 26.5, 26.2 against candidate 26.8, 26.8, 26.9; the control drifted 0.4 FPS over the session, so the spread (0.6) covers the mean. A rendered re-check failed to start: the desktop session opened over SSH refused the window to both builds (X authorization), so no rendered numbers on `main` |
+| M4-T01 | Interrupt-test ceiling (`6ad94d6`: stack 1 with the plain check's four interrupt reads replaced by one host flag; AppImage `758221b76bc4`, composite profile `68112e95`) against stack 1 (`cand-503`, `274b6290a1e2`); local `measure-503/irq-ceiling/windows.jsonl` (private) | `gamemode_measure.py` 3 × 15 s per launch, six launches alternating stack 1 → ceiling | Game Mode, worst-angle Outset state | **26.87 → 26.96 (+0.3%), not consistent**: by pair 26.80/27.00, 26.97/26.90, 26.83/26.97. A perfect word does not beat the stack, so M4 is a no-go. It also explains the first ceiling's +3.1%: ≈ 0.7% came from the range tests and ≤ 0.3% from the interrupt reads; the rest came from taking interrupts late (less handler work, the same drift that changed its checkpoints), which no exact change can recover |
 | M1-T03 | Same session's exit reports (`[native-*]` lines; local `measure-503/m1-native-counts.txt`) | Accepted/declined counts over the session (22,417 retraces, ≈ 8,500 game frames) | As above | ≈ 304 M native runs and ≈ 10.7 M declines: **≈ 37,000 routing decisions per game frame**. The readiness callback (`host_can_skip_observation`) is only 0.33% of the game thread, so the `*_try` functions' 7.5% is mostly the native routines' own (inlined) work. Declines are dominated by `key-s` (79% declined) and `transform-simple` (80%), ≈ 1,060 per frame: a minor candidate. The 13% gap to 30 FPS has to come from the translated chunks (M1-T02) |
