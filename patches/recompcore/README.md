@@ -290,3 +290,9 @@ only cut its shape (the geysers' middle layer, C1 + 0.5 x RASC, was shaded as sc
 depth keeps its share near or far (the cover's fade from 3,000 units went by the far wall's depth behind it). The
 effects are drawn into the mask a second time over white, so a blended effect's share is its opacity: a dark
 dust no longer lets the floor's shadows show through. `DOL_AURORA_EFFECT_MASK_OPACITY=0` keeps the colour alone.
+
+Patch 0207 adds Wind Waker HD's facing term to the sun shadows (off by default, `DOL_AURORA_SUN_SHADOW_FACING=1`):
+what faces away from the sun is in shade too, from the scenery's smooth normals made on the CPU while it is on,
+then HD's terrain curve. Characters, marked in the sea mask, keep their own shading. `aurora_set_sun_palette` gives
+the shade HD's light for the hour: its ambient (the palette's shadow colour from above, BG0 C0 from the side) over
+its sunlight. The gap fill is off (it shaded Link's own front) and the slope term is 20 near the camera as far off.

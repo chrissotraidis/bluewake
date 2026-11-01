@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "22ddca24e11acf57900122e0d7212cecdbb0e588",
+      "sha": "845809f29ff3bbc3d45f9b84ad828ffbcf94465b",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -727,6 +727,13 @@
             "patches/recompcore/0206-Aurora-the-HD-look-s-shading-leaves-the-effects-drawn-over-the-scene-alone.patch"
           ],
           "evidence": "pdale-boop's: the geysers' core is cream with no blue, as with the look off; under a shutting door's dust the shadow band goes from 0.836 of the floor beside it to 1.001 (1.047 with the look off); frame dumps from four other save states match within noise."
+        },
+        "hd_facing_term": {
+          "runtime": "845809f29ff3bbc3d45f9b84ad828ffbcf94465b",
+          "tracked_patches": [
+            "patches/recompcore/0207-Sun-shadows-Wind-Waker-HD-s-facing-term-and-its-light-for-the-hour.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_FACING (off by default) shades what faces away from the sun, from the scenery's smooth normals made on the CPU; characters, marked in the sea mask, keep their own shading; aurora_set_sun_palette multiplies the shade by HD's ambient over its sunlight for the hour (stages.bin version 3); the gap fill off (it shaded Link's own front); the near slope term 20. Windows 11 (RTX 5070 Ti, Direct3D 12): Outset's bridge and east wall at 10:00 against Cemu's HD."
         }
       }
     },
