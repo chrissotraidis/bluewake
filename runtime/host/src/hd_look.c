@@ -138,8 +138,9 @@ void bluewake_hd_look_reload(void) {
     {
         static int s_quality = -1;
         const char* value = getenv("DOL_AURORA_SUN_SHADOW_QUALITY");
+        // hd: Wind Waker HD's own shadow pass (its map size, cascades and pre-pass; local test).
         const int quality = value == NULL || value[0] == '\0' ? 2 : strcmp(value, "low") == 0 ? 0
-                            : strcmp(value, "medium") == 0 ? 1 : 2;
+                            : strcmp(value, "medium") == 0 ? 1 : strcmp(value, "hd") == 0 ? 3 : 2;
         if (quality != s_quality) {
             aurora_set_sun_shadow_quality(quality);
             s_quality = quality;
@@ -508,8 +509,31 @@ static void hd_normals_stage(CPUState* cpu) {
         fprintf(stderr, "[hd-look] HD normals for %s: %s\n", stage, f != NULL ? path : "none");
 }
 
+// Wind Waker HD's cloud shadow texture for the cloud shadows on HD's rule: the HD pack's
+// optional/hd-cloud-shadow/ww_shadow_clouds.dds (made by the importer), handed to the renderer once when the pack
+// has it (without it the renderer keeps its own noise, or DOL_AURORA_CLOUD_SHADOWS_HD_TEXTURE's file).
+static void hd_cloud_texture(void) {
+    static bool s_done;
+    if (s_done)
+        return;
+    s_done = true;
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (pack == NULL || pack[0] == '\0')
+        return;
+    char path[4096];
+    snprintf(path, sizeof path, "%s/optional/hd-cloud-shadow/ww_shadow_clouds.dds", pack);
+    FILE* f = fopen(path, "rb");
+    if (f == NULL)
+        return;
+    fclose(f);
+    aurora_set_hd_cloud_texture(path);
+    if (g_trace)
+        fprintf(stderr, "[hd-look] HD cloud shadow texture: %s\n", path);
+}
+
 static void clouds(CPUState* cpu, unsigned long long retrace) {
     hd_normals_stage(cpu);
+    hd_cloud_texture();
     bool show = false;
     bool torch_view = false;
     if (g_clouds == 1 || g_sun == 1 || g_edge == 1 || g_torch == 1) {
@@ -587,7 +611,8 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
     // The room model's widened culling goes with the sun shadows on the high
     // shadow quality (DOL_AURORA_SUN_SHADOW_QUALITY unset or high).
     const char* quality = getenv("DOL_AURORA_SUN_SHADOW_QUALITY");
-    const bool high = quality == NULL || quality[0] == '\0' || strcmp(quality, "high") == 0;
+    const bool high = quality == NULL || quality[0] == '\0' || strcmp(quality, "high") == 0 ||
+                      strcmp(quality, "hd") == 0;
     bluewake_hd_room_clip = sun_on && (g_room_cull >= 0 ? g_room_cull == 1 : high);
     // The palms' shadow-sized cull boxes go with it (BLUEWAKE_HD_PALM_CULL
     // overrides; turned on, it applies whatever the sun).
