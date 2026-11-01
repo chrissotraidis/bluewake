@@ -48,13 +48,13 @@ Details and raw numbers are in the [tracker's evidence ledger](PROGRESS.md#evide
 
 | Metric | Baseline | Target | Validation |
 |---|---:|---:|---|
-| Outset game FPS | ≈ 26.4 (worst-angle state, Game Mode) | Gain above both 2% and the A/A spread | Game Mode A/B/A, plus rendered A/B/B/A with at least 5 pairs |
+| Outset game FPS | ≈ 26.4 (worst-angle state, Game Mode) | A consistent gain: the candidate ahead of the control in every interleaved launch (at least six). No minimum size; small gains are kept when exact | Game Mode launches alternating control and candidate, plus rendered A/B/B/A where available |
 | Game-thread cycles per frame | ≈ 129 M | Lower in proportion; the targeted cost visibly smaller | Same-window `perf stat` and samples |
 | Guest behaviour | Control checkpoints | Identical at every checkpoint, every scene | Fixed-state benchmark comparison |
 | Other scenes | Five-scene results | No slowdown beyond their spread | Full rendered five-scene tour |
 | Player experience | ≈ 26 FPS in Game Mode | No new visual, input, audio or timing issue | Outset walk on a first-revision Deck |
 
-A candidate may help Outset without reaching 30 FPS: relative gain and exactness decide retention. Control and candidate share compiler, optimization profile, flags, state and settings. Private disc, state and module artifacts stay off GitHub.
+A candidate may help Outset without reaching 30 FPS: consistency and exactness decide retention, not size (2026-11-01: gains under 1% are kept when they are consistent, exact and covered by tests). Control and candidate share compiler, optimization profile, flags, state and settings. Private disc, state and module artifacts stay off GitHub.
 
 ## Decisions
 
