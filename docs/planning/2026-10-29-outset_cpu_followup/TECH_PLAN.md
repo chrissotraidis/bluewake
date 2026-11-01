@@ -129,12 +129,12 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPU
 | Exactness | render_bench, five states | Guest checkpoints identical to the control in every scene | Passed: identical in all 14 runs × 5 scenes |
 | Safety | `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run | Zero unsafe answers | Passed: 1,107,330,401 inline answers, 0 unsafe, 0 conservative |
 | Performance | Game Mode A/B/A (Outset), rendered A/B/B/A ≥ 5 pairs | Outset gain above 2% and the A/A spread | Game Mode +1.8% (beyond spread); rendered +1.6% overall, Outset +1.9% (3 pairs) |
-| Regression | Five-scene tour, Outset walk | No scene beyond noise; no player-visible issue | Pending |
+| Regression | Five-scene tour, Outset walk | No scene beyond noise; no player-visible issue | Passed |
 
 ## Next steps
 
 1. **Safety:** done; the verify run found 0 unsafe answers in 1.1 billion.
-2. **Player check:** an Outset walk on the Deck with the stack.
+2. **Player check:** done, no issue.
 3. **Follow-up, separate change:** the interrupt test. A host-maintained "interrupt may be pending" word would replace three of its reads. It needs every write site kept in sync (≈ 17 in `main.c`, 5 in RecompCore's `interrupts.c`), a RecompCore companion PR and a handshake bump coordinated with [#524](https://github.com/chrissotraidis/bluewake/pull/524). Estimated ≈ +1%.
 4. **Later:** count the dispatch-loop edges and look at the GX command stream.
 

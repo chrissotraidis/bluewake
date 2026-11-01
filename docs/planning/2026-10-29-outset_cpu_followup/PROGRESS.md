@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: Retained stack: +1.8% Game Mode, +1.6% rendered, checkpoints identical  
+Status: Complete: +1.8% Game Mode, +1.6% rendered, checkpoints identical, verify clean, player-checked  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -32,7 +32,7 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 
 - [x] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints. Game Mode A/B done: **+1.8%** (beyond the spread). Rendered run (3 pairs, five states): +1.6% overall, Outset +1.9%, checkpoints identical. `BLUEWAKE_DIRECT_SKIP_VERIFY=1`: 1.1 billion inline answers, 0 unsafe.
 - [x] M3-T02: Run the full five-scene rendered tour and focused CI tests. No scene slower; checkpoints identical; `direct_calls_test` in Windows and Linux CI.
-- [ ] M3-T03: Perform the Outset walk/camera player test and record retain/reject reasoning. Decision (2026-10-31): **retain the stack** at +1.8%, slightly under the 2% target, as an exact improvement; the remaining saving (the interrupt test) is a separate follow-up.
+- [x] M3-T03: Perform the Outset walk/camera player test and record retain/reject reasoning. Player walk on the Deck (2026-11-01): no visual, input, audio or timing issue. Decision (2026-10-31): **retain the stack** at +1.8%, slightly under the 2% target, as an exact improvement; the remaining saving (the interrupt test) is a separate follow-up.
 
 ## Evidence ledger
 
@@ -56,4 +56,5 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 | M3-T01 | Stack: candidate v2 + actor-search inline (`1c41c6b`; AppImage `47c7f3077292`, same composite profile); local `measure-503/plain3/windows.jsonl` (private) | Same Game Mode A/B/A | As v1 | **26.1 → 26.6 game FPS (+1.8%, spread 0.4: beyond it)**; IPC 1.648 → 1.614. Control ran 0.4 FPS lower this session than the previous one; the interleaved control-twice runs absorb it. The paired-single path was dropped: its plain-float fast path already exists, leaving only call overhead (≈ 0.2 M per frame) |
 | M3-T01/T02 | Control (A, `e237759c`) against the retained stack (B, `47c7f3077292`); local `2026_10_31-232547/` (private) | `render_bench` rendered, desktop session, unpaced, 5 states × 1,800 retraces, 3 pairs A/B/B/A (12 measured + 2 picture runs), scale 3, Smooth Motion on (1 step), Efficient soft effects on | Steam Deck Desktop Mode | **B +1.6% overall**: Outset +1.9%, Lava Room +3.0%, Hyrule Castle +1.8%, Butterfly Room +0.5%, Shipwreck +0.7%; busy equal. **Guest checkpoints identical across all 14 runs of both builds in every scene**, and equal to the control's hashes from the ceiling run. Picture flags are capture timing, not state: the Butterfly Room shows a different attack moment with identical checkpoints (paced Smooth Motion capture), and the Outset and Lava Room flicker is equal in both builds (28,245 vs 27,893; 11,875 vs 11,542 pixels) |
 | M3-T01 | Retained stack (`47c7f3077292`) with `BLUEWAKE_DIRECT_SKIP_VERIFY=1`; Deck log `~/bluewake-ab.log` (private) | One Game Mode launch through the Steam shortcut from the worst-angle Outset state, ≈ 100 s, then SIGTERM; the exit report's `[direct-skip] verify` line | Game Mode, Outset | **1,107,330,401 inline answers, 0 unsafe, 0 conservative**: the plain and full checks agreed with the host on every direct call |
+| M3-T03 | Retained stack (`47c7f3077292`) | Outset walk and camera by the player | Steam Deck, Game Mode | No issue reported |
 | M1-T03 | Same session's exit reports (`[native-*]` lines; local `measure-503/m1-native-counts.txt`) | Accepted/declined counts over the session (22,417 retraces, ≈ 8,500 game frames) | As above | ≈ 304 M native runs and ≈ 10.7 M declines: **≈ 37,000 routing decisions per game frame**. The readiness callback (`host_can_skip_observation`) is only 0.33% of the game thread, so the `*_try` functions' 7.5% is mostly the native routines' own (inlined) work. Declines are dominated by `key-s` (79% declined) and `transform-simple` (80%), ≈ 1,060 per frame: a minor candidate. The 13% gap to 30 FPS has to come from the translated chunks (M1-T02) |
