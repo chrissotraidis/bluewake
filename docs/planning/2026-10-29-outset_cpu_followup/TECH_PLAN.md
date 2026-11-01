@@ -63,6 +63,8 @@ Every A/B ran in Game Mode from the worst-angle Outset state, launched through t
 
 Rendered, five states, 3 pairs (unpaced): the stack is **+1.6% overall** (Outset +1.9%, Lava Room +3.0%, Hyrule Castle +1.8%, Butterfly Room +0.5%, Shipwreck +0.7%), with **guest checkpoints identical to the control in every run and scene**.
 
+Re-checked on current `main` (`6b429fe`, full build and profile) after merging it into this branch: **+1.4%** in Game Mode across six launches, with the candidate ahead of the control in every launch.
+
 Considered and dropped: the paired-single plain-float path already exists; only call overhead remains (≈ 0.2 M cycles per frame), and inlining such helpers was slower in October.
 
 ## Approach
