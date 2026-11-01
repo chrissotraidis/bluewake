@@ -73,7 +73,7 @@ static inline bool bw_host_quiet(const CPUState* cpu) {
 
 /* The chassis loop's checks before a dispatch (an exception, the turn's
  * budget), and the edge service's before it would have nothing to do. */
-static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
+static inline bool bw_direct_call_ready_full(const CPUState* cpu, u32 address) {
     if (!bw_direct_enabled || cpu == NULL || bw_host_can_skip == NULL ||
         bw_direct_depth >= BW_DIRECT_DEPTH_MAX)
         return false;
@@ -93,6 +93,35 @@ static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
         return allowed;
     }
     return bw_host_can_skip(bw_host_can_skip_user, cpu, address);
+}
+
+/* The same answer for an address the build knows lies outside the host's two
+ * ranges (direct_skip.h): with the inline answer on, only the singles remain.
+ * bw_host_skip_fast is set only while direct calls are on, so it stands for
+ * bw_direct_enabled and the host's query; the translated code's cpu is never
+ * NULL. Anything else (the answer off, verify) is the full check. */
+static inline bool bw_direct_call_ready_plain(const CPUState* cpu, u32 address) {
+    const volatile BwHostSkipFast* fast = bw_host_skip_fast;
+    if (__builtin_expect(fast != NULL, 1) && fast->simple && !bw_host_skip_verify) {
+        if (bw_direct_depth >= BW_DIRECT_DEPTH_MAX || cpu->exception != 0u ||
+            (cpu->cycle_budget > 0 && cpu->downcount <= -cpu->cycle_budget) || !bw_host_quiet(cpu))
+            return false;
+        return address != fast->single[0] && address != fast->single[1];
+    }
+    return bw_direct_call_ready_full(cpu, address);
+}
+
+static inline bool bw_skip_range_outside(u32 address) {
+    return (address < BW_SKIP_RANGE0_FIRST || address > BW_SKIP_RANGE0_LAST) &&
+           (address < BW_SKIP_RANGE1_FIRST || address > BW_SKIP_RANGE1_LAST);
+}
+
+/* At a call the translator wrote, the address is a constant: the range tests
+ * are settled here, at build time. */
+static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
+    if (__builtin_constant_p(address) && bw_skip_range_outside(address))
+        return bw_direct_call_ready_plain(cpu, address);
+    return bw_direct_call_ready_full(cpu, address);
 }
 
 /* The addresses the host's edge service acts at, from the builder's watch list
