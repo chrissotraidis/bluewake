@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: Stack 1 complete (tag `outset-503-stack1`: +1.4–1.8% Game Mode, +1.6% rendered, exact); M4 closed as no-go  
+Status: Ready for review: +1.4–1.8% Game Mode, +1.6% rendered, exact (tag `outset-503-stack1`); M4 closed as no-go; follow-ups #529–#531  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -11,7 +11,7 @@ Architecture: [performance workflow](../../performance/Overview.md#performance-w
 
 - [x] M0-T01: Record BlueWake/RecompCore/AppImage/module hashes, build flags, PGO identity and Deck settings.
 - [x] M0-T02: Load the fixed Outset state and verify the expected stage, room, checkpoints and game-thread bottleneck.
-- [ ] M0-T03: Run at least five interleaved A/A pairs and record FPS/cycles noise.
+- [x] M0-T03: Run at least five interleaved A/A pairs and record FPS/cycles noise. Covered by the control-twice Game Mode launches in every A/B (spread 0.3–0.6 game FPS) and the six-launch rounds on `main`.
 
 ### M1: Attribute the flat game-thread profile (depends: M0)
 
@@ -44,6 +44,14 @@ Acceptance: the candidate ahead of the control in every interleaved Game Mode la
 - [x] M4-T02: Map every write to the four values and design the word ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification-closed-as-no-go)). Every RecompCore write is covered by a host path, so no RecompCore change is needed. `host_dsp_interrupt` runs on the game thread in both DSP modes, so plain stores suffice.
 - [ ] ~~M4-T03~~: Not implemented: M4-T01 showed even a perfect word does not beat the stack consistently.
 - [ ] ~~M4-T04~~: Not needed.
+
+## Follow-ups
+
+| PR | Plan | Basis in this PR |
+|---|---|---|
+| [#529](https://github.com/chrissotraidis/bluewake/pull/529) | Train the optimization profile on Outset | Flat profile; training has one Outset stop and runs with the stage-select logic live |
+| [#530](https://github.com/chrissotraidis/bluewake/pull/530) | Count the dispatch-loop edges in Outset | ≈ 4.3 M cycles per frame, unattributed |
+| [#531](https://github.com/chrissotraidis/bluewake/pull/531) | Profile the GX command stream in Outset | ≈ 5.1 M cycles per frame, host side not broken down |
 
 ## Evidence ledger
 

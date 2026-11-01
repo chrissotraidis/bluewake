@@ -1,6 +1,6 @@
 # TECH_PLAN — Outset game-thread follow-up
 
-Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) closed as no-go  
+Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) closed as no-go; ready for review; follow-ups #529–#531  
 Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; control build = [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0 (local `f4bda45`)  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -228,10 +228,13 @@ Every writer runs on the game thread, the same thread that runs the module's che
 
 ## Next steps
 
-1. **Safety:** done; the verify run found 0 unsafe answers in 1.1 billion.
-2. **Player check:** done, no issue.
-3. **M4, closed:** the interrupt test's bound was +0.3% and inconsistent ([outcome](#m4-the-interrupt-test-specification-closed-as-no-go)).
-4. **Next:** count the dispatch-loop edges and look at the GX command stream, bounding each with a ceiling first.
+This PR is complete. The remaining shared costs continue in separate plans, each counted and bounded before any change:
+
+| PR | Plan | Basis in this PR |
+|---|---|---|
+| [#529](https://github.com/chrissotraidis/bluewake/pull/529) | Train the optimization profile on Outset | Flat profile; training has one Outset stop and runs with the stage-select logic live |
+| [#530](https://github.com/chrissotraidis/bluewake/pull/530) | Count the dispatch-loop edges in Outset | ≈ 4.3 M cycles per frame, unattributed |
+| [#531](https://github.com/chrissotraidis/bluewake/pull/531) | Profile the GX command stream in Outset | ≈ 5.1 M cycles per frame, host side not broken down |
 
 ## Implementation order
 

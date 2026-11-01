@@ -1,6 +1,6 @@
 # PRD — Outset game-thread follow-up
 
-Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) closed as no-go  
+Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) closed as no-go; ready for review; follow-ups #529–#531  
 Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured baseline is the combined [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack, re-measured on a control build of [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0.  
 Scope: the CPU cost of Outset's game thread on the Steam Deck. Excluded: Smooth Motion and GPU pacing ([#504](https://github.com/chrissotraidis/bluewake/pull/504)), and build-recipe changes.
 
@@ -63,4 +63,5 @@ A candidate may help Outset without reaching 30 FPS: consistency and exactness d
 - **Retain at +1.8% (2026-10-31):** slightly under the 2% target, but exact and beyond noise. The interrupt test is the next, separate change.
 - **One PR:** the code is stacked on this PR, as #504 did. [#528](https://github.com/chrissotraidis/bluewake/pull/528) was closed.
 - **M4 (interrupt test) closed as no-go:** even a perfect host word gained +0.3%, inconsistently. The first ceiling's gain came mostly from taking interrupts late, which no exact change can keep ([outcome](TECH_PLAN.md#m4-the-interrupt-test-specification-closed-as-no-go)).
+- **Follow-ups (2026-11-01):** [#529](https://github.com/chrissotraidis/bluewake/pull/529) training on Outset, [#530](https://github.com/chrissotraidis/bluewake/pull/530) dispatch-loop edges, [#531](https://github.com/chrissotraidis/bluewake/pull/531) GX command stream.
 - **Platform:** first-revision Steam Deck, current SteamOS, Game Mode, render scale 3.
