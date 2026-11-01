@@ -32,7 +32,7 @@ static void sky_load(void);
 
 // HD's sunlight as the player chose it (BLUEWAKE_HD_SUNLIGHT, read at each
 // reload): the power its factor for the hour is taken to (sky_brightness()).
-static float g_sunlight = 0.37f;
+static float g_sunlight = 0.4545f;
 // HD's factor for the hour as last worked out (sky_brightness()), so a new
 // choice of sunlight shows at once, the game paused under the menu too.
 static float g_sky_factor;
@@ -97,7 +97,13 @@ void bluewake_hd_look_reload(void) {
     const int bloom = part("BLUEWAKE_HD_BLOOM", all);
     const int far_blur = part("BLUEWAKE_HD_FAR_BLUR", all);
     const int ao = part("BLUEWAKE_HD_AO", all);
-    g_clouds = part("BLUEWAKE_HD_CLOUD_SHADOWS", all);
+    // Cloud shadows stay off unless BLUEWAKE_HD_CLOUD_SHADOWS=1: at Outset at
+    // 10:00 they darkened 61% of the picture by about 13%, the sea included,
+    // where Wind Waker HD has no cloud shadow at all (its clouds' shadow is its
+    // cloud texture over a floor, nothing where the sky is clear). Off, the
+    // bridge, its shade and the sea there matched HD's within a few levels.
+    g_clouds = all == 0 ? 0
+               : setting("BLUEWAKE_HD_CLOUD_SHADOWS") >= 0 ? setting("BLUEWAKE_HD_CLOUD_SHADOWS") : all >= 0 ? 0 : -1;
     // Sun shadows are worked out from what is on screen, and on open ground
     // they drew long dark streaks, so the HD look leaves them off; only
     // BLUEWAKE_HD_SUN_SHADOWS=1 turns them on. They are part of the HD look,
@@ -142,7 +148,7 @@ void bluewake_hd_look_reload(void) {
     // How dark the sun shadows are and how strong HD's sunlight is, as the
     // player chose in the menu (HD's own by default).
     aurora_set_sun_shadow_strength(setting_number("BLUEWAKE_HD_SHADOW_STRENGTH", 1.0f, 0.0f, 1.0f));
-    const float sunlight = setting_number("BLUEWAKE_HD_SUNLIGHT", 0.37f, 0.05f, 1.0f);
+    const float sunlight = setting_number("BLUEWAKE_HD_SUNLIGHT", 0.4545f, 0.05f, 1.0f);
     if (sunlight != g_sunlight) {
         g_sunlight = sunlight;
         sky_sunlight_changed();
@@ -713,18 +719,21 @@ enum {
     kVrboxInfo = 0x803C9D80u,     // mpVrboxInfo (stage_vrbox_info_class, 0x24 each)
 };
 // Every stage HD retuned (optional/hd-sky/stages.bin, else sea.bin alone): a
-// stage's GC Pale, HD Pale, GC Virt, HD Virt, HD's Pale factors. The stage in
+// stage's GC Pale, HD Pale, GC Virt, HD Virt, HD's Pale factors (version 3:
+// each Pale entry's shadow colour, then its factors; 2: the factors). The stage in
 // play is known by its tables holding one stage's GameCube colours; its data
 // is then g_sky_data (Virt can be none: an interior has no sky).
 typedef struct SkyStage {
     char name[16];
     u8* data;
     u32 pale, virt;
+    u32 extra;  // bytes a Pale entry's factors take: 28 with the shadow colour first (version 3), else 24
 } SkyStage;
 static SkyStage* g_skies;
 static u32 g_sky_count;
 static u8* g_sky_data;  // the stage in play's, or NULL
 static u32 g_sky_pale, g_sky_virt;
+static u32 g_sky_extra = 24u;  // the stage in play's (SkyStage.extra)
 static bool g_sky_shown;  // the tables hold HD's (as last seen)
 static float g_sky_exposure;  // what aurora_set_exposure was last given
 
@@ -777,11 +786,12 @@ static void sky_load(void) {
         } else {
             memcpy(stage->name, "sea", 4);
         }
-        if (fread(head, 1, 16, f) != 16 || memcmp(head, "BWSK", 4) != 0 || head[7] != 2u)
+        if (fread(head, 1, 16, f) != 16 || memcmp(head, "BWSK", 4) != 0 || (head[7] != 2u && head[7] != 3u))
             break;
         stage->pale = (u32)head[8] << 24 | (u32)head[9] << 16 | (u32)head[10] << 8 | head[11];
         stage->virt = (u32)head[12] << 24 | (u32)head[13] << 16 | (u32)head[14] << 8 | head[15];
-        const size_t size = 2u * (stage->pale * 0x2Cu + stage->virt * 0x24u) + stage->pale * 24u;
+        stage->extra = head[7] == 3u ? 28u : 24u;
+        const size_t size = 2u * (stage->pale * 0x2Cu + stage->virt * 0x24u) + stage->pale * stage->extra;
         if (stage->pale == 0u || stage->pale >= 256u || stage->virt >= 256u || (stage->data = malloc(size)) == NULL)
             break;
         if (fread(stage->data, 1, size, f) != size) {
@@ -799,10 +809,12 @@ static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size);
 // The bytes of an entry the host rewrites in place while it keeps a table (bit
 // n: byte n): a Pale entry's colours (0x00-0x20, the linear blend) and a Virt
 // entry's (kVirtColours below: the sky's gain, and the blend). Each retrace it
-// rewrites the four entries the game is blending.
+// rewrites the entries the game is blending: the light's four and, with HD's
+// light on characters, the scenery's four (s_written_pale; the characters'
+// colours, 0x00-0x05, are among the colours).
 #define SKY_PALE_LOOSE 0x1FFFFFFFFull
 #define SKY_VIRT_LOOSE 0x1FF770000ull
-#define SKY_LOOSE_ENTRIES 4u
+#define SKY_LOOSE_ENTRIES 8u
 // Whether a table that holds HD's already is taken as the stage's
 // (BLUEWAKE_STATE_REAPPLY=0 after a load turns it off).
 static bool s_sky_adopt = true;
@@ -871,6 +883,7 @@ static bool sky_pick(CPUState* cpu, u32 table) {
     g_sky_data = stage->data;
     g_sky_pale = stage->pale;
     g_sky_virt = stage->virt;
+    g_sky_extra = stage->extra;
     return true;
 }
 
@@ -932,9 +945,11 @@ static u32 sky_table(CPUState* cpu, u32 pointer, u32 count, u32 entry, const u8*
 // (dScnKy_env_light_c::setLight_palno_get and setLight): the hour's two
 // palettes of the last weather and of the new one, by the hour, then by the
 // weather's change. In g_env_light (0x803E4AB4). As the scene's brightness,
-// taken to the power 0.37: 3 at noon is 1.5, 2 in the morning 1.29. Gamma's
-// 1/2.2 (1.65 at noon) looked right on Windfall's dock and too strong in play,
-// on the islands' sand and rock; 0.25 lost HD's brilliance.
+// taken to gamma's 1/2.2 (0.4545): 3 at noon is 1.65, 2 in the morning 1.37,
+// HD's sunlight in the game's gamma. It once looked too strong on the islands'
+// sand and rock and was taken to 0.37, while the cloud shadows darkened the
+// whole picture and the rock's faces turned from the sun weren't shaded; with
+// those fixed, 1/2.2 matched HD's bridge at Outset at 10:00.
 enum {
     kEnvLight = 0x803E4AB4u,
     kEnvPselect = kEnvLight + 0x008u,   // mpPselectInfo (0xC each: palette ids[8], change rate)
@@ -1231,10 +1246,20 @@ static int sky_palette(CPUState* cpu, u32 envr_idx, u32 colpat, u32 slot) {
     return pale < g_sky_pale ? (int)pale : -1;
 }
 
+// The room Link is in (dStage_roomControl_c::mStayNo), negative while none is.
+enum { kStayRoom = 0x803F6A78u };
+
 // The four palettes the game is blending now and how (setLight_palno_get):
 // the hour's two (slots) of the last weather, the same of the new one, by the
 // hour (ab), then by the weather's change (cb). False outside the schedule.
-static bool sky_blend_state(CPUState* cpu, int pale[4], float* ab, float* cb) {
+// The game's light (g_env_light) takes its palettes from the floor under Link
+// (his polygon's colour, settingTevStruct_colget_player) and lights Link, the
+// sky and the fog with them; the scenery takes its room's (setLight_bg: a
+// room's palettes are those of its number). With `scenery`, the room's: under
+// Windfall's arch the floor names a darker palette (envr 50) that dims Link
+// while the walls and the street keep the town's (room 11), in Wind Waker HD
+// as on the GameCube.
+static bool sky_blend_state(CPUState* cpu, bool scenery, int pale[4], float* ab, float* cb) {
     const u32 schedule = mem_read32(cpu, kEnvSchedule);
     if (!guest_pointer(schedule))
         return false;
@@ -1251,7 +1276,10 @@ static bool sky_blend_state(CPUState* cpu, int pale[4], float* ab, float* cb) {
             if (*ab >= 1.0f)
                 *ab = 1.0f;
         }
-        const u32 envr0 = mem_read8(cpu, kEnvEnvrPrev), envr1 = mem_read8(cpu, kEnvEnvrCurr);
+        u32 envr0 = mem_read8(cpu, kEnvEnvrPrev), envr1 = mem_read8(cpu, kEnvEnvrCurr);
+        const s8 room = (s8)mem_read8(cpu, kStayRoom);
+        if (scenery && room >= 0)
+            envr0 = envr1 = (u32)room;
         const u32 pat0 = mem_read8(cpu, kEnvColpatPrev), pat1 = mem_read8(cpu, kEnvColpatCurr);
         pale[0] = sky_palette(cpu, envr0, pat0, slot0);
         pale[1] = sky_palette(cpu, envr0, pat0, slot1);
@@ -1264,34 +1292,76 @@ static bool sky_blend_state(CPUState* cpu, int pale[4], float* ab, float* cb) {
     return false;
 }
 
-static float sky_factor_of(int pale) {
+// A Pale entry's extra bytes (its shadow colour in version 3, then its factors).
+static const u8* sky_extra_of(int pale) {
+    return g_sky_data + 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + (u32)pale * g_sky_extra;
+}
+
+// HD's factor `index` for a Pale entry (0 actor C0, 1 actor K0, 2 BG0 C0, 3 BG0 K0, 4 BG1 C0, 5 BG1 K0).
+static float sky_factor_at(int pale, u32 index) {
     if (pale < 0)
         return 1.0f;
-    const u8* f = g_sky_data + 2u * (g_sky_pale * 0x2Cu + g_sky_virt * 0x24u) + (u32)pale * 24u + 3u * 4u;
+    const u8* f = sky_extra_of(pale) + (g_sky_extra == 28u ? 4u : 0u) + index * 4u;
     const u32 bits = (u32)f[0] << 24 | (u32)f[1] << 16 | (u32)f[2] << 8 | f[3];
     float value;
     memcpy(&value, &bits, 4);
     return value > 0.0f && value < 10.0f ? value : 1.0f;
 }
 
-static float sky_brightness(CPUState* cpu) {
-    int pale[4];
-    float ab, cb;
-    if (!sky_blend_state(cpu, pale, &ab, &cb))
-        return 0.0f;
-    const float a = sky_factor_of(pale[0]), b = sky_factor_of(pale[1]);
-    const float c = sky_factor_of(pale[2]), d = sky_factor_of(pale[3]);
-    const float prev = a + ab * (b - a), curr = c + ab * (d - c);
-    const float factor = prev + cb * (curr - prev);
-    // The power the factor is taken to: the menu's HD sunlight (0.37, HD's), or
-    // BLUEWAKE_HD_SKY_GAMMA over it for testing.
+static float sky_factor_of(int pale) { return sky_factor_at(pale, 3u); }
+
+// The power HD's factors are taken to: the menu's HD sunlight (0.4545, HD's), or
+// BLUEWAKE_HD_SKY_GAMMA over it for testing.
+static float sky_power(void) {
     static float s_override = -1.0f;
     if (s_override < 0.0f) {
         const char* value = getenv("BLUEWAKE_HD_SKY_GAMMA");
         s_override = value != NULL && atof(value) > 0.0 ? (float)atof(value) : 0.0f;
     }
+    return s_override > 0.0f ? s_override : g_sunlight;
+}
+
+static float sky_brightness(CPUState* cpu) {
+    int pale[4];
+    float ab, cb;
+    if (!sky_blend_state(cpu, true, pale, &ab, &cb))
+        return 0.0f;
+    const float a = sky_factor_of(pale[0]), b = sky_factor_of(pale[1]);
+    const float c = sky_factor_of(pale[2]), d = sky_factor_of(pale[3]);
+    const float prev = a + ab * (b - a), curr = c + ab * (d - c);
+    const float factor = prev + cb * (curr - prev);
     g_sky_factor = factor;
-    return powf(factor, s_override > 0.0f ? s_override : g_sunlight);
+    return powf(factor, sky_power());
+}
+
+// HD scales each light colour by its own factor: a character's light (actor K0)
+// by 2.75 at noon and its shade (actor C0) by 1, against the scenery's 3 (read
+// on Link in Cemu at Windfall's dock at 14:00: K0 x 2.75, C0 x 1, linear). The
+// brightness above takes the whole picture up by the scenery's, so a character's
+// shade came out three times HD's (Link's back lit, his shirt washed out, his
+// hair glowing). The characters' two colours in the Pale entries written here are
+// taken down by their factor against the scenery's, to the same power, so after
+// the brightness they are HD's. BLUEWAKE_HD_ACTOR_LIGHT=0 leaves them alone.
+static bool sky_actor_light(void) {
+    static int s_on = -1;
+    if (s_on < 0) {
+        const char* value = getenv("BLUEWAKE_HD_ACTOR_LIGHT");
+        s_on = value == NULL || value[0] != '0';
+    }
+    return s_on && g_sky_factor > 0.0f;
+}
+
+// A Pale entry's character colours (out[0..5]: actor C0, actor K0) scaled by the
+// characters' factors (`c0`, `k0`, blended as the entry is) against the scenery's.
+static void sky_actor_scale(u8 out[6], float c0, float k0) {
+    if (!sky_actor_light())
+        return;
+    const float p = sky_power();
+    const float s[2] = {powf(c0 / g_sky_factor, p), powf(k0 / g_sky_factor, p)};
+    for (u32 c = 0; c < 6u; ++c) {
+        const float v = out[c] * s[c / 3u] + 0.5f;
+        out[c] = (u8)(v > 255.0f ? 255.0f : v);
+    }
 }
 
 // HD blends its palettes in linear light (it keeps them linear), the game in
@@ -1311,11 +1381,15 @@ static u8 sky_gam(float v) {
 
 static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
-static int s_written_pale[4] = {-1, -1, -1, -1}, s_written_virt[4] = {-1, -1, -1, -1};
+// The Pale entries written last (the game's light's four, then the scenery's)
+// and the Virt entries.
+static int s_written_pale[8] = {-1, -1, -1, -1, -1, -1, -1, -1}, s_written_virt[4] = {-1, -1, -1, -1};
 
 static void sky_linear_forget(void) {
+    for (int i = 0; i < 8; ++i)
+        s_written_pale[i] = -1;
     for (int i = 0; i < 4; ++i)
-        s_written_pale[i] = s_written_virt[i] = -1;
+        s_written_virt[i] = -1;
 }
 
 // HD's noon sky is brighter than its palette's colour (0,210,255 on Windfall's
@@ -1334,6 +1408,57 @@ static float sky_gain(float brightness) {
     return 1.0f + (s_gain - 1.0f) * (up < 0.0f ? 0.0f : up > 1.0f ? 1.0f : up);
 }
 
+// One set of four palettes' linear blend (sky_blend_state's), written into
+// all four Pale entries, recorded from `written` on.
+static void sky_linear_pale(CPUState* cpu, u32 pale_table, const int pale[4], const float w[4], int* written) {
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    u8 pale_out[0x21];
+    for (u32 c = 0; c < 0x21u; ++c) {
+        float v = 0.0f;
+        for (int i = 0; i < 4; ++i)
+            v += w[i] * sky_lin(hd_pale[(u32)pale[i] * 0x2Cu + c]);
+        pale_out[c] = sky_gam(v);
+    }
+    float c0 = 0.0f, k0 = 0.0f;
+    for (int i = 0; i < 4; ++i) {
+        c0 += w[i] * sky_factor_at(pale[i], 0u);
+        k0 += w[i] * sky_factor_at(pale[i], 1u);
+    }
+    sky_actor_scale(pale_out, c0, k0);
+    for (int i = 0; i < 4; ++i) {
+        for (u32 c = 0; c < 0x21u; ++c)
+            mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, pale_out[c]);
+        written[i] = pale[i];
+    }
+}
+
+// Without the linear blend: each of the four Pale entries keeps its own colours,
+// its character colours scaled (sky_actor_scale), recorded from `written` on.
+static void sky_actor_pale(CPUState* cpu, u32 pale_table, const int pale[4], int* written) {
+    if (!sky_actor_light())
+        return;
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    for (int i = 0; i < 4; ++i) {
+        u8 out[6];
+        memcpy(out, hd_pale + (u32)pale[i] * 0x2Cu, sizeof out);
+        sky_actor_scale(out, sky_factor_at(pale[i], 0u), sky_factor_at(pale[i], 1u));
+        for (u32 c = 0; c < 6u; ++c)
+            mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, out[c]);
+        written[i] = pale[i];
+    }
+}
+
+static bool sky_weights(CPUState* cpu, bool scenery, int pale[4], float w[4]) {
+    float ab, cb;
+    if (!sky_blend_state(cpu, scenery, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
+        return false;
+    w[0] = (1.0f - ab) * (1.0f - cb);
+    w[1] = ab * (1.0f - cb);
+    w[2] = (1.0f - ab) * cb;
+    w[3] = ab * cb;
+    return true;
+}
+
 static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on, float gain) {
     if (g_sky_data == NULL) {
         sky_linear_forget();
@@ -1343,46 +1468,49 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on, f
     const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
     const u8* hd_virt = hd_pale + g_sky_pale * 0x2Cu + g_sky_virt * 0x24u;
     // HD's own colours back where they were blended.
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 8; ++i) {
         if (on && s_written_pale[i] >= 0)
             for (u32 c = 0; c < 0x21u; ++c)
                 mem_write8(cpu, pale_table + (u32)s_written_pale[i] * 0x2Cu + c, hd_pale[(u32)s_written_pale[i] * 0x2Cu + c]);
+        s_written_pale[i] = -1;
+    }
+    for (int i = 0; i < 4; ++i) {
         if (on && virt_table != 0u && s_written_virt[i] >= 0)
             for (u32 c = 0; c < sizeof kVirtColours; ++c)
                 mem_write8(cpu, virt_table + (u32)s_written_virt[i] * 0x24u + kVirtColours[c],
                            hd_virt[(u32)s_written_virt[i] * 0x24u + kVirtColours[c]]);
-        s_written_pale[i] = s_written_virt[i] = -1;
+        s_written_virt[i] = -1;
     }
-    int pale[4];
-    float ab, cb;
-    if (!on || !sky_blend_state(cpu, pale, &ab, &cb) || pale[0] < 0 || pale[1] < 0 || pale[2] < 0 || pale[3] < 0)
+    int pale[4], room_pale[4];
+    float w[4], room_w[4];
+    if (!on || !sky_weights(cpu, false, pale, w))
         return;
-    const float w[4] = {(1.0f - ab) * (1.0f - cb), ab * (1.0f - cb), (1.0f - ab) * cb, ab * cb};
+    // The game's light's palettes, then the scenery's where its room names
+    // others (they win an entry both name: the scenery fills the screen).
+    const bool room = sky_weights(cpu, true, room_pale, room_w) && memcmp(room_pale, pale, sizeof pale) != 0;
+    if (linear_on) {
+        sky_linear_pale(cpu, pale_table, pale, w, s_written_pale);
+        if (room)
+            sky_linear_pale(cpu, pale_table, room_pale, room_w, s_written_pale + 4);
+    } else {
+        sky_actor_pale(cpu, pale_table, pale, s_written_pale);
+        if (room)
+            sky_actor_pale(cpu, pale_table, room_pale, s_written_pale + 4);
+    }
+    // The sky goes with the game's light.
     int virt[4];
     for (int i = 0; i < 4; ++i)
         virt[i] = virt_table != 0u && hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] < g_sky_virt ? hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] : -1;
-    u8 pale_out[0x21], virt_out[sizeof kVirtColours];
-    for (u32 c = 0; c < 0x21u; ++c) {
-        float v = 0.0f;
-        for (int i = 0; i < 4; ++i)
-            v += w[i] * sky_lin(hd_pale[(u32)pale[i] * 0x2Cu + c]);
-        pale_out[c] = sky_gam(v);
-    }
-    const bool virt_ok = virt[0] >= 0 && virt[1] >= 0 && virt[2] >= 0 && virt[3] >= 0;
-    for (u32 c = 0; virt_ok && c < sizeof kVirtColours; ++c) {
+    if (virt[0] < 0 || virt[1] < 0 || virt[2] < 0 || virt[3] < 0)
+        return;
+    u8 virt_out[sizeof kVirtColours];
+    for (u32 c = 0; c < sizeof kVirtColours; ++c) {
         float v = 0.0f;
         for (int i = 0; i < 4; ++i)
             v += w[i] * sky_lin(hd_virt[(u32)virt[i] * 0x24u + kVirtColours[c]]);
         virt_out[c] = sky_gam(v);
     }
     for (int i = 0; i < 4; ++i) {
-        if (linear_on) {
-            for (u32 c = 0; c < 0x21u; ++c)
-                mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, pale_out[c]);
-            s_written_pale[i] = pale[i];
-        }
-        if (!virt_ok)
-            continue;
         // The blend, or without it each entry's own colours (the game's blend
         // of them carries the sky's gain alike); the sky's colour (0x18-0x1A,
         // kVirtColours 6-8) times the gain.
