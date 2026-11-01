@@ -1,13 +1,13 @@
 # PROGRESS — Dispatch-loop edges in Outset
 
-Status: Planned  
+Status: M0-T01 done (census); M0-T02 measuring  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
 
 ### M0: Count
 
-- [ ] M0-T01: Opt-in census at loop entry that does not change which path runs; unit test.
+- [x] M0-T01: Opt-in census at loop entry that does not change which path runs; unit test. `cmake/composite/loop_census.h` (compile-time `BLUEWAKE_LOOP_CENSUS`): host entries, each boundary by target address and skipped/asked, and six exit reasons; report on unload. `tests/loop_census_test.c` in Windows and Linux CI; `composite_dispatch_loop_test` unchanged and passing.
 - [ ] M0-T02: Outset per-frame table by kind and reason (Game Mode, worst-angle state).
 
 ### M1: Attribute (depends: M0)

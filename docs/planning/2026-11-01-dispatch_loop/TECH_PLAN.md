@@ -19,7 +19,7 @@ What reaches the loop is whatever these leave: watched addresses, transfers whos
 
 ## Approach
 
-1. **Counting build (diagnostic only).** Add an opt-in counter (compile-time `BLUEWAKE_EDGE_CENSUS`, which already exists for related work) at loop entry, recording the source site, the target and the reason for the exit. Report the top sites at exit.
+1. **Counting build (diagnostic only).** `cmake/composite/loop_census.h`, compile-time `BLUEWAKE_LOOP_CENSUS`, separate from the host's `BLUEWAKE_EDGE_CENSUS` (which also switches off the inline direct-call path). It counts host entries, each boundary by target address (with whether the edge service was skipped) and why the loop returned. Calls and returns are told apart offline: a target at a decomp function start is a call.
 2. **Outset sample.** Run the counting build from #503's worst-angle state in Game Mode; normalize per game frame.
 3. **Map.** Map source sites to game functions (decomp `symbols.txt`, as in #503 M1-T02) and to the transform that skipped them.
 4. **Bound.** For the largest group, build a ceiling that takes that path directly, unsafely, and A/B it against the #503 stack.
@@ -29,9 +29,9 @@ What reaches the loop is whatever these leave: watched addresses, transfers whos
 
 | File | Change | Why |
 |---|---|---|
-| `cmake/composite/dispatch_loop.h` | Opt-in census at loop entry (kind, reason, site) | Attribution; off in shipped builds |
+| `cmake/composite/loop_census.h`, `dispatch_loop.h` | Opt-in census: entries, boundaries by target and skipped/asked, exit reasons | Attribution; compiles to nothing in shipped builds |
 | `scripts/` (report) | Census → per-frame table, joined with decomp symbols | Repeatable mapping |
-| `tests/composite_dispatch_loop_test.c` | Census counts on synthetic edges; zero overhead when off | Keeps the shipped path unchanged |
+| `tests/loop_census_test.c`, CI (Windows, Linux) | Census counts on synthetic runs: every exit reason, targets, entries | Proves the counts; the existing loop test proves the path is unchanged |
 | Candidate files | Decided by M2 | — |
 
 ## Verification
@@ -53,7 +53,7 @@ What reaches the loop is whatever these leave: watched addresses, transfers whos
 
 ## Gaps
 
-- `BLUEWAKE_EDGE_CENSUS` already disables the inline direct-call path in `main.c`. The census build must count without changing which path runs, or its numbers describe a different program.
+- `BLUEWAKE_EDGE_CENSUS` disables the inline direct-call path in `main.c`, so it is not used; the loop census is separate and counts without changing the path.
 
 ## References
 

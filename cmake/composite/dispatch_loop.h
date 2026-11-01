@@ -2,6 +2,7 @@
 #define BLUEWAKE_COMPOSITE_DISPATCH_LOOP_H
 
 #include "edge_intercept_abi.h"
+#include "loop_census.h"
 #if defined(BLUEWAKE_DIRECT_CALLS)
 #include "direct_calls.h"
 #endif
@@ -42,19 +43,20 @@ static inline int bluewake_chassis_dispatch_loop(
     if (ctx == NULL || dispatch == NULL)
         return bluewake_chassis_return(0);
 
+    BW_LOOP_CENSUS_ENTRY();
     s64 prior_downcount = ctx->downcount;
     int dispatched = dispatch(ctx, address);
-    if (!dispatched || edge_service == NULL)
-        return bluewake_chassis_return(dispatched);
-    if (ctx->downcount >= prior_downcount)
-        return bluewake_chassis_return(1);
+    if (!dispatched)
+        return BW_LOOP_CENSUS_EXIT(BW_LOOP_EXIT_FIRST_MISS, bluewake_chassis_return(dispatched));
+    if (edge_service == NULL || ctx->downcount >= prior_downcount)
+        return BW_LOOP_CENSUS_EXIT(BW_LOOP_EXIT_FIRST_ONLY, bluewake_chassis_return(1));
 
     unsigned zero_charge_run = 0u;
     for (;;) {
         if (ctx->exception != 0u ||
             (ctx->cycle_budget > 0 &&
              ctx->downcount <= -ctx->cycle_budget))
-            return bluewake_chassis_return(1);
+            return BW_LOOP_CENSUS_EXIT(BW_LOOP_EXIT_STOP, bluewake_chassis_return(1));
 
         address = ctx->pc;
 #if defined(BLUEWAKE_GATHER_PIPE)
@@ -65,20 +67,21 @@ static inline int bluewake_chassis_dispatch_loop(
         skip_edge = bw_edge_filter_enabled && bw_edge_watch_ready &&
                     bw_edge_unwatched(address) && bw_direct_call_ready(ctx, address);
 #endif
+        BW_LOOP_CENSUS_BOUNDARY(address, skip_edge);
         if (!skip_edge && edge_service(service_user, ctx, address))
-            return bluewake_chassis_return(1);
+            return BW_LOOP_CENSUS_EXIT(BW_LOOP_EXIT_SERVICE, bluewake_chassis_return(1));
 
         prior_downcount = ctx->downcount;
         dispatched = dispatch(ctx, address);
         if (!dispatched)
-            return bluewake_chassis_return(1);
+            return BW_LOOP_CENSUS_EXIT(BW_LOOP_EXIT_MISS, bluewake_chassis_return(1));
         if (ctx->downcount >= prior_downcount) {
             /* Eight non-advancing successors are allowed; the ninth yields
              * so a stuck guest always returns to the host. Progress resets
              * the run, and a new turn or CPU gets an independent allowance. */
             if (++zero_charge_run <= 8u)
                 continue;
-            return bluewake_chassis_return(1);
+            return BW_LOOP_CENSUS_EXIT(BW_LOOP_EXIT_NO_PROGRESS, bluewake_chassis_return(1));
         }
         zero_charge_run = 0u;
     }
