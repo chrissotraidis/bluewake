@@ -8,6 +8,8 @@
 
 #include <atomic>
 #include <functional>
+#include <string>
+#include <vector>
 
 namespace wwhd {
 
@@ -16,6 +18,10 @@ struct ImportProgress {
     size_t files_total = 0;  // HD resources to read
     size_t replacements = 0; // replacement keys so far
     std::string stage;       // what is happening, for the menu
+    // The HD look's optional parts so far: places with HD's sky and light,
+    // models with HD's shading, and whether its cloud shadow texture was found.
+    size_t sky_stages = 0, shaded_models = 0;
+    bool cloud_shadow = false;
 };
 
 struct ImportOptions {
@@ -42,7 +48,57 @@ struct ImportResult {
     size_t replacements = 0;
     size_t conflicts = 0;
     std::vector<ImportError> errors;
+    // The pack's optional parts (import-report.json's "optional"), for the summary.
+    size_t sky_stages = 0;    // optional/hd-sky: HD's sky and light, places
+    size_t sky_clouds = 0;    // optional/hd-clouds: HD's sky clouds, textures
+    bool cloud_shadow = false; // optional/hd-cloud-shadow: HD's cloud shadow texture
+    size_t normal_stages = 0, normal_objects = 0; // optional/hd-normals (and hd-colours): places, object models
 };
+
+namespace import_summary_detail {
+inline std::string count(size_t n, const char* one, const char* many) {
+    return std::to_string(n) + " " + (n == 1 ? one : many);
+}
+inline std::string list(const std::vector<std::string>& items) {
+    std::string out;
+    for (size_t i = 0; i < items.size(); ++i)
+        out += (i == 0 ? "" : i + 1 == items.size() ? " and " : ", ") + items[i];
+    return out;
+}
+} // namespace import_summary_detail
+
+// What an import made, for a person: the textures, then the optional parts
+// the HD look uses (import-report.json's "optional").
+inline std::string describe_import(const ImportResult& r) {
+    using namespace import_summary_detail;
+    std::vector<std::string> made;
+    if (r.sky_stages)
+        made.push_back("HD's sky and light for " + count(r.sky_stages, "place", "places"));
+    if (r.sky_clouds)
+        made.push_back("its sky clouds");
+    if (r.cloud_shadow)
+        made.push_back("its cloud shadows");
+    if (r.normal_stages || r.normal_objects)
+        made.push_back("its shading for the sun shadows (" + count(r.normal_stages, "place", "places") + ", " +
+                       count(r.normal_objects, "object", "objects") + ")");
+    return "Imported " + count(r.replacements, "texture", "textures") + " from Wind Waker HD" +
+           (made.empty() ? std::string(".") : ", with " + list(made) + ".");
+}
+
+// The optional parts the discs did not give ("" when none is missing).
+inline std::string describe_import_left_out(const ImportResult& r) {
+    using namespace import_summary_detail;
+    std::vector<std::string> missing;
+    if (!r.sky_stages)
+        missing.push_back("HD's sky and light");
+    if (!r.sky_clouds)
+        missing.push_back("its sky clouds");
+    if (!r.cloud_shadow)
+        missing.push_back("its cloud shadows");
+    if (!r.normal_stages && !r.normal_objects)
+        missing.push_back("its shading for the sun shadows");
+    return missing.empty() ? std::string() : "Not found on these discs: " + list(missing) + ".";
+}
 
 // Throws Cancelled before publication when the token is set, FormatError for
 // invalid input, or another std::exception for I/O failures. Workers stop before

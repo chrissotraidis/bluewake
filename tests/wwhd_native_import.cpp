@@ -159,6 +159,9 @@ int main(int argc, char** argv) {
         const wwhd::ImportResult r = wwhd::import_pack(options);
         std::printf("Created %zu replacements; %zu conflicts skipped; %zu unsupported\n", r.replacements, r.conflicts,
                     r.errors.size());
+        std::printf("%s\n", wwhd::describe_import(r).c_str());
+        if (!wwhd::describe_import_left_out(r).empty())
+            std::printf("%s\n", wwhd::describe_import_left_out(r).c_str());
     } catch (const wwhd::Cancelled&) {
 #ifdef WWHD_IMPORT_TESTING
         // An unwound call must not leave its cancelled token on this thread.

@@ -1,12 +1,15 @@
 """Wind Waker HD's sky and light palettes (each stage's Pale and Virt tables) for the HD look's BLUEWAKE_HD_SKY.
 
 HD keeps each GameCube entry's layout and appends fields (Pale 0x6C, Virt 0x38); its colours are linear and go back to
-the GameCube's gamma (1/2.2). Kept from HD: colours, Virt index, fog start and end, and the first six of its Pale
+the GameCube's gamma (1/2.2). Kept from HD: colours, Virt index, fog start and end, its Pale entry's shadow colour
+(linear RGB and a pad byte: the light from the sky its shade takes from above) and the first six of its Pale
 multipliers (actor C0, actor K0, BG0 C0, BG0 K0, BG1 C0, BG1 K0: the sun's light, K0, on actors and scenery is 2.75 and
 3 times at noon, linear). Kept from the GameCube: the cloud colours' alpha (what HD's means isn't known).
 
-One stage: 'BWSK' u32 version(2) u32 pale_count u32 virt_count, then the GameCube's Pale entries (0x2C each), HD's in
-the GameCube's layout, the GameCube's Virt entries (0x24 each), HD's, and HD's multipliers (24 bytes a Pale entry).
+One stage: 'BWSK' u32 version(4) u32 pale_count u32 virt_count, then the GameCube's Pale entries (0x2C each), HD's in
+the GameCube's layout, the GameCube's Virt entries (0x24 each), HD's, HD's shadow colour and multipliers (28 bytes a
+Pale entry; version 2 had the multipliers alone, 24 bytes), and HD's five Virt floats (20 bytes a Virt entry, HD's
+0x24-0x37; float 3 is the haze's brightness, 1.636 at dusk on the sea; version 3 ended before them).
 Every stage (optional/hd-sky/stages.bin): 'BWSA' u32 count, then for each its name (16 bytes, zero-padded), u32
 length and the one-stage data. All big-endian, as in the game's memory; the GameCube's copies let the host know the
 stage in play and put its tables back.
@@ -15,6 +18,12 @@ import struct
 
 HD_SKY_FOLDER = "optional/hd-sky"
 HD_SKY_FILE = "stages.bin"
+# HD's room lights (optional/hd-sky/room-lights.bin): each stage's baseLight.bin, an external file in its
+# Stage.bfres that HD's dKy_setLight_init loads (64 big-endian s16 pitches, one a room, then 64 yaws), which its
+# setLightPosHD lights the room from (kankyo3_roomLight: (cos p sin y, sin p, cos p cos y)) in place of the sun.
+# 'BWRL' u32 count, then for each stage its name (16 bytes, zero-padded) and the file's 256 bytes as they are.
+# Only stages with a room's angles set.
+HD_ROOM_LIGHTS_FILE = "room-lights.bin"
 
 
 def chunks(d: bytes) -> dict:
@@ -56,13 +65,14 @@ def convert(gc: bytes, hd: bytes) -> bytes:
     for i in range(pn):
         e = hd[hpo + 0x6C * i:hpo + 0x6C * i + 0x2C]
         hd_pale += gamma(e[:0x21]) + e[0x21:0x2C]  # 11 colours, then Virt index, pad, fog start and end
-    factors = b''.join(hd[hpo + 0x6C * i + 0x30:hpo + 0x6C * i + 0x48] for i in range(pn))
+    factors = b''.join(hd[hpo + 0x6C * i + 0x2C:hpo + 0x6C * i + 0x48] for i in range(pn))
     hd_virt = b''
     for i in range(vn):
         e, g = hd[hvo + 0x38 * i:hvo + 0x38 * i + 0x24], gc_virt[0x24 * i:0x24 * (i + 1)]
         hd_virt += (e[:0x10] + gamma(e[0x10:0x13]) + g[0x13:0x14] + gamma(e[0x14:0x17]) + g[0x17:0x18]
                     + gamma(e[0x18:0x21]) + e[0x21:0x24])
-    return b'BWSK' + struct.pack('>III', 2, pn, vn) + gc_pale + hd_pale + gc_virt + hd_virt + factors
+    floats = b''.join(hd[hvo + 0x38 * i + 0x24:hvo + 0x38 * i + 0x38] for i in range(vn))
+    return b'BWSK' + struct.pack('>III', 4, pn, vn) + gc_pale + hd_pale + gc_virt + hd_virt + factors + floats
 
 
 def pack_all(stages: dict) -> tuple[bytes, list]:
@@ -80,3 +90,50 @@ def pack_all(stages: dict) -> tuple[bytes, list]:
         entries += name.encode().ljust(16, b'\0') + struct.pack('>I', len(one)) + one
         count += 1
     return b'BWSA' + struct.pack('>I', count) + entries, skipped
+
+
+def bfres_external(b: bytes, name: str):
+    """An external file of a Wii U BFRES (its twelfth index group) by name, or None."""
+    if b[:4] != b'FRES' or len(b) < 0x50:
+        return None
+    pos = 0x20 + 11 * 4
+    rel, = struct.unpack('>i', b[pos:pos + 4])
+    if rel == 0:
+        return None
+    g = pos + rel
+    if g < 0 or g + 8 > len(b):
+        return None
+    _, count = struct.unpack('>Ii', b[g:g + 8])
+    if not 0 <= count < 4096 or g + 8 + 16 * (count + 1) > len(b):
+        return None
+    for i in range(1, count + 1):
+        e = g + 8 + i * 16
+        name_rel, data_rel = struct.unpack('>ii', b[e + 8:e + 16])
+        at = e + 8 + name_rel
+        end = b.find(b'\0', at) if 0 <= at < len(b) else -1
+        if end < 0 or b[at:end] != name.encode():
+            continue
+        d = e + 12 + data_rel
+        if d < 0 or d + 8 > len(b):
+            return None
+        off, size = struct.unpack('>iI', b[d:d + 8])
+        start = d + off
+        if start < 0 or start + size > len(b):
+            return None
+        return b[start:start + size]
+    return None
+
+
+def room_lights(bfres: bytes):
+    """A stage's baseLight.bin from its Stage.bfres, when it sets a room's light, else None."""
+    blob = bfres_external(bfres, 'baseLight.bin')
+    if blob is None or len(blob) < 0x100 or not any(blob[:0x100]):
+        return None
+    return blob[:0x100]
+
+
+def pack_room_lights(stages: dict) -> bytes:
+    """room-lights.bin from {name: baseLight.bin's 256 bytes}."""
+    names = [n for n in sorted(stages) if len(n.encode()) <= 15]
+    return b'BWRL' + struct.pack('>I', len(names)) + b''.join(
+        n.encode().ljust(16, b'\0') + stages[n] for n in names)
