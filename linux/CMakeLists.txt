@@ -199,6 +199,17 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
+    # The direct-call check (cmake/composite/direct_calls.h): in this optimized
+    # build the constant addresses take the plain check, as in the game module.
+    add_executable(bluewake_direct_calls_test
+        ${BLUEWAKE_REPO_ROOT}/tests/direct_calls_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/direct_calls.c)
+    target_include_directories(bluewake_direct_calls_test PRIVATE
+        ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_REPO_ROOT}/tests)
+    target_compile_definitions(bluewake_direct_calls_test PRIVATE
+        BLUEWAKE_EDGE_FILTER=1 BW_EDGE_WATCH_INCLUDE="direct_call_watch.inc")
+    add_test(NAME bluewake_direct_calls_test COMMAND bluewake_direct_calls_test)
+
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_link_libraries(bluewake_linux_disc_test PRIVATE gxruntime GXRuntime::aurora xxhash)
