@@ -18,6 +18,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if !defined(_WIN32)
+#include <sys/statvfs.h>
+#endif
+
 #define BW_GC_MAGIC 0xC2339F3Du
 // main.dol of GZLE01 USA rev 0, as checked by scripts/prepare.py.
 static const char* const kExpectedDolSha1 =
@@ -31,6 +35,78 @@ static int fail(char* error, size_t size, const char* fmt, ...) {
         va_end(ap);
     }
     return -1;
+}
+
+// Free space in bytes on the filesystem holding `path`, or -1 when the platform
+// cannot say (the caller then makes no claim instead of refusing the import).
+static int64_t free_bytes(const char* path) {
+#if defined(_WIN32)
+    ULARGE_INTEGER caller_free;
+    if (GetDiskFreeSpaceExA(path, &caller_free, NULL, NULL) == 0)
+        return -1;
+    return (int64_t)caller_free.QuadPart;
+#else
+    struct statvfs vfs;
+    if (statvfs(path, &vfs) != 0)
+        return -1;
+    return (int64_t)vfs.f_bavail * (int64_t)vfs.f_frsize;
+#endif
+}
+
+// "10 MB", "1.4 GB": a size the player can compare with what their file manager
+// shows for the folder.
+static void format_size(int64_t bytes, char* out, size_t size) {
+    if (bytes >= ((int64_t)1 << 30))
+        snprintf(out, size, "%.1f GB",
+                 (double)bytes / (double)((int64_t)1 << 30));
+    else if (bytes >= ((int64_t)1 << 20))
+        snprintf(out, size, "%.0f MB",
+                 (double)bytes / (double)((int64_t)1 << 20));
+    else
+        snprintf(out, size, "%lld KB", (long long)((bytes + 1023) / 1024));
+}
+
+int bluewake_disc_space_verdict(const char* out_dir, int64_t needed,
+                               int64_t available, char* error,
+                               size_t error_size) {
+    if (available < 0 || available >= needed)
+        return 0;
+    char need_text[32], free_text[32];
+    format_size(needed, need_text, sizeof need_text);
+    format_size(available, free_text, sizeof free_text);
+    return fail(error, error_size,
+                "BlueWake needs about %s of free space in %s to unpack the "
+                "game's files, and only %s is free. Free some space there, or "
+                "give BlueWake a folder on another drive.",
+                need_text, out_dir, free_text);
+}
+
+// The free-space check an import makes before it writes anything.
+static int check_space(const char* out_dir, int64_t needed, char* error,
+                       size_t error_size) {
+    return bluewake_disc_space_verdict(out_dir, needed, free_bytes(out_dir),
+                                       error, error_size);
+}
+
+// A write that failed, naming the folder as well as the file: the bare file
+// name read as a damaged disc in the report this fixes (#479).
+static int fail_write(const char* dir, const char* name, int err, char* error,
+                      size_t error_size) {
+    if (err == ENOSPC) {
+        char free_text[32];
+        const int64_t left = free_bytes(dir);
+        if (left >= 0) {
+            format_size(left, free_text, sizeof free_text);
+            return fail(error, error_size,
+                        "Could not write %s into %s: the folder is full (%s "
+                        "free).",
+                        name, dir, free_text);
+        }
+        return fail(error, error_size,
+                    "Could not write %s into %s: the folder is full.", name, dir);
+    }
+    return fail(error, error_size, "Could not write %s into %s (%s).", name, dir,
+                err != 0 ? strerror(err) : "write failed");
 }
 
 static uint32_t be32(const uint8_t* p) {
@@ -48,6 +124,26 @@ static uint8_t* read_at(FILE* f, uint64_t offset, size_t size) {
         return NULL;
     }
     return buffer;
+}
+
+// How many bytes one disc member occupies once written: a Yaz0 header's total,
+// else its stored size. Reads only the eight bytes it needs.
+static int64_t unpacked_size(const uint8_t* data, size_t size) {
+    if (size >= 8 && memcmp(data, "Yaz0", 4) == 0) {
+        const uint32_t total = be32(data + 4);
+        if (total > 0)
+            return (int64_t)total;
+    }
+    return (int64_t)size;
+}
+
+// The same for a member still on disc, which is read through `f` at `off`.
+static int64_t unpacked_size_at(FILE* f, uint32_t off, uint32_t size) {
+    uint8_t header[8];
+    if (size >= 8 && fseeko(f, (off_t)off, SEEK_SET) == 0 &&
+        fread(header, 1, 8, f) == 8)
+        return unpacked_size(header, sizeof header);
+    return (int64_t)size;
 }
 
 // Yaz0: returns a malloc'd buffer of *out_size bytes, or NULL if malformed.
@@ -264,10 +360,14 @@ int bluewake_disc_check(const char* iso_path, char* error, size_t error_size) {
     return rc;
 }
 
-// Unpacks the .rel members of RELS.arc (a RARC archive, possibly inside a
-// Yaz0 wrapper, whose members are Yaz0 RELs). Returns the count or -1.
+// Walks the .rel members of RELS.arc (a RARC archive, possibly inside a Yaz0
+// wrapper, whose members are Yaz0 RELs). With `out` it writes each one into that
+// directory and adds the bytes written to *bytes; with `out` NULL it only adds
+// the bytes they would take, which is how the importer knows how much room the
+// unpacking needs before it writes anything. Returns the member count or -1.
 static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
-                           BlueWakeImportProgress progress, void* context) {
+                           int64_t* bytes, BlueWakeImportProgress progress,
+                           void* context, char* error, size_t error_size) {
     if (arc_size < 0x40 || memcmp(arc, "RARC", 4) != 0)
         return -1;
     const size_t data_start = (size_t)be32(arc + 0x0C) + 0x20;
@@ -277,7 +377,7 @@ static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
     const size_t str_off = (size_t)be32(info + 20) + 0x20;
     if (file_off + (size_t)nfiles * 0x14 > arc_size || str_off >= arc_size)
         return -1;
-    int written = 0;
+    int found = 0;
     for (uint32_t i = 0; i < nfiles; ++i) {
         const uint8_t* e = arc + file_off + (size_t)i * 0x14;
         const uint32_t type_name = be32(e + 4);
@@ -293,6 +393,10 @@ static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
         const size_t doff = data_start + be32(e + 8), dlen = be32(e + 12);
         if (doff + dlen > arc_size)
             return -1;
+        *bytes += unpacked_size(arc + doff, dlen);
+        ++found;
+        if (out == NULL)
+            continue;
         uint8_t* data;
         size_t data_size = dlen;
         if (dlen >= 4 && memcmp(arc + doff, "Yaz0", 4) == 0) {
@@ -302,17 +406,93 @@ static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
             if (data != NULL)
                 memcpy(data, arc + doff, dlen);
         }
-        if (data == NULL || write_rel(out, name, data, data_size) != 0) {
-            free(data);
+        if (data == NULL) {
+            fail(error, error_size, "The disc's %s could not be unpacked.",
+                 name);
             return -1;
         }
+        if (write_rel(out, name, data, data_size) != 0) {
+            const int err = errno;
+            free(data);
+            return fail_write(out, name, err, error, error_size);
+        }
         free(data);
-        ++written;
         if (progress != NULL && (i & 31u) == 0)
             progress(context, 0.3 + 0.65 * (double)i / nfiles,
                      "Unpacking game modules");
     }
-    return written;
+    return found;
+}
+
+// One walk of the disc's file table. With `out` it writes the loose rels/*.rel
+// entries as it goes; with `out` NULL it only adds what they would take.
+// *arc_off and *arc_len receive RELS.arc's location. Returns 0, or -1 with a
+// sentence in `error` (a damaged file table, or a write that failed).
+static int scan_rel_entries(FILE* f, const uint8_t* fst, uint32_t fst_size,
+                            const char* out, int64_t* need, int* written,
+                            uint32_t* arc_off, uint32_t* arc_len, char* error,
+                            size_t error_size) {
+    // Directory entries hold the index one past their last child.
+    const uint32_t count = be32(fst + 8);
+    const uint32_t strings = count * 12;
+    uint32_t dir_end[16];
+    const char* dir_name[16];
+    int depth = 0;
+    for (uint32_t i = 1; i < count; ++i) {
+        while (depth > 0 && i >= dir_end[depth - 1])
+            --depth;
+        const uint8_t* e = fst + i * 12;
+        const uint32_t name_off = strings + (be32(e) & 0xFFFFFFu);
+        if (name_off >= fst_size ||
+            memchr(fst + name_off, 0, fst_size - name_off) == NULL)
+            return fail(error, error_size, "The disc's file table is malformed.");
+        const char* name = (const char*)fst + name_off;
+        if (e[0] != 0) {
+            if (depth < 16) {
+                dir_end[depth] = be32(e + 8);
+                dir_name[depth] = name;
+                ++depth;
+            }
+            continue;
+        }
+        const uint32_t off = be32(e + 4), size = be32(e + 8);
+        if (depth == 0 && strcmp(name, "RELS.arc") == 0) {
+            *arc_off = off;
+            *arc_len = size;
+            continue;
+        }
+        if (depth != 1 || strcmp(dir_name[0], "rels") != 0 ||
+            !has_rel_suffix(name))
+            continue;
+        *need += unpacked_size_at(f, off, size);
+        if (out == NULL) {
+            ++*written;
+            continue;
+        }
+        uint8_t* data = read_at(f, off, size);
+        if (data == NULL)
+            return fail(error, error_size,
+                        "The disc image could not be read at %s; the image "
+                        "looks damaged.",
+                        name);
+        size_t data_size = size;
+        if (size >= 4 && memcmp(data, "Yaz0", 4) == 0) {
+            uint8_t* plain = yaz0_decode(data, size, &data_size);
+            free(data);
+            data = plain;
+        }
+        if (data == NULL)
+            return fail(error, error_size,
+                        "The disc's %s could not be unpacked.", name);
+        if (write_rel(out, name, data, data_size) != 0) {
+            const int err = errno;
+            free(data);
+            return fail_write(out, name, err, error, error_size);
+        }
+        free(data);
+        ++*written;
+    }
+    return 0;
 }
 
 int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
@@ -378,79 +558,22 @@ int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
         goto done;
     }
 
-    remove_flat_dir(rels_tmp);
-    unlink(dol_tmp);
-    rmdir(tmp_dir);
-    if (mkdir(tmp_dir, 0755) != 0 || mkdir(rels_tmp, 0755) != 0) {
-        fail(error, error_size, "Could not create the data folder (%s).",
-             strerror(errno));
-        goto done;
-    }
-    if (write_file(dol_tmp, dol, dol_size) != 0) {
-        fail(error, error_size, "Could not write main.dol (%s).",
-             strerror(errno));
-        goto done;
-    }
-
-    // File system table: loose rels/*.rel and the RELS.arc archive.
-    // Directory entries hold the index one past their last child.
+    // File system table: loose rels/*.rel and the RELS.arc archive. It is read
+    // and walked once to count before anything is written, so the import can be
+    // refused for want of room instead of failing on whichever file came first
+    // (#479).
     fst = fst_size >= 12 ? read_at(f, fst_off, fst_size) : NULL;
     const uint32_t count = fst != NULL ? be32(fst + 8) : 0;
     if (fst == NULL || count == 0 || (uint64_t)count * 12 > fst_size) {
         fail(error, error_size, "The disc's file table could not be read.");
         goto done;
     }
-    const uint32_t strings = count * 12;
-    uint32_t dir_end[16];
-    const char* dir_name[16];
-    int depth = 0;
     uint32_t arc_off = 0, arc_len = 0;
+    int64_t need = (int64_t)dol_size;
     int written = 0;
-    for (uint32_t i = 1; i < count; ++i) {
-        while (depth > 0 && i >= dir_end[depth - 1])
-            --depth;
-        const uint8_t* e = fst + i * 12;
-        const uint32_t name_off = strings + (be32(e) & 0xFFFFFFu);
-        if (name_off >= fst_size ||
-            memchr(fst + name_off, 0, fst_size - name_off) == NULL) {
-            fail(error, error_size, "The disc's file table is malformed.");
-            goto done;
-        }
-        const char* name = (const char*)fst + name_off;
-        if (e[0] != 0) {
-            if (depth < 16) {
-                dir_end[depth] = be32(e + 8);
-                dir_name[depth] = name;
-                ++depth;
-            }
-            continue;
-        }
-        const uint32_t off = be32(e + 4), size = be32(e + 8);
-        if (depth == 0 && strcmp(name, "RELS.arc") == 0) {
-            arc_off = off;
-            arc_len = size;
-        } else if (depth == 1 && strcmp(dir_name[0], "rels") == 0 &&
-                   has_rel_suffix(name)) {
-            uint8_t* data = read_at(f, off, size);
-            size_t data_size = size;
-            if (data != NULL && size >= 4 && memcmp(data, "Yaz0", 4) == 0) {
-                uint8_t* plain = yaz0_decode(data, size, &data_size);
-                free(data);
-                data = plain;
-            }
-            if (data == NULL ||
-                write_rel(rels_tmp, name, data, data_size) != 0) {
-                free(data);
-                fail(error, error_size, "Could not extract %s.", name);
-                goto done;
-            }
-            free(data);
-            ++written;
-        }
-    }
-    if (progress != NULL)
-        progress(context, 0.3, "Unpacking game modules");
-
+    if (scan_rel_entries(f, fst, fst_size, NULL, &need, &written, &arc_off,
+                         &arc_len, error, error_size) != 0)
+        goto done;
     if (arc_len == 0) {
         fail(error, error_size,
              "The disc has no RELS.arc; it is not a complete GZLE01 image.");
@@ -463,11 +586,47 @@ int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
         free(arc);
         arc = plain;
     }
-    const int from_arc =
-        arc != NULL ? unpack_rels_arc(arc, arc_size, rels_tmp, progress, context)
-                    : -1;
-    if (from_arc < 0) {
+    int64_t arc_need = 0;
+    const int arc_members =
+        arc != NULL
+            ? unpack_rels_arc(arc, arc_size, NULL, &arc_need, NULL, NULL, error,
+                              error_size)
+            : -1;
+    if (arc_members < 0) {
         fail(error, error_size, "The disc's RELS.arc could not be unpacked.");
+        goto done;
+    }
+    need += arc_need;
+    if (check_space(out_dir, need, error, error_size) != 0)
+        goto done;
+
+    remove_flat_dir(rels_tmp);
+    unlink(dol_tmp);
+    rmdir(tmp_dir);
+    if (mkdir(tmp_dir, 0755) != 0 || mkdir(rels_tmp, 0755) != 0) {
+        fail(error, error_size, "Could not create the data folder (%s).",
+             strerror(errno));
+        goto done;
+    }
+    if (write_file(dol_tmp, dol, dol_size) != 0) {
+        fail_write(tmp_dir, "main.dol", errno, error, error_size);
+        goto done;
+    }
+
+    written = 0;
+    int64_t wrote = 0;
+    if (scan_rel_entries(f, fst, fst_size, rels_tmp, &wrote, &written, &arc_off,
+                         &arc_len, error, error_size) != 0)
+        goto done;
+    if (progress != NULL)
+        progress(context, 0.3, "Unpacking game modules");
+    int64_t from_arc_bytes = 0;
+    const int from_arc = unpack_rels_arc(arc, arc_size, rels_tmp, &from_arc_bytes,
+                                         progress, context, error, error_size);
+    if (from_arc < 0) {
+        if (error != NULL && error_size > 0 && error[0] == '\0')
+            fail(error, error_size,
+                 "The disc's RELS.arc could not be unpacked.");
         goto done;
     }
     written += from_arc;

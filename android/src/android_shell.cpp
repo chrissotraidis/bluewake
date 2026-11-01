@@ -347,4 +347,30 @@ JNIEXPORT jbyteArray SHELL(nativeCardImport)(JNIEnv* env, jclass, jbyteArray car
     return out;
 }
 
+// BlueWake's card as a Dolphin .gci (its 64-byte directory entry, then the
+// 98,304 bytes of save data), or null with the reason in error[0]. On demand:
+// the card bytes are only read, and the caller writes the file wherever the
+// player chose.
+JNIEXPORT jbyteArray SHELL(nativeCardExport)(JNIEnv* env, jclass, jbyteArray card_bytes, jobjectArray error) {
+    jbyte* card = card_bytes != nullptr ? env->GetByteArrayElements(card_bytes, nullptr) : nullptr;
+    uint8_t* result = nullptr;
+    size_t result_size = 0;
+    const char* reason =
+        card == nullptr ? "The memory card could not be read."
+                        : bw_card_export((const uint8_t*)card, (size_t)env->GetArrayLength(card_bytes), &result,
+                                         &result_size);
+    if (card != nullptr)
+        env->ReleaseByteArrayElements(card_bytes, card, JNI_ABORT);
+    if (reason != nullptr) {
+        if (error != nullptr && env->GetArrayLength(error) > 0)
+            env->SetObjectArrayElement(error, 0, env->NewStringUTF(reason));
+        std::free(result);
+        return nullptr;
+    }
+    jbyteArray out = env->NewByteArray((jsize)result_size);
+    env->SetByteArrayRegion(out, 0, (jsize)result_size, (const jbyte*)result);
+    std::free(result);
+    return out;
+}
+
 }  // extern "C"

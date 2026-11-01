@@ -52,7 +52,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MARK = "/* bluewake: _savegpr/_restgpr inline (scripts/windows/inline_save_restore_gpr.py) */\n"
 SAVE, RESTORE = 0x80328F04, 0x80328F50
 CALL = re.compile(
-    r"    // ([0-9A-F]{8}): bl      0x(80328F[0-9A-F]{2})\n"
+    r"    // ([0-9A-F]{8}): bl      0x([8C]0328F[0-9A-F]{2})\n"
     r"    \{\n"
     r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
     r"            ctx->pc = 0x\2u;\n"
@@ -60,6 +60,14 @@ CALL = re.compile(
     r"    \}\n")
 FUNCTION = re.compile(r"^(?:static )?void \w+\(CPUState\* ctx(?:_param)?\) \{$", re.M)
 BUDGET = "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET"
+# Routine entries the host names only together with particular return
+# addresses: the GroundCross check at _restgpr_27 (main.c's
+# host_observe_ground_cross_return, lr 0x80246A04) and the run-queue traces at
+# _savegpr_29 (lr 0x802B09C4 and 0x802B4100). Those returns are named too, so
+# their call sites stay out through the return check; every other caller of
+# these entries is inlined. Entry: its returns. tests/test_inline_gpr.py fails
+# if the host names an entry without one of them.
+RETURN_KEYED = {0x80328F84: (0x80246A04,), 0x80328F40: (0x802B09C4, 0x802B4100)}
 # Elliott's helper-body certificates from scripts/mods/prepare_native_gpr.py.
 # Check all variants before modifying any caller; only hashes are distributed.
 LEAVES = (
@@ -102,13 +110,15 @@ def inline_body(target, ret):
         lines.append(f"            if (ctx->downcount - {count - 1} > {BUDGET}) {{")
         suffix = 0
     lines.append(f"                ctx->downcount -= {count};")
-    lines.append("                const u32 frame = ctx->gpr[11];")
+    # The frame is proven plain MEM1 (bw_inline_gpr_memory_ready), so the stores
+    # and loads go straight to its bytes (bw_inline_gpr_frame).
+    lines.append(f"                u8* const slots = bw_inline_gpr_frame(ctx, {first}u, {'true' if save else 'false'});")
     for reg in range(first, 32):
-        offset = 4 * reg - 128
+        at = 4 * (reg - first)
         if save:
-            lines.append(f"                mem_write32(ctx, frame + (u32)(s32)({offset}), (u32)ctx->gpr[{reg}]);")
+            lines.append(f"                write_be32(slots + {at}, (u32)ctx->gpr[{reg}]);")
         else:
-            lines.append(f"                ctx->gpr[{reg}] = mem_read32(ctx, frame + (u32)(s32)({offset}));")
+            lines.append(f"                ctx->gpr[{reg}] = read_be32(slots + {at});")
     lines.append(f"                ctx->cycle_observation_suffix = {suffix}u;")
     lines.append(f"                ctx->pc = 0x{ret:08X}u;")
     # The routine's return dispatch, then the chassis's checks at the boundary.
@@ -131,9 +141,14 @@ def transform(text, watched):
         body = text[begin:end]
         pieces, cursor = [], 0
         for m in CALL.finditer(body):
-            site, target, ret = int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)
+            site, ret = int(m.group(1), 16), int(m.group(3), 16)
+            # A REL chunk (linked at 0xC0400000 up) calls the routines through
+            # the mirror, 0xC0328Fxx: the same code, checked by its 0x8 form as
+            # the direct calls check it.
+            target = int(m.group(2), 16) & ~0x40000000
             routine = SAVE <= target < SAVE + 18 * 4 or RESTORE <= target < RESTORE + 18 * 4
-            if (not routine or target % 4 != 0 or target in watched or
+            if (not routine or target % 4 != 0 or
+                    (target in watched and target not in RETURN_KEYED) or
                     ret != site + 4 or ret in watched or site in watched
                     or f"\nlabel_{ret:08X}:\n" not in body):
                 continue

@@ -32,11 +32,31 @@
 typedef void (*BwGatherPipeWrite)(u64 value, u8 size);
 extern BwGatherPipeWrite bw_gather_pipe_write;
 
+static inline bool bw_gather_pipe_unaliased(CPUState* cpu, u32 addr, u32 size) {
+#if defined(BLUEWAKE_GATHER_ALIAS_CACHE)
+    /* The FIFO occupies one 32-byte window and get_ram_ptr() also accepts its
+     * 0x40000000 mirror. Recompute only when the alias registry moves. If an
+     * alias can overlap either form, retain the ordinary per-access resolver
+     * so partial aliases and registration-order semantics remain unchanged. */
+    static u32 cached_generation = (u32)-1;
+    static bool overlaps;
+    const u32 generation = g_ppc_guest_alias_generation;
+    if (__builtin_expect(cached_generation != generation, 0)) {
+        overlaps = ppc_guest_alias_range_overlaps(0xCC008000u, 0x20u) ||
+                   ppc_guest_alias_range_overlaps(0x8C008000u, 0x20u);
+        cached_generation = generation;
+    }
+    if (__builtin_expect(!overlaps, 1))
+        return true;
+#endif
+    return get_ram_ptr(cpu, addr, size, NULL) == NULL;
+}
+
 static inline bool bw_gather_pipe(CPUState* cpu, u32 addr, u32 size) {
     /* The mirror bit first: guest RAM stores, which never have it, pay one test. */
     /* Registered storage takes precedence over hardware in the ordinary path. */
     return (addr & 0x40000000u) != 0u && (addr & ~0x1Fu) == 0xCC008000u &&
-           bw_gather_pipe_write != NULL && get_ram_ptr(cpu, addr, size, NULL) == NULL;
+           bw_gather_pipe_write != NULL && bw_gather_pipe_unaliased(cpu, addr, size);
 }
 
 /* The EFB and the hardware registers: an access there may see how far the

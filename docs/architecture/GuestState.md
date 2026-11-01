@@ -34,7 +34,7 @@ The two main pieces are separate native allocations with different jobs:
 
 | Term | Plain meaning | Concrete representation in BlueWake |
 | --- | --- | --- |
-| `CPUState` | The current state of the guest Gekko processor: what its registers contain, which guest instruction comes next, and what timing or exception work is pending. It does **not** contain the guest's RAM bytes. | One C structure containing the guest register file, `pc`, control and exception fields, cycle accounting, a pointer to memory, and native access hooks. [Current structure](https://github.com/chrissotraidis/RecompCore/blob/f647d03d3886eb2357950190fe1cba3fa3d10242/GXRuntime/include/core/cpu.h#L129-L192) |
+| `CPUState` | The current state of the guest Gekko processor: what its registers contain, which guest instruction comes next, and what timing or exception work is pending. It does **not** contain the guest's RAM bytes. | One C structure containing the guest register file, `pc`, control and exception fields, cycle accounting, a pointer to memory, and native access hooks. [Current structure](https://github.com/chrissotraidis/RecompCore/blob/2e4e5998d4d0e7087b1f4d01b3512b594f11658c/GXRuntime/include/core/cpu.h#L137-L192) |
 | MEM1 | The guest's main-memory contents: program data, stacks, heaps, loaded DOL sections, and materialized REL data addressed by the game. It does **not** contain the CPU registers. | A 32 MiB byte array in the BlueWake process. `CPUState.ram` points to that array; the first 24 MiB corresponds to retail GameCube MEM1 and the remaining 8 MiB supports BlueWake's linked layout. [Storage contract](../../cmake/composite/module_cpu_contract.h#L16-L27), [storage selection](../../cmake/composite/module_cpu_contract.h#L58-L94) |
 
 Put another way, `CPUState` answers “what is the guest processor doing now?”,
@@ -51,7 +51,7 @@ boundary. A translated block performs loads and stores through the runtime
 memory helpers, charges guest cycles and leaves the next guest address in `pc`.
 The host receives the same authoritative state when the block yields rather
 than reconstructing the CPU from native registers. [Generated-state
-optimization](https://github.com/chrissotraidis/RecompCore/blob/f647d03d3886eb2357950190fe1cba3fa3d10242/GXRuntime/include/core/cpu.h#L193-L200)
+optimization](https://github.com/chrissotraidis/RecompCore/blob/2e4e5998d4d0e7087b1f4d01b3512b594f11658c/GXRuntime/include/core/cpu.h#L200-L207)
 
 ### CPU, memory space, and I/O
 
@@ -302,7 +302,7 @@ loop](Host.md#main-loop-execution).
 
 This is an inventory of the `CPUState` used by the current BlueWake build, not
 a general specification of every register in a GameCube emulator. BlueWake
-pins RecompCore at `f647d03d3886eb2357950190fe1cba3fa3d10242`; the groups
+pins RecompCore at `2e4e5998d4d0e7087b1f4d01b3512b594f11658c`; the groups
 below come directly from that revision's structure. `CPUState` combines the
 architectural fields used by translated PowerPC instructions with the runtime
 fields that connect them to BlueWake's scheduler, memory, and services.
@@ -451,7 +451,7 @@ translated code from interpreting a different layout. BlueWake's diagnostic
 checkpoint independently enumerates the same fields, which also keeps this
 documentation grounded in the state the current host observes. [Pinned
 revision](../../scripts/builder/profiles/bluewake.sh#L37-L44), [CPU
-layout](https://github.com/chrissotraidis/RecompCore/blob/f647d03d3886eb2357950190fe1cba3fa3d10242/GXRuntime/include/core/cpu.h#L130-L185),
+layout](https://github.com/chrissotraidis/RecompCore/blob/2e4e5998d4d0e7087b1f4d01b3512b594f11658c/GXRuntime/include/core/cpu.h#L137-L192),
 [ABI validation](../../cmake/composite/module_cpu_contract.h#L35-L79), and
 [checkpoint field list](../../runtime/host/src/guest_checkpoint.h#L9-L38).
 
@@ -586,7 +586,17 @@ of every access. The pinned `get_ram_ptr()` first tries a direct MEM1 fast path
 when no aliases overlap MEM1 and the address passes its range checks. It can
 therefore skip alias lookup when doing so preserves the same result; ordinary
 guest-memory accesses do not necessarily search the alias table. [Pinned
-resolver](https://github.com/chrissotraidis/RecompCore/blob/f647d03d3886eb2357950190fe1cba3fa3d10242/GXRuntime/include/core/cpu.h#L205-L255)
+resolver](https://github.com/chrissotraidis/RecompCore/blob/2e4e5998d4d0e7087b1f4d01b3512b594f11658c/GXRuntime/include/core/cpu.h#L212-L262)
+
+When alias resolution is required, the runtime first tries the alias returned
+by the preceding successful lookup. Otherwise it uses a 4 KiB page index to
+start near the relevant aliases, retaining the sorted search when an alias set
+is too wide for that index. Adding, removing, or clearing aliases rebuilds the
+index and invalidates the remembered entry. These are lookup accelerators only:
+the first registered alias that fully contains the requested range still wins.
+[Index construction](https://github.com/chrissotraidis/RecompCore/blob/2e4e5998d4d0e7087b1f4d01b3512b594f11658c/GXRuntime/src/core/cpu.c#L72-L167),
+[lookup](https://github.com/chrissotraidis/RecompCore/blob/2e4e5998d4d0e7087b1f4d01b3512b594f11658c/GXRuntime/src/core/cpu.c#L357-L423), and
+[differential oracle](https://github.com/chrissotraidis/RecompCore/blob/2e4e5998d4d0e7087b1f4d01b3512b594f11658c/GXRuntime/tests/guest_alias_lookup_test.c)
 
 ```mermaid
 flowchart TD
@@ -804,5 +814,6 @@ of truth for current behavior.
 - [PR #211](https://github.com/chrissotraidis/bluewake/pull/211): guest callback stack and return-context handling.
 - [PR #213](https://github.com/chrissotraidis/bluewake/pull/213) and [PR #221](https://github.com/chrissotraidis/bluewake/pull/221): guest camera integration and its input path.
 - [PR #222](https://github.com/chrissotraidis/bluewake/pull/222): launch-time controller handoff.
+- [PR #501](https://github.com/chrissotraidis/bluewake/pull/501): preserves alias precedence while replacing repeated sorted lookup with a remembered hit and a 4 KiB page index.
 
 Return to the runtime [high-level view](Runtime.md#high-level-view).

@@ -8,8 +8,7 @@ time. Each piece is an option, off by default, and one switch turns on every pie
 - **Android:** Mods › **Wind Waker HD Look**, then restart BlueWake (experimental own-disc builds, [ANDROID.md](ANDROID.md)).
 - **From a terminal:** `BLUEWAKE_HD_LOOK=1`.
 
-Each piece also has its own variable, which wins over the switch (`=1` on, `=0` off), so a piece that costs too
-much on a small GPU can be left out.
+Each piece also has its own switch (below), so a piece that costs too much on a small GPU can be left out.
 
 **Known issues** (October 17): with Smooth Motion above 60 FPS, the effects dropped out of most in-between frames
 and the shadows slid against the ground; pdale-boop's draft #371 (RecompCore#40) fixes that. Fixed in `main`: the
@@ -17,22 +16,25 @@ softer default (#321: sun shadows off, gentler ambient occlusion, cloud shadows,
 that looked square and banding on the sea (RecompCore#41: the sea's place from its plane, dithered shades). The last
 is checked on the Mac; Vulkan, where jslay88 saw it, still needs a look.
 
-On Mac, Linux and Windows, safe startup turns the HD look off and clears the eight `BLUEWAKE_HD_*`
-per-effect overrides listed below. F2 or the menu can turn the whole look back on during that session.
+On Mac, Linux and Windows, safe startup turns the HD look off, puts each of its parts listed below back on (so the
+look comes back whole) and clears the sun shadows' switch. F2 or the menu can turn the whole look back on during that
+session.
 The reset is saved only after the earlier settings file is backed up; if the backup fails, or Mac/Linux
 uses `BLUEWAKE_SETTINGS=none`, startup resets only the session. Normal startup keeps the usual overrides.
 
 ## Turning one piece off
 
-Each piece has its own switch, which wins over the main one: `=0` turns it off, `=1` on. The names are
-`BLUEWAKE_HD_AO` (ambient occlusion), `BLUEWAKE_HD_SUN_SHADOWS`, `BLUEWAKE_HD_CLOUD_SHADOWS`, `BLUEWAKE_HD_BLOOM`,
-`BLUEWAKE_HD_FAR_BLUR`, `BLUEWAKE_HD_EDGE_LIGHT`, `BLUEWAKE_HD_TORCH_LIGHT` and `BLUEWAKE_HD_DISTANT_ISLANDS`.
+In the menu, under "Wind Waker HD look" on the Display tab, **Wind Waker HD look settings** opens to a switch for
+each piece: islands on the horizon, soft shading (ambient occlusion), cloud shadows, edge light, torch light, the soft
+distance (far blur) and bloom. They're on with the look and greyed while it's off; turning the look off (F2) takes
+them all with it, whatever their switches say. Sun shadows are in the same place, marked
+experimental: off by default, with a switch of their own.
 
-- **Mac and Linux:** add a line such as `BLUEWAKE_HD_AO=0` to the settings file
-  (`~/Library/Application Support/BlueWake/settings.ini` on the Mac, `~/.config/BlueWake/settings.ini` on Linux)
-  while BlueWake isn't running. The menu keeps lines it doesn't manage.
-- **Windows:** set it in PowerShell before starting the game: `$env:BLUEWAKE_HD_AO="0"; .\BlueWake.exe`.
-- Menu switches for each piece are planned with the new desktop menu (#368).
+For testing, the same switches are variables: `BLUEWAKE_HD_AO` (ambient occlusion), `BLUEWAKE_HD_SUN_SHADOWS`,
+`BLUEWAKE_HD_CLOUD_SHADOWS`, `BLUEWAKE_HD_BLOOM`, `BLUEWAKE_HD_FAR_BLUR`, `BLUEWAKE_HD_EDGE_LIGHT`,
+`BLUEWAKE_HD_TORCH_LIGHT` and `BLUEWAKE_HD_DISTANT_ISLANDS`. `=0` turns a piece off and `=1` on;
+`BLUEWAKE_HD_LOOK=0` turns them all off, and with `BLUEWAKE_HD_LOOK` not set, a piece's own `=1` turns it on alone.
+On Windows, set them in PowerShell before starting the game: `$env:BLUEWAKE_HD_AO="0"; .\BlueWake.exe`.
 
 ## Where this comes from
 
@@ -52,7 +54,9 @@ come from the player's own disc through [WWHD_TEXTURES.md](WWHD_TEXTURES.md).
 | HD's far-distance blur | HD depth of field | **In**, with the switch (RecompCore 0170). Off by default | `BLUEWAKE_HD_FAR_BLUR` |
 | Ambient occlusion | Ambient occlusion | **In**, with the switch (RecompCore 0171). Off by default | `BLUEWAKE_HD_AO` |
 | Cloud shadows on the sea | Cloud shadows | **In**, with the switch, outdoors (RecompCore 0172). Off by default | `BLUEWAKE_HD_CLOUD_SHADOWS` |
-| Sun shadows | Sun shadows (resolution, strength) | **In**, outdoors, from a shadow map of the whole scene (RecompCore 0173, 0183). Left out of the HD look switch: from the screen alone, on open ground it drew long dark streaks. Only its own variable turns it on | `BLUEWAKE_HD_SUN_SHADOWS` |
+| HD's sky clouds | The remaster's soft, painted sky clouds | **In**, with its own switch, **HD's clouds in the sky**: off by default, and only with the HD textures and the HD look both on; it takes effect when BlueWake starts again. The importer keeps them in the pack's `optional/hd-clouds`, which RecompCore loads over the pack only when asked (`DOL_AURORA_TEXTURE_PACK_OPTIONAL=hd-clouds`). A pack imported before needs importing again | `BLUEWAKE_HD_CLOUDS` |
+| HD's sky and light | The remaster's retuned colours for the sea (sky cyan with an aqua horizon, sky-blue fog, a bluer sea) and its brighter sunlight on scenery and Link (3 times at noon, twice in the morning and evening, as in HD's palettes, taken to the power 0.37 on screen: 1.5 at noon, 1.29 in the morning; the menu's **HD sunlight** (`BLUEWAKE_HD_SUNLIGHT`) makes it softer, 0.3 or 0.22, and `BLUEWAKE_HD_SKY_GAMMA` sets the power over it for testing; the sea is left as it is) | **Experimental**, off by default, with its own switch, **HD's sky and light** (and under it **HD's taller haze and cloud layers** and **HD's dawn and dusk colours**; each off until turned on, the HD look on or not; all three follow the menu at once, and need the HD textures and the HD look), every stage HD retuned (130 of the GameCube's 155 with palettes; the rest are test rooms HD dropped): the host writes HD's sky and light palettes over the stage's own in the game's memory once they load, and puts them back when it is off; RecompCore brightens everything but the sea by HD's factor for the hour (`aurora_set_exposure`; the sea is found by its textures, so a beach below a swell's height takes the light and the swells' crests don't), and the sky's colour by `BLUEWAKE_HD_SKY_GAIN` (1.27, which matched HD's noon) as far as that factor is up from 1, in the palette (the floating clouds keep their colour). HD's light schedule (noon to 17:00, two hours to dusk at 20:00) goes over the game's. With `BLUEWAKE_HD_SKY_MODELS=1` the sky models are shaped as HD's: the horizon's haze 2.8 times as tall, the front haze 1.6, the cloud layers to 11.3, 21.5 and 7.75 degrees, each layer one sheet of its HD texture, the cirrus band wrapped once around the sky, from where HD's model starts it. The palettes and cloud layers come from the player's own discs: the importer writes the pack's `optional/hd-sky/stages.bin` and the layers' textures in `optional/hd-clouds` (a pack imported before needs importing again); `scripts/wwhd_sky_palettes.py` makes the palettes from stage files directly. No menu row yet | `BLUEWAKE_HD_SKY` |
+| Sun shadows | Sun shadows (resolution, strength) | **In**, outdoors, from a shadow map of the whole scene (RecompCore 0173, 0183). Left out of the HD look switch: from the screen alone, on open ground it drew long dark streaks. Only its own variable turns it on, and the HD look switch off turns it off | `BLUEWAKE_HD_SUN_SHADOWS` The menu's **Sun shadow darkness** (`BLUEWAKE_HD_SHADOW_STRENGTH`) makes them lighter: 0.8 or 0.6 of HD's (`aurora_set_sun_shadow_strength`). |
 | Edge light | Character edge light | **In**, with the switch, outdoors (RecompCore 0174). Off by default | `BLUEWAKE_HD_EDGE_LIGHT` |
 | Torch light | Torch and fire light | **In**, with the switch, everywhere (RecompCore 0175). Off by default | `BLUEWAKE_HD_TORCH_LIGHT` |
 
@@ -90,7 +94,8 @@ walk over the actor list once a frame while the option is on. Nothing runs while
 
 Wind Waker draws its 3D scene, copies the finished scene out at full size, and then draws the HUD flat on top. Bloom
 runs in Aurora just before that copy: whatever is brighter than a threshold is blurred at a quarter of the size and
-added back, so clouds, foam and white highlights glow while the HUD stays sharp. It's six small GPU passes a frame
+screened back (it brightens what is darker and tends to white without passing it; added, it clipped the clouds to flat
+white), so clouds, foam and white highlights glow while the HUD stays sharp. It's six small GPU passes a frame
 and nothing while it's off. `DOL_AURORA_BLOOM_THRESHOLD` (default 0.72) and `DOL_AURORA_BLOOM_STRENGTH` (BlueWake starts it at 0.3; Aurora's default
 0.35) tune it; `DOL_AURORA_PASS_TRACE=1` logs one frame's passes.
 
@@ -104,7 +109,8 @@ by distance, before bloom. Aurora's depth gives the distance; Wind Waker draws t
 the islands' far models without depth, so those get a lighter amount of their own. At Outset's pier, Link is about
 240 near-plane units away and the island's cliffs about 3,700, so the blur starts at 8,000 and is full at 30,000:
 the island stays sharp and the horizon softens. `DOL_AURORA_FAR_BLUR_START`, `_END`, `_AMOUNT` (BlueWake starts it at 0.4; Aurora's default 0.8) and
-`_BACKGROUND` (0.35) tune it, and `DOL_AURORA_FAR_BLUR_DEBUG=1` shows the distance as brightness. It needs the
+`_BACKGROUND` (BlueWake starts it at 0, so the sky's clouds and the wind's lines stay sharp; the islands' far models
+then soften only a little, from the sea in front of them; Aurora's default 0.35) tune it, and `DOL_AURORA_FAR_BLUR_DEBUG=1` shows the distance as brightness. It needs the
 renderer's full feature set, so it stays off in compatibility mode.
 
 Checked on an M3 Max from an Outset save state: the horizon, far islands and sky soften, the island and the HUD stay
@@ -113,11 +119,16 @@ sharp. The switch alone gives the same frame as turning on each part by hand.
 ### Ambient occlusion
 
 HD darkens creases and the ground where things meet it. Before the far blur and bloom, from the depth buffer alone, at
-a quarter of the size: around each pixel, six pairs of samples on opposite sides, in a ring that shrinks with
-distance. A pair whose average is nearer than the pixel (a crease, a contact) darkens it; on a flat floor the two
-samples straddle the pixel, so it stays as it was. Where there is no depth (the sky, the horizon) and across big
-steps (a silhouette in front of the background) nothing is darkened. `DOL_AURORA_AO_RADIUS` (default 30) and
-`_STRENGTH` (BlueWake starts it at 0.3; Aurora's default 0.6) tune it, and `DOL_AURORA_AO_DEBUG=1` shows the occlusion alone.
+a quarter of the size: around each pixel, twelve samples in a ring that shrinks with distance. Each gets a place in
+the scene from the depth, and the pixel a surface normal from the depth around it; a sample above that surface and
+within the radius of the pixel in the scene (a crease, a contact) darkens it, so a flat floor stays as it was at any
+angle, and a floor seen at a low angle is not shaded in front of Link (#491). Where there is no depth (the sky, the
+horizon) and across big steps (a silhouette in front of the background) nothing is darkened. It is blurred and stretched back to the scene's
+size only along each surface, so Link's own shade stays on him instead of spreading onto what is behind him (#491), and it
+fades out from 1,000 to 2,500 units away, where the ring is a few pixels across and the sea's swells darkened a band toward
+the horizon. `DOL_AURORA_AO_RADIUS` (default 30), `_STRENGTH` (BlueWake starts it at 0.3; Aurora's default 0.6),
+`_FADE_START` and `_FADE_END` tune it. `DOL_AURORA_AO_DEBUG=1` shows the occlusion alone, and `=2` tints what it
+darkens red over the scene.
 
 Checked on an M3 Max from an Outset save state: darker under Link's feet, round the pier's posts and in the cliffs'
 creases; the pier's deck and the sea unchanged.
@@ -166,7 +177,7 @@ at noon Link, the boat and the tower cast shadows on the pier and the water; at 
 a building behind the camera, which the screen's version left lit.
 
 On an iPad Pro (M2), walking across Outset's grass, it drew long dark diagonal streaks across the ground, so the HD look
-switch leaves it off (October 13). `BLUEWAKE_HD_SUN_SHADOWS=1` still turns it on. With the shadow map, pdale-boop played
+switch leaves it off (October 13). `BLUEWAKE_HD_SUN_SHADOWS=1` still turns it on, while the HD look is on: turning the look off (F2, or `BLUEWAKE_HD_LOOK=0`) takes the sun shadows with it. With the shadow map, pdale-boop played
 Outset on Arch (RTX 5070 Ti, Vulkan) with sun shadows on and saw no streaks (October 17); not yet checked on Metal.
 
 Checked on an M3 Max from an Outset save state with the sun high: Link casts a soft shadow on the pier away from the
@@ -187,7 +198,8 @@ get a warm rim; the HUD is unchanged.
 On the GameCube, a torch lights the models near it but not the walls and floor. With the switch, the host reads the
 game's own point lights each retrace (`g_env_light.mpPLights`: torches, fires, lanterns, bombs) and passes the 16 nearest
 the camera to Aurora, which lights every surface around them from the depth, with a smooth falloff and a slight flicker
-for the lights the game marks as fluctuating. `DOL_AURORA_TORCH_LIGHT_STRENGTH` (0.35) and `_REACH` (the glow's radius,
+for the lights the game marks as fluctuating. `DOL_AURORA_TORCH_LIGHT_STRENGTH` (BlueWake starts it at 0.2; at Aurora's 0.35 the Dragon Roost Cavern's walls beside
+each torch were washed pale yellow) and `_REACH` (the glow's radius,
 times the game's own, 3) tune it.
 
 Checked on an M3 Max from a Dragon Roost Cavern save state: five lights near the camera, and the wall around the torch

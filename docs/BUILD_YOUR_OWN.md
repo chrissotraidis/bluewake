@@ -135,6 +135,23 @@ it and prepares the game. Keep the imported disc on the device: the game reads i
 **⋯ › Game Data & Saves › Remove Disc Image…** removes the imported disc and extracted game files,
 keeps your saves and settings, and requires importing the disc again before playing.
 
+## On a Windows PC (experimental)
+
+From BlueWake's next release, PadMint 0.5.27 or newer can also build the iPhone/iPad app on a
+Windows PC (x64 or ARM64). BlueWake 0.10.0's recipe still builds on a Mac only. You need Visual
+Studio Build Tools with **Desktop development with C++** and **C++ Clang Compiler for Windows**,
+your own GZLE01 revision 0 disc, and 25 GB free. Then, in PadMint, choose BlueWake and your disc, or
+run `padmint make bluewake ios --disc "path\to\GZLE01.iso"`.
+
+PadMint translates your disc, applies the mods, compiles the game code for iOS and adds it, with its
+`ModuleOptimizations` data, to the release's app without game code. The Windows build skips the
+Mac's local training step, so it isn't claimed to run as fast as a copy built on a Mac.
+
+Checked on 31 October: on Windows 11 ARM64, PadMint 0.5.27 built the original disc into a personal
+IPA in 2 h 19 min. The app's 14 original entries stayed unchanged and only the game module and its
+companion were added; a repeat build recompiled nothing. Not checked yet: a Windows-built copy on an
+iPhone or iPad, and a native x64 Windows PC. Linux stays planned.
+
 ## Updating
 
 ```sh
@@ -155,6 +172,9 @@ completed work is reused.
 Export the save from Dolphin (**Tools › Memory Card Manager**, or the `.gci` file in its GC folder), copy
 it to the device, then open **⋯ › Game Data & Saves › Import Dolphin Save…**. Choose the quest log and the
 BlueWake slot for it; your current saves are backed up first. USA saves only.
+
+**Export Dolphin Save…**, beside it, writes your save out as a `.gci` for Dolphin's Memory Card Manager, a
+real memory card, or another copy of BlueWake. It writes a new file and leaves your own card alone.
 
 ## Mods
 

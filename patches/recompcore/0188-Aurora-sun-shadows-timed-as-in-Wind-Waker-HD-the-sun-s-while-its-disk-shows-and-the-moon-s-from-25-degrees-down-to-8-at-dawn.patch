@@ -1,0 +1,101 @@
+From 8e3626b0d2cede7e434a24b24121f0bfe9324e16 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 17:59:40 -0500
+Subject: [PATCH] Aurora: sun shadows timed as in Wind Waker HD, the sun's
+ while its disk shows and the moon's from 25 degrees down to 8 at dawn
+
+Sun shadows last while the game draws its sun disk, moon's from 25 degrees.
+
+The sun's shadows fade from +1 to -8 degrees (the game draws its large sun
+disk down to -7.5, 06:30-19:30), cast from the sun held at 2 degrees once it
+is under the horizon; the moon's come in from 25 degrees, full at 30. Matches
+Wind Waker HD's timing at dusk.
+
+The moon's shadows at dawn last until it is down to 8 degrees, as in HD.
+
+HD isn't symmetric: its moon shadows come in at 25-30 degrees as the night
+comes on, but at dawn hold until the moon is about 8 degrees up, then hand
+over to the sun (about 06:30). The moon is in the west at dawn.
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 46 +++++++++++++------
+ 1 file changed, 33 insertions(+), 13 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 7f62c88f40..9ce11a737d 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -56,11 +56,16 @@ float g_sunMapFarEnd = 5000.f;    // bias goes from its near values to its far o
+ float g_sunMapNormalNear = 2.f;    // DOL_AURORA_SUN_SHADOW_MAP_NORMAL_NEAR: the normal offset near the camera, in texels
+                                    // (with 0.5 and 1 below, a wall the sun only grazed was striped light and dark)
+ float g_sunMapSlopeNear = 10.f;   // DOL_AURORA_SUN_SHADOW_MAP_SLOPE_NEAR: the same near the camera
+-float g_sunMapFadeLow = 0.01f;    // DOL_AURORA_SUN_SHADOW_MAP_FADE_LOW/_HIGH: the light's height (sin of its
+-float g_sunMapFadeHigh = 0.05f;   // elevation) where its shadows are gone, and at full strength (0.6 and 2.9 degrees)
++float g_sunMapFadeLow = -0.139f;  // DOL_AURORA_SUN_SHADOW_MAP_FADE_LOW/_HIGH: the sun's height (sin of its elevation)
++float g_sunMapFadeHigh = 0.017f;  // where its shadows are gone, and at full strength (-8 and +1 degrees). The game
++                                  // draws its large sun disk down to -7.5 (06:30-19:30), and HD casts while it shows
++float g_sunMapHold = 0.035f;      // DOL_AURORA_SUN_SHADOW_MAP_HOLD: below this height (2 degrees) the shadows are cast
++                                  // from the sun held there, as one under the horizon lights nothing
+ float g_moonStrength = 0.5f;      // DOL_AURORA_MOON_SHADOWS_STRENGTH: the moon's shadows, a share of the sun's
+-float g_moonFadeLow = 0.2f;       // DOL_AURORA_MOON_SHADOWS_FADE_LOW/_HIGH: the same for the moon (12 and 27
+-float g_moonFadeHigh = 0.45f;     // degrees), so its shadows come in once the dusk has gone
++float g_moonFadeLow = 0.42f;      // DOL_AURORA_MOON_SHADOWS_FADE_LOW/_HIGH: the same for the moon (25 and 30
++float g_moonFadeHigh = 0.5f;      // degrees) as the night comes on, as in HD
++float g_moonDawnLow = 0.139f;     // DOL_AURORA_MOON_SHADOWS_DAWN_LOW/_HIGH: the same at dawn, when HD keeps them down
++float g_moonDawnHigh = 0.17f;     // to 8 degrees (the moon setting in the west), then hands over to the sun
+ // GLSL's smoothstep.
+ float smoothstep_f(float lo, float hi, float x) noexcept {
+   const float t = std::clamp((x - lo) / (hi - lo), 0.f, 1.f);
+@@ -1892,11 +1897,14 @@ void initialize() {
+   g_sunMapDepth = env_float("DOL_AURORA_SUN_SHADOW_MAP_DEPTH", g_sunMapDepth, 1000.f, 1000000.f);
+   g_sunMapBias = env_float("DOL_AURORA_SUN_SHADOW_MAP_BIAS", g_sunMapBias, 0.f, 1000.f);
+   g_sunMapSlope = env_float("DOL_AURORA_SUN_SHADOW_MAP_SLOPE", g_sunMapSlope, 0.f, 32.f);
+-  g_sunMapFadeLow = env_float("DOL_AURORA_SUN_SHADOW_MAP_FADE_LOW", g_sunMapFadeLow, 0.f, 0.9f);
++  g_sunMapFadeLow = env_float("DOL_AURORA_SUN_SHADOW_MAP_FADE_LOW", g_sunMapFadeLow, -0.5f, 0.9f);
+   g_sunMapFadeHigh = env_float("DOL_AURORA_SUN_SHADOW_MAP_FADE_HIGH", g_sunMapFadeHigh, g_sunMapFadeLow + 0.001f, 1.f);
++  g_sunMapHold = env_float("DOL_AURORA_SUN_SHADOW_MAP_HOLD", g_sunMapHold, 0.f, 0.5f);
+   g_moonStrength = env_float("DOL_AURORA_MOON_SHADOWS_STRENGTH", g_moonStrength, 0.f, 1.f);
+   g_moonFadeLow = env_float("DOL_AURORA_MOON_SHADOWS_FADE_LOW", g_moonFadeLow, 0.f, 0.9f);
+   g_moonFadeHigh = env_float("DOL_AURORA_MOON_SHADOWS_FADE_HIGH", g_moonFadeHigh, g_moonFadeLow + 0.001f, 1.f);
++  g_moonDawnLow = env_float("DOL_AURORA_MOON_SHADOWS_DAWN_LOW", g_moonDawnLow, 0.f, 0.9f);
++  g_moonDawnHigh = env_float("DOL_AURORA_MOON_SHADOWS_DAWN_HIGH", g_moonDawnHigh, g_moonDawnLow + 0.001f, 1.f);
+   g_sunMapFarStart = env_float("DOL_AURORA_SUN_SHADOW_MAP_FAR_START", g_sunMapFarStart, 0.f, 100000.f);
+   g_sunMapFarEnd = env_float("DOL_AURORA_SUN_SHADOW_MAP_FAR_END", g_sunMapFarEnd, g_sunMapFarStart + 1.f, 200000.f);
+   g_sunMapNormalNear = env_float("DOL_AURORA_SUN_SHADOW_MAP_NORMAL_NEAR", g_sunMapNormalNear, 0.f, 16.f);
+@@ -2151,14 +2159,26 @@ void set_sun_shadow_quality(int level) noexcept {
+ SunMap sun_map(const Camera& camera) noexcept {
+   SunMap map;
+   const float* v = camera.view.data();
+-  // The sun, or below the horizon the moon: the game puts it opposite the sun
+-  // (dScnKy_env_light_c's mMoonPos is the eye minus the sun's offset). Long
+-  // shadows hold until the sun is a few degrees up, then fade; the moon's come
+-  // in later, once the dusk has gone (from 12 degrees up, full at 27).
+-  const bool moon = v[18] < 0.f;
+-  const float sun[3] = {moon ? -v[17] : v[17], moon ? -v[18] : v[18], moon ? -v[19] : v[19]};
+-  const float fade = moon ? smoothstep_f(g_moonFadeLow, g_moonFadeHigh, sun[1]) * g_moonStrength
+-                          : smoothstep_f(g_sunMapFadeLow, g_sunMapFadeHigh, sun[1]);
++  // The sun, or once it has gone the moon: the game puts it opposite the sun
++  // (dScnKy_env_light_c's mMoonPos is the eye minus the sun's offset). As in
++  // HD, the sun's shadows last while its disk is drawn, fading out from the
++  // horizon to 8 degrees under it, cast from the sun held a little up. HD's
++  // moon isn't the same both ways: its shadows come in once it is 25 degrees
++  // up, full at 30, but at dawn last until it is down to 8. The sun is in the
++  // west (-x) at dusk, so the moon is in the west at dawn.
++  const bool moon = v[18] < g_sunMapFadeLow;
++  float sun[3] = {moon ? -v[17] : v[17], moon ? -v[18] : v[18], moon ? -v[19] : v[19]};
++  const bool dawn = moon && sun[0] < 0.f;
++  const float fade = !moon  ? smoothstep_f(g_sunMapFadeLow, g_sunMapFadeHigh, sun[1])
++                     : dawn ? smoothstep_f(g_moonDawnLow, g_moonDawnHigh, sun[1]) * g_moonStrength
++                            : smoothstep_f(g_moonFadeLow, g_moonFadeHigh, sun[1]) * g_moonStrength;
++  if (sun[1] < g_sunMapHold) {
++    const float across = std::sqrt(sun[0] * sun[0] + sun[2] * sun[2]);
++    const float scale = across > 1e-4f ? std::sqrt(1.f - g_sunMapHold * g_sunMapHold) / across : 0.f;
++    sun[0] *= scale;
++    sun[1] = g_sunMapHold;
++    sun[2] *= scale;
++  }
+   if (!camera.valid || fade <= 0.f)
+     return map;
+   map.light = {sun[0], sun[1], sun[2]};
+-- 
+2.56.0
+

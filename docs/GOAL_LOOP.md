@@ -1,6 +1,6 @@
 # What we're doing
 
-The dated plan, and the five-step loop every session follows. Owner: Chris. Updated October 24, 2026. The ranked
+The dated plan, and the five-step loop every session follows. Owner: Chris. Updated October 29, 2026. The ranked
 backlog is [PRIORITIES.md](PRIORITIES.md), the speed strategy and its runbook are [PERFORMANCE.md](PERFORMANCE.md),
 and the standards everything is held to are in [DIRECTION.md](DIRECTION.md). The daily sections from October 11 to
 15, with every measurement, are kept in [status/GOAL_LOOP_2026-10-15.md](status/GOAL_LOOP_2026-10-15.md).
@@ -30,6 +30,17 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 | 1. Lean what we have, and catch up with Elliott | 0.7.0 and the next two weeks | Lean block copies (the default since 0.7.0), draw fusion, his faster loads and natives rounds 4, 5 and 7, his upload changes, hidden symbols, Smooth Motion pacing | Faster on the benchmark, and the game plays the same |
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
 | 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
+
+## October 29: PadMint's Python 3.9 build failure
+
+[#499](https://github.com/chrissotraidis/bluewake/pull/499) fixes the default game-math and skin preparation
+writes reported in [#496](https://github.com/chrissotraidis/bluewake/issues/496). BlueWake `830449af` passed
+PadMint current-main `d6f0f59`'s full fresh-player iOS check with Apple's Python 3.9.6, including local training
+through the player-control checkpoint, final compilation, signing and private package checks. The recorded
+build time was 8,775.93 seconds; all PR checks passed. The [dated validation record](status/PADMINT_PYTHON39_2026-10-29.md)
+separates the public app audit from the personal IPA's expected publication-gate failure. Private artifacts
+remain local. Public 0.9.0 is unchanged; reporter confirmation and physical-device/gameplay/performance
+acceptance remain outstanding. The October 24 plan below is retained as its dated record.
 
 ## Where things stand on October 24
 
