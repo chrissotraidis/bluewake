@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "8bf0c5da3f80a200f696787603b77259a7d9af4e",
+      "sha": "efbc809d0fc4e122b3301041116ab9ae6af2765e",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -733,6 +733,13 @@
             "patches/recompcore/0209-Sun-shadows-Wind-Waker-HD-s-bias-terrain-mix-and-light-rule-its-stage-normals-from-the-host.patch"
           ],
           "evidence": "pdale-boop's: HD's bias (DOL_AURORA_SUN_SHADOW_MAP_HD_BIAS, _CASTER_BIAS 80,3 as HD draws its map), HD's terrain shadow mix (DOL_AURORA_SUN_SHADOW_HD_MIX), aurora_set_sun_hd_light (HD's sun by day, the moon's side by night, its day/night fade) and aurora_set_hd_normals (the pack's optional/hd-normals/<stage>.bin); all off by default."
+        },
+        "hd_effects_and_shadow_pass": {
+          "runtime": "efbc809d0fc4e122b3301041116ab9ae6af2765e",
+          "tracked_patches": [
+            "patches/recompcore/0210-Aurora-Wind-Waker-HD-s-bloom-SSAO-rim-light-cloud-shadows-and-shadow-pass.patch"
+          ],
+          "evidence": "pdale-boop's, each behind its own switch and off by default: HD's bloom chain and mask, SSAO, rim light, cloud shadows on HD's rule with its ww_shadow_clouds (aurora_set_hd_cloud_texture, the pack's optional/hd-cloud-shadow), and HD's shadow pass (set_sun_shadow_quality(3): three 1024 cascades, a half-size pre-pass, blurred); characters keep BlueWake's caster bias. Read from RenderDoc captures of Cemu on Windows."
         }
       }
     },

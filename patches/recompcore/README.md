@@ -291,3 +291,8 @@ Patch 0208 reads a table of Wind Waker HD's normals keyed by the GameCube's exac
 Patch 0209 adds Wind Waker HD's shadow bias and terrain shadow mix (test switches), `aurora_set_sun_hd_light` (HD's
 light rule: the sun by day, the moon's side by night, its day/night fade) and `aurora_set_hd_normals` (HD's normals
 for the stage in play, from the HD pack's `optional/hd-normals/<stage>.bin`).
+
+Patch 0210 adds Wind Waker HD's bloom chain, SSAO, rim light and cloud shadows (each behind its own switch, off by
+default; the cloud texture from the host, `aurora_set_hd_cloud_texture`), and HD's own shadow pass as a fourth
+shadow quality (`hd`, `set_sun_shadow_quality(3)`): three 1024 maps, a half-size pre-pass with one filtered lookup
+per pixel in the cascade its distance picks, blurred.
