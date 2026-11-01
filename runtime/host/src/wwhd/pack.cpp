@@ -9,6 +9,8 @@
 #include "hd.h"
 #include "imaging.h"
 #include "sha256.h"
+#include "cloud_shadow.h"
+#include "normals.h"
 #include "sky.h"
 #include "ui.h"
 #include "wiiu_disc.h"
@@ -604,6 +606,8 @@ ImportResult import_pack(const ImportOptions& o) {
     check_cancel();
     std::map<std::string, Bytes> gc_stages;
     std::map<std::string, std::pair<Bytes, Bytes>> sky_stages;  // stage: GameCube's and HD's dzs
+    std::map<std::string, Bytes> room_light_stages;             // stage: HD's baseLight.bin
+    std::string cloud_shadow = "null"; // the report's entry for HD's cloud shadow texture, once written
     const std::vector<GCTexture> originals = index_gc(o.gc_disc, result.errors, &gc_stages);
     Targets targets;
     for (const GCTexture& t : originals) {
@@ -623,11 +627,17 @@ ImportResult import_pack(const ImportOptions& o) {
         const unsigned cores = std::thread::hardware_concurrency();
         const unsigned threads = o.threads ? o.threads : std::max(1u, std::min(4u, cores > 1 ? cores - 1 : 1u));
         PngWriter writer(o.exact_report ? 0 : threads);
+        // HD's normals and vertex colours by the GameCube's positions (the HD look's sun shadows): each
+        // GameCube arc is read from its disc as its HD archive turns up.
+        HdNormals normals(o.gc_disc);
         for (const std::string& source : files) {
             check_cancel();
             progress.files_read++;
             if (progress.files_read % 20 == 0) {
                 progress.replacements = matches.size() - conflicts.size();
+                progress.sky_stages = sky_stages.size();
+                progress.shaded_models = normals.models_matched();
+                progress.cloud_shadow = cloud_shadow != "null";
                 report("Reading Wind Waker HD");
             }
             const Bytes archive = disc ? disc->read(*disc_entries.at(source)) : read_file(o.hd_folder + "/" + source);
@@ -658,10 +668,39 @@ ImportResult import_pack(const ImportOptions& o) {
                         const std::string stage = path.substr(slash == std::string::npos ? 0 : slash + 1,
                                                               end - (slash == std::string::npos ? 0 : slash + 1));
                         const auto gc = gc_stages.find(stage);
-                        if (gc != gc_stages.end() && !sky_stages.count(stage))
+                        if (gc != gc_stages.end() && !sky_stages.count(stage)) {
                             if (const auto at = find_dzs(data))
                                 sky_stages[stage] = {gc->second, Bytes(data.begin() + long(*at), data.end())};
+                            if (auto lights = room_lights(data))
+                                room_light_stages[stage] = std::move(*lights);
+                        }
                     }
+                    // HD's cloud shadow texture (the HD look's cloud shadows on HD's rule), its blocks as they are.
+                    if (cloud_shadow == "null" && cloud_shadow_source(path) && data.size() >= 4 &&
+                        std::memcmp(data.data(), "FRES", 4) == 0) {
+                        const std::string member = path + "#" + kHdCloudShadowName;
+                        try {
+                            const std::set<std::string> names{kHdCloudShadowName};
+                            bfres(data, path, &names, [&](HDTexture&& tex) {
+                                if (tex.format != kGx2Bc4Unorm)
+                                    throw FormatError(std::string(kHdCloudShadowName) + " is not BC4");
+                                std::error_code made;
+                                fs::create_directories(staging / kHdCloudShadowFolder, made);
+                                if (made)
+                                    throw WriteError("cannot make " + (staging / kHdCloudShadowFolder).string() + ": " +
+                                                     made.message());
+                                write_file(staging / kHdCloudShadowFolder / kHdCloudShadowFile,
+                                           dds_bc4(uint32_t(tex.width), uint32_t(tex.height), tex.levels));
+                                cloud_shadow = "{\"file\": " + json_string(kHdCloudShadowFile) + ", \"hd\": " +
+                                               json_string(tex.source) + ", \"size\": [" + std::to_string(tex.width) +
+                                               ", " + std::to_string(tex.height) + "], \"mipmaps\": " +
+                                               std::to_string(tex.levels.size()) + "}";
+                            });
+                        } catch (const FormatError& ex) {
+                            result.errors.push_back({member, ex.what()});
+                        }
+                    }
+                    normals.feed(path, data);
                     const auto l = layouts.find(parent_of(path));
                     const Layout* layout = keep && l != layouts.end() ? &l->second : nullptr;
                     source_textures(data, path, targets, layout, [&](HDTexture&& hd, std::vector<const GCTexture*> candidates) {
@@ -795,7 +834,23 @@ ImportResult import_pack(const ImportOptions& o) {
             } catch (const FormatError& ex) {
                 result.errors.push_back({source, ex.what()});
             }
+            normals.flush();
         }
+        // HD's normals (each stage's, the objects') and the objects' vertex colours.
+        progress.replacements = matches.size() - conflicts.size();
+        progress.sky_stages = sky_stages.size();
+        progress.shaded_models = normals.models_matched();
+        progress.cloud_shadow = cloud_shadow != "null";
+        report("Writing HD's shading for the sun shadows");
+        const HdNormals::Tables normal_tables = normals.tables();
+        for (const auto& [name, table] : normal_tables.files) {
+            const fs::path file = staging / name;
+            fs::create_directories(file.parent_path(), ec);
+            if (ec)
+                throw WriteError("cannot make " + file.parent_path().string() + ": " + ec.message());
+            write_file(file, table);
+        }
+        result.errors.insert(result.errors.end(), normal_tables.errors.begin(), normal_tables.errors.end());
         writer.drain();
         check_cancel();
         report("Finishing the pack");
@@ -881,11 +936,22 @@ ImportResult import_pack(const ImportOptions& o) {
                 throw WriteError("cannot make " + (staging / kHdSkyFolder).string() + ": " + ec.message());
             write_file(staging / kHdSkyFolder / kHdSkyFile, sky);
         }
+        if (!room_light_stages.empty()) {  // HD's dungeon and interior room lights, beside the palettes
+            fs::create_directories(staging / kHdSkyFolder, ec);
+            if (ec)
+                throw WriteError("cannot make " + (staging / kHdSkyFolder).string() + ": " + ec.message());
+            write_file(staging / kHdSkyFolder / kHdRoomLightsFile, pack_room_lights(room_light_stages));
+        }
         std::string skipped;
         for (const auto& [stage, why] : sky_skipped)
             skipped += std::string(skipped.empty() ? "" : ", ") + "{\"stage\": " + json_string(stage) +
                        ", \"reason\": " + json_string(why) + "}";
         const uint32_t sky_count = uint32_t(sky[4]) << 24 | uint32_t(sky[5]) << 16 | uint32_t(sky[6]) << 8 | sky[7];
+        result.sky_stages = sky_stages.empty() ? 0 : sky_count;
+        result.sky_clouds = optional_clouds.size();
+        result.cloud_shadow = cloud_shadow != "null";
+        result.normal_stages = normal_tables.stages;
+        result.normal_objects = normal_tables.object_models;
         const std::time_t now = std::time(nullptr);
         char created[32];
         std::strftime(created, sizeof created, "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
@@ -897,7 +963,11 @@ ImportResult import_pack(const ImportOptions& o) {
                                  "  \"unsupported\": [\n" + errors + "\n  ],\n" + "  \"textures\": [\n" + textures + "\n  ],\n" +
                                  "  \"optional\": {\"hd-clouds\": [" + clouds + "],\n" +
                                  "    \"hd-sky\": {\"file\": " + json_string(kHdSkyFile) + ", \"stages\": " +
-                                 std::to_string(sky_count) + ", \"skipped\": [" + skipped + "]}}\n}\n";
+                                 std::to_string(sky_count) + ", \"skipped\": [" + skipped + "], \"room_lights\": {\"file\": " +
+                                 json_string(kHdRoomLightsFile) + ", \"stages\": " +
+                                 std::to_string(room_light_stages.size()) + "}},\n" +
+                                 "    \"hd-cloud-shadow\": " + cloud_shadow + ",\n" +
+                                 "    \"hd-normals\": " + normal_tables.report + "}\n}\n";
         write_file(staging / "import-report.json", Bytes(json.begin(), json.end()));
         const std::string readme = "Private artwork extracted from your own Wind Waker HD disc.\n"
                                    "Choose this folder in Mods > Wind Waker HD textures, then restart.\n"

@@ -68,6 +68,9 @@ bool ImportJob::start(const std::string& hd_picked, const std::string& gc_disc, 
         status_.files_read = p.files_read;
         status_.files_total = p.files_total;
         status_.replacements = p.replacements;
+        status_.sky_stages = p.sky_stages;
+        status_.shaded_models = p.shaded_models;
+        status_.cloud_shadow = p.cloud_shadow;
         status_.message = p.stage;
     };
     worker_ = std::thread([this, options] {
@@ -79,7 +82,8 @@ bool ImportJob::start(const std::string& hd_picked, const std::string& gc_disc, 
             done.replacements = r.replacements;
             done.conflicts = r.conflicts;
             done.unsupported = r.errors.size();
-            done.message = "Imported " + std::to_string(r.replacements) + " textures from Wind Waker HD.";
+            done.message = describe_import(r);
+            done.left_out = describe_import_left_out(r);
         } catch (const std::exception& ex) {
             done.failed = true;
             done.message = cancel_ ? std::string("The import was cancelled.") : std::string("The import failed: ") + ex.what();
