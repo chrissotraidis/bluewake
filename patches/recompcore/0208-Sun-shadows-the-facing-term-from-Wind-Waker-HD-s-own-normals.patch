@@ -1,0 +1,226 @@
+From 10d1669c31dcc4c646eafdac42a9f2adf072ad0d Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:51:47 -0600
+Subject: [PATCH] Sun shadows: the facing term from Wind Waker HD's own normals
+
+DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS: a table of HD's per-vertex normals keyed by the GameCube's exact,
+raw joint-local vertex positions ('BWHN': x, y, z, nx, ny, nz; a position at one of HD's hard edges listed
+once per normal, the one nearest the faces' own taken). HD remade its models on the GameCube's positions with
+normals of its own, which its per-vertex light follows.
+
+Also tests of the depth's own facing with smooth normals (DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL, blurred as
+HD's pre-pass blurs: _FACING_DEPTH_BLUR). Nintendo's shader source on HD's disc later showed HD's shadow has
+no such term (its line is commented out); off by default.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 75 ++++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 53 ++++++++++++-
+ 2 files changed, 125 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 445dc53165..b69b483352 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -2502,6 +2502,49 @@ static float smooth_crease_cos() {
+   return value;
+ }
+ 
++// Wind Waker HD's own normals for the scenery, by the GameCube's exact vertex position (local test:
++// DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS=<table>, b'BWHN', u32 version 1, u32 count, then count x f32 x, y,
++// z, nx, ny, nz; a position at one of HD's hard edges is listed once per normal). HD remade its models with
++// the GameCube's positions and normals of its own, which its per-vertex light follows.
++struct HdNormals {
++  absl::flat_hash_map<std::array<uint32_t, 3>, std::pair<uint32_t, uint32_t>> at; // first, count in `normals`
++  std::vector<std::array<float, 3>> normals;
++};
++
++static const HdNormals* hd_normals() {
++  static const std::unique_ptr<HdNormals> table = []() -> std::unique_ptr<HdNormals> {
++    const char* path = std::getenv("DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS");
++    if (path == nullptr || path[0] == '\0')
++      return nullptr;
++    FILE* f = std::fopen(path, "rb");
++    if (f == nullptr)
++      return nullptr;
++    char magic[4]{};
++    uint32_t version = 0, count = 0;
++    bool ok = std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "BWHN", 4) == 0 &&
++              std::fread(&version, 4, 1, f) == 1 && version == 1 && std::fread(&count, 4, 1, f) == 1;
++    std::vector<std::array<float, 6>> rows(ok ? count : 0);
++    ok = ok && std::fread(rows.data(), sizeof(rows[0]), rows.size(), f) == rows.size();
++    std::fclose(f);
++    if (!ok)
++      return nullptr;
++    auto table = std::make_unique<HdNormals>();
++    table->normals.reserve(rows.size());
++    for (const auto& r : rows) {
++      std::array<uint32_t, 3> key{};
++      std::memcpy(key.data(), r.data(), sizeof(key));
++      auto [it, added] = table->at.try_emplace(key, static_cast<uint32_t>(table->normals.size()), 0u);
++      if (!added && it->second.first + it->second.second != table->normals.size())
++        continue; // a position listed apart: keep its first run
++      table->normals.push_back({r[3], r[4], r[5]});
++      ++it->second.second;
++    }
++    std::fprintf(stderr, "[sun-facing] HD normals: %zu positions from %s\n", table->at.size(), path);
++    return table;
++  }();
++  return table.get();
++}
++
+ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan) {
+   using Vec = std::array<float, 3>;
+   static thread_local std::vector<float> vertices;
+@@ -2562,12 +2605,42 @@ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan)
+     if (valid(i))
+       for (int corner = 0; corner < 3; ++corner)
+         groupFaces[groupFill[group[plan.indices[i + corner]]]++] = static_cast<uint32_t>(f);
+-  // A vertex's normal: the faces at its position that turn within the crease of its own faces.
++  // A vertex's normal: HD's at its position when the table has it (the one nearest its own faces' at one of
++  // HD's hard edges), else the faces at its position that turn within the crease of its own faces.
+   const float crease = smooth_crease_cos();
++  const HdNormals* hd = hd_normals();
++  // DOL_AURORA_SUN_SHADOW_FACING_LOG=1 (local debug): how many scenery vertices found HD's normal.
++  static const bool log = std::getenv("DOL_AURORA_SUN_SHADOW_FACING_LOG") != nullptr;
++  static thread_local uint64_t s_hdHits = 0, s_vertices = 0, s_calls = 0;
++  s_vertices += count;
++  if (log && hd != nullptr && ++s_calls % 4000 == 0)
++    std::fprintf(stderr, "[sun-facing] HD normals for %llu of %llu scenery vertices\n",
++                 static_cast<unsigned long long>(s_hdHits), static_cast<unsigned long long>(s_vertices));
+   for (size_t v = 0; v < count; ++v) {
+     float* out = &vertices[v * gxc::kVertexFloats + gxc::kVertexNormalOffset / sizeof(float)];
+     const Vec& ref = own[v];
+     const float refLength = std::sqrt(ref[0] * ref[0] + ref[1] * ref[1] + ref[2] * ref[2]);
++    if (hd != nullptr) {
++      std::array<uint32_t, 3> key{};
++      std::memcpy(key.data(), &vertices[v * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float)], sizeof(key));
++      if (const auto it = hd->at.find(key); it != hd->at.end()) {
++        const Vec* best = &hd->normals[it->second.first];
++        float bestDot = -2.f;
++        for (uint32_t j = 0; j < it->second.second; ++j) {
++          const Vec& c = hd->normals[it->second.first + j];
++          // The model's winding isn't known: the mask's pass turns the normal to the side seen.
++          const float d = std::abs(c[0] * ref[0] + c[1] * ref[1] + c[2] * ref[2]);
++          if (d > bestDot) {
++            bestDot = d;
++            best = &c;
++          }
++        }
++        for (int k = 0; k < 3; ++k)
++          out[k] = (*best)[k];
++        ++s_hdHits;
++        continue;
++      }
++    }
+     Vec n{0.f, 0.f, 0.f};
+     if (refLength > 0.f) {
+       for (uint32_t j = groupStart[group[v]]; j < groupStart[group[v] + 1]; ++j) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 76088e366f..a8953f7cb3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -157,6 +157,11 @@ float g_sunMapDim = 0.5f;         // DOL_AURORA_SUN_SHADOW_MAP_DIM: how strong t
+ // far fade (12000 to 14000).
+ bool g_sunFacing = false;
+ float g_sunFacingMul = 10.f;         // DOL_AURORA_SUN_SHADOW_FACING_MUL: fully lit from N.L = 1 / mul (HD: 10)
++// With the scenery's smooth normals: the shape's own facing as well, from the depth's normal, as HD's shadow
++// pre-pass folds into its shadow term (normal2ShadowMul 10) on top of its models' per-vertex light; 0 off
++// (DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL, local test).
++float g_sunFacingDepthMul = 0.f;
++float g_sunFacingDepthBlur = 8.f; // DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR: its blur, pixels at 1080 lines (0 none)
+ float g_sunFacingFarStart = 12000.f; // DOL_AURORA_SUN_SHADOW_FACING_FAR_START / _END: where it fades out
+ float g_sunFacingFarEnd = 14000.f;
+ // With the facing term, HD's terrain curve for its shadow (its terrain shaders' 0.5 x pow(2 x shadow, e), e
+@@ -954,6 +959,8 @@ override sea_bias: f32 = 0.0;
+ override soft: f32 = 0.01;
+ override facing_on: f32 = 0.0;
+ override facing_mul: f32 = 10.0;
++override facing_depth_mul: f32 = 0.0;
++override facing_depth_blur: f32 = 8.0;
+ override facing_far_start: f32 = 12000.0;
+ override facing_far_end: f32 = 14000.0;
+ override shape_on: f32 = 1.0;
+@@ -1224,6 +1231,31 @@ fn depth_normal(uv: vec2<f32>, p: vec3<f32>, tx: f32, ty: f32) -> vec3<f32> {
+     return select(n, -n, dot(n, -p) < 0.0);
+ }
+ 
++// The shape's own facing (the depth's normal, x facing_depth_mul), blurred as HD's shadow pre-pass blurs it:
++// 3 x 3 points facing_depth_blur pixels apart (at 1080 lines, wider with distance), leaving out points whose
++// depth jumps (another object, or the sky past an edge), so the shade doesn't cross a silhouette.
++fn depth_facing_blurred(uv: vec2<f32>, z: f32, tx: f32, ty: f32, sun: vec3<f32>) -> f32 {
++    let size = vec2<f32>(textureDimensions(depth));
++    let stride = facing_depth_blur * (size.y / 1080.0) * mix(1.0, 3.0, smoothstep(1000.0, 8000.0, z)) / size;
++    var sum = 0.0;
++    var weight = 0.0;
++    for (var j = -1; j <= 1; j++) {
++        for (var i = -1; i <= 1; i++) {
++            let q = uv + vec2<f32>(f32(i), f32(j)) * stride;
++            let pq = view_pos(q, tx, ty);
++            if (abs(-pq.z - z) > 0.1 * z) {
++                continue;
++            }
++            let nq = depth_normal(q, pq, tx, ty);
++            let nw = vec3(dot(view.rows[0].xyz, nq), dot(view.rows[1].xyz, nq), dot(view.rows[2].xyz, nq));
++            let w = (2.0 - abs(f32(i))) * (2.0 - abs(f32(j)));
++            sum += w * clamp(dot(nw, sun) * facing_depth_mul, 0.0, 1.0);
++            weight += w;
++        }
++    }
++    return select(1.0, sum / weight, weight > 0.0);
++}
++
+ @fragment
+ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+     let z = view_depth(in.uv);
+@@ -1403,16 +1435,29 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         if (terrain) {
+             // The scenery's smooth normal where its draw gave one (blended across each triangle, as HD's
+             // models' per-vertex light is), else the depth's (one per triangle).
+-            var nv = depth_normal(in.uv, p, tx, ty);
++            let nd = depth_normal(in.uv, p, tx, ty);
++            var nv = nd;
++            var smoothed = false;
+             if (view.facing.z > 0.5) {
+                 let sn = textureLoad(normals, mp, 0);
+                 if (sn.a > 0.5) {
+                     nv = normalize(sn.xyz * 2.0 - 1.0);
++                    smoothed = true;
+                 }
+             }
+             let nw = vec3(dot(view.rows[0].xyz, nv), dot(view.rows[1].xyz, nv), dot(view.rows[2].xyz, nv));
+             let away = 1.0 - smoothstep(facing_far_start, facing_far_end, z);
+-            facing = mix(1.0, clamp(dot(nw, sun) * facing_mul, 0.0, 1.0), away);
++            var turned = clamp(dot(nw, sun) * facing_mul, 0.0, 1.0);
++            // The shape's own facing too where the light came from smooth normals (HD's shadow pre-pass).
++            if (smoothed && facing_depth_mul > 0.0) {
++                if (facing_depth_blur > 0.0) {
++                    turned = min(turned, depth_facing_blurred(in.uv, z, tx, ty, sun));
++                } else {
++                    let ndw = vec3(dot(view.rows[0].xyz, nd), dot(view.rows[1].xyz, nd), dot(view.rows[2].xyz, nd));
++                    turned = min(turned, clamp(dot(ndw, sun) * facing_depth_mul, 0.0, 1.0));
++                }
++            }
++            facing = mix(1.0, turned, away);
+             lit = min(lit, facing);
+             if (shape_on > 0.5) {
+                 let e = mix(4.0, 2.0, smoothstep(shape_near, shape_far, z));
+@@ -1885,6 +1930,8 @@ wgpu::RenderPipeline make_sun_map_pipeline(wgpu::TextureFormat format, bool dire
+       wgpu::ConstantEntry{.key = "effect_debug", .value = g_effectDebug ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "facing_on", .value = g_sunFacing ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "facing_mul", .value = g_sunFacingMul},
++      wgpu::ConstantEntry{.key = "facing_depth_mul", .value = g_sunFacingDepthMul},
++      wgpu::ConstantEntry{.key = "facing_depth_blur", .value = g_sunFacingDepthBlur},
+       wgpu::ConstantEntry{.key = "facing_far_start", .value = g_sunFacingFarStart},
+       wgpu::ConstantEntry{.key = "facing_far_end", .value = g_sunFacingFarEnd},
+       wgpu::ConstantEntry{.key = "shape_on", .value = g_sunShape ? 1.0 : 0.0},
+@@ -2402,6 +2449,8 @@ void initialize() {
+   if (const char* facing = std::getenv("DOL_AURORA_SUN_SHADOW_FACING"))
+     g_sunFacing = facing[0] == '1';
+   g_sunFacingMul = env_float("DOL_AURORA_SUN_SHADOW_FACING_MUL", g_sunFacingMul, 0.5f, 1000.f);
++  g_sunFacingDepthMul = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL", g_sunFacingDepthMul, 0.f, 1000.f);
++  g_sunFacingDepthBlur = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR", g_sunFacingDepthBlur, 0.f, 200.f);
+   g_sunFacingFarStart = env_float("DOL_AURORA_SUN_SHADOW_FACING_FAR_START", g_sunFacingFarStart, 0.f, 1e7f);
+   g_sunFacingFarEnd = env_float("DOL_AURORA_SUN_SHADOW_FACING_FAR_END", g_sunFacingFarEnd, g_sunFacingFarStart + 1.f, 1e7f);
+   if (const char* shape = std::getenv("DOL_AURORA_SUN_SHADOW_SHAPE"))
+-- 
+2.49.0.windows.1
+

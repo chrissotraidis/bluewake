@@ -53,8 +53,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Effects that write depth left out of the HD look's shading too: the game's particles and glow models (Dragon Roost Cavern's lava geysers, a door's dust): patches/recompcore/0206 (pdale-boop).
 # The lava geysers' core and a door's dust left unshaded too: glow models may take the rasterized colour when their textures only cut the shape, effects at their own depth keep their share near or far, and a blended effect's share by its opacity: patches/recompcore/0206 (pdale-boop).
 # Wind Waker HD's facing term in the sun shadows, and its light for the hour in their shade (aurora_set_sun_palette); the gap fill off; the slope term as far off near the camera: patches/recompcore/0207 (pdale-boop).
+# The facing term from Wind Waker HD's own normals, by the GameCube's vertex positions (test switch): patches/recompcore/0208 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=845809f29ff3bbc3d45f9b84ad828ffbcf94465b
+RECOMPCORE_SHA=10d1669c31dcc4c646eafdac42a9f2adf072ad0d
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
