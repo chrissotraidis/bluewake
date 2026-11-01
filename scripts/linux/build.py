@@ -1373,7 +1373,8 @@ int main(void) {{
         app = self.package(module)
         print(f"\nBlueWake: {app}")
         print(f"  run {app / 'bluewake'}")
-        print("  It contains game code translated from your disc and a copy of the disc: keep it for yourself.")
+        print("  The first launch asks for your own disc and prepares the game files from it.")
+        print("  It contains game code translated from your disc: keep it for yourself.")
         if (app / "portable.txt").exists():
             print(f"  Saves: {app / 'user'} (portable mode: portable.txt is in the app folder).")
         else:
