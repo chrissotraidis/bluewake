@@ -25,6 +25,8 @@ bool bluewake_hd_room_clip;
 static float g_sun_view[3] = {0.0f, 1.0f, 0.0f};  // toward the sun, in the camera's space (room culling)
 static float g_sun_up = 1.0f;  // the sun's direction's height (sine of its elevation)
 static bool g_trace;
+// BLUEWAKE_HD_FIXED_SPLITS=1 (testing): the HD shadows keep their fixed cascade splits, not HD's from the camera.
+static bool g_fixed_splits;
 static bool g_sky;  // HD's sky and light palettes (BLUEWAKE_HD_SKY)
 static bool g_sky_models;  // with them, HD's sky models (BLUEWAKE_HD_SKY_MODELS=1; off by default)
 static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; off by default)
@@ -92,6 +94,7 @@ void bluewake_hd_look_reload(void) {
     const int all = setting("BLUEWAKE_HD_LOOK");
     bluewake_hd_distant_islands = part("BLUEWAKE_HD_DISTANT_ISLANDS", all) == 1;
     g_trace = setting("BLUEWAKE_HD_TRACE") == 1;
+    g_fixed_splits = setting("BLUEWAKE_HD_FIXED_SPLITS") == 1;
     // The renderer's parts (Aurora's post_fx). Left to DOL_AURORA_BLOOM and
     // DOL_AURORA_FAR_BLUR and DOL_AURORA_AO while neither the switch nor the part is set.
     const int bloom = part("BLUEWAKE_HD_BLOOM", all);
@@ -390,6 +393,45 @@ enum {
     kPointLights = 0x803E4EACu,  // g_env_light.mpPLights[200] (LIGHT_INFLUENCE*: pos, color s16, power)
 };
 
+// Wind Waker HD's shadow cascade splits for this frame (LayerShadow's ranges from its camera, calculateShadowRanges in
+// the WWHD decompilation's hd_layer_shadow.cpp; its tuning, sLayerShadowTuning at 0x101F8994 in cking.rpx). HD's camera
+// fields are the game's dCamera_c (camera_process_class + 0x244): mCenter +0x10, mEye +0x1C, mFovy +0x38, mCurMode
+// +0x13C, the shakes mCenterShake +0x568, mEyeShake +0x574, mFovYShake +0x580. Its middle split is 2.5 times the
+// camera's distance to what it looks at, less 4 x clamp(-2 x (fovy - 70), -100, 900), kept within 300 to 1000; its
+// far split the middle plus 2.5 times (middle - 30), within 500 to 2500. Cameras in modes 4, 10 and 11 take 200 and
+// 700. Left out: its event and cutscene ranges (fixed ones for a few events and Demo02). False when the view isn't
+// the game's camera.
+static bool hd_cascade_splits(CPUState* cpu, u32 view, float* middle, float* far_split) {
+    const u32 cam = view + 0x244u;
+    float c[3], e[3];
+    for (u32 i = 0; i < 3; ++i) {
+        c[i] = read_float(cpu, cam + 0x10u + i * 4u) + read_float(cpu, cam + 0x568u + i * 4u);
+        e[i] = read_float(cpu, cam + 0x1Cu + i * 4u) + read_float(cpu, cam + 0x574u + i * 4u);
+    }
+    const float fovy = read_float(cpu, cam + 0x38u) + read_float(cpu, cam + 0x580u);
+    const u32 mode = mem_read32(cpu, cam + 0x13Cu);
+    const float dx = c[0] - e[0], dy = c[1] - e[1], dz = c[2] - e[2];
+    const float distance = sqrtf(dx * dx + dy * dy + dz * dz);
+    // Not the game's camera (the view's own field of view disagrees, or nothing sensible is there).
+    if (!(distance >= 0.f && distance < 100000.f && fovy > 1.f && fovy < 170.f) ||
+        fabsf(fovy - read_float(cpu, view + kViewFovy)) > 20.f)
+        return false;
+    if (mode == 4u || mode == 10u || mode == 11u) {
+        *middle = 200.f;
+        *far_split = 700.f;
+        return true;
+    }
+    float adjust = -(fovy - 70.f) * 2.f;
+    adjust = adjust < -100.f ? -100.f : adjust > 900.f ? 900.f : adjust;
+    float m = distance * 2.5f - 4.f * adjust;
+    m = m < 300.f ? 300.f : m > 1000.f ? 1000.f : m;
+    float reach = (m - 30.f) * 2.5f;
+    reach = reach < 500.f ? 500.f : reach > 2500.f ? 2500.f : reach;
+    *middle = m;
+    *far_split = m + reach;
+    return true;
+}
+
 // The game's point lights nearest the camera (torches, fires, lanterns, bombs):
 // up to 16 of x, y, z, radius, r, g, b, flicker for the renderer.
 static void point_lights(CPUState* cpu, const float eye[3]) {
@@ -564,6 +606,11 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                 // off read hundreds of units too far and shaded itself in blocks.
                 const float far_plane = read_float(cpu, view + kViewFar);
                 aurora_set_world_view_far(far_plane > near_plane ? far_plane : 0.f);
+                // HD's shadow cascades follow its camera (BlueWake's zoom included).
+                float split_middle = 0.f, split_far = 0.f;
+                if (g_fixed_splits || !hd_cascade_splits(cpu, view, &split_middle, &split_far))
+                    split_middle = split_far = 0.f;
+                aurora_set_sun_cascade_splits(split_middle, split_far);
                 const float sx = read_float(cpu, kSunPos) - inv[3];
                 const float sy = read_float(cpu, kSunPos + 4u) - inv[7];
                 const float sz = read_float(cpu, kSunPos + 8u) - inv[11];
@@ -593,7 +640,8 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                     torch_view = true;
                 }
                 if (g_trace && retrace % 300u == 0u)
-                    fprintf(stderr, "[hd-look] sun from the eye %.0f %.0f %.0f\n", sx, sy, sz);
+                    fprintf(stderr, "[hd-look] sun from the eye %.0f %.0f %.0f, HD's cascade splits %.0f %.0f\n", sx,
+                            sy, sz, split_middle, split_far);
                 show = outdoors;
             }
         }
