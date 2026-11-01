@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "ebbb718930aa6594c86cc6809a15bfcb19fc72b3",
+      "sha": "39f8651ca59db4761006cd7f2efb9872c49a8581",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -712,6 +712,13 @@
             "patches/recompcore/0206-Aurora-the-HD-look-s-shading-leaves-the-effects-drawn-over-the-scene-alone.patch"
           ],
           "evidence": "pdale-boop's: the HD look's sun shadows (the shadow map's and the screen's), occlusion and cloud shadows, worked out after the scene from its depth, leave the effects drawn over it alone, as Wind Waker HD draws them after its lighting: Link's cast shadow had been drawn across the spin attack's glowing rings. A 3D draw that is blended, tests depth and writes none (not the sea's surf, the GameCube's own dst-alpha shadows, what has no depth test, or a skinned model's eyes and mouth) is drawn again with its own pipeline into a mask over black against the finished depth, 5% of its distance further back so what lies on a surface keeps its shade; the shading takes away twice the mask's brightest channel, within 3,000 units. Arch Linux (Ryzen 9 9900X, RTX 5070 Ti, Vulkan), rendered from Dale's charged spin attack state against the same build without it, frames matched by content: Link's shadow no longer crosses the rings and burst (the changed pixels, 1.2-4.2% of the frame, are within 3 steps of the sun-shadows-off frame for about 90% of them), Link's shadow on the grass and the rest of the frame unchanged but for a grass fringe at a cliff's edge; with the sun shadows off, 0.0-0.3% changed (the occlusion and cloud shadows on the rings). Windows and Mac not yet checked."
+        },
+        "hd_facing_term": {
+          "runtime": "39f8651ca59db4761006cd7f2efb9872c49a8581",
+          "tracked_patches": [
+            "patches/recompcore/0207-Sun-shadows-Wind-Waker-HD-s-facing-term-and-its-light-for-the-hour.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_FACING (off by default) shades what faces away from the sun, from the scenery's smooth normals made on the CPU; characters, marked in the sea mask, keep their own shading; aurora_set_sun_palette multiplies the shade by HD's ambient over its sunlight for the hour (stages.bin version 3); the gap fill off (it shaded Link's own front); the near slope term 20. Windows 11 (RTX 5070 Ti, Direct3D 12): Outset's bridge and east wall at 10:00 against Cemu's HD."
         }
       }
     },

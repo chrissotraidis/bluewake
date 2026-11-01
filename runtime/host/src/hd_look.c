@@ -1379,6 +1379,50 @@ static u8 sky_gam(float v) {
     return (u8)(g > 255.0f ? 255.0f : g);
 }
 
+// HD's light for the sun shadows (aurora_set_sun_palette), from each palette
+// the game is blending, blended as the brightness is: the light from the sky
+// HD's shade takes from above (its Pale entry's shadow colour, kept linear),
+// the scenery's ambient, which its shade takes from the side (BG0 C0 times its
+// factor), and the sun's light on scenery (BG0 K0 times its factor). Read from
+// HD's terrain shaders in Cemu: a flat surface in shade takes the shadow colour,
+// a wall half of it and half BG0 C0, and a lit one BG0 K0 times its factor (3
+// at noon). Only with stages.bin version 3 (the shadow colour in it).
+static void sky_sun_palette(CPUState* cpu, bool on) {
+    static bool s_sent;
+    int pale[4];
+    float ab, cb;
+    bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_blend_state(cpu, true, pale, &ab, &cb);
+    for (int i = 0; ok && i < 4; ++i)
+        ok = pale[i] >= 0;
+    if (!ok) {
+        if (s_sent)
+            aurora_set_sun_palette(0, NULL, NULL, NULL);
+        s_sent = false;
+        return;
+    }
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    float v[3][4][3];  // sky, ground, lit; for each of the four palettes
+    for (int i = 0; i < 4; ++i) {
+        const u8* entry = hd_pale + (u32)pale[i] * 0x2Cu;
+        const u8* extra = sky_extra_of(pale[i]);
+        const float ground = sky_factor_at(pale[i], 2u), lit = sky_factor_at(pale[i], 3u);
+        for (int c = 0; c < 3; ++c) {
+            v[0][i][c] = extra[c] / 255.0f;
+            v[1][i][c] = sky_lin(entry[0x06 + c]) * ground;
+            v[2][i][c] = sky_lin(entry[0x09 + c]) * lit;
+        }
+    }
+    float out[3][3];
+    for (int k = 0; k < 3; ++k)
+        for (int c = 0; c < 3; ++c) {
+            const float prev = v[k][0][c] + ab * (v[k][1][c] - v[k][0][c]);
+            const float curr = v[k][2][c] + ab * (v[k][3][c] - v[k][2][c]);
+            out[k][c] = prev + cb * (curr - prev);
+        }
+    aurora_set_sun_palette(1, out[0], out[1], out[2]);
+    s_sent = true;
+}
+
 static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
 // The Pale entries written last (the game's light's four, then the scenery's)
@@ -1563,6 +1607,7 @@ static void sky(CPUState* cpu) {
     g_sky_shown = g_sky && pale != 0u;
     // HD's brightness goes with its palettes: only while they are in place.
     const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
+    sky_sun_palette(cpu, g_sky_shown);
     sky_linear(cpu, pale, virt, g_sky_shown, sky_gain(exposure));
     // The schedule goes with the palettes (back to the GameCube's when they go).
     sky_schedule(cpu, g_sky_shown);

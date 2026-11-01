@@ -277,3 +277,9 @@ shading takes away as much of its shade as they make up (their brightest channel
 what has no depth test (the sky's clouds) and a character's eyes and mouth; the effects are drawn 5% of their distance
 further back (`DOL_AURORA_EFFECT_MASK_PUSH`), so what lies on a surface keeps its shade.
 `DOL_AURORA_EFFECT_MASK_DEBUG=1` shows in red what the sun shadows leave.
+
+Patch 0207 adds Wind Waker HD's facing term to the sun shadows (off by default, `DOL_AURORA_SUN_SHADOW_FACING=1`):
+what faces away from the sun is in shade too, from the scenery's smooth normals made on the CPU while it is on,
+then HD's terrain curve. Characters, marked in the sea mask, keep their own shading. `aurora_set_sun_palette` gives
+the shade HD's light for the hour: its ambient (the palette's shadow colour from above, BG0 C0 from the side) over
+its sunlight. The gap fill is off (it shaded Link's own front) and the slope term is 20 near the camera as far off.
