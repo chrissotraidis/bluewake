@@ -1,6 +1,6 @@
 # PRD — Outset game-thread follow-up
 
-Status: In progress (M2)  
+Status: Retained stack (+1.8%); rendered checkpoint run pending  
 Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured baseline is the combined [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack, re-measured on a control build of [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0.  
 Scope: the CPU cost of Outset's game thread on the Steam Deck. Excluded: Smooth Motion and GPU pacing ([#504](https://github.com/chrissotraidis/bluewake/pull/504)), and build-recipe changes.
 
@@ -32,7 +32,8 @@ So the 13% has to come from costs every scene pays, removed one at a time withou
 | No game function dominates | Top: `calcWeightEnvelopeMtx` 2.1%, then collision checks ≤ 1.5% | Hooking one game function cannot close the gap; [#436](https://github.com/chrissotraidis/bluewake/pull/436) showed a collision hook can even be slower |
 | Outset is "more of everything" than the ocean | 131 M vs 103 M cycles per frame | Target costs every scene pays |
 | The runtime's shared costs are ≈ 44 M per frame, ≈ 8–12 M of it removable | Survey of runtime and host symbols | Worth 6–9%: several changes, not one |
-| The direct-call check is the largest removable piece | Ceiling test: +3.1% (Game Mode), +4.5% (rendered) | First candidate, now written |
+| The direct-call check is the largest removable piece | Ceiling test: +3.1% (Game Mode), +4.5% (rendered) | First candidate |
+| An exact smaller check gains +0.7%; with the actor-search lookup inlined, +1.8% | Game Mode A/B/A against the control | Retained; most of the ceiling's gain was the interrupt test it skipped |
 
 Details and raw numbers are in the [tracker's evidence ledger](PROGRESS.md#evidence-ledger).
 
@@ -59,5 +60,6 @@ A candidate may help Outset without reaching 30 FPS: relative gain and exactness
 
 - **Stage select fix dropped:** a debugging tool, off by default. Its handoff is kept outside this PR.
 - **Candidates must be exact:** the unsafe ceiling changed when interrupts are taken, so its guest state drifted. A shippable change keeps every runtime test.
+- **Retain at +1.8% (2026-10-31):** slightly under the 2% target, but exact and beyond noise. The interrupt test is the next, separate change.
 - **One PR:** the code is stacked on this PR, as #504 did. [#528](https://github.com/chrissotraidis/bluewake/pull/528) was closed.
 - **Platform:** first-revision Steam Deck, current SteamOS, Game Mode, render scale 3.

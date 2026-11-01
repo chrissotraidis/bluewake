@@ -1,6 +1,6 @@
 # TECH_PLAN — Outset game-thread follow-up
 
-Status: In progress (M2: first candidate written, Deck A/B pending)  
+Status: Retained stack, +1.8% Outset game FPS in Game Mode; rendered checkpoint run pending  
 Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; control build = [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0 (local `f4bda45`)  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -50,6 +50,19 @@ So what remains is to make the question itself smaller, without moving it or inl
 
 The ceiling clears the 2% bar. It also shows what must not be cut: its guest checkpoints drifted from the control in every scene, because skipping the interrupt test changes when interrupts are taken. **The shippable check keeps every runtime test and removes only work whose answer is already known.**
 
+## Results
+
+Every A/B ran in Game Mode from the worst-angle Outset state, launched through the Steam shortcut, in the order control → candidate → control, with 3 × 15 s windows per launch. All builds shared the control's composite profile (`--reuse`).
+
+| Build | What changed | Game FPS | Change | Spread | Lesson |
+|---|---|---:|---:|---:|---|
+| Ceiling (not shippable) | Check reduced to depth, exception, budget, one flag | 26.4 → 27.2 | +3.1% | 0.5 | The bound; skipping interrupt tests drifts guest state |
+| v1 | Range tests settled at build time | 26.6 → 25.8 | **−2.9%** | 0.5 | The plain check was inlined at ≈ 448 sites per chunk (+11% hot code): layout, not logic |
+| v2 | v1, both checks out of line and `hot` | 26.5 → 26.7 | +0.7% | 0.6 | Exact, but too small alone |
+| **Stack (retained)** | **v2 + actor-search lookup inlined** | **26.1 → 26.6** | **+1.8%** | 0.4 | Two exact shared-cost cuts add up |
+
+Considered and dropped: the paired-single plain-float path already exists; only call overhead remains (≈ 0.2 M cycles per frame), and inlining such helpers was slower in October.
+
 ## Approach
 
 Of the ≈ 17 loads per call, two groups are known before the game runs:
@@ -87,6 +100,8 @@ flowchart TD
 | [`runtime/host/src/main.c`](../../../runtime/host/src/main.c) | `_Static_assert` that those constants equal `draw_tags.h`'s | A future edit to one list cannot silently desynchronize the other |
 | [`cmake/composite/direct_calls.c`](../../../cmake/composite/direct_calls.c) | Every path that disables direct calls also clears `bw_host_skip_fast` | Makes "pointer set" a valid stand-in for the dropped enabled/callback tests |
 | [`tests/direct_calls_test.c`](../../../tests/direct_calls_test.c) | v3 cases on the shared ranges; plain vs full compared for six addresses in all 256 host/CPU states | Proves the two checks give the same answer, not just that each compiles |
+| [`cmake/composite/direct_calls.h`](../../../cmake/composite/direct_calls.h) `noinline, hot` on both checks | Keep both out of line in the hot section, as the single check was | v1 inlined the plain check everywhere and ran 2.9% slower; the reused profile does not know the new names |
+| [`runtime/host/src/main.c`](../../../runtime/host/src/main.c) `bw_search_word` | Always inline (seven call sites, one function) | Every sampled lookup took the plain-RAM path; ≈ 60% of its samples were the call and three saved registers |
 | [`linux/CMakeLists.txt`](../../../linux/CMakeLists.txt), [`linux-host.yml`](../../../.github/workflows/linux-host.yml) | Run `bluewake_direct_calls_test` in the Linux host job (it already ran on Windows) | Release build, so the constant addresses take the plain path, as in the game module |
 
 No handshake change. [#524](https://github.com/chrissotraidis/bluewake/pull/524) touches the same files for the stage select; whichever merges second rebases.
@@ -108,19 +123,18 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPU
 
 | Layer | Method | Required evidence | Status |
 |---|---|---|---|
-| Unit | `direct_calls_test`, -O0 and -O2/Release, Linux and Windows CI | Plain = full in every state | Passing locally |
+| Unit | `direct_calls_test`, -O0 and -O2/Release, Linux and Windows CI | Plain = full in every state | Passing locally and in CI |
 | Exactness | render_bench, five states | Guest checkpoints identical to the control in every scene | Pending |
 | Safety | `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run | Zero unsafe answers | Pending |
-| Performance | Game Mode A/B/A (Outset), rendered A/B/B/A ≥ 5 pairs | Outset gain above 2% and the A/A spread | Pending |
+| Performance | Game Mode A/B/A (Outset), rendered A/B/B/A ≥ 5 pairs | Outset gain above 2% and the A/A spread | Game Mode +1.8% (beyond spread); rendered pending |
 | Regression | Five-scene tour, Outset walk | No scene beyond noise; no player-visible issue | Pending |
 
 ## Next steps
 
-1. **M2-T03:** finish the candidate module over the control folder (same composite profile) and record its hashes.
-2. **M3-T01, Game Mode:** control → candidate → control from the worst-angle Outset state. Expect +1–2%: the ceiling was +3.1%, and the interrupt tests stay.
-3. **M3-T01, exactness:** render_bench across the five states with identical checkpoints, then the verify run.
-4. **Decide:** retain if the gain clears 2% and the spread. If short, stack the next shared costs (paired-single float path, actor-search reads) and measure them together.
-5. **Then:** count the dispatch-loop edges and look at the GX command stream before proposing changes there.
+1. **Exactness:** the rendered run across the five states (in progress) must show guest checkpoints identical to the control in every scene; then one `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run with zero unsafe answers.
+2. **Player check:** an Outset walk on the Deck with the stack.
+3. **Follow-up, separate change:** the interrupt test. A host-maintained "interrupt may be pending" word would replace three of its reads. It needs every write site kept in sync (≈ 17 in `main.c`, 5 in RecompCore's `interrupts.c`), a RecompCore companion PR and a handshake bump coordinated with [#524](https://github.com/chrissotraidis/bluewake/pull/524). Estimated ≈ +1%.
+4. **Later:** count the dispatch-loop edges and look at the GX command stream.
 
 ## Implementation order
 

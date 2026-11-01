@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: In progress (M2)  
+Status: Retained stack (+1.8% Outset game FPS); rendered checkpoint run pending  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -26,13 +26,13 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 
 - [x] M2-T01: Add the smallest source change matching the selected cost and preserve fallback behavior. The direct-call range tests settled at build time (`3a1b500`): constant targets outside the two fixed ranges take `bw_direct_call_ready_plain`; everything else keeps the full check.
 - [x] M2-T02: Add or extend the surface's focused correctness test. `direct_calls_test` compares the plain and full answers in all 256 host/CPU states; passes at -O0 and -O2. CI: Windows host job (existing) and, new, the Linux host job (Release, so constant addresses take the plain path).
-- [ ] M2-T03: Build matched control/candidate artifacts and record identities. Candidate module building over the control folder with the same composite profile (local `bench/503-plain` = control + `3a1b500`).
+- [x] M2-T03: Build matched control/candidate artifacts and record identities. Final stack AppImage `47c7f3077292` (local `bench/503-plain` = control + `3a1b500`, `6ce8b35`, `1c41c6b`), same composite profile `35c4f7bc` as the control.
 
 ### M3: Qualify and decide (depends: M2)
 
-- [ ] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints. Also a Game Mode A/B (control → candidate → control, worst-angle Outset state) and `BLUEWAKE_DIRECT_SKIP_VERIFY=1` with zero unsafe answers.
+- [ ] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints. Game Mode A/B done: **+1.8%** (beyond the spread). Rendered run (3 pairs, five states) in progress; `BLUEWAKE_DIRECT_SKIP_VERIFY=1` run still to do.
 - [ ] M3-T02: Run the full five-scene rendered tour and focused CI tests.
-- [ ] M3-T03: Perform the Outset walk/camera player test and record retain/reject reasoning.
+- [ ] M3-T03: Perform the Outset walk/camera player test and record retain/reject reasoning. Decision (2026-10-31): **retain the stack** at +1.8%, slightly under the 2% target, as an exact improvement; the remaining saving (the interrupt test) is a separate follow-up.
 
 ## Evidence ledger
 
