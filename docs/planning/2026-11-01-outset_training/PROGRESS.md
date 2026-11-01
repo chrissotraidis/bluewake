@@ -1,7 +1,17 @@
 # PROGRESS — Train the optimization profile on Outset
 
-Status: M3 measured: ≤ +0.4%, not consistent in the player's setup  
+Status: Closed: ≤ 0.4%, not consistent; planning record only (builder code removed)  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
+
+## Outcome (2026-11-01): closed, planning record only
+
+Training the optimization profile on Outset gives **≤ 0.4% game FPS, not consistent** in the player's setup (16:9, widescreen mod): the candidate led in 2 of 3 launch pairs. Without mods at 4:3 it led in 3 of 3, by +0.2%. That doesn't meet the acceptance rule, so the default training stays as it is.
+
+**The experiment's builder code was removed from this PR.** It added `--train-state FILE` to the Linux builder: a private save state played as an extra training stop, with the mods playback's mods and the state in the training fingerprint, plus builder tests. It stays in this branch's history for anyone repeating the experiment:
+- [`b56c94e`](https://github.com/irregularthanis/bluewake/commit/b56c94e9c) — `--train-state`
+- [`88b258e`](https://github.com/irregularthanis/bluewake/commit/88b258e4b) — state stops use the build's mods
+
+This PR merges only this planning record.
 
 ## Milestones
 
@@ -21,8 +31,8 @@ Status: M3 measured: ≤ +0.4%, not consistent in the player's setup
 
 ### M3: Decide (depends: M2)
 
-- [ ] M3-T01: Game Mode (≥ 6 interleaved launches) and render_bench (checkpoints, five scenes) for the M2 build.
-- [ ] M3-T02: Retain or record no-go.
+- [x] M3-T01: Game Mode (≥ 6 interleaved launches) for the M2 build, at 4:3 and at 16:9 with the widescreen mod. render_bench skipped: no gain to qualify.
+- [x] M3-T02: Retain or record no-go. **No-go**: the default training is unchanged and the builder code is removed; this plan merges as a record.
 
 ## Evidence ledger
 

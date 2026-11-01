@@ -1,8 +1,18 @@
 # TECH_PLAN — Train the optimization profile on Outset
 
-Status: M2-T01 done; builds next  
+Status: Closed: ≤ 0.4%, not consistent; planning record only (builder code removed)  
 Source: BlueWake `main` at `6b429fea9e60`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
+
+## Outcome (2026-11-01): closed, planning record only
+
+Training the optimization profile on Outset gives **≤ 0.4% game FPS, not consistent** in the player's setup (16:9, widescreen mod): the candidate led in 2 of 3 launch pairs. Without mods at 4:3 it led in 3 of 3, by +0.2%. That doesn't meet the acceptance rule, so the default training stays as it is.
+
+**The experiment's builder code was removed from this PR.** It added `--train-state FILE` to the Linux builder: a private save state played as an extra training stop, with the mods playback's mods and the state in the training fingerprint, plus builder tests. It stays in this branch's history for anyone repeating the experiment:
+- [`b56c94e`](https://github.com/irregularthanis/bluewake/commit/b56c94e9c) — `--train-state`
+- [`88b258e`](https://github.com/irregularthanis/bluewake/commit/88b258e4b) — state stops use the build's mods
+
+This PR merges only this planning record.
 
 ## Where training comes from
 
@@ -27,7 +37,7 @@ The Linux builder builds an instrumented module, plays it headless, merges the c
    The fingerprint (`TRAINING_VERSION`) changes so old profiles are not reused.
 4. **Measure:** a full build of each, the same commit, only the training different.
 
-## Changes (planned)
+## Changes (tried, then removed)
 
 | File | Change | Why |
 |---|---|---|
@@ -53,6 +63,11 @@ The Linux builder builds an instrumented module, plays it headless, merges the c
 | ~~M1~~ | — | Dropped after M0 |
 | M2 | M0 | Outset play stop with the villagers, with tests |
 | M3 | M2 | Full build and A/B; retain or record no-go |
+
+## Ideas not pursued
+
+- **Sample-based layout from Deck profiles (AutoFDO/BOLT):** it would capture what the Deck's Zen 2 actually stalls on, but that CPU has no branch-record hardware (LBR), so the layout data would be coarse. It also needs a new toolchain step.
+- **Scripted runs into the busiest view:** the state's three runs leave the skinning-heavy part of Outset under-weighted (1.81% of training against 5.26% of Outset). Given the small result, it's not pursued.
 
 ## Gaps
 

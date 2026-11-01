@@ -115,55 +115,6 @@ class LinuxContainerMountTest(unittest.TestCase):
                     (root, "rw"), (disc, "ro")])
 
 
-class TrainStateTest(unittest.TestCase):
-    """--train-state: a private save state played as one more training stop."""
-
-    @staticmethod
-    def state(path, retrace):
-        import gzip
-        with gzip.open(path, "wb") as out:
-            out.write(b"BWSTATE1" + bytes(60) + retrace.to_bytes(8, "little") + b"rest")
-
-    def test_stop_runs_from_the_states_own_retrace(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "outset.bwstate"
-            self.state(path, 9919)
-            builder = BUILD.Builder.__new__(BUILD.Builder)
-            self.assertEqual(builder.state_retrace(path), 9919)
-            moves, end = builder.state_stop(path)
-            self.assertEqual(moves, ["10369:0:300:0:127", "10699:0:300:110:60", "11029:0:300:-110:60"])
-            self.assertEqual(end, 9919 + BUILD.Builder.TOUR_STOP)
-
-    def test_stops_play_with_the_mods_playbacks_mods(self):
-        builder = BUILD.Builder.__new__(BUILD.Builder)
-        builder.mods = True
-        self.assertEqual(builder.state_stop_mods(), BUILD.Builder.TRAINING_MODS)
-        builder.mods = False  # --no-mods
-        self.assertIsNone(builder.state_stop_mods())
-
-    def test_a_file_that_is_not_a_state_is_refused(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "not.bwstate"
-            import gzip
-            with gzip.open(path, "wb") as out:
-                out.write(b"NOTSTATE" + bytes(80))
-            with self.assertRaises(BUILD.BuildError):
-                BUILD.Builder.state_retrace(path)
-
-    def test_states_are_mounted_read_only_in_the_container(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary).resolve()
-            root, out, disc, state = base / "checkout", base / "out", base / "disc.iso", base / "s.bwstate"
-            root.mkdir()
-            out.mkdir()
-            disc.touch()
-            state.touch()
-            with patch.object(BUILD, "ROOT", root), \
-                    patch.object(BUILD, "_git_metadata_paths", return_value=[]):
-                self.assertEqual(BUILD.container_mounts(disc, out, [state]), [
-                    (root, "rw"), (out, "rw"), (disc, "ro"), (state, "ro")])
-
-
 class LinuxContainerRunTest(unittest.TestCase):
     """The Docker layer wraps the CLI; it does not reinterpret the build."""
 
