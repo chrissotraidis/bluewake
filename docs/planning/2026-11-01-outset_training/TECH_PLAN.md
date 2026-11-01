@@ -1,6 +1,6 @@
 # TECH_PLAN — Train the optimization profile on Outset
 
-Status: M0 done; M2 next  
+Status: M2-T01 done; builds next  
 Source: BlueWake `main` at `6b429fea9e60`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -31,8 +31,8 @@ The Linux builder builds an instrumented module, plays it headless, merges the c
 
 | File | Change | Why |
 |---|---|---|
-| `scripts/linux/build.py` | `TRAINING_TOUR` gains an Outset play stop; `TRAINING_VERSION` bump | More Outset play in the profile |
-| `tests/` (builder tests) | The tour's generated warps and moves for the new stop; fingerprint changes with the tour | Builder logic covered in CI without game data |
+| `scripts/linux/build.py` | `--train-state FILE` (repeatable): `state_retrace`, `state_stop`, an extra playback per state in `train`, the state's hash in `training_fingerprint`, a read-only container mount, and argument checks | Outset play as players see it (the busy view the tour does not reach), without changing the default training |
+| `tests/test_linux_ci_container.py` | The stop's moves and end from a synthetic state; non-states refused; states mounted read-only | Builder logic covered in CI (audit workflow) without game data |
 | `scripts/profile_coverage.py` (new, optional) | Ranks profile counts against a sample list | Repeatable step 1 |
 
 ## Verification

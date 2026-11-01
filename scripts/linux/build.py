@@ -34,6 +34,7 @@ it is yours alone. Never share or upload it. Your saves live in
 """
 import argparse
 import concurrent.futures
+import gzip
 import hashlib
 import json
 import os
@@ -244,7 +245,7 @@ def _git_metadata_paths():
     return paths
 
 
-def container_mounts(disc, out):
+def container_mounts(disc, out, states=()):
     """Ordered bind mounts; later mounts narrow access granted by parents."""
     disc = disc.resolve()
     out = out.resolve()
@@ -254,6 +255,8 @@ def container_mounts(disc, out):
         mounts.append((out, "rw"))
     # The exact file is over-mounted read-only even if its parent is writable.
     mounts.append((disc, "ro"))
+    # --train-state files are private game data like the disc: read-only, each exact file.
+    mounts.extend((Path(state).resolve(), "ro") for state in states)
     return mounts
 
 
@@ -266,6 +269,9 @@ def run_in_ci_container(args):
         die("--ci-container requires Docker; install it and start the Docker daemon")
     if not args.disc.resolve().is_file():
         die(f"disc image not found: {args.disc.resolve()}")
+    for state in getattr(args, "train_state", None) or []:
+        if not Path(state).resolve().is_file():
+            die(f"--train-state: no such file: {Path(state).resolve()}")
 
     daemon = subprocess.run([docker, "info"], capture_output=True, text=True)
     if daemon.returncode:
@@ -288,7 +294,7 @@ def run_in_ci_container(args):
     command = [docker, "run", "--rm", "--init", "--platform", "linux/amd64",
                "--user", f"{os.getuid()}:{os.getgid()}",
                "--env", "HOME=/tmp", "--env", f"{CI_CONTAINER_ENV}=1"]
-    for path, mode in container_mounts(args.disc, args.out):
+    for path, mode in container_mounts(args.disc, args.out, getattr(args, "train_state", None) or []):
         command.extend(["--volume", f"{path}:{path}:{mode}"])
     command.extend(["--workdir", str(Path.cwd().resolve()), CI_CONTAINER_IMAGE,
                     "python3", str(Path(__file__).resolve()), *sys.argv[1:]])
@@ -1000,6 +1006,21 @@ int main(void) {{
     # alongside the mods playback. Each playback is one game thread.
     TOUR_STATE_AT = TOUR_START - 100
 
+    @staticmethod
+    def state_retrace(path):
+        """The retrace a BlueWake save state was taken at (its header, as the app writes it)."""
+        with gzip.open(path, "rb") as handle:
+            header = handle.read(76)
+        if len(header) < 76 or not header.startswith(b"BWSTATE1"):
+            die(f"{path} is not a BlueWake save state")
+        return int.from_bytes(header[68:76], "little")
+
+    def state_stop(self, path):
+        """--train-state: the same three runs as a tour stop, from the state's own retrace."""
+        start = self.state_retrace(path)
+        moves = [f"{start + 450}:0:300:0:127", f"{start + 780}:0:300:110:60", f"{start + 1110}:0:300:-110:60"]
+        return moves, start + self.TOUR_STOP
+
     def training_tour(self, places):
         """The warps to `places` from TOUR_START, the runs at each stop, and the retraces it ends at."""
         warps, moves = [], []
@@ -1086,6 +1107,9 @@ int main(void) {{
             script = ROOT / "scripts/windows/cache_ops.py"
             key.update(script.relative_to(ROOT).as_posix().encode())
             key.update(script.read_bytes())
+        for state in getattr(self.args, "train_state", None) or []:
+            key.update(b"train-state")
+            key.update(sha256_file(Path(state)).encode())
         key.update(Path(__file__).read_bytes())
         return key.hexdigest()
 
@@ -1125,6 +1149,11 @@ int main(void) {{
             tours = [pool.submit(self.training_run, exe, module, attempt / f"run-tour{i + 1}", None,
                                  places=places, load_state=state)
                      for i, places in enumerate(self.tour_groups())]
+            # --train-state: private save states played as extra stops (a scene as players
+            # see it, for example a busy view the tour's warps do not reach).
+            tours += [pool.submit(self.training_run, exe, module, attempt / f"run-state{i + 1}", None,
+                                  load_state=Path(extra))
+                      for i, extra in enumerate(getattr(self.args, "train_state", None) or [])]
             for job in tours + ([mods] if mods else []):
                 raw += job.result()
         print(f"training playbacks done ({int(time.monotonic() - start) // 60} min, "
@@ -1161,6 +1190,8 @@ int main(void) {{
         if tour:
             places = self.TRAINING_TOUR
         warps, tour_moves, tour_end = self.training_tour(places) if places else ([], [], self.TRAINING_RETRACES)
+        if load_state and not places:
+            tour_moves, tour_end = self.state_stop(load_state)
         if save_state:
             tour_end = self.TOUR_STATE_AT + 2
         opening = [] if load_state else [f"{n}:0x0100:2" for n in range(17800, 22001, 150)] + self.TRAINING_RUN
@@ -1471,6 +1502,9 @@ def main():
                         help="after a change to the app's own code (runtime/host/src, linux/src): keep the "
                              "optimization profile of the last build in --out instead of training again, so the "
                              "game module recompiles only what the change touches and the app is rebuilt")
+    parser.add_argument("--train-state", action="append", default=[], metavar="FILE",
+                        help="also train from this BlueWake save state (repeatable): a stop of the "
+                             "training tour played from the state's own retrace; private, like the disc")
     parser.add_argument("--tour-playbacks", type=int, default=None,
                         help="training: how many playbacks play the tour at once (default: logical CPUs / 3)")
     parser.add_argument("--prepared-blocks", action="store_true",
@@ -1593,6 +1627,11 @@ def main():
         args.behaviour_timing = False
     if args.host_only and (args.retrain or args.no_train or args.no_pgo):
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
+    if args.train_state and (args.host_only or args.no_train or args.no_pgo):
+        parser.error("--train-state adds to the training; it needs a build that trains (not --host-only or --no-train)")
+    for state in args.train_state:
+        if not Path(state).is_file():
+            parser.error(f"--train-state: no such file: {state}")
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
     if args.fixed_mem1 and not args.fixed_cpu:

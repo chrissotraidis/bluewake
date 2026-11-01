@@ -1,6 +1,6 @@
 # PROGRESS — Train the optimization profile on Outset
 
-Status: M0 done; M1 dropped; M2 next  
+Status: M2-T01 done (`--train-state`); M2-T02 builds next  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -16,8 +16,8 @@ Status: M0 done; M1 dropped; M2 next
 
 ### M2: Outset play in the tour (depends: M0)
 
-- [ ] M2-T01: Add Outset play with the villagers on screen (actor-dense: skinning, animation, lighting); bump `TRAINING_VERSION`; builder tests.
-- [ ] M2-T02: Full build and A/B against the control.
+- [x] M2-T01: Add Outset play with the villagers on screen. Done as `--train-state FILE` (Linux builder): a private save state played as one more stop, from its own retrace, with the tour's three runs; mounted read-only in the CI container and part of the training fingerprint. The default training is unchanged, so `TRAINING_VERSION` stays. Three builder tests.
+- [ ] M2-T02: Two full builds of one commit (#503's stack with this change): the control with the default training, the candidate adding `--train-state` with #503's worst-angle Outset state. Then the M0 coverage report and the A/B.
 
 ### M3: Decide (depends: M2)
 
