@@ -134,6 +134,13 @@ class TrainStateTest(unittest.TestCase):
             self.assertEqual(moves, ["10369:0:300:0:127", "10699:0:300:110:60", "11029:0:300:-110:60"])
             self.assertEqual(end, 9919 + BUILD.Builder.TOUR_STOP)
 
+    def test_stops_play_with_the_mods_playbacks_mods(self):
+        builder = BUILD.Builder.__new__(BUILD.Builder)
+        builder.mods = True
+        self.assertEqual(builder.state_stop_mods(), BUILD.Builder.TRAINING_MODS)
+        builder.mods = False  # --no-mods
+        self.assertIsNone(builder.state_stop_mods())
+
     def test_a_file_that_is_not_a_state_is_refused(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "not.bwstate"

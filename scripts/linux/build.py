@@ -1006,6 +1006,14 @@ int main(void) {{
     # alongside the mods playback. Each playback is one game thread.
     TOUR_STATE_AT = TOUR_START - 100
 
+    # The mods the mods playback trains; --train-state stops play with them too, so a
+    # scene's mod variants (widescreen's chunks, say) are trained as players run them.
+    TRAINING_MODS = "widescreen,betterww"
+
+    def state_stop_mods(self):
+        """--train-state: the stops play with the mods playback's mods when the build has mods."""
+        return self.TRAINING_MODS if self.mods else None
+
     @staticmethod
     def state_retrace(path):
         """The retrace a BlueWake save state was taken at (its header, as the app writes it)."""
@@ -1143,7 +1151,7 @@ int main(void) {{
         # as soon as it has.
         with concurrent.futures.ThreadPoolExecutor() as pool:
             plain = pool.submit(self.training_run, exe, module, attempt / "run-plain", None, save_state=state)
-            mods = pool.submit(self.training_run, exe, module, attempt / "run-mods", "widescreen,betterww") \
+            mods = pool.submit(self.training_run, exe, module, attempt / "run-mods", self.TRAINING_MODS) \
                 if self.mods else None
             raw = plain.result()
             tours = [pool.submit(self.training_run, exe, module, attempt / f"run-tour{i + 1}", None,
@@ -1151,8 +1159,8 @@ int main(void) {{
                      for i, places in enumerate(self.tour_groups())]
             # --train-state: private save states played as extra stops (a scene as players
             # see it, for example a busy view the tour's warps do not reach).
-            tours += [pool.submit(self.training_run, exe, module, attempt / f"run-state{i + 1}", None,
-                                  load_state=Path(extra))
+            tours += [pool.submit(self.training_run, exe, module, attempt / f"run-state{i + 1}",
+                                  self.state_stop_mods(), load_state=Path(extra))
                       for i, extra in enumerate(getattr(self.args, "train_state", None) or [])]
             for job in tours + ([mods] if mods else []):
                 raw += job.result()
