@@ -36,12 +36,12 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 
 ### M4: The interrupt test (depends: M3; known-good tag `outset-503-stack1`)
 
-Specification: [TECH_PLAN M4](TECH_PLAN.md#m4-the-interrupt-test-specification).
+Specification: [TECH_PLAN M4](TECH_PLAN.md#m4-the-interrupt-test-specification-closed-as-no-go).
 
 Acceptance: the candidate ahead of the control in every interleaved Game Mode launch (at least six), identical checkpoints, zero unsafe verify answers, focused tests in CI. No minimum gain.
 
 - [x] M4-T01: Bound the gain: a diagnostic module whose plain check reads one host flag instead of the four interrupt values (local `bench/503-irq-ceiling`, not shippable), A/B against the tagged stack. **+0.3%, not consistent (lost one of three pairs): no-go.**
-- [x] M4-T02: Map every write to the four values and design the word ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification)). Every RecompCore write is covered by a host path, so no RecompCore change is needed. `host_dsp_interrupt` runs on the game thread in both DSP modes, so plain stores suffice.
+- [x] M4-T02: Map every write to the four values and design the word ([specification](TECH_PLAN.md#m4-the-interrupt-test-specification-closed-as-no-go)). Every RecompCore write is covered by a host path, so no RecompCore change is needed. `host_dsp_interrupt` runs on the game thread in both DSP modes, so plain stores suffice.
 - [ ] ~~M4-T03~~: Not implemented: M4-T01 showed even a perfect word does not beat the stack consistently.
 - [ ] ~~M4-T04~~: Not needed.
 
