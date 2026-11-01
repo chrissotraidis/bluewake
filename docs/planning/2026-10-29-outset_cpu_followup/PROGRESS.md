@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: Complete: +1.8% Game Mode, +1.6% rendered, checkpoints identical, verify clean, player-checked  
+Status: Stack 1 complete (tag `outset-503-stack1`: +1.4–1.8% Game Mode, +1.6% rendered, exact); M4 in progress  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -33,6 +33,15 @@ PC mapping and opt-in routing counters may run in parallel; both integrate into 
 - [x] M3-T01: Run at least five rendered A/B/B/A pairs at Outset with matching checkpoints. Game Mode A/B done: **+1.8%** (beyond the spread). Rendered run (3 pairs, five states): +1.6% overall, Outset +1.9%, checkpoints identical. `BLUEWAKE_DIRECT_SKIP_VERIFY=1`: 1.1 billion inline answers, 0 unsafe.
 - [x] M3-T02: Run the full five-scene rendered tour and focused CI tests. No scene slower; checkpoints identical; `direct_calls_test` in Windows and Linux CI.
 - [x] M3-T03: Perform the Outset walk/camera player test and record retain/reject reasoning. Player walk on the Deck (2026-11-01): no visual, input, audio or timing issue. Decision (2026-10-31): **retain the stack** at +1.8%, slightly under the 2% target, as an exact improvement; the remaining saving (the interrupt test) is a separate follow-up.
+
+### M4: The interrupt test (depends: M3; known-good tag `outset-503-stack1`)
+
+Acceptance: the candidate ahead of the control in every interleaved Game Mode launch (at least six), identical checkpoints, zero unsafe verify answers, focused tests in CI. No minimum gain.
+
+- [ ] M4-T01: Bound the gain: a diagnostic module whose plain check reads one host flag instead of the four interrupt values (local `bench/503-irq-ceiling`, not shippable), A/B against the tagged stack.
+- [ ] M4-T02: Map every write to the four values (host `main.c`, RecompCore `interrupts.c`) and design one host-maintained "interrupt may be pending" word.
+- [ ] M4-T03: Implement with focused tests; RecompCore companion PR and pin; handshake version coordinated with #524.
+- [ ] M4-T04: Qualify: Game Mode launches, checkpoints, verify run, player check.
 
 ## Evidence ledger
 

@@ -1,6 +1,6 @@
 # TECH_PLAN — Outset game-thread follow-up
 
-Status: Retained stack: +1.8% Game Mode, +1.6% rendered (Outset +1.9%), checkpoints identical  
+Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) in progress  
 Source: BlueWake `a7731853c197cc9763a86d62e731d65ca0b25556`; control build = [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0 (local `f4bda45`)  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -137,7 +137,7 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPU
 
 1. **Safety:** done; the verify run found 0 unsafe answers in 1.1 billion.
 2. **Player check:** done, no issue.
-3. **Follow-up, separate change:** the interrupt test. A host-maintained "interrupt may be pending" word would replace three of its reads. It needs every write site kept in sync (≈ 17 in `main.c`, 5 in RecompCore's `interrupts.c`), a RecompCore companion PR and a handshake bump coordinated with [#524](https://github.com/chrissotraidis/bluewake/pull/524). Estimated ≈ +1%.
+3. **M4, in progress: the interrupt test.** A host-maintained "interrupt may be pending" word would replace three of its four reads. Before writing it, a diagnostic module bounds the gain. The real version needs every write site kept in sync (≈ 17 in `main.c`, 5 in RecompCore's `interrupts.c`), a RecompCore companion PR and a handshake bump coordinated with [#524](https://github.com/chrissotraidis/bluewake/pull/524). It is measured against the tag `outset-503-stack1`, and kept if consistent and exact, whatever the size.
 4. **Later:** count the dispatch-loop edges and look at the GX command stream.
 
 ## Implementation order

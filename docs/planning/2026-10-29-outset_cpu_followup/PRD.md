@@ -1,6 +1,6 @@
 # PRD — Outset game-thread follow-up
 
-Status: Retained stack: +1.8% Game Mode, +1.6% rendered, checkpoints identical  
+Status: Stack 1 retained (+1.4–1.8% Game Mode, +1.6% rendered, exact); M4 (interrupt test) in progress  
 Source: BlueWake `main` at `a7731853c197cc9763a86d62e731d65ca0b25556`; measured baseline is the combined [#480](https://github.com/chrissotraidis/bluewake/pull/480) → [#495](https://github.com/chrissotraidis/bluewake/pull/495) → [#501](https://github.com/chrissotraidis/bluewake/pull/501) stack, re-measured on a control build of [#504](https://github.com/chrissotraidis/bluewake/pull/504) + `main` 0.10.0.  
 Scope: the CPU cost of Outset's game thread on the Steam Deck. Excluded: Smooth Motion and GPU pacing ([#504](https://github.com/chrissotraidis/bluewake/pull/504)), and build-recipe changes.
 
