@@ -254,8 +254,9 @@ leaves the `user` folder and `portable.txt` alone.
 ## The app folder
 
 `build/linux/BlueWake/` is a personal build: `gGZLE01_recomp.so` is code
-translated from your disc and `game/` holds your disc image. Never share or
-upload it.
+translated from your disc. Never share or upload it. It holds no part of the
+disc: the first launch's setup asks for your disc image and prepares the game
+files from it into the install folder.
 
 ## The AppImage
 
@@ -268,8 +269,8 @@ Linux system: like other AppImages, compatibility is limited by the glibc and
 CPU baseline of the build host. The player's disc is not bundled, and neither
 are the files prepared from one: the first run asks for the disc and prepares
 them into the install folder (a disc and files extracted from it are never
-distributed). The app folder a folder build writes carries none of them
-either, so both kinds of build are clean.
+distributed). A folder build's app folder carries neither either, so both
+kinds of build are clean.
 
 ### Build the AppImage
 
