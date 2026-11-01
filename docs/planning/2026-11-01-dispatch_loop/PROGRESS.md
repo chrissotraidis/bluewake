@@ -1,6 +1,6 @@
 # PROGRESS — Dispatch-loop edges in Outset
 
-Status: Turn-end route closed (≤ 0.4%); M1-T03 (calls through the loop) next  
+Status: Testing the direct-call depth cap (exact by construction)  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -14,12 +14,12 @@ Status: Turn-end route closed (≤ 0.4%); M1-T03 (calls through the loop) next
 
 - [ ] M1-T01: Map the top sites to game functions and to the transform that skipped them. Done for returns: ≈ 14,500 per frame (76–89% of returns) follow calls that ran directly and were unwound by a turn end.
 - [x] M1-T02: Which device deadlines end the turns (≈ 1,890 per frame), with an opt-in deadline census. The DSP's 12,600-cycle step ends 92%.
-- [ ] M1-T03: The ≈ 9,400 calls per frame that arrive through the loop: untransformed sites, watched addresses or readiness false.
+- [x] M1-T03: The ≈ 9,400 calls per frame that arrive through the loop: ≈ 2,800 watched by design; ≈ 3,000+ indirect calls refused at the call site, most likely by the 32-call depth cap.
 
 ### M2: Bound (depends: M1)
 
 - [x] M2-T01: Bound for the largest group (returns after turn ends) via `BLUEWAKE_DSP_RATE`: +0.4%, no-go.
-- [ ] M2-T02: Bound for the calls through the loop, after M1-T03.
+- [ ] M2-T02: Depth cap 32 → 128 in the counting build: do the indirect calls and the unwound returns leave the loop?
 
 ### M3: Candidate (depends: M2)
 
@@ -34,3 +34,4 @@ Status: Turn-end route closed (≤ 0.4%); M1-T03 (calls through the loop) next
 | M1-T01 | Same census log; the counting build's generated chunks (`composite-src`, private): which return sites belong to calls the builder runs directly (`ctx->lr = RET; … if (bw_direct_call_ready…` for `bl`, `bw_call_translated(…) && ctx->pc == RET` for `bctrl`) | Static match of each counted target against the transformed sources; turn length from the cycle cap and the census's host entries | As M0-T02 | **≈ 40% of the loop's boundaries are returns after a turn ended mid-call.** Of the 9,620 returns after `bl` per frame, 7,347 (76%) are at sites whose call ran directly; of the 8,088 after `bctrl`, 7,161 (89%) are. A direct call keeps the caller's C frame, so its return can only reach the loop if that frame was unwound: a turn ended inside the callee, and every pending return then comes back through the loop (≈ 7–8 per turn end). Turns end ≈ 1,890 times per frame, averaging ≈ 8,600 guest cycles against a cap of 16,384 (`BLUEWAKE_CYCLE_CAP`), so device deadlines, not the cap, decide them. At ≈ 120 cycles per boundary, these returns cost ≈ 1.7 M cycles per frame |
 | M1-T02 | #503 stack (`cand-503`, `274b6290a1e2`) with `BLUEWAKE_DEADLINE_CENSUS=1` (existing host census, runtime); Deck log `measure-530/deadline.log` (private) | One Game Mode launch, ≈ 85 s | Worst-angle Outset state, 16:9, widescreen mod, HLE DSP | **The DSP cadence ends 92% of turns**: 3,873,605 deadline calls; DSP 3,580,635 (92.4%), audio DMA 284,463 (7.3%), VI 5,040, decrementer 2,095, clamp 1,372, cap 0. The host steps the DSP every `g_dsp_update_rate` = 12,600 guest cycles (`BLUEWAKE_DSP_RATE`), in HLE mode too; the September census found the same for LLE (94.5%). So each DSP step ends a turn, unwinds the call stack, and sends the pending returns round the loop |
 | M2-T01 (turn ends) | #503 stack (`cand-503`) with `BLUEWAKE_DSP_RATE` 12,600 (default) against 50,400, runtime only; local `measure-530/dsp-rate/` (private) | `gamemode_measure.py` 3 × 15 s, six launches alternating | Game Mode, worst-angle Outset state, 16:9, widescreen mod | **Bound for removing turn ends: +0.4%** (26.84 → 26.94), ahead in 3/3 pairs but by 0.23, 0.04 and 0.03 FPS. Not exact (the DSP cadence changes when the game sees DSP mail and interrupts); it bounds what an exact change could gain, which would need the host to service the DSP without unwinding the module's C stack. **No-go**: deep change to the chassis and host loop for ≤ 0.4%. The returns after a turn end cost less than the average boundary, so M1-T01's ≈ 1.7 M estimate was high |
+| M1-T03 | Same census log; the counting build's generated chunks; `direct_calls.py`, `direct_calls.c` | Each top call target matched against its call sites and the transforms | As M0-T02 | **Calls through the loop are of two kinds.** (1) **Watched by design, ≈ 2,800 per frame, edge service asked 100%:** the native actor search's hooks `cTgIt_JudgeFilter` 0x80245640 (1,018), `cTgIt_MethodCall` 0x8024560C (585), `fpcSch_JudgeByID` 0x80040068 (557), and `OSDisableInterrupts`/`OSRestoreInterrupts` (≈ 510 each; all 192/233 call sites left untransformed because the host watches them). (2) **Indirect calls that pass the check at the loop but not at the call (edge service asked 0%):** `J3DShapeMtxConcatView::loadMtxConcatView` 1,751, `__GXDefaultTexRegionCallback` 490, other callbacks. 3,692 of 3,706 `bctrl` sites are transformed, so the call site refused them. Hypothesis: `BW_DIRECT_DEPTH_MAX` (32 nested direct calls). J3D drawing recurses through virtual calls; at the cap the call goes round the loop and every enclosing chunk returns too, unwinding up to 32 frames whose returns then also go round the loop. At the loop the depth is back to 0, so the same call passes there. Changing the cap is exact by construction: direct or not, the guest state is the same |
