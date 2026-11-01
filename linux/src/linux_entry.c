@@ -154,11 +154,16 @@ static void resolve_dirs(void) {
     const char* home = getenv("HOME");
     char portable[4096];
     snprintf(portable, sizeof portable, "%sportable.txt", g_exe_dir);
+    char remembered_install[4096] = "";
     if (override != NULL && override[0] != '\0') {
         snprintf(g_data_dir, sizeof g_data_dir, "%s/", override);
     } else if (file_exists(portable)) {
         snprintf(g_data_dir, sizeof g_data_dir, "%suser/", g_exe_dir);
         g_portable = 1;
+    } else if (bw_setup_remembered_install_dir(remembered_install, sizeof remembered_install)) {
+        // The player chose where the game is installed in the setup window; that
+        // choice outlives this launch, unless BLUEWAKE_DATA_DIR says otherwise.
+        snprintf(g_data_dir, sizeof g_data_dir, "%s/", remembered_install);
     } else if (data_home != NULL && data_home[0] != '\0') {
         snprintf(g_data_dir, sizeof g_data_dir, "%s/BlueWake/", data_home);
     } else if (home != NULL && home[0] != '\0') {
@@ -458,9 +463,23 @@ int main(int argc, char** argv) {
         char selected_disc[4096] = "";
         if (explicit_disc != NULL)
             snprintf(selected_disc, sizeof selected_disc, "%s", explicit_disc);
-        const int setup = bw_linux_setup(g_data_dir, selected_disc, sizeof selected_disc);
+        char chosen_install[4096] = "";
+        const int setup = bw_linux_setup(g_data_dir, chosen_install, sizeof chosen_install,
+                                         selected_disc, sizeof selected_disc);
         if (setup <= 0)
             return setup < 0 ? 1 : 0;
+        // The window may have moved the install folder; everything below (saves,
+        // card, caches, logs) follows it.
+        if (chosen_install[0] != '\0') {
+            snprintf(g_data_dir, sizeof g_data_dir, "%s/", chosen_install);
+            make_dirs(g_data_dir);
+            char logs[4096], states[4096];
+            snprintf(logs, sizeof logs, "%slogs", g_data_dir);
+            mkdir(logs, 0755);
+            snprintf(states, sizeof states, "%sstates", g_data_dir);
+            mkdir(states, 0755);
+        }
+        setenv("BLUEWAKE_DATA_DIR", g_data_dir, 1);
         setenv("BLUEWAKE_DISC", selected_disc, 1);
     }
 

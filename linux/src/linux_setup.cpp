@@ -35,8 +35,14 @@
 #include <vector>
 
 #include <sys/statvfs.h>
+#include <unistd.h>
+
+#include <cerrno>
 
 namespace {
+
+// What the preparation writes: main.dol (~4 MB) and the 415 game modules (~7 MB).
+constexpr unsigned long long kPreparationBytes = 12ull << 20;
 
 namespace fs = std::filesystem;
 
@@ -216,6 +222,90 @@ void copy_text(char* out, size_t size, const std::string& text) {
     std::snprintf(out, size, "%s", text.c_str());
 }
 
+// The chosen install folder is remembered beside the settings file rather than in
+// it: the in-game menus rewrite settings.ini from their own table, and the folder
+// the game lives in must survive that.
+std::string install_record_path() {
+    const std::string settings = settings_path();
+    if (settings.empty()) return {};
+    return (fs::path(settings).parent_path() / "install.txt").string();
+}
+
+bool remember_install_dir(const std::string& dir) {
+    const std::string path = install_record_path();
+    if (path.empty()) return true;   // nowhere to write it; this launch still uses it
+    std::error_code ec;
+    fs::create_directories(fs::path(path).parent_path(), ec);
+    std::ofstream output(path, std::ios::trunc);
+    if (!output) return false;
+    output << dir << '\n';
+    output.close();
+    return static_cast<bool>(output);
+}
+
+// Free bytes on the filesystem holding `path`, looking at its nearest existing
+// parent when the folder itself does not exist yet; -1 when nothing is known.
+double free_bytes_near(const std::string& path) {
+    if (path.empty()) return -1.0;
+    std::error_code ec;
+    fs::path probe(path);
+    while (!probe.empty() && !fs::exists(probe, ec)) {
+        fs::path parent = probe.parent_path();
+        if (parent == probe) return -1.0;
+        probe = parent;
+    }
+    struct statvfs info {};
+    if (probe.empty() || statvfs(probe.c_str(), &info) != 0) return -1.0;
+    return static_cast<double>(info.f_bavail) * static_cast<double>(info.f_frsize);
+}
+
+// The folder the game is installed into: it must exist or be creatable, be
+// writable, and have room for the prepared game files — the check the TotK
+// installer's install-folder field makes.
+bool validate_install(const char* path, std::string& status, bool& valid) {
+    valid = false;
+    if (path[0] == '\0') {
+        status = "Choose the folder BlueWake installs the game into.";
+        return false;
+    }
+    std::error_code ec;
+    const fs::path dir(path);
+    if (fs::exists(dir, ec)) {
+        if (!fs::is_directory(dir, ec)) {
+            status = "That path is a file, not a folder.";
+            return false;
+        }
+        if (access(path, W_OK) != 0) {
+            status = std::string("That folder is not writable: ") + std::strerror(errno);
+            return false;
+        }
+    } else {
+        const fs::path parent = dir.has_parent_path() ? dir.parent_path() : fs::path(".");
+        if (!fs::exists(parent, ec) || !fs::is_directory(parent, ec) || access(parent.c_str(), W_OK) != 0) {
+            status = "That folder does not exist and cannot be created.";
+            return false;
+        }
+    }
+    const double free = free_bytes_near(path);
+    if (free < 0.0) {
+        status = "The free space in that folder could not be read.";
+        return false;
+    }
+    if (free < static_cast<double>(kPreparationBytes)) {
+        char text[256];
+        std::snprintf(text, sizeof text, "That folder has %.1f MB free; the game files need %llu MB.",
+                      free / (1024.0 * 1024.0), kPreparationBytes >> 20);
+        status = text;
+        return false;
+    }
+    char text[256];
+    std::snprintf(text, sizeof text, "%llu MB needed; %.1f GB free.", kPreparationBytes >> 20,
+                  free / (1024.0 * 1024.0 * 1024.0));
+    status = text;
+    valid = true;
+    return true;
+}
+
 bool validate_disc(const char* path, std::string& status, bool& valid) {
     valid = false;
     if (path[0] == '\0') { status = "Choose your GZLE01 revision-0 .iso or .gcm file."; return false; }
@@ -247,8 +337,6 @@ bool validate_textures(const char* path, std::string& status, bool& valid) {
 
 // --- the preparation, on its own thread -------------------------------------
 
-// What the preparation writes: main.dol (~4 MB) and the 415 game modules (~7 MB).
-constexpr unsigned long long kPreparationBytes = 12ull << 20;
 
 double seconds_since(std::chrono::steady_clock::time_point then) {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - then).count();
@@ -277,7 +365,7 @@ struct Job {
     std::vector<std::string> log;
 
     // The form's answers, copied before the thread starts.
-    std::string data_dir, disc, textures, appimage, config;
+    std::string data_dir, install_display, disc, textures, appimage, config;
     bool textures_enabled = false;
     bool install_shortcuts = false;
     std::map<std::string, std::string>* settings = nullptr;
@@ -355,6 +443,10 @@ struct Job {
     // The settings file, the texture-pack variable the host reads, and the
     // application-menu shortcuts: the work the last stage covers.
     bool save_settings(std::string& why) {
+        if (!install_display.empty() && !remember_install_dir(install_display)) {
+            why = "The install folder could not be remembered in " + install_record_path() + ".";
+            return false;
+        }
         if (settings != nullptr) {
             (*settings)["DOL_AURORA_TEXTURE_PACK"] = textures_enabled ? textures : std::string();
             setenv("DOL_AURORA_TEXTURE_PACK", (*settings)["DOL_AURORA_TEXTURE_PACK"].c_str(), 1);
@@ -490,12 +582,39 @@ void log_pane(Job& job) {
 
 } // namespace
 
-extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size) {
+extern "C" int bw_setup_remembered_install_dir(char* out, size_t size) {
+    if (out == NULL || size == 0) return 0;
+    out[0] = '\0';
+    const std::string path = install_record_path();
+    if (path.empty()) return 0;
+    std::ifstream input(path);
+    std::string line;
+    if (!std::getline(input, line)) return 0;
+    while (line.size() > 1 && line.back() == '/') line.pop_back();
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+    if (line.empty()) return 0;
+    copy_text(out, size, line);
+    return 1;
+}
+
+extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, size_t install_dir_size,
+                              char* disc, size_t disc_size) {
     const std::string config = settings_path();
     auto settings = config == "none" ? std::map<std::string, std::string>{} : read_settings(config);
 
+    // The install folder the game goes into: the one it is in now, which the
+    // player can change here, as the TotK installer's install-folder field does.
+    char install[4096]{};
+    copy_text(install, sizeof install, install_dir != nullptr ? install_dir : "");
+    for (size_t length = std::strlen(install); length > 1 && install[length - 1] == '/'; --length)
+        install[length - 1] = '\0';
+    std::string install_status;
+    bool install_valid = false;
+    validate_install(install, install_status, install_valid);
+    const auto install_root = [&install] { return std::string(install) + '/'; };
+
     if (disc[0] == '\0') {
-        std::ifstream remembered(std::string(data_dir) + "disc.txt");
+        std::ifstream remembered(install_root() + "disc.txt");
         std::string path;
         if (std::getline(remembered, path)) copy_text(disc, disc_size, path);
     }
@@ -533,7 +652,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
     ImGui_ImplSDLRenderer3_Init(renderer);
 
     Picker picker;
-    enum class PickKind { None, Disc, Textures } pick_kind = PickKind::None;
+    enum class PickKind { None, Disc, Textures, Install } pick_kind = PickKind::None;
     std::string disc_status;
     std::string texture_status = textures_enabled ? "" : "Optional";
     std::string message;
@@ -577,6 +696,9 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
                 copy_text(textures, sizeof textures, picker.path);
                 textures_enabled = true;
                 validate_textures(textures, texture_status, textures_valid);
+            } else if (picked_result == 1 && pick_kind == PickKind::Install) {
+                copy_text(install, sizeof install, picker.path);
+                validate_install(install, install_status, install_valid);
             } else if (picked_result < 0) {
                 message = std::string("The XDG file dialog failed: ") +
                           (picker.error[0] ? picker.error : SDL_GetError());
@@ -639,6 +761,22 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Install folder");
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(-96.0f);
+                if (ImGui::InputText("##install", install, sizeof install))
+                    validate_install(install, install_status, install_valid);
+                ImGui::SameLine();
+                ImGui::BeginDisabled(pick_kind != PickKind::None);
+                if (ImGui::Button("Browse...##install", ImVec2(88.0f, 0.0f))) {
+                    picker.result.store(0); pick_kind = PickKind::Install; SDL_ClearError();
+                    SDL_ShowOpenFolderDialog(picked, &picker, window, nullptr, false);
+                }
+                ImGui::EndDisabled();
+
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted("HD texture pack");
                 ImGui::TableNextColumn();
                 if (ImGui::Checkbox("Enable", &textures_enabled)) {
@@ -668,6 +806,10 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
                 ImGui::EndDisabled();
                 ImGui::EndTable();
             }
+            ImGui::TextColored(install_valid ? kDone : ImVec4(1.f, .65f, .25f, 1.f), "%s",
+                               install_status.c_str());
+            ImGui::SameLine();
+            ImGui::TextDisabled("The game files and your saved games go here.");
             ImGui::TextColored(disc_valid ? kDone : ImVec4(1.f, .65f, .25f, 1.f), "%s", disc_status.c_str());
             if (textures_enabled)
                 ImGui::TextDisabled("%s", texture_status.c_str());
@@ -682,10 +824,17 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
                                  kStartWidth - kQuitWidth - style.ItemSpacing.x);
             if (ImGui::Button("Quit##form", ImVec2(kQuitWidth, 0.0f))) done = true;
             ImGui::SameLine();
-            ImGui::BeginDisabled(!disc_valid || !textures_valid);
+            ImGui::BeginDisabled(!disc_valid || !textures_valid || !install_valid);
             if (ImGui::Button("Start", ImVec2(kStartWidth, 0.0f))) {
+                std::error_code ec;
+                fs::create_directories(fs::path(install), ec);
+                if (!fs::is_directory(fs::path(install), ec)) {
+                    message = std::string("The install folder could not be created: ") +
+                              (ec ? ec.message() : "not a folder");
+                } else {
                 job = std::make_unique<Job>();
-                job->data_dir = data_dir;
+                job->data_dir = install_root();
+                job->install_display = install;
                 job->disc = disc;
                 job->textures_enabled = textures_enabled;
                 job->textures = textures;
@@ -703,6 +852,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
                     show_log = false;
                     screen = Screen::Preparing;
                 }
+                }
             }
             ImGui::EndDisabled();
         } else if (screen == Screen::Preparing && job != nullptr) {
@@ -717,7 +867,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
             const double overall = job->overall();
             std::snprintf(overlay, sizeof overlay, "%d%%", static_cast<int>(overall * 100.0));
             ImGui::ProgressBar(static_cast<float>(overall), ImVec2(-FLT_MIN, 0.0f), overlay);
-            const std::string space = free_space_in(data_dir);
+            const std::string space = free_space_in(job->data_dir);
             if (!space.empty()) ImGui::TextDisabled("%s", space.c_str());
             if (failed) ImGui::TextColored(kFailed, "%s", job->failure().c_str());
             if (show_log) log_pane(*job);
@@ -749,6 +899,7 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
             ImGui::Spacing();
             ImGui::TextWrapped("The game files are prepared. Later launches go straight to the game; "
                                "--setup reopens this window.");
+            ImGui::TextDisabled("Installed in: %s", job->install_display.c_str());
             if (job->textures_enabled) ImGui::TextDisabled("HD texture pack: %s", job->textures.c_str());
             if (show_log) log_pane(*job);
 
@@ -775,6 +926,8 @@ extern "C" int bw_linux_setup(const char* data_dir, char* disc, size_t disc_size
     }
 
     if (job != nullptr && job->thread != nullptr) SDL_WaitThread(job->thread, nullptr);
+    if (start && job != nullptr && install_dir_out != nullptr && install_dir_size > 0)
+        copy_text(install_dir_out, install_dir_size, job->install_display);
     job.reset();
 
     ImGui_ImplSDLRenderer3_Shutdown();
