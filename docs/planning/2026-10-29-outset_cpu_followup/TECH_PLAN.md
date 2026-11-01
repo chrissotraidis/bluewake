@@ -232,7 +232,7 @@ This PR is complete. The remaining shared costs continue in separate plans, each
 
 | PR | Plan | Basis in this PR |
 |---|---|---|
-| [#529](https://github.com/chrissotraidis/bluewake/pull/529) | Train the optimization profile on Outset | Flat profile; training has one 1,500-retrace Outset stop |
+| [#529](https://github.com/chrissotraidis/bluewake/pull/529) | Train the optimization profile on Outset | Flat profile; training has one 1,500-retrace Outset stop. **Outcome: no-go** (≤ 0.4%, not consistent); planning record only |
 | [#530](https://github.com/chrissotraidis/bluewake/pull/530) | Count the dispatch-loop edges in Outset | ≈ 4.3 M cycles per frame, unattributed |
 | [#531](https://github.com/chrissotraidis/bluewake/pull/531) | Profile the GX command stream in Outset | ≈ 5.1 M cycles per frame, host side not broken down |
 
