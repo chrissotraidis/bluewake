@@ -74,10 +74,13 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
     using namespace perf_detail;
     if (font != nullptr)
         ImGui::PushFont(font);
-    // The size the text will be drawn at: the font's own rasterised size times the
-    // scale the menu asked for. Everything below is in font sizes, so the panel
-    // re-lays out at a new resolution or text size instead of being stretched.
-    const float font_size = (font != nullptr ? font->FontSize : ImGui::GetFontSize()) * font_scale;
+    // The text is half again the menu's: the panel is read at a glance, not sat in
+    // front of. Never above the font's own rasterised size, though — drawn larger
+    // than its atlas is what looks stretched. Everything below is in font sizes, so
+    // a new resolution or text size re-lays the panel out instead of scaling it.
+    const float base_size = font != nullptr ? font->FontSize : ImGui::GetFontSize();
+    const float panel_scale = font_scale * 1.5f < 1.f ? font_scale * 1.5f : 1.f;
+    const float font_size = base_size * panel_scale;
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     const float margin = 0.7f * font_size;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.6f * font_size, 0.5f * font_size));
@@ -88,7 +91,7 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoMove);
-    ImGui::SetWindowFontScale(font_scale);   // inside the window: this frame's text, this window only
+    ImGui::SetWindowFontScale(panel_scale);   // inside the window: this frame's text, this window only
     const ImVec4 gpu_color(0.55f, 0.83f, 0.31f, 1.f), cpu_color(0.18f, 0.59f, 0.80f, 1.f),
         ram_color(0.80f, 0.45f, 0.70f, 1.f), rate_color(0.95f, 0.95f, 0.95f, 1.f),
         picture_color(0.62f, 0.70f, 0.95f, 1.f);
