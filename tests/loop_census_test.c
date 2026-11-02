@@ -71,6 +71,11 @@ int main(void) {
     cpu = cpu_with_budget(8);
     assert(bluewake_chassis_dispatch_loop(&cpu, 0x80001000u, dispatch, NULL, NULL));
     assert(bw_loop_exits[BW_LOOP_EXIT_FIRST_ONLY] == 1u);
-    puts("Loop census: entries, boundaries, targets and every exit reason counted");
+    /* Pairs name the call site through the link register. */
+    unsigned long long pairs = 0u;
+    for (unsigned i = 0; i < BW_LOOP_CENSUS_SLOTS; ++i)
+        pairs += bw_loop_pair_count[i];
+    assert(pairs == bw_loop_boundaries && bw_loop_pair_unrecorded == 0u);
+    puts("Loop census: entries, boundaries, targets, call sites and every exit reason counted");
     return 0;
 }

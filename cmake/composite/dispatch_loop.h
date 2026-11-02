@@ -67,7 +67,7 @@ static inline int bluewake_chassis_dispatch_loop(
         skip_edge = bw_edge_filter_enabled && bw_edge_watch_ready &&
                     bw_edge_unwatched(address) && bw_direct_call_ready(ctx, address);
 #endif
-        BW_LOOP_CENSUS_BOUNDARY(address, skip_edge);
+        BW_LOOP_CENSUS_BOUNDARY(address, ctx->lr, skip_edge);
         if (!skip_edge && edge_service(service_user, ctx, address))
             return BW_LOOP_CENSUS_EXIT(BW_LOOP_EXIT_SERVICE, bluewake_chassis_return(1));
 

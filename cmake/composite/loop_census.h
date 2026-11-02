@@ -4,7 +4,7 @@
 /* BLUEWAKE_LOOP_CENSUS (compile-time, diagnostic builds only): what goes round
  * the chassis loop (dispatch_loop.h). It counts the host's entries, each
  * boundary the loop takes (by target address, and whether the edge service was
- * skipped or asked) and why the loop returned. It only counts: the loop takes
+ * skipped or asked; and by target and link register, which names a call's site) and why the loop returned. It only counts: the loop takes
  * the same path with it as without it (#530). The host prints the report at
  * exit through bluewake_composite_loop_census_report (module_export.c): the
  * app's shutdown does not run shared-library destructors.
@@ -35,8 +35,31 @@ static unsigned long long bw_loop_unrecorded; /* targets beyond the table */
 static unsigned bw_loop_address[BW_LOOP_CENSUS_SLOTS];
 static unsigned long long bw_loop_count[BW_LOOP_CENSUS_SLOTS];
 static unsigned long long bw_loop_count_skipped[BW_LOOP_CENSUS_SLOTS];
+/* The same boundaries by (target, link register): for a call that arrives
+ * through the loop, lr - 4 is its call site. */
+static unsigned bw_loop_pair_address[BW_LOOP_CENSUS_SLOTS];
+static unsigned bw_loop_pair_lr[BW_LOOP_CENSUS_SLOTS];
+static unsigned long long bw_loop_pair_count[BW_LOOP_CENSUS_SLOTS];
+static unsigned long long bw_loop_pair_unrecorded;
 
-static inline void bw_loop_census_boundary(unsigned address, bool skipped) {
+static inline void bw_loop_census_pair(unsigned address, unsigned lr) {
+    unsigned slot = ((address ^ (lr * 0x85EBCA6Bu)) * 0x9E3779B1u) >> 16;
+    for (unsigned probes = 0; probes < BW_LOOP_CENSUS_SLOTS; ++probes) {
+        if (bw_loop_pair_count[slot] == 0u) {
+            bw_loop_pair_address[slot] = address;
+            bw_loop_pair_lr[slot] = lr;
+        }
+        if (bw_loop_pair_address[slot] == address && bw_loop_pair_lr[slot] == lr) {
+            bw_loop_pair_count[slot]++;
+            return;
+        }
+        slot = (slot + 1u) & (BW_LOOP_CENSUS_SLOTS - 1u);
+    }
+    bw_loop_pair_unrecorded++;
+}
+
+static inline void bw_loop_census_boundary(unsigned address, unsigned lr, bool skipped) {
+    bw_loop_census_pair(address, lr);
     bw_loop_boundaries++;
     bw_loop_skipped += skipped;
     unsigned slot = (address * 0x9E3779B1u) >> 16;
@@ -74,14 +97,19 @@ __attribute__((unused)) static void bw_loop_census_report(void) {
         if (bw_loop_count[i] != 0u)
             fprintf(stderr, "[loop-census] target=0x%08X count=%llu skipped=%llu\n",
                     bw_loop_address[i], bw_loop_count[i], bw_loop_count_skipped[i]);
+    fprintf(stderr, "[loop-census] pairs_unrecorded=%llu\n", bw_loop_pair_unrecorded);
+    for (unsigned i = 0; i < BW_LOOP_CENSUS_SLOTS; ++i)
+        if (bw_loop_pair_count[i] != 0u)
+            fprintf(stderr, "[loop-census] pair target=0x%08X lr=0x%08X count=%llu\n",
+                    bw_loop_pair_address[i], bw_loop_pair_lr[i], bw_loop_pair_count[i]);
 }
 
 #define BW_LOOP_CENSUS_ENTRY() (bw_loop_entries++)
-#define BW_LOOP_CENSUS_BOUNDARY(address, skipped) bw_loop_census_boundary((address), (skipped))
+#define BW_LOOP_CENSUS_BOUNDARY(address, lr, skipped) bw_loop_census_boundary((address), (lr), (skipped))
 #define BW_LOOP_CENSUS_EXIT(reason, result) bw_loop_census_exit((reason), (result))
 #else
 #define BW_LOOP_CENSUS_ENTRY() ((void)0)
-#define BW_LOOP_CENSUS_BOUNDARY(address, skipped) ((void)0)
+#define BW_LOOP_CENSUS_BOUNDARY(address, lr, skipped) ((void)0)
 #define BW_LOOP_CENSUS_EXIT(reason, result) (result)
 #endif
 
