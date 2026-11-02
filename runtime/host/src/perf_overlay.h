@@ -28,19 +28,38 @@ struct BwPerfPicture {
 namespace perf_detail {
 
 // A number in the panel's right-aligned column, or "-" for one the machine or
-// the renderer does not give (a negative, as perf_monitor.h keeps them).
-inline void number(const char* format, float value) {
+// the renderer does not give (a negative, as perf_monitor.h keeps them). Under a
+// number that is a share of something — a load, a memory in use, a clock against
+// the card's top — a bar of that share in the row's colour, so the panel reads at
+// a glance before the digits do. A negative fraction is a plain number: a total,
+// a temperature nobody has a scale for, or the rate itself, whose graph is below.
+inline void number(const char* format, float value, float fraction, const ImVec4& color) {
     ImGui::TableNextColumn();
+    const float width = ImGui::GetContentRegionAvail().x;
     if (value < 0.f) {
         ImGui::TextDisabled("%s", "-");
         return;
     }
     char text[48];
     std::snprintf(text, sizeof text, format, value);
-    const float room = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(text).x;
+    const float room = width - ImGui::CalcTextSize(text).x;
     if (room > 0.f)
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + room);
     ImGui::TextUnformatted(text);
+    if (fraction < 0.f)
+        return;
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float height = ImGui::GetFontSize() * 0.16f;
+    const float round = height * 0.5f;
+    ImGui::Dummy(ImVec2(width, height));   // the room the bar is drawn in
+    const float share = fraction < 0.f ? 0.f : fraction > 1.f ? 1.f : fraction;
+    const float filled = width * share;
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(at, ImVec2(at.x + width, at.y + height),
+                        ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.20f)), round);
+    if (filled > 0.f)
+        draw->AddRectFilled(at, ImVec2(at.x + (filled < height ? height : filled), at.y + height),
+                            ImGui::GetColorU32(color), round);
 }
 
 inline void label(const char* text, const ImVec4& color) {
@@ -105,12 +124,17 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
         ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthFixed, column_width(kValue, 3));
         ImGui::TableSetupColumn("##of", ImGuiTableColumnFlags_WidthFixed, column_width(kOf, 3));
         ImGui::TableSetupColumn("##share", ImGuiTableColumnFlags_WidthFixed, column_width(kShare, 4));
+        // The shares: a load against 100%, a memory against the whole of it, a clock
+        // against 3 GHz (a card idling at 100 MHz and one at its top both read), a
+        // temperature against 100 C, a card's draw against 300 W, and a frame time
+        // against the graph's own 50 ms floor.
         label("GPU", gpu_color);
-        number("%.0f%%", stats.gpu_pct);
-        number("%.0f C", stats.gpu_temp_c);
-        number("%.0f W", stats.gpu_power_w);
+        number("%.0f%%", stats.gpu_pct, stats.gpu_pct / 100.f, gpu_color);
+        number("%.0f C", stats.gpu_temp_c, stats.gpu_temp_c / 100.f, gpu_color);
+        number("%.0f W", stats.gpu_power_w, stats.gpu_power_w / 300.f, gpu_color);
         label("VRAM", gpu_color);
-        number("%.1f GB", stats.vram_used_mb / 1024.f);
+        number("%.1f GB", stats.vram_used_mb / 1024.f,
+               stats.vram_total_mb > 0.f ? stats.vram_used_mb / stats.vram_total_mb : -1.f, gpu_color);
         ImGui::TableNextColumn();
         if (stats.vram_total_mb < 0.f)
             ImGui::TextDisabled("%s", "-");
@@ -119,13 +143,14 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
             std::snprintf(text, sizeof text, "of %.1f GB", stats.vram_total_mb / 1024.f);
             ImGui::TextUnformatted(text);
         }
-        number("%.0f MHz", stats.gpu_clock_mhz);
+        number("%.0f MHz", stats.gpu_clock_mhz, stats.gpu_clock_mhz / 3000.f, gpu_color);
         label("CPU", cpu_color);
-        number("%.0f%%", stats.cpu_total_pct);
-        number("%.0f C", stats.cpu_temp_c);
-        number("%.0f%%", stats.cpu_game_pct);
+        number("%.0f%%", stats.cpu_total_pct, stats.cpu_total_pct / 100.f, cpu_color);
+        number("%.0f C", stats.cpu_temp_c, stats.cpu_temp_c / 100.f, cpu_color);
+        number("%.0f%%", stats.cpu_game_pct, stats.cpu_game_pct / 100.f, cpu_color);
         label("RAM", ram_color);
-        number("%.1f GB", stats.ram_used_mb / 1024.f);
+        number("%.1f GB", stats.ram_used_mb / 1024.f,
+               stats.ram_total_mb > 0.f ? stats.ram_used_mb / stats.ram_total_mb : -1.f, ram_color);
         ImGui::TableNextColumn();
         if (stats.ram_total_mb < 0.f)
             ImGui::TextDisabled("%s", "-");
@@ -134,7 +159,8 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
             std::snprintf(text, sizeof text, "of %.1f GB", stats.ram_total_mb / 1024.f);
             ImGui::TextUnformatted(text);
         }
-        number("%.1f GB", stats.ram_game_mb / 1024.f);
+        number("%.1f GB", stats.ram_game_mb / 1024.f,
+               stats.ram_total_mb > 0.f ? stats.ram_game_mb / stats.ram_total_mb : -1.f, ram_color);
         ImGui::TableNextColumn();   // the frame row: the rate where the labels are
         if (stats.fps <= 0.f)
             ImGui::TextDisabled("%s", "-");
@@ -143,8 +169,8 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
             std::snprintf(text, sizeof text, "%.0f FPS", stats.fps);
             ImGui::TextColored(rate_color, "%s", text);
         }
-        number("%.1f ms", stats.frame_ms_avg);
-        number("%.1f ms", stats.frame_ms_max);
+        number("%.1f ms", stats.frame_ms_avg, stats.frame_ms_avg / 50.f, rate_color);
+        number("%.1f ms", stats.frame_ms_max, stats.frame_ms_max / 50.f, rate_color);
         ImGui::EndTable();
     }
 
@@ -183,12 +209,11 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
         }
         ImGui::EndTable();
     }
-    if (stats.gpu_name[0] != '\0')
-        ImGui::TextDisabled("%s", stats.gpu_name);
-    else
-        ImGui::TextDisabled("%s", "-");
-    if (stats.cpu_name[0] != '\0')
-        ImGui::TextDisabled("%s", stats.cpu_name);
+    // Brighter than a disabled line: these are the last thing read, and the game
+    // behind them is busy. The names are half the point of the panel on a Deck.
+    const ImVec4 name_color(0.82f, 0.82f, 0.86f, 1.f);
+    ImGui::TextColored(name_color, "%s", stats.gpu_name[0] != '\0' ? stats.gpu_name : "-");
+    ImGui::TextColored(name_color, "%s", stats.cpu_name[0] != '\0' ? stats.cpu_name : "-");
     ImGui::End();
     ImGui::PopStyleVar(2);
     if (font != nullptr)
