@@ -62,6 +62,8 @@ Through `__ptmf_scall`, the caller reached the helper with a direct `bl`. After 
 
 The loop would have done the same: dispatch the target, then continue from wherever it left the guest.
 
+**Measuring it.** The rewrite changes the control flow of 220 chunks (29.8% of Outset's chunk time), so the candidate must be trained on its own code. A reused profile no longer matches those chunks: the first A/B with a reused profile came out 4.9% slower, which measured that mismatch, not the change.
+
 **Risk.** `bctr` also implements switch tables. Those now run their case block nested instead of through the loop, which is still exact but adds call depth; a deep switch loop could reach the 32-call cap and unwind as before. The A/B shows whether that costs anything.
 
 ## Changes (planned)
