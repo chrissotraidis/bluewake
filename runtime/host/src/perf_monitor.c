@@ -89,8 +89,7 @@ static int named;
 static char cpu_sensor_dir[192];
 
 void bw_perf_reset(void) {
-    named = 0;
-    cpu_sensor_dir[0] = '\0';
+    named = 0;   // the names are read again; the sensor directory is kept
     memset(&g, 0, sizeof g);
     memset(&machine, 0, sizeof machine);
     g.stats.cpu_total_pct = g.stats.cpu_game_pct = g.stats.cpu_temp_c = -1.f;
@@ -479,14 +478,14 @@ static void sample_machine(unsigned long long now_ns) {
     if (cpu_sensor_dir[0] == '\0')
         find_hwmon("/sys/class/hwmon", kCpuSensors, (int)(sizeof kCpuSensors / sizeof kCpuSensors[0]),
                    cpu_sensor_dir, sizeof cpu_sensor_dir);
-    if (cpu_sensor_dir[0] != '\0' && s->cpu_temp_c < 0.f) {
+    if (cpu_sensor_dir[0] != '\0') {
+        // Every sample, not once: a temperature frozen at the launch is worse than
+        // none. A sensor reading 0 or 150 C is a sensor that is not reading, and the
+        // panel says "-" instead of a temperature nobody has.
         const unsigned long long millidegrees = read_number(cpu_sensor_dir, "temp1_input");
-        // A sensor reading 0 or 150 C is a sensor that is not reading: the panel
-        // says "-" instead of a temperature nobody has.
-        if (millidegrees > 1000ull && millidegrees < 150000ull)
-            s->cpu_temp_c = (float)((double)millidegrees / 1000.0);
-        fprintf(stderr, "[perf] panel cpu sensor: %s temp1_input=%llu (%s)\n", cpu_sensor_dir, millidegrees,
-                s->cpu_temp_c < 0.f ? "not a reading, left as -" : "used");
+        s->cpu_temp_c = millidegrees > 1000ull && millidegrees < 150000ull
+                            ? (float)((double)millidegrees / 1000.0)
+                            : -1.f;
     }
 
     // The card the game draws on: the first that reports its memory (amdgpu's

@@ -143,8 +143,10 @@ void apply_perf_overlay() {
     g_perf_mode = bw_perf_mode_of(bw_desktop::env("BLUEWAKE_PERF_OVERLAY", "off").c_str());
     g_frame_rate_on = env_on("DOL_AURORA_SHOW_FPS", false);
     aurora_set_fps_overlay(g_perf_mode != BW_PERF_FULL && g_frame_rate_on);
-    if (g_perf_mode != BW_PERF_FULL)
-        bw_perf_reset();
+    // Always, not only when leaving the panel: a reset is what says "no reading yet"
+    // (a negative) for every number, and the first draw would otherwise show the
+    // zeros a fresh struct holds as if they were measurements.
+    bw_perf_reset();
 }
 
 void apply_fps_position() {

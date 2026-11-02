@@ -115,6 +115,9 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
         ram_color(0.80f, 0.45f, 0.70f, 1.f), rate_color(0.95f, 0.95f, 0.95f, 1.f),
         picture_color(0.62f, 0.70f, 0.95f, 1.f);
 
+    // Room between the rows: the numbers, their bars and the labels below run together
+    // at this text size otherwise.
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.4f * font_size, 0.3f * font_size));
     if (ImGui::BeginTable("##bluewake-perf-numbers", 4, ImGuiTableFlags_SizingFixedFit)) {
         static const char* const kFirst[] = {"GPU", "VRAM", "CPU", "RAM", "60 FPS"};
         static const char* const kValue[] = {"100%", "888.8 GB", "888.8 ms"};
@@ -173,9 +176,13 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
         number("%.1f ms", stats.frame_ms_max, stats.frame_ms_max / 50.f, rate_color);
         ImGui::EndTable();
     }
+    ImGui::PopStyleVar();
 
     // The frame times as a graph: the worst frame sets its top, and 50 ms (20
     // FPS) is the least height it shows, so a good run still reads as a line.
+    const ImVec4 line_color(0.75f, 0.78f, 0.85f, 0.22f);
+    ImGui::PushStyleColor(ImGuiCol_Separator, line_color);
+    ImGui::Separator();
     const float top = stats.frame_ms_max > 50.f ? stats.frame_ms_max : 50.f;
     // The graph does not count toward the panel's width in the same way the
     // tables do; -FLT_MIN fills the columns the two tables sized.
@@ -187,6 +194,8 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
                      ImVec2(-1.f, 3.5f * font_size));
     ImGui::PopStyleColor(2);
 
+    ImGui::Separator();
+    ImGui::PopStyleColor();
     static const char* const kLabels[] = {"Window", "Game image", "Scaling", "Frame limit", "Presentation"};
     const char* const values[] = {picture.window, picture.image, picture.scaling, picture.limit, picture.present};
     float value_width = 0.f;
