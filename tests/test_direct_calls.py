@@ -46,7 +46,7 @@ label_80004004:
 
 TAIL_JUMP = '''#include "../generated.h"
 void synthetic(CPUState* ctx) {
-    // 80004000: bctr
+    // 80328E0C: bctr
     {
         u32 target = ctx->ctr & ~3u;
         bool ctr_ok = true;
@@ -191,7 +191,10 @@ class DirectPreparationTests(unittest.TestCase):
                       '                (void)bw_call_translated(ctx, target);\n'
                       '            return;', result)
         self.assertEqual(direct.transform_indirect(result, set()), (result, 0))
-        self.assertEqual(direct.transform_indirect(TAIL_JUMP, {0x80004000}), (TAIL_JUMP, 0))
+        self.assertEqual(direct.transform_indirect(TAIL_JUMP, {0x80328E0C}), (TAIL_JUMP, 0))
+        # Any other bctr (a switch table, say) keeps its trip round the loop.
+        other = TAIL_JUMP.replace('80328E0C', '80004000')
+        self.assertEqual(direct.transform_indirect(other, set()), (other, 0))
         # blrl: as a bctrl, but the target comes from lr (read before lr is set)
         # and anything else keeps the chunk's own return dispatch.
         result, count = direct.transform_indirect(LINK_CALL, set())

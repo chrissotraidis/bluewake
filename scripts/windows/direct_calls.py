@@ -219,7 +219,13 @@ INDIRECT = re.compile(
 
 # A tail jump through the count register (the compiler's __ptmf_scall, which
 # runs C++ pointer-to-member calls, ends in one) and a call through the link
-# register: both left the chunk for the chassis loop (#530).
+# register: both left the chunk for the chassis loop (#530). Only the listed tail
+# jumps are rewritten: most bctr sites are switch tables, which would then run
+# their case nested; measured on the Steam Deck, rewriting all of them gained
+# about 0.4% but not consistently.
+TAIL_JUMP_SITES = {
+    0x80328E0C,  # __ptmf_scall (GZLE01)
+}
 TAIL_JUMP = re.compile(
     r"    // ([0-9A-F]{8}): bctr\n"
     r"    \{\n"
@@ -289,7 +295,8 @@ def transform_indirect(text, watched):
         # caller's direct call then finds its return address and carries on.
         pieces, cursor = [], 0
         for m in TAIL_JUMP.finditer(body):
-            if int(m.group(1), 16) in watched:
+            site = int(m.group(1), 16)
+            if site not in TAIL_JUMP_SITES or site in watched:
                 continue
             pieces.append(body[cursor:m.start()])
             pieces.append(
