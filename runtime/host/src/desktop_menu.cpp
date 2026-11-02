@@ -17,6 +17,7 @@
 #include "menu_draw.h"
 #include "menu_shared.h"
 #include "option_notes.h"
+#include "perf_overlay.h"
 #include "smooth_rate.h"
 #include "stage_select_key.h"
 #include "status_line_overlay.h"
@@ -98,6 +99,9 @@ const char* const kShadowShown[] = {"As in HD", "Lighter", "Much lighter"};
 const char* const kShadowStored[] = {"1", "0.8", "0.6"};
 const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "Largest"};
 const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
+// The frame rate's three modes, and the panel's numbers (perf_monitor.h).
+const char* const kPerfShown[] = {"Off", "Frame rate", "Full panel"};
+const char* const kPerfStored[] = {"off", "fps", "full"};
 const char* const kInterpPacingShown[] = {"Automatic", "Never pause"};
 const char* const kInterpPacingStored[] = {"", "0"};
 
@@ -123,6 +127,18 @@ float display_refresh() {
 int smooth_requested() { return bw_smooth_requested(env("DOL_AURORA_FRAME_INTERP_STEPS", "1").c_str()); }
 
 void refresh_smooth_rate() { aurora_set_frame_interp_steps(bw_smooth_steps(smooth_requested(), display_refresh())); }
+
+// The frame rate's mode (BLUEWAKE_PERF_OVERLAY): the counter alone is Aurora's,
+// the full panel is the host's and draws the rate itself, so Aurora's counter is
+// off in it. Nothing is sampled while the panel is off.
+int perf_mode() { return bw_perf_mode_of(bw_desktop::env("BLUEWAKE_PERF_OVERLAY", "off").c_str()); }
+
+void apply_perf_overlay() {
+    const int mode = perf_mode();
+    aurora_set_fps_overlay(mode != BW_PERF_FULL && env_on("DOL_AURORA_SHOW_FPS", false));
+    if (mode != BW_PERF_FULL)
+        bw_perf_reset();
+}
 
 void apply_fps_position() {
     aurora_set_fps_overlay_position(
@@ -269,7 +285,7 @@ void apply_live() {
     aurora_set_forced_anisotropy(static_cast<unsigned>(env_int("DOL_AURORA_FORCE_ANISO", 1)));
     refresh_smooth_rate();
     aurora_set_frame_interpolation(env_on("DOL_AURORA_FRAME_INTERP", false));
-    aurora_set_fps_overlay(env_on("DOL_AURORA_SHOW_FPS", false));
+    apply_perf_overlay();
     apply_fps_position();
     aurora_set_pause_on_focus_lost(env_on("BLUEWAKE_PAUSE_UNFOCUSED", false));
     aurora_set_background_input(env_on("BLUEWAKE_BACKGROUND_INPUT", false));
@@ -300,6 +316,8 @@ void apply_now(const bw_settings::Setting& s) {
         aurora_set_fps_overlay(value != "0");
     else if (std::strcmp(key, "DOL_AURORA_FPS_POSITION") == 0)
         apply_fps_position();
+    else if (std::strcmp(key, "BLUEWAKE_PERF_OVERLAY") == 0)
+        apply_perf_overlay();
     else if (std::strcmp(key, "DOL_AURORA_RENDER_SCALE") == 0)
         aurora_set_frame_buffer_scale(static_cast<float>(std::atoi(value.c_str())));
     else if (std::strcmp(key, "DOL_AURORA_FORCE_ANISO") == 0)
@@ -688,6 +706,12 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *shown = bw_desktop::kScaleShown;
         *stored = bw_desktop::kScaleStored;
         *count = 5;
+        return true;
+    }
+    if (std::strcmp(key, "BLUEWAKE_PERF_OVERLAY") == 0) {
+        *shown = bw_desktop::kPerfShown;
+        *stored = bw_desktop::kPerfStored;
+        *count = 3;
         return true;
     }
     if (std::strcmp(key, "DOL_AURORA_FORCE_ANISO") == 0) {
@@ -1196,6 +1220,41 @@ void draw_menu(const bw_platform::Look& look) {
         close_menu();
 }
 
+// The full panel, while it is on (BLUEWAKE_PERF_OVERLAY=full): perf_monitor.h's
+// numbers, and the picture's details from the settings the game runs with. The
+// rate is counted from the presents here, so the panel and Aurora's counter never
+// both show one.
+void draw_performance_panel(const bw_platform::Look& look) {
+    if (perf_mode() != BW_PERF_FULL || !env_on("DOL_AURORA_SHOW_FPS", false))
+        return;
+    bw_perf_present(SDL_GetTicksNS());
+    BwPerfStats stats;
+    bw_perf_snapshot(&stats);
+    char window_size[32], image_size[48], scaling[48], limit[32];
+    int width = 0, height = 0;
+    SDL_Window* window = game_window();
+    const bool sized = window != nullptr && SDL_GetWindowSize(window, &width, &height);
+    std::snprintf(window_size, sizeof window_size, "%s", "-");
+    if (sized)
+        std::snprintf(window_size, sizeof window_size, "%dx%d", width, height);
+    // The resolution the game is drawn at is its own 640x480 frame buffer that
+    // many times over, or the window's own pixels (aurora_set_frame_buffer_scale).
+    const int multiple = env_int("DOL_AURORA_RENDER_SCALE", 0);
+    if (multiple > 0) {
+        std::snprintf(image_size, sizeof image_size, "%dx%d", 640 * multiple, 480 * multiple);
+        std::snprintf(scaling, sizeof scaling, "%dx the game's 640x480", multiple);
+    } else {
+        std::snprintf(image_size, sizeof image_size, "%s", window_size);
+        std::snprintf(scaling, sizeof scaling, "%s", "none (1:1)");
+    }
+    const int steps = env_on("DOL_AURORA_FRAME_INTERP", false)
+                          ? bw_smooth_steps(smooth_requested(), display_refresh())
+                          : 0;
+    std::snprintf(limit, sizeof limit, "%d FPS", (steps + 1) * 30);
+    const bluewake_ui::BwPerfPicture picture{window_size, image_size, scaling, limit, nullptr};
+    bluewake_ui::draw_perf_panel(stats, picture, look.scale);
+}
+
 // Every presented frame, on the main thread, inside Aurora's frame.
 void draw(void*) {
     SDL_Window* window = game_window();
@@ -1222,6 +1281,7 @@ void draw(void*) {
     draw_climb_wheel();
     draw_safe_mode_note(now, look);
     draw_shader_wait(look);
+    draw_performance_panel(look);
     if (bluewake_stage_select_take_question())
         ask_stage_select();
     if (g_open)
@@ -1316,11 +1376,18 @@ void toggle_hd_look() {
     std::fprintf(stderr, "[settings] Wind Waker HD look %s (F2)\n", on ? "on" : "off");
 }
 
+// F9 walks the three modes: off, the counter, the full panel, and off again. The
+// switch is Aurora's counter; the panel draws the rate itself.
 void toggle_fps() {
-    const bool on = !env_on("DOL_AURORA_SHOW_FPS", false);
-    set_env("DOL_AURORA_SHOW_FPS", on ? "1" : "0");
-    aurora_set_fps_overlay(on);
-    bluewake_status_post(on ? "Frame rate on" : "Frame rate off");
+    const bool on = env_on("DOL_AURORA_SHOW_FPS", false);
+    const char* next = !on ? "fps" : perf_mode() != BW_PERF_FULL ? "full" : "off";
+    set_env("BLUEWAKE_PERF_OVERLAY", std::string(next));
+    set_env("DOL_AURORA_SHOW_FPS", std::strcmp(next, "off") == 0 ? "0" : "1");
+    apply_perf_overlay();
+    bluewake_status_post(std::strcmp(next, "off") == 0      ? "Frame rate off"
+                         : std::strcmp(next, "fps") == 0    ? "Frame rate on"
+                                                            : "Performance panel on");
+    std::fprintf(stderr, "[settings] frame rate %s (F9)\n", next);
 }
 
 void toggle_smooth_motion() {
