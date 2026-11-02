@@ -1062,6 +1062,7 @@ int main(void) {{
                                             "gather_pipe", "direct_calls", "inline_gpr", "native_j3d",
                                             "native_vec", "native_math", "native_skin", "native_game_math",
                                             "lean_memory", "native_entries", "lean_blocks")},
+                               **({"gather_pipe_profile": True} if getattr(self.args, "gather_pipe_profile", False) else {}),
                                **({"lean_deadlines": True} if getattr(self.args, "lean_deadlines", False) else {}),
                                **({"behaviour_timing": True} if getattr(self.args, "behaviour_timing", False) else {}),
                                **({"cache_ops": True} if getattr(self.args, "cache_ops", False) else {}),

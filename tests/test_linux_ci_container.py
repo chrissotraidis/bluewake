@@ -92,6 +92,13 @@ class GatherPipeProfilePolicyTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--gather-pipe-profile requires --gather-pipe", result.stderr)
 
+    def test_profile_build_trains_its_own_profile(self):
+        # The retained stages change the module's code, so a normal build's
+        # counts must not be reused for it (the training fingerprint).
+        source = (BUILD.ROOT / "scripts/linux/build.py").read_text()
+        fingerprint = source[source.index("def training_fingerprint"):source.index("def train(")]
+        self.assertIn('"gather_pipe_profile": True', fingerprint)
+
     def test_profile_stages_are_not_retained_by_default(self):
         header = (BUILD.ROOT / "cmake/composite/gather_pipe.h").read_text()
         self.assertIn("#if defined(BLUEWAKE_GATHER_PIPE_PROFILE)", header)
