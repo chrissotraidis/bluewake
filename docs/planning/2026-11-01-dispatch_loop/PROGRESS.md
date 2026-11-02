@@ -1,6 +1,6 @@
 # PROGRESS — Dispatch-loop edges in Outset
 
-Status: Candidate found: transform `bctr` (`__ptmf_scall`) and `blrl`  
+Status: M3 candidate built and under test  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -21,7 +21,7 @@ Status: Candidate found: transform `bctr` (`__ptmf_scall`) and `blrl`
 - [x] M2-T01: Bound for the largest group (returns after turn ends) via `BLUEWAKE_DSP_RATE`: +0.4%, no-go.
 - [x] M2-T02: Depth cap 32 → 128 in the counting build: no change. Hypothesis rejected.
 - [x] M2-T03: Find the call sites (census pairs by link register). Mostly `bctr` in `__ptmf_scall` (≈ 2,000/frame) and `blrl` (≈ 490/frame), neither transformed.
-- [ ] M3-T01: Transform `bctr` tail jumps (as in `__ptmf_scall`) and `blrl` calls to run directly, keeping every runtime check; focused tests.
+- [x] M3-T01: Transform `bctr` tail jumps (as in `__ptmf_scall`) and `blrl` calls to run directly, keeping every runtime check; focused tests (`911e0e8`; 7/7 builder tests pass).
 - [ ] M3-T02: Game Mode (≥ 6 interleaved launches) and render_bench checkpoints; retain or record no-go.
 
 ### M3: Candidate (depends: M2)

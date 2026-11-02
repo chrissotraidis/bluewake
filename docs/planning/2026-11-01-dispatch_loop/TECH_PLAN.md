@@ -1,6 +1,6 @@
 # TECH_PLAN — Dispatch-loop edges in Outset
 
-Status: Planning  
+Status: Candidate under test (M3)  
 Source: BlueWake `main` at `6b429fea9e60`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -25,6 +25,45 @@ What reaches the loop is whatever these leave: watched addresses, transfers whos
 4. **Bound.** For the largest group, build a ceiling that takes that path directly, unsafely, and A/B it against the #503 stack.
 5. **Candidate.** Only if the bound is consistent: an exact change in the transform or the loop, with focused tests.
 
+## Candidate (M3): `bctr` tail jumps and `blrl` calls run directly
+
+**Problem.** M0–M2 attributed the loop's traffic. Apart from watched calls (kept on purpose) and returns after turn ends (≤ 0.4%, closed), the largest remaining group comes from two instructions [`direct_calls.py`](../../../scripts/windows/direct_calls.py) never rewrites:
+
+| Instruction | Where | Per Outset frame | What happens today |
+|---|---|---:|---|
+| `bctr` (unconditional) | `__ptmf_scall` (0x80328DE8), which runs C++ pointer-to-member calls | ≈ 2,000 calls | The chunk returns with `pc = ctr`; the loop dispatches the member; its `blr` back to the caller also goes round the loop |
+| `blrl` | GX (0x80324F10), the texture-region callback | ≈ 490 calls | The chunk jumps to its return dispatcher; the callee runs from the loop; so does its return |
+
+**Change.** In `transform_indirect`, next to the existing `bctrl` rewrite:
+
+```c
+/* bctr: run the target where the loop would have dispatched it, then leave
+   with the guest where the target left it. */
+ctx->pc = target;
+if (bw_direct_call_ready(ctx, target))
+    (void)bw_call_translated(ctx, target);
+return;
+
+/* blrl: as bctrl, with the target read from lr before lr is set. */
+ctx->lr = RET;
+ctx->pc = target;
+if (bw_direct_call_ready(ctx, target) && bw_call_translated(ctx, target) &&
+    ctx->pc == RET && bw_direct_call_ready(ctx, RET))
+    goto label_RET;
+goto return_dispatch_CHUNK;   /* the original path */
+```
+
+Through `__ptmf_scall`, the caller reached the helper with a direct `bl`. After the member returns, `pc` equals the caller's return address, so the caller's existing direct-call check carries on in place: neither the call nor the return goes round the loop.
+
+**Exactness.** Only the host path changes, not the guest instructions or their order:
+- `bw_direct_call_ready` keeps the exception, budget, interrupt and watched-address checks;
+- `bw_call_translated` refuses watched targets and targets with no translation;
+- any refusal takes the original path.
+
+The loop would have done the same: dispatch the target, then continue from wherever it left the guest.
+
+**Risk.** `bctr` also implements switch tables. Those now run their case block nested instead of through the loop, which is still exact but adds call depth; a deep switch loop could reach the 32-call cap and unwind as before. The A/B shows whether that costs anything.
+
 ## Changes (planned)
 
 | File | Change | Why |
@@ -32,7 +71,8 @@ What reaches the loop is whatever these leave: watched addresses, transfers whos
 | `cmake/composite/loop_census.h`, `dispatch_loop.h` | Opt-in census: entries, boundaries by target and skipped/asked, exit reasons | Attribution; compiles to nothing in shipped builds |
 | `scripts/` (report) | Census → per-frame table, joined with decomp symbols | Repeatable mapping |
 | `tests/loop_census_test.c`, CI (Windows, Linux) | Census counts on synthetic runs: every exit reason, targets, entries | Proves the counts; the existing loop test proves the path is unchanged |
-| Candidate files | Decided by M2 | — |
+| `scripts/windows/direct_calls.py` (`TAIL_JUMP`, `LINK_CALL`, in `transform_indirect`) | `bctr` and `blrl` run their target directly; the original path otherwise | ≈ 2,500 calls per frame and their returns leave the loop |
+| `tests/test_direct_calls.py` | Synthetic `bctr` and `blrl` sites: rewritten, idempotent, watched sites untouched, `lr` read before it is set | Builder logic in CI (audit workflow) |
 
 ## Verification
 
