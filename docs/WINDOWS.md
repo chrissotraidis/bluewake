@@ -125,7 +125,8 @@ The `--gather-pipe` option also leaves the module ABI unchanged. It can be used
 with or without `--inline-fp` and records its helper hashes in build provenance.
 The Windows and Linux hosts use direct FIFO writes with such a module unless `BLUEWAKE_GATHER_PIPE=0` is set.
 With that enabled, `BLUEWAKE_GATHER_PIPE_BATCH=1` additionally requests batching
-on a backend that supports byte writes. Both require a module prepared with
+on a backend that supports byte writes. The Linux host batches by default (measured on the Steam Deck, #531);
+`BLUEWAKE_GATHER_PIPE_BATCH=0` keeps direct writes there. Both require a module prepared with
 `--gather-pipe`; older modules keep their ordinary MMIO path. FIFO diagnostic
 tracing and edge-census builds retain the ordinary handler. Renderer batching,
 whole-module optimized comparisons and performance remain unaccepted until the

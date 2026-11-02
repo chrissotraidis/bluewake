@@ -232,6 +232,16 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
+    # The host's gather-writer selection, including Linux's batching default (#531).
+    add_executable(bluewake_gather_host_test
+        ${BLUEWAKE_REPO_ROOT}/tests/gather_host_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+    target_include_directories(bluewake_gather_host_test PRIVATE
+        ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_HOST_SRC})
+    target_link_libraries(bluewake_gather_host_test PRIVATE gxruntime)
+    set_target_properties(bluewake_gather_host_test PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME bluewake_gather_host_test COMMAND bluewake_gather_host_test)
+
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_link_libraries(bluewake_linux_disc_test PRIVATE gxruntime GXRuntime::aurora xxhash)

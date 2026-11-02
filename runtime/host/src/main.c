@@ -8339,7 +8339,8 @@ int main(int argc, char** argv) {
     const BluewakeGatherMode gather_mode = bluewake_gather_pipe_configure(
         set_gather_word, set_gather_bytes, dol_platform_gx_write,
         dol_platform_gx_write_bytes_available() ? dol_platform_gx_write_bytes : NULL,
-        host_feature_wanted("BLUEWAKE_GATHER_PIPE") ? "1" : "0", getenv("BLUEWAKE_GATHER_PIPE_BATCH"),
+        host_feature_wanted("BLUEWAKE_GATHER_PIPE") ? "1" : "0",
+        bluewake_gather_pipe_batch_option(getenv("BLUEWAKE_GATHER_PIPE_BATCH")),
         g_gx_fifo_trace || BLUEWAKE_EDGE_CENSUS);
     fprintf(stderr, "[chassis] gather-pipe=%s\n",
             gather_mode == BLUEWAKE_GATHER_BATCH ? "batch" :
