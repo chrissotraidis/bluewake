@@ -64,18 +64,31 @@ inline float column_width(const char* const* samples, int count) {
 
 } // namespace perf_detail
 
-// The whole panel. scale is the menu's text scale (bw_platform::look's), so it
-// sits the same distance from the corner at every window size and font size.
-inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& picture, float scale) {
+// The whole panel. font and font_scale are the menu's (bw_platform::look's), so the
+// panel is set in the same text as the menu, follows the player's text size, and is
+// drawn from the menu's font atlas — rasterised at the display's scale, so it is sharp
+// at every size rather than a small font stretched up. The spacing, the margins and
+// the graph are all in font sizes, so a different resolution or text size re-lays the
+// panel out instead of scaling a picture of it.
+inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& picture, ImFont* font, float font_scale) {
     using namespace perf_detail;
+    if (font != nullptr)
+        ImGui::PushFont(font);
+    // The size the text will be drawn at: the font's own rasterised size times the
+    // scale the menu asked for. Everything below is in font sizes, so the panel
+    // re-lays out at a new resolution or text size instead of being stretched.
+    const float font_size = (font != nullptr ? font->FontSize : ImGui::GetFontSize()) * font_scale;
     const ImVec2 display = ImGui::GetIO().DisplaySize;
-    ImGui::SetNextWindowPos(ImVec2(display.x - 12.f * scale, 12.f * scale), ImGuiCond_Always, ImVec2(1.f, 0.f));
+    const float margin = 0.7f * font_size;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.6f * font_size, 0.5f * font_size));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.4f * font_size, 0.25f * font_size));
+    ImGui::SetNextWindowPos(ImVec2(display.x - margin, margin), ImGuiCond_Always, ImVec2(1.f, 0.f));
     ImGui::SetNextWindowBgAlpha(0.62f);
     ImGui::Begin("##bluewake-perf", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoMove);
-    ImGui::SetWindowFontScale(0.72f);
+    ImGui::SetWindowFontScale(font_scale);   // inside the window: this frame's text, this window only
     const ImVec4 gpu_color(0.55f, 0.83f, 0.31f, 1.f), cpu_color(0.18f, 0.59f, 0.80f, 1.f),
         ram_color(0.80f, 0.45f, 0.70f, 1.f), rate_color(0.95f, 0.95f, 0.95f, 1.f),
         picture_color(0.62f, 0.70f, 0.95f, 1.f);
@@ -138,7 +151,7 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
     // The graph does not count toward the panel's width in the same way the
     // tables do; -FLT_MIN fills the columns the two tables sized.
     ImGui::PlotLines("##bluewake-perf-graph", stats.frame_ms, BW_PERF_HISTORY, 0, nullptr, 0.f, top,
-                     ImVec2(-1.f, 48.f * scale));
+                     ImVec2(-1.f, 3.5f * font_size));
 
     static const char* const kLabels[] = {"Window", "Game image", "Scaling", "Frame limit", "Presentation"};
     const char* const values[] = {picture.window, picture.image, picture.scaling, picture.limit, picture.present};
@@ -169,6 +182,9 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
     if (stats.cpu_name[0] != '\0')
         ImGui::TextDisabled("%s", stats.cpu_name);
     ImGui::End();
+    ImGui::PopStyleVar(2);
+    if (font != nullptr)
+        ImGui::PopFont();
 }
 
 } // namespace bluewake_ui

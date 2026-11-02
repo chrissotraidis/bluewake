@@ -1252,7 +1252,7 @@ void draw_performance_panel(const bw_platform::Look& look) {
                           : 0;
     std::snprintf(limit, sizeof limit, "%d FPS", (steps + 1) * 30);
     const bluewake_ui::BwPerfPicture picture{window_size, image_size, scaling, limit, nullptr};
-    bluewake_ui::draw_perf_panel(stats, picture, look.scale);
+    bluewake_ui::draw_perf_panel(stats, picture, look.font, look.font_scale * bluewake_ui::text_size());
 }
 
 // Every presented frame, on the main thread, inside Aurora's frame.
