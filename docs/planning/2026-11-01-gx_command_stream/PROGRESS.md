@@ -1,6 +1,6 @@
 # PROGRESS — Profile the GX command stream in Outset
 
-Status: M3: batch by default on every platform (`d9556a4`); Linux checkpoints and pictures pending; other platforms pending measurement  
+Status: Linux qualified (exact; +1.7% Game Mode, +1.2% rendered); other platforms on by default, pending measurement  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -21,7 +21,7 @@ Status: M3: batch by default on every platform (`d9556a4`); Linux checkpoints an
 ### M3: Candidate (depends: M2)
 
 - [x] M3-T01: Exact change with focused tests. Batch by default on Linux (`4abfb50`); `gather_host_test` covers the default and opt-out and now also runs in the Linux job.
-- [ ] M3-T02: Game Mode (≥ 6 interleaved launches), render_bench checkpoints and pictures; retain or record no-go. Game Mode done (+1.7%); render_bench checkpoints and pictures pending.
+- [x] M3-T02: Game Mode (≥ 6 interleaved launches), render_bench checkpoints and pictures; retain or record no-go. **Retained**: Game Mode +1.7% (6/6 pairs), rendered +1.2% (Outset +2.2%), guest checkpoints identical in every scene.
 
 ### M4: Other platforms (on by default everywhere, pending measurement)
 
@@ -43,3 +43,4 @@ Batching is on by default on every platform, so testers already run it. Each pla
 | M0-T01 (review) | `e2ed31c` reviewed; fix in this commit | Code review; `python3 tests/test_linux_ci_container.py` | Source only | The option works as described (stages kept as profiler symbols, refused without `--gather-pipe`, off by default). Fixed: the training fingerprint ignored `--gather-pipe-profile`, so a profiling build could reuse a normal build's counts for differently shaped code (#530 measured that mismatch as −4.9%); new test. Noted: line tables cover the module only; the host stage (`aurora_backend_gx_write`) resolves by symbol |
 | M0-T02 | Profiling build `ab39a11` (#503 stack + #531 with `--gather-pipe-profile`, full build with its own training); Deck `~/m531/perf.data` (private) | `perf record -F 2999 -t <game thread>` 30 s, `perf stat` 10 s; symbols from the build's own module and host | Game Mode, worst-angle Outset state, 16:9, widescreen mod; ≈ 26 game FPS, ≈ 131 M cycles per frame | **GX stream ≈ 4.1% of the game thread, ≈ 5.4 M cycles per frame:** host `aurora_backend_gx_write` 2.61% (3.4 M); module `bw_gather_pipe` (the per-store check) ≈ 1.05% (1.4 M); `bw_gather_pipe_put` ≈ 0.20%; `bw_gather_pipe_drain` ≈ 0.08%; `dol_platform_gx_write` 0.17%. Inside `aurora_backend_gx_write` the samples sit on its flag checks and prologue/epilogue, not on parsing: it is called **once per written value**. The host log shows `[chassis] gather-pipe=direct`: the batching path (`aurora_backend_gx_write_bytes`, one enqueue per run of bytes) exists but needs `BLUEWAKE_GATHER_PIPE_BATCH=1`, which nothing sets; it was never qualified (`docs/WINDOWS.md`) and never measured on the Deck |
 | M2 (bound) | #503 stack (`cand-503`, `274b6290a1e2`) with and without `BLUEWAKE_GATHER_PIPE_BATCH=1` (runtime only); local `measure-531/batch/` (private) | `gamemode_measure.py` 3 × 15 s, twelve launches alternating (six pairs); host log confirms `gather-pipe=batch` / `direct` for every launch | Game Mode, worst-angle Outset state, 16:9, widescreen mod | **Batch +1.7% (26.70 → 27.16 game FPS), ahead in 6 of 6 pairs** (by 0.24–0.57 FPS). The existing path, switched on. Not yet qualified: pictures and guest checkpoints must match before it can be the default |
+| M3-T02 | #503's build (`main-503`, `72d288f`), A direct against B `BLUEWAKE_GATHER_PIPE_BATCH=1`; local `2026_11_02-135220/` (private) | `render_bench` rendered, desktop session, unpaced, 5 states × 1,800 retraces, 3 pairs A/B/B/A (12 measured + 2 picture runs), scale 3, Smooth Motion on (1 step), widescreen mod | Steam Deck Desktop Mode | **Exact: one guest-checkpoint hash per scene across all 14 runs of both builds.** Speed: **B +1.2% overall**; Outset +2.2%, Hyrule Castle +1.7%, Butterfly Room +1.7%, Shipwreck +1.7%, Lava Room −0.7% (GPU- and power-bound since #504; its runs varied by ≈ 1 FPS). Pictures: Outset, Hyrule Castle, Shipwreck similar; the Butterfly Room "changed" flag is the paced Smooth Motion capture at a different moment (state identical), and the Lava Room flicker is equal in both builds (12,311 vs 12,098 pixels) |

@@ -1,6 +1,6 @@
 # PRD — Profile the GX command stream in Outset
 
-Status: Candidate under qualification: batch GX writes by default on every platform (+1.7% on the Deck)  
+Status: Linux qualified: batching exact, +1.7% Game Mode, +1.2% rendered; on by default everywhere  
 Source: BlueWake `main` at `6b429fea9e60`; follows [#503](https://github.com/chrissotraidis/bluewake/pull/503)  
 Scope: the game-thread cost of turning the game's GX command stream into renderer work. Excluded: GPU time, Smooth Motion, the renderer's own threads.
 

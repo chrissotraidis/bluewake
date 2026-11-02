@@ -1,6 +1,6 @@
 # TECH_PLAN — Profile the GX command stream in Outset
 
-Status: Candidate under qualification: batch GX writes by default on every platform (+1.7% on the Deck)  
+Status: Linux qualified: batching exact, +1.7% Game Mode, +1.2% rendered; on by default everywhere  
 Source: BlueWake `main` at `6b429fea9e60`
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -37,7 +37,7 @@ Source: BlueWake `main` at `6b429fea9e60`
 
 **Why it should be exact.** The guest-visible FIFO stream is the same bytes in the same order; only how many host calls deliver them changes. The drain points keep anything that reads GX state (hardware registers, chassis boundaries) behind a delivered stream. Qualification still has to show it: identical guest checkpoints and identical or similar pictures in all five scenes, the bar #495 met.
 
-**Measured.** #503's build, `BLUEWAKE_GATHER_PIPE_BATCH` unset against `=1`, twelve alternating Game Mode launches: **26.70 → 27.16 game FPS (+1.7%), ahead in 6 of 6 pairs**.
+**Measured.** #503's build, `BLUEWAKE_GATHER_PIPE_BATCH` unset against `=1`, twelve alternating Game Mode launches: **26.70 → 27.16 game FPS (+1.7%), ahead in 6 of 6 pairs**. render_bench, five scenes, three pairs: **guest checkpoints identical** in every run of both, **+1.2% overall** (Outset +2.2%; Lava Room −0.7%, GPU- and power-bound); pictures similar apart from the known capture-timing flags.
 
 ## Other platforms
 
