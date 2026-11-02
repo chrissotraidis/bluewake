@@ -1,6 +1,6 @@
 # PROGRESS — Profile the GX command stream in Outset
 
-Status: M3: batch by default on Linux implemented (`4abfb50`); qualifying checkpoints and pictures  
+Status: M3: batch by default on every platform (`d9556a4`); Linux checkpoints and pictures pending; other platforms pending measurement  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -23,13 +23,13 @@ Status: M3: batch by default on Linux implemented (`4abfb50`); qualifying checkp
 - [x] M3-T01: Exact change with focused tests. Batch by default on Linux (`4abfb50`); `gather_host_test` covers the default and opt-out and now also runs in the Linux job.
 - [ ] M3-T02: Game Mode (≥ 6 interleaved launches), render_bench checkpoints and pictures; retain or record no-go. Game Mode done (+1.7%); render_bench checkpoints and pictures pending.
 
-### M4: Other platforms (depends: M3 qualified on Linux)
+### M4: Other platforms (on by default everywhere, pending measurement)
 
-Batching already ships on macOS and iOS in builds with the combined optimizations; Windows and Android still use direct writes. Each platform turns it on only after its own A/B.
+Batching is on by default on every platform, so testers already run it. Each platform records a with/without A/B (the menu switch, or `BLUEWAKE_GATHER_PIPE_BATCH=0`), Outset from the worst-angle state, at least six interleaved launches, pictures compared.
 
-- [ ] M4-T01: Windows: a release build, Outset from the worst-angle state, with and without `BLUEWAKE_GATHER_PIPE_BATCH=1`, at least six interleaved launches; pictures compared. Then make it the Windows default in `bluewake_gather_pipe_batch_option` (`_WIN32`), with the test's Windows branch.
-- [ ] M4-T02: Android: the same on a device (APK with `--gather-pipe`); then default it on `__ANDROID__`, with a test.
-- [ ] M4-T03: macOS and iOS: record a with/without measurement of the existing default, so every platform's setting rests on a measurement.
+- [ ] M4-T01: Windows.
+- [ ] M4-T02: Android (also confirms the new Display toggle builds and works).
+- [ ] M4-T03: macOS and iOS.
 
 ## Evidence ledger
 

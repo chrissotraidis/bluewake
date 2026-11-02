@@ -1,6 +1,6 @@
 # PRD — Profile the GX command stream in Outset
 
-Status: Candidate under qualification: batch GX writes by default on Linux (+1.7% in Outset)  
+Status: Candidate under qualification: batch GX writes by default on every platform (+1.7% on the Deck)  
 Source: BlueWake `main` at `6b429fea9e60`; follows [#503](https://github.com/chrissotraidis/bluewake/pull/503)  
 Scope: the game-thread cost of turning the game's GX command stream into renderer work. Excluded: GPU time, Smooth Motion, the renderer's own threads.
 
@@ -34,15 +34,15 @@ Outset draws about 1,960 draws per game frame. It is unknown whether this cost s
 
 ## Platforms
 
-| Platform | Batching today | How it is set | Measured |
+| Platform | Default (this PR) | How to compare | Measured |
 |---|---|---|---|
-| macOS | On, in builds with `--combined-optimizations` | `main.c` reads the bundle's `ModuleOptimizations` (`combined-v1`) and sets `BLUEWAKE_GATHER_PIPE_BATCH=1` (#292, Oct 12) | Not recorded on its own |
-| iOS / iPadOS | On, in builds with `--combined-optimizations` | `apple/ios/src/ios_entry.m`, the same list | Not recorded on its own |
-| Linux desktop (Steam Deck) | On by default (this PR) | `bluewake_gather_pipe_batch_option` | **+1.7%** in Outset, 6 of 6 pairs |
-| Windows | Off (direct) | Shares `main.c`; `BLUEWAKE_GATHER_PIPE_BATCH=1` turns it on | Not measured |
-| Android | Off (direct) | Shares `main.c`; it defines `__linux__`, so the default excludes `__ANDROID__` explicitly | Not measured |
+| Linux desktop (Steam Deck) | On | Config → Performance switch, or `BLUEWAKE_GATHER_PIPE_BATCH=0` | **+1.7%** in Outset, 6 of 6 pairs |
+| Windows | On | The same switch, or the variable | Pending |
+| macOS | On (combined-optimization builds already batched, #292) | The same switch, or the variable | Pending |
+| iOS / iPadOS | On (combined-optimization builds already batched) | `BLUEWAKE_GATHER_PIPE_BATCH=0` | Pending |
+| Android | On | Display → "Batch Graphics Commands" | Pending |
 
-Windows and Android are measured before their defaults change (PROGRESS M4).
+Batching is on by default on every platform, so testers already run it; each platform records a with/without measurement (PROGRESS M4).
 
 ## Outcomes
 
@@ -60,7 +60,7 @@ Windows and Android are measured before their defaults change (PROGRESS M4).
 
 ## Decisions
 
-- **Batch by default on desktop Linux (2026-11-02):** only where it was measured (Android, which also defines `__linux__`, is excluded); `BLUEWAKE_GATHER_PIPE_BATCH=0` keeps direct writes; Windows and Mac unchanged until measured there. Qualification: identical checkpoints and identical or similar pictures, the bar #495 met.
+- **Batch by default on every platform (2026-11-02):** measured on Linux; on everywhere else pending each platform's measurement, so testers already run it. A menu switch (desktop Config → Performance, Android Display) or `BLUEWAKE_GATHER_PIPE_BATCH=0` keeps direct writes for comparison. Qualification: identical checkpoints and identical or similar pictures, the bar #495 met.
 - **Profile before changing:** the first deliverable is the breakdown.
 - **Make the attribution build public:** #495's attribution used a local-only build that keeps gather stages as profiler symbols. M0 adds that as a builder option, so others can repeat it.
 - **Acceptance** follows #503's rule: consistent, exact, tested; size is not a bar.
