@@ -1,6 +1,6 @@
 # PROGRESS — Profile the GX command stream in Outset
 
-Status: Batching: +1.7%, consistent; qualifying pictures and checkpoints next  
+Status: M3: batch by default on Linux implemented (`4abfb50`); qualifying checkpoints and pictures  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -12,17 +12,16 @@ Status: Batching: +1.7%, consistent; qualifying pictures and checkpoints next
 
 ### M1: Counts (depends: M0)
 
-- [ ] M1-T01: Opt-in word, command-kind and flush counters at the hand-off; parity test.
-- [ ] M1-T02: Outset and a lighter scene; cycles per word and per command.
+- [ ] ~~M1-T01/T02~~: Skipped: M0 showed the cost is per-call overhead, and an existing path removes it.
 
 ### M2: Bound (depends: M1)
 
-- [ ] M2-T01: Ceiling for the largest stage; Game Mode A/B against the #503 stack; go/no-go.
+- [x] M2-T01: Ceiling for the largest stage; Game Mode A/B against the #503 stack; go/no-go. The existing batch path itself: +1.7%, ahead in 6 of 6 pairs.
 
 ### M3: Candidate (depends: M2)
 
-- [ ] M3-T01: Exact change with focused tests.
-- [ ] M3-T02: Game Mode (≥ 6 interleaved launches), render_bench checkpoints and pictures; retain or record no-go.
+- [x] M3-T01: Exact change with focused tests. Batch by default on Linux (`4abfb50`); `gather_host_test` covers the default and opt-out and now also runs in the Linux job.
+- [ ] M3-T02: Game Mode (≥ 6 interleaved launches), render_bench checkpoints and pictures; retain or record no-go. Game Mode done (+1.7%); render_bench checkpoints and pictures pending.
 
 ## Evidence ledger
 
