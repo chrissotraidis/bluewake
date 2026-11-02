@@ -602,7 +602,7 @@ int main(void) {{
         # the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.gather_pipe_profile)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(getattr(self.args, 'gather_pipe_profile', False))}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
                        f"{int(self.args.gather_alias_cache)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
@@ -844,7 +844,7 @@ int main(void) {{
     # --- 9 compile -----------------------------------------------------------
     def compile_module(self):
         flags = []
-        if self.args.gather_pipe_profile:
+        if getattr(self.args, "gather_pipe_profile", False):
             flags.append("-gline-tables-only")
         if self.profile is not None:
             # The profile is a compiler input but not a header dependency: its
@@ -951,7 +951,7 @@ int main(void) {{
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
-            f"-DBLUEWAKE_GATHER_PIPE_PROFILE={'ON' if self.args.gather_pipe_profile else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_PIPE_PROFILE={'ON' if getattr(self.args, 'gather_pipe_profile', False) else 'OFF'}",
             f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
@@ -1275,7 +1275,7 @@ int main(void) {{
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
-            "gather_pipe_profile": self.args.gather_pipe_profile,
+            "gather_pipe_profile": getattr(self.args, "gather_pipe_profile", False),
             "gather_alias_cache": self.args.gather_alias_cache,
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
