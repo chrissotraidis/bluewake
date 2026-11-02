@@ -54,9 +54,40 @@ int bluewake_native_skin_try(CPUState* cpu) {
 }
 static unsigned long long s_skin_runs, s_skin_declined, s_skin_joints;
 
+/* BLUEWAKE_SKIN_CENSUS (compile time, diagnostic builds only, #541): each
+ * decline by its reason, and the accepted and timing-declined calls by the
+ * cycles the function costs (58 + 23 per envelope + 60 per joint), so a
+ * measurement shows which model sizes the turn's budget and deadline refuse. */
+#if defined(BLUEWAKE_SKIN_CENSUS)
+static const char* const s_skin_reasons[] = {"state", "guest_data", "model", "stores_overlap", "mix_counts",
+                                             "joint_count", "joint_tables", "joint_matrices", "turn_budget",
+                                             "deadline"};
+#define SKIN_REASONS (sizeof s_skin_reasons / sizeof s_skin_reasons[0])
+#define SKIN_BINS 6u /* < 1k, 1-2k, 2-4k, 4-8k, 8-16k, >= 16k cycles */
+static unsigned long long s_skin_reason_counts[SKIN_REASONS];
+static unsigned long long s_skin_accepted_bins[SKIN_BINS], s_skin_budget_bins[SKIN_BINS], s_skin_deadline_bins[SKIN_BINS];
+static unsigned skin_bin(unsigned long long cycles) {
+    unsigned bin = 0;
+    for (unsigned long long limit = 1024u; bin + 1u < SKIN_BINS && cycles >= limit; limit <<= 1)
+        ++bin;
+    return bin;
+}
+#define SKIN_DECLINE(reason) do { s_skin_reason = (reason); goto decline; } while (0)
+#else
+#define SKIN_DECLINE(reason) goto decline
+#endif
+
 BW_SKIN_EXPORT void bluewake_native_skin_report(void) {
     fprintf(stderr, "[native-skin] calcWeightEnvelopeMtx native=%llu declined=%llu joints=%llu\n",
             s_skin_runs, s_skin_declined, s_skin_joints);
+#if defined(BLUEWAKE_SKIN_CENSUS)
+    for (unsigned r = 0; r < SKIN_REASONS; ++r)
+        fprintf(stderr, "[native-skin-census] decline %s=%llu\n", s_skin_reasons[r], s_skin_reason_counts[r]);
+    static const char* const bins[SKIN_BINS] = {"<1k", "1-2k", "2-4k", "4-8k", "8-16k", ">=16k"};
+    for (unsigned b = 0; b < SKIN_BINS; ++b)
+        fprintf(stderr, "[native-skin-census] cycles %s accepted=%llu turn_budget=%llu deadline=%llu\n", bins[b],
+                s_skin_accepted_bins[b], s_skin_budget_bins[b], s_skin_deadline_bins[b]);
+#endif
 }
 
 #define SKIN_FRAME 112u
@@ -143,11 +174,15 @@ static inline SkinPair skin_madd(const CPUState* cpu, SkinPair a, SkinPair c, Sk
 int bluewake_native_skin(CPUState* cpu) {
     if (cpu == NULL)
         return 0;
+#if defined(BLUEWAKE_SKIN_CENSUS)
+    unsigned s_skin_reason = 0;
+    unsigned long long census_cycles = 0;
+#endif
     const u32 gqr = cpu->gqr[0];
     if (cpu->exception != 0u || (cpu->msr & PPC_MSR_FP) == 0u || (cpu->hid2 & PPC_HID2_LSQE) == 0u ||
         ((gqr >> 16) & 7u) != 0u || (gqr & 7u) != 0u || (cpu->fpscr & 3u) != 0u ||
         g_mem_write_journal != NULL || cpu->cycle_budget <= 0)
-        goto decline;
+        SKIN_DECLINE(0);
 
     const u32 self = cpu->gpr[3];
     const u32 sp = cpu->gpr[1];
@@ -158,7 +193,7 @@ int bluewake_native_skin(CPUState* cpu) {
     const u8* unit_data = skin_ram(cpu, unit, 8u);
     if (self_model == NULL || self_arrays == NULL || unit_data == NULL || !skin_floats(unit_data, 2) ||
         skin_ram(cpu, frame, SKIN_FRAME + 8u) == NULL)
-        goto decline;
+        SKIN_DECLINE(1);
     const u32 model = read_be32(self_model);
     const u32 scale_flags = read_be32(self_arrays);        /* 132(r3) */
     const u32 envelope_flags = read_be32(self_arrays + 4); /* 136(r3) */
@@ -166,7 +201,7 @@ int bluewake_native_skin(CPUState* cpu) {
     const u32 weighted = read_be32(self_arrays + 12);      /* 144(r3) */
     const u8* model_fields = skin_ram(cpu, model + 48u, 20u);
     if (model_fields == NULL)
-        goto decline;
+        SKIN_DECLINE(2);
     const u32 count = read_be16(model_fields);             /* 48: envelopes */
     const u32 mix_counts = read_be32(model_fields + 4);    /* 52 */
     const u32 indices = read_be32(model_fields + 8);       /* 56 */
@@ -181,7 +216,7 @@ int bluewake_native_skin(CPUState* cpu) {
                          skin_ram(cpu, envelope_flags, count) == NULL)) ||
         !skin_untouched(&stores, self + 4u, 4u) || !skin_untouched(&stores, self + 132u, 16u) ||
         !skin_untouched(&stores, unit, 8u) || !skin_untouched(&stores, model + 48u, 20u))
-        goto decline;
+        SKIN_DECLINE(3);
 
     /* Every joint the function reads, checked before anything is written. */
     u64 joints = 0;
@@ -189,7 +224,7 @@ int bluewake_native_skin(CPUState* cpu) {
     if (count != 0u) {
         const u8* counts = skin_ram(cpu, mix_counts, count);
         if (counts == NULL || !skin_untouched(&stores, mix_counts, count))
-            goto decline;
+            SKIN_DECLINE(4);
         for (u32 i = 0; i < count; ++i) {
             const u32 mix = counts[i];
             const u32 iterations = mix != 0u ? mix : 1u; /* a do-while */
@@ -197,13 +232,13 @@ int bluewake_native_skin(CPUState* cpu) {
             cycles += 23u + 60u * (u64)iterations;
         }
         if (joints > 0x10000000u)
-            goto decline;
+            SKIN_DECLINE(5);
         const u32 index_bytes = 2u * (u32)joints, weight_bytes = 4u * (u32)joints;
         const u8* index_data = skin_ram(cpu, indices, index_bytes);
         const u8* weight_data = skin_ram(cpu, weights, weight_bytes);
         if (index_data == NULL || weight_data == NULL || !skin_untouched(&stores, indices, index_bytes) ||
             !skin_untouched(&stores, weights, weight_bytes) || !skin_floats(weight_data, (unsigned)joints))
-            goto decline;
+            SKIN_DECLINE(6);
         for (u64 j = 0; j < joints; ++j) {
             const u32 index = read_be16(index_data + 2u * j);
             const u32 a = inverse + index * 48u, b = node_matrices + index * 48u, s = scale_flags + index;
@@ -212,17 +247,20 @@ int bluewake_native_skin(CPUState* cpu) {
             if (a_data == NULL || b_data == NULL || skin_ram(cpu, s, 1u) == NULL ||
                 !skin_floats(a_data, 12) || !skin_floats(b_data, 12) || !skin_untouched(&stores, a, 48u) ||
                 !skin_untouched(&stores, b, 48u) || !skin_untouched(&stores, s, 1u))
-                goto decline;
+                SKIN_DECLINE(7);
         }
     }
 
     /* The translation stops at no block (the turn's budget) and prepays every
      * block with no refund (the deadline, further than any block's suffix). */
+#if defined(BLUEWAKE_SKIN_CENSUS)
+    census_cycles = cycles;
+#endif
     if (cpu->downcount - (s64)cycles <= -cpu->cycle_budget)
-        goto decline;
+        SKIN_DECLINE(8);
     if (cpu->cycle_deadline_budget > 0 &&
         (cpu->cycle_deadline_budget < 60 || cpu->cycle_deadline_budget + cpu->downcount < (s64)cycles))
-        goto decline;
+        SKIN_DECLINE(9);
 
     /* The prologue: the frame, the return address, f27-f31 twice, r29-r31. */
     const u32 return_address = cpu->lr;
@@ -353,9 +391,19 @@ int bluewake_native_skin(CPUState* cpu) {
     cpu->pc = return_address & ~3u;
     s_skin_runs++;
     s_skin_joints += joints;
+#if defined(BLUEWAKE_SKIN_CENSUS)
+    s_skin_accepted_bins[skin_bin(cycles)]++;
+#endif
     return 1;
 
 decline:
     s_skin_declined++;
+#if defined(BLUEWAKE_SKIN_CENSUS)
+    s_skin_reason_counts[s_skin_reason]++;
+    if (s_skin_reason == 8u)
+        s_skin_budget_bins[skin_bin(census_cycles)]++;
+    else if (s_skin_reason == 9u)
+        s_skin_deadline_bins[skin_bin(census_cycles)]++;
+#endif
     return 0;
 }

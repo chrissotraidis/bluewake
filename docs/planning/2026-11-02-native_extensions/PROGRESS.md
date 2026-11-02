@@ -1,13 +1,13 @@
 # PROGRESS — Native extensions for Outset's character work
 
-Status: Planned  
+Status: M0 in progress: decline census written; control build running  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
 
 ### M0: Why skinning declines
 
-- [ ] M0-T01: Decline-reason and model-size counters in `native_skin.c` (diagnostic define).
+- [x] M0-T01: Decline-reason and model-size counters in `native_skin.c` (diagnostic define). `BLUEWAKE_SKIN_CENSUS`: each of the ten decline sites by name (state, guest data, model, overlapping stores, mix counts, joint count, joint tables, joint matrices, turn budget, deadline), and the accepted and timing-declined calls by estimated cycles (< 1k … ≥ 16k), printed through the native's existing exit report. Without the define, `SKIN_DECLINE(n)` is the original `goto decline`.
 - [ ] M0-T02: Outset, Game Mode, one minute: declines by reason and size; accepted calls by size.
 
 ### M1: The native switches (can run beside M0)

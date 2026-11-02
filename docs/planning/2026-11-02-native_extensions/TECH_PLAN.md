@@ -1,6 +1,6 @@
 # TECH_PLAN — Native extensions for Outset's character work
 
-Status: Planning  
+Status: M0 in progress  
 Source: BlueWake `main` at `ee991d312`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -39,7 +39,7 @@ if (cpu->cycle_deadline_budget > 0 &&
 
 | File | Change | Why |
 |---|---|---|
-| `cmake/composite/native_skin.c` | Decline-reason and size counters (diagnostic define), printed at exit | M0 |
+| [`cmake/composite/native_skin.c`](../../../cmake/composite/native_skin.c) | `BLUEWAKE_SKIN_CENSUS`: decline counts by reason (the ten decline sites) and cycle bins for accepted, budget-declined and deadline-declined calls, in the exit report | M0: which model sizes the timing checks refuse |
 | `scripts/linux/build.py` (or the local build helper) | Builds with `--native-entries` / `--native-set4` for the A/B | M1; default unchanged unless retained |
 | `cmake/composite/native_skin.c` | Resumable envelope loop: stop at the translation's boundary with its exact state | M2 |
 | `tests/native_skin_test.c` | Partial runs compared with the translation at each possible stop | M2 exactness |
