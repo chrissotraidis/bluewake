@@ -1,6 +1,6 @@
 # PROGRESS — Dispatch-loop edges in Outset
 
-Status: Testing the direct-call depth cap (exact by construction)  
+Status: Depth cap ruled out; instrumenting the refused indirect calls  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -19,7 +19,8 @@ Status: Testing the direct-call depth cap (exact by construction)
 ### M2: Bound (depends: M1)
 
 - [x] M2-T01: Bound for the largest group (returns after turn ends) via `BLUEWAKE_DSP_RATE`: +0.4%, no-go.
-- [ ] M2-T02: Depth cap 32 → 128 in the counting build: do the indirect calls and the unwound returns leave the loop?
+- [x] M2-T02: Depth cap 32 → 128 in the counting build: no change. Hypothesis rejected.
+- [ ] M2-T03: Count, at the transformed `bctrl` sites, which test refuses the call (readiness, watch table, chunk lookup).
 
 ### M3: Candidate (depends: M2)
 
@@ -35,3 +36,4 @@ Status: Testing the direct-call depth cap (exact by construction)
 | M1-T02 | #503 stack (`cand-503`, `274b6290a1e2`) with `BLUEWAKE_DEADLINE_CENSUS=1` (existing host census, runtime); Deck log `measure-530/deadline.log` (private) | One Game Mode launch, ≈ 85 s | Worst-angle Outset state, 16:9, widescreen mod, HLE DSP | **The DSP cadence ends 92% of turns**: 3,873,605 deadline calls; DSP 3,580,635 (92.4%), audio DMA 284,463 (7.3%), VI 5,040, decrementer 2,095, clamp 1,372, cap 0. The host steps the DSP every `g_dsp_update_rate` = 12,600 guest cycles (`BLUEWAKE_DSP_RATE`), in HLE mode too; the September census found the same for LLE (94.5%). So each DSP step ends a turn, unwinds the call stack, and sends the pending returns round the loop |
 | M2-T01 (turn ends) | #503 stack (`cand-503`) with `BLUEWAKE_DSP_RATE` 12,600 (default) against 50,400, runtime only; local `measure-530/dsp-rate/` (private) | `gamemode_measure.py` 3 × 15 s, six launches alternating | Game Mode, worst-angle Outset state, 16:9, widescreen mod | **Bound for removing turn ends: +0.4%** (26.84 → 26.94), ahead in 3/3 pairs but by 0.23, 0.04 and 0.03 FPS. Not exact (the DSP cadence changes when the game sees DSP mail and interrupts); it bounds what an exact change could gain, which would need the host to service the DSP without unwinding the module's C stack. **No-go**: deep change to the chassis and host loop for ≤ 0.4%. The returns after a turn end cost less than the average boundary, so M1-T01's ≈ 1.7 M estimate was high |
 | M1-T03 | Same census log; the counting build's generated chunks; `direct_calls.py`, `direct_calls.c` | Each top call target matched against its call sites and the transforms | As M0-T02 | **Calls through the loop are of two kinds.** (1) **Watched by design, ≈ 2,800 per frame, edge service asked 100%:** the native actor search's hooks `cTgIt_JudgeFilter` 0x80245640 (1,018), `cTgIt_MethodCall` 0x8024560C (585), `fpcSch_JudgeByID` 0x80040068 (557), and `OSDisableInterrupts`/`OSRestoreInterrupts` (≈ 510 each; all 192/233 call sites left untransformed because the host watches them). (2) **Indirect calls that pass the check at the loop but not at the call (edge service asked 0%):** `J3DShapeMtxConcatView::loadMtxConcatView` 1,751, `__GXDefaultTexRegionCallback` 490, other callbacks. 3,692 of 3,706 `bctrl` sites are transformed, so the call site refused them. Hypothesis: `BW_DIRECT_DEPTH_MAX` (32 nested direct calls). J3D drawing recurses through virtual calls; at the cap the call goes round the loop and every enclosing chunk returns too, unwinding up to 32 frames whose returns then also go round the loop. At the loop the depth is back to 0, so the same call passes there. Changing the cap is exact by construction: direct or not, the guest state is the same |
+| M2-T02 | Counting build `c605e0a` (`BW_DIRECT_DEPTH_MAX` 32 → 128, local only, `--reuse`); Deck log `measure-530/census-depth128.log` (private) | Same one-minute census run | As M0-T02 | **Depth-cap hypothesis rejected:** 35,878 boundaries per frame (35,844 before); `loadMtxConcatView` 1,757 per frame (1,751), `__GXDefaultTexRegionCallback` 491 (490). Also checked: the widescreen mod's chunk variants are transformed too (1,095 of 1,095 `bctrl` sites). Why these indirect calls are refused at the call site remains open |
