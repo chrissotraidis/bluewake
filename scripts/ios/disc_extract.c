@@ -35,7 +35,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "disc_extract: %s\n", error);
         return 1;
     }
-    if (bluewake_disc_prepare(argv[1], argv[2], progress, NULL, error, sizeof error) != 0) {
+    if (bluewake_disc_prepare(argv[1], argv[2], progress, NULL, NULL, NULL, error,
+                              sizeof error) != 0) {
         fprintf(stderr, "\ndisc_extract: %s\n", error);
         return 1;
     }

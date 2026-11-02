@@ -357,7 +357,8 @@ static void BWProgress(void* context, double fraction, const char* stage) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         char error[512] = "";
         const int rc = bluewake_disc_prepare(disc.fileSystemRepresentation, dir.fileSystemRepresentation,
-                                             BWProgress, (__bridge void*)self, error, sizeof error);
+                                             BWProgress, (__bridge void*)self, NULL, NULL,
+                                             error, sizeof error);
         NSString* message = @(error);
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_importing = NO;
