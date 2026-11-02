@@ -313,3 +313,17 @@ Patch 0214 adds `aurora_set_hd_object_tables`: Wind Waker HD's normals and verte
 models (the HD pack's `optional/hd-normals/objects.bin` and `optional/hd-colours/objects.bin`), looked up after the
 stage's; and HD's light on the scenery (`DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT=1`, off by default): HD's terrain
 material is texture x vertex colour x light, where the GameCube's mix never goes below the shade colour.
+
+Patch 0215 adds Wind Waker HD's actor light (`DOL_AURORA_ACTOR_LIGHT_HD=1`, off by default): characters drawn with
+the GameCube's toon pattern (C0, K and the ramp, then the albedo) take HD's toon shader, read pixel for pixel from
+Cemu captures: the ramp as a lit/dark switch on the lit channel, its coordinate times the blurred sun shadow (this
+frame's, as HD's); the shade a hemisphere from actor C0 to the palette's shadow colour; the lit side actor
+K0 times its factor; HD's rim; the albedo in linear light, clipped before the gamma. The host sends the blended
+palette each frame (`aurora_set_actor_light_hd`). The GameCube's effect-light stage (K1) is left out, as HD drops it
+for its point lights. Matched draws mark the sea mask's alpha, and the sun pass, the HD rim and the exposure leave
+them alone. `DOL_AURORA_ACTOR_LIGHT_DEBUG` (1-5) shows its terms, `DOL_AURORA_ACTOR_LIGHT_LOG` each toon shader's TEV.
+The characters take this frame's sun shadow, as Wind Waker HD does (depth, then its shadow pre-pass,
+then the characters): for scene passes with HD's actor light, the sea mask and its depth are drawn before the scene,
+a characters' pre-pass is built from that depth with HD's blur, and the characters sample it. Before, they took the
+last frame's pre-pass, whose edge lagged a frame on a moving camera. `DOL_AURORA_ACTOR_LIGHT_SAME_FRAME=0` keeps the
+last frame's, to compare.

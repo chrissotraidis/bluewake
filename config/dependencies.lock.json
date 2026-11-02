@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "b84a53a8d34205cb2de9a4f5c076fbcc185bd499",
+      "sha": "dbd411711445f615e13ec43efae1a3dc9badba68",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -768,6 +768,13 @@
             "patches/recompcore/0214-Sun-shadows-Wind-Waker-HD-s-normals-and-colours-for-the-objects-and-the-rooms-and-its-light-on-the-scenery.patch"
           ],
           "evidence": "pdale-boop's: aurora_set_hd_object_tables (the pack's optional/hd-normals/objects.bin and optional/hd-colours/objects.bin, the importer's), looked up after the stage's; DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT, HD's light on every draw of the palms' kind (Outset's left cliff at 10:00, median brightness: HD 64, before 76, after 62)."
+        },
+        "hd_actor_light": {
+          "runtime": "dbd411711445f615e13ec43efae1a3dc9badba68",
+          "tracked_patches": [
+            "patches/recompcore/0215-Characters-Wind-Waker-HD-s-actor-light.patch"
+          ],
+          "evidence": "pdale-boop's: Wind Waker HD's actor light, read pixel for pixel from Cemu captures of Link (Outset 10:00, Windfall 21:00) and his shield (Windfall 12:00): the ramp as a lit/dark switch times the blurred sun shadow, a hemisphere shade from actor C0 to the shadow colour, actor K0 times its factor lit, HD's rim; the effect-light stage left out as HD drops it. gxcore tests check the formula against the traced pixels; in game at Outset and Windfall (Linux, Vulkan), Dale: the day shade accurate. This frame's sun shadow: the characters' sun shadow from this frame (HD's order: depth, shadow pre-pass, characters) instead of the last frame's; from a state at Outset's pier only Link and the King of Red Lions change against the last frame's shadow, GPU busy 0.716 ms against 0.680 (1680x720, Linux, Vulkan); Dale: the shadows on Link look good."
         }
       }
     },

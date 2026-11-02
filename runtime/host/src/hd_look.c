@@ -128,6 +128,8 @@ void bluewake_hd_look_defaults(void) {
             // HD's rim light takes the edge light's place whatever the edge
             // light's switch says, so it needs that switch on.
             {"DOL_AURORA_RIM_HD", "1"},
+            // HD's light on characters (its toon shader; needs HD's sky and light for the palette).
+            {"DOL_AURORA_ACTOR_LIGHT_HD", "1"},
         };
         const bool edge_light = setting("BLUEWAKE_HD_EDGE_LIGHT") != 0;
         for (size_t i = 0; i < sizeof kHdLight / sizeof kHdLight[0]; ++i) {
@@ -1648,6 +1650,50 @@ static void sky_sun_palette(CPUState* cpu, bool on) {
     s_sent = true;
 }
 
+// HD's light on characters (aurora_set_actor_light_hd), from the palettes the
+// game's own light is blending (the floor under Link picks them, as for actors
+// in the game, not each room's): the shade's ambient (actor C0 times its
+// factor), the sky HD's shade blends toward from above (the Pale entry's
+// shadow colour, kept linear) and the lit colour (actor K0 times its factor,
+// 2.75 at noon). Read from HD's toon shader in Cemu: a character's shade is a
+// hemisphere from actor C0 below to the shadow colour above, its lit side K.
+// Only with stages.bin version 3 (the shadow colour in it).
+static void sky_actor_palette(CPUState* cpu, bool on) {
+    static bool s_sent;
+    int pale[4];
+    float ab, cb;
+    bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_blend_state(cpu, false, pale, &ab, &cb);
+    for (int i = 0; ok && i < 4; ++i)
+        ok = pale[i] >= 0;
+    if (!ok) {
+        if (s_sent)
+            aurora_set_actor_light_hd(0, NULL, NULL, NULL);
+        s_sent = false;
+        return;
+    }
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    float v[3][4][3];  // ambient (C0), shadow colour, lit (K); for each of the four palettes
+    for (int i = 0; i < 4; ++i) {
+        const u8* entry = hd_pale + (u32)pale[i] * 0x2Cu;
+        const u8* extra = sky_extra_of(pale[i]);
+        const float ambient = sky_factor_at(pale[i], 0u), lit = sky_factor_at(pale[i], 1u);
+        for (int c = 0; c < 3; ++c) {
+            v[0][i][c] = sky_lin(entry[0x00 + c]) * ambient;
+            v[1][i][c] = extra[c] / 255.0f;
+            v[2][i][c] = sky_lin(entry[0x03 + c]) * lit;
+        }
+    }
+    float out[3][3];
+    for (int k = 0; k < 3; ++k)
+        for (int c = 0; c < 3; ++c) {
+            const float prev = v[k][0][c] + ab * (v[k][1][c] - v[k][0][c]);
+            const float curr = v[k][2][c] + ab * (v[k][3][c] - v[k][2][c]);
+            out[k][c] = prev + cb * (curr - prev);
+        }
+    aurora_set_actor_light_hd(1, out[0], out[1], out[2]);
+    s_sent = true;
+}
+
 static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
 // The Pale entries written last (the game's light's four, then the scenery's)
@@ -1833,6 +1879,7 @@ static void sky(CPUState* cpu) {
     // HD's brightness goes with its palettes: only while they are in place.
     const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
     sky_sun_palette(cpu, g_sky_shown);
+    sky_actor_palette(cpu, g_sky_shown);
     sky_linear(cpu, pale, virt, g_sky_shown, sky_gain(exposure));
     // The schedule goes with the palettes (back to the GameCube's when they go).
     sky_schedule(cpu, g_sky_shown);
