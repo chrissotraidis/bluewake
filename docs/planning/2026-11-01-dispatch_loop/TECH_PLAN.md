@@ -21,7 +21,7 @@ The loop's ≈ 35,800 boundaries per frame are cheap individually; no group larg
 
 **This PR merges only the planning record.** The opt-in loop census (`BLUEWAKE_LOOP_CENSUS`) that produced these findings was removed too. It stays in the branch history for any future counting build: [`5864a65`](https://github.com/irregularthanis/bluewake/commit/5864a655f) (census), [`3e03a5d`](https://github.com/irregularthanis/bluewake/commit/3e03a5d54) (host report), [`5a6fb7e`](https://github.com/irregularthanis/bluewake/commit/5a6fb7e69) (call sites by link register).
 
-**Follow-up:** the census pointed at the skinning native, which declines exactly the big models that cost the most. Planned in the native-extensions follow-up.
+**Follow-up:** the census pointed at the skinning native, which declines exactly the big models that cost the most. Planned in [#541](https://github.com/chrissotraidis/bluewake/pull/541).
 
 Also learned: a candidate that changes chunk code must be trained on its own code. A reused profile made the same rewrite measure −4.9%.
 
