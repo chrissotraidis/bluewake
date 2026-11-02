@@ -344,3 +344,17 @@ per vertex in HD's tables: 66 draws and 47,000 vertices a game frame in Hyrule C
 again with the same bytes and the same tables and light colours takes the vertices made the first time; it is
 compared in full, so the picture is the same. Lava draws always make them. Entries unused for 120 game frames go.
 `DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0` makes them every frame, as before.
+
+Patch 0215 adds Wind Waker HD's actor light (`DOL_AURORA_ACTOR_LIGHT_HD=1`, off by default): characters drawn with
+the GameCube's toon pattern (C0, K and the ramp, then the albedo) take HD's toon shader, read pixel for pixel from
+Cemu captures: the ramp as a lit/dark switch on the lit channel, its coordinate times the blurred sun shadow (this
+frame's, as HD's); the shade a hemisphere from actor C0 to the palette's shadow colour; the lit side actor
+K0 times its factor; HD's rim; the albedo in linear light, clipped before the gamma. The host sends the blended
+palette each frame (`aurora_set_actor_light_hd`). The GameCube's effect-light stage (K1) is left out, as HD drops it
+for its point lights. Matched draws mark the sea mask's alpha, and the sun pass, the HD rim and the exposure leave
+them alone. `DOL_AURORA_ACTOR_LIGHT_DEBUG` (1-5) shows its terms, `DOL_AURORA_ACTOR_LIGHT_LOG` each toon shader's TEV.
+The characters take this frame's sun shadow, as Wind Waker HD does (depth, then its shadow pre-pass,
+then the characters): for scene passes with HD's actor light, the sea mask and its depth are drawn before the scene,
+a characters' pre-pass is built from that depth with HD's blur, and the characters sample it. Before, they took the
+last frame's pre-pass, whose edge lagged a frame on a moving camera. `DOL_AURORA_ACTOR_LIGHT_SAME_FRAME=0` keeps the
+last frame's, to compare.

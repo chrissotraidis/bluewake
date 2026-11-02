@@ -128,6 +128,8 @@ void bluewake_hd_look_defaults(void) {
             // HD's rim light takes the edge light's place whatever the edge
             // light's switch says, so it needs that switch on.
             {"DOL_AURORA_RIM_HD", "1"},
+            // HD's light on characters (its toon shader; needs HD's sky and light for the palette).
+            {"DOL_AURORA_ACTOR_LIGHT_HD", "1"},
         };
         const bool edge_light = setting("BLUEWAKE_HD_EDGE_LIGHT") != 0;
         for (size_t i = 0; i < sizeof kHdLight / sizeof kHdLight[0]; ++i) {
@@ -960,6 +962,7 @@ static u8* g_sky_data;  // the stage in play's, or NULL
 static u32 g_sky_pale, g_sky_virt;
 static u32 g_sky_extra = 24u;  // the stage in play's (SkyStage.extra)
 static bool g_sky_shown;  // the tables hold HD's (as last seen)
+static bool sky_palettes_shown(void) { return g_sky_shown; }
 static float g_sky_exposure;  // what aurora_set_exposure was last given
 
 // A new choice of HD sunlight, at once: the brightness is otherwise worked out
@@ -1709,6 +1712,50 @@ static void sky_sun_palette(CPUState* cpu, bool on) {
     s_sent = true;
 }
 
+// HD's light on characters (aurora_set_actor_light_hd), from the palettes the
+// game's own light is blending (the floor under Link picks them, as for actors
+// in the game, not each room's): the shade's ambient (actor C0 times its
+// factor), the sky HD's shade blends toward from above (the Pale entry's
+// shadow colour, kept linear) and the lit colour (actor K0 times its factor,
+// 2.75 at noon). Read from HD's toon shader in Cemu: a character's shade is a
+// hemisphere from actor C0 below to the shadow colour above, its lit side K.
+// Only with stages.bin version 3 (the shadow colour in it).
+static void sky_actor_palette(CPUState* cpu, bool on) {
+    static bool s_sent;
+    int pale[4];
+    float ab, cb;
+    bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_blend_state(cpu, false, pale, &ab, &cb);
+    for (int i = 0; ok && i < 4; ++i)
+        ok = pale[i] >= 0;
+    if (!ok) {
+        if (s_sent)
+            aurora_set_actor_light_hd(0, NULL, NULL, NULL);
+        s_sent = false;
+        return;
+    }
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    float v[3][4][3];  // ambient (C0), shadow colour, lit (K); for each of the four palettes
+    for (int i = 0; i < 4; ++i) {
+        const u8* entry = hd_pale + (u32)pale[i] * 0x2Cu;
+        const u8* extra = sky_extra_of(pale[i]);
+        const float ambient = sky_factor_at(pale[i], 0u), lit = sky_factor_at(pale[i], 1u);
+        for (int c = 0; c < 3; ++c) {
+            v[0][i][c] = sky_lin(entry[0x00 + c]) * ambient;
+            v[1][i][c] = extra[c] / 255.0f;
+            v[2][i][c] = sky_lin(entry[0x03 + c]) * lit;
+        }
+    }
+    float out[3][3];
+    for (int k = 0; k < 3; ++k)
+        for (int c = 0; c < 3; ++c) {
+            const float prev = v[k][0][c] + ab * (v[k][1][c] - v[k][0][c]);
+            const float curr = v[k][2][c] + ab * (v[k][3][c] - v[k][2][c]);
+            out[k][c] = prev + cb * (curr - prev);
+        }
+    aurora_set_actor_light_hd(1, out[0], out[1], out[2]);
+    s_sent = true;
+}
+
 static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
 // The Pale entries written last (the game's light's four, then the scenery's)
@@ -1872,6 +1919,80 @@ static bool sky_kept(CPUState* cpu, u32 table) {
 
 static u32 s_pale, s_virt;  // the tables the host keeps
 
+// Wind Waker HD reads no floor palettes outside the dungeons: its dBgS::GetPolyColor returns 0xFF ("none") unless
+// the stage type is 1 (wwhd d_bg_s.cpp; the GameCube's, 0x800A06A4, has no such check), so outdoors and in houses,
+// boss and sub-dungeon stages Link and the characters stay on their room's palettes (Windfall's stalls and arch:
+// the GameCube's envr 50, HD's room 11). With HD's palettes in, the collision's floor colours (bits 19-26 of each
+// poly info's first word, which only GetPolyColor reads) are set to 0xFF on such stages, each original kept and
+// written back when the look or the palettes go, or on a type 1 stage. Only collision still registered with the
+// game's dBgS is touched. BLUEWAKE_HD_FLOOR_PALETTES=1 keeps the GameCube's floor palettes everywhere.
+enum {
+    kBgS = 0x803C5EA8u,     // g_dComIfG_gameInfo.play.mBgS (dBgS: m_chk_element[256], 0x14 each)
+    kBgChkCount = 256u,
+    kBgwBgd = 0x94u,        // cBgW::pm_bgd (cBgD_t)
+    kBgdTiNum = 0x28u,      // cBgD_t::m_ti_num
+    kBgdTiTbl = 0x2Cu,      // cBgD_t::m_ti_tbl (cBgD_Ti_t, 0x10 each; m_info0 first)
+    kFloorColourMask = 0x07F80000u,
+};
+typedef struct FloorColours {
+    u32 table, count;
+    u8* saved;  // each entry's original colour (bits 19-26)
+} FloorColours;
+static FloorColours g_floor[kBgChkCount];
+
+static void floor_colours_restore(CPUState* cpu, u32 slot, bool write) {
+    FloorColours* f = &g_floor[slot];
+    if (f->saved != NULL && write)
+        for (u32 i = 0; i < f->count; ++i) {
+            const u32 a = f->table + i * 0x10u;
+            const u32 w = mem_read32(cpu, a);
+            mem_write32(cpu, a, (w & ~kFloorColourMask) | ((u32)f->saved[i] << 19));
+        }
+    free(f->saved);
+    memset(f, 0, sizeof *f);
+}
+
+static void floor_colours(CPUState* cpu, bool hd) {
+    static int s_keep = -1;
+    if (s_keep < 0)
+        s_keep = setting("BLUEWAKE_HD_FLOOR_PALETTES") == 1;
+    const u32 info = mem_read32(cpu, kStagInfo);
+    const u32 type = guest_pointer(info) ? (mem_read32(cpu, info + 0x0Cu) >> 16) & 7u : 1u;
+    const bool none = hd && !s_keep && type != 1u;
+    for (u32 slot = 0; slot < kBgChkCount; ++slot) {
+        const bool used = (mem_read32(cpu, kBgS + slot * 0x14u + 4u) & 1u) != 0u;  // m_flags: ChkUsed
+        const u32 bgw = used ? mem_read32(cpu, kBgS + slot * 0x14u) : 0u;
+        const u32 bgd = guest_pointer(bgw) ? mem_read32(cpu, bgw + kBgwBgd) : 0u;
+        const u32 table = guest_pointer(bgd) ? mem_read32(cpu, bgd + kBgdTiTbl) : 0u;
+        const u32 count = guest_pointer(table) ? mem_read32(cpu, bgd + kBgdTiNum) : 0u;
+        FloorColours* f = &g_floor[slot];
+        const bool same = f->saved != NULL && f->table == table && f->count == count;
+        if (f->saved != NULL && (!same || !none))
+            floor_colours_restore(cpu, slot, same);  // gone or replaced: its memory isn't the game's collision now
+        if (!none || count == 0u || count > 0x10000u || f->saved != NULL)
+            continue;
+        bool shared = false;  // one model's collision for several (moving BG actors): kept by the first slot only
+        for (u32 other = 0; other < kBgChkCount && !shared; ++other)
+            shared = other != slot && g_floor[other].saved != NULL && g_floor[other].table == table;
+        if (shared)
+            continue;
+        f->saved = (u8*)malloc(count);
+        if (f->saved == NULL)
+            continue;
+        f->table = table;
+        f->count = count;
+        for (u32 i = 0; i < count; ++i) {
+            const u32 a = table + i * 0x10u;
+            const u32 w = mem_read32(cpu, a);
+            f->saved[i] = (u8)((w & kFloorColourMask) >> 19);
+            mem_write32(cpu, a, w | kFloorColourMask);
+        }
+        if (g_trace)
+            fprintf(stderr, "[hd-look] floor palettes off (stage type %u): collision %u, %u poly infos\n", type, slot,
+                    count);
+    }
+}
+
 static void sky(CPUState* cpu) {
     if (g_sky_count == 0u)
         return;
@@ -1899,6 +2020,7 @@ static void sky(CPUState* cpu) {
     // HD's brightness goes with its palettes: only while they are in place.
     const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
     sky_sun_palette(cpu, g_sky_shown);
+    sky_actor_palette(cpu, g_sky_shown);
     sky_linear(cpu, pale, virt, g_sky_shown, sky_gain(exposure));
     // The schedule goes with the palettes (back to the GameCube's when they go).
     sky_schedule(cpu, g_sky_shown);
@@ -1927,6 +2049,9 @@ void bluewake_hd_look_state_loaded(bool reapply) {
     sky_linear_forget();
     memset(s_shifted, 0, sizeof s_shifted);
     g_room_fade.to = -1;  // no fade from the room before the load
+    // The loaded RAM has its own collision bytes: forget what was kept, without writing it.
+    for (u32 slot = 0; slot < kBgChkCount; ++slot)
+        floor_colours_restore(NULL, slot, false);
 }
 
 void bluewake_hd_look_retrace(CPUState* cpu) {
@@ -1942,6 +2067,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
     g_palms_were_on = g_palms;
     clouds(cpu, retrace);
     sky(cpu);
+    floor_colours(cpu, sky_palettes_shown());
     if (g_trace && retrace % 300u == 0u)
         trace_islands(cpu, retrace);
 }
