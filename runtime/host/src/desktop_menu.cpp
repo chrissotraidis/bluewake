@@ -128,15 +128,22 @@ int smooth_requested() { return bw_smooth_requested(env("DOL_AURORA_FRAME_INTERP
 
 void refresh_smooth_rate() { aurora_set_frame_interp_steps(bw_smooth_steps(smooth_requested(), display_refresh())); }
 
-// The frame rate's mode (BLUEWAKE_PERF_OVERLAY): the counter alone is Aurora's,
-// the full panel is the host's and draws the rate itself, so Aurora's counter is
-// off in it. Nothing is sampled while the panel is off.
-int perf_mode() { return bw_perf_mode_of(bw_desktop::env("BLUEWAKE_PERF_OVERLAY", "off").c_str()); }
+// The frame rate's mode (BLUEWAKE_PERF_OVERLAY): the counter alone is Aurora's, the
+// full panel is the host's and draws the rate itself, so Aurora's counter is off in
+// it. Nothing is sampled while the panel is off.
+//
+// Both are cached: this is read on every presented frame, and reading the settings
+// there would be a getenv and a string per frame for a value that only changes when
+// the player changes it (apply_perf_overlay runs then, and on the first frame).
+int g_perf_mode = BW_PERF_OFF;
+bool g_frame_rate_on = false;
+int perf_mode() { return g_perf_mode; }
 
 void apply_perf_overlay() {
-    const int mode = perf_mode();
-    aurora_set_fps_overlay(mode != BW_PERF_FULL && env_on("DOL_AURORA_SHOW_FPS", false));
-    if (mode != BW_PERF_FULL)
+    g_perf_mode = bw_perf_mode_of(bw_desktop::env("BLUEWAKE_PERF_OVERLAY", "off").c_str());
+    g_frame_rate_on = env_on("DOL_AURORA_SHOW_FPS", false);
+    aurora_set_fps_overlay(g_perf_mode != BW_PERF_FULL && g_frame_rate_on);
+    if (g_perf_mode != BW_PERF_FULL)
         bw_perf_reset();
 }
 
@@ -1225,7 +1232,7 @@ void draw_menu(const bw_platform::Look& look) {
 // rate is counted from the presents here, so the panel and Aurora's counter never
 // both show one.
 void draw_performance_panel(const bw_platform::Look& look) {
-    if (perf_mode() != BW_PERF_FULL || !env_on("DOL_AURORA_SHOW_FPS", false))
+    if (g_perf_mode != BW_PERF_FULL || !g_frame_rate_on)
         return;
     bw_perf_present(SDL_GetTicksNS());
     BwPerfStats stats;
