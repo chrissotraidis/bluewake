@@ -27,6 +27,17 @@
 static const char* const kExpectedDolSha1 =
     "8d28bab68bb5078c38e43f29206f0bd01f7e7a67";
 
+// The internal walkers answer this when the player cancelled, so the public
+// entry point can report a cancel as its own result instead of a failure with a
+// sentence about a damaged disc.
+#define BW_IMPORT_CANCELLED (-2)
+
+// Whether the caller's cancel hook says to stop. A walker asks between whole
+// files, so the answer is only ever sampled at a boundary.
+static int was_cancelled(BlueWakeImportCancelled cancelled, void* context) {
+    return cancelled != NULL && cancelled(context) != 0;
+}
+
 static int fail(char* error, size_t size, const char* fmt, ...) {
     if (error != NULL && size > 0) {
         va_list ap;
@@ -429,7 +440,9 @@ done:
 // unpacking needs before it writes anything. Returns the member count or -1.
 static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
                            int64_t* bytes, BlueWakeImportProgress progress,
-                           void* context, char* error, size_t error_size) {
+                           void* context, BlueWakeImportCancelled cancelled,
+                           void* cancel_context, char* error,
+                           size_t error_size) {
     if (arc_size < 0x40 || memcmp(arc, "RARC", 4) != 0)
         return -1;
     const size_t data_start = (size_t)be32(arc + 0x0C) + 0x20;
@@ -441,6 +454,8 @@ static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
         return -1;
     int found = 0;
     for (uint32_t i = 0; i < nfiles; ++i) {
+        if ((i & 31u) == 0 && was_cancelled(cancelled, cancel_context))
+            return BW_IMPORT_CANCELLED;
         const uint8_t* e = arc + file_off + (size_t)i * 0x14;
         const uint32_t type_name = be32(e + 4);
         if (((type_name >> 24) & 1u) == 0)
@@ -492,7 +507,9 @@ static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
 // sentence in `error` (a damaged file table, or a write that failed).
 static int scan_rel_entries(FILE* f, const uint8_t* fst, uint32_t fst_size,
                             const char* out, int64_t* need, int* written,
-                            uint32_t* arc_off, uint32_t* arc_len, char* error,
+                            uint32_t* arc_off, uint32_t* arc_len,
+                            BlueWakeImportCancelled cancelled,
+                            void* cancel_context, char* error,
                             size_t error_size) {
     // Directory entries hold the index one past their last child.
     const uint32_t count = be32(fst + 8);
@@ -501,6 +518,8 @@ static int scan_rel_entries(FILE* f, const uint8_t* fst, uint32_t fst_size,
     const char* dir_name[16];
     int depth = 0;
     for (uint32_t i = 1; i < count; ++i) {
+        if ((i & 31u) == 0 && was_cancelled(cancelled, cancel_context))
+            return BW_IMPORT_CANCELLED;
         while (depth > 0 && i >= dir_end[depth - 1])
             --depth;
         const uint8_t* e = fst + i * 12;
@@ -559,9 +578,12 @@ static int scan_rel_entries(FILE* f, const uint8_t* fst, uint32_t fst_size,
 
 int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
                           BlueWakeImportProgress progress, void* context,
-                          char* error, size_t error_size) {
+                          BlueWakeImportCancelled cancelled,
+                          void* cancel_context, char* error, size_t error_size) {
     if (bluewake_disc_check(iso_path, error, error_size) != 0)
         return -1;
+    if (was_cancelled(cancelled, cancel_context))
+        return 1;
     FILE* f = fopen(iso_path, "rb");
     if (f == NULL)
         return fail(error, error_size, "The disc image could not be opened.");
@@ -633,9 +655,15 @@ int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
     uint32_t arc_off = 0, arc_len = 0;
     int64_t need = (int64_t)dol_size;
     int written = 0;
-    if (scan_rel_entries(f, fst, fst_size, NULL, &need, &written, &arc_off,
-                         &arc_len, error, error_size) != 0)
+    // -1 is a damaged disc or a failed read; a cancel is the player's own
+    // answer and gets the import's cancelled result instead of a sentence.
+    int walk = scan_rel_entries(f, fst, fst_size, NULL, &need, &written, &arc_off,
+                                &arc_len, cancelled, cancel_context, error,
+                                error_size);
+    if (walk != 0) {
+        if (walk == BW_IMPORT_CANCELLED) rc = 1;
         goto done;
+    }
     if (arc_len == 0) {
         fail(error, error_size,
              "The disc has no RELS.arc; it is not a complete GZLE01 image.");
@@ -650,10 +678,13 @@ int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
     }
     int64_t arc_need = 0;
     const int arc_members =
-        arc != NULL
-            ? unpack_rels_arc(arc, arc_size, NULL, &arc_need, NULL, NULL, error,
-                              error_size)
-            : -1;
+        arc != NULL ? unpack_rels_arc(arc, arc_size, NULL, &arc_need, NULL, NULL,
+                                      cancelled, cancel_context, error, error_size)
+                    : -1;
+    if (arc_members == BW_IMPORT_CANCELLED) {
+        rc = 1;
+        goto done;
+    }
     if (arc_members < 0) {
         fail(error, error_size, "The disc's RELS.arc could not be unpacked.");
         goto done;
@@ -677,14 +708,23 @@ int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
 
     written = 0;
     int64_t wrote = 0;
-    if (scan_rel_entries(f, fst, fst_size, rels_tmp, &wrote, &written, &arc_off,
-                         &arc_len, error, error_size) != 0)
+    walk = scan_rel_entries(f, fst, fst_size, rels_tmp, &wrote, &written, &arc_off,
+                            &arc_len, cancelled, cancel_context, error,
+                            error_size);
+    if (walk != 0) {
+        if (walk == BW_IMPORT_CANCELLED) rc = 1;
         goto done;
+    }
     if (progress != NULL)
         progress(context, 0.3, "Unpacking game modules");
     int64_t from_arc_bytes = 0;
     const int from_arc = unpack_rels_arc(arc, arc_size, rels_tmp, &from_arc_bytes,
-                                         progress, context, error, error_size);
+                                         progress, context, cancelled,
+                                         cancel_context, error, error_size);
+    if (from_arc == BW_IMPORT_CANCELLED) {
+        rc = 1;
+        goto done;
+    }
     if (from_arc < 0) {
         if (error != NULL && error_size > 0 && error[0] == '\0')
             fail(error, error_size,
@@ -699,7 +739,12 @@ int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
         goto done;
     }
 
-    // Swap the finished outputs in.
+    // Swap the finished outputs in. A cancel that arrived while the last members
+    // were written still wins: a half-swapped folder is worse than none.
+    if (was_cancelled(cancelled, cancel_context)) {
+        rc = 1;
+        goto done;
+    }
     remove_flat_dir(rels_dir);
     unlink(dol_path);
     if (rename(rels_tmp, rels_dir) != 0 || rename(dol_tmp, dol_path) != 0) {
