@@ -24,7 +24,7 @@ Natives for most of that work already exist in `cmake/composite/`, certified aga
 
 The natives cover the many cheap calls; the expensive ones stay translated.
 
-**Why the other sets are off.** `--native-entries` (#361) and `--native-set4` (#366, #381) were linked behind switches, off by default, and never measured on the Deck.
+**Why the other sets are off.** `--native-entries` (#361) and `--native-set4` (#366, #381) were linked behind switches, off by default, and never measured on the Deck. Building them showed neither is ready to run (2026-11-02): `--native-entries` fails in its generator on the current translation, and `--native-set4` has no hooks until its entry points are certified for this tree. Turning them on is porting work, not a flag.
 
 ## Outcomes
 

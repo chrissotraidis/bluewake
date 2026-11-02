@@ -1,6 +1,6 @@
 # PROGRESS — Native extensions for Outset's character work
 
-Status: M0 in progress: decline census written; control build running  
+Status: M0 census build ready; M1 blocked: both native sets need porting before they can run  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -12,8 +12,8 @@ Status: M0 in progress: decline census written; control build running
 
 ### M1: The native switches (can run beside M0)
 
-- [ ] M1-T01: `--native-entries`, trained on its own code; Game Mode A/B (≥ 6 interleaved launches) against #503's stack; checkpoints.
-- [ ] M1-T02: `--native-set4`, the same.
+- [ ] M1-T01: `--native-entries`, trained on its own code; Game Mode A/B (≥ 6 interleaved launches) against #503's stack; checkpoints. **Blocked:** the build fails in `native-leaf-gen` (`__ieee754_fmod`: unhandled `bw_write32_ato`, a write form the lean-memory translation emits that the generator predates). Needs the generator updated first.
+- [ ] M1-T02: `--native-set4`, the same. **Blocked:** it builds, but links its sources without hooks (`cmake/composite/CMakeLists.txt`: "Hooks stay out until hashes are recorded for this tree"), so nothing calls it and the build behaves like the control. Needs its entry points certified against this tree first.
 - [ ] M1-T03: Both together if each qualifies; retain or record.
 
 ### M2: Resumable skinning (depends: M0 confirms timing)
@@ -29,4 +29,6 @@ Status: M0 in progress: decline census written; control build running
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
+| M1 | Local `bench/541-ctl` (#503 stack, `a64af0e`); full builds with `--native-entries` and `--native-set4` | `build_script` with each option, own training | Linux workstation | **Neither set can be measured as it stands.** `--native-entries`: build fails in `native-leaf-gen` on `__ieee754_fmod` (`unhandled ctx: bw_write32_ato(&bw_ool, ctx, 0x8032EC1Cu, …)`). `--native-set4`: builds (`t541-set4`), but its hooks are not inserted until hashes are recorded for this tree, so its natives are never called |
+| M0 | Control `a64af0e` (AppImage `t541-ctl/a64af0e941c4`, own training) and the census build `78a3382` (`--reuse` over it, `BLUEWAKE_SKIN_CENSUS` on locally) | Census symbols confirmed in the module | Linux workstation | Ready for the one-minute Outset run on the Deck |
 | Planning | #503 `measure-503/m1-native-counts.txt`, `m1-functions.txt` (private) | Native counters and the game-function mapping from #503's Outset session | Game Mode, Outset, stage select off | `calcWeightEnvelopeMtx`: native 1,080,359 runs, 114,745 declined (≈ 10%), yet 2.33 M cycles/frame still translated against 0.83 M in the native. Translated costs of functions whose natives are switched off: Maya `calcTransform` 0.59, key-frame 0.46 + 0.44, `JMAEulerToQuat` 0.40 M cycles/frame |
