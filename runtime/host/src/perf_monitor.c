@@ -448,8 +448,12 @@ static void sample_machine(unsigned long long now_ns) {
                    cpu_sensor_dir, sizeof cpu_sensor_dir);
     if (cpu_sensor_dir[0] != '\0' && s->cpu_temp_c < 0.f) {
         const unsigned long long millidegrees = read_number(cpu_sensor_dir, "temp1_input");
-        if (millidegrees != 0ull)
+        // A sensor reading 0 or 150 C is a sensor that is not reading: the panel
+        // says "-" instead of a temperature nobody has.
+        if (millidegrees > 1000ull && millidegrees < 150000ull)
             s->cpu_temp_c = (float)((double)millidegrees / 1000.0);
+        fprintf(stderr, "[perf] panel cpu sensor: %s temp1_input=%llu (%s)\n", cpu_sensor_dir, millidegrees,
+                s->cpu_temp_c < 0.f ? "not a reading, left as -" : "used");
     }
 
     // The card the game draws on: the first that reports its memory (amdgpu's
@@ -480,14 +484,17 @@ static void sample_machine(unsigned long long now_ns) {
             const unsigned long long microwatts = read_number(hwmon, "power1_average");
             if (microwatts != 0ull)
                 s->gpu_power_w = (float)((double)microwatts / 1e6);
-            const unsigned long long mhz = read_number(hwmon, "freq1_input");
-            if (mhz != 0ull)
-                s->gpu_clock_mhz = (float)mhz;
+            // The clock is in Hz (amdgpu's freq1_input), so a bare 43 MHz idle
+            // reads as 43000000 — and 699000000 is 699 MHz, not 699 GHz. Anything
+            // outside 1-10 GHz is not a clock the panel can show.
+            const unsigned long long hz = read_number(hwmon, "freq1_input");
+            if (hz >= 1000000ull && hz <= 10000000000ull)
+                s->gpu_clock_mhz = (float)((double)hz / 1e6);
         }
         card_logged = 1;
         fprintf(stderr,
                 "[perf] panel card: \"%s\" (vulkan), vram %.0f/%.0f MB; %s: busy %.0f%%, temp %.0f C, "
-                "power %.0f W, clock %.0f MHz\n",
+                "power %.0f W, clock %.0f MHz (from freq1_input)\n",
                 s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_used_mb, s->vram_total_mb, base, s->gpu_pct,
                 s->gpu_temp_c, s->gpu_power_w, s->gpu_clock_mhz);
     }

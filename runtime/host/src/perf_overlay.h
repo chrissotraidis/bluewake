@@ -153,8 +153,13 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
     const float top = stats.frame_ms_max > 50.f ? stats.frame_ms_max : 50.f;
     // The graph does not count toward the panel's width in the same way the
     // tables do; -FLT_MIN fills the columns the two tables sized.
+    // The line in the waits' amber over a darker trough, so it reads against the
+    // game behind the panel rather than as a faint smudge in the default grey.
+    ImGui::PushStyleColor(ImGuiCol_PlotLines, ImVec4(0.93f, 0.76f, 0.33f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.f, 0.f, 0.f, 0.35f));
     ImGui::PlotLines("##bluewake-perf-graph", stats.frame_ms, BW_PERF_HISTORY, 0, nullptr, 0.f, top,
                      ImVec2(-1.f, 3.5f * font_size));
+    ImGui::PopStyleColor(2);
 
     static const char* const kLabels[] = {"Window", "Game image", "Scaling", "Frame limit", "Presentation"};
     const char* const values[] = {picture.window, picture.image, picture.scaling, picture.limit, picture.present};
