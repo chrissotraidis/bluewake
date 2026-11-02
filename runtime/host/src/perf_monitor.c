@@ -442,7 +442,40 @@ static void sample_machine(unsigned long long now_ns) {
         if (vulkan_device(s->gpu_name, sizeof s->gpu_name, &device_local_mb) && device_local_mb > 0.f)
             s->vram_total_mb = device_local_mb;
     }
+    // The card's own sensor is not the CPU's, and a disk's is not either; when no
+    // sensor is called one of the names the CPUs use, the first that reads a
+    // plausible temperature and is not one of those parts is taken instead. What
+    // was there is said once, in the log, so a missing temperature is one line
+    // away from its reason.
+    static int sensors_logged;
     static const char* const kCpuSensors[] = {"k10temp", "coretemp", "zenpower", "cpu_thermal", "acpitz"};
+    static const char* const kNotTheCpu[] = {"amdgpu", "radeon", "nvme", "iwlwifi_1", "mt7921", "acpitz_ac"};
+    if (!sensors_logged) {
+        sensors_logged = 1;
+        char seen[512] = "";
+        size_t at = 0;
+        for (int i = 0; i < 8; ++i) {
+            char dir[192], path[224], name[64];
+            snprintf(dir, sizeof dir, "/sys/class/hwmon/hwmon%d", i);
+            snprintf(path, sizeof path, "%s/name", dir);
+            if (!read_line(path, name, sizeof name))
+                continue;
+            const unsigned long long milli = read_number(dir, "temp1_input");
+            if (name[0] != '\0' && at < sizeof seen)
+                at += (size_t)snprintf(seen + at, sizeof seen - at, "%s%s=%llu", at != 0 ? " " : "", name, milli);
+            if (cpu_sensor_dir[0] == '\0' && milli > 1000ull && milli < 150000ull) {
+                int is_cpu = 0;
+                for (int w = 0; w < (int)(sizeof kCpuSensors / sizeof kCpuSensors[0]); ++w)
+                    is_cpu |= strcmp(name, kCpuSensors[w]) == 0;
+                int skip = 0;
+                for (int w = 0; w < (int)(sizeof kNotTheCpu / sizeof kNotTheCpu[0]); ++w)
+                    skip |= strcmp(name, kNotTheCpu[w]) == 0;
+                if (is_cpu || !skip)
+                    snprintf(cpu_sensor_dir, sizeof cpu_sensor_dir, "%s", dir);
+            }
+        }
+        fprintf(stderr, "[perf] panel sensors: %s\n", seen[0] != '\0' ? seen : "none under /sys/class/hwmon");
+    }
     if (cpu_sensor_dir[0] == '\0')
         find_hwmon("/sys/class/hwmon", kCpuSensors, (int)(sizeof kCpuSensors / sizeof kCpuSensors[0]),
                    cpu_sensor_dir, sizeof cpu_sensor_dir);
