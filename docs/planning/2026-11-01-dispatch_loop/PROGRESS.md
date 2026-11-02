@@ -1,6 +1,6 @@
 # PROGRESS — Dispatch-loop edges in Outset
 
-Status: Depth cap ruled out; instrumenting the refused indirect calls  
+Status: Candidate found: transform `bctr` (`__ptmf_scall`) and `blrl`  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -20,12 +20,12 @@ Status: Depth cap ruled out; instrumenting the refused indirect calls
 
 - [x] M2-T01: Bound for the largest group (returns after turn ends) via `BLUEWAKE_DSP_RATE`: +0.4%, no-go.
 - [x] M2-T02: Depth cap 32 → 128 in the counting build: no change. Hypothesis rejected.
-- [ ] M2-T03: Count, at the transformed `bctrl` sites, which test refuses the call (readiness, watch table, chunk lookup).
+- [x] M2-T03: Find the call sites (census pairs by link register). Mostly `bctr` in `__ptmf_scall` (≈ 2,000/frame) and `blrl` (≈ 490/frame), neither transformed.
+- [ ] M3-T01: Transform `bctr` tail jumps (as in `__ptmf_scall`) and `blrl` calls to run directly, keeping every runtime check; focused tests.
+- [ ] M3-T02: Game Mode (≥ 6 interleaved launches) and render_bench checkpoints; retain or record no-go.
 
 ### M3: Candidate (depends: M2)
 
-- [ ] M3-T01: Exact change with focused tests.
-- [ ] M3-T02: Game Mode (≥ 6 interleaved launches), render_bench checkpoints; retain or record no-go.
 
 ## Evidence ledger
 
@@ -37,3 +37,4 @@ Status: Depth cap ruled out; instrumenting the refused indirect calls
 | M2-T01 (turn ends) | #503 stack (`cand-503`) with `BLUEWAKE_DSP_RATE` 12,600 (default) against 50,400, runtime only; local `measure-530/dsp-rate/` (private) | `gamemode_measure.py` 3 × 15 s, six launches alternating | Game Mode, worst-angle Outset state, 16:9, widescreen mod | **Bound for removing turn ends: +0.4%** (26.84 → 26.94), ahead in 3/3 pairs but by 0.23, 0.04 and 0.03 FPS. Not exact (the DSP cadence changes when the game sees DSP mail and interrupts); it bounds what an exact change could gain, which would need the host to service the DSP without unwinding the module's C stack. **No-go**: deep change to the chassis and host loop for ≤ 0.4%. The returns after a turn end cost less than the average boundary, so M1-T01's ≈ 1.7 M estimate was high |
 | M1-T03 | Same census log; the counting build's generated chunks; `direct_calls.py`, `direct_calls.c` | Each top call target matched against its call sites and the transforms | As M0-T02 | **Calls through the loop are of two kinds.** (1) **Watched by design, ≈ 2,800 per frame, edge service asked 100%:** the native actor search's hooks `cTgIt_JudgeFilter` 0x80245640 (1,018), `cTgIt_MethodCall` 0x8024560C (585), `fpcSch_JudgeByID` 0x80040068 (557), and `OSDisableInterrupts`/`OSRestoreInterrupts` (≈ 510 each; all 192/233 call sites left untransformed because the host watches them). (2) **Indirect calls that pass the check at the loop but not at the call (edge service asked 0%):** `J3DShapeMtxConcatView::loadMtxConcatView` 1,751, `__GXDefaultTexRegionCallback` 490, other callbacks. 3,692 of 3,706 `bctrl` sites are transformed, so the call site refused them. Hypothesis: `BW_DIRECT_DEPTH_MAX` (32 nested direct calls). J3D drawing recurses through virtual calls; at the cap the call goes round the loop and every enclosing chunk returns too, unwinding up to 32 frames whose returns then also go round the loop. At the loop the depth is back to 0, so the same call passes there. Changing the cap is exact by construction: direct or not, the guest state is the same |
 | M2-T02 | Counting build `c605e0a` (`BW_DIRECT_DEPTH_MAX` 32 → 128, local only, `--reuse`); Deck log `measure-530/census-depth128.log` (private) | Same one-minute census run | As M0-T02 | **Depth-cap hypothesis rejected:** 35,878 boundaries per frame (35,844 before); `loadMtxConcatView` 1,757 per frame (1,751), `__GXDefaultTexRegionCallback` 491 (490). Also checked: the widescreen mod's chunk variants are transformed too (1,095 of 1,095 `bctrl` sites). Why these indirect calls are refused at the call site remains open |
+| M2-T03 | Counting build `5b18b83` (census with target/link-register pairs, `5a6fb7e`; depth cap back at 32); Deck log `measure-530/census-pairs.log` (private) | Same one-minute census; call sites from `lr − 4` against the chunks' instruction comments | As M0-T02 | **The "refused" indirect calls are mostly not `bctrl`.** `loadMtxConcatView` arrives from `bl __ptmf_scall` at 0x802DC4EC (1,595/frame) and 0x802DC068 (160), and 0x8027E9AC from another (224). `__ptmf_scall` (0x80328DE8), the compiler's pointer-to-member call helper, jumps to the member with **`bctr`**, which the builder does not transform: the chunk ends, the call goes round the loop, and so does the member's return to the original caller. `__GXDefaultTexRegionCallback` arrives from a **`blrl`** at 0x80324F10 (492/frame), also not transformed. Open: a transformed `bctrl` at 0x802F58A0 still hands 0x80012A2C to the loop (402/frame); 0x8003EF1C (209) |
