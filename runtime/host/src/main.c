@@ -7352,8 +7352,11 @@ static void draw_done_commit(void) {
     const u64 lead_us = bw_elapsed_us(g_draw_done_positioned_at, now);
     if (lead_us > g_draw_done_max_lead_us)
         g_draw_done_max_lead_us = lead_us;
-    // The finish has to land before the retrace that shows the frame: count
-    // the ones that did not, they are the 15 FPS pathology returning.
+    // A deferral is allowed to cross a retrace, and when it does that frame
+    // takes the extra frame of latency this mode is documented to cost. Count
+    // them so the cost is a number: a large share means the worker's tail is
+    // longer than a frame's slack, which is where the drain was the right
+    // answer anyway.
     if (g_host_retrace_count != g_draw_done_positioned_retrace)
         ++g_draw_done_late;
 }

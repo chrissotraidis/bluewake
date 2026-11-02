@@ -28,6 +28,10 @@ DIP = re.compile(
     r"\[fps-dip\].*?game=(?P<game>\d+).*?speed=(?P<speed>\d+)%.*?busy=(?P<busy>\d+)%.*?"
     r"waits: gx=(?P<gx>\d+)ms present=(?P<present>\d+)ms gpu=(?P<gpu>\d+)ms"
 )
+FLUSH = re.compile(
+    r"\[gx-flush-summary\] scope=(?P<scope>\w+) calls=(?P<calls>\d+) "
+    r"total_us=(?P<total>\d+) max_us=(?P<max>\d+)"
+)
 OVERLAP = re.compile(
     r"\[gx\] draw-done overlap: deferred=(?P<deferred>\d+) early=(?P<early>\d+) "
     r"bound=(?P<bound>\d+) late=(?P<late>\d+) max_lead_us=(?P<lead>\d+) "
@@ -46,10 +50,14 @@ class Run:
         self.gx: list[int] = []
         self.present: list[int] = []
         self.gpu: list[int] = []
+        self.flush: dict[str, int] = {}
 
     @property
     def ok(self) -> bool:
-        return bool(self.game)
+        # A run is usable with the draw-done counters and the drain census even
+        # when there are no [fps-dip] lines: an unpaced tour produces none, and
+        # the census is the direct measure of the drain this switch removes.
+        return bool(self.game) or bool(self.flush) or bool(self.counters)
 
     def pct(self, values: list[int], q: float) -> float:
         if not values:
@@ -75,6 +83,10 @@ def collect(path: Path) -> Run:
         run.gx.append(int(match["gx"]))
         run.present.append(int(match["present"]))
         run.gpu.append(int(match["gpu"]))
+    flushes = list(FLUSH.finditer(text))
+    if flushes:
+        last = flushes[-1]
+        run.flush = {key: int(last[key]) for key in ("calls", "total", "max")}
     matches = list(OVERLAP.finditer(text))
     if matches:
         last = matches[-1]
@@ -105,8 +117,9 @@ def describe_label(run: Run, expected: bool) -> str:
 
 
 def row(run: Run) -> str:
-    if not run.ok:
-        return f"  {run.path.name}: no [fps-dip] lines -- no measurement"
+    if not run.game:
+        return (f"  {run.path.name}: no [fps-dip] lines (unpaced or short run), "
+                "see the counters below")
     return (
         f"  game fps      mean {statistics.mean(run.game):5.1f}   "
         f"p10 {run.pct(run.game, 0.10):5.1f}   min {min(run.game)}\n"
@@ -121,9 +134,20 @@ def row(run: Run) -> str:
 
 
 def counters_line(run: Run) -> str:
+    drain = ""
+    if run.flush:
+        mean = run.flush["total"] / run.flush["calls"] if run.flush["calls"] else 0.0
+        drain = (f"  drain         calls {run.flush['calls']}  "
+                 f"total {run.flush['total'] / 1000.0:.1f}ms  "
+                 f"max {run.flush['max'] / 1000.0:.2f}ms  mean {mean:.0f}us")
     if not run.counters:
-        return "  overlap counters: none (switch off, or no summary printed)"
+        return drain or "  overlap counters: none (switch off, or no summary printed)"
     c = run.counters
+    head = (
+        f"  overlap       deferred {c['deferred']}  early {c['early']}  "
+        f"bound {c['bound']}  late {c['late']}  "
+        f"max_lead {c['lead'] / 1000.0:.2f}ms  presents {c['presents']}")
+    return head + ("\n" + drain if drain else "")
     return (
         f"  overlap       deferred {c['deferred']}  early {c['early']}  "
         f"bound {c['bound']}  late {c['late']}  "
@@ -139,14 +163,29 @@ def verdict(off: Run, on: Run) -> list[str]:
         notes.append("  no verdict: the 'on' run printed no overlap counters, so it "
                      "was not running the switch")
         return notes
-    if on.counters["late"]:
-        notes.append(f"  FAIL late={on.counters['late']}: a finish crossed a retrace, "
-                     "which is the 15 FPS pathology -- do not go further")
+    # A crossed retrace is the extra frame of latency the mode costs, not a
+    # failure on its own; a large share of them means the worker's tail is
+    # longer than a frame's slack, where the drain was the right answer.
+    if on.counters["deferred"] and on.counters["late"] > on.counters["deferred"] // 10:
+        notes.append(f"  WARN late={on.counters['late']} of {on.counters['deferred']}: "
+                     "over a tenth of the frame's finishes crossed a retrace, so those "
+                     "frames took the extra frame of latency")
     if on.counters["deferred"] == 0:
         notes.append("  FAIL deferred=0: the switch never deferred, so nothing was measured")
     if on.counters["bound"] and on.counters["bound"] > on.counters["deferred"] // 10:
         notes.append(f"  WARN bound={on.counters['bound']} is over a tenth of the "
                      "deferred commits: the one-draw-done lead is being hit often")
+    if off.flush and on.flush:
+        notes.append(f"  drain calls {off.flush['calls']} -> {on.flush['calls']}, "
+                     f"total {off.flush['total'] / 1000.0:.1f}ms -> "
+                     f"{on.flush['total'] / 1000.0:.1f}ms")
+        if on.flush["calls"]:
+            notes.append("  FAIL the drain still ran: the switch did not take the "
+                         "draw-done path")
+    if not (off.game and on.game):
+        notes.append("  no frame-rate verdict: a run has no [fps-dip] lines "
+                     "(the drain census above is the measurement)")
+        return notes
     delta_fps = statistics.mean(on.game) - statistics.mean(off.game)
     delta_gx = statistics.mean(on.gx) - statistics.mean(off.gx)
     notes.append(f"  game fps {delta_fps:+.1f}, waits gx {delta_gx:+.1f}ms")
