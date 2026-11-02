@@ -1,7 +1,7 @@
 # TECH_PLAN — Profile the GX command stream in Outset
 
-Status: Planning  
-Source: BlueWake `main` at `6b429fea9e60`  
+Status: In progress
+Source: BlueWake `main` at `6b429fea9e60`
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
 ## The path
@@ -24,15 +24,20 @@ Source: BlueWake `main` at `6b429fea9e60`
 5. **Bound.** For the largest stage, a ceiling build (for example a batched hand-off, or skipping a redundant copy) A/B against the #503 stack.
 6. **Candidate.** Only if the bound is consistent: an exact change with focused tests; pictures compared directly.
 
-## Changes (planned)
+## Changes
 
 | File | Change | Why |
 |---|---|---|
-| `scripts/linux/build.py` | Option to keep gather stages visible to the profiler (attribution only) | Repeatable stage breakdown |
+| `scripts/linux/build.py` | `--gather-pipe-profile` adds module line tables and retains gather check, packing and drain boundaries; the host already builds with `-g` | Repeatable stage breakdown without changing normal builds |
+| `cmake/composite/gather_pipe*.h` | Compile the selected stages `noinline` only in the diagnostic build | Give `perf` distinct symbols for validation, packing and drain work |
 | Host GX entry (`aurora_backend_gx_write` and callees) | Opt-in per-kind counters | Attribution; off in shipped builds |
 | `scripts/` (report) | Profile and counters → per-frame table | Repeatable breakdown |
 | Tests | Counter on/off parity on a synthetic command stream | The shipped path stays unchanged |
 | Candidate files | Decided by M2 | — |
+
+The diagnostic boundary work is implemented by
+[`e2ed31c94`](https://github.com/irregularthanis/bluewake/commit/e2ed31c94).
+It is opt-in and does not alter the default or release build path.
 
 ## Verification
 

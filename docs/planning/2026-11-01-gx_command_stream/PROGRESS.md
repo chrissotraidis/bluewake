@@ -1,13 +1,13 @@
 # PROGRESS — Profile the GX command stream in Outset
 
-Status: Planned  
+Status: In progress
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
 
 ### M0: Stage-visible profile
 
-- [ ] M0-T01: Builder option keeping gather stages visible to the profiler; builder test; build with host line tables.
+- [x] M0-T01: Builder option keeping gather stages visible to the profiler; builder test; build with host line tables.
 - [ ] M0-T02: Outset per-frame table by stage (Game Mode, worst-angle state).
 
 ### M1: Counts (depends: M0)
@@ -28,3 +28,4 @@ Status: Planned
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
+| M0-T01 | [`e2ed31c94`](https://github.com/irregularthanis/bluewake/commit/e2ed31c94) | `python3 tests/test_linux_ci_container.py`; `git diff --check`; `scripts/audit_repo.sh` | Source-only Linux builder contracts; no game data | PASS: 20 tests; diagnostic flag requires gather pipe, default stays inline; audit passed |
