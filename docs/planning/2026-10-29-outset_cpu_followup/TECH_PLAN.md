@@ -234,7 +234,7 @@ This PR is complete. The remaining shared costs continue in separate plans, each
 |---|---|---|
 | [#529](https://github.com/chrissotraidis/bluewake/pull/529) | Train the optimization profile on Outset | Flat profile; training has one 1,500-retrace Outset stop. **Outcome: no-go** (≤ 0.4%, not consistent); planning record only |
 | [#530](https://github.com/chrissotraidis/bluewake/pull/530) | Count the dispatch-loop edges in Outset | ≈ 4.3 M cycles per frame, unattributed. **Outcome: no-go**; planning record only |
-| [#531](https://github.com/chrissotraidis/bluewake/pull/531) | Profile the GX command stream in Outset | ≈ 5.1 M cycles per frame, host side not broken down. **Candidate: batch GX writes by default on Linux, +1.7%**; qualification pending |
+| [#531](https://github.com/chrissotraidis/bluewake/pull/531) | Profile the GX command stream in Outset | ≈ 5.1 M cycles per frame, host side not broken down. **Candidate: batch GX writes by default on every platform, +1.7% on the Deck**; qualification pending |
 | [#541](https://github.com/chrissotraidis/bluewake/pull/541) | Native extensions for Outset's character work | The skinning native declines the big models (2.33 M cycles/frame still translated); two native sets off |
 
 ## Implementation order
