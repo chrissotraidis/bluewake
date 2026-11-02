@@ -32,7 +32,8 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_STICK_CAMERA_SPEED", "BLUEWAKE_STICK_AIM", "BLUEWAKE_STICK_AIM_SPEED", "BLUEWAKE_STICK_ZOOM", "BLUEWAKE_STICK_ZOOM_SPEED",
     "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_AIM_INVERT_Y",
     "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
-    "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "BLUEWAKE_MENU_PAUSES", "BLUEWAKE_MENU_TEXT_SIZE",
+    "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "BLUEWAKE_GATHER_PIPE_BATCH", "BLUEWAKE_MENU_PAUSES",
+    "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
     "DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION",
 };
@@ -43,7 +44,9 @@ static const char* const kFileOrder[] = {
 static const char* const kWindowsOwnDefaults[][2] = {
     {"DOL_AURORA_ASPECT_FIT", "1"}, {"BLUEWAKE_FAST_FORWARD", "0"}, {"BLUEWAKE_QUICK_DOORS", "0"},
     // The game keeps running under the menu on Windows until pausing is checked there.
-    {"BLUEWAKE_MENU_PAUSES", "0"}};
+    {"BLUEWAKE_MENU_PAUSES", "0"},
+    // Graphics commands go to the renderer one at a time on Windows until batching is measured there (#531).
+    {"BLUEWAKE_GATHER_PIPE_BATCH", "0"}};
 static const char* const kWindowsOnlyNextLaunch[] = {"BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS",
                                                      "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};
 static const char* const kFilledEverywhere[] = {"BLUEWAKE_DSP_MODE", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};
