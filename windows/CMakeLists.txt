@@ -108,6 +108,7 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/hd_look.c
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/fps_watch.c
+    ${BLUEWAKE_HOST_SRC}/perf_monitor.c
     ${BLUEWAKE_HOST_SRC}/game_options.c
     ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
     ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
