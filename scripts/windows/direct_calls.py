@@ -217,10 +217,38 @@ INDIRECT = re.compile(
     r"        \}\n"
     r"    \}\n")
 
+# A tail jump through the count register (the compiler's __ptmf_scall, which
+# runs C++ pointer-to-member calls, ends in one) and a call through the link
+# register: both left the chunk for the chassis loop (#530).
+TAIL_JUMP = re.compile(
+    r"    // ([0-9A-F]{8}): bctr\n"
+    r"    \{\n"
+    r"        u32 target = ctx->ctr & ~3u;\n"
+    r"        bool ctr_ok = true;\n"
+    r"        bool cr_ok = true;\n"
+    r"        if \(ctr_ok && cr_ok\) \{\n"
+    r"            ctx->pc = target;\n"
+    r"            return;\n"
+    r"        \}\n"
+    r"    \}\n")
+LINK_CALL = re.compile(
+    r"    // ([0-9A-F]{8}): blrl\n"
+    r"    \{\n"
+    r"        u32 target = ctx->lr & ~3u;\n"
+    r"        bool ctr_ok = true;\n"
+    r"        bool cr_ok = true;\n"
+    r"        if \(ctr_ok && cr_ok\) \{\n"
+    r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
+    r"            ctx->pc = target;\n"
+    r"            goto (return_dispatch_[0-9A-F]{8});\n"
+    r"        \}\n"
+    r"    \}\n")
+
 
 def transform_indirect(text, watched):
     """A bctrl's target is known only when it runs: bw_call_translated checks it
-    against the host's watch list and runs it as the dispatcher would."""
+    against the host's watch list and runs it as the dispatcher would. The same
+    for a bctr tail jump and a blrl call (#530)."""
     if INDIRECT_MARK in text:
         return text, 0
     if INCLUDE not in text:
@@ -249,6 +277,61 @@ def transform_indirect(text, watched):
                 f"                ctx->pc == 0x{m.group(2)}u && bw_direct_call_ready(ctx, 0x{ret:08X}u))\n"
                 f"                goto label_{m.group(2)};\n"
                 "            return;\n"
+                "        }\n"
+                "    }\n")
+            cursor = m.end()
+            done += 1
+        pieces.append(body[cursor:])
+        body = "".join(pieces)
+        # A tail jump runs its target where the loop would have dispatched it,
+        # then leaves the chunk with the guest where the target left it: the same
+        # guest code, without the trip round the loop. Through __ptmf_scall the
+        # caller's direct call then finds its return address and carries on.
+        pieces, cursor = [], 0
+        for m in TAIL_JUMP.finditer(body):
+            if int(m.group(1), 16) in watched:
+                continue
+            pieces.append(body[cursor:m.start()])
+            pieces.append(
+                f"    // {m.group(1)}: bctr\n"
+                "    {\n"
+                "        u32 target = ctx->ctr & ~3u;\n"
+                "        bool ctr_ok = true;\n"
+                "        bool cr_ok = true;\n"
+                "        if (ctr_ok && cr_ok) {\n"
+                "            ctx->pc = target;\n"
+                "            if (bw_direct_call_ready(ctx, target))\n"
+                "                (void)bw_call_translated(ctx, target);\n"
+                "            return;\n"
+                "        }\n"
+                "    }\n")
+            cursor = m.end()
+            done += 1
+        pieces.append(body[cursor:])
+        body = "".join(pieces)
+        # A call through the link register, as a bctrl: the target runs directly
+        # and, when it returns here, the chunk carries on; anything else takes the
+        # chunk's own return dispatch, as before.
+        pieces, cursor = [], 0
+        for m in LINK_CALL.finditer(body):
+            site, ret = int(m.group(1), 16), int(m.group(2), 16)
+            if (ret in watched or site in watched or ret != site + 4
+                    or f"\nlabel_{ret:08X}:\n" not in body):
+                continue
+            pieces.append(body[cursor:m.start()])
+            pieces.append(
+                f"    // {m.group(1)}: blrl\n"
+                "    {\n"
+                "        u32 target = ctx->lr & ~3u;\n"
+                "        bool ctr_ok = true;\n"
+                "        bool cr_ok = true;\n"
+                "        if (ctr_ok && cr_ok) {\n"
+                f"            ctx->lr = 0x{m.group(2)}u;\n"
+                "            ctx->pc = target;\n"
+                "            if (bw_direct_call_ready(ctx, target) && bw_call_translated(ctx, target) &&\n"
+                f"                ctx->pc == 0x{m.group(2)}u && bw_direct_call_ready(ctx, 0x{ret:08X}u))\n"
+                f"                goto label_{m.group(2)};\n"
+                f"            goto {m.group(3)};\n"
                 "        }\n"
                 "    }\n")
             cursor = m.end()
