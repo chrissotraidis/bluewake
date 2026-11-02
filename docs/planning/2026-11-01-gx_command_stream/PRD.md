@@ -32,6 +32,18 @@ Outset draws about 1,960 draws per game frame. It is unknown whether this cost s
 
 **Prior work:** the Oct 27 runtime CPU plan ([fork #5](https://github.com/irregularthanis/bluewake/pull/5)) built the first gather-pipe attribution and split the module's stages: alias validation 1.01%, packing 0.14%, drain 0.09%. Its winner, the alias cache, shipped as [#495](https://github.com/chrissotraidis/bluewake/pull/495) (+2.84%, checkpoints identical). It didn't cover the host side or the batch switch; this is that counterpart.
 
+## Platforms
+
+| Platform | Batching today | How it is set | Measured |
+|---|---|---|---|
+| macOS | On, in builds with `--combined-optimizations` | `main.c` reads the bundle's `ModuleOptimizations` (`combined-v1`) and sets `BLUEWAKE_GATHER_PIPE_BATCH=1` (#292, Oct 12) | Not recorded on its own |
+| iOS / iPadOS | On, in builds with `--combined-optimizations` | `apple/ios/src/ios_entry.m`, the same list | Not recorded on its own |
+| Linux desktop (Steam Deck) | On by default (this PR) | `bluewake_gather_pipe_batch_option` | **+1.7%** in Outset, 6 of 6 pairs |
+| Windows | Off (direct) | Shares `main.c`; `BLUEWAKE_GATHER_PIPE_BATCH=1` turns it on | Not measured |
+| Android | Off (direct) | Shares `main.c`; it defines `__linux__`, so the default excludes `__ANDROID__` explicitly | Not measured |
+
+Windows and Android are measured before their defaults change (PROGRESS M4).
+
 ## Outcomes
 
 - A breakdown of the game-thread GX cost by stage (module batching, host hand-off, command parsing) and by command kind, per game frame.
@@ -48,7 +60,7 @@ Outset draws about 1,960 draws per game frame. It is unknown whether this cost s
 
 ## Decisions
 
-- **Batch by default on Linux (2026-11-02):** only where it was measured; `BLUEWAKE_GATHER_PIPE_BATCH=0` keeps direct writes; Windows and Mac unchanged until measured there. Qualification: identical checkpoints and identical or similar pictures, the bar #495 met.
+- **Batch by default on desktop Linux (2026-11-02):** only where it was measured (Android, which also defines `__linux__`, is excluded); `BLUEWAKE_GATHER_PIPE_BATCH=0` keeps direct writes; Windows and Mac unchanged until measured there. Qualification: identical checkpoints and identical or similar pictures, the bar #495 met.
 - **Profile before changing:** the first deliverable is the breakdown.
 - **Make the attribution build public:** #495's attribution used a local-only build that keeps gather stages as profiler symbols. M0 adds that as a builder option, so others can repeat it.
 - **Acceptance** follows #503's rule: consistent, exact, tested; size is not a bar.

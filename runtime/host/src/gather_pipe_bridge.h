@@ -37,13 +37,14 @@ static inline BluewakeGatherMode bluewake_gather_pipe_configure(
     return BLUEWAKE_GATHER_DIRECT;
 }
 
-/* BLUEWAKE_GATHER_PIPE_BATCH as the bridge reads it. On Linux an unset value
+/* BLUEWAKE_GATHER_PIPE_BATCH as the bridge reads it. On desktop Linux (not
+ * Android, which also defines __linux__) an unset value
  * means batching: one hand-off per run of bytes instead of one host call per
  * written value, measured on the Steam Deck at +1.7% game FPS in Outset with
  * identical guest state (#531); "0" keeps direct writes. Elsewhere batching
  * stays an explicit opt-in until it is measured there. */
 static inline const char* bluewake_gather_pipe_batch_option(const char* value) {
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
     if (value == NULL || value[0] == '\0')
         return "1";
 #endif
