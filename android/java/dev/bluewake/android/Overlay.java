@@ -702,11 +702,11 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         MenuView.Item aspectMenu = menu("Aspect Ratio",
                 aspectAction("Original 4:3", 0, aspect),
                 aspectAction("Fill Screen", 1, aspect));
-        // Off by default on Android until it is measured here (runtime/host/src/gather_pipe_bridge.h, #531).
-        MenuView.Item gxBatch = action("Batch Graphics Commands (Experimental)", () -> {
-            settings.set(Settings.GX_BATCH, !settings.bool(Settings.GX_BATCH, false));
+        // On by default, pending its measurement on Android (runtime/host/src/gather_pipe_bridge.h, #531).
+        MenuView.Item gxBatch = action("Batch Graphics Commands", () -> {
+            settings.set(Settings.GX_BATCH, !settings.bool(Settings.GX_BATCH, true));
             alertNextLaunch("Graphics command batching takes effect the next time BlueWake starts.");
-        }).subtitle("Hands the game's graphics commands to the renderer in runs").checked(settings.bool(Settings.GX_BATCH, false));
+        }).subtitle("Hands the game's graphics commands to the renderer in runs").checked(settings.bool(Settings.GX_BATCH, true));
         return menu("Display", showFPS, smoothMotion, resolution, filtering, aspectMenu, gxBatch);
     }
 

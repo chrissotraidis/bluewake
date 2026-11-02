@@ -44,9 +44,7 @@ static const char* const kFileOrder[] = {
 static const char* const kWindowsOwnDefaults[][2] = {
     {"DOL_AURORA_ASPECT_FIT", "1"}, {"BLUEWAKE_FAST_FORWARD", "0"}, {"BLUEWAKE_QUICK_DOORS", "0"},
     // The game keeps running under the menu on Windows until pausing is checked there.
-    {"BLUEWAKE_MENU_PAUSES", "0"},
-    // Graphics commands go to the renderer one at a time on Windows until batching is measured there (#531).
-    {"BLUEWAKE_GATHER_PIPE_BATCH", "0"}};
+    {"BLUEWAKE_MENU_PAUSES", "0"}};
 static const char* const kWindowsOnlyNextLaunch[] = {"BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS",
                                                      "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};
 static const char* const kFilledEverywhere[] = {"BLUEWAKE_DSP_MODE", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};

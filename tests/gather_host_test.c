@@ -43,14 +43,9 @@ int main(void) {
     assert(configure("1", "1", false) == BLUEWAKE_GATHER_BATCH);
     bw_gather_pipe_put(0x12345678u, 4);
     assert(configure("1", "0", false) == BLUEWAKE_GATHER_DIRECT);
-    /* The batch option's default: batching on desktop Linux when unset (not
-     * Android, measured separately); "0" opts out. */
-#if defined(__linux__) && !defined(__ANDROID__)
+    /* The batch option's default: batching on every platform when unset; "0" opts out. */
     assert(strcmp(bluewake_gather_pipe_batch_option(NULL), "1") == 0);
     assert(strcmp(bluewake_gather_pipe_batch_option(""), "1") == 0);
-#else
-    assert(bluewake_gather_pipe_batch_option(NULL) == NULL);
-#endif
     assert(strcmp(bluewake_gather_pipe_batch_option("0"), "0") == 0);
     assert(strcmp(bluewake_gather_pipe_batch_option("1"), "1") == 0);
     assert(delivered == 12 && batches == 2 && bw_gather_pipe_length == 0);

@@ -190,9 +190,9 @@ final class Settings {
         // The Wind Waker HD look (runtime/host/src/hd_look.h), as ios_entry.m sets it.
         if (bool(HD_LOOK, false)) env.put("BLUEWAKE_HD_LOOK", "1");
         if (has(DPAD_MENUS)) env.put("BLUEWAKE_DPAD_MENUS", bool(DPAD_MENUS, false) ? "1" : "0");
-        // The game's graphics commands to the renderer in runs rather than one at a time: off by
-        // default here until it is measured on Android (#531; on by default on desktop Linux).
-        env.put("BLUEWAKE_GATHER_PIPE_BATCH", bool(GX_BATCH, false) ? "1" : "0");
+        // The game's graphics commands to the renderer in runs rather than one at a time: on by
+        // default, as on every platform, pending its measurement on Android (#531).
+        env.put("BLUEWAKE_GATHER_PIPE_BATCH", bool(GX_BATCH, true) ? "1" : "0");
         if (bool(MOD_BETTERWW, false)) {
             // android_entry.c keeps it only if the game module was built with
             // Better Wind Waker's options (bluewake_composite_option_count).
