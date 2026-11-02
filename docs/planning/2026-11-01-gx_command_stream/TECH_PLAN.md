@@ -92,6 +92,12 @@ It is opt-in and does not alter the default or release build path.
 - The renderer's own threads also consume the commands. A change that moves work off the game thread must not add waits elsewhere, so the GX worker and present waits in `[fps-dip]` must be checked alongside the frame rate.
 - `DOL_AURORA_GPU_PROF` timestamps are unreliable with Smooth Motion's pass split (seen in #504 and #503), so they are not used here.
 
+## Possible follow-up: the module's per-store check
+
+`bw_gather_pipe`, the test each store that leaves plain RAM makes (is it a gather-pipe write?), measured ≈ 1.4 M cycles per Outset frame (≈ 1%) in the profiling build. That figure is inflated: the profiling build keeps the check out of line (`noinline`), so each call pays a call, a return and register saves that the shipped build, where it is inlined, does not. It cannot go to zero either, since every hardware store must still be routed. A realistic gain is about 0.2–0.4%, and the change would touch a helper inlined into every store path, where #503's first candidate lost 2.9% to code layout.
+
+**If picked up:** bound it first with a diagnostic build whose check keeps only the mirror-bit and FIFO-window comparisons (not exact), six interleaved Game Mode launches against batching on. Pursue an exact version only if the bound is consistent.
+
 ## References
 
 - [#503 Outset game-thread follow-up](https://github.com/chrissotraidis/bluewake/pull/503) — the 5.1 M figure and method

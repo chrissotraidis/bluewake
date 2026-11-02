@@ -58,6 +58,12 @@ Batching is on by default on every platform, so testers already run it; each pla
 | Candidate gain | #503 stack on `main` | Ahead in every interleaved Game Mode launch (≥ 6); no minimum size | Game Mode A/B |
 | Pictures and state | Control | Checkpoints identical; pictures identical or similar in all five render_bench scenes | render_bench |
 
+## Possible follow-up: the module's per-store check
+
+`bw_gather_pipe`, the test each store that leaves plain RAM makes (is it a gather-pipe write?), measured ≈ 1.4 M cycles per Outset frame (≈ 1%) in the profiling build. That figure is inflated: the profiling build keeps the check out of line (`noinline`), so each call pays a call, a return and register saves that the shipped build, where it is inlined, does not. It cannot go to zero either, since every hardware store must still be routed. A realistic gain is about 0.2–0.4%, and the change would touch a helper inlined into every store path, where #503's first candidate lost 2.9% to code layout.
+
+**If picked up:** bound it first with a diagnostic build whose check keeps only the mirror-bit and FIFO-window comparisons (not exact), six interleaved Game Mode launches against batching on. Pursue an exact version only if the bound is consistent.
+
 ## Decisions
 
 - **Batch by default on every platform (2026-11-02):** measured on Linux; on everywhere else pending each platform's measurement, so testers already run it. A menu switch (desktop Config → Performance, Android Display) or `BLUEWAKE_GATHER_PIPE_BATCH=0` keeps direct writes for comparison. Qualification: identical checkpoints and identical or similar pictures, the bar #495 met.

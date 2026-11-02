@@ -31,6 +31,10 @@ Batching is on by default on every platform, so testers already run it. Each pla
 - [ ] M4-T02: Android (also confirms the new Display toggle builds and works).
 - [ ] M4-T03: macOS and iOS.
 
+### Possible follow-up (not scheduled)
+
+- [ ] The module's per-store check (`bw_gather_pipe`, ≈ 1.4 M cycles/frame in the profiling build, inflated by `noinline`; realistic ≈ 0.2–0.4%): bound it with a diagnostic build first ([technical plan](TECH_PLAN.md#possible-follow-up-the-modules-per-store-check)).
+
 ## Evidence ledger
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
