@@ -178,6 +178,17 @@ target_include_directories(bluewake_perf_monitor_test PRIVATE ${CMAKE_CURRENT_SO
 add_test(NAME bluewake_perf_monitor_test COMMAND bluewake_perf_monitor_test)
 set_tests_properties(bluewake_perf_monitor_test PROPERTIES TIMEOUT 30)
 
+# The panel's hand-written Vulkan structures against the real header, where the build
+# has one (the renderer's pinned headers do): a moved field would otherwise show as a
+# garbled card name rather than a build error.
+add_executable(bluewake_perf_monitor_vk_layout_test ../../tests/perf_monitor_vk_layout_test.c)
+target_include_directories(bluewake_perf_monitor_vk_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(EXISTS ${GXRUNTIME_DIR}/Externals/Vulkan-Headers/include/vulkan/vulkan.h)
+    target_include_directories(bluewake_perf_monitor_vk_layout_test
+        PRIVATE ${GXRUNTIME_DIR}/Externals/Vulkan-Headers/include)
+endif()
+add_test(NAME bluewake_perf_monitor_vk_layout_test COMMAND bluewake_perf_monitor_vk_layout_test)
+
 add_executable(bluewake_bmg_patch_test ../../tests/bmg_patch_test.c)
 target_include_directories(bluewake_bmg_patch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME bluewake_bmg_patch_test COMMAND bluewake_bmg_patch_test)

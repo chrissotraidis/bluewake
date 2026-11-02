@@ -16,6 +16,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 #else
+#include <dlfcn.h>
 #include <unistd.h>
 #endif
 
@@ -135,6 +136,150 @@ void bw_perf_present(unsigned long long now_ns) {
     if (now_ns - machine.at_ns >= SAMPLE_NS)
         sample_machine(now_ns);
 }
+
+// --- the card, as Vulkan names it --------------------------------------------
+//
+// The card's counters come from the driver's sysfs, but its name does not: sysfs
+// knows the PCI ids, not "Radeon RX 6600", and the host does not link Vulkan while
+// the renderer does. So the loader already in the process is asked at run time for
+// the device's own name and its device-local memory — the same two facts the TotK
+// port's overlay takes from its device. Nothing here is required: a machine with no
+// loader, or one whose first device is not the renderer's, leaves the name empty
+// and the panel's line reads "-".
+#if defined(_WIN32) || !defined(__APPLE__)
+
+#if defined(_WIN32)
+#define BW_VK_LIBRARY "vulkan-1.dll"
+static void* library_open(const char* name) { return (void*)LoadLibraryA(name); }
+static void* library_symbol(void* library, const char* name) { return (void*)GetProcAddress((HMODULE)library, name); }
+static void library_close(void* library) {
+    if (library != NULL)
+        FreeLibrary((HMODULE)library);
+}
+#else
+#define BW_VK_LIBRARY "libvulkan.so.1"
+static void* library_open(const char* name) { return dlopen(name, RTLD_NOW | RTLD_LOCAL); }
+static void* library_symbol(void* library, const char* name) { return dlsym(library, name); }
+static void library_close(void* library) {
+    if (library != NULL)
+        dlclose(library);
+}
+#endif
+
+// Only the head of VkPhysicalDeviceProperties is read, and its fields up to the
+// name are fixed; the rest is written by the driver into a buffer far larger than
+// the structure. The layouts are checked against the real headers in
+// tests/perf_monitor_vk_layout_test.c.
+typedef struct {
+    int sType;
+    const void* pNext;
+    const char* pApplicationName;
+    unsigned applicationVersion;
+    const char* pEngineName;
+    unsigned engineVersion;
+    unsigned apiVersion;
+} BwVkApplicationInfo;
+
+typedef struct {
+    int sType;
+    const void* pNext;
+    unsigned flags;
+    const void* pApplicationInfo;
+    unsigned enabledLayerCount;
+    const char* const* ppEnabledLayerNames;
+    unsigned enabledExtensionCount;
+    const char* const* ppEnabledExtensionNames;
+} BwVkInstanceCreateInfo;
+
+typedef struct {
+    unsigned apiVersion, driverVersion, vendorID, deviceID;
+    int deviceType;
+    char deviceName[256];
+} BwVkDeviceHead;
+
+typedef struct {
+    unsigned flags, heapIndex;
+} BwVkMemoryType;
+typedef struct {
+    unsigned long long size;
+    unsigned flags;
+} BwVkMemoryHeap;
+typedef struct {
+    unsigned memoryTypeCount, memoryHeapCount;
+    BwVkMemoryType memoryTypes[32];
+    BwVkMemoryHeap memoryHeaps[16];
+} BwVkMemoryProperties;
+
+enum {
+    BW_VK_APPLICATION_INFO = 0,
+    BW_VK_INSTANCE_CREATE_INFO = 1,
+    BW_VK_DEVICE_LOCAL_HEAP = 1u,
+    BW_VK_API_1_0 = 1u << 22,
+};
+
+// dlsym/GetProcAddress hand back an object pointer and C says a function pointer is
+// not one; POSIX and Windows both guarantee the conversion, and going through
+// memcpy keeps the cast ISO C forbids out of the source. Like the renderer's own
+// loader does.
+static void library_function(void* target, size_t size, void* symbol) { memcpy(target, &symbol, size); }
+
+// The device's name into name, and its device-local memory into vram_mb (left
+// alone when the driver reports none). 1 when a device answered.
+static int vulkan_device(char* name, size_t size, float* vram_mb) {
+    typedef int (*CreateInstance)(const BwVkInstanceCreateInfo*, const void*, void**);
+    typedef void (*DestroyInstance)(void*, const void*);
+    typedef int (*EnumerateDevices)(void*, unsigned*, void**);
+    typedef void (*DeviceProperties)(void*, void*);
+    typedef void (*DeviceMemory)(void*, BwVkMemoryProperties*);
+    void* library = library_open(BW_VK_LIBRARY);
+    if (library == NULL)
+        return 0;
+    CreateInstance create = NULL;
+    DestroyInstance destroy = NULL;
+    EnumerateDevices enumerate = NULL;
+    DeviceProperties properties = NULL;
+    DeviceMemory memory = NULL;
+    library_function(&create, sizeof create, library_symbol(library, "vkCreateInstance"));
+    library_function(&destroy, sizeof destroy, library_symbol(library, "vkDestroyInstance"));
+    library_function(&enumerate, sizeof enumerate, library_symbol(library, "vkEnumeratePhysicalDevices"));
+    library_function(&properties, sizeof properties, library_symbol(library, "vkGetPhysicalDeviceProperties"));
+    library_function(&memory, sizeof memory, library_symbol(library, "vkGetPhysicalDeviceMemoryProperties"));
+    int found = 0;
+    void* instance = NULL;
+    if (create != NULL && destroy != NULL && enumerate != NULL && properties != NULL && memory != NULL) {
+        BwVkApplicationInfo app = {BW_VK_APPLICATION_INFO, NULL, "BlueWake", 1u, "BlueWake", 1u, BW_VK_API_1_0};
+        BwVkInstanceCreateInfo info = {BW_VK_INSTANCE_CREATE_INFO, NULL, 0u, &app, 0u, NULL, 0u, NULL};
+        if (create(&info, NULL, &instance) == 0 && instance != NULL) {
+            unsigned count = 0;
+            if (enumerate(instance, &count, NULL) == 0 && count > 0u) {
+                void* devices[8];
+                if (count > 8u)
+                    count = 8u;
+                if (enumerate(instance, &count, devices) == 0) {
+                    unsigned char raw[4096];
+                    memset(raw, 0, sizeof raw);
+                    properties(devices[0], raw);
+                    const BwVkDeviceHead* head = (const BwVkDeviceHead*)raw;
+                    snprintf(name, size, "%.*s", (int)size - 1, head->deviceName);
+                    BwVkMemoryProperties heaps;
+                    memset(&heaps, 0, sizeof heaps);
+                    memory(devices[0], &heaps);
+                    unsigned long long total = 0ull;
+                    for (unsigned i = 0u; i < heaps.memoryHeapCount && i < 16u; ++i)
+                        if ((heaps.memoryHeaps[i].flags & BW_VK_DEVICE_LOCAL_HEAP) != 0u)
+                            total += heaps.memoryHeaps[i].size;
+                    if (total != 0ull && vram_mb != NULL)
+                        *vram_mb = (float)((double)total / 1048576.0);
+                    found = name[0] != '\0';
+                }
+            }
+            destroy(instance, NULL);
+        }
+    }
+    library_close(library);
+    return found;
+}
+#endif
 
 // --- the machine, as each system reports it ----------------------------------
 
@@ -290,7 +435,12 @@ static void sample_machine(unsigned long long now_ns) {
     if (!named) {
         named = 1;
         read_cpu_name(s->cpu_name, sizeof s->cpu_name);
-        snprintf(s->gpu_name, sizeof s->gpu_name, "%s", "");
+        // The card's name is Vulkan's to give (sysfs knows only the PCI ids), and its
+        // device-local memory comes with it: what sysfs reports for that is used first
+        // when the loop below finds it.
+        float device_local_mb = -1.f;
+        if (vulkan_device(s->gpu_name, sizeof s->gpu_name, &device_local_mb) && device_local_mb > 0.f)
+            s->vram_total_mb = device_local_mb;
     }
     static const char* const kCpuSensors[] = {"k10temp", "coretemp", "zenpower", "cpu_thermal", "acpitz"};
     if (cpu_sensor_dir[0] == '\0')
@@ -306,16 +456,19 @@ static void sample_machine(unsigned long long now_ns) {
     // counters below /sys/class/drm/cardN/device, its temperature and power in
     // the hwmon beside them). A driver that reports none leaves the numbers at
     // "-", and the load stays unknown.
-    for (int card = 0; card < 4 && s->vram_total_mb < 0.f; ++card) {
+    static int card_logged;
+    for (int card = 0; card < 10 && !card_logged; ++card) {
         char base[96];
         snprintf(base, sizeof base, "/sys/class/drm/card%d/device", card);
         const unsigned long long vram_total = read_number(base, "mem_info_vram_total");
-        if (vram_total == 0ull)
-            continue;
         const unsigned long long vram_used = read_number(base, "mem_info_vram_used");
-        s->vram_total_mb = (float)((double)vram_total / 1048576.0);
-        s->vram_used_mb = (float)((double)vram_used / 1048576.0);
         const unsigned long long busy = read_number(base, "gpu_busy_percent");
+        if (vram_total == 0ull && vram_used == 0ull && busy == 0ull)
+            continue;   // no counters here: not the card that draws
+        if (vram_total != 0ull)
+            s->vram_total_mb = (float)((double)vram_total / 1048576.0);
+        if (vram_used != 0ull)
+            s->vram_used_mb = (float)((double)vram_used / 1048576.0);
         s->gpu_pct = (float)busy;
         char hwmon_root[128], hwmon[192];
         snprintf(hwmon_root, sizeof hwmon_root, "%s/hwmon", base);
@@ -331,6 +484,18 @@ static void sample_machine(unsigned long long now_ns) {
             if (mhz != 0ull)
                 s->gpu_clock_mhz = (float)mhz;
         }
+        card_logged = 1;
+        fprintf(stderr,
+                "[perf] panel card: \"%s\" (vulkan), vram %.0f/%.0f MB; %s: busy %.0f%%, temp %.0f C, "
+                "power %.0f W, clock %.0f MHz\n",
+                s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_used_mb, s->vram_total_mb, base, s->gpu_pct,
+                s->gpu_temp_c, s->gpu_power_w, s->gpu_clock_mhz);
+    }
+    if (!card_logged) {
+        card_logged = 1;
+        fprintf(stderr, "[perf] panel card: no /sys/class/drm/card*/device reports counters (gpu name from "
+                        "vulkan: \"%s\", vram total %.0f MB)\n",
+                s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_total_mb);
     }
 }
 
