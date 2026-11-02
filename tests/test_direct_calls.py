@@ -44,43 +44,6 @@ label_80004004:
 }
 '''
 
-TAIL_JUMP = '''#include "../generated.h"
-void synthetic(CPUState* ctx) {
-    // 80328E0C: bctr
-    {
-        u32 target = ctx->ctr & ~3u;
-        bool ctr_ok = true;
-        bool cr_ok = true;
-        if (ctr_ok && cr_ok) {
-            ctx->pc = target;
-            return;
-        }
-    }
-label_80004004:
-    ctx->gpr[3] += 1;
-}
-'''
-
-LINK_CALL = '''#include "../generated.h"
-void synthetic(CPUState* ctx) {
-    // 80004000: blrl
-    {
-        u32 target = ctx->lr & ~3u;
-        bool ctr_ok = true;
-        bool cr_ok = true;
-        if (ctr_ok && cr_ok) {
-            ctx->lr = 0x80004004u;
-            ctx->pc = target;
-            goto return_dispatch_80004000;
-        }
-    }
-label_80004004:
-    ctx->gpr[3] += 1;
-return_dispatch_80004000:
-    return;
-}
-'''
-
 FALLBACK = '''#include "../generated.h"
 void synthetic(CPUState* ctx) {
     // 80004000: synthetic interpreter instruction
@@ -181,31 +144,6 @@ class DirectPreparationTests(unittest.TestCase):
                                    (direct.transform_fallback, FALLBACK)):
             for watched in ({0x80004000}, {0x80004004}):
                 self.assertEqual(convert_fn(source, watched), (source, 0))
-
-    def test_tail_jumps_and_link_calls_run_directly(self):
-        # bctr: the target runs where the loop would dispatch it, then the chunk
-        # leaves with the guest where the target left it.
-        result, count = direct.transform_indirect(TAIL_JUMP, set())
-        self.assertEqual(count, 1)
-        self.assertIn('if (bw_direct_call_ready(ctx, target))\n'
-                      '                (void)bw_call_translated(ctx, target);\n'
-                      '            return;', result)
-        self.assertEqual(direct.transform_indirect(result, set()), (result, 0))
-        self.assertEqual(direct.transform_indirect(TAIL_JUMP, {0x80328E0C}), (TAIL_JUMP, 0))
-        # Any other bctr (a switch table, say) keeps its trip round the loop.
-        other = TAIL_JUMP.replace('80328E0C', '80004000')
-        self.assertEqual(direct.transform_indirect(other, set()), (other, 0))
-        # blrl: as a bctrl, but the target comes from lr (read before lr is set)
-        # and anything else keeps the chunk's own return dispatch.
-        result, count = direct.transform_indirect(LINK_CALL, set())
-        self.assertEqual(count, 1)
-        self.assertLess(result.index('u32 target = ctx->lr & ~3u;'), result.index('ctx->lr = 0x80004004u;'))
-        self.assertIn('ctx->pc == 0x80004004u && bw_direct_call_ready(ctx, 0x80004004u))\n'
-                      '                goto label_80004004;\n'
-                      '            goto return_dispatch_80004000;', result)
-        self.assertEqual(direct.transform_indirect(result, set()), (result, 0))
-        for watched in ({0x80004000}, {0x80004004}):
-            self.assertEqual(direct.transform_indirect(LINK_CALL, watched), (LINK_CALL, 0))
 
     def test_watch_list_collapses_mirrors_and_is_repeatable(self):
         with tempfile.TemporaryDirectory() as tmp:

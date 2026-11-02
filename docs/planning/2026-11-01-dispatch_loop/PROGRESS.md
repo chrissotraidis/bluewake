@@ -1,6 +1,6 @@
 # PROGRESS — Dispatch-loop edges in Outset
 
-Status: M3: +0.4%, not consistent; narrowing the rewrite next  
+Status: Closed: no candidate qualifies; findings and the loop census remain  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -22,7 +22,7 @@ Status: M3: +0.4%, not consistent; narrowing the rewrite next
 - [x] M2-T02: Depth cap 32 → 128 in the counting build: no change. Hypothesis rejected.
 - [x] M2-T03: Find the call sites (census pairs by link register). Mostly `bctr` in `__ptmf_scall` (≈ 2,000/frame) and `blrl` (≈ 490/frame), neither transformed.
 - [x] M3-T01: Transform `bctr` tail jumps (as in `__ptmf_scall`) and `blrl` calls to run directly, keeping every runtime check; focused tests (`911e0e8`; 7/7 builder tests pass).
-- [ ] M3-T02: Game Mode (≥ 6 interleaved launches) and render_bench checkpoints; retain or record no-go.
+- [x] M3-T02: Game Mode (≥ 6 interleaved launches) and render_bench checkpoints; retain or record no-go. **No-go**: all `bctr` +0.4% (inconsistent), narrowed 0.0%. Checkpoints not run, since nothing qualified. The rewrite is removed from the PR.
 
 ### M3: Candidate (depends: M2)
 
@@ -40,3 +40,4 @@ Status: M3: +0.4%, not consistent; narrowing the rewrite next
 | M2-T03 | Counting build `5b18b83` (census with target/link-register pairs, `5a6fb7e`; depth cap back at 32); Deck log `measure-530/census-pairs.log` (private) | Same one-minute census; call sites from `lr − 4` against the chunks' instruction comments | As M0-T02 | **The "refused" indirect calls are mostly not `bctrl`.** `loadMtxConcatView` arrives from `bl __ptmf_scall` at 0x802DC4EC (1,595/frame) and 0x802DC068 (160), and 0x8027E9AC from another (224). `__ptmf_scall` (0x80328DE8), the compiler's pointer-to-member call helper, jumps to the member with **`bctr`**, which the builder does not transform: the chunk ends, the call goes round the loop, and so does the member's return to the original caller. `__GXDefaultTexRegionCallback` arrives from a **`blrl`** at 0x80324F10 (492/frame), also not transformed. Open: a transformed `bctrl` at 0x802F58A0 still hands 0x80012A2C to the loop (402/frame); 0x8003EF1C (209) |
 | M3-T02 | Control `e87db4d` (#503 stack + #530 census off) against candidate `43b5dd1` (+ `911e0e8`), both `--reuse` of the census build's profile; 249 `bctr` sites and the GX `blrl` rewritten; local `measure-530/ab/` (private) | `gamemode_measure.py` 3 × 15 s, six launches alternating | Game Mode, worst-angle Outset state, 16:9, widescreen mod | **Candidate 4.9% slower** (26.26 → 24.97), behind in 3/3 pairs; IPC 1.655 → 1.568. Not a valid measure of the change: the rewrite changes the control flow of 220 chunks holding 29.8% of Outset's chunk time, and a reused profile no longer matches them, so clang drops their profile data (the same trap as #503's v1). Next: a candidate trained on its own code |
 | M3-T02 | Same control (`e87db4d`) against the candidate trained on its own code (`43b5dd1`, full build `t530-candT`, 425 trained functions); local `measure-530/ab-trained/` (private) | Same six alternating launches | As above | **+0.4% (26.21 → 26.31), not consistent**: by pair 26.30/26.43, 26.13/26.43, 26.20/26.07 (behind). The −4.9% was the profile mismatch. As it stands the rewrite does not meet the acceptance rule; the switch tables (all 249 `bctr` sites rewritten, most of them not `__ptmf_scall`) are the likely drag |
+| M3-T02 | Same control (`e87db4d`) against the narrowed candidate (`9510699`: only `__ptmf_scall`'s `bctr` and the GX `blrl`, `3335807`; full build with its own training); local `measure-530/ab-narrow/` (private) | `gamemode_measure.py` 3 × 15 s, **twelve** launches alternating (six pairs) | Game Mode, worst-angle Outset state, 16:9, widescreen mod | **26.13 → 26.12 (0.0%), behind in 5 of 6 pairs.** The pointer-to-member calls and the GX callback cost nothing measurable once they run directly; the all-`bctr` version's +0.4% came from the switch tables and was not consistent either. **No-go** |

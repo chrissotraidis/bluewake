@@ -1,8 +1,30 @@
 # PRD — Dispatch-loop edges in Outset
 
-Status: Candidate under test: run `bctr` tail jumps and `blrl` calls directly  
+Status: Closed: no candidate qualifies; findings and the opt-in loop census remain  
 Source: BlueWake `main` at `6b429fea9e60`; follows [#503](https://github.com/chrissotraidis/bluewake/pull/503)  
 Scope: the game-thread cost of control transfers that still go round the module's dispatch loop. Excluded: the direct-call check (settled in #503), game-function hooks.
+
+## Outcome (2026-11-02)
+
+**No change to the dispatch loop qualifies.** Every route was bounded or measured on the Steam Deck in Game Mode, from the worst-angle Outset state, at 16:9 with the widescreen mod:
+
+| Route | Result |
+|---|---|
+| Fewer turn ends (DSP step 4× rarer, not exact; a bound) | +0.4%, ahead 3/3 pairs but by 0.03–0.23 FPS: not worth an exact redesign |
+| Direct-call depth cap 32 → 128 | No change in the census |
+| `bctr` and `blrl` run directly, all `bctr` sites (trained on its own code) | +0.4%, behind in 1 of 3 pairs |
+| The same, only `__ptmf_scall`'s `bctr` and the GX `blrl` | 0.0%, behind in 5 of 6 pairs |
+
+The loop's ≈ 35,800 boundaries per frame are cheap individually; no group large enough to remove is also expensive enough to show.
+
+**The rewrite's code was removed from this PR.** It stays in the branch history: [`911e0e8`](https://github.com/irregularthanis/bluewake/commit/911e0e8f6) (all `bctr`/`blrl`) and [`3335807`](https://github.com/irregularthanis/bluewake/commit/33358074b) (narrowed).
+
+**What this PR keeps:**
+- the findings;
+- the opt-in loop census (`BLUEWAKE_LOOP_CENSUS`), which compiles to nothing in shipped builds. It counts entries, boundaries by target and call site, and exit reasons, and the host prints it at exit.
+
+Also learned: a candidate that changes chunk code must be trained on its own code. A reused profile made the same rewrite measure −4.9%.
+
 
 ## Problem
 

@@ -1,8 +1,30 @@
 # TECH_PLAN — Dispatch-loop edges in Outset
 
-Status: Candidate under test (M3)  
+Status: Closed: no candidate qualifies; findings and the opt-in loop census remain  
 Source: BlueWake `main` at `6b429fea9e60`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
+
+## Outcome (2026-11-02)
+
+**No change to the dispatch loop qualifies.** Every route was bounded or measured on the Steam Deck in Game Mode, from the worst-angle Outset state, at 16:9 with the widescreen mod:
+
+| Route | Result |
+|---|---|
+| Fewer turn ends (DSP step 4× rarer, not exact; a bound) | +0.4%, ahead 3/3 pairs but by 0.03–0.23 FPS: not worth an exact redesign |
+| Direct-call depth cap 32 → 128 | No change in the census |
+| `bctr` and `blrl` run directly, all `bctr` sites (trained on its own code) | +0.4%, behind in 1 of 3 pairs |
+| The same, only `__ptmf_scall`'s `bctr` and the GX `blrl` | 0.0%, behind in 5 of 6 pairs |
+
+The loop's ≈ 35,800 boundaries per frame are cheap individually; no group large enough to remove is also expensive enough to show.
+
+**The rewrite's code was removed from this PR.** It stays in the branch history: [`911e0e8`](https://github.com/irregularthanis/bluewake/commit/911e0e8f6) (all `bctr`/`blrl`) and [`3335807`](https://github.com/irregularthanis/bluewake/commit/33358074b) (narrowed).
+
+**What this PR keeps:**
+- the findings;
+- the opt-in loop census (`BLUEWAKE_LOOP_CENSUS`), which compiles to nothing in shipped builds. It counts entries, boundaries by target and call site, and exit reasons, and the host prints it at exit.
+
+Also learned: a candidate that changes chunk code must be trained on its own code. A reused profile made the same rewrite measure −4.9%.
+
 
 ## What exists
 
@@ -25,7 +47,7 @@ What reaches the loop is whatever these leave: watched addresses, transfers whos
 4. **Bound.** For the largest group, build a ceiling that takes that path directly, unsafely, and A/B it against the #503 stack.
 5. **Candidate.** Only if the bound is consistent: an exact change in the transform or the loop, with focused tests.
 
-## Candidate (M3): `bctr` tail jumps and `blrl` calls run directly
+## Candidate (M3, removed): `bctr` tail jumps and `blrl` calls run directly
 
 **Problem.** M0–M2 attributed the loop's traffic. Apart from watched calls (kept on purpose) and returns after turn ends (≤ 0.4%, closed), the largest remaining group comes from two instructions [`direct_calls.py`](../../../scripts/windows/direct_calls.py) never rewrites:
 
@@ -73,8 +95,7 @@ The loop would have done the same: dispatch the target, then continue from where
 | `cmake/composite/loop_census.h`, `dispatch_loop.h` | Opt-in census: entries, boundaries by target and skipped/asked, exit reasons | Attribution; compiles to nothing in shipped builds |
 | `scripts/` (report) | Census → per-frame table, joined with decomp symbols | Repeatable mapping |
 | `tests/loop_census_test.c`, CI (Windows, Linux) | Census counts on synthetic runs: every exit reason, targets, entries | Proves the counts; the existing loop test proves the path is unchanged |
-| `scripts/windows/direct_calls.py` (`TAIL_JUMP`, `LINK_CALL`, in `transform_indirect`) | `bctr` and `blrl` run their target directly; the original path otherwise | ≈ 2,500 calls per frame and their returns leave the loop |
-| `tests/test_direct_calls.py` | Synthetic `bctr` and `blrl` sites: rewritten, idempotent, watched sites untouched, `lr` read before it is set | Builder logic in CI (audit workflow) |
+| ~~`scripts/windows/direct_calls.py`, `tests/test_direct_calls.py`~~ | ~~`bctr` and `blrl` run their target directly~~ | Removed after M3: no consistent gain (history: `911e0e8`, `3335807`) |
 
 ## Verification
 
