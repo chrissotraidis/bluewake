@@ -174,9 +174,12 @@ the current task, with the free space in the data folder underneath. **Show
 log** lists what happened with a timestamp. When the last stage finishes the
 window shows **Ready** and starts the game from there. A failure stays on the
 stage that failed with the importer's sentence, **Show log**, and **Back** to
-the form. Closing the window during the preparation lets it finish first (a few
-seconds): the importer has no abort hook yet, and a half-written preparation
-would have to be redone anyway.
+the form. **Cancel** stops the preparation where it is: the importer is asked
+between files, so it stops within a few of them, removes what it had unpacked
+and the folder it was preparing into, and the window goes back to the form with
+your answers still filled in, so nothing half-written is left for a later run.
+Closing the window during the preparation still lets it finish first (a few
+seconds).
 
 A first import measures the files it is about to write (main.dol and the 415
 `.rel` modules, about 10 MB) and checks the data folder has that much room
