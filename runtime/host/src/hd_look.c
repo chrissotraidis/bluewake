@@ -88,6 +88,57 @@ void bluewake_hd_look_defaults(void) {
     const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
     if (setting("BLUEWAKE_HD_CLOUDS") == 1 && setting("BLUEWAKE_HD_LOOK") == 1 && pack != NULL && pack[0] != '\0')
         setenv("DOL_AURORA_TEXTURE_PACK_OPTIONAL", "hd-clouds", 0);
+    // Wind Waker HD's own versions of the look's parts (RecompCore 0206-0213,
+    // each behind a switch of its own, off in Aurora), as the Windows test
+    // launcher sets them, with the look on when BlueWake starts and a pack
+    // imported from the player's HD disc: they follow HD's own normals and
+    // colours, which only the importer writes (optional/hd-normals). A pack of
+    // textures alone keeps the look as it was. Each acts only under its part
+    // (sun shadows, bloom, AO, cloud shadows), so the parts' own defaults are
+    // unchanged. A value already set wins; an empty one (the settings file's)
+    // reads as unset. Aurora reads these once, so the look turned on later
+    // (F2) goes without them until BlueWake starts again.
+    char normals[4096];
+    snprintf(normals, sizeof normals, "%s/optional/hd-normals/objects.bin", pack != NULL ? pack : "");
+    FILE* imported = pack != NULL && pack[0] != '\0' ? fopen(normals, "rb") : NULL;
+    if (imported != NULL)
+        fclose(imported);
+    if (setting("BLUEWAKE_HD_LOOK") == 1 && imported != NULL) {
+        static const char* const kHdLight[][2] = {
+            {"BLUEWAKE_HD_SUN_RULE", "1"},
+            {"DOL_AURORA_SUN_SHADOW_QUALITY", "hd"},
+            {"DOL_AURORA_SUN_SHADOW_SHAPE", "0"},
+            {"DOL_AURORA_SUN_SHADOW_MAP_HD_BIAS", "1"},
+            {"DOL_AURORA_SUN_SHADOW_MAP_CASTER_BIAS", "80,3"},
+            {"DOL_AURORA_SUN_SHADOW_HD_MIX", "1"},
+            {"DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY", "1"},
+            {"DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT", "1"},
+            {"DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT", "1"},
+            {"DOL_AURORA_SUN_SHADOW_TEMPORAL", "1"},
+            {"DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE", "100,400,0.9"},
+            {"DOL_AURORA_BLOOM_HD", "1"},
+            {"DOL_AURORA_BLOOM_HD_MASK", "1"},
+            {"DOL_AURORA_BLOOM_HD_STRENGTH", "0.6"},
+            {"DOL_AURORA_EXPOSURE_HIGHLIGHTS", "0.99,1.0"},
+            {"DOL_AURORA_AO_HD", "1"},
+            {"DOL_AURORA_CLOUD_SHADOWS_HD", "1"},
+            {"DOL_AURORA_SUN_SHADOW_FACING", "1"},
+            {"DOL_AURORA_SUN_SHADOW_FACING_MUL", "1.0"},
+            {"DOL_AURORA_SUN_SHADOW_FACING_CREASE", "45"},
+            // HD's rim light takes the edge light's place whatever the edge
+            // light's switch says, so it needs that switch on.
+            {"DOL_AURORA_RIM_HD", "1"},
+        };
+        const bool edge_light = setting("BLUEWAKE_HD_EDGE_LIGHT") != 0;
+        for (size_t i = 0; i < sizeof kHdLight / sizeof kHdLight[0]; ++i) {
+            const char* key = kHdLight[i][0];
+            if (!edge_light && strcmp(key, "DOL_AURORA_RIM_HD") == 0)
+                continue;
+            const char* value = getenv(key);
+            if (value == NULL || value[0] == '\0')
+                setenv(key, kHdLight[i][1], 1);
+        }
+    }
 }
 
 void bluewake_hd_look_reload(void) {
@@ -639,7 +690,8 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                     const char* rule = getenv("BLUEWAKE_HD_SUN_RULE");
                     s_hd_rule = rule != NULL && rule[0] == '1';
                 }
-                if (s_hd_rule) {
+                // HD's rule is for its sun shadows; with them off the edge light keeps the game's sun.
+                if (s_hd_rule && g_sun == 1) {
                     float light[3];
                     hd_sun_rule(cpu, retrace, light);
                     aurora_set_sun_direction(light[0], light[1], light[2]);
