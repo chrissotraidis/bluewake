@@ -291,14 +291,6 @@ static void bluewake_native_gx_enable(void)
 }
 #endif
 
-#if defined(BLUEWAKE_LOOP_CENSUS)
-/* The chassis loop's census (loop_census.h), printed by the host at exit. */
-RECOMP_MODULE_EXPORT void bluewake_composite_loop_census_report(void)
-{
-    bw_loop_census_report();
-}
-#endif
-
 RECOMP_MODULE_EXPORT const StaticRecompModuleDesc* staticrecomp_get_module(void)
 {
 #if defined(BLUEWAKE_NATIVE_ENTRIES)

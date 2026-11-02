@@ -232,14 +232,6 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
-    # The chassis loop's opt-in census (cmake/composite/loop_census.h, #530).
-    add_executable(bluewake_loop_census_test ${BLUEWAKE_REPO_ROOT}/tests/loop_census_test.c)
-    target_include_directories(bluewake_loop_census_test PRIVATE
-        ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite)
-    target_link_libraries(bluewake_loop_census_test PRIVATE gxruntime)
-    set_target_properties(bluewake_loop_census_test PROPERTIES LINKER_LANGUAGE CXX)
-    add_test(NAME bluewake_loop_census_test COMMAND bluewake_loop_census_test)
-
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_link_libraries(bluewake_linux_disc_test PRIVATE gxruntime GXRuntime::aurora xxhash)

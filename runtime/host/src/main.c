@@ -16104,13 +16104,6 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[direct-skip] verify: inline=%llu unsafe=%llu conservative=%llu\n", inline_answers,
                 unsafe, conservative);
     }
-    {
-        // A module built with BLUEWAKE_LOOP_CENSUS (#530) exports its loop census.
-        typedef void (*LoopCensusReportFn)(void);
-        LoopCensusReportFn loop_census = (LoopCensusReportFn)dlsym(lib, "bluewake_composite_loop_census_report");
-        if (loop_census != NULL)
-            loop_census();
-    }
     fprintf(stderr,
             "[collision-provenance] summary ground_cross_returns=%llu "
             "deferred_fp=%llu valid_seen=%u sentinel_seen=%u\n",

@@ -286,14 +286,6 @@ target_include_directories(bluewake_composite_dispatch_loop_test PRIVATE
 add_test(NAME bluewake_composite_dispatch_loop_test
     COMMAND bluewake_composite_dispatch_loop_test)
 
-add_executable(bluewake_loop_census_test ../../tests/loop_census_test.c)
-target_link_libraries(bluewake_loop_census_test PRIVATE gxruntime)
-target_include_directories(bluewake_loop_census_test PRIVATE
-    ${GXRUNTIME_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/composite
-)
-add_test(NAME bluewake_loop_census_test COMMAND bluewake_loop_census_test)
-
 # Manual A/B qualification consumes two local player-generated modules. It is
 # intentionally absent from CTest: CI must never need or publish game code.
 add_executable(bluewake_fast_blocks_test EXCLUDE_FROM_ALL ../../tests/fast_blocks_test.c)

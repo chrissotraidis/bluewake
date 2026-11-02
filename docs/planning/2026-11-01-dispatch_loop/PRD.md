@@ -1,6 +1,6 @@
 # PRD — Dispatch-loop edges in Outset
 
-Status: Closed: no candidate qualifies; findings and the opt-in loop census remain  
+Status: Closed: no change qualifies; planning record only (census and candidate code removed)  
 Source: BlueWake `main` at `6b429fea9e60`; follows [#503](https://github.com/chrissotraidis/bluewake/pull/503)  
 Scope: the game-thread cost of control transfers that still go round the module's dispatch loop. Excluded: the direct-call check (settled in #503), game-function hooks.
 
@@ -19,9 +19,9 @@ The loop's ≈ 35,800 boundaries per frame are cheap individually; no group larg
 
 **The rewrite's code was removed from this PR.** It stays in the branch history: [`911e0e8`](https://github.com/irregularthanis/bluewake/commit/911e0e8f6) (all `bctr`/`blrl`) and [`3335807`](https://github.com/irregularthanis/bluewake/commit/33358074b) (narrowed).
 
-**What this PR keeps:**
-- the findings;
-- the opt-in loop census (`BLUEWAKE_LOOP_CENSUS`), which compiles to nothing in shipped builds. It counts entries, boundaries by target and call site, and exit reasons, and the host prints it at exit.
+**This PR merges only the planning record.** The opt-in loop census (`BLUEWAKE_LOOP_CENSUS`) that produced these findings was removed too. It stays in the branch history for any future counting build: [`5864a65`](https://github.com/irregularthanis/bluewake/commit/5864a655f) (census), [`3e03a5d`](https://github.com/irregularthanis/bluewake/commit/3e03a5d54) (host report), [`5a6fb7e`](https://github.com/irregularthanis/bluewake/commit/5a6fb7e69) (call sites by link register).
+
+**Follow-up:** the census pointed at the skinning native, which declines exactly the big models that cost the most. Planned in the native-extensions follow-up.
 
 Also learned: a candidate that changes chunk code must be trained on its own code. A reused profile made the same rewrite measure −4.9%.
 

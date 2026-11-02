@@ -1,7 +1,11 @@
 # PROGRESS — Dispatch-loop edges in Outset
 
-Status: Closed: no candidate qualifies; findings and the loop census remain  
+Status: Closed: no change qualifies; planning record only (census and candidate code removed)  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
+
+## Outcome (2026-11-02)
+
+Closed: no change to the dispatch loop qualifies; this PR merges only the planning record. The census and the candidate stay in the branch history ([`5864a65`](https://github.com/irregularthanis/bluewake/commit/5864a655f), [`3e03a5d`](https://github.com/irregularthanis/bluewake/commit/3e03a5d54), [`5a6fb7e`](https://github.com/irregularthanis/bluewake/commit/5a6fb7e69), [`911e0e8`](https://github.com/irregularthanis/bluewake/commit/911e0e8f6), [`3335807`](https://github.com/irregularthanis/bluewake/commit/33358074b)).
 
 ## Milestones
 
