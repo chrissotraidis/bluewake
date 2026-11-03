@@ -388,3 +388,9 @@ into every cascade and the other lists into the first two: the host marks the ga
 the old rule (`DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all` keeps every caster in every cascade).
 `DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0` keeps the cascades fixed to the sun, to compare;
 `DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=2` shows debug view 12 unblurred, with the pre-pass shadow in red.
+
+Patch 0219 lets alpha-tested draws of more than one texture cast into the sun map with the cut-out of the texture
+their alpha is from (`gxc::cutout_alpha_texmap()`: a Windfall girl's body, colour from texmap 0 and its toon ramp
+from texmap 1, cast no shadow before), and still scenery the game draws blended and alpha-tested while writing
+depth (Outset's grass) casts through the same cut-out, as Wind Waker HD casts it. Additive glows and what the game
+writes each frame stay out.

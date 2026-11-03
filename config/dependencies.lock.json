@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "0fb3c10d6b029cb9b92ec7f0bbea2869b7748d72",
+      "sha": "58a390eb1788ba50f2a7b1780379f95c158394ee",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -853,6 +853,13 @@
             "patches/recompcore/0218-Sun-shadows-cascades-that-follow-the-camera-as-Wind-Waker-HD-s.patch"
           ],
           "evidence": "pdale-boop's: at 21:9 from the boat at Outset the first cascade 3194 x 1038 units (3.1 x 1.0 a texel; HD's own at the bridge 2.4 x 1.3) where the stable square was 4096 (4 x 4), the second 10.7 x 2.7 against 13.5; in play on Windows (Nov 10) the near shadows sharper and nothing popped."
+        },
+        "hd_cutout_casters": {
+          "runtime": "58a390eb1788ba50f2a7b1780379f95c158394ee",
+          "tracked_patches": [
+            "patches/recompcore/0219-Sun-shadows-alpha-tested-casters-cut-out-by-the-texture-their-alpha-is-from-the-game-s-blended-grass-too.patch"
+          ],
+          "evidence": "pdale-boop's: gxcore cutout tests; over ten states the cut-out path takes 0 to 7 more draws a frame, all characters' bodies of that material; Outset's grass tufts cast, as in HD's own sun map."
         }
       }
     },
