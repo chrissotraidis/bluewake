@@ -2050,8 +2050,10 @@ static void sky_actor_palette(CPUState* cpu, bool on) {
     float w[4];
     const bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_weights(cpu, false, pale, w);
     if (!ok) {
-        if (s_sent)
+        if (s_sent) {
             aurora_set_actor_light_hd(0, NULL, NULL, NULL);
+            aurora_set_actor_light_hd_own(0, NULL, NULL);
+        }
         s_sent = false;
         return;
     }
@@ -2067,6 +2069,19 @@ static void sky_actor_palette(CPUState* cpu, bool on) {
     for (u32 c = 0; c < 3u; ++c)
         shadow[c] += g_sky_fade * (c0_bytes[c] - shadow[c]);
     aurora_set_actor_light_hd(1, shade, shadow, lit);
+    // The game's own global actor colours (g_env_light.mActorC0 and mActorK0: Link's, from the floor under him), that
+    // each character's own toon registers are set against: HD lights a character by its own tevstr's colours (the
+    // palettes of the floor under it, as the game's) times the global intensities (setLightTevColorType), so an
+    // islander in the sun keeps the sun's light while Link stands where the floor names a darker palette (Windfall's
+    // stalls and arch, envr 50).
+    float own_c0[3], own_k0[3];
+    for (u32 c = 0; c < 3u; ++c) {
+        const float vc = (float)(s16)mem_read16(cpu, kEnvLight + 0xB18u + 2u * c);
+        const float vk = (float)(s16)mem_read16(cpu, kEnvLight + 0xB20u + 2u * c);
+        own_c0[c] = powf((vc < 0.0f ? 0.0f : vc > 255.0f ? 255.0f : vc) / 255.0f, 2.2f);
+        own_k0[c] = powf((vk < 0.0f ? 0.0f : vk > 255.0f ? 255.0f : vk) / 255.0f, 2.2f);
+    }
+    aurora_set_actor_light_hd_own(setting("BLUEWAKE_HD_ACTOR_OWN") != 0, own_c0, own_k0);
     s_sent = true;
     static unsigned s_traced;
     if (g_trace && (s_traced++ % 60u == 0u || g_sky_fade > 0.0f || g_tint.s > 0.0f || g_tint.all != 1.0f ||

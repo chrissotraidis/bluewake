@@ -414,3 +414,10 @@ host sends on HD's rule (`aurora_set_point_lights`, up to 32) add colour x sat(N
 characters' HD light (x 1.75) and to the lit scenery's stage-0 light (x 1.25) in their own draws, and the sun
 shadows' shade leaves that light as HD's does (1.25 x AO x the lights after its shade). With it on, the torch
 glow and the GameCube's effect-light stage are left out, so the lights aren't counted twice.
+
+Patch 0223 lights each character by its own palettes on Wind Waker HD's character light, as HD's
+setLightTevColorType: a character's colours are its own tevstr's (the floor under it) times the global
+intensities (Link's). The host gives the GameCube's global actor C0 and K0 (`aurora_set_actor_light_hd_own`); a
+character draw whose toon registers (C0, the ramp stage's KONST) differ takes HD's c0 and k times those ratios in
+linear light (clamped 0-4), the shadow colour global. Link's own draws have ratio 1.
+`DOL_AURORA_ACTOR_LIGHT_HD_OWN=0` turns it off.
