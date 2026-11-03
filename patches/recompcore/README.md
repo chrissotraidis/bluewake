@@ -386,3 +386,9 @@ overrides it for tests. In HD's lava and fire rooms (GanonB, Cave01, MiniKaz, Ga
 parts) a lit room draw in the GameCube's two-stage form adds HD's lava glow, albedo x lava K x 4 x the vertex red
 squared, outside the shade, with lava K the material's konst2 animation at the game frame, from a version 2
 stage colour table (`aurora_set_hd_stage_colours`).
+
+Patch 0225 adds `aurora_set_monotone_hd`: while the host's monotone is on (Frozen Hyrule), the game's grey quad is
+left out and at that point Wind Waker HD's pass runs instead: the scene's grey by HD's weights at half size,
+`saturate` of the way, times HD's multiply, over the scene by distance. What the game draws after it (Link and
+his things) stays in colour, and bloom goes over all of it, as in HD. Single-sampled only
+(`aurora_monotone_hd_supported`); `DOL_AURORA_MONOTONE_HD=0` turns it off.

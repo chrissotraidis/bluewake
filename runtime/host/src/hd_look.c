@@ -28,6 +28,7 @@ static bool g_trace;
 // BLUEWAKE_HD_FIXED_SPLITS=1 (testing): the HD shadows keep their fixed cascade splits, not HD's from the camera.
 static bool g_fixed_splits;
 static bool g_sky;  // HD's sky and light palettes (BLUEWAKE_HD_SKY)
+static bool g_monotone;  // HD's monotone in Frozen Hyrule (BLUEWAKE_HD_MONOTONE, on with the look; monotone())
 static bool g_sky_models;  // with them, HD's sky models (BLUEWAKE_HD_SKY_MODELS=1; off by default)
 static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; on with an imported pack)
 static void sky_load(void);
@@ -190,6 +191,7 @@ void bluewake_hd_look_reload(void) {
     g_edge = part("BLUEWAKE_HD_EDGE_LIGHT", all);
     g_torch = part("BLUEWAKE_HD_TORCH_LIGHT", all);
     g_sky = all == 1 && setting("BLUEWAKE_HD_SKY") == 1;
+    g_monotone = part("BLUEWAKE_HD_MONOTONE", all) == 1;
     // Off until turned on, the HD look on or not (they are new).
     g_sky_models = setting("BLUEWAKE_HD_SKY_MODELS") == 1;
     g_sky_linear = setting("BLUEWAKE_HD_SKY_LINEAR") == 1;
@@ -1385,10 +1387,15 @@ static bool sky_pick(CPUState* cpu, u32 table) {
         current[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);
     int found = -1;
     bool found_exact = false;
-    // Frozen Hyrule (Hyroom, Hyrule) is sepia in Wind Waker HD, and that look
-    // isn't in its palettes: with HD's alone, the room stayed grey and Link's
-    // hair turned green-yellow. Kept the GameCube's until the sepia is done.
-    if (strncmp(current, "Hyroom", 8) == 0 || strncmp(current, "Hyrule", 8) == 0)
+    // Frozen Hyrule is sepia in Wind Waker HD, and that look isn't in its
+    // palettes: they are tuned to be seen through HD's monotone (monotone()).
+    // With HD's alone under the GameCube's grey, the room stayed grey and
+    // Link's hair turned green-yellow. Without HD's monotone the GameCube's are
+    // kept in the stages the game freezes (d_s_play.cpp: Hyrule, Hyroom,
+    // kenroom, and the X stages, Ganon's Tower's refights).
+    if (!(g_monotone && aurora_monotone_hd_supported()) &&
+        (strncmp(current, "Hyroom", 8) == 0 || strncmp(current, "Hyrule", 8) == 0 ||
+         strncmp(current, "kenroom", 8) == 0 || current[0] == 'X'))
         return false;
     for (u32 i = 0; i < g_sky_count; ++i) {
         const SkyStage* stage = &g_skies[i];
@@ -2439,6 +2446,68 @@ static void far_blur_level(CPUState* cpu) {
     }
 }
 
+// Wind Waker HD's monotone (Frozen Hyrule), from the game's own state: while
+// mDoGph_gInf_c::mMonotone is set (d_s_play.cpp: Hyrule, Hyroom and kenroom
+// until the colours come back, the X stages, the warp out of Hyrule), HD draws
+// its DOF pass with its monotone presets (d_kankyo_4.cpp), which RecompCore
+// draws at the game's grey composite (aurora_set_monotone_hd()). In Hyroom HD
+// blends from Monotone (sepia beyond 0 to 100) to MonotoneOff (34,500 to
+// 34,800) as the game's rate goes from 400 to -600, so the colours come back
+// as a sweep out from the camera: the blend chases 1 - (rate + 600) / 1000 by
+// 0.0015 a game frame (HD's frameMonotoneRange 1000 and its step, read from its
+// rpx; the extra step it adds is taken as 0), back to 0 at once when the rate
+// turns back past -250, and 1 from Demo49's frame 610. Elsewhere HD draws
+// MonotoneOut whole while the flag is set and ignores the rate.
+enum {
+    kFrameBufferTex = 0x803F68A0u,   // mDoGph_gInf_c::mFrameBufferTex (the grey composite's copy)
+    kMonotone = 0x803F68B5u,         // mDoGph_gInf_c::mMonotone (u8)
+    kMonotoneRate = 0x803F68B6u,     // mMonotoneRate (s16, 400 to -600)
+    kMonotoneRateSpeed = 0x803F68B8u, // mMonotoneRateSpeed (s16)
+    kDemoArcName = 0x803F6A7Cu,      // dStage_roomControl_c::mDemoArcName (char[8])
+    kPlayDemo = 0x803C9430u,         // g_dComIfG_gameInfo.play.mDemo (dDemo_manager_c*), its mFrame at +0xD4
+};
+
+static void monotone(CPUState* cpu, unsigned long long retrace) {
+    static bool s_sent;
+    static float s_blend;
+    static const float kMul[3] = {1.4f, 1.5f, 0.6f};
+    if (!g_monotone || mem_read8(cpu, kMonotone) == 0u) {
+        if (s_sent)
+            aurora_set_monotone_hd(0, 0.8f, 0.0f, 0.0f, kMul, 1.0f, 0u);
+        s_sent = false;
+        s_blend = 0.0f;
+        return;
+    }
+    char stage[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+    float start = 0.0f, end = 0.0f;
+    if (strncmp(stage, "Hyroom", 8) == 0) {
+        const int rate = (s16)mem_read16(cpu, kMonotoneRate);
+        const int speed = (s16)mem_read16(cpu, kMonotoneRateSpeed);
+        float target = 1.0f - (float)(rate + 600) / 1000.0f;
+        target = target < 0.0f ? 0.0f : target > 1.0f ? 1.0f : target;
+        if (speed < 0 && rate > -250)
+            s_blend = 0.0f;
+        else if (retrace % 2u == 0u)  // once a game frame (two retraces)
+            s_blend = s_blend < target ? fminf(s_blend + 0.0015f, target) : fmaxf(s_blend - 0.0015f, target);
+        char demo[9] = {0};
+        for (u32 i = 0; i < 8u; ++i)
+            demo[i] = (char)mem_read8(cpu, kDemoArcName + i);
+        const u32 manager = mem_read32(cpu, kPlayDemo);
+        if (strncmp(demo, "Demo49", 8) == 0 && manager >= 0x80000000u && manager < 0x81800000u &&
+            (s32)mem_read32(cpu, manager + 0xD4u) >= 0x262)
+            s_blend = 1.0f;
+        start = 34500.0f * s_blend;
+        end = 100.0f + 34700.0f * s_blend;
+    }
+    aurora_set_monotone_hd(1, 0.8f, start, end, kMul, 1.0f, mem_read32(cpu, kFrameBufferTex));
+    s_sent = true;
+    if (g_trace && retrace % 300u == 0u)
+        fprintf(stderr, "[hd-look] monotone on in %s: rate %d speed %d blend %.4f, sepia from %.0f to %.0f\n", stage,
+                (s16)mem_read16(cpu, kMonotoneRate), (s16)mem_read16(cpu, kMonotoneRateSpeed), s_blend, start, end);
+}
+
 void bluewake_hd_look_retrace(CPUState* cpu) {
     const unsigned long long retrace = ++g_retrace;
     if (cpu == NULL || cpu->ram == NULL)
@@ -2451,6 +2520,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
     g_palms_were_on = g_palms;
     clouds(cpu, retrace);
     sky(cpu);
+    monotone(cpu, retrace);
     far_blur_level(cpu);
     if (g_trace && retrace % 300u == 0u)
         trace_islands(cpu, retrace);

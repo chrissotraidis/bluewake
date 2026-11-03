@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "5c0eb76bb3481f0989ad8659bf3c29f3cf5c7539",
+      "sha": "b4462d4391fbc0387303aef51ba89f0390e3e75f",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -838,6 +838,13 @@
             "patches/recompcore/0224-Sun-shadows-Wind-Waker-HD-s-caster-culling-and-lava-glow-in-its-lit-rooms-aurora_set_sun_caster_cull.patch"
           ],
           "evidence": "pdale-boop's: in Dragon Roost Cavern's room 0, 225 of HD's 240 map draws cull back faces, the rest none; with them culled the floor is lit and shows Link's shadow, as in HD. Lava glow: Cave01 from 0.47 to 0.97 of HD's brightness and to its hue (red share 0.50, HD 0.49); GanonB from 0.60 to 0.86."
+        },
+        "hd_monotone": {
+          "runtime": "b4462d4391fbc0387303aef51ba89f0390e3e75f",
+          "tracked_patches": [
+            "patches/recompcore/0225-Aurora-Wind-Waker-HD-s-monotone-at-the-game-s-grey-composite-aurora_set_monotone_hd.patch"
+          ],
+          "evidence": "pdale-boop's: in Frozen Hyrule the castle is sepia, Link in colour with his sun shadow, the game's grey quad left out; the hue as HD's."
         }
       }
     },
