@@ -130,6 +130,11 @@ void bluewake_hd_look_defaults(void) {
             {"DOL_AURORA_RIM_HD", "1"},
             // HD's light on characters (its toon shader; needs HD's sky and light for the palette).
             {"DOL_AURORA_ACTOR_LIGHT_HD", "1"},
+            // HD's far blur (its DOF presets wwHD_basic and wwHD_night): sharp to 25,000, then HD's linear ramp to
+            // 50,000 times its level for the hour (far_blur_level()), under the look's amount.
+            {"DOL_AURORA_FAR_BLUR_HD", "1"},
+            {"DOL_AURORA_FAR_BLUR_START", "25000"},
+            {"DOL_AURORA_FAR_BLUR_END", "50000"},
             // HD's palettes blended in linear light, as HD blends them (its dawn and dusk: the cirrus at 07:30,
             // the lavender at 17:30), with HD's sky and light on (it acts only under them).
             {"BLUEWAKE_HD_SKY_LINEAR", "1"},
@@ -2273,6 +2278,26 @@ void bluewake_hd_look_state_loaded(bool reapply) {
         floor_colours_restore(NULL, slot, false);
 }
 
+// Wind Waker HD's far blur level for the hour (d_kankyo_4.cpp's preset blend): wwHD_basic's 1.2 from 08:00 to 18:00,
+// wwHD_night's 0.65 from 20:00 to 06:00, blended linearly over 06:00-08:00 and 18:00-20:00 (the clock in degrees,
+// 15 an hour). Used by Aurora's far blur on HD's ramp (DOL_AURORA_FAR_BLUR_HD=1, with an imported pack).
+static void far_blur_level(CPUState* cpu) {
+    static float s_level = -1.0f;
+    const float day = 1.2f, night = 0.65f;
+    const float t = read_float(cpu, kEnvTime);
+    float level = night;
+    if (t >= 90.0f && t < 120.0f)
+        level = night + (day - night) * (t - 90.0f) / 30.0f;
+    else if (t >= 120.0f && t < 270.0f)
+        level = day;
+    else if (t >= 270.0f && t < 300.0f)
+        level = day + (night - day) * (t - 270.0f) / 30.0f;
+    if (!(fabsf(level - s_level) <= 0.001f)) {
+        aurora_set_far_blur_level(level);
+        s_level = level;
+    }
+}
+
 void bluewake_hd_look_retrace(CPUState* cpu) {
     const unsigned long long retrace = ++g_retrace;
     if (cpu == NULL || cpu->ram == NULL)
@@ -2287,6 +2312,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
     clouds(cpu, retrace);
     sky(cpu);
     floor_colours(cpu, sky_palettes_shown());
+    far_blur_level(cpu);
     if (g_trace && retrace % 300u == 0u)
         trace_islands(cpu, retrace);
 }
