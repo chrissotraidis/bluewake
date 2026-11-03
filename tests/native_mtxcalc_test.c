@@ -190,15 +190,23 @@ static void reset_host(void) {
     bw_host_pi_mask = &s_pi_mask;
 }
 
-/* The module's can-skip observation, as the host's is: allow a direct-call
- * skip wherever the host's interrupt sources are clean and no interrupt the
- * guest would take is pending. The test has no feature dispatch. */
+/* The module's can-skip observation, as the host's is: allow a direct-call skip
+ * where the host's interrupt sources are clean and no interrupt the guest would
+ * take is pending, so the translation runs the whole function instead of
+ * stopping at its first call. The test has no feature dispatch.
+ *
+ * This used to refuse every skip, because the v1 handshake returned 0 (direct
+ * calls off) and a skip changes cycle accounting. Measured against a module that
+ * allows it (#179): J3DMtxCalcBasic and J3DMtxCalcSoftimage 40 cases each, 0
+ * mismatches each. J3DMtxCalcMaya still stops, at _restgpr_27, which the host
+ * really does name and which is not this test's question (issue #498). */
 static bool test_can_skip(void* user, const CPUState* cpu, u32 address) {
-    /* Refuse every direct-call skip: the test compares a native run against the
-     * full-loop translation, and skips would change cycle accounting (the old v1
-     * handshake returned 0, keeping direct calls off). */
-    (void)user; (void)cpu; (void)address;
-    return false;
+    (void)user; (void)address;
+    if (s_sources_dirty)
+        return false;
+    if ((cpu->msr & PPC_MSR_EE) == 0u)
+        return true;
+    return !s_decrementer_pending && (s_pi_cause & s_pi_mask) == 0u;
 }
 
 static const u32 FUNCTIONS[] = {BLUEWAKE_MTXCALC_BASIC, BLUEWAKE_MTXCALC_SOFTIMAGE, BLUEWAKE_MTXCALC_MAYA};
@@ -425,9 +433,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "CPU state size %u, expected %u\n", mod->cpu_state_size, (unsigned)sizeof(CPUState));
         return 1;
     }
-    static const bool clear = false;
-    static const u32 zero = 0u;
-    if (!direct(true, &clear, &clear, &zero, &zero, test_can_skip, NULL) || !filter(true)) {
+    if (!direct(true, &s_sources_dirty, &s_decrementer_pending, &s_pi_cause, &s_pi_mask,
+                test_can_skip, NULL) || !filter(true)) {
         fprintf(stderr, "the module's direct calls or edge filter are unavailable\n");
         return 1;
     }
