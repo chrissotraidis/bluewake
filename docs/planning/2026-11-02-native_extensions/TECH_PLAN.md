@@ -1,6 +1,6 @@
 # TECH_PLAN — Native extensions for Outset's character work
 
-Status: M2 exact; with the wrapper fix, partial runs show no measurable gain on the Deck (+0.05%); decision after render_bench; M1 blocked on porting  
+Status: M2 exact in play but no measurable gain (Game Mode +0.05%, render_bench +0.55%); decision pending; M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 

@@ -1,6 +1,6 @@
 # PRD — Native extensions for Outset's character work
 
-Status: M2 exact; with the wrapper fix, partial runs show no measurable gain on the Deck (+0.05%); decision after render_bench; M1 blocked on porting  
+Status: M2 exact in play but no measurable gain (Game Mode +0.05%, render_bench +0.55%); decision pending; M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`; follows [#503](https://github.com/chrissotraidis/bluewake/pull/503) and [#530](https://github.com/chrissotraidis/bluewake/pull/530)  
 Scope: the game-thread cost of skinning and animating Outset's characters, through natives that already exist in the tree. Excluded: collision (a no-go of this shape in [#436](https://github.com/chrissotraidis/bluewake/pull/436)), the dispatch loop (#530), GX ([#531](https://github.com/chrissotraidis/bluewake/pull/531)).
 
