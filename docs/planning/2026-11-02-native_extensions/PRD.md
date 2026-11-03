@@ -1,6 +1,6 @@
 # PRD — Native extensions for Outset's character work
 
-Status: M2 exact in play but no measurable gain (Game Mode +0.05%, render_bench +0.55%); decision pending; M1 blocked on porting  
+Status: Done. Partial runs measured and dropped (exact, no gain); the epilogue hand-over kept for exactness; M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`; follows [#503](https://github.com/chrissotraidis/bluewake/pull/503) and [#530](https://github.com/chrissotraidis/bluewake/pull/530)  
 Scope: the game-thread cost of skinning and animating Outset's characters, through natives that already exist in the tree. Excluded: collision (a no-go of this shape in [#436](https://github.com/chrissotraidis/bluewake/pull/436)), the dispatch loop (#530), GX ([#531](https://github.com/chrissotraidis/bluewake/pull/531)).
 
@@ -49,3 +49,4 @@ The natives cover the many cheap calls; the expensive ones stay translated.
 - **Exact or nothing:** a native stops, declines or resumes exactly where the translation would; anything else is out.
 - **Acceptance** follows #503's rule: consistent across interleaved launches, exact, tested; size is not a bar.
 - **Other hardware (2026-11-02):** exact everywhere; fast where `fma` is one instruction (`x86-64-v3`, ARM64). Builds without hardware FMA keep the skinning native off by default, because there it measured no faster than the translation.
+- **M2 outcome (2026-11-03):** partial runs dropped: exact after the wrapper fix, but +0.05% in Game Mode and +0.55% in render_bench, inside noise. The epilogue hand-over is kept, because it keeps the native exact whatever the build does to the function's ending. Threaded skinning was considered: ceiling about +0.5–1%, not pursued.

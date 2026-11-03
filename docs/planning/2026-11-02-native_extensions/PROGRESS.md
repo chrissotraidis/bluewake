@@ -1,6 +1,6 @@
 # PROGRESS — Native extensions for Outset's character work
 
-Status: M2 exact in play (checkpoints identical) but no measurable gain (Game Mode +0.05%, render_bench +0.55%); decision pending; M1 blocked on porting  
+Status: Done. M2 partial runs measured and dropped (no gain); epilogue hand-over kept for exactness; M1 blocked on porting  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -31,7 +31,7 @@ Status: M2 exact in play (checkpoints identical) but no measurable gain (Game Mo
 - [x] M3-T04: **Found:** the hook's wrapper turned the partial result 2 into 1, so partial runs skipped the rest of the loop in play. Fixed (`028f1f0`); tests now go through the wrapper. The earlier partial-run gains were skipped work.
 - [x] M3-T05: Rebuild with the fix; Game Mode A/B: partial runs **+0.05% (3 of 6 rounds)**, the hand-over alone −0.2%: no measurable gain either way.
 - [x] M3-T06: render_bench with the fix: checkpoints identical with partial runs on; FPS +0.55%, inside noise.
-- [ ] M3-T07: Decision. Partial runs and the hand-over are exact but gain nothing measurable (Game Mode +0.05%, render_bench +0.55%).
+- [x] M3-T07: **Decision (2026-11-03): partial runs dropped, the epilogue hand-over kept** (`b9549c9`). The hand-over keeps the native exact for every build's epilogue; partial runs were exact but measured no gain. Kept tooling: census, `--bench`, `--replay`/`--replay-module`, the capture define, tests through the wrapper.
 - [ ] M3-T01 (fixed build): Game Mode A/B (≥ 6 interleaved launches) against the control `a64af0e`, with `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`; the same build with it off shows the hand-over alone.
 - [x] M3-T02: Checkpoints: the hand-over (partial runs off) is identical to the control; partial runs differ in Outset. See M3-T04.
 

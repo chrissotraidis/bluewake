@@ -1,6 +1,6 @@
 # TECH_PLAN — Native extensions for Outset's character work
 
-Status: M2 exact in play but no measurable gain (Game Mode +0.05%, render_bench +0.55%); decision pending; M1 blocked on porting  
+Status: Done. M0: the turn budget refuses big models. M2: partial runs built, exact, no measurable gain, dropped; the epilogue hand-over kept for exactness. M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -34,53 +34,42 @@ if (cpu->cycle_deadline_budget > 0 &&
 |---|---|---|---|
 | M0 | Why does skinning decline? | Count declines by reason and model size; one Outset minute in Game Mode | **Done.** All timing declines are the turn budget; calls of 8k+ cycles refused 91–100% |
 | M1 | Do the two native sets help? | Full builds with `--native-entries` / `--native-set4`, own training, A/B | **Blocked.** Both need porting first (generator write forms; entry hashes for this tree) |
-| M2 | Can big models run natively? | Native runs the envelopes that fit the turn, then hands over to the translation | **Done.** Exact in the differential test ([how it works](#how-the-resumable-native-works-m2)) |
-| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | **No measurable gain:** partial runs +0.05% (3 of 6 rounds), the hand-over alone level. Earlier gains came from a wrapper bug that skipped work (fixed) |
+| M2 | Can big models run natively? | Native runs the envelopes that fit the turn, then hands over to the translation | **Built, exact, dropped:** no measurable gain. The epilogue hand-over is kept for exactness ([what was kept](#what-m2-kept-and-what-it-dropped)) |
+| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | **No.** Partial runs +0.05% (3 of 6 rounds), render_bench +0.55%; the hand-over alone level. Checkpoints identical. Earlier gains came from a wrapper bug that skipped work |
 
-## How the resumable native works (M2)
+## What M2 kept and what it dropped
 
-`calcWeightEnvelopeMtx` has a prologue, a loop over the model's envelopes (each with an inner loop over its joints) and an epilogue. The translation checks the turn's cycle budget at block entries: the loop head (0x802EE6F0), each joint (0x802EE724) and the loop test (0x802EE824–830). When the budget runs out it saves `pc` and returns, and the next turn resumes there.
+`calcWeightEnvelopeMtx` has a prologue, a loop over the model's envelopes (each with an inner loop over its joints) and an epilogue.
 
-Before M2 the native was all-or-nothing: it ran the whole function or declined. Big models never fit a turn, so they always ran translated:
-
-```mermaid
-flowchart LR
-    E[Entry 0x802EE67C] --> H{Native: whole call<br/>fits the turn?}
-    H -- yes --> N[Native: prologue,<br/>all envelopes, epilogue] --> R[Return]
-    H -- no --> T[Translation: whole call,<br/>stops and resumes at block boundaries] --> R
-```
-
-With M2 the native runs only the loop's work and hands the translation the exact state it would have at the loop test. The translation then goes on from there: the epilogue when every envelope is done, or the loop head when only the first *k* fit:
+| | M0 (before) | M2 as built | **Kept (`b9549c9`)** |
+|---|---|---|---|
+| Prologue | native | native | native |
+| Loop | all of it, or decline | all of it, **or the first envelopes that fit the turn (partial runs)** | all of it, or decline |
+| Epilogue | native (its own copy) | translation | **translation** |
 
 ```mermaid
 flowchart TD
-    E[Entry 0x802EE67C:<br/>chunk hook calls the native] --> C{Checks: data, CPU state,<br/>how many envelopes fit the turn?}
-    C -- "no envelope fits (or data unsafe)" --> D[Return 0: translation runs<br/>the whole call, nothing changed]
-    C -- all --> A[Native: prologue + every envelope] --> X1[Return 1:<br/>goto 0x802EE834 epilogue]
-    C -- "first k (opt-in)" --> P[Native: prologue + k envelopes] --> X2[Return 2:<br/>goto 0x802EE6F0 loop head]
-    X2 --> B{Translation's own budget check}
-    B -- turn over --> S[Save pc 0x802EE6F0, return;<br/>next turn resumes the loop]
-    B -- cycles left --> L[Translation: remaining envelopes] --> X1
-    X1 --> Q[Translation: restore registers, return]
+    E[Entry 0x802EE67C:<br/>chunk hook calls the native] --> C{Data safe, and prologue<br/>+ loop fit the turn?}
+    C -- no --> D[Return 0: the translation<br/>runs the whole call]
+    C -- yes --> A[Native: prologue and every envelope]
+    A --> X[Return 1: goto 0x802EE834]
+    X --> Q[Translation: its own epilogue,<br/>restore registers, return]
 ```
 
-The hand-over is the state after the loop test with r31 = *k*:
+**Why the epilogue hand-over is kept.** M0 replayed the epilogue and left the cycle suffix at 2, the plain translation's value. On the #503 stack the inline `_restgpr` leaves 0, and when the inline path cannot be taken it falls back to the real routine, which leaves something else again. So no fixed value in the native is right for every build and path, and the M0 native fails the differential test against the #503 module on its first case. Letting the translation run its own epilogue is exact for all of them. No effect of the old mismatch was seen in play: the control's checkpoints matched the hand-over's.
 
-| State | Value at the hand-over |
-|---|---|
-| Loop registers | r31 = *k*, r4 = 48*k*, r8 = envelopes; r29/r30 the weight and index pointers after the joints consumed; r9–r12, r0, r5–r7 as the last joint left them |
-| Frame | Stack moved by 112, return address, f27–f31 and r29–r31 saved; r1 = frame; LR = 0x802EE6B8 (the register-save helper's return) |
-| FP | f0–f13 and f28–f30 as last computed; f10, f12, f31 the zero pair; f27 the unit pair; FPRF if any FP ran |
-| Flags | CR0 = LT (envelopes remain) or EQ, with SO from XER |
-| Cycles | downcount less 37 + Σ(23 + 60·joints) for the envelopes run; suffix 1 (the last store block's) |
+**Why partial runs were dropped.** They let big models, which never fit a turn, run their first envelopes natively, and hand over at the loop head (0x802EE6F0). After a wrapper bug was fixed (below) they were exact in every test, in 220 cases captured on the Deck and in render_bench's checkpoints, but measured **+0.05%** in Game Mode and **+0.55%** in render_bench: noise. The extra joints save only the native-vs-translation difference, about 0.1–0.3% of an Outset frame by the local bench. They were the riskiest code for no measurable return.
 
-Details of the hand-over:
-- **How many envelopes (*k*):** the longest run whose cycles keep the downcount above the turn's limit and inside the device deadline; with *k* = 0 it declines.
-- **Why stopping early is still exact:** the translation does the remaining envelopes itself, with its own budget checks.
-- **Why the epilogue stays translated:** builds reshape it (the #503 stack inlines `_restgpr`, which leaves a different cycle suffix), and the translation's own epilogue is right for each.
-- **Empty models:** the prologue and set-up run natively, then the hand-over at the epilogue with the set-up's registers (r0 the return address, r11 frame + 32, f28–f30 the caller's). The first M2 build declined them, which cost about 0.5% on the Deck.
-- **The wrapper passes the code through:** `bluewake_native_skin_try` returns the native's 0, 1 or 2. A first version returned `ready && native`, which turned 2 into 1 and skipped the rest of the loop in play; the tests now call the native through the wrapper.
-- **Opt-in:** partial runs need `BLUEWAKE_NATIVE_SKIN_PARTIAL=1` until M3 qualifies them.
+**The wrapper bug, and the test lesson.** The hook calls `bluewake_native_skin_try`, which returned `ready && native(cpu)`. That turned the partial code 2 into 1, so the hook jumped to the epilogue with envelopes left. In play, every partial run skipped the rest of the model's matrices. Checkpoints diverged in the first frame after load, and the skipped work showed up as a false +0.8–1.2%. The tests called the native directly and never saw it. The wrapper now passes the native's result through, and the differential test and replay call the native through it, as the hook does.
+
+**Threading, considered and not pursued.** The native's checks (no store overlaps a load, plain RAM, safe floats) would allow envelopes to be split across host threads exactly. With skinning now about 1.5% of the game thread, the ceiling is about +0.5–1% on Outset, against a 13% gap to 30 FPS, and the shared CPU/GPU power budget may take part of it back.
+
+### Tools kept
+
+- `native_skin_test MODULE [CASES]`: the differential test, through the hook's wrapper; short turns, deadlines inside the call.
+- `native_skin_test MODULE --bench`: host time, translated against native, at the module's `-march`.
+- `native_skin_test MODULE --replay DIR` / `--replay-module DIR`: cases captured in play (`BLUEWAKE_SKIN_DUMP` diagnostic define), through the test's copy of the native or the module's own hook.
+- `BLUEWAKE_SKIN_CENSUS`: declines by reason and model size.
 
 ### Is the native faster than the translation?
 
@@ -109,17 +98,16 @@ The native is portable C and exact on every platform. Its speed depends on one o
 
 The native's checks decline for exactness and for the turn's budget, never for speed, so the build decides instead. `native_skin.h` sets `BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA` from `__FMA__`, `__aarch64__` or `__ARM_FEATURE_FMA`. Without hardware FMA, the module keeps the native off and prints why, and the translated path runs, unless `BLUEWAKE_NATIVE_SKIN=1` is set explicitly. On every build, `BLUEWAKE_NATIVE_SKIN=0` turns it off.
 
-## Changes (planned)
+## Changes (as landed)
 
 | File | Change | Why |
 |---|---|---|
-| [`cmake/composite/native_skin.c`](../../../cmake/composite/native_skin.c) | `BLUEWAKE_SKIN_CENSUS`: decline counts by reason (the ten decline sites) and cycle bins for accepted, budget-declined and deadline-declined calls, in the exit report | M0: which model sizes the timing checks refuse |
-| `scripts/linux/build.py` (or the local build helper) | Builds with `--native-entries` / `--native-set4` for the A/B | M1; default unchanged unless retained |
-| `cmake/composite/native_skin.c` | Hand-over at the loop's test; the first envelopes that fit the turn (opt-in `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`) | M2: big models mostly native |
-| `cmake/composite/native_skin.h` | Return codes 1 (epilogue) and 2 (loop head) documented; `BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA` | M2; off where `fma` is a library call |
-| `scripts/windows/native_skin.py` | Hook: `switch` on the result, `goto label_802EE834` / `label_802EE6F0`; both labels required in the certified body | M2 |
-| `tests/native_skin_test.c` | Short turn budgets; a native run is finished by the translation from the hand-over and compared with the translation alone. `--bench`: host time, translated vs native | M2 exactness and speed |
-| `tests/native_skin_source_test.py`, `tests/test_windows_prepared_cache.py` | Fixtures carry the hand-over labels; a missing label is rejected | M2 |
+| [`cmake/composite/native_skin.c`](../../../cmake/composite/native_skin.c) | `BLUEWAKE_SKIN_CENSUS`: declines by reason and cycle bins, in the exit report | M0: which model sizes the timing checks refuse |
+| `cmake/composite/native_skin.c` | The native runs the prologue and the loop, then hands over at the epilogue; empty models too; the wrapper passes the result through; off without hardware FMA unless `BLUEWAKE_NATIVE_SKIN=1`; `BLUEWAKE_SKIN_DUMP` capture (diagnostic) | M2: exact for every build's epilogue |
+| `cmake/composite/native_skin.h` | Result codes documented; `BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA` | M2 |
+| `scripts/windows/native_skin.py` | Hook: `switch` on the result, `case 1: goto label_802EE834`; the label required in the certified body | M2 |
+| `tests/native_skin_test.c` | Through the wrapper; short turns and deadlines; `--bench`; `--replay` / `--replay-module` | M2 exactness, speed, cases from play |
+| `tests/native_skin_source_test.py`, `tests/test_windows_prepared_cache.py` | Fixtures carry the epilogue label; a missing label is rejected | M2 |
 
 ## Verification
 
