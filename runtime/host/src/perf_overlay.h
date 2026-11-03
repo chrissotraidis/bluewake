@@ -122,7 +122,7 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
         static const char* const kFirst[] = {"GPU", "VRAM", "CPU", "RAM", "60 FPS"};
         static const char* const kValue[] = {"100%", "888.8 GB", "888.8 ms"};
         static const char* const kOf[] = {"188 C", "888.8 GB", "8888.8 ms"};
-        static const char* const kShare[] = {"888 W", "8888 MHz", "100%", "888.8 GB"};
+        static const char* const kShare[] = {"888 W", "8888 MHz", "game 100%", "game 888.8 GB"};
         ImGui::TableSetupColumn("##labels", ImGuiTableColumnFlags_WidthFixed, column_width(kFirst, 5));
         ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthFixed, column_width(kValue, 3));
         ImGui::TableSetupColumn("##of", ImGuiTableColumnFlags_WidthFixed, column_width(kOf, 3));
@@ -150,7 +150,7 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
         label("CPU", cpu_color);
         number("%.0f%%", stats.cpu_total_pct, stats.cpu_total_pct / 100.f, cpu_color);
         number("%.0f C", stats.cpu_temp_c, stats.cpu_temp_c / 100.f, cpu_color);
-        number("%.0f%%", stats.cpu_game_pct, stats.cpu_game_pct / 100.f, cpu_color);
+        number("game %.0f%%", stats.cpu_game_pct, stats.cpu_game_pct / 100.f, cpu_color);
         label("RAM", ram_color);
         number("%.1f GB", stats.ram_used_mb / 1024.f,
                stats.ram_total_mb > 0.f ? stats.ram_used_mb / stats.ram_total_mb : -1.f, ram_color);
@@ -162,7 +162,7 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
             std::snprintf(text, sizeof text, "of %.1f GB", stats.ram_total_mb / 1024.f);
             ImGui::TextUnformatted(text);
         }
-        number("%.1f GB", stats.ram_game_mb / 1024.f,
+        number("game %.1f GB", stats.ram_game_mb / 1024.f,
                stats.ram_total_mb > 0.f ? stats.ram_game_mb / stats.ram_total_mb : -1.f, ram_color);
         ImGui::TableNextColumn();   // the frame row: the rate where the labels are
         if (stats.fps <= 0.f)
