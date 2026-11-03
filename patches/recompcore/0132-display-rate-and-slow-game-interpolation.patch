@@ -1,0 +1,358 @@
+From 9fe605d0ac57f84452a9f9151f30ce7b8c2cfef8 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Thu, 1 Oct 2026 13:05:18 -0400
+Subject: [PATCH] Aurora: up to 7 in-between frames, and none while the game
+ runs slow
+
+Frame interpolation could show 60 or 120 frames a second (1 or 3 in-between
+frames per game frame). frame_interp::kMaxSteps is now 7, for a display's own
+rate up to 240 Hz: the held frames, the per-job ranges (InterpRanges, which
+held three and overran the helper's stack past that), the dump names and the
+buffers' limits follow it. Each buffer still starts at what 60 and 120 used
+and grows only to what a frame needs. The vertex limit is a 256-byte multiple
+per step: 8 MB / 3 * 7 was not a multiple of 4, no mapped staging buffer
+could be made, and every frame went out without in-between frames.
+
+The pacing dropped in-between frames when the GPU or the render worker fell
+behind, but not when the game itself did. On a CPU with few cores their work
+(each draw captured on the GX worker and matched on the helper, the render
+worker drawing them again) takes cores the game's thread needs. On 4 of an
+i9-13900KF's E-cores at 60 FPS the game ran in slow motion, 24-28 game frames
+a second, against 30 with interpolation off. Game frames ending more than
+35.5 ms apart on average (8 frames; gaps of a quarter second or more, a load
+or a pause, start it again) now count as an overload at any step count,
+unless pacing is off (DOL_AURORA_FRAME_INTERP_PACING=0). After such a drop the
+calm needed before trying again doubles up to 2 minutes, not 30 s. A frame
+with none queues no matching work, so a drop gives that CPU back. Same setup:
+29.6-30.0 game frames a second, with interpolation off for the heavy views.
+
+Unchanged where it already ran well: the in-between frame dumps at 60 FPS
+(game frames 880-910) are byte for byte the release's, 62 of 62. With 7 steps
+(a 240 Hz display simulated) every frame has its 7, each nearer the next real
+frame by an even step.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 49 ++++++++++-----
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  7 ++-
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 59 ++++++++++++++++---
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  4 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  7 ++-
+ 5 files changed, 99 insertions(+), 27 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index f203f1af..b23074a5 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -256,9 +256,11 @@ static std::array<FramePacket, FrameSlotCount> g_framePackets;
+ // blocks of a busy scene came to about 55 MB, and past 32 the rest did not
+ // fit, so those draws kept the next frame's transforms in two of the three in-
+ // between frames (the sea on a beach blinked out and back). The GPU buffer
+-// grows to what a frame uses (upload_interp_data).
++// grows to what a frame uses (upload_interp_data), so the limit for the
++// most in-between frames (frame_interp::kMaxSteps, at a 240 Hz display)
++// costs nothing at 60 or 120.
+ constexpr uint64_t InterpUniformStepSize = 33554432; // 32mb
+-constexpr uint64_t InterpUniformBufferSize = InterpUniformStepSize * 3;
++constexpr uint64_t InterpUniformBufferSize = InterpUniformStepSize * frame_interp::kMaxSteps;
+ static uint64_t g_interpUniformBufferSize = 0; // the GPU buffer's size (render worker)
+ // Per frame slot, the range each in-between job resolved to, in job order
+ // (gxcore_draw.cpp's helper writes them; end_frame waits for it).
+@@ -266,8 +268,17 @@ static std::array<std::vector<InterpRanges>, FrameSlotCount> g_interpJobRanges;
+ // Per frame slot, the parts of its batched GXCore draws (push_batch_draw).
+ static std::array<std::vector<BatchDraw>, FrameSlotCount> g_batchDraws;
+ // A particle's blended vertices, per frame slot (see push_interp_vertices).
+-constexpr uint64_t InterpVertexBufferSize = 8388608; // 8mb
++// 8 MB was the limit for three in-between frames, so the limit is that
++// third (rounded to 256 bytes: a mapped buffer's size and a copy's must be
++// multiples of 4, and 8 MB / 3 * 7 was not, so no staging buffer could be
++// made and no frame had in-between frames) for each of kMaxSteps. The GPU
++// buffer starts at 8 MB and grows to what a frame uses (upload_interp_data).
++constexpr uint64_t InterpVertexStepSize = 2796288;
++constexpr uint64_t InterpVertexBufferSize = InterpVertexStepSize * frame_interp::kMaxSteps;
++constexpr uint64_t InterpVertexStartSize = 8388608;
++static_assert(InterpVertexStepSize * 3 >= 8388608 && InterpVertexStepSize % 256 == 0);
+ wgpu::Buffer g_interpVertexBuffer;
++static uint64_t g_interpVertexBufferSize = 0; // the GPU buffer's size (render worker)
+ // Both are written, while a frame records, straight into a staging buffer
+ // mapped for it, and copied to their GPU buffers on the GPU when the frame is
+ // rendered (upload_interp_data). Staged in memory and sent with
+@@ -306,7 +317,7 @@ static std::array<InterpSlot, FrameSlotCount> g_interpSlots;
+ // did not fit (recording thread). That frame shows no in-between frames:
+ // with some of its draws left out of them, those would blink.
+ static uint64_t g_interpUniformWant = 0;
+-static uint64_t g_interpVertexWant = InterpVertexBufferSize / 2;
++static uint64_t g_interpVertexWant = InterpVertexStartSize / 2;
+ static bool g_interpOverflowed = false; // helper thread, read after wait_interp_jobs
+ static size_t g_replayFrameSlot = 0; // render worker: the frame whose in-between frame is encoded
+ static int g_replayStep = 0;          // render worker: which of its in-between frames
+@@ -350,7 +361,10 @@ static webgpu::TextureWithSampler g_heldFrame; // the real frame, kept for its l
+ // presents, in two sets that alternate between game frames so a new frame
+ // never has to show the one before's early; and the time the last present
+ // was scheduled for, the clock the next frame's continue.
+-static webgpu::TextureWithSampler g_heldSteps[2][4];
++// Each set: the in-between frames (0..kMaxSteps-1), then the real frame.
++static webgpu::TextureWithSampler g_heldSteps[2][frame_interp::kMaxSteps + 1];
++static constexpr int kHeldReal = frame_interp::kMaxSteps;
++static_assert(kInterpMaxSteps == frame_interp::kMaxSteps);
+ static int g_heldSet = 0;
+ static PresentClock::time_point g_lastDue{};
+ static bool g_heldShown = false;                 // the screen shows g_heldFrame (render worker)
+@@ -1281,7 +1295,7 @@ void shutdown() {
+   }
+   g_interpSlots = {};
+   g_interpUniformWant = 0;
+-  g_interpVertexWant = InterpVertexBufferSize / 2;
++  g_interpVertexWant = InterpVertexStartSize / 2;
+   g_interpOverflowed = false;
+   g_lastGameFrameEnd = {};
+   g_gameFramePeriodNs = 0;
+@@ -2149,11 +2163,14 @@ static void upload_interp_data(size_t frameSlot) {
+     };
+     g_interpUniformBindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
+   }
+-  if (vertexBytes != 0 && !g_interpVertexBuffer) {
++  if (vertexBytes != 0 && (!g_interpVertexBuffer || g_interpVertexBufferSize < vertexBytes)) {
++    const uint64_t wanted = std::max(vertexBytes, InterpVertexStartSize);
++    g_interpVertexBufferSize = std::min(
++        InterpVertexBufferSize, (wanted + InterpVertexStepSize - 1) / InterpVertexStepSize * InterpVertexStepSize);
+     const wgpu::BufferDescriptor descriptor{
+         .label = "In-between frame vertex buffer",
+         .usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
+-        .size = InterpVertexBufferSize,
++        .size = g_interpVertexBufferSize,
+     };
+     g_interpVertexBuffer = g_device.CreateBuffer(&descriptor);
+   }
+@@ -2243,12 +2260,12 @@ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::
+ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEncoder& encoder,
+                           const EndFrameCallback& callback, int steps) {
+   ZoneScopedN("Present with in-between frames");
+-  steps = std::clamp(steps, 1, 3);
++  steps = std::clamp(steps, 1, frame_interp::kMaxSteps);
+   g_heldSet ^= 1;
+   auto& held = g_heldSteps[g_heldSet];
+   // The set this frame takes was the one two frames ago: anything of it still
+   // waiting is shown now.
+-  flush_presents_from(&held[0], &held[3]);
++  flush_presents_from(&held[0], &held[kHeldReal]);
+   const auto keep = [](wgpu::CommandEncoder& commands, webgpu::TextureWithSampler& copy) {
+     const auto& source = webgpu::present_source();
+     ensure_held_texture(copy, source);
+@@ -2258,7 +2275,7 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+     commands.CopyTextureToTexture(&src, &dst, &extent);
+   };
+   // 1. The real frame, kept aside.
+-  keep(encoder, held[3]);
++  keep(encoder, held[kHeldReal]);
+   webgpu::gpu_prof::frame_end(encoder);
+   {
+     const wgpu::CommandBufferDescriptor descriptor{.label = "Real frame command buffer"};
+@@ -2269,7 +2286,7 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+   after_submit();
+   const bool dump = frame_interp::dump_frame(frame.gameFrame);
+   if (dump) {
+-    dump_texture(held[3], "real", frame.gameFrame);
++    dump_texture(held[kHeldReal], "real", frame.gameFrame);
+   }
+   deferred_present_tick();
+ 
+@@ -2279,7 +2296,9 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+   const auto interval = step_offset(1, steps);
+   PresentClock::time_point base{};
+   static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "In-between frame encoder"};
+-  static const char* const kDumpNames[] = {"between", "between2", "between3"};
++  static const char* const kDumpNames[] = {"between",  "between2", "between3", "between4",
++                                          "between5", "between6", "between7"};
++  static_assert(std::size(kDumpNames) == frame_interp::kMaxSteps);
+   for (int step = 0; step < steps; ++step) {
+     auto between = g_device.CreateCommandEncoder(&EncoderDescriptor);
+     g_replayStep = step;
+@@ -2310,7 +2329,7 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+   g_replayStep = 0;
+   // 3. The real frame after them.
+   g_lastDue = base + interval * steps;
+-  defer_present(g_lastDue, &held[3], callback, frame.gameFrame, -1);
++  defer_present(g_lastDue, &held[kHeldReal], callback, frame.gameFrame, -1);
+   deferred_present_tick();
+ }
+ 
+@@ -2346,7 +2365,7 @@ static void present_held(wgpu::CommandEncoder& encoder, const EndFrameCallback&
+   }
+   webgpu::gpu_prof::after_submit();
+   after_submit();
+-  steps = std::clamp(steps, 1, 3);
++  steps = std::clamp(steps, 1, frame_interp::kMaxSteps);
+   defer_present(PresentClock::now() + step_offset(steps, steps), &g_heldFrame, callback);
+   g_lastDue = {};
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 8c66706f..ed9de40d 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -331,9 +331,12 @@ Range push_interp_vertices(size_t slot, const uint8_t* data, size_t length);
+ // A job's in-between blocks and vertices, one per in-between frame of the
+ // game frame (frame_interp::frame_steps; either empty when the draw keeps its
+ // own).
++// At most kInterpMaxSteps of each (frame_interp::kMaxSteps, which common.cpp
++// checks it against).
++constexpr int kInterpMaxSteps = 7;
+ struct InterpRanges {
+-  Range uniform[3];
+-  Range verts[3];
++  Range uniform[kInterpMaxSteps];
++  Range verts[kInterpMaxSteps];
+ };
+ void resolve_interp_job(size_t slot, const InterpRanges& ranges);
+ // One draw of a batch (gxcore_draw.cpp): its indices' count, and its first
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 331d5814..50b971c8 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -4,6 +4,7 @@
+ #include <bit>
+ #include <array>
+ #include <atomic>
++#include <chrono>
+ #include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -35,7 +36,7 @@ uint64_t env_u64(const char* name, uint64_t fallback) {
+ std::atomic_bool g_enabled{env_flag("DOL_AURORA_FRAME_INTERP", false)};
+ // In-between frames per game frame (1: 60 Hz, 3: 120 Hz; DOL_AURORA_FRAME_INTERP_STEPS),
+ // asked for at any time and taken at a game frame's start (g_frameSteps).
+-std::atomic<int> g_steps{static_cast<int>(std::clamp<uint64_t>(env_u64("DOL_AURORA_FRAME_INTERP_STEPS", 1), 1, 3))};
++std::atomic<int> g_steps{static_cast<int>(std::clamp<uint64_t>(env_u64("DOL_AURORA_FRAME_INTERP_STEPS", 1), 1, kMaxSteps))};
+ int g_frameSteps = g_steps.load(std::memory_order_relaxed);
+ // In-between frames need not make the game wait (pace_steps): when the GPU
+ // or the render worker keeps falling behind (note_overload), 60 Hz drops to
+@@ -52,6 +53,11 @@ struct Pacing {
+   int calm = 0;    // game frames since the last overload
+   int calmNeeded = 0;
+   uint32_t recent = 0; // one bit a game frame, newest lowest: an overload reported
++  // The game's own speed (slow_game): when the last game frame ended here,
++  // and the running average of the gaps between them.
++  std::chrono::steady_clock::time_point lastEnd{};
++  double gapMs = 0.0;
++  int gaps = 0;
+ } g_pacing;
+ std::atomic_bool g_encodingInterpolated{false};
+ std::atomic<uint64_t> g_gameFrame{1};
+@@ -1809,6 +1815,32 @@ void note_overload(const char* why) noexcept {
+   g_overloaded.store(true, std::memory_order_relaxed);
+ }
+ 
++// The game itself below full speed: its frames ended here more than
++// kSlowGapMs apart on average over the last 8 or so (under 28.2 a second
++// against the game's 29.97). On a CPU with few cores the in-between frames'
++// work (each draw captured here and matched on the helper thread, the
++// render worker drawing them again) takes cores the game's own thread
++// needs, and the game ran in slow motion: 24-27 game frames a second on 4
++// of the i9's E-cores at 60 FPS, 30 with frame interpolation off. A gap of
++// a quarter second or more (a load, a pause, a hidden window) is not the
++// game's speed and starts the average again.
++static bool slow_game(Pacing& p) {
++  static constexpr double kSlowGapMs = 35.5;
++  const auto now = std::chrono::steady_clock::now();
++  const auto last = p.lastEnd;
++  p.lastEnd = now;
++  if (last == std::chrono::steady_clock::time_point{})
++    return false;
++  const double ms = std::chrono::duration<double, std::milli>(now - last).count();
++  if (ms >= 250.0) {
++    p.gaps = 0;
++    return false;
++  }
++  p.gapMs = p.gaps == 0 ? ms : p.gapMs + (ms - p.gapMs) / 8.0;
++  p.gaps = std::min(p.gaps + 1, 8);
++  return p.gaps >= 8 && p.gapMs > kSlowGapMs;
++}
++
+ // Recording thread, between game frames: the next frame's in-between frames.
+ // Overloads (the GPU a frame behind, or the game waiting on rendering) in 3 of
+ // the last 8 game frames take 60 Hz to none (and 120 Hz to 60, when pacing
+@@ -1823,6 +1855,7 @@ void note_overload(const char* why) noexcept {
+ static void pace_steps() {
+   static constexpr int kCalmStart = 90;  // game frames, 3 s
+   static constexpr int kCalmMost = 900;  // 30 s
++  static constexpr int kCalmMostSlow = 3600; // 2 min, after the game itself ran slow
+   static constexpr uint64_t kSettle = 4; // game frames between drops
+   static constexpr uint64_t kSoon = 300; // an overload within 10 s of coming back
+   // DOL_AURORA_FRAME_INTERP_PACING: 0 never lowers them, 1 lowers 120 Hz's
+@@ -1836,24 +1869,36 @@ static void pace_steps() {
+   auto& p = g_pacing;
+   ++p.frame;
+   const int wanted = g_steps.load(std::memory_order_relaxed);
+-  const bool pacing = setting == 1 || (setting < 0 && wanted < kMaxSteps);
+-  const bool overloaded = g_overloaded.exchange(false, std::memory_order_relaxed) && pacing;
++  const bool pacing = setting == 1 || (setting < 0 && wanted < 3);
++  // The game running slow counts at any number of in-between frames (slow
++  // motion is worse than fewer of them) unless pacing is off altogether.
++  const bool slow = slow_game(p) && setting != 0;
++  const bool overloaded = (g_overloaded.exchange(false, std::memory_order_relaxed) && pacing) || slow;
+   p.recent = (p.recent << 1) | (overloaded ? 1u : 0u);
+   const bool sustained = std::popcount(p.recent & 0xFFu) >= 3;
+   if (wanted != p.wanted) {
+-    p = Pacing{.frame = p.frame, .wanted = wanted, .budget = wanted, .calmNeeded = kCalmStart};
++    p = Pacing{.frame = p.frame, .wanted = wanted, .budget = wanted, .calmNeeded = kCalmStart,
++               .lastEnd = p.lastEnd};
+   } else if (sustained) {
+     p.calm = 0;
+     if (p.budget > 0 && p.frame - p.lastDrop >= kSettle) {
+       if (p.lastRaise != 0 && p.frame - p.lastRaise < kSoon)
+-        p.calmNeeded = std::min(p.calmNeeded * 2, kCalmMost);
++        p.calmNeeded = std::min(p.calmNeeded * 2, slow ? kCalmMostSlow : kCalmMost);
+       const int before = p.budget;
+       p.budget = p.budget > 1 ? 1 : 0;
+       p.lastDrop = p.frame;
+       p.recent = 0;
+       const char* why = g_overloadWhy.load(std::memory_order_relaxed);
+-      std::fprintf(stderr, "[interp-pace] in-between frames %d -> %d (%s; back after %.0f s calm)\n", before,
+-                   p.budget, why != nullptr ? why : "rendering fell behind", p.calmNeeded / 30.0);
++      if (slow) {
++        std::fprintf(stderr,
++                     "[interp-pace] in-between frames %d -> %d (the game ran below full speed, %.1f game "
++                     "frames a second; back after %.0f s calm)\n",
++                     before, p.budget, 1000.0 / p.gapMs, p.calmNeeded / 30.0);
++        p.gaps = 0; // the next drop on new frames' gaps
++      } else {
++        std::fprintf(stderr, "[interp-pace] in-between frames %d -> %d (%s; back after %.0f s calm)\n", before,
++                     p.budget, why != nullptr ? why : "rendering fell behind", p.calmNeeded / 30.0);
++      }
+     }
+   } else if (p.budget < wanted) {
+     if (++p.calm >= p.calmNeeded) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index 547a09d1..13eff3ea 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -38,7 +38,9 @@ void set_enabled(bool enabled) noexcept;
+ // In-between frames per game frame: 1 (60 Hz from 30) or 3 (120 Hz), at
+ // t = step / (steps + 1). A change takes effect at the next game frame;
+ // frame_steps() is the recording frame's.
+-constexpr int kMaxSteps = 3;
++// In-between frames a game frame, at most: 7 shows 240 a second (a 240 Hz
++// display), 3 shows 120 and 1 shows 60.
++constexpr int kMaxSteps = 7;
+ void set_steps(int steps) noexcept;
+ int steps() noexcept;
+ int frame_steps() noexcept;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index a6203f1e..38758240 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -1689,8 +1689,11 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   // In-between frames: matched on the helper thread (queued below), or here
+   // while a traced frame reports each draw's outcome. Here it is matched
+   // before a staging segment can split the frame; a split frame is not
+-  // interpolated.
+-  const bool interpolating = frame_interp::enabled();
++  // interpolated. A frame the pacing gave no in-between frames
++  // (frame_skipped) queues nothing: matching its draws would only cost the
++  // CPU it was dropped for, and the frame after has no previous to blend from
++  // (as after a cut).
++  const bool interpolating = frame_interp::enabled() && !frame_interp::frame_skipped();
+   const bool matchHere = interpolating && frame_interp::tracing();
+   if (matchHere)
+     wait_interp_jobs();
+-- 
+2.46.0
+

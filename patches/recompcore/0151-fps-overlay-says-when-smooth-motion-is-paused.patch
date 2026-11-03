@@ -1,0 +1,60 @@
+From e280c788dadabd18b085af0085f1558fc9ff5ecc Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 22:00:29 +0900
+Subject: [PATCH] FPS overlay: say when Smooth Motion is paused
+
+With its in-between frames paused, Smooth Motion presents each game frame twice, so the overlay read 60 FPS while the picture moved at 30 (Wind-Waker-Recomp #6: "FPS counter says 60 still"). When fewer than 90% of the last second's game frames were interpolated, it now shows the game's rate and "Smooth Motion paused".
+---
+ GXRuntime/graphics/aurora/lib/aurora.cpp | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index a4399c6107..31c413e236 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -23,6 +23,7 @@
+ #include "window.hpp"
+ 
+ #include <SDL3/SDL_filesystem.h>
++#include <SDL3/SDL_timer.h>
+ #include <magic_enum.hpp>
+ 
+ #include "system_info.hpp"
+@@ -264,6 +265,23 @@ static void draw_fps_overlay() {
+   }
+   const float shown = gfx::calculate_fps();
+   const float game = gfx::calculate_game_fps();
++  // With Smooth Motion's in-between frames paused (the game ran slow a moment
++  // ago), each game frame is presented twice: the count says 60 while the
++  // picture moves at 30. Over the last second, fewer than 90% of game frames
++  // interpolated says so.
++  static AuroraFrameInterpTotals last{};
++  static Uint64 last_at = 0;
++  static bool paused = false;
++  const Uint64 now = SDL_GetTicks();
++  if (now - last_at >= 1000) {
++    AuroraFrameInterpTotals totals{};
++    aurora_get_frame_interp_totals(&totals);
++    const unsigned long long frames = totals.frames - last.frames;
++    const unsigned long long interpolated = totals.interpolated - last.interpolated;
++    paused = aurora_get_frame_interpolation() && frames > 0 && interpolated * 10 < frames * 9;
++    last = totals;
++    last_at = now;
++  }
+   // Top center: the corners hold the game's HUD (hearts, buttons, map, rupees).
+   ImGui::SetNextWindowPos(ImVec2{ImGui::GetIO().DisplaySize.x * 0.5f, 12.f}, ImGuiCond_Always, ImVec2{0.5f, 0.f});
+   ImGui::SetNextWindowBgAlpha(0.6f);
+@@ -272,7 +290,9 @@ static void draw_fps_overlay() {
+                                      ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+   if (ImGui::Begin("##aurora-fps", nullptr, flags)) {
+     ImGui::SetWindowFontScale(1.5f);
+-    if (game > 0.f && shown > game + 5.f) {
++    if (paused && game > 0.f) {
++      ImGui::Text("%.0f FPS (Smooth Motion paused)", game);
++    } else if (game > 0.f && shown > game + 5.f) {
+       ImGui::Text("%.0f FPS (game %.0f)", shown, game);
+     } else {
+       ImGui::Text("%.0f FPS", shown);
+-- 
+2.46.0
+

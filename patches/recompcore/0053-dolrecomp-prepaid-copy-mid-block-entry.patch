@@ -1,0 +1,163 @@
+--- /tmp/emitter.pristine.c	2026-09-22 17:39:26
++++ ref/recompcore/DolRecomp/src/backend/emitter.c	2026-09-22 18:36:54
+@@ -2032,6 +2032,40 @@
+     fprintf(out, "    }\n");
+ }
+ 
++/* The prepaid copy's observation correction.
++ *
++ * The single body flips cycle_block_prepaid back to false here and carries on,
++ * because it has a per-instruction charge to fall back to. The prepaid copy has
++ * none: giving the unexecuted cycles back and clearing a flag would leave the
++ * rest of the block uncharged. It hands the observing instruction to the precise
++ * copy at that address instead, which charges it and the rest of the block one
++ * instruction at a time - the same state the flag flip produces.
++ *
++ * This is not optional, and that is what the parked copy was missing. The
++ * deadline budget is not fixed within a block: the host recomputes it every time
++ * the guest observes the cycle domain (bluewake_cycle_domain_observe ->
++ * bounded_budget), and the observing instructions are the loads and stores. So a
++ * leader-time guard cannot stand in for a reconcile that runs where the
++ * observation does. docs/status/CURRENT.md, 2026-09-22. */
++static void emit_fast_observation_reconcile(FILE* out, const PPCInst* inst,
++                                            u32 resume, u32 func_addr) {
++    if (!instruction_may_observe_cycle_domain(inst))
++        return;
++    fprintf(out, "    if (ctx->cycle_deadline_budget > 0 &&\n");
++    fprintf(out, "        (s64)ctx->cycle_observation_suffix > "
++                 "ctx->cycle_deadline_budget) {\n");
++    fprintf(out, "        ctx->downcount += "
++                 "(s64)ctx->cycle_observation_suffix;\n");
++    if (resume != 0u) {
++        fprintf(out, "        ctx->pc = 0x%08Xu;\n", resume);
++        fprintf(out, "        func_%08X_precise(ctx);\n", func_addr);
++    } else {
++        fprintf(out, "        ctx->pc = 0x%08Xu;\n", func_addr);
++    }
++    fprintf(out, "        return;\n");
++    fprintf(out, "    }\n");
++}
++
+ static void emit_precise_instruction_charge(FILE* out, const PPCInst* inst) {
+     const u32 cycles = c_function_cfg_instruction_cycles(inst);
+     if (cycles == 0u)
+@@ -2187,13 +2221,20 @@
+                 max_suffix = suffix;
+         }
+     }
+-    /* The flat copy is emitted once, as func_X, while the pair is off: the
+-     * fast copy diverged from the certified route (docs/status/CURRENT.md,
+-     * 2026-09-22) and its half of the design is parked until that is
+-     * understood. The infra stays so the shape can be re-enabled for one
+-     * screening run instead of being rewritten. */
++    /* Two copies: the prepaid one keeps the dispatcher's name and the precise
++     * one is the bail-out target it calls by name. The precise copy is emitted
++     * first so the call has a definition in scope, and with the pair off the
++     * single copy is the precise body under the dispatcher's name.
++     *
++     * The prepaid copy is re-enabled here for a screening run: it diverged from
++     * the certified route on 2026-09-22 (2.8x the host turns with identical
++     * guest cycles) and the ledger's conclusion was that the host's cycle
++     * domain has to be instrumented before the shape is judged, because the
++     * budget the host handed the chassis per turn is what moved. That
++     * instrument now exists (BLUEWAKE_CREDIT_CENSUS and the turn-exit
++     * inventory), so the shape is measured rather than argued about. */
+     fprintf(out, "void func_%08X%s(CPUState* ctx) {\n", func_addr,
+-            fast ? "_precise" : "");
++            fast ? "" : "_precise");
+     if (!fast) {
+         fprintf(out, "    bool cycle_block_prepaid = false;\n");
+     } else {
+@@ -2213,7 +2254,43 @@
+     bool contiguous = count > 0u;
+     for (u32 i = 0; contiguous && i < count; ++i)
+         contiguous = insts[i].address == insts[0].address + i * 4u;
+-    if (contiguous) {
++    if (contiguous && fast) {
++        const u32 table_lo = insts[0].address;
++        const u32 table_hi = insts[count - 1u].address;
++        const u32 words = (count + 63u) / 64u;
++        fprintf(out, "    static void* const pc_table_%08X[%u] = {\n",
++                func_addr, count);
++        for (u32 i = 0; i < count; ++i)
++            fprintf(out, "        &&label_%08X%s\n", insts[i].address,
++                    i + 1u < count ? "," : "");
++        fprintf(out, "    };\n");
++        fprintf(out, "    static const unsigned long long leader_bits_%08X[%u] = {\n",
++                func_addr, words);
++        for (u32 w = 0; w < words; ++w) {
++            unsigned long long bits = 0ull;
++            for (u32 b = 0; b < 64u; ++b) {
++                const u32 i = w * 64u + b;
++                if (i < count && cfg->leaders[i])
++                    bits |= 1ull << b;
++            }
++            fprintf(out, "        0x%016llXull%s\n", bits, w + 1u < words ? "," : "");
++        }
++        fprintf(out, "    };\n");
++        fprintf(out, "    {\n");
++        fprintf(out, "        const u32 pc = ctx->pc;\n");
++        fprintf(out, "        if (pc >= 0x%08Xu && pc <= 0x%08Xu && ((pc - 0x%08Xu) & 3u) == 0u) {\n",
++                table_lo, table_hi, table_lo);
++        fprintf(out, "            const u32 idx = (pc - 0x%08Xu) >> 2;\n", table_lo);
++        fprintf(out, "            if (((leader_bits_%08X[idx >> 6] >> (idx & 63u)) & 1ull) == 0ull) {\n",
++                func_addr);
++        fprintf(out, "                func_%08X_precise(ctx);\n", func_addr);
++        fprintf(out, "                return;\n");
++        fprintf(out, "            }\n");
++        fprintf(out, "            goto *pc_table_%08X[idx];\n", func_addr);
++        fprintf(out, "        }\n");
++        fprintf(out, "    }\n");
++        fprintf(out, "    return;\n");
++    } else if (contiguous) {
+         const u32 table_lo = insts[0].address;
+         const u32 table_hi = insts[count - 1u].address;
+         fprintf(out, "    static void* const pc_table_%08X[%u] = {\n",
+@@ -2231,6 +2308,10 @@
+         fprintf(out, "    }\n");
+         fprintf(out, "    return;\n");
+     } else {
++        if (fast)
++            fprintf(stderr,
++                    "error: non-contiguous prepaid copy at %08X - the mid-block "
++                    "entry guard needs the computed-goto table\n", func_addr);
+         fprintf(out, "    switch (ctx->pc) {\n");
+         for (u32 i = 0; i < count; i++) {
+             fprintf(out, "    case 0x%08Xu: goto label_%08X;\n",
+@@ -2265,15 +2346,8 @@
+                  * only safe while the reconcile could not have fired: it fires
+                  * when the deadline budget is positive and shorter than this
+                  * block's observation suffix. */
+-                fprintf(out, "    if (!dolrecomp_block_can_precharge(ctx, %uu)",
++                fprintf(out, "    if (!dolrecomp_block_can_precharge(ctx, %uu)) {\n",
+                         cfg->block_cycles[i]);
+-                /* A suffix of one can never exceed a positive budget, so the
+-                 * clause would be tautologically false and clang says so. */
+-                if (observes && max_suffix > 1u)
+-                    fprintf(out, " ||\n        (ctx->cycle_deadline_budget > 0 &&\n"
+-                                 "         ctx->cycle_deadline_budget < %uu)",
+-                            max_suffix);
+-                fprintf(out, ") {\n");
+                 fprintf(out, "        ctx->pc = 0x%08Xu;\n", insts[i].address);
+                 fprintf(out, "        func_%08X_precise(ctx);\n", func_addr);
+                 fprintf(out, "        return;\n");
+@@ -2325,6 +2399,10 @@
+             has_local_returns, "");
+         if (!fast)
+             emit_cycle_observation_reconcile(out, &insts[i]);
++        else
++            emit_fast_observation_reconcile(
++                out, &insts[i],
++                i + 1u < count ? insts[i + 1u].address : 0u, func_addr);
+     }
+ 
+     fprintf(out, "    ctx->pc = 0x%08Xu;\n", func_end);
+@@ -2367,6 +2445,8 @@
+ 
+     emit_flat_function(out, insts, count, &cfg, func_addr, func_end,
+                        has_local_returns, false);
++    emit_flat_function(out, insts, count, &cfg, func_addr, func_end,
++                       has_local_returns, true);
+ 
+     c_function_cfg_destroy(&cfg);
+     return true;

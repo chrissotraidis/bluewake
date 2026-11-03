@@ -1,0 +1,53 @@
+From 4db351141c52717c11c092444801f4f082c7f922 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 08:48:40 -0500
+Subject: [PATCH] aurora: one Metal view per window, reused by every surface
+
+The surface is released while an iOS app is in the background and created
+again on return, and each creation called SDL_Metal_CreateView, which adds a
+new view above everything in the window and never removed the old one. On
+iPadOS the new view covered the SunPad touch controls about a second after a
+home-screen round trip, leaving the game with no on-screen input. The view is
+now created once and kept as a window property; later surfaces reuse its
+layer (the old surface is released before the new one is created). Simulator:
+title -> Settings -> back, controls present in all 24 screenshots after return.
+---
+ .../graphics/aurora/lib/dawn/MetalBinding.mm  | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/dawn/MetalBinding.mm b/GXRuntime/graphics/aurora/lib/dawn/MetalBinding.mm
+index 421bd9e609..a52fc4ef0d 100644
+--- a/GXRuntime/graphics/aurora/lib/dawn/MetalBinding.mm
++++ b/GXRuntime/graphics/aurora/lib/dawn/MetalBinding.mm
+@@ -2,10 +2,27 @@
+ 
+ #import <Foundation/Foundation.h>
+ #include <SDL3/SDL_metal.h>
++#include <SDL3/SDL_properties.h>
++#include <SDL3/SDL_video.h>
+ 
+ namespace aurora::webgpu::utils {
++// One Metal view per window, reused by every surface. The surface is released
++// while an iOS app is in the background and created again on return; creating
++// a view each time stacked a new one above everything already in the window,
++// which on iPadOS covered the touch controls after a home-screen round trip,
++// and never removed the old views. The view lives as long as its window.
++static constexpr const char* kAuroraMetalViewProperty = "aurora.metal_view";
++
+ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptorCocoa(SDL_Window* window) {
+-  SDL_MetalView view = SDL_Metal_CreateView(window);
++  const SDL_PropertiesID props = SDL_GetWindowProperties(window);
++  SDL_MetalView view = SDL_GetPointerProperty(props, kAuroraMetalViewProperty, nullptr);
++  if (view == nullptr) {
++    view = SDL_Metal_CreateView(window);
++    if (view != nullptr)
++      SDL_SetPointerProperty(props, kAuroraMetalViewProperty, view);
++  }
++  if (view == nullptr)
++    return nullptr;
+   std::shared_ptr<wgpu::SurfaceSourceMetalLayer> desc = std::make_shared<wgpu::SurfaceSourceMetalLayer>();
+   desc->layer = SDL_Metal_GetLayer(view);
+   return std::move(desc);
+-- 
+2.41.0
+

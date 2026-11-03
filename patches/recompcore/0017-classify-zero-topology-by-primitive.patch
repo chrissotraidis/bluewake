@@ -1,0 +1,142 @@
+From b38975405dab922dc1a6919b0caf7c0837759ab7 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 00:56:52 -0500
+Subject: [PATCH] graphics: classify zero topology by primitive
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 13 +++++++++
+ .../include/gxruntime/gxcore/gxcore.hpp       |  8 +++++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 26 +++++++++++++++++
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 29 +++++++++++++++++++
+ 4 files changed, 76 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index ab2e3cb9ef..34d75a58eb 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -404,6 +404,11 @@ void dol_aurora_shutdown(void) {
+                      "projection_missing=%llu payload_empty=%llu "
+                      "walk_underivable=%llu stride_mismatch=%llu "
+                      "topology_unsupported=%llu payload_overrun=%llu "
++                     "topology_zero_quads=%llu topology_zero_triangles=%llu "
++                     "topology_zero_triangle_strip=%llu "
++                     "topology_zero_triangle_fan=%llu "
++                     "topology_zero_lines=%llu topology_zero_line_strip=%llu "
++                     "topology_zero_points=%llu topology_zero_unknown=%llu "
+                      "array_unresolved=%llu array_out_of_bounds=%llu "
+                      "unsupported_texgen=%llu per_vertex_tex_mtx=%llu "
+                      "unresolved_tex_matrix=%llu normals_ignored=%llu "
+@@ -424,6 +429,14 @@ void dol_aurora_shutdown(void) {
+                      gaps.vertex_stride_mismatch,
+                      gaps.vertex_topology_unsupported,
+                      gaps.vertex_payload_overrun,
++                     gaps.topology_zero_quads,
++                     gaps.topology_zero_triangles,
++                     gaps.topology_zero_triangle_strip,
++                     gaps.topology_zero_triangle_fan,
++                     gaps.topology_zero_lines,
++                     gaps.topology_zero_line_strip,
++                     gaps.topology_zero_points,
++                     gaps.topology_zero_unknown,
+                      gaps.vertex_array_unresolved,
+                      gaps.vertex_array_out_of_bounds,
+                      gaps.unsupported_texgen,
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index b9d70db48d..5504f11927 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -29,6 +29,14 @@ struct GapCounters {
+   unsigned long long vertex_walk_underivable = 0;
+   unsigned long long vertex_stride_mismatch = 0;
+   unsigned long long vertex_topology_unsupported = 0;
++  unsigned long long topology_zero_quads = 0;
++  unsigned long long topology_zero_triangles = 0;
++  unsigned long long topology_zero_triangle_strip = 0;
++  unsigned long long topology_zero_triangle_fan = 0;
++  unsigned long long topology_zero_lines = 0;
++  unsigned long long topology_zero_line_strip = 0;
++  unsigned long long topology_zero_points = 0;
++  unsigned long long topology_zero_unknown = 0;
+   unsigned long long vertex_payload_overrun = 0;
+   unsigned long long vertex_array_unresolved = 0;
+   unsigned long long vertex_array_out_of_bounds = 0;
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 66f15cf3c9..2c4fe1c658 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -746,6 +746,32 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   if (index_count == 0u) {
+     ++counters.vertex_decode_failures;
+     ++counters.vertex_topology_unsupported;
++    switch (primitive) {
++    case ar::GxPrimitive::Quads:
++      ++counters.topology_zero_quads;
++      break;
++    case ar::GxPrimitive::Triangles:
++      ++counters.topology_zero_triangles;
++      break;
++    case ar::GxPrimitive::TriangleStrip:
++      ++counters.topology_zero_triangle_strip;
++      break;
++    case ar::GxPrimitive::TriangleFan:
++      ++counters.topology_zero_triangle_fan;
++      break;
++    case ar::GxPrimitive::Lines:
++      ++counters.topology_zero_lines;
++      break;
++    case ar::GxPrimitive::LineStrip:
++      ++counters.topology_zero_line_strip;
++      break;
++    case ar::GxPrimitive::Points:
++      ++counters.topology_zero_points;
++      break;
++    default:
++      ++counters.topology_zero_unknown;
++      break;
++    }
+     return skip("unsupported or empty primitive");
+   }
+ 
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index ec3ca438a6..3ade5e3873 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -203,6 +203,35 @@ void test_state_to_plan_and_wgsl() {
+   CHECK(counters.draws_skipped == 0);
+   CHECK(counters.unresolved_tex_matrix == 0);
+ 
++  // Topology admission is distinct from the shared zero-index exit: valid
++  // lines/points build plans, while an incomplete quad is rejected.
++  {
++    ar::ConsumedDraw line = draw;
++    line.primitive = 0xA8;
++    const gxc::DrawPlan line_plan = state.build_draw_plan(line, counters);
++    CHECK(line_plan.ok);
++    CHECK(line_plan.pipeline.primitive_topology == 1u);
++    CHECK(line_plan.indices.size() == 4u);
++
++    ar::ConsumedDraw points = draw;
++    points.primitive = 0xB8;
++    const gxc::DrawPlan point_plan = state.build_draw_plan(points, counters);
++    CHECK(point_plan.ok);
++    CHECK(point_plan.pipeline.primitive_topology == 2u);
++    CHECK(point_plan.indices.size() == 4u);
++
++    ar::ConsumedDraw partial_quad = draw;
++    partial_quad.vertex_count = 3u;
++    partial_quad.vertex_payload.resize(3u * partial_quad.vertex_size);
++    const gxc::DrawPlan partial_plan =
++        state.build_draw_plan(partial_quad, counters);
++    CHECK(!partial_plan.ok);
++    CHECK(counters.vertex_topology_unsupported == 1u);
++    CHECK(counters.topology_zero_quads == 1u);
++    CHECK(counters.topology_zero_lines == 0u);
++    CHECK(counters.topology_zero_points == 0u);
++  }
++
+   // Shader key.
+   const gxc::ShaderKey& key = plan.pipeline.shader;
+   CHECK(key.num_tex_gens == 1);
+-- 
+2.41.0
+

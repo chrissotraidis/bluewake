@@ -1,0 +1,41 @@
+From 21697ccc990e29c1aee9f339662b9e27aa748a22 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 23:29:58 -0500
+Subject: [PATCH] graphics: size fixed staging for scene bursts
+
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 7fb45fee4f..0233ab5e69 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -172,15 +172,16 @@ private:
+ 
+ namespace aurora::gfx {
+ inline constexpr bool UseTextureBuffer = true;
+-inline constexpr uint64_t UniformBufferSize = 25165824;  // 24mb
+-// Vertex/index raised from 3mb/1mb: full gameplay through gxcore --core
+-// (Dolphin-ported core, triangle-list expansion) exceeds the menu-scale sizes
+-// the live SDK path used. Wind Waker's opening-to-Outset transition crosses
+-// 8mb of indices before the next display copy. Per-frame staging; costs
+-// ~staging_count * delta RAM.
+-inline constexpr uint64_t VertexBufferSize = 12582912;   // 12mb
++// Full gameplay through gxcore --core (Dolphin-ported core, triangle-list
++// expansion) exceeds the menu-scale sizes the live SDK path used. Wind
++// Waker's opening-to-Outset transition batches more than 24mb of uniform
++// constants before the next display copy, so keep the fixed frame slices
++// proportionally sized for that burst. Per-frame staging costs roughly
++// staging_count * delta RAM.
++inline constexpr uint64_t UniformBufferSize = 50331648;  // 48mb
++inline constexpr uint64_t VertexBufferSize = 25165824;   // 24mb
+ inline constexpr uint64_t IndexBufferSize = 16777216;    // 16mb
+-inline constexpr uint64_t StorageBufferSize = 8388608;   // 8mb
++inline constexpr uint64_t StorageBufferSize = 16777216;  // 16mb
+ inline constexpr uint64_t TextureUploadSize = 25165824;  // 24mb
+ 
+ extern AuroraStats g_stats;
+-- 
+2.41.0
+

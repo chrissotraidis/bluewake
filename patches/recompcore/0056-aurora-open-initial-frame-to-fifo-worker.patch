@@ -1,0 +1,66 @@
+From d80689c18c988ea9f8e43d3a21b34d6fcaff3d28 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 09:08:07 -0500
+Subject: [PATCH] aurora: open the initial frame to the FIFO translation worker
+
+dol_aurora_initialize() begins the first Aurora frame itself, but only a present
+set g_aurora_recording_open. With the worker running, every batch before the
+first present was parsed into the packet sink instead of the core sink, so the
+core sink never observed the display copy that triggers the first present and
+no frame was ever recorded or shown: a black window on macOS and iOS alike
+(gx-core submitted=0). Open the initial frame to the worker under the same lock
+the transition uses.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp       | 5 +++++
+ GXRuntime/backends/aurora/aurora_backend_private.h | 2 ++
+ GXRuntime/backends/aurora/aurora_graphics.cpp      | 5 +++++
+ 3 files changed, 12 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 655601b7ee..d33a6b4365 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -392,6 +392,11 @@ bool dol_aurora_initialize(int argc, char** argv,
+ 
+     gx_aurora::poll_events();
+     gx_aurora::g_frame_open = !gx_aurora::g_should_quit && aurora_begin_frame();
++    // The first frame is opened here rather than by a present, so it must also
++    // be opened to the FIFO translation worker. Otherwise every batch falls
++    // back to the packet sink, the core sink never sees the display copy that
++    // triggers the first present, and no frame is ever recorded or shown.
++    gx_aurora::set_initial_frame_recording(gx_aurora::g_frame_open);
+     gx_aurora::install_platform_ops();
+     return true;
+ }
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 0039962163..68c9b7c090 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -172,6 +172,8 @@ DolGuestResourceKind map_resource_kind(aurora::gx::recomp::ResourceKind kind);
+ bool aurora_guest_address_resolver_bridge(void*, std::uint32_t address, std::uint32_t size, aurora::gx::recomp::AddressSpace space, aurora::gx::recomp::ResourceKind resource, const void** data, std::uint32_t* available);
+ 
+ void install_platform_ops();
++// Opens (or closes) the frame begun at initialization to the FIFO worker.
++void set_initial_frame_recording(bool open);
+ 
+ } // namespace gx_aurora
+ 
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 3763c82239..e93a531ff7 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -692,6 +692,11 @@ void shadow_frontend_stop_worker(void) {
+     g_fifo_worker_stop_and_join();
+ }
+ 
++void set_initial_frame_recording(bool open) {
++    std::lock_guard<std::mutex> recording(g_aurora_recording_mutex);
++    g_aurora_recording_open = open;
++}
++
+ unsigned long long shadow_transform_frame_number() {
+     return g_frame_open ? g_present_count + 1ull : g_present_count;
+ }
+-- 
+2.41.0
+

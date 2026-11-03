@@ -1,0 +1,33 @@
+From 9638c4020a1a11b031891961f4089c0ee86e32f9 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 23:13:01 -0500
+Subject: [PATCH] graphics: size index staging for Outset transition
+
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index e885be071a..7fb45fee4f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -173,11 +173,13 @@ private:
+ namespace aurora::gfx {
+ inline constexpr bool UseTextureBuffer = true;
+ inline constexpr uint64_t UniformBufferSize = 25165824;  // 24mb
+-// Vertex/index raised from 3mb/1mb: a full gameplay scene through gxcore --core
++// Vertex/index raised from 3mb/1mb: full gameplay through gxcore --core
+ // (Dolphin-ported core, triangle-list expansion) exceeds the menu-scale sizes
+-// the live SDK path used. Per-frame staging; costs ~staging_count * delta RAM.
++// the live SDK path used. Wind Waker's opening-to-Outset transition crosses
++// 8mb of indices before the next display copy. Per-frame staging; costs
++// ~staging_count * delta RAM.
+ inline constexpr uint64_t VertexBufferSize = 12582912;   // 12mb
+-inline constexpr uint64_t IndexBufferSize = 8388608;     // 8mb
++inline constexpr uint64_t IndexBufferSize = 16777216;    // 16mb
+ inline constexpr uint64_t StorageBufferSize = 8388608;   // 8mb
+ inline constexpr uint64_t TextureUploadSize = 25165824;  // 24mb
+ 
+-- 
+2.41.0
+

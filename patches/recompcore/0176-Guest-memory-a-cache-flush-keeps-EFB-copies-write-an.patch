@@ -1,0 +1,258 @@
+From ee99bbc13c948351f6974c745cad2593a25eacbf Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 21:51:47 +0900
+Subject: [PATCH] Guest memory: a cache flush keeps EFB copies (write and flush
+ epochs apart)
+
+---
+ .gitignore                                    |  3 ++
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  1 +
+ .../backends/aurora/aurora_backend_private.h  |  1 +
+ GXRuntime/backends/aurora/aurora_graphics.cpp |  6 ++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 16 ++++++---
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  2 ++
+ .../include/gxruntime/guest_memory_dirty.h    |  9 +++++
+ GXRuntime/src/guest_memory_dirty.c            | 33 ++++++++++++++-----
+ GXRuntime/tests/runtime_tests.c               | 16 +++++++++
+ 9 files changed, 74 insertions(+), 13 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index 1270b78..dedca96 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -54,3 +54,6 @@ CMakeLists.txt.user
+ StrikersRecomp/generated_smc.txt
+ StrikersRecomp/generated.c
+ StrikersRecomp/generated.h
++
++# Left behind by GXRuntime host tests run from the repository root
++gxruntime-memory-card-*.dolcard*
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 73b8c66..2b141b2 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -470,6 +470,7 @@ bool dol_aurora_initialize(int argc, char** argv,
+         dol_guest_memory_dirty_reset();
+         aurora::gfx::gxcore::set_texture_dirty_epoch_observer(
+             gx_aurora::core_texture_dirty_epoch);
++        aurora::gfx::gxcore::set_efb_copy_epoch_observer(gx_aurora::core_efb_copy_epoch);
+         gx_aurora::g_core_sink.set_plan_observer(gx_aurora::core_plan_observer, nullptr);
+         gx_aurora::g_core_sink.set_copy_observer(gx_aurora::core_copy_observer, nullptr);
+         gx_aurora::g_core_submitted.store(0, std::memory_order_relaxed);
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 89f323a..994bcd3 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -100,6 +100,7 @@ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*);
+ void core_copy_observer(const gxruntime::gxcore::EfbCopyCommand& cmd, void*);
+ bool core_texture_dirty_epoch(uint32_t address, uint32_t size,
+                               uint64_t* epoch);
++bool core_efb_copy_epoch(uint32_t address, uint32_t size, uint64_t* epoch);
+ 
+ extern unsigned long long g_shadow_last_draw_total;
+ extern unsigned long long g_shadow_last_vertex_total;
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 95bb3df..2380cf7 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -43,6 +43,8 @@ void reset_texture_cache();
+ void note_frame_presented();
+ void set_texture_dirty_epoch_observer(
+     bool (*observer)(uint32_t, uint32_t, uint64_t*));
++void set_efb_copy_epoch_observer(
++    bool (*observer)(uint32_t, uint32_t, uint64_t*));
+ unsigned long long texture_upload_count();
+ } // namespace aurora::gfx::gxcore
+ #endif
+@@ -60,6 +62,10 @@ bool core_texture_dirty_epoch(uint32_t address, uint32_t size,
+     return dol_guest_memory_dirty_epoch(address, size, epoch);
+ }
+ 
++bool core_efb_copy_epoch(uint32_t address, uint32_t size, uint64_t* epoch) {
++    return dol_guest_memory_write_epoch(address, size, epoch);
++}
++
+ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*) {
+     if (!plan.ok)
+         return; // skip reasons are tallied in the sink gap counters
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 1faf316..e4440bb 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -332,6 +332,13 @@ uint64_t small_texture_hash(const uint8_t* bytes, uint32_t size,
+ }
+ TextureCacheStats g_textureCacheStats;
+ TextureDirtyEpochObserver g_textureDirtyEpochObserver = nullptr;
++// For EFB copies (guest_memory_dirty.h's write epoch): unset, the texture one.
++TextureDirtyEpochObserver g_efbCopyEpochObserver = nullptr;
++
++bool efb_copy_epoch(uint32_t address, uint32_t size, uint64_t* epoch) {
++  const auto observer = g_efbCopyEpochObserver != nullptr ? g_efbCopyEpochObserver : g_textureDirtyEpochObserver;
++  return observer != nullptr && observer(address, size, epoch);
++}
+ 
+ // EFB copy allocations mirror GXState::copyTextureCache: one guest destination
+ // may be reused with different dimensions or formats, which require distinct GPU
+@@ -964,6 +971,8 @@ void set_texture_dirty_epoch_observer(TextureDirtyEpochObserver observer) {
+   g_textureDirtyEpochObserver = observer;
+ }
+ 
++void set_efb_copy_epoch_observer(TextureDirtyEpochObserver observer) { g_efbCopyEpochObserver = observer; }
++
+ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
+ unsigned long long texture_upload_count() { return g_textureCacheStats.uploads; }
+ 
+@@ -1059,8 +1068,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   }
+   uint64_t memoryEpoch = 0;
+   const bool memoryEpochValid =
+-      g_textureDirtyEpochObserver != nullptr && cmd.byte_size != 0u &&
+-      g_textureDirtyEpochObserver(cmd.dest_address, cmd.byte_size, &memoryEpoch);
++      cmd.byte_size != 0u && efb_copy_epoch(cmd.dest_address, cmd.byte_size, &memoryEpoch);
+   g_efbCopyTextures.insert_or_assign(
+       cmd.dest_address,
+       EfbCopyBinding{it->second, cmd.byte_size, memoryEpoch, memoryEpochValid});
+@@ -1643,9 +1651,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       uint64_t memoryEpoch = 0;
+       const bool memoryUnchanged =
+           !efbIt->second.memory_epoch_valid ||
+-          (g_textureDirtyEpochObserver != nullptr &&
+-           g_textureDirtyEpochObserver(address, efbIt->second.byte_size,
+-                                       &memoryEpoch) &&
++          (efb_copy_epoch(address, efbIt->second.byte_size, &memoryEpoch) &&
+            memoryEpoch == efbIt->second.memory_epoch);
+       if (memoryUnchanged) {
+         ++g_textureCacheStats.hits;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 4ab8b8e..9759829 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -135,6 +135,8 @@ void note_frame_presented();
+ using TextureDirtyEpochObserver =
+     bool (*)(uint32_t address, uint32_t size, uint64_t* epoch);
+ void set_texture_dirty_epoch_observer(TextureDirtyEpochObserver observer);
++// EFB copies: the guest memory's write epoch, which a cache flush doesn't move.
++void set_efb_copy_epoch_observer(TextureDirtyEpochObserver observer);
+ 
+ // Texture-cache telemetry (S13 A3): proves the no-reconvert property. `uploads`
+ // counts actual decode+upload (cache miss); `hits` counts cache reuse (no
+diff --git a/GXRuntime/include/gxruntime/guest_memory_dirty.h b/GXRuntime/include/gxruntime/guest_memory_dirty.h
+index be60a63..f2ba021 100644
+--- a/GXRuntime/include/gxruntime/guest_memory_dirty.h
++++ b/GXRuntime/include/gxruntime/guest_memory_dirty.h
+@@ -12,9 +12,18 @@ extern "C" {
+ // mark ranges when the guest flushes CPU cache lines or a device completes a
+ // bulk transfer. Callers outside physical MEM1 receive false and must use
+ // content comparison instead.
++//
++// Two kinds of mark: a write (a device transfer, a readback written into RAM)
++// and a cache flush (the guest's dcbf/dcbst, which says the CPU may have
++// written there). dol_guest_memory_dirty_epoch sees both; the write epoch only
++// writes. An image the GPU itself rendered into a guest address (an EFB copy)
++// has no bytes in RAM to go stale, so it follows the write epoch: a flush of a
++// line in the same page must not replace it with RAM's unrelated bytes.
+ void dol_guest_memory_dirty_reset(void);
+ void dol_guest_memory_dirty_mark(u32 address, u32 size);
++void dol_guest_memory_flush_mark(u32 address, u32 size);
+ bool dol_guest_memory_dirty_epoch(u32 address, u32 size, u64* epoch);
++bool dol_guest_memory_write_epoch(u32 address, u32 size, u64* epoch);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/GXRuntime/src/guest_memory_dirty.c b/GXRuntime/src/guest_memory_dirty.c
+index fb17c71..0e24781 100644
+--- a/GXRuntime/src/guest_memory_dirty.c
++++ b/GXRuntime/src/guest_memory_dirty.c
+@@ -9,7 +9,8 @@
+ #define DOL_MEM1_DIRTY_PAGE_COUNT \
+     (DOL_MEM1_TRACKED_SIZE / DOL_MEM1_DIRTY_PAGE_SIZE)
+ 
+-static u64 g_page_epochs[DOL_MEM1_DIRTY_PAGE_COUNT];
++static u64 g_page_epochs[DOL_MEM1_DIRTY_PAGE_COUNT];        // writes and flushes
++static u64 g_page_write_epochs[DOL_MEM1_DIRTY_PAGE_COUNT];  // writes only
+ static u64 g_next_epoch;
+ 
+ static bool physical_range(u32 address, u32 size, u32* start, u32* end) {
+@@ -27,29 +28,45 @@ static bool physical_range(u32 address, u32 size, u32* start, u32* end) {
+ 
+ void dol_guest_memory_dirty_reset(void) {
+     memset(g_page_epochs, 0, sizeof(g_page_epochs));
++    memset(g_page_write_epochs, 0, sizeof(g_page_write_epochs));
+     g_next_epoch = 0u;
+ }
+ 
+-void dol_guest_memory_dirty_mark(u32 address, u32 size) {
++static void mark(u32 address, u32 size, bool write) {
+     u32 start;
+     u32 end;
+     if (!physical_range(address, size, &start, &end))
+         return;
+     const u64 epoch = ++g_next_epoch;
+-    for (u32 page = start; page <= end; ++page)
++    for (u32 page = start; page <= end; ++page) {
+         g_page_epochs[page] = epoch;
++        if (write)
++            g_page_write_epochs[page] = epoch;
++    }
+ }
+ 
+-bool dol_guest_memory_dirty_epoch(u32 address, u32 size, u64* epoch) {
++void dol_guest_memory_dirty_mark(u32 address, u32 size) { mark(address, size, true); }
++
++void dol_guest_memory_flush_mark(u32 address, u32 size) { mark(address, size, false); }
++
++static bool newest(const u64* epochs, u32 address, u32 size, u64* epoch) {
+     u32 start;
+     u32 end;
+     if (epoch == NULL || !physical_range(address, size, &start, &end))
+         return false;
+-    u64 newest = 0u;
++    u64 latest = 0u;
+     for (u32 page = start; page <= end; ++page) {
+-        if (g_page_epochs[page] > newest)
+-            newest = g_page_epochs[page];
++        if (epochs[page] > latest)
++            latest = epochs[page];
+     }
+-    *epoch = newest;
++    *epoch = latest;
+     return true;
+ }
++
++bool dol_guest_memory_dirty_epoch(u32 address, u32 size, u64* epoch) {
++    return newest(g_page_epochs, address, size, epoch);
++}
++
++bool dol_guest_memory_write_epoch(u32 address, u32 size, u64* epoch) {
++    return newest(g_page_write_epochs, address, size, epoch);
++}
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index a82ed17..9dfc87b 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -2681,6 +2681,22 @@ static void test_guest_memory_dirty_epochs(void) {
+     assert(epoch == 2u);
+     assert(!dol_guest_memory_dirty_epoch(0x82000000u, 1u, &epoch));
+     assert(!dol_guest_memory_dirty_epoch(0u, 0u, &epoch));
++    /* A cache flush moves the dirty epoch only; a write moves both. */
++    dol_guest_memory_dirty_reset();
++    u64 write_epoch = 0u;
++    dol_guest_memory_dirty_mark(0x80004000u, 0x20u);
++    assert(dol_guest_memory_write_epoch(0x80004000u, 0x20u, &write_epoch));
++    const u64 written = write_epoch;
++    assert(written != 0u);
++    dol_guest_memory_flush_mark(0x80004040u, 0x20u);
++    assert(dol_guest_memory_dirty_epoch(0x80004000u, 0x20u, &epoch));
++    assert(epoch > written);
++    assert(dol_guest_memory_write_epoch(0x80004000u, 0x20u, &write_epoch));
++    assert(write_epoch == written);
++    dol_guest_memory_dirty_mark(0x80004080u, 0x20u);
++    assert(dol_guest_memory_write_epoch(0x80004000u, 0x20u, &write_epoch));
++    assert(write_epoch > written);
++    assert(!dol_guest_memory_write_epoch(0x82000000u, 1u, &write_epoch));
+ }
+ 
+ int main(void) {
+-- 
+2.46.0
+

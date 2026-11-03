@@ -1,0 +1,126 @@
+From ac67cb5029818567fff70fde18c1e3b23ea9cba6 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 16:56:33 -0500
+Subject: [PATCH] llvm: admit register-only FP retry entries
+
+---
+ src/app/pipeline.c                  |  2 +-
+ src/backend/llvm/register_state.cpp | 23 ++++++++++-------------
+ tests/llvm_fixture.cpp              |  7 +++++++
+ tests/llvm_smoke_test.c             | 20 ++++++++++++++++++++
+ 4 files changed, 38 insertions(+), 14 deletions(-)
+
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index c435441..afe3026 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v26"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v27"
+ 
+ typedef struct {
+     const PPCInst* insts;
+diff --git a/src/backend/llvm/register_state.cpp b/src/backend/llvm/register_state.cpp
+index 58ddbbc..2d219a3 100644
+--- a/src/backend/llvm/register_state.cpp
++++ b/src/backend/llvm/register_state.cpp
+@@ -137,12 +137,11 @@ void FunctionEmitter::scanRegionLeaders() {
+     region_leaders_[(address - source_.guest_start) / 4u] = true;
+   }
+ 
+-  // The guest's lazy-FP path can first fault on an FP/PSQ memory operation or
+-  // a paired register transfer after an OS context switch.
+-  // Keep that cold entry separate from the hot region so a retry can reload
+-  // architectural state without discarding compile-time GQR knowledge. Do
+-  // not clone arithmetic-only regions: they are not first-use sites and are
+-  // common enough to make full-game object generation prohibitively costly.
++  // The guest's lazy-FP path can first fault on any FP instruction after an OS
++  // context switch. Memory/PSQ sites use cold suffixes so the hot region keeps
++  // compile-time GQR knowledge. Register-only first use becomes a structural
++  // entry instead; cloning every arithmetic suffix makes full-game generation
++  // prohibitively costly.
+   const std::vector<bool> structural_leaders = region_leaders_;
+   bool fp_entry_seen = false;
+   for (u32 i = 0; i < source_.block_count; i++) {
+@@ -168,14 +167,12 @@ void FunctionEmitter::scanRegionLeaders() {
+       const bool indexed_psq = primary == 4u &&
+                                (xo == 6u || xo == 7u || xo == 38u ||
+                                 xo == 39u);
+-      const bool paired_register_transfer =
+-          primary == 4u &&
+-          (xo == 528u || xo == 560u || xo == 592u || xo == 624u);
+-      if (!scalar_memory && !indexed_scalar_memory && !direct_psq &&
+-          !indexed_psq && !paired_register_transfer)
+-        continue;
+-      if (!region_leaders_[i])
++      const bool memory_first_use =
++          scalar_memory || indexed_scalar_memory || direct_psq || indexed_psq;
++      if (memory_first_use && !region_leaders_[i])
+         retry_leaders_[i] = true;
++      else
++        region_leaders_[i] = true;
+       fp_entry_seen = true;
+       break;
+     }
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index dc816f1..3592905 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -375,6 +375,13 @@ int main(int argc, char **argv) {
+   };
+   CHECK(add_chunk(&module, paired_register_resume_words, 3, 0x80004100u));
+ 
++  const u32 scalar_register_resume_words[] = {
++      0x38A50001u,
++      0xFC041800u,
++      0x4E800020u,
++  };
++  CHECK(add_chunk(&module, scalar_register_resume_words, 3, 0x80004200u));
++
+   CHECK(dolir_verify(&module, stderr));
+   DolLLVMOptions options{};
+   options.optimization_level = 2;
+diff --git a/tests/llvm_smoke_test.c b/tests/llvm_smoke_test.c
+index bfb2ee7..6d42ea8 100644
+--- a/tests/llvm_smoke_test.c
++++ b/tests/llvm_smoke_test.c
+@@ -23,6 +23,7 @@ void func_80003E00(CPUState* cpu);
+ void func_80003F00(CPUState* cpu);
+ void func_80004000(CPUState* cpu);
+ void func_80004100(CPUState* cpu);
++void func_80004200(CPUState* cpu);
+ 
+ static u32 fallback_count;
+ static int fallback_bad;
+@@ -207,6 +208,25 @@ int main(void) {
+     CHECK(cpu.pc == 0x81234564u);
+     CHECK(fallback_count == fallback_before_paired_register_retry);
+ 
++    prepare_call(&cpu, 0x80004200u);
++    cpu.msr = 0;
++    cpu.gpr[5] = 41;
++    cpu.fpr[4] = 1.0;
++    cpu.fpr[3] = 2.0;
++    cpu.cr = 0;
++    u32 fallback_before_scalar_register_retry = fallback_count;
++    func_80004200(&cpu);
++    CHECK(cpu.gpr[5] == 42);
++    CHECK(cpu.exception == PPC_EXC_FP_UNAVAILABLE);
++    CHECK(cpu.srr0 == 0x80004204u);
++    cpu.exception = 0;
++    cpu.msr |= 1u << 13;
++    cpu.pc = cpu.srr0;
++    func_80004200(&cpu);
++    CHECK((cpu.cr >> 28) == 8u);
++    CHECK(cpu.pc == 0x81234564u);
++    CHECK(fallback_count == fallback_before_scalar_register_retry);
++
+     prepare_call(&cpu, 0x80002000u);
+     cpu.gpr[3] = 0xA5A55A5Au;
+     func_80002000(&cpu);
+-- 
+2.41.0
+

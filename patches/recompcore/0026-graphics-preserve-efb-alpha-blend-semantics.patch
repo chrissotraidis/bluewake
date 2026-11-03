@@ -1,0 +1,177 @@
+From d86c25a6a6222d77893c08081dc8bff1d8498825 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 06:47:30 -0500
+Subject: [PATCH] graphics: preserve EFB alpha blend semantics
+
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 16 ++++----
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  5 ++-
+ .../include/gxruntime/gxcore/shader.hpp       |  3 ++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 35 +++++++++++++++++-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 37 ++++++++++++++++++-
+ 5 files changed, 84 insertions(+), 12 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 808d323d6d..6eb053544f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -421,13 +421,15 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+         .dstFactor = to_blend_factor_dst(
+             static_cast<gxc::DstBlendFactor>(key.dst_factor), dual_source),
+     };
+-    blendState.alpha = dual_source
+-                           ? wgpu::BlendComponent{
+-                                 .operation = wgpu::BlendOperation::Add,
+-                                 .srcFactor = wgpu::BlendFactor::One,
+-                                 .dstFactor = wgpu::BlendFactor::Zero,
+-                             }
+-                           : blendState.color;
++    blendState.alpha = {
++        .operation = wgpu::BlendOperation::Add,
++        .srcFactor = to_blend_factor_src(
++            static_cast<gxc::SrcBlendFactor>(key.src_factor_alpha),
++            dual_source),
++        .dstFactor = to_blend_factor_dst(
++            static_cast<gxc::DstBlendFactor>(key.dst_factor_alpha),
++            dual_source),
++    };
+   }
+   auto writeMask = wgpu::ColorWriteMask::None;
+   if (key.color_update != 0) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index e16b415fc1..ac9bfc4f9e 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -36,8 +36,9 @@ struct DrawData {
+ // stages add shader structure, pixel constants, and indirect texmap bindings.
+ // v7: fifth texgen adds UV4 and a high per-vertex matrix-index word. v8:
+ // destination-alpha override adds a dual-source fragment output/blend state.
+-// v9: GXSetZCompLoc early depth adds a depth-only pipeline variant.
+-constexpr uint32_t GXCorePipelineConfigVersion = 9;
++// v9: GXSetZCompLoc early depth adds a depth-only pipeline variant. v10:
++// RGB and alpha blending carry donor-exact independent factors.
++constexpr uint32_t GXCorePipelineConfigVersion = 10;
+ 
+ struct PipelineConfig {
+   uint32_t version = GXCorePipelineConfigVersion;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 60be69f125..47afc848f8 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -272,11 +272,14 @@ struct PipelineKey {
+   std::uint8_t blend_subtract = 0; // cmode0 bit 11
+   std::uint8_t src_factor = 0;     // SrcBlendFactor (cmode0 bits 8-10)
+   std::uint8_t dst_factor = 0;     // DstBlendFactor (cmode0 bits 5-7)
++  std::uint8_t src_factor_alpha = 0; // color factors mapped for alpha blending
++  std::uint8_t dst_factor_alpha = 0;
+   std::uint8_t color_update = 0;   // cmode0 bit 3
+   std::uint8_t alpha_update = 0;   // cmode0 bit 4
+   // 0 triangle list, 1 line list, 2 point list. Line strips are expanded to
+   // line-list pairs by build_topology_indices.
+   std::uint8_t primitive_topology = 0;
++  std::uint8_t pad1[2]{};
+ };
+ static_assert(std::has_unique_object_representations_v<PipelineKey>);
+ 
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 7092df1b0d..fca7b337bd 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -816,15 +816,46 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   pipe.dst_factor = static_cast<std::uint8_t>(bits(cmode0, 3, 5));
+   pipe.src_factor = static_cast<std::uint8_t>(bits(cmode0, 3, 8));
+   pipe.color_update = static_cast<std::uint8_t>(bits(cmode0, 1, 3));
+-  pipe.alpha_update = static_cast<std::uint8_t>(bits(cmode0, 1, 4));
+   const std::uint32_t dst_alpha = bp_valid_[0x42] ? bp_regs_[0x42] : 0u;
+   const std::uint32_t pe_control = bp_valid_[0x43] ? bp_regs_[0x43] : 0u;
++  const bool target_has_alpha = bits(pe_control, 3, 0) == 1u;
++  pipe.alpha_update = static_cast<std::uint8_t>(
++      bits(cmode0, 1, 4) != 0u && target_has_alpha);
++
++  // Dolphin BlendingState keeps RGB and alpha factors separate. EFB formats
++  // without alpha read destination alpha as one, and color factors collapse to
++  // their alpha equivalents when operating on the alpha channel.
++  if (!target_has_alpha) {
++    if (pipe.src_factor == 6u)
++      pipe.src_factor = 1u;
++    else if (pipe.src_factor == 7u)
++      pipe.src_factor = 0u;
++    if (pipe.dst_factor == 6u)
++      pipe.dst_factor = 1u;
++    else if (pipe.dst_factor == 7u)
++      pipe.dst_factor = 0u;
++  }
++  pipe.src_factor_alpha = pipe.src_factor;
++  pipe.dst_factor_alpha = pipe.dst_factor;
++  if (pipe.src_factor_alpha == 2u)
++    pipe.src_factor_alpha = 6u;
++  else if (pipe.src_factor_alpha == 3u)
++    pipe.src_factor_alpha = 7u;
++  if (pipe.dst_factor_alpha == 2u)
++    pipe.dst_factor_alpha = 4u;
++  else if (pipe.dst_factor_alpha == 3u)
++    pipe.dst_factor_alpha = 5u;
++
+   pipe.early_depth_test = static_cast<std::uint8_t>(bits(pe_control, 1, 6));
+   if (pipe.depth_test != 0u && pipe.early_depth_test != 0u)
+     ++counters.early_depth_active;
+   const bool use_dst_alpha = bits(dst_alpha, 1, 8) != 0u &&
+                              pipe.alpha_update != 0u &&
+-                             bits(pe_control, 3, 0) == 1u;
++                             target_has_alpha;
++  if (use_dst_alpha) {
++    pipe.src_factor_alpha = 1u;
++    pipe.dst_factor_alpha = 0u;
++  }
+   key.use_dst_alpha = use_dst_alpha ? 1u : 0u;
+   key.dst_alpha = static_cast<std::uint8_t>(bits(dst_alpha, 8, 0));
+   if (use_dst_alpha)
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 3ad7c634b4..53e67c102f 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -347,8 +347,43 @@ void test_state_to_plan_and_wgsl() {
+   CHECK(plan.pipeline.blend_enable == 1);
+   CHECK(plan.pipeline.src_factor == 4);
+   CHECK(plan.pipeline.dst_factor == 5);
++  CHECK(plan.pipeline.src_factor_alpha == 4);
++  CHECK(plan.pipeline.dst_factor_alpha == 5);
+   CHECK(plan.pipeline.color_update == 1);
+-  CHECK(plan.pipeline.alpha_update == 1);
++  // Default PEControl is RGB8_Z24, whose destination alpha is fixed at one.
++  CHECK(plan.pipeline.alpha_update == 0);
++
++  // RGBA6 preserves alpha writes and maps color factors to their alpha-channel
++  // equivalents exactly as Dolphin BlendingState::Generate.
++  {
++    gxc::GxCoreState alpha_blend_state = state;
++    alpha_blend_state.apply(bp(0x41u, 1u | (2u << 5u) | (2u << 8u) |
++                                         (1u << 3u) | (1u << 4u)));
++    alpha_blend_state.apply(bp(0x43u, 1u));
++    gxc::GapCounters gaps;
++    const gxc::DrawPlan alpha_blend_plan =
++        alpha_blend_state.build_draw_plan(draw, gaps);
++    CHECK(alpha_blend_plan.ok);
++    CHECK(alpha_blend_plan.pipeline.alpha_update == 1u);
++    CHECK(alpha_blend_plan.pipeline.src_factor == 2u);
++    CHECK(alpha_blend_plan.pipeline.dst_factor == 2u);
++    CHECK(alpha_blend_plan.pipeline.src_factor_alpha == 6u);
++    CHECK(alpha_blend_plan.pipeline.dst_factor_alpha == 4u);
++  }
++
++  // RGB8 treats destination alpha as one for color blending and never writes
++  // the host surface's emulated alpha channel.
++  {
++    gxc::GxCoreState rgb_state = state;
++    rgb_state.apply(bp(0x41u, 1u | (7u << 5u) | (6u << 8u) |
++                                 (1u << 3u) | (1u << 4u)));
++    gxc::GapCounters gaps;
++    const gxc::DrawPlan rgb_plan = rgb_state.build_draw_plan(draw, gaps);
++    CHECK(rgb_plan.ok);
++    CHECK(rgb_plan.pipeline.src_factor == 1u);
++    CHECK(rgb_plan.pipeline.dst_factor == 0u);
++    CHECK(rgb_plan.pipeline.alpha_update == 0u);
++  }
+ 
+   // Decoded vertices: fixed 20-float layout.
+   CHECK(plan.vertex_count == 4);

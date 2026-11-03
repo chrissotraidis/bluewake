@@ -1,0 +1,357 @@
+From 475aad87c2e719ad4b2121ec335fc0feba3b07a9 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 03:12:50 -0500
+Subject: [PATCH] aurora: end each frame at its display copy in worker mode
+
+The display-copy flag was raised by the copy observer on the FIFO worker, and
+the main thread presented at its next GX write. By then the worker had often
+run on into the next frame's first draws - Wind Waker draws the sky and sea
+first - and recorded them into the frame being presented; the next frame then
+began without them. The title showed its logo and island over a black sky in
+4-14 of 310 captured frames in worker mode and in none with the worker off.
+
+The frontend can now stop a FIFO parse right after a display copy
+(set_stop_at_display_copy), leaving the rest buffered. In worker mode the worker
+then leaves the recording lock and waits until the main thread has presented;
+the main thread presents at its next GX write or inside a drain that is waiting
+on the worker, exactly once per stop. After: 0 black frames in three worker runs
+and one synchronous run, all with the same 12,269,794 submitted draws. New
+frontend test: a flush stops after GXCopyDisp and the next flush resumes.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  5 +-
+ .../backends/aurora/aurora_backend_private.h  |  5 +-
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 87 +++++++++++++++++--
+ .../aurora_recomp/retail_gx_frontend.hpp      |  8 ++
+ .../frontend/src/retail_gx_frontend.cpp       |  8 ++
+ .../frontend/tests/frontend_replay_test.cpp   | 33 +++++++
+ 6 files changed, 136 insertions(+), 10 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 4e19c874dc..d9026ebe77 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -57,7 +57,7 @@ bool g_shadow_frontend_failed = false;
+ gxruntime::gxcore::GxCoreSink g_core_sink;
+ unsigned long long g_core_submitted = 0;
+ unsigned long long g_core_rejected = 0;
+-bool g_display_copy_pending = false;
++std::atomic<bool> g_display_copy_pending{false};
+ 
+ unsigned long long g_shadow_last_draw_total = 0;
+ unsigned long long g_shadow_last_vertex_total = 0;
+@@ -365,6 +365,9 @@ bool dol_aurora_initialize(int argc, char** argv,
+     gx_aurora::g_shadow_frontend_failed = false;
+     gx_aurora::g_shadow_frontend.reset(nullptr);
+     gx_aurora::g_shadow_frontend.set_packet_drain_enabled(gx_aurora::g_shadow_frontend_enabled);
++    // The frame ends at the display copy: stop each parse there so the draws
++    // after it are recorded after the present, into the next frame.
++    gx_aurora::g_shadow_frontend.set_stop_at_display_copy(gx_aurora::g_gx_core_enabled);
+     gx_aurora::g_shadow_packet_sink.reset();
+     gx_aurora::g_shadow_packet_sink.set_streaming(true);
+     gx_aurora::g_shadow_packet_sink.set_draw_observer(
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 88fa0f90c2..13c18fcaf8 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -6,6 +6,7 @@
+ #include "gxruntime/platform.h"
+ #include <SDL3/SDL_audio.h>
+ #include <array>
++#include <atomic>
+ #include <string>
+ #include <unordered_map>
+ 
+@@ -83,7 +84,9 @@ extern bool g_shadow_frontend_failed;
+ extern gxruntime::gxcore::GxCoreSink g_core_sink;
+ extern unsigned long long g_core_submitted;
+ extern unsigned long long g_core_rejected;
+-extern bool g_display_copy_pending;
++// Set by the copy observer (the FIFO worker's thread in worker mode) when a
++// display copy ends a frame; the main thread presents and clears it.
++extern std::atomic<bool> g_display_copy_pending;
+ 
+ 
+ 
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 0015370654..2ac2659302 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -12,6 +12,7 @@
+ #include <gxruntime/guest_memory_dirty.h>
+ #include <SDL3/SDL_timer.h>
+ #include <atomic>
++#include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -35,6 +36,11 @@ void set_texture_dirty_epoch_observer(
+ 
+ namespace gx_aurora {
+ 
++// True while the FIFO worker translates. Then the worker requests each present
++// itself, once per display copy (wait_for_present), and the copy observer must
++// not: its request, raised mid-parse, led to a second, empty present.
++std::atomic<bool> g_worker_mode{false};
++
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+ bool core_texture_dirty_epoch(uint32_t address, uint32_t size,
+                               uint64_t* epoch) {
+@@ -52,7 +58,7 @@ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*) {
+ 
+ void core_copy_observer(const gxruntime::gxcore::EfbCopyCommand& cmd, void*) {
+     aurora::gfx::gxcore::copy_efb_to_texture(cmd);
+-    if (cmd.format == 0xFu)
++    if (cmd.format == 0xFu && !g_worker_mode.load(std::memory_order_relaxed))
+         g_display_copy_pending = true;
+ }
+ #endif
+@@ -327,6 +333,18 @@ bool g_aurora_recording_in_transition = false;
+ // silent, because before this gate existed that state was a null dereference.
+ std::atomic<std::uint64_t> g_aurora_unframed_batches = 0;
+ 
++// Display-copy hand-off (worker mode). The frontend stops a parse right after a
++// display copy; the worker then leaves the recording lock and waits here until
++// the main thread has presented, so the next frame's first draws are recorded
++// into the next frame. Before this the worker ran on into them and they landed
++// in the frame being presented: the Wind Waker title intermittently showed its
++// logo and island over a black sky and sea (the sky is drawn first).
++std::condition_variable g_present_cv;
++std::uint64_t g_presents_done = 0;      // under g_fifo_worker_mutex
++bool g_worker_waiting_present = false;  // under g_fifo_worker_mutex
++std::uint64_t g_present_wait_seen = 0;  // g_presents_done when the wait began
++void wait_for_present(std::unique_lock<std::mutex>& recording);
++
+ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     if (batch.empty())
+         return;
+@@ -334,8 +352,8 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     // One batch, one frame: the lock keeps the main thread from closing the
+     // packet underneath this recording, and the gate below keeps this batch
+     // from recording into a packet that does not exist yet.
+-    std::lock_guard<std::mutex> recording(g_aurora_recording_mutex);
+-    const bool record_into_aurora = g_gx_core_enabled && g_aurora_recording_open;
++    std::unique_lock<std::mutex> recording(g_aurora_recording_mutex);
++    bool record_into_aurora = g_gx_core_enabled && g_aurora_recording_open;
+     if (g_gx_core_enabled && !record_into_aurora)
+         g_aurora_unframed_batches.fetch_add(1, std::memory_order_relaxed);
+     // Feed the front end in the slices the single-threaded path flushes at.
+@@ -356,6 +374,14 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+             flushed = g_shadow_frontend.flush(&g_core_sink);
+         else
+             flushed = g_shadow_frontend.flush(&g_shadow_packet_sink);
++        // A parse that stopped at a display copy resumes on the buffered rest
++        // only after the present, and may stop again at the next one.
++        while (flushed && g_shadow_frontend.display_copy_stopped()) {
++            wait_for_present(recording);
++            record_into_aurora = g_gx_core_enabled && g_aurora_recording_open;
++            flushed = record_into_aurora ? g_shadow_frontend.flush(&g_core_sink)
++                                         : g_shadow_frontend.flush(&g_shadow_packet_sink);
++        }
+     }
+     if (!flushed) {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+@@ -419,6 +445,27 @@ void g_fifo_worker_main() {
+     }
+ }
+ 
++// Called by the worker with the recording lock held, after a parse stopped at a
++// display copy. Lock order is recording, then g_fifo_worker_mutex, everywhere.
++void wait_for_present(std::unique_lock<std::mutex>& recording) {
++    std::unique_lock<std::mutex> lock(g_fifo_worker_mutex);
++    if (g_fifo_worker_stop)
++        return;
++    const std::uint64_t seen = g_presents_done;
++    g_worker_waiting_present = true;
++    g_present_wait_seen = seen;
++    // One request per stop: the main thread presents at its next GX write, or
++    // in a drain that is waiting on this worker (woken below), whichever comes
++    // first; the other finds the request already served.
++    g_display_copy_pending = true;
++    g_fifo_worker_idle_cv.notify_all();
++    recording.unlock();
++    g_present_cv.wait(lock, [seen] { return g_presents_done != seen || g_fifo_worker_stop; });
++    g_worker_waiting_present = false;
++    lock.unlock();
++    recording.lock();
++}
++
+ void g_fifo_worker_start() {
+     if (g_fifo_worker_started || trace_should_record())
+         return;
+@@ -430,6 +477,7 @@ void g_fifo_worker_start() {
+     if (disabled)
+         return;
+     g_fifo_worker_started = true;
++    g_worker_mode = true;
+     g_fifo_worker_thread = std::thread(g_fifo_worker_main);
+ }
+ 
+@@ -454,8 +502,10 @@ void g_fifo_worker_stop_and_join() {
+         g_fifo_work_pending = true;
+         worker.swap(g_fifo_worker_thread);
+         g_fifo_worker_started = false;
++        g_worker_mode = false;
+     }
+     g_fifo_worker_cv.notify_all();
++    g_present_cv.notify_all();
+     if (worker.joinable())
+         worker.join();
+     std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+@@ -521,9 +571,26 @@ static void g_fifo_drain() {
+         return;
+     g_fifo_work_pending = true;
+     g_fifo_worker_cv.notify_one();
+-    g_fifo_worker_idle_cv.wait(lock, [target] {
+-        return g_fifo_worker_idle && g_fifo_parsed >= target;
+-    });
++    for (;;) {
++        g_fifo_worker_idle_cv.wait(lock, [target] {
++            return (g_fifo_worker_idle && g_fifo_parsed >= target) ||
++                   g_worker_waiting_present;
++        });
++        if (g_fifo_worker_idle && g_fifo_parsed >= target)
++            return;
++        if (g_presents_done != g_present_wait_seen) {
++            // Already presented for this stop; the worker is waking up.
++            g_fifo_worker_idle_cv.wait_for(lock, std::chrono::milliseconds(1));
++            continue;
++        }
++        // The worker stopped at a display copy and waits for the present that
++        // ends the frame; this thread is the one that presents.
++        lock.unlock();
++        // No present has happened since the wait began, so this is the one.
++        g_display_copy_pending = false;
++        aurora_backend_present();
++        lock.lock();
++    }
+ }
+ 
+ }  // namespace
+@@ -1262,6 +1329,11 @@ void aurora_backend_present(void) {
+     // presentable), and the worker may record.
+     gx_aurora::g_aurora_recording_in_transition = false;
+     aurora_recording.unlock();
++    {
++        std::lock_guard<std::mutex> lock(gx_aurora::g_fifo_worker_mutex);
++        ++gx_aurora::g_presents_done;
++    }
++    gx_aurora::g_present_cv.notify_all();
+ }
+ 
+ void aurora_backend_mark_gx_begin(void) {
+@@ -1308,8 +1380,7 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+     if (gx_aurora::g_gx_core_enabled && !gx_aurora::g_frame_open)
+         gx_aurora::reopen_frame_if_unframed();
+     if (gx_aurora::g_gx_core_enabled)
+-        if (gx_aurora::g_display_copy_pending) {
+-            gx_aurora::g_display_copy_pending = false;
++        if (gx_aurora::g_display_copy_pending.exchange(false)) {
+             aurora_backend_present();
+         }
+     if (gx_aurora::g_gx_core_enabled)
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index 1b86f87413..4ee3073647 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -60,6 +60,12 @@ public:
+                     std::uint8_t stride);
+   bool load_cp_reg(std::uint8_t reg, std::uint32_t value);
+   void set_packet_drain_enabled(bool enabled);
++  // Stop a FIFO parse right after a display copy (GXCopyDisp), leaving the
++  // rest buffered for the next flush. A host that presents at the display copy
++  // needs the frame to end exactly there: draws after it belong to the next
++  // frame. display_copy_stopped() reports that the last flush stopped so.
++  void set_stop_at_display_copy(bool enabled) { stop_at_display_copy_ = enabled; }
++  bool display_copy_stopped() const { return display_copy_stopped_; }
+ 
+   // Read-only tap on the decode event stream (histograms): invoked
+   // for every trace event a successful flush/write_display_list/replay_fifo
+@@ -123,6 +129,8 @@ private:
+   // trace, so one large batch cannot overflow it (see parse_stream).
+   bool emit_and_drain(AuroraRenderSink& sink);
+   AuroraRenderSink* parse_sink_ = nullptr;
++  bool stop_at_display_copy_ = false;
++  bool display_copy_stopped_ = false;
+ 
+   DolGxRecompState state_{};
+   std::vector<std::uint8_t> fifo_buffer_;
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index efafa5e4a2..75eb0080af 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -369,6 +369,7 @@ bool RetailGxFrontend::write_fifo(std::span<const std::uint8_t> bytes) {
+ 
+ bool RetailGxFrontend::flush(AuroraRenderSink* sink) {
+   last_error_ = nullptr;
++  display_copy_stopped_ = false;
+   std::uint32_t first_event = 0;
+   if (packet_drain_enabled_) {
+     first_event = emitted_trace_count_;
+@@ -661,6 +662,13 @@ bool RetailGxFrontend::parse_stream(std::span<const std::uint8_t> bytes,
+         return fail_parse("BP register handler rejected", cmd, pos,
+                           bytes[pos + 1u], read_be32(bytes, pos + 1u));
+       pos += 5u;
++      if (stop_at_display_copy_ && allow_partial && depth == 0u &&
++          bytes[pos - 4u] == DOL_GX_BP_REG_TRIGGER_EFB_COPY &&
++          (bytes[pos - 2u] & 0x40u) != 0u) {
++        // BP 0x52 with bit 14 set: GXCopyDisp. End this flush here.
++        display_copy_stopped_ = true;
++        break;
++      }
+       continue;
+     }
+ 
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 845c4be0e8..80f649a6d9 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -536,6 +536,38 @@ void test_large_batch_drains_instead_of_dropping() {
+   assert(saw_vcd);
+ }
+ 
++// A host that presents at the display copy needs the parse to end there: the
++// draws after GXCopyDisp belong to the next frame.
++void test_flush_stops_after_display_copy() {
++  std::vector<std::uint8_t> fifo;
++  push_bp(fifo, DOL_GX_BP_REG_GENMODE, 1u);
++  push_bp(fifo, DOL_GX_BP_REG_TRIGGER_EFB_COPY, (1u << 14u) | (1u << 11u));
++  push_bp(fifo, DOL_GX_BP_REG_GENMODE, 2u);
++
++  RetailGxFrontend frontend;
++  frontend.set_packet_drain_enabled(true);
++  frontend.set_stop_at_display_copy(true);
++  RecordingAuroraRenderSink sink;
++  assert(frontend.write_fifo(fifo));
++  assert(frontend.flush(&sink));
++  assert(frontend.display_copy_stopped());
++  assert(frontend.pending_fifo_size() == 5u);
++  auto genmode_writes = [&] {
++    std::size_t n = 0;
++    for (const auto& packet : sink.packets())
++      if (packet.kind == RenderPacketKind::State &&
++          packet.state.kind == RenderStateKind::BpReg &&
++          packet.state.index == DOL_GX_BP_REG_GENMODE)
++        ++n;
++    return n;
++  };
++  assert(genmode_writes() == 1u);
++  assert(frontend.flush(&sink));
++  assert(!frontend.display_copy_stopped());
++  assert(frontend.pending_fifo_size() == 0u);
++  assert(genmode_writes() == 2u);
++}
++
+ // GXLoadTexObj writes SETIMAGE0-3 and then SETTLUT for a CI texture. The
+ // texture a draw binds must carry the palette named by that later SETTLUT,
+ // not the one the slot held for the previous texture (the Wind Waker title
+@@ -692,6 +724,7 @@ int main() {
+   test_unresolved_tlut_load_is_noop();
+   test_tlut_written_after_image_selects_palette();
+   test_large_batch_drains_instead_of_dropping();
++  test_flush_stops_after_display_copy();
+   test_xf_projection_capture();
+ 
+   CPUState cpu;
+-- 
+2.41.0
+

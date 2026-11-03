@@ -1,0 +1,91 @@
+diff --git a/GXRuntime/src/audio_dma.c b/GXRuntime/src/audio_dma.c
+index 44b39f29ca..fe8e6a242c 100644
+--- a/GXRuntime/src/audio_dma.c
++++ b/GXRuntime/src/audio_dma.c
+@@ -182,18 +182,26 @@ bool dol_audio_dma_consume_pcm16_stereo_work(DolAudioDma* dma,
+     u32 source_address = 0;
+     u8 bytes[DOL_AUDIO_DMA_FRAMES_PER_CHUNK * 4u];
+     s16 samples[DOL_AUDIO_DMA_FRAMES_PER_CHUNK * 2u];
++    bool consumed = false;
+ 
+-    if (read_source == NULL ||
+-        !dol_audio_dma_advance(dma, work_units, &source_address) ||
+-        !read_source(user, source_address, bytes, sizeof bytes))
++    if (read_source == NULL)
+         return false;
+ 
+-    for (u32 i = 0; i < DOL_AUDIO_DMA_FRAMES_PER_CHUNK * 2u; i++) {
+-        const u32 offset = i * 2u;
+-        samples[i] = (s16)(((u16)bytes[offset] << 8) | bytes[offset + 1u]);
++    u64 pending_work = work_units;
++    while (dol_audio_dma_advance(dma, pending_work, &source_address)) {
++        pending_work = 0u;
++        if (!read_source(user, source_address, bytes, sizeof bytes))
++            return false;
++
++        for (u32 i = 0; i < DOL_AUDIO_DMA_FRAMES_PER_CHUNK * 2u; i++) {
++            const u32 offset = i * 2u;
++            samples[i] =
++                (s16)(((u16)bytes[offset] << 8) | bytes[offset + 1u]);
++        }
++        dol_platform_audio_push(samples, DOL_AUDIO_DMA_FRAMES_PER_CHUNK);
++        consumed = true;
+     }
+-    dol_platform_audio_push(samples, DOL_AUDIO_DMA_FRAMES_PER_CHUNK);
+-    return true;
++    return consumed;
+ }
+ 
+ bool dol_audio_dma_consume_pcm16_stereo(DolAudioDma* dma,
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index 270da89955..a3915e9406 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -152,7 +152,7 @@ static void test_audio_push_capture(const s16* samples, u32 frames) {
+     assert(samples != NULL);
+     assert(frames == 8u);
+     memcpy(g_captured_audio, samples, frames * 2u * sizeof(samples[0]));
+-    g_captured_audio_frames = frames;
++    g_captured_audio_frames += frames;
+ }
+ 
+ static bool test_audio_read(void* user, u32 source_address, u8* data,
+@@ -2022,6 +2022,38 @@ static void test_audio_dma_pcm_boundary(void) {
+     assert(g_captured_audio[3] == -1);
+     assert(g_captured_audio[4] == (s16)0x1234);
+     assert(g_captured_audio[5] == (s16)0xABCD);
++
++    DolAudioDma aggregate;
++    DolAudioDma sliced;
++    dol_audio_dma_init(&aggregate);
++    dol_audio_dma_init(&sliced);
++    dol_audio_dma_set_work_rate(&aggregate, 4000000u);
++    dol_audio_dma_set_work_rate(&sliced, 4000000u);
++    dol_audio_dma_set_source(&aggregate, 0x00100000u);
++    dol_audio_dma_set_source(&sliced, 0x00100000u);
++    dol_audio_dma_write_control(&aggregate, DOL_AUDIO_DMA_ENABLE | 1u);
++    dol_audio_dma_write_control(&sliced, DOL_AUDIO_DMA_ENABLE | 1u);
++    dol_audio_dma_ack_interrupt(&aggregate);
++    dol_audio_dma_ack_interrupt(&sliced);
++
++    g_captured_audio_frames = 0u;
++    assert(dol_audio_dma_consume_pcm16_stereo_work(
++        &aggregate, 2500u, test_audio_read, (void*)pcm_chunk));
++    assert(g_captured_audio_frames == 16u);
++    assert(aggregate.work_counter == 500u);
++
++    g_captured_audio_frames = 0u;
++    assert(!dol_audio_dma_consume_pcm16_stereo_work(
++        &sliced, 500u, test_audio_read, (void*)pcm_chunk));
++    assert(dol_audio_dma_consume_pcm16_stereo_work(
++        &sliced, 1000u, test_audio_read, (void*)pcm_chunk));
++    assert(dol_audio_dma_consume_pcm16_stereo_work(
++        &sliced, 1000u, test_audio_read, (void*)pcm_chunk));
++    assert(g_captured_audio_frames == 16u);
++    assert(sliced.work_counter == aggregate.work_counter);
++    assert(sliced.remaining_blocks == aggregate.remaining_blocks);
++    assert(sliced.current_source_address == aggregate.current_source_address);
++    assert(sliced.interrupt_pending == aggregate.interrupt_pending);
+     dol_platform_reset();
+ }
+ 

@@ -1,0 +1,164 @@
+From 4638a9f9e6be714277ccfa8d1e784eac1f6650ec Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 15:37:21 -0500
+Subject: [PATCH] llvm: preserve tagged alias memory accesses
+
+---
+ src/backend/llvm/memory.cpp | 31 +++++++++++++++++++++++--------
+ tests/llvm_fixture.cpp      |  7 +++++++
+ tests/llvm_smoke_test.c     | 31 +++++++++++++++++++++++++++++++
+ 3 files changed, 61 insertions(+), 8 deletions(-)
+
+diff --git a/src/backend/llvm/memory.cpp b/src/backend/llvm/memory.cpp
+index 58b7d9a..88ecbea 100644
+--- a/src/backend/llvm/memory.cpp
++++ b/src/backend/llvm/memory.cpp
+@@ -76,7 +76,12 @@ Value *FunctionEmitter::emitGuestLoad(Value *address, Type *resultType,
+                                       u32 width, bool sign) {
+   materializeFPRF();
+   Value *normalized = normalizeAddress(address);
+-  Value *mem1 = rangeCheck(normalized, GC_RAM_BASE, ram_size_, width);
++  Value *aliasAware = builder_.CreateICmpNE(
++      builder_.CreateAnd(address, builder_.getInt32(0x40000000u)),
++      builder_.getInt32(0));
++  Value *mem1 = builder_.CreateAnd(
++      builder_.CreateNot(aliasAware),
++      rangeCheck(normalized, GC_RAM_BASE, ram_size_, width));
+   BasicBlock *mem1Block = BasicBlock::Create(context_, "load_mem1", function_);
+   BasicBlock *checkMem2 =
+       BasicBlock::Create(context_, "load_check_mem2", function_);
+@@ -96,8 +101,10 @@ Value *FunctionEmitter::emitGuestLoad(Value *address, Type *resultType,
+ 
+   builder_.SetInsertPoint(checkMem2);
+   Value *inMem2 = builder_.CreateAnd(
+-      builder_.CreateIsNotNull(mem2_),
+-      rangeCheck(normalized, WII_MEM2_BASE, mem2_size_, width));
++      builder_.CreateNot(aliasAware),
++      builder_.CreateAnd(
++          builder_.CreateIsNotNull(mem2_),
++          rangeCheck(normalized, WII_MEM2_BASE, mem2_size_, width)));
+   builder_.CreateCondBr(inMem2, mem2Block, slowBlock,
+                         MDBuilder(context_).createBranchWeights(2000, 1));
+ 
+@@ -211,15 +218,21 @@ void FunctionEmitter::emitGuestStore(Value *address, Value *value, u32 width) {
+   materializeFPRF();
+   clearReservation(address);
+   Value *normalized = normalizeAddress(address);
++  Value *aliasAware = builder_.CreateICmpNE(
++      builder_.CreateAnd(address, builder_.getInt32(0x40000000u)),
++      builder_.getInt32(0));
+   BasicBlock *mem1Block = BasicBlock::Create(context_, "store_mem1", function_);
+   BasicBlock *checkMem2 =
+       BasicBlock::Create(context_, "store_check_mem2", function_);
+   BasicBlock *mem2Block = BasicBlock::Create(context_, "store_mem2", function_);
+   BasicBlock *slowBlock = BasicBlock::Create(context_, "store_slow", function_);
+   BasicBlock *join = BasicBlock::Create(context_, "store_join", function_);
+-  builder_.CreateCondBr(rangeCheck(normalized, GC_RAM_BASE, ram_size_, width),
+-                        mem1Block, checkMem2,
+-                        MDBuilder(context_).createBranchWeights(2000, 1));
++  builder_.CreateCondBr(
++      builder_.CreateAnd(
++          builder_.CreateNot(aliasAware),
++          rangeCheck(normalized, GC_RAM_BASE, ram_size_, width)),
++      mem1Block, checkMem2,
++      MDBuilder(context_).createBranchWeights(2000, 1));
+ 
+   builder_.SetInsertPoint(mem1Block);
+   Value *mem1Offset =
+@@ -232,8 +245,10 @@ void FunctionEmitter::emitGuestStore(Value *address, Value *value, u32 width) {
+ 
+   builder_.SetInsertPoint(checkMem2);
+   Value *inMem2 = builder_.CreateAnd(
+-      builder_.CreateIsNotNull(mem2_),
+-      rangeCheck(normalized, WII_MEM2_BASE, mem2_size_, width));
++      builder_.CreateNot(aliasAware),
++      builder_.CreateAnd(
++          builder_.CreateIsNotNull(mem2_),
++          rangeCheck(normalized, WII_MEM2_BASE, mem2_size_, width)));
+   builder_.CreateCondBr(inMem2, mem2Block, slowBlock,
+                         MDBuilder(context_).createBranchWeights(2000, 1));
+ 
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index 2b7995d..375d696 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -361,6 +361,13 @@ int main(int argc, char **argv) {
+   };
+   CHECK(add_chunk(&module, indexed_fp_resume_words, 3, 0x80003F00u));
+ 
++  const u32 tagged_alias_words[] = {
++      0x80A30000u,
++      0x90A30004u,
++      0x4E800020u,
++  };
++  CHECK(add_chunk(&module, tagged_alias_words, 3, 0x80004000u));
++
+   CHECK(dolir_verify(&module, stderr));
+   DolLLVMOptions options{};
+   options.optimization_level = 2;
+diff --git a/tests/llvm_smoke_test.c b/tests/llvm_smoke_test.c
+index c9395b9..f161f72 100644
+--- a/tests/llvm_smoke_test.c
++++ b/tests/llvm_smoke_test.c
+@@ -21,6 +21,7 @@ void func_80002D00(CPUState* cpu);
+ void func_80003D00(CPUState* cpu);
+ void func_80003E00(CPUState* cpu);
+ void func_80003F00(CPUState* cpu);
++void func_80004000(CPUState* cpu);
+ 
+ static u32 fallback_count;
+ static int fallback_bad;
+@@ -29,6 +30,10 @@ static u8 cache_operation;
+ static u32 cache_address;
+ static u32 cache_cia;
+ static u32 external_write_count;
++static u32 tagged_read_address;
++static u32 tagged_write_address;
++static u64 tagged_write_value;
++static u8 tagged_write_size;
+ static u32 spr_state[1024];
+ 
+ static u32 read_spr(CPUState* cpu, u16 spr, u32 cia) {
+@@ -65,6 +70,19 @@ static void external_write32(CPUState* cpu, u32 ea, u32 value, u8 rid) {
+     cpu->external_rid = rid;
+ }
+ 
++static u64 tagged_read(CPUState* cpu, u32 ea, u8 size) {
++    (void)cpu;
++    tagged_read_address = ea;
++    return size == 4u ? 0x12345678u : 0u;
++}
++
++static void tagged_write(CPUState* cpu, u32 ea, u64 value, u8 size) {
++    (void)cpu;
++    tagged_write_address = ea;
++    tagged_write_value = value;
++    tagged_write_size = size;
++}
++
+ static void prepare_call(CPUState* cpu, u32 address) {
+     cpu->pc = address;
+     cpu->lr = 0x81234567u;
+@@ -156,6 +174,19 @@ int main(void) {
+     CHECK(cpu.pc == 0x81234564u);
+     CHECK(fallback_count == fallback_before_indexed_fp_retry);
+ 
++    prepare_call(&cpu, 0x80004000u);
++    cpu.gpr[3] = 0xC1F8018Cu;
++    cpu.external_read = tagged_read;
++    cpu.external_write = tagged_write;
++    func_80004000(&cpu);
++    CHECK(cpu.gpr[5] == 0x12345678u);
++    CHECK(tagged_read_address == 0xC1F8018Cu);
++    CHECK(tagged_write_address == 0xC1F80190u);
++    CHECK(tagged_write_value == 0x12345678u && tagged_write_size == 4u);
++    CHECK(cpu.pc == 0x81234564u);
++    cpu.external_read = NULL;
++    cpu.external_write = NULL;
++
+     prepare_call(&cpu, 0x80002000u);
+     cpu.gpr[3] = 0xA5A55A5Au;
+     func_80002000(&cpu);
+-- 
+2.41.0
+

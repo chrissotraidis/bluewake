@@ -1,0 +1,180 @@
+diff --git a/GXRuntime/backends/aurora/aurora_audio.cpp b/GXRuntime/backends/aurora/aurora_audio.cpp
+index ac52184..f4492ce 100644
+--- a/GXRuntime/backends/aurora/aurora_audio.cpp
++++ b/GXRuntime/backends/aurora/aurora_audio.cpp
+@@ -73,6 +73,19 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+     }
+ 
+     int queued = SDL_GetAudioStreamQueued(gx_aurora::g_audio_stream);
++    // With the host pacing retraces by the wall clock (BlueWake's
++    // BLUEWAKE_WALL_PACE), the queue must not pace the game as well: its 1 ms
++    // waits added up to about 35 ms whenever the device drained a buffer, and
++    // two or three frames a second stayed on screen for 60 ms. A push that
++    // would overfill the queue is dropped instead and counted.
++    static const bool no_throttle = [] {
++        const char* env = std::getenv("DOL_AUDIO_NO_THROTTLE");
++        return env != nullptr && env[0] != '\0' && env[0] != '0';
++    }();
++    if (no_throttle && queued > max_queued_bytes) {
++        gx_aurora::g_audio_dropped_count++;
++        return;
++    }
+     unsigned waited_ms = 0;
+     while (queued > max_queued_bytes && waited_ms < 20u) {
+         gx_aurora::g_audio_throttle_count++;
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index b068676..5a6e146 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -37,6 +37,7 @@ unsigned long long g_present_count = 0;
+ unsigned long long g_fifo_bytes = 0;
+ unsigned long long g_audio_push_count = 0;
+ unsigned long long g_audio_throttle_count = 0;
++unsigned long long g_audio_dropped_count = 0;
+ unsigned long long g_audio_low_log_push = 0;
+ u32 g_audio_sample_rate = 32000;
+ SDL_AudioStream* g_audio_stream = nullptr;
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index ff70c79..ce5aa54 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -43,6 +43,7 @@ extern unsigned long long g_present_count;
+ extern unsigned long long g_fifo_bytes;
+ extern unsigned long long g_audio_push_count;
+ extern unsigned long long g_audio_throttle_count;
++extern unsigned long long g_audio_dropped_count;
+ extern unsigned long long g_audio_starved_count;
+ extern unsigned long long g_audio_stretched_count;
+ extern unsigned long long g_audio_low_log_push;
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index d642ed8..c4fb2ad 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -630,7 +630,25 @@ inline void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
+ 
+ // Waits until the worker has translated everything appended so far. Called at
+ // the barriers and only there.
++static void g_fifo_drain_impl();
++std::atomic<unsigned long long> g_timing_drain_us{0};
++std::atomic<unsigned long long> g_timing_present_us{0};
++std::atomic<unsigned long long> g_timing_end_frame_us{0};
++std::atomic<unsigned long long> g_timing_draws{0};
++std::atomic<unsigned long long> g_timing_present_in_drain_us{0};
++bool g_timing_in_drain = false;  // main thread only
++static unsigned long long timing_now_us() {
++    return static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::microseconds>(
++        std::chrono::steady_clock::now().time_since_epoch()).count());
++}
+ static void g_fifo_drain() {
++    const unsigned long long start = timing_now_us();
++    g_timing_in_drain = true;
++    g_fifo_drain_impl();
++    g_timing_in_drain = false;
++    g_timing_drain_us += timing_now_us() - start;
++}
++static void g_fifo_drain_impl() {
+     g_fifo_publish_local();
+     std::unique_lock<std::mutex> lock(g_fifo_worker_mutex);
+     // Called from the guest's synchronization points, which never run inside
+@@ -1121,7 +1139,56 @@ void shadow_transform_observer(
+ 
+ extern "C" {
+ 
++static void aurora_backend_present_impl(void);
++
++// Timed for the per-second frame diagnostics (dol_aurora_frame_timing).
+ void aurora_backend_present(void) {
++    const unsigned long long start = gx_aurora::timing_now_us();
++    aurora_backend_present_impl();
++    const unsigned long long spent = gx_aurora::timing_now_us() - start;
++    gx_aurora::g_timing_present_us += spent;
++    if (gx_aurora::g_timing_in_drain)
++        gx_aurora::g_timing_present_in_drain_us += spent;
++}
++
++void dol_aurora_frame_timing(DolAuroraFrameTiming* out) {
++    out->presents = gx_aurora::g_present_count;
++    out->drain_us = gx_aurora::g_timing_drain_us - gx_aurora::g_timing_present_in_drain_us;
++    out->present_us = gx_aurora::g_timing_present_us;
++    out->end_frame_us = gx_aurora::g_timing_end_frame_us;
++    out->draws = gx_aurora::g_timing_draws;
++    out->audio_throttles = gx_aurora::g_audio_throttle_count;
++    out->audio_dropped = gx_aurora::g_audio_dropped_count;
++    out->audio_queued_ms = 0;
++    if (gx_aurora::g_audio_stream != nullptr && gx_aurora::g_audio_sample_rate != 0u) {
++        const int queued = SDL_GetAudioStreamQueued(gx_aurora::g_audio_stream);
++        out->audio_queued_ms =
++            queued > 0 ? static_cast<int>(queued * 1000ll / (gx_aurora::g_audio_sample_rate * 4ll)) : 0;
++    }
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    out->display_copies = gx_aurora::g_shadow_frontend.display_copies();
++#else
++    out->display_copies = 0;
++#endif
++}
++
++// A present the worker requested at a display copy is taken at the main
++// thread's next GX write. If the worker finishes the frame while the guest is
++// idle waiting for the next retrace, there is no write until the game starts
++// its next frame, so the finished frame waited up to a frame time: two or
++// three frames a second stayed on screen for 60 ms while the game was on time
++// ([late] lines, 2026-09-26). The host calls this at every retrace as well.
++void aurora_backend_service_present(void) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    if (!gx_aurora::g_initialized || !gx_aurora::g_gx_core_enabled)
++        return;
++    if (gx_aurora::g_display_copy_pending.load(std::memory_order_relaxed) &&
++        gx_aurora::g_display_copy_pending.exchange(false))
++        aurora_backend_present();
++#endif
++}
++
++static void aurora_backend_present_impl(void) {
+     if (!gx_aurora::g_initialized)
+         return;
+     // Everything below up to the next begin_frame runs with no frame packet for
+@@ -1157,7 +1224,10 @@ void aurora_backend_present(void) {
+ #endif
+     if (gx_aurora::g_frame_open) {
+         gx_aurora::run_host_overlay();
++        gx_aurora::g_timing_draws += aurora_get_stats()->drawCallCount;
++        const unsigned long long end_frame_start = gx_aurora::timing_now_us();
+         aurora_end_frame();
++        gx_aurora::g_timing_end_frame_us += gx_aurora::timing_now_us() - end_frame_start;
+         gx_aurora::g_frame_open = false;
+     }
+     ++gx_aurora::g_present_count;
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 9d77099..2e84da1 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -39,6 +39,29 @@ void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user)
+ typedef bool (*DolAuroraHoldFn)(void* user);
+ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user);
+ 
++/* Cumulative main-thread frame timing, for per-second diagnostics: time spent
++   waiting for the FIFO translation worker at the guest's GX barriers, time in
++   the present (including that wait's own present), the part of it inside
++   aurora_end_frame (GPU submission and waiting for a drawable), and the draw
++   calls submitted. Differences between two reads cover the interval. */
++typedef struct DolAuroraFrameTiming {
++    unsigned long long presents;
++    unsigned long long drain_us;
++    unsigned long long present_us;
++    unsigned long long end_frame_us;
++    unsigned long long draws;
++    unsigned long long display_copies;  /* the game's GXCopyDisp calls */
++    unsigned long long audio_throttles; /* 1 ms waits for the audio queue to drain */
++    unsigned long long audio_dropped;   /* pushes dropped on a full queue (no throttle) */
++    int audio_queued_ms;                /* audio waiting in the device queue now */
++} DolAuroraFrameTiming;
++void dol_aurora_frame_timing(DolAuroraFrameTiming* out);
++
++/* Presents a frame the FIFO worker has finished and requested, if any. The
++   request is otherwise taken only at the next GX write; the host calls this
++   at each retrace so a frame finished while the guest idles is not held. */
++void aurora_backend_service_present(void);
++
+ #ifdef __cplusplus
+ }
+ #endif

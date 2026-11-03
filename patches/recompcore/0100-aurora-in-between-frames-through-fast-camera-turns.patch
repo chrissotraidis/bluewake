@@ -1,0 +1,729 @@
+From 21775f1ca7301b3e644ceaa47df90f2b262e8d95 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Mon, 28 Sep 2026 21:06:25 -0400
+Subject: [PATCH] Aurora: in-between frames through fast camera turns
+
+A fast turn (a mouse camera swinging tens of degrees in a game frame) moved
+distant scenery past the plausibility bounds, so up to a third of frames
+were taken for camera cuts and shown at 30, and draws that failed on their
+own jumped against the blended scene around them (a doubled look).
+
+- The camera's motion (voted for by the draws with a key of their own, now
+  before plausibility, or the frame before's until enough have voted) is
+  taken out of each pair: plausibility judges only the object's own motion,
+  and the in-between matrices are that motion blended in the previous
+  camera's view and carried by exactly half of the camera's motion
+  (quaternion half-turn; D^0.5 * D^0.5 = D), so scenery lands where the
+  halfway camera sees it however far it turned, without the shrink of a
+  straight blend of two views. Lights and normal matrices follow.
+- A draw with a key of its own that changed rigidly but past the bounds is
+  blended by half of its own motion (the sky, the first rooms of a turn).
+- Copies of a model are found through a grid of where the camera carries the
+  previous frame's copies, instead of a budgeted scan that a turn bringing
+  dozens of copies into view used up; a moved copy pairs only within an
+  actor's pace.
+- Copies just come into view do not count toward a cut while the camera's
+  motion is a turn (a field of grass swung into view at once).
+- Motions over 70 degrees or 1000 units stay cuts. DOL_AURORA_FRAME_INTERP_LOG_FRAMES
+  logs a line per game frame.
+
+Scripted mouse turns at 11-32 degrees a game frame: 355 of 355 frames
+interpolated (5 before), 0.65 percent of draws unblended (5.9). Unit tests
+cover a 50-degree turn, a walker during it, a field coming into view and a cut.
+---
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 419 ++++++++++++++++--
+ .../aurora/tests/frame_interp_test.cpp        |  73 ++-
+ 2 files changed, 458 insertions(+), 34 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index d360438..5541301 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -1,6 +1,7 @@
+ #include "frame_interp.hpp"
+ 
+ #include <algorithm>
++#include <array>
+ #include <atomic>
+ #include <cmath>
+ #include <cstdio>
+@@ -10,6 +11,7 @@
+ #include <vector>
+ 
+ #include <absl/container/flat_hash_map.h>
++#include <absl/container/flat_hash_set.h>
+ 
+ #include <aurora/aurora.h>
+ 
+@@ -71,17 +73,37 @@ gxc::VertexShaderConstants g_blended;
+ struct Motion {
+   double m[3][4];
+   uint32_t votes;
++  // For the camera's motion (see camera_motion()): its inverse, and the part
++  // of it the in-between frame is at (D^t: the rotation turned by t of its
++  // angle, and exactly half of D at t = 0.5, so D^0.5 * D^0.5 = D).
++  bool derived;
++  bool bounded;
++  double inverse[3][4];
++  double part[3][4];
+ };
+ constexpr int kMaxMotions = 6;
+ constexpr uint32_t kMinMotionVotes = 4;
+ Motion g_motions[kMaxMotions];
+ int g_motionCount = 0;
+ int g_leadingMotion = -1;
+-// Copies searched this frame for one a motion carries onto a draw, and a bound
+-// on it: a frame whose motions fit nothing must not search every copy for
+-// every draw.
+-constexpr uint32_t kSearchBudget = 1u << 16;
+-uint32_t g_searchBudget = kSearchBudget;
++// The camera's motion the frame before, for the draws of this frame that come
++// before enough of its own have voted (the sky, the first rooms): a turning
++// camera turns about as far from one frame to the next.
++Motion g_predicted;
++bool g_havePredicted = false;
++// The largest camera motion taken for a turn rather than a cut: a mouse can
++// swing the camera tens of degrees in a frame, but a cut usually moves it far.
++constexpr double kMaxCameraTurn = 70.0 * M_PI / 180.0;
++constexpr double kMaxCameraShift = 1000.0;
++// Where the camera's motion carries each of the previous frame's copies, in a
++// grid per key, built the first time a key needs it in a frame: a fast turn
++// brings dozens of copies into view at once, and finding each one's copy (or
++// that it has none) must not cost a pass over every copy of its model.
++constexpr double kCellSize = 8.0;
++absl::flat_hash_map<uint64_t, uint32_t> g_cellHead; // (key, cell) -> first copy + 1
++std::vector<uint32_t> g_cellNext;                   // per previous record: next in its cell + 1
++std::vector<std::array<float, 3>> g_carried;        // per previous record: where the camera carries it
++absl::flat_hash_set<uint64_t> g_griddedKeys;
+ // The constants of the last draw found new in view: the other parts of that
+ // copy (grass is nine draws with one matrix) are new too.
+ uint32_t g_newInView = UINT32_MAX;
+@@ -91,7 +113,8 @@ struct Counts {
+   uint64_t matched = 0;   // a plausible counterpart in the previous frame
+   uint64_t identical = 0; // matched, and nothing changed
+   uint64_t blended = 0;   // matched and blended
+-  uint64_t rejected = 0;  // counterparts exist, none plausible
++  uint64_t rejected = 0;  // counterparts exist, none plausible (with the new in view)
++  uint64_t fresh = 0;     // of those, copies just come into view (blended from where they stood)
+   uint64_t unmatched = 0; // no counterpart
+ };
+ Counts g_frameCounts;
+@@ -101,6 +124,8 @@ uint64_t g_framesInterpolated = 0;
+ bool g_lastVerdict = false;
+ 
+ const bool g_log = env_flag("DOL_AURORA_FRAME_INTERP_LOG", false);
++// DOL_AURORA_FRAME_INTERP_LOG_FRAMES: a line per game frame (debug).
++const bool g_logFrames = env_flag("DOL_AURORA_FRAME_INTERP_LOG_FRAMES", false);
+ const uint64_t g_traceFrame = env_u64("DOL_AURORA_FRAME_INTERP_TRACE", 0);
+ const char* g_outcome = "";
+ const char* g_rejectReason = "";
+@@ -239,7 +264,8 @@ double translation_distance2(const float a[][4], const float b[3]) {
+ // there: the foliage flickers at 60 FPS.
+ 
+ // out = a * b for 3x4 affine matrices.
+-void affine_multiply(const double a[3][4], const float b[][4], double out[3][4]) {
++template <typename T>
++void affine_multiply(const double a[3][4], const T b[][4], double out[3][4]) {
+   for (int r = 0; r < 3; ++r) {
+     for (int c = 0; c < 4; ++c)
+       out[r][c] = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c];
+@@ -321,6 +347,7 @@ void vote_motion(const float current[][4], const float previous[][4]) {
+       m[r][3] += current[r][3];
+     }
+     g_motions[agreed].votes = 1;
++    g_motions[agreed].derived = false;
+   }
+   // The motion most draws agree with is the camera's.
+   if (g_leadingMotion < 0 || g_motions[agreed].votes > g_motions[g_leadingMotion].votes)
+@@ -338,6 +365,222 @@ double motion_error(const Motion& motion, const float current[][4], const float
+   return std::sqrt(error);
+ }
+ 
++uint64_t cell_key(uint64_t key, int64_t x, int64_t y, int64_t z) {
++  uint64_t h = key * 0x9E3779B97F4A7C15ull;
++  h ^= static_cast<uint64_t>(x) * 0xC2B2AE3D27D4EB4Full;
++  h ^= static_cast<uint64_t>(y) * 0x165667B19E3779F9ull;
++  h ^= static_cast<uint64_t>(z) * 0x27D4EB2F165667C5ull;
++  return h ^ (h >> 29);
++}
++
++int64_t cell_of(double value) { return static_cast<int64_t>(std::floor(value / kCellSize)); }
++
++// The copies of `key` (g_previousIndex[first, first + count)) where `motion`
++// carries them, into the grid.
++void grid_copies(uint64_t key, const Motion& motion, size_t first, size_t count) {
++  if (!g_griddedKeys.insert(key).second)
++    return;
++  if (g_carried.size() < g_previousIndex.size()) {
++    g_carried.resize(g_previousIndex.size());
++    g_cellNext.resize(g_previousIndex.size());
++  }
++  for (size_t i = first; i < first + count; ++i) {
++    const float* p = g_previousIndex[i].position;
++    double c[3];
++    for (int r = 0; r < 3; ++r)
++      c[r] = motion.m[r][0] * p[0] + motion.m[r][1] * p[1] + motion.m[r][2] * p[2] + motion.m[r][3];
++    g_carried[i] = {float(c[0]), float(c[1]), float(c[2])};
++    uint32_t& head = g_cellHead[cell_key(key, cell_of(c[0]), cell_of(c[1]), cell_of(c[2]))];
++    g_cellNext[i] = head;
++    head = static_cast<uint32_t>(i + 1);
++  }
++}
++
++// The copy of `key` the camera carries onto `here` (within `tolerance`), as
++// an index from `first`, or `count` if none; and how far off the nearest
++// copy that stood still is (HUGE_VAL if none is within a cell).
++size_t find_carried(uint64_t key, const float here[][4], size_t first, size_t count, double tolerance,
++                    double& nearestStill) {
++  size_t pick = count;
++  double best = tolerance;
++  const int64_t cx = cell_of(here[0][3]), cy = cell_of(here[1][3]), cz = cell_of(here[2][3]);
++  for (int64_t dx = -1; dx <= 1; ++dx) {
++    for (int64_t dy = -1; dy <= 1; ++dy) {
++      for (int64_t dz = -1; dz <= 1; ++dz) {
++        const auto it = g_cellHead.find(cell_key(key, cx + dx, cy + dy, cz + dz));
++        for (uint32_t link = it == g_cellHead.end() ? 0u : it->second; link != 0u; link = g_cellNext[link - 1]) {
++          const size_t i = link - 1;
++          const auto& c = g_carried[i];
++          const double ex = c[0] - here[0][3], ey = c[1] - here[1][3], ez = c[2] - here[2][3];
++          const double e = std::sqrt(ex * ex + ey * ey + ez * ez);
++          if (e <= best) {
++            best = e;
++            pick = i - first;
++          }
++          if (g_previousIndex[i].still)
++            nearestStill = std::min(nearestStill, e);
++        }
++      }
++    }
++  }
++  return pick;
++}
++
++float blend_weight();
++
++// The inverse of a camera motion and its part at the blend weight, once; a
++// motion that turns or shifts too far to be a turn is not used (a cut).
++bool derive(Motion& motion) {
++  if (motion.derived)
++    return motion.bounded;
++  motion.derived = true;
++  motion.bounded = false;
++  const double(*m)[4] = motion.m;
++  if (!affine_inverse(m, motion.inverse))
++    return false;
++  // A camera's motion is rigid: a rotation and a shift, no scale or skew.
++  for (int i = 0; i < 3; ++i) {
++    for (int k = 0; k < 3; ++k) {
++      const double dot = m[0][i] * m[0][k] + m[1][i] * m[1][k] + m[2][i] * m[2][k];
++      if (std::fabs(dot - (i == k ? 1.0 : 0.0)) > 2e-3)
++        return false;
++    }
++  }
++  // The rotation as a quaternion (the camera's is rigid).
++  double w, x, y, z;
++  const double trace = m[0][0] + m[1][1] + m[2][2];
++  if (trace > 0.0) {
++    const double s = std::sqrt(trace + 1.0) * 2.0;
++    w = 0.25 * s;
++    x = (m[2][1] - m[1][2]) / s;
++    y = (m[0][2] - m[2][0]) / s;
++    z = (m[1][0] - m[0][1]) / s;
++  } else if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
++    const double s = std::sqrt(1.0 + m[0][0] - m[1][1] - m[2][2]) * 2.0;
++    w = (m[2][1] - m[1][2]) / s;
++    x = 0.25 * s;
++    y = (m[0][1] + m[1][0]) / s;
++    z = (m[0][2] + m[2][0]) / s;
++  } else if (m[1][1] > m[2][2]) {
++    const double s = std::sqrt(1.0 + m[1][1] - m[0][0] - m[2][2]) * 2.0;
++    w = (m[0][2] - m[2][0]) / s;
++    x = (m[0][1] + m[1][0]) / s;
++    y = 0.25 * s;
++    z = (m[1][2] + m[2][1]) / s;
++  } else {
++    const double s = std::sqrt(1.0 + m[2][2] - m[0][0] - m[1][1]) * 2.0;
++    w = (m[1][0] - m[0][1]) / s;
++    x = (m[0][2] + m[2][0]) / s;
++    y = (m[1][2] + m[2][1]) / s;
++    z = 0.25 * s;
++  }
++  const double norm = std::sqrt(w * w + x * x + y * y + z * z);
++  if (!(norm > 1e-9))
++    return false;
++  w /= norm, x /= norm, y /= norm, z /= norm;
++  if (w < 0.0)
++    w = -w, x = -x, y = -y, z = -z;
++  const double angle = 2.0 * std::acos(std::min(1.0, w));
++  const double shift = std::sqrt(m[0][3] * m[0][3] + m[1][3] * m[1][3] + m[2][3] * m[2][3]);
++  if (angle > kMaxCameraTurn || shift > kMaxCameraShift)
++    return false;
++  // The rotation by t of the angle about the same axis.
++  const double t = blend_weight();
++  const double axis = std::sqrt(x * x + y * y + z * z);
++  double pw = 1.0, px = 0.0, py = 0.0, pz = 0.0;
++  if (axis > 1e-12) {
++    const double half = 0.5 * angle * t;
++    pw = std::cos(half);
++    const double k = std::sin(half) / axis;
++    px = x * k, py = y * k, pz = z * k;
++  }
++  double r[3][3] = {
++      {1 - 2 * (py * py + pz * pz), 2 * (px * py - pz * pw), 2 * (px * pz + py * pw)},
++      {2 * (px * py + pz * pw), 1 - 2 * (px * px + pz * pz), 2 * (py * pz - px * pw)},
++      {2 * (px * pz - py * pw), 2 * (py * pz + px * pw), 1 - 2 * (px * px + py * py)},
++  };
++  // The translation: at t = 0.5 exactly half of D, (R_h + I) t_h = t, so
++  // that the half applied twice is D; otherwise t of it.
++  double shiftPart[3] = {m[0][3] * t, m[1][3] * t, m[2][3] * t};
++  if (t == 0.5f) {
++    const float sum[3][4] = {
++        {float(r[0][0] + 1.0), float(r[0][1]), float(r[0][2]), 0.f},
++        {float(r[1][0]), float(r[1][1] + 1.0), float(r[1][2]), 0.f},
++        {float(r[2][0]), float(r[2][1]), float(r[2][2] + 1.0), 0.f},
++    };
++    double solve[3][4];
++    if (affine_inverse(sum, solve)) {
++      for (int i = 0; i < 3; ++i)
++        shiftPart[i] = solve[i][0] * m[0][3] + solve[i][1] * m[1][3] + solve[i][2] * m[2][3];
++    }
++  }
++  for (int i = 0; i < 3; ++i) {
++    for (int k = 0; k < 3; ++k)
++      motion.part[i][k] = r[i][k];
++    motion.part[i][3] = shiftPart[i];
++  }
++  motion.bounded = true;
++  return true;
++}
++
++// A draw's own motion from one frame to the next, M_now * M_before^-1.
++bool own_motion(const float previous[][4], const float current[][4], Motion& out) {
++  double inverse[3][4];
++  if (!affine_inverse(previous, inverse))
++    return false;
++  for (int r = 0; r < 3; ++r) {
++    for (int c = 0; c < 4; ++c)
++      out.m[r][c] = double(current[r][0]) * inverse[0][c] + double(current[r][1]) * inverse[1][c] +
++                    double(current[r][2]) * inverse[2][c];
++    out.m[r][3] += current[r][3];
++  }
++  out.votes = 1;
++  out.derived = false;
++  return true;
++}
++
++// The camera's motion this frame, once enough draws agree on it, or the frame
++// before's until then; null when neither is a turn.
++Motion* camera_motion() {
++  if (g_leadingMotion >= 0 && g_motions[g_leadingMotion].votes >= kMinMotionVotes)
++    return derive(g_motions[g_leadingMotion]) ? &g_motions[g_leadingMotion] : nullptr;
++  return g_havePredicted && derive(g_predicted) ? &g_predicted : nullptr;
++}
++
++// A draw's matrices as the previous frame's camera saw them: D^-1 * M. What
++// is left between that and the previous frame's matrices is the object's own
++// motion, which is what plausibility judges once the camera's is known (a fast
++// turn moves distant scenery far on screen, not in the world).
++void as_previous_camera(const Motion& camera, const float rows[][4], float out[][4]) {
++  double carried[3][4];
++  affine_multiply(camera.inverse, rows, carried);
++  for (int r = 0; r < 3; ++r)
++    for (int c = 0; c < 4; ++c)
++      out[r][c] = static_cast<float>(carried[r][c]);
++}
++
++bool plausible_relative(const Motion* camera, const gxc::VertexShaderConstants& current,
++                        const gxc::VertexShaderConstants& previous, uint64_t usedMatrixRows) {
++  if (camera == nullptr || previous.projection[3][2] == 0.f || current.projection[3][2] == 0.f)
++    return plausible(current, previous, usedMatrixRows);
++  if (!plausible_projection(current.projection, previous.projection))
++    return false;
++  float relative[3][4];
++  if (usedMatrixRows == 0) {
++    as_previous_camera(*camera, current.posnormalmatrix, relative);
++    return plausible_matrix(relative, previous.posnormalmatrix);
++  }
++  for (uint64_t rows = usedMatrixRows; rows != 0; rows &= rows - 1) {
++    const int row = __builtin_ctzll(rows);
++    if (row > 61)
++      continue;
++    as_previous_camera(*camera, &current.transformmatrices[row], relative);
++    if (!plausible_matrix(relative, &previous.transformmatrices[row]))
++      return false;
++  }
++  return true;
++}
++
+ // Where a draw that stands still was the frame before: M_before = D^-1 * M_now
+ // for the camera's motion D, and its normal matrix turned back by D's
+ // rotation (D is rigid, so that is its inverse transpose too). The rest
+@@ -416,6 +659,65 @@ void blend(const gxc::VertexShaderConstants& previous, const gxc::VertexShaderCo
+   }
+ }
+ 
++// The in-between frame when the camera's motion is known: each matrix is the
++// object's own motion blended in the previous camera's view, then carried by
++// the camera's part motion. Scenery that stood still lands exactly where the
++// halfway camera sees it however far the camera turned (a straight blend of
++// two views turned far apart shrinks them), and what moves keeps its place
++// against it.
++void blend_relative(const Motion& camera, const gxc::VertexShaderConstants& previous,
++                    const gxc::VertexShaderConstants& current, float t, gxc::VertexShaderConstants& out) {
++  blend(previous, current, t, out);
++  const auto place = [&](const float from[][4], const float to[][4], float result[][4], bool affine) {
++    double seen[3][4];
++    affine_multiply(camera.inverse, to, seen);
++    double mid[3][4];
++    for (int r = 0; r < 3; ++r) {
++      for (int c = 0; c < 4; ++c) {
++        const double value = affine || c < 3 ? seen[r][c] : double(to[r][c]);
++        mid[r][c] = from[r][c] + (value - from[r][c]) * t;
++      }
++    }
++    for (int r = 0; r < 3; ++r) {
++      for (int c = 0; c < 3; ++c)
++        result[r][c] = static_cast<float>(camera.part[r][0] * mid[0][c] + camera.part[r][1] * mid[1][c] +
++                                          camera.part[r][2] * mid[2][c]);
++      result[r][3] = static_cast<float>(
++          affine ? camera.part[r][0] * mid[0][3] + camera.part[r][1] * mid[1][3] + camera.part[r][2] * mid[2][3] +
++                       camera.part[r][3]
++                 : mid[r][3]);
++    }
++  };
++  place(previous.posnormalmatrix, current.posnormalmatrix, out.posnormalmatrix, true);
++  // Normal matrices turn with the camera's rotation only (it is rigid).
++  place(&previous.posnormalmatrix[3], &current.posnormalmatrix[3], &out.posnormalmatrix[3], false);
++  for (int m = 0; m < 10; ++m)
++    place(&previous.transformmatrices[m * 3], &current.transformmatrices[m * 3], &out.transformmatrices[m * 3], true);
++  for (int m = 0; m < 10; ++m)
++    place(&previous.normalmatrices[m * 3], &current.normalmatrices[m * 3], &out.normalmatrices[m * 3], false);
++  // Lights in view space: positions carried, directions turned.
++  for (int l = 0; l < 8; ++l) {
++    double pos[3], dir[3];
++    for (int r = 0; r < 3; ++r) {
++      const auto& now = current.lights[l];
++      pos[r] = camera.inverse[r][0] * now.pos[0] + camera.inverse[r][1] * now.pos[1] +
++               camera.inverse[r][2] * now.pos[2] + camera.inverse[r][3];
++      dir[r] = camera.inverse[r][0] * now.dir[0] + camera.inverse[r][1] * now.dir[1] + camera.inverse[r][2] * now.dir[2];
++    }
++    double midPos[3], midDir[3];
++    for (int r = 0; r < 3; ++r) {
++      midPos[r] = previous.lights[l].pos[r] + (pos[r] - previous.lights[l].pos[r]) * t;
++      midDir[r] = previous.lights[l].dir[r] + (dir[r] - previous.lights[l].dir[r]) * t;
++    }
++    for (int r = 0; r < 3; ++r) {
++      out.lights[l].pos[r] = static_cast<float>(camera.part[r][0] * midPos[0] + camera.part[r][1] * midPos[1] +
++                                                camera.part[r][2] * midPos[2] + camera.part[r][3]);
++      out.lights[l].dir[r] = static_cast<float>(camera.part[r][0] * midDir[0] + camera.part[r][1] * midDir[1] +
++                                                camera.part[r][2] * midDir[2]);
++    }
++  }
++}
++
+ inline uint64_t mix64(uint64_t h) {
+   h ^= h >> 33;
+   h *= 0xFF51AFD7ED558CCDull;
+@@ -517,6 +819,14 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+   const size_t candidates = static_cast<size_t>(range.second - range.first);
+   const bool perspective = current.projection[3][2] != 0.f;
+   const gxc::VertexShaderConstants* previous = nullptr;
++  // A draw with a key of its own is the same object as its counterpart, so
++  // it votes for the camera's motion whether or not the pair looks plausible
++  // yet: a fast turn makes the scenery implausible until the camera's motion
++  // is known.
++  if (candidates == 1 && occurrence == 0 && usedMatrixRows == 0 && perspective &&
++      constantsOf(0).projection[3][2] != 0.f)
++    vote_motion(current.posnormalmatrix, constantsOf(0).posnormalmatrix);
++  Motion* const view = perspective ? camera_motion() : nullptr;
+ 
+   // Copies of one model (grass, bushes, trees): the copy that a motion several
+   // draws share (the camera's, for anything standing still) carries onto
+@@ -552,18 +862,10 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+       pick = state.next;
+     else if (constantsIndex == g_newInView)
+       nearestStill = 0.0; // another part of a copy just found new in view
+-    else if (g_searchBudget >= candidates) {
+-      g_searchBudget -= static_cast<uint32_t>(candidates);
+-      double best = tolerance;
+-      for (size_t i = 0; i < candidates; ++i) {
+-        const double e = motion_error(*camera, here, copies[i].position);
+-        if (e <= best) {
+-          best = e;
+-          pick = i;
+-        }
+-        if (copies[i].still)
+-          nearestStill = std::min(nearestStill, e);
+-      }
++    else {
++      const size_t first = static_cast<size_t>(range.first - g_previousIndex.begin());
++      grid_copies(key, *camera, first, candidates);
++      pick = find_carried(key, here, first, candidates, tolerance, nearestStill);
+     }
+   }
+   const bool placed = pick < candidates;
+@@ -571,7 +873,7 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     state.next = static_cast<uint32_t>(pick + 1);
+     frame.records.back().still = motion_error(*camera, here, copies[pick].position) <= tolerance;
+     const auto& candidate = constantsOf(pick);
+-    if (plausible(current, candidate, usedMatrixRows))
++    if (plausible_relative(view, current, candidate, usedMatrixRows))
+       previous = &candidate;
+   } else {
+     // Without such a copy, a copy that stood still would have been carried
+@@ -586,8 +888,9 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+       const double moved = motion_error(*camera, here, copies[copy].position);
+       if (copies[copy].still)
+         return moved <= 4.0 * tolerance;
+-      return nearestStill == HUGE_VAL ||
+-             (moved < nearestStill && moved <= 40.0 + 0.01 * translation_length(here));
++      // A copy that moved at an actor's pace (a pot Link carries), when no
++      // copy that stood still is nearer.
++      return moved < nearestStill && moved <= 40.0 + 0.01 * translation_length(here);
+     };
+     bool anyUsable = false;
+     // The same occurrence of the key: a model drawn from a fixed list (a
+@@ -595,7 +898,7 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     if (occurrence < candidates && usable(occurrence)) {
+       anyUsable = true;
+       const auto& candidate = constantsOf(occurrence);
+-      if (plausible(current, candidate, usedMatrixRows))
++      if (plausible_relative(view, current, candidate, usedMatrixRows))
+         previous = &candidate;
+     }
+     if (previous == nullptr && candidates > 1) {
+@@ -607,7 +910,8 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+           continue;
+         anyUsable = true;
+         const double d = translation_distance2(here, copies[i].position);
+-        if ((previous == nullptr || d < bestDistance) && plausible(current, constantsOf(i), usedMatrixRows)) {
++        if ((previous == nullptr || d < bestDistance) &&
++            plausible_relative(view, current, constantsOf(i), usedMatrixRows)) {
+           previous = &constantsOf(i);
+           bestDistance = d;
+         }
+@@ -618,15 +922,36 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+       // instead of failing the plausibility test.
+       g_newInView = constantsIndex;
+       ++g_frameCounts.rejected;
++      ++g_frameCounts.fresh;
+       g_outcome = "new in view";
+       // Drawn as it is now, it would sit half a camera step ahead of the
+       // copies beside it (a pop along the screen's edge while the camera
+       // turns). It stood where the camera's motion carries it from, so it is
+       // blended from there.
+       if (usedMatrixRows != 0 || !stood_before(*camera, current, g_stoodBefore) ||
+-          !plausible(current, g_stoodBefore, 0))
++          !plausible_relative(view, current, g_stoodBefore, 0))
+         return nullptr;
+-      blend(g_stoodBefore, current, blend_weight(), g_blended);
++      if (view != nullptr)
++        blend_relative(*view, g_stoodBefore, current, blend_weight(), g_blended);
++      else
++        blend(g_stoodBefore, current, blend_weight(), g_blended);
++      return &g_blended;
++    }
++  }
++  if (previous == nullptr && candidates == 1 && occurrence == 0 && usedMatrixRows == 0 && perspective &&
++      constantsOf(0).projection[3][2] != 0.f &&
++      plausible_projection(current.projection, constantsOf(0).projection)) {
++    // A draw with a key of its own is the same object as its counterpart.
++    // Before enough of the frame's draws agree on the camera's motion (the
++    // sky, the first rooms of a fast turn), one whose change is rigid and a
++    // turn rather than a cut is blended by half of its own motion, which for
++    // scenery is the camera's.
++    Motion own{};
++    if (own_motion(constantsOf(0).posnormalmatrix, current.posnormalmatrix, own) && derive(own)) {
++      ++g_frameCounts.matched;
++      blend_relative(own, constantsOf(0), current, blend_weight(), g_blended);
++      ++g_frameCounts.blended;
++      g_outcome = "blended by its own motion";
+       return &g_blended;
+     }
+   }
+@@ -636,15 +961,15 @@ const gxc::VertexShaderConstants* blend_draw(uint64_t key, uint64_t usedMatrixRo
+     return nullptr;
+   }
+   ++g_frameCounts.matched;
+-  // A draw matched without ambiguity votes for the camera's motion.
+-  if (candidates == 1 && occurrence == 0 && usedMatrixRows == 0 && perspective)
+-    vote_motion(current.posnormalmatrix, previous->posnormalmatrix);
+   if (std::memcmp(previous, &current, sizeof(current)) == 0) {
+     ++g_frameCounts.identical;
+     g_outcome = "identical";
+     return nullptr;
+   }
+-  blend(*previous, current, blend_weight(), g_blended);
++  if (view != nullptr && previous->projection[3][2] != 0.f)
++    blend_relative(*view, *previous, current, blend_weight(), g_blended);
++  else
++    blend(*previous, current, blend_weight(), g_blended);
+   ++g_frameCounts.blended;
+   g_outcome = "blended";
+   return &g_blended;
+@@ -655,8 +980,13 @@ bool frame_verdict() noexcept {
+   if (!enabled() || !g_havePrevious || g_frameCounts.blended == 0)
+     return false;
+   // A cut: most draws have a counterpart that is not plausibly the same thing.
+-  const uint64_t considered = g_frameCounts.matched + g_frameCounts.rejected;
+-  if (considered >= 16 && g_frameCounts.rejected * 10 > considered * 4)
++  // Copies just come into view count too (after a cut every copy of a model
++  // looks new), unless the frame's camera motion is a turn: a fast turn can
++  // bring a whole field of grass into view at once.
++  const uint64_t rejected =
++      g_frameCounts.rejected - (camera_motion() != nullptr ? g_frameCounts.fresh : 0u);
++  const uint64_t considered = g_frameCounts.matched + rejected;
++  if (considered >= 16 && rejected * 10 > considered * 4)
+     return false;
+   g_lastVerdict = true;
+   return true;
+@@ -672,12 +1002,14 @@ void end_game_frame() noexcept {
+       g_keys.clear();
+       g_motionCount = 0;
+       g_leadingMotion = -1;
++      g_havePredicted = false;
+       g_havePrevious = false;
+     }
+     g_frameCounts = {};
+     return;
+   }
+   ++g_framesSeen;
++  const int g_lastVerdictSeen = g_lastVerdict ? 1 : 0;
+   if (g_lastVerdict)
+     ++g_framesInterpolated;
+   g_lastVerdict = false;
+@@ -689,6 +1021,23 @@ void end_game_frame() noexcept {
+   g_totalCounts.unmatched += g_frameCounts.unmatched;
+   if (g_log && g_framesSeen % 60 == 0)
+     log_counts();
++  if (g_logFrames) {
++    const Motion* camera = camera_motion();
++    double angle = 0.0;
++    if (camera != nullptr)
++      angle = std::acos(std::clamp((camera->m[0][0] + camera->m[1][1] + camera->m[2][2] - 1.0) / 2.0, -1.0, 1.0)) *
++              180.0 / M_PI;
++    std::fprintf(stderr,
++                 "[frame-interp-frame] frame=%llu verdict=%d draws=%llu blended=%llu rejected=%llu unmatched=%llu "
++                 "camera=%s turn=%.1f votes=%u fresh=%llu\n",
++                 static_cast<unsigned long long>(g_gameFrame.load(std::memory_order_relaxed)), g_lastVerdictSeen,
++                 static_cast<unsigned long long>(g_frameCounts.draws),
++                 static_cast<unsigned long long>(g_frameCounts.blended),
++                 static_cast<unsigned long long>(g_frameCounts.rejected),
++                 static_cast<unsigned long long>(g_frameCounts.unmatched),
++                 camera == nullptr ? "none" : (camera == &g_predicted ? "predicted" : "voted"), angle,
++                 camera == nullptr ? 0u : camera->votes, static_cast<unsigned long long>(g_frameCounts.fresh));
++  }
+   g_frameCounts = {};
+ 
+   const FrameRecords& finished = g_frames[g_current];
+@@ -699,9 +1048,13 @@ void end_game_frame() noexcept {
+   g_current ^= 1u;
+   g_frames[g_current].clear();
+   g_keys.clear();
++  g_cellHead.clear();
++  g_griddedKeys.clear();
++  g_havePredicted = g_leadingMotion >= 0 && g_motions[g_leadingMotion].votes >= kMinMotionVotes;
++  if (g_havePredicted)
++    g_predicted = g_motions[g_leadingMotion];
+   g_motionCount = 0;
+   g_leadingMotion = -1;
+-  g_searchBudget = kSearchBudget;
+   g_newInView = UINT32_MAX;
+ }
+ 
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index a2098af..7e93417 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -77,9 +77,18 @@ static bool halfway(const Result& result, const Camera& before, const Camera& no
+     return false;
+   const auto a = seen(before.yaw, before.x, before.z, x, yBefore, -800.f);
+   const auto b = seen(now.yaw, now.x, now.z, x, y, -800.f);
++  // Halfway along the camera's turn: the straight midpoint of the two places,
++  // within the arc's bulge (about a unit at these distances and turns); a clump
++  // paired with its neighbour is off by tens of units.
++  float length = 0.f;
+   for (int r = 0; r < 3; ++r) {
+     const float expected = (a.posnormalmatrix[r][3] + b.posnormalmatrix[r][3]) / 2.f;
+-    if (std::fabs(result.constants.posnormalmatrix[r][3] - expected) > 0.01f)
++    length += expected * expected;
++  }
++  const float tolerance = 0.003f * std::sqrt(length) + 0.05f;
++  for (int r = 0; r < 3; ++r) {
++    const float expected = (a.posnormalmatrix[r][3] + b.posnormalmatrix[r][3]) / 2.f;
++    if (std::fabs(result.constants.posnormalmatrix[r][3] - expected) > tolerance)
+       return false;
+   }
+   return true;
+@@ -204,6 +213,68 @@ int main() {
+     fi::end_game_frame();
+   }
+ 
++  // A fast turn (50 degrees in one game frame, a flick of the mouse camera):
++  // distant scenery moves far past the plausibility bounds, but the rooms'
++  // shared motion is the camera's, so the frame is still interpolated, each
++  // room is drawn exactly where the halfway camera sees it (no shrink from
++  // blending two views far apart), and a character walking meanwhile is
++  // halfway along its own path in that view.
++  {
++    fi::end_game_frame();
++    fi::end_game_frame(); // no previous frame, no prediction
++    const Camera a{0.f, 0.f, 0.f}, b{50.f, 0.f, 0.f}, mid{25.f, 0.f, 0.f};
++    const auto frame = [](const Camera& c, float walker, Result* rooms, Result& link) {
++      for (int room = 0; room < 12; ++room) {
++        const auto* r = fi::blend_draw(700 + room, 0,
++                                       seen(c.yaw, c.x, c.z, room * 400.f - 2200.f, -80.f, -2500.f - room * 90.f));
++        rooms[room].blended = r != nullptr;
++        if (r != nullptr)
++          rooms[room].constants = *r;
++      }
++      const auto* l = fi::blend_draw(799, 0, seen(c.yaw, c.x, c.z, walker, 0.f, -300.f));
++      link.blended = l != nullptr;
++      if (l != nullptr)
++        link.constants = *l;
++    };
++    Result rooms[12], link;
++    frame(a, 0.f, rooms, link);
++    fi::end_game_frame();
++    frame(b, 20.f, rooms, link);
++    CHECK(fi::frame_verdict());
++    bool exact = true;
++    for (int room = 0; room < 12; ++room) {
++      const auto want = seen(mid.yaw, 0.f, 0.f, room * 400.f - 2200.f, -80.f, -2500.f - room * 90.f);
++      exact = exact && rooms[room].blended;
++      for (int r = 0; r < 3 && exact; ++r)
++        for (int c = 0; c < 4; ++c)
++          exact = exact && std::fabs(rooms[room].constants.posnormalmatrix[r][c] - want.posnormalmatrix[r][c]) <
++                               (c == 3 ? 0.05f : 1e-4f);
++    }
++    CHECK(exact);
++    const auto walking = seen(mid.yaw, 0.f, 0.f, 10.f, 0.f, -300.f);
++    CHECK(link.blended && std::fabs(link.constants.posnormalmatrix[0][3] - walking.posnormalmatrix[0][3]) < 0.05f &&
++          std::fabs(link.constants.posnormalmatrix[2][3] - walking.posnormalmatrix[2][3]) < 0.05f);
++    fi::end_game_frame();
++    // Most of the view new at once (a field of grass swung into view): still
++    // a turn, not a cut.
++    {
++      frame(b, 20.f, rooms, link);
++      for (int clump = 0; clump < 4; ++clump) // the model's copies elsewhere, far behind
++        fi::blend_draw(900, 0, seen(b.yaw, b.x, b.z, 5000.f + clump * 30.f, 0.f, 4000.f));
++      fi::end_game_frame();
++      const Camera c{70.f, 0.f, 0.f};
++      frame(c, 20.f, rooms, link);
++      for (int clump = 0; clump < 40; ++clump)
++        fi::blend_draw(900, 0, seen(c.yaw, c.x, c.z, -600.f + clump * 30.f, 0.f, -700.f));
++      CHECK(fi::frame_verdict());
++      fi::end_game_frame();
++    }
++    // A cut (the camera across the island) is still not interpolated.
++    frame(Camera{140.f, 3000.f, -4000.f}, 20.f, rooms, link);
++    CHECK(!fi::frame_verdict());
++    fi::end_game_frame();
++  }
++
+   // Draw keys: the same payload gives the same key; another primitive does not.
+   {
+     const uint8_t payload[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+-- 
+2.55.0
+

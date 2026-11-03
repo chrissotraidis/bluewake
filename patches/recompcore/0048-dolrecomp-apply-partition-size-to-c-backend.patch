@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Tue, 1 Sep 2026 05:15:00 -0500
+Subject: [PATCH] dolrecomp: apply partition size to C backend
+
+---
+ DolRecomp/src/app/pipeline.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/DolRecomp/src/app/pipeline.c b/DolRecomp/src/app/pipeline.c
+index 3306611..514ac11 100644
+--- a/DolRecomp/src/app/pipeline.c
++++ b/DolRecomp/src/app/pipeline.c
+@@ -1119,7 +1119,9 @@ int emit_code_sections_split(const LoadedCodeSection* sections,
+     fprintf(header, "\n// Function entry points\n");
+ 
+     u32 file_count = 0;
+-    const u32 chunk_instructions = c_chunk_instructions();
++    const u32 chunk_instructions = options->partition_instructions
++                                       ? options->partition_instructions
++                                       : c_chunk_instructions();
+     FunctionList funcs = {0};
+     SMCAnalysis smc = {0};
+ 
+-- 
+2.50.1

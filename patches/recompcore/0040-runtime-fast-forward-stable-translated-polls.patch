@@ -1,0 +1,86 @@
+From cd3574a998e4ef004216f3d9ea4dd06ac1478ad0 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 23:45:28 -0500
+Subject: [PATCH] runtime: fast-forward stable translated polls
+
+---
+ DolRecomp                       |  2 +-
+ GXRuntime/include/core/cpu.h    | 16 ++++++++++++++++
+ GXRuntime/tests/runtime_tests.c | 12 ++++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/DolRecomp b/DolRecomp
+index f0a86be2d6..208d2b4063 160000
+--- a/DolRecomp
++++ b/DolRecomp
+@@ -1 +1 @@
+-Subproject commit f0a86be2d6c4a5e2e171c5754751fb00fea8033b
++Subproject commit 208d2b4063b5474a62f4dbebf84d525dd22e81cc
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index 094ad1b477..d6746fb7e8 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -228,6 +228,22 @@ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size
+     return NULL;
+ }
+ 
++// Device and guest-thread work is delivered between translated dispatches.
++// An unaliased physical MEM1 read therefore cannot change while one generated
++// block is polling it; MMIO, aliases, uncached mirrors, and MEM2 remain on the
++// ordinary per-iteration path.
++static GXRUNTIME_ALWAYS_INLINE bool ppc_dispatch_poll_read_stable(
++    CPUState* cpu, u32 addr, u32 size) {
++    if (g_ppc_guest_aliases_overlap_mem1 || (addr & 0x40000000u) != 0u ||
++        size == 0u || size > cpu->ram_size)
++        return false;
++    u32 offset = addr - GC_RAM_BASE;
++    return offset <= cpu->ram_size - size;
++}
++
++#define DOLRECOMP_POLL_READ_STABLE(cpu, addr, size) \
++    ppc_dispatch_poll_read_stable((cpu), (addr), (size))
++
+ static GXRUNTIME_ALWAYS_INLINE void clear_matching_reservation(CPUState* cpu, u32 addr) {
+     u32 reserve_addr = cpu->reserve_addr & ~0x40000000u;
+     u32 store_addr = addr & ~0x40000000u;
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index 2670653cab..eec1366876 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -1078,10 +1078,20 @@ static void test_boot_globals(void) {
+ static void test_guest_data_alias(void) {
+     CPUState cpu;
+     assert(cpu_init(&cpu));
++    assert(ppc_dispatch_poll_read_stable(&cpu, GC_RAM_BASE, 4u));
++    assert(ppc_dispatch_poll_read_stable(
++        &cpu, GC_RAM_BASE + cpu.ram_size - 4u, 4u));
++    assert(!ppc_dispatch_poll_read_stable(&cpu, GC_RAM_BASE, 0u));
++    assert(!ppc_dispatch_poll_read_stable(&cpu, GC_RAM_BASE - 4u, 4u));
++    assert(!ppc_dispatch_poll_read_stable(
++        &cpu, GC_RAM_BASE + cpu.ram_size - 3u, 4u));
++    assert(!ppc_dispatch_poll_read_stable(
++        &cpu, GC_RAM_BASE | 0x40000000u, 4u));
+     const u8 initial[4] = {0x12u, 0x34u, 0x56u, 0x78u};
+     const u32 linked = 0x815581A0u;
+     ppc_guest_alias_clear();
+     assert(ppc_guest_alias_add(linked, sizeof(initial), initial));
++    assert(!ppc_dispatch_poll_read_stable(&cpu, GC_RAM_BASE, 4u));
+     u8* resolved = NULL;
+     assert(!ppc_guest_alias_resolve(0x80000000u, 4u, &resolved, NULL));
+     assert(!ppc_guest_alias_resolve(0x817FFFFCu, 4u, &resolved, NULL));
+@@ -1109,10 +1119,12 @@ static void test_guest_data_alias(void) {
+     assert(ppc_guest_alias_remove(second_linked, sizeof(initial)));
+     assert(!ppc_guest_alias_resolve(second_linked, 4u, &resolved, NULL));
+     ppc_guest_alias_clear();
++    assert(ppc_dispatch_poll_read_stable(&cpu, GC_RAM_BASE, 4u));
+ 
+     u8 shared_storage[4] = {0x01u, 0x23u, 0x45u, 0x67u};
+     assert(ppc_guest_alias_add_shared(linked, sizeof(shared_storage),
+                                       shared_storage));
++    assert(!ppc_dispatch_poll_read_stable(&cpu, GC_RAM_BASE, 4u));
+     resolved = NULL;
+     assert(ppc_guest_alias_get_storage(linked, sizeof(shared_storage),
+                                        &resolved));
+-- 
+2.41.0
+

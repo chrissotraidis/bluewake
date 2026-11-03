@@ -1,0 +1,830 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BlueWake dependency lock",
+  "version": 1,
+  "generated": "2026-09-25",
+  "policy": {
+    "pinning": "exact-sha",
+    "float": false,
+    "notes": "Every product dependency has an exact SHA. Reference-only checkouts under ref/ are informational until promoted to product use with recursive submodule SHAs and test evidence."
+  },
+  "dependencies": [
+    {
+      "id": "dolrecomp",
+      "url": "https://github.com/elliotttate/DolRecomp",
+      "sha": "b8b534591cba8ca7cd43943a655ee6e2591cf5de",
+      "license": "GPL-3.0",
+      "role": "CPU translator; chrissotraidis/DolRecomp 5c91d6e (the translator state used for the shipped GZLE01 composite) plus runtime option sites (patches/dolrecomp/0019), which translate the base game byte-identically",
+      "verified": "2026-09-28",
+      "local_checkout": {
+        "path": "ref/recompcore/DolRecomp",
+        "sha": "b8b534591cba8ca7cd43943a655ee6e2591cf5de"
+      },
+      "local_patch": {
+        "base_sha": "528a204fbf68fccf7353bff9202714fa6a009dcf",
+        "head_sha": "ac67cb5029818567fff70fde18c1e3b23ea9cba6",
+        "commits": [
+          "aeab6d4954",
+          "7a51be16c7",
+          "69ada85d04",
+          "d30b390bfc",
+          "dbaea41661",
+          "fd22d7e91b",
+          "312a4181fd",
+          "d613dc579e",
+          "a0bd6d0ffc",
+          "e3913e3659",
+          "4638a9f9e6",
+          "7cefb7af06",
+          "4bbe4eb167",
+          "ac67cb5029"
+        ],
+        "files": [
+          "src/frontend/container/rel.c",
+          "tests/test_rel.c",
+          "CMakeLists.txt",
+          "src/backend/llvm/fp_fixups.cpp",
+          "src/backend/llvm/register_state.cpp",
+          "src/app/cli.c",
+          "src/app/cli.h",
+          "src/app/pipeline.c",
+          "src/backend/llvm/branch_targets.cpp",
+          "src/backend/llvm/control_flow.cpp",
+          "src/backend/llvm/emitter.cpp",
+          "src/backend/llvm/emitter.h",
+          "src/backend/llvm/exits.cpp",
+          "src/backend/llvm/llvm_backend.h",
+          "src/backend/llvm/retry_regions.cpp",
+          "tests/cmake/check_llvm_codegen.cmake",
+          "tests/cmake/compile_generated_llvm.cmake",
+          "tests/llvm_fixture.cpp",
+          "tests/llvm_ir_test.cpp",
+          "tests/llvm_semantics_test.c",
+          "tests/llvm_smoke_test.c",
+          "tests/test_cli.c"
+        ],
+        "purpose": "correct REL immediate-halfword relocation offsets, preserve tagged relative-branch displacement, make the LLVM object backend and generated-code compile test valid on Mach-O macOS hosts, admit exact scalar and paired-single memory first-use FP fault PCs through cold native retry suffixes while preserving hot fixed-GQR specialization, admit register-only FP first-use PCs as structural entries without unbounded suffix cloning, preserve bit-30 tagged guest aliases through the runtime-aware memory path, optionally preserve host dispatcher interception across native object partitions, and generate fixed-layout LLVM objects for BlueWake's expanded 32 MiB MEM1 backing, and the per-patch series under patches/dolrecomp registered in this lock",
+        "tracked_patches": [
+          "patches/dolrecomp/0001-preserve-tagged-relative-branch-namespace.patch",
+          "patches/dolrecomp/0003-llvm-support-Mach-O-backend-tests.patch",
+          "patches/dolrecomp/0004-llvm-resume-scalar-FP-faults-natively.patch",
+          "patches/dolrecomp/0005-llvm-support-dispatcher-cross-range-exits.patch",
+          "patches/dolrecomp/0006-llvm-support-expanded-fixed-MEM1-layouts.patch",
+          "patches/dolrecomp/0007-llvm-preserve-paired-single-lazy-FP-retry.patch",
+          "patches/dolrecomp/0008-llvm-limit-lazy-FP-clones-to-memory-first-use.patch",
+          "patches/dolrecomp/0009-llvm-invalidate-narrowed-retry-object-cache.patch",
+          "patches/dolrecomp/0010-llvm-retry-indexed-scalar-FP-first-use.patch",
+          "patches/dolrecomp/0011-llvm-invalidate-indexed-FP-retry-cache.patch",
+          "patches/dolrecomp/0012-llvm-preserve-tagged-alias-memory-accesses.patch",
+          "patches/dolrecomp/0013-llvm-invalidate-tagged-alias-object-cache.patch",
+          "patches/dolrecomp/0014-llvm-resume-paired-register-transfers-after-FP-faults.patch",
+          "patches/dolrecomp/0015-llvm-admit-register-only-FP-retry-entries.patch",
+          "patches/dolrecomp/0016-backend-emit-a-static-pc-resumption-table.patch",
+          "patches/dolrecomp/0017-backend-collapse-the-duplicated-block-leader-guard.patch",
+          "patches/dolrecomp/0018-backend-move-the-precise-instruction-charge-out-of-line.patch",
+          "patches/dolrecomp/0002-backend-fast-forward-stable-memory-polls.patch",
+          "patches/dolrecomp/0003-backend-emit-cycle-observation-suffixes.patch"
+        ],
+        "checkout": "ref/DolRecomp (ignored; local reproducibility checkpoint)",
+        "note": "historical: the fork commit above contains these changes and the later ones; patches/dolrecomp is kept as history"
+      },
+      "upstream": {
+        "url": "https://github.com/ExpansionPak/DolRecomp",
+        "base_sha": "528a204fbf68fccf7353bff9202714fa6a009dcf"
+      },
+      "branch": "bluewake",
+      "submodule_of": "recompcore",
+      "submodule_path": "ref/recompcore/DolRecomp"
+    },
+    {
+      "id": "moderngekko",
+      "url": "https://github.com/ExpansionPak/ModernGekko",
+      "sha": "cc6b1327325d27ab1519daabce51dde47424705d",
+      "license": "GPL-3.0",
+      "role": "compatibility runtime (Route A); head red at this SHA, latest green 4adb92bbf66af78201470d0721d2d7a809ffbcdc; reference only since 2026-09-25 (the StaticRecomp ABI header now comes from the RecompCore fork)",
+      "verified": "2026-08-21",
+      "local_checkout": {
+        "path": "ref/ModernGekko",
+        "sha": "048c426ba3db0369e40826d22ad3adcce7fe7c58",
+        "stale": true
+      }
+    },
+    {
+      "id": "recompcore",
+      "url": "https://github.com/chrissotraidis/RecompCore",
+      "sha": "78c266d20059560fa5efe68be16062c36623af6a",
+      "branch": "bluewake-next",
+      "license": "GPL-3.0",
+      "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
+      "verified": "2026-10-31",
+      "upstream": {
+        "url": "https://github.com/ExpansionPak/RecompCore",
+        "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
+      },
+      "fork_contents": "the 80 BlueWake commits after the upstream base, including the former unpublished head 3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d and the patches/recompcore series through 0097 (0085-0091 in commit 0f642d4, the iPad device session of 2026-09-26; 0092, HD texture packs and the aspect override, in 7952fa2; 0093, background decoding of HD textures, in 594807d), plus the previously uncommitted GXRuntime core cpu.h/cpu.c and DSPIntTables sources, with .gitmodules pointing DolRecomp at chrissotraidis/DolRecomp branch bluewake (chrissotraidis/RecompCore 2d60636); elliotttate/RecompCore's copy adds patches/recompcore 0098-0113 (bluewake 8ab24da, then windows-release 9618e9d) and points DolRecomp at elliotttate/DolRecomp; chrissotraidis/RecompCore bluewake-next is 9618e9d plus patches 0114-0127 (Windows DSP layout, save safety, pipeline shutdown, audio recovery/capture opt-in display timing the reproduced worker-identity race post-publication card consistency and full-queue audio recovery)",
+      "superseded_local_patch": {
+        "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2",
+        "head_sha": "3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d",
+        "commits": [
+          "1ffbbd0807",
+          "903e1a5bee",
+          "c557b9bc84",
+          "b170d43fd5",
+          "d9edce201d",
+          "73d939e9da",
+          "b9627d4331",
+          "1f08d14ec5",
+          "118140fcaf",
+          "9638c4020a",
+          "21697ccc99",
+          "22ec40bb02",
+          "32c6c3198a",
+          "c8b50f35d9",
+          "a3457e76b9",
+          "b38975405d",
+          "0c8bf21214",
+          "7f23ea22eb",
+          "8caa98be19",
+          "84ce67a57e",
+          "bcb87c2acb",
+          "1e2f5b6031",
+          "8bac2ba568",
+          "306dd58857",
+          "d86c25a6a6",
+          "27ce4f7ec2",
+          "57faa208c1",
+          "449aa9ac69",
+          "b39652b6a8",
+          "2be66fe92a",
+          "634465a275",
+          "66fb61257f",
+          "f50c396aaf",
+          "e6c09527a2",
+          "4c8949a0bc",
+          "7506b313be",
+          "1deab5723b",
+          "16308ba1c4",
+          "9eb90469b7",
+          "cd3574a998",
+          "410d073385",
+          "a5a7652a94",
+          "51057555f98889b8c041c870b9f934d0f4943809",
+          "f998ec3df7baffbb0bd9f75c65e96b495f14f468",
+          "412c35ac67dc2511118587a083e2f7a567c22010",
+          "d80689c18c",
+          "e7d3f5b292",
+          "8f9021b36a",
+          "3d9a70469f",
+          "8190098ea2",
+          "575d24580a",
+          "feb5644104",
+          "e9ac149c0e",
+          "993df27f38",
+          "b73fd7505d",
+          "b0a232239d",
+          "cc93154e39",
+          "f76641bec6",
+          "c3408b39bc",
+          "475aad87c2",
+          "8686cb93fa",
+          "3607dd93b4",
+          "b5248b9bf8",
+          "3a876b15d0",
+          "4db351141c",
+          "62fc460f53",
+          "2bd44e810e",
+          "5d33661d02",
+          "2f470cd8cf",
+          "7ae765ca57",
+          "73ca709f9f",
+          "1996d2eddd",
+          "3476998bdb"
+        ],
+        "files": [
+          "GXRuntime/graphics/gxcore/src/gxcore_shader.cpp",
+          "GXRuntime/graphics/gxcore/src/gxcore.cpp",
+          "GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp",
+          "GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp",
+          "GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp",
+          "GXRuntime/backends/aurora/aurora_graphics.cpp",
+          "GXRuntime/backends/aurora/aurora_backend.cpp",
+          "GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp",
+          "GXRuntime/backends/aurora/aurora_backend_private.h",
+          "GXRuntime/include/gxruntime/audio_dma.h",
+          "GXRuntime/src/audio_dma.c",
+          "GXRuntime/tests/runtime_tests.c",
+          "GXRuntime/CMakeLists.txt",
+          "GXRuntime/include/gxruntime/audio_adpcm.h",
+          "GXRuntime/src/audio_adpcm.c",
+          "GXRuntime/include/gxruntime/audio_voice.h",
+          "GXRuntime/src/audio_voice.c",
+          "GXRuntime/include/gxruntime/audio_event.h",
+          "GXRuntime/src/audio_event.c",
+          "GXRuntime/src/core/cpu.c",
+          "GXRuntime/include/core/cpu.h",
+          "GXRuntime/tests/runtime_tests.c",
+          "GXRuntime/graphics/aurora/lib/gfx/common.hpp",
+          "GXRuntime/graphics/aurora/lib/gfx/common.cpp",
+          "GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp",
+          "GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp",
+          "GXRuntime/graphics/aurora/lib/gfx/staging_budget.hpp",
+          "GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp",
+          "GXRuntime/graphics/frontend/src/render_sink.cpp",
+          "GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp",
+          "GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp",
+          "GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend_c.h",
+          "GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp",
+          "GXRuntime/include/gxruntime/gx_recomp.h",
+          "GXRuntime/include/gxruntime/guest_memory_dirty.h",
+          "GXRuntime/src/aram.c",
+          "GXRuntime/src/dvd.c",
+          "GXRuntime/src/guest_memory.c",
+          "GXRuntime/src/guest_memory_dirty.c",
+          "GXRuntime/src/gx_recomp.c",
+          "GXRuntime/src/gx_recomp_parser.c",
+          "Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp",
+          "Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp",
+          "Source/Core/Core/DSP/Interpreter/DSPIntTables.h",
+          "Source/Core/Core/DSP/DSPCore.h",
+          "Source/Core/Core/DSP/DSPMemoryMap.cpp",
+          "DolRecomp",
+          "GXRuntime/graphics/aurora/lib/dolphin/pad/pad.cpp",
+          "GXRuntime/graphics/aurora/lib/window.cpp",
+          "GXRuntime/include/gxruntime/aurora_backend.h",
+          "GXRuntime/include/gxruntime/aram.h",
+          "GXRuntime/graphics/aurora/lib/gfx/efb_readback.cpp",
+          "GXRuntime/graphics/aurora/lib/dawn/MetalBinding.mm",
+          "GXRuntime/backends/aurora/audio_stretch.hpp",
+          "GXRuntime/backends/aurora/aurora_audio.cpp",
+          "GXRuntime/graphics/aurora/include/aurora/gfx.h"
+        ],
+        "purpose": "typed integer WGSL clamps, authentic retail display-copy frame presentation, guest-cycle-clocked PCM DMA, DSP ADPCM decoder fixture, voice-event mixer boundary, sound-ID event adapter, gated PCM payload diagnostics, bounded guest-alias lookup, exact tagged guest-alias resolution, shared guest-alias backing, direct unshadowed-MEM1 access, exact stable-poll dispatch fast-forwarding, suffix-aware cycle-domain observations and host-observed timebase reads, deliverable-only DSP exception checks, predecoded DSP interpreter dispatch, inline common DSP instruction fetch, bounded Aurora staging segmentation without partial presentation, default classified gxcore coverage telemetry, native line/point primitive admission, primitive-specific zero-topology classification, honest incomplete-primitive no-op accounting, indirect TEV coordinate translation, classified texgen residuals, donor-exact normal-source texgen coordinates, complete five-texgen vertex/shader admission, donor-exact destination-alpha dual-source blending, donor-exact per-vertex normal-matrix selection, default GX early-depth emulation, donor-exact EFB alpha blend semantics, donor-exact draw-time BP scissor delivery, persistent EFB source dimensions across repeated half-scale copies, complete source/destination extent delivery for scaled EFB resolves, destination/extent/format-aware EFB copy texture caching, per-texmap BP address/filter/LOD-clamp/anisotropy sampler delivery, donor-exact BP SU fixed-point texture-coordinate scaling, late BP ZTexture sampled depth output, one-shot BP write-mask semantics for J3D material state, declared-span CI palette hashing, 64-bit monotonic packet sequencing for release-scale GX streams, authentic cache-flush/device-DMA texture dirtiness for content-hash reuse, host-clock timebase writes, complete audio-DMA draining, guest-cycle AI sample counting, and TEV-selected single-texmap binding, and serialization of the FIFO translation worker against Aurora's frame transition, and a stopped and joined FIFO translation worker at shutdown, and a parked prepaid-copy emitter experiment with its mid-block-entry fix (dormant: a delta against the working tree, not applied, documented in docs/archive/status/CURRENT.md, 2026-09-22), and a predecoded DSP dispatch table built with the interpreter's tables instead of behind a per-instruction initialization guard, and a guest-alias generation counter for readers that cache a resolved host pointer",
+        "tracked_patches": [
+          "patches/recompcore/0008-guest-cycle-audio-dma.patch",
+          "patches/recompcore/0009-bound-guest-alias-lookup.patch",
+          "patches/recompcore/0010-preserve-tagged-guest-alias-namespace.patch",
+          "patches/recompcore/0011-size-index-staging-for-outset-transition.patch",
+          "patches/recompcore/0012-size-fixed-staging-for-scene-bursts.patch",
+          "patches/recompcore/0013-segment-staging-without-presenting.patch",
+          "patches/recompcore/0014-report-gxcore-coverage-at-shutdown.patch",
+          "patches/recompcore/0015-classify-vertex-decode-failures.patch",
+          "patches/recompcore/0016-admit-line-and-point-primitives.patch",
+          "patches/recompcore/0017-classify-zero-topology-by-primitive.patch",
+          "patches/recompcore/0018-classify-incomplete-primitives-as-noops.patch",
+          "patches/recompcore/0019-graphics-implement-indirect-TEV-coordinates.patch",
+          "patches/recompcore/0020-graphics-classify-texgen-residuals.patch",
+          "patches/recompcore/0021-graphics-implement-normal-source-texgen.patch",
+          "patches/recompcore/0022-graphics-support-fifth-texgen.patch",
+          "patches/recompcore/0023-graphics-implement-destination-alpha.patch",
+          "patches/recompcore/0024-graphics-select-per-vertex-normal-matrices.patch",
+          "patches/recompcore/0025-graphics-emulate-gx-early-depth.patch",
+          "patches/recompcore/0026-graphics-preserve-efb-alpha-blend-semantics.patch",
+          "patches/recompcore/0027-graphics-deliver-gx-draw-scissor-state.patch",
+          "patches/recompcore/0028-graphics-preserve-efb-copy-source-dimensions.patch",
+          "patches/recompcore/0029-graphics-deliver-per-texmap-sampler-state.patch",
+          "patches/recompcore/0030-graphics-deliver-bp-texcoord-scales.patch",
+          "patches/recompcore/0031-graphics-implement-late-ztexture-depth-output.patch",
+          "patches/recompcore/0032-graphics-preserve-efb-copy-source-extent.patch",
+          "patches/recompcore/0033-graphics-key-EFB-copies-by-target-shape.patch",
+          "patches/recompcore/0034-graphics-apply-one-shot-BP-write-masks.patch",
+          "patches/recompcore/0035-graphics-bound-CI-palette-cache-hashing.patch",
+          "patches/recompcore/0035-runtime-share-guest-alias-backing-storage.patch",
+          "patches/recompcore/0036-runtime-bypass-alias-lookup-for-unshadowed-MEM1.patch",
+          "patches/recompcore/0037-dsp-skip-masked-exception-checks.patch",
+          "patches/recompcore/0038-dsp-predecode-interpreter-dispatch.patch",
+          "patches/recompcore/0039-dsp-inline-common-instruction-fetch.patch",
+          "patches/dolrecomp/0002-backend-fast-forward-stable-memory-polls.patch",
+          "patches/dolrecomp/0003-backend-emit-cycle-observation-suffixes.patch",
+          "patches/recompcore/0040-runtime-fast-forward-stable-translated-polls.patch",
+          "patches/recompcore/0041-graphics-preserve-packet-sequence-beyond-32-bit-wrap.patch",
+          "patches/recompcore/0042-graphics-cache-texture-hashes-by-guest-dirtiness.patch",
+          "patches/recompcore/0043-runtime-observe-timebase-through-host-clock.patch",
+          "patches/recompcore/0044-runtime-delegate-timebase-writes-to-host-clock.patch",
+          "patches/recompcore/0045-runtime-drain-all-completed-audio-dma-chunks.patch",
+          "patches/recompcore/0046-runtime-drive-ai-sample-counter-from-guest-cycles.patch",
+          "patches/recompcore/0047-graphics-bind-single-texmap-by-tev-selection.patch",
+          "patches/recompcore/0048-dolrecomp-apply-partition-size-to-c-backend.patch",
+          "patches/recompcore/0049-aurora-latch-keyboard-presses-for-the-guest-pad.patch",
+          "patches/recompcore/0050-aurora-scalar-alpha-compares.patch",
+          "patches/recompcore/0051-aurora-serialize-fifo-worker-against-frame-transition.patch",
+          "patches/recompcore/0052-aurora-stop-and-join-the-fifo-worker.patch",
+          "patches/recompcore/0053-dolrecomp-prepaid-copy-mid-block-entry.patch",
+          "patches/recompcore/0054-dsp-decode-table-without-init-guard.patch",
+          "patches/recompcore/0055-guest-alias-generation.patch",
+          "patches/recompcore/0056-aurora-open-initial-frame-to-fifo-worker.patch",
+          "patches/recompcore/0057-aurora-feed-the-FIFO-worker-in-flush-sized-slices-an.patch",
+          "patches/recompcore/0058-aurora-host-overlay-and-event-hooks-and-aspect-corre.patch",
+          "patches/recompcore/0059-aurora-reopen-the-frame-after-a-failed-begin_frame-a.patch",
+          "patches/recompcore/0060-runtime-index-guest-aliases-for-binary-search.patch",
+          "patches/recompcore/0061-runtime-expose-the-ARAM-buffer-to-a-DSP-backend.patch",
+          "patches/recompcore/0062-aurora-reuse-identical-uniform-blocks-and-size-verte.patch",
+          "patches/recompcore/0063-aurora-wake-the-FIFO-worker-only-when-it-is-asleep.patch",
+          "patches/recompcore/0064-gxcore-count-toon-texgens-by-channel-state-and-lit-c.patch",
+          "patches/recompcore/0065-aurora-batch-gather-pipe-bytes-on-the-main-thread-be.patch",
+          "patches/recompcore/0066-frontend-resolve-a-CI-texture-s-palette-after-its-SE.patch",
+          "patches/recompcore/0067-aurora-let-the-host-hold-the-guest-at-any-frame-boun.patch",
+          "patches/recompcore/0068-gxcore-make-EFB-copies-at-the-render-scale-and-norma.patch",
+          "patches/recompcore/0069-frontend-fix-a-CI-texture-s-palette-in-place-gxcore-.patch",
+          "patches/recompcore/0070-frontend-drain-the-trace-before-it-overflows-aurora-.patch",
+          "patches/recompcore/0071-aurora-end-each-frame-at-its-display-copy-in-worker-.patch",
+          "patches/recompcore/0072-aurora-fixed-gather-pipe-batch-buffer-and-inline-per.patch",
+          "patches/recompcore/0073-frontend-reuse-one-render-packet-instead-of-zeroing-.patch",
+          "patches/recompcore/0074-gxcore-drop-the-palette-from-a-non-CI-texture-s-cach.patch",
+          "patches/recompcore/0075-aurora-DOL_GX_FIFO_BATCH-cuts-the-worker-s-stream-at.patch",
+          "patches/recompcore/0076-aurora-one-Metal-view-per-window-reused-by-every-sur.patch",
+          "patches/recompcore/0077-aurora-stretch-the-audio-in-time-while-the-guest-run.patch",
+          "patches/recompcore/0078-gxcore-frontend-stop-copying-the-GX-state-and-the-dr.patch",
+          "patches/recompcore/0079-aurora-load-before-exchanging-the-display-copy-reque.patch",
+          "patches/recompcore/0080-aurora-re-hash-small-textures-once-a-frame-texture-d.patch",
+          "patches/recompcore/0081-gx_recomp-mask-the-palette-load-address-to-the-GameC.patch",
+          "patches/recompcore/0082-frontend-a-palette-loaded-after-its-texture-is-bound.patch",
+          "patches/recompcore/0083-pad-a-bound-controller-combines-with-the-keyboard-in.patch",
+          "patches/recompcore/0084-aurora-aurora_peek_z-reads-the-depth-snapshot-for-a-.patch"
+        ],
+        "checkout": "ref/recompcore (ignored; local reproducibility checkpoint)",
+        "working_tree": {
+          "captured": "2026-09-22",
+          "commit": "51057555f98889b8c041c870b9f934d0f4943809",
+          "message": "working tree as landed 2026-09-22: GX FIFO deferral and translation worker in the aurora backend, and the embedded DolRecomp pin",
+          "files": [
+            "GXRuntime/backends/aurora/aurora_backend.cpp",
+            "GXRuntime/backends/aurora/aurora_backend_private.h",
+            "GXRuntime/backends/aurora/aurora_graphics.cpp",
+            "GXRuntime/graphics/aurora/lib/dolphin/pad/pad.cpp",
+            "GXRuntime/graphics/aurora/lib/gx/shader.cpp",
+            "GXRuntime/graphics/aurora/lib/window.cpp",
+            "GXRuntime/graphics/gxcore/src/gxcore.cpp",
+            "GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp",
+            "GXRuntime/include/core/cpu.h",
+            "GXRuntime/include/gxruntime/audio_dma.h",
+            "GXRuntime/include/gxruntime/platform.h",
+            "GXRuntime/src/audio_dma.c",
+            "GXRuntime/src/core/cpu.c",
+            "GXRuntime/src/core/cpu_exception.c",
+            "GXRuntime/src/core/cpu_interpreter_integer.c",
+            "GXRuntime/src/hle/hle_core.c",
+            "GXRuntime/src/platform.c",
+            "GXRuntime/tests/runtime_tests.c"
+          ],
+          "note": "The landed GX deferral and worker were uncommitted, which meant a reverse-apply of the tree would have destroyed them; they are now a commit in the pin. The embedded DolRecomp still carries its parked inert emitter scaffolding uncommitted (14 paths), which emits the same text as before it was added.",
+          "followup_commits": [
+            {
+              "captured": "2026-09-22",
+              "commit": "f998ec3df7baffbb0bd9f75c65e96b495f14f468",
+              "message": "aurora: serialize the FIFO translation worker against the frame transition",
+              "files": [
+                "GXRuntime/backends/aurora/aurora_graphics.cpp"
+              ],
+              "note": "The rendered probes of the zero-charge candidate died on the worker thread with EXC_BAD_ACCESS at 0x28 in aurora::gfx::get_render_target_size(); 0x28 is the offset into the null g_recordingFrame that the worker was dereferencing, because aurora_backend_present() clears it in end_frame and restores it in begin_frame, and the worker recorded across that window. This commit adds the recording lock, the per-batch sink gate and the drain guard. The patch series for the pin before this work is stale -- only 0003 and 0018 apply -- so a reverse-apply today still destroys the landed work; the pin's own history is the authority, as recorded here."
+            },
+            {
+              "captured": "2026-09-22",
+              "commit": "412c35ac67dc2511118587a083e2f7a567c22010",
+              "message": "aurora: stop and join the FIFO translation worker at shutdown",
+              "files": [
+                "GXRuntime/backends/aurora/aurora_graphics.cpp",
+                "GXRuntime/backends/aurora/aurora_backend.cpp",
+                "GXRuntime/backends/aurora/aurora_backend_private.h"
+              ],
+              "note": "Nothing stopped the worker: the thread was live when dol_aurora_shutdown() destroyed the device and joinable when exit destroyed its std::thread, so every rendered run ended by SIGABRT (std::terminate) after a normal guest stop. Pre-existing: it reproduces on the host without the frame-transition fix on a 60-retrace run."
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "d80689c18c988ea9f8e43d3a21b34d6fcaff3d28",
+              "message": "aurora: open the initial frame to the FIFO translation worker"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "e7d3f5b292997b4888387924b2375a1dd038f59a",
+              "message": "aurora: feed the FIFO worker in flush-sized slices and name its failures"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "8f9021b36ab51e2e7821b2286d9331889ac83cfa",
+              "message": "aurora: host overlay and event hooks, and aspect-correct output on iOS"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "3d9a70469f0bb0a6921acc9a6404e52ea9035665",
+              "message": "aurora: reopen the frame after a failed begin_frame, and let the host hold the guest"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "8190098ea24f0b7d137188511c141b06f611bfe8",
+              "message": "runtime: expose the ARAM buffer to a DSP backend"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "575d24580ab786ddccbd6a93186a1e98e52018b2",
+              "message": "aurora: reuse identical uniform blocks and size vertex staging for a whole frame"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "feb5644104f0dbaef0e0a0a445d7e5edf7382555",
+              "message": "aurora: wake the FIFO worker only when it is asleep"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "e9ac149c0ecd58ef75e122fff0783a18d143e82e",
+              "message": "gxcore: count toon texgens by channel state and lit channels with unloaded lights"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "993df27f380c93a0b1496d4e5f74fa37a3bff1c0",
+              "message": "aurora: batch gather-pipe bytes on the main thread before handing them to the worker"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "b73fd7505d44eb570a7cdea8531c3606f3625288",
+              "message": "frontend: resolve a CI texture's palette after its SETTLUT write"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "b0a232239dd494a6b19cfda50f23445265af8b75",
+              "message": "aurora: let the host hold the guest at any frame boundary"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "cc93154e39382aedd6aa5ac0900a334cfc9f7439",
+              "message": "gxcore: make EFB copies at the render scale and normalize texcoords by guest size"
+            },
+            {
+              "captured": "2026-09-23",
+              "commit": "f76641bec6bf62000bc1d94dc130e1a2a30691b0",
+              "message": "frontend: fix a CI texture's palette in place; gxcore: opaque copies without EFB alpha"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "c3408b39bca5b4cd847167bb75f150b024faf3c1",
+              "message": "frontend: drain the trace before it overflows; aurora: map EFB readback outside its lock"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "475aad87c2e719ad4b2121ec335fc0feba3b07a9",
+              "message": "aurora: end each frame at its display copy in worker mode"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "8686cb93fa67027e343c57af4a1800d0945b55f0",
+              "message": "aurora: fixed gather-pipe batch buffer and inline per-write checks"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "3607dd93b49b04b0b2323201d621ebbe49198cde",
+              "message": "frontend: reuse one render packet instead of zeroing a draw snapshot per event"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "b5248b9bf885cf4fd4d6ad3d320af24488406c55",
+              "message": "gxcore: drop the palette from a non-CI texture's cache identity"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "3a876b15d0eb0ce5d406b39fb720af98e434581f",
+              "message": "aurora: DOL_GX_FIFO_BATCH cuts the worker's stream at another size"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "4db351141c52717c11c092444801f4f082c7f922",
+              "message": "aurora: one Metal view per window, reused by every surface"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "62fc460f53584da51fe59c519c5c171c4fe3a482",
+              "message": "aurora: stretch the audio in time while the guest runs slow"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "2bd44e810e766ce1e49e1735eb084adbf782a919",
+              "message": "gxcore/frontend: stop copying the GX state and the draw per draw"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "5d33661d0286c26cfddc12d634d8cc1316f5009f",
+              "message": "aurora: load before exchanging the display-copy request at every FIFO write"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "2f470cd8cff3c60d7062c0dc248f1e07dd08de55",
+              "message": "aurora: re-hash small textures once a frame; texture diagnostics"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "7ae765ca57ef1c85f7d687b621e4dc14ab62777b",
+              "message": "gx_recomp: mask the palette load address to the GameCube's 25 bits"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "73ca709f9f7e6818b4e855b016cd4c217a11256b",
+              "message": "frontend: a palette loaded after its texture is bound is the one it draws with"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "1996d2eddd9a95ff8326fddc5a228d9d8d02ac7f",
+              "message": "pad: a bound controller combines with the keyboard instead of replacing its stick"
+            },
+            {
+              "captured": "2026-09-24",
+              "commit": "3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d",
+              "message": "aurora: aurora_peek_z reads the depth snapshot for a translated GXPeekZ"
+            }
+          ],
+          "uncommitted_patches": [
+            "patches/recompcore/0055-guest-alias-generation.patch",
+            "patches/recompcore/0060-runtime-index-guest-aliases-for-binary-search.patch"
+          ]
+        },
+        "note": "historical record only: 3476998 was never published and the patches/recompcore series does not apply cleanly to the base (0008 fails); use the fork commit above"
+      },
+      "reconciliation": {
+        "base_sha": "99e4748002d42c1a86fdcb33a47cd0e97292acff",
+        "donor_sha": "634895470af6e61e601f06a351f3a72888215159",
+        "tracked_patches": [
+          "patches/recompcore/0131-optional-global-mem1.patch",
+          "patches/recompcore/0132-display-rate-and-slow-game-interpolation.patch",
+          "patches/recompcore/0133-check-guest-span-before-subtraction.patch",
+          "patches/recompcore/0134-test-seven-interpolation-steps.patch",
+          "patches/recompcore/0135-honor-extended-mem1-aliases.patch",
+          "patches/recompcore/0136-dual-texture-post-transform.patch",
+          "patches/recompcore/0137-preserve-post-texture-save-state.patch",
+          "patches/recompcore/0138-pe-token-and-pictobox-readback.patch",
+          "patches/recompcore/0139-portable-runtime-save-fixture.patch",
+          "patches/recompcore/0140-sum-routine-slow-gx-batches.patch",
+          "patches/recompcore/0141-game-speed-from-median-frame-gaps.patch",
+          "patches/recompcore/0142-count-host-held-time.patch",
+          "patches/recompcore/0143-aurora-dawn-s-device-lock-so-its-threads-do-not-race-a-crash.patch",
+          "patches/recompcore/0144-aurora-pipelines-compiled-on-several-threads-and-the-draws-s.patch",
+          "patches/recompcore/0145-gxcore-a-draw-s-attribute-arrays-found-once-and-fixed-point-.patch",
+          "patches/recompcore/0146-smooth-motion-a-cloth-s-strips-blended-vertex-by-vertex.patch",
+          "patches/recompcore/0147-smooth-motion-colours-blended-in-the-in-between-frames.patch",
+          "patches/recompcore/0148-gxcore-a-draw-s-vertex-constants-kept-when-its-transform-sta.patch",
+          "patches/recompcore/0149-gxcore-an-ubershader-draws-what-is-still-compiling.patch",
+          "patches/recompcore/0150-gxcore-the-ubershader-on-by-default-on-d3d12-only-where-it-w.patch",
+          "patches/recompcore/0151-fps-overlay-says-when-smooth-motion-is-paused.patch",
+          "patches/recompcore/0152-gx-front-end-a-draw-s-transform-state-copied-only-wh.patch",
+          "patches/recompcore/0153-smooth-motion-the-mac-s-water-and-hud-indexed-meshes.patch",
+          "patches/recompcore/0154-gxcore-an-hd-replacement-s-own-mip-levels-sampled-th.patch",
+          "patches/recompcore/0155-smooth-motion-only-meshes-whose-positions-the-game-w.patch"
+        ],
+        "evidence": "Prior runtime candidate passes Mac/Windows regressions. Extended MEM1 aliases, endian reads/writes, reservations, journals, MEM2 and MMIO pass plain/global ASan/UBSan fixtures; full candidate and gameplay/performance acceptance remain pending.",
+        "later_donor_dual_texture": {
+          "donor_patch": "585ad2a4547cd3c9f01361b706b217eb4bcb1eab",
+          "import": "94e9835c4da4fd3b23533de9342319b58aa9ccbf",
+          "save_state_adaptation": "18ba3b642588a33b9e8eac4aba7f713bb8d3d778",
+          "evidence": "Matrix-fold and FIFO/frontend save-state regressions pass Release and ASan/UBSan; Mac host builds. BlueWake lava scene and native Windows acceptance pending."
+        },
+        "pictobox_capture": {
+          "runtime": "2218107dac0150151b39d736924df57e8dc75104",
+          "evidence": "PE token/finish and tiled I8/RGB565 regressions pass; bounded Mac Metal regular/Deluxe photo content, album acceptance, repeat/cancel, actual game save/separate-launch photo reload and pre-fix state capture pass. Native Windows remains pending.",
+          "test_portability_followup": "0568feddb332e0d9fe8a3a7cff330263f14af2f1"
+        },
+        "stability_logging": {
+          "runtime": "d55ee014e4670337aa05fefa3209e444cc7a63f0",
+          "evidence": "Session-log change only: routine slow GX batches summed every ten seconds, batches of 50 ms or more logged singly. Mac Metal runs on a copied save show the summary and single hitch lines; Windows CI passes."
+        },
+        "steady_pacing": {
+          "runtime": "3f16e469c3b9a99a2f4a57c65190136258b89fb5",
+          "donor": "elliotttate RecompCore 0bb1fefbf82a06e6640e08b9b1782637afea7650 (Wind-Waker-Recomp patch 0122), authorship retained",
+          "evidence": "Donor: six 120-200 ms game-thread holds no longer drop in-between frames on Windows; two E-cores still drop. BlueWake: frame_interp and fps_watch regressions pass on Mac; Physical M2 iPad, copied save, Smooth Motion 60, scripted 150/64/150/80 ms holds, two runs each: before (main 55bd3e7) dropped the in-between frames 4 times a run and was without them 35 of 40 s after the first hold; after (2d6a590) 0 drops, 0 of 40 s. Original saves/settings byte-identical after restoring the prior build."
+        },
+        "held_time": {
+          "runtime": "886e138c5ee301712950731397ec53b086b3f430",
+          "evidence": "Logging only: DolAuroraFrameTiming.held_us and dol_aurora_held_us() count menu/background holds so [perf] and [fps-dip] leave them out. fps_watch and frame_interp regressions pass on Mac."
+        },
+        "donor_post_040": {
+          "runtime": "6c853a1d908af3d6f700510377729f5d4c2c8c31",
+          "donor": "elliotttate RecompCore 31401e5, 3be805f, 0e631be, bb63c90, 50763a2, 6d0ed15, db2c87f, 44e5c2c (Wind-Waker-Recomp patches 0121, 0123-0129), authorship retained",
+          "evidence": "Device lock, multi-threaded pipelines, GX worker reductions, Smooth Motion cloth and colours, ubershader (on by default for D3D12 only). Mac host builds; frame_interp and fps_watch regressions pass; donor measurements not repeated."
+        },
+        "picto_actor_id": {
+          "runtime": "5423b269e01d629fd3668c822887a6d54b620c79",
+          "tracked_patches": [
+            "patches/recompcore/0177-answer-picto-actor-id-from-current-efb.patch"
+          ],
+          "evidence": "Mac M3 Max Metal: clear Lenzo subject 94/detail 0; empty-wall subject 0 with normal warm-cache rendering. Copied card unchanged. Contributors confirmed Linux/M4 Pro and all three Lenzo photos plus bad-photo rejection on Windows. Cold first-use alpha-only draws can still be skipped while pipelines compile; RecompCore#39 is a separate Mac-tested follow-up awaiting Windows/Linux gameplay checks."
+        },
+        "vulkan_resize": {
+          "runtime": "f647d03d3886eb2357950190fe1cba3fa3d10242",
+          "tracked_patches": [
+            "patches/recompcore/0178-Aurora-a-resized-Vulkan-window-keeps-its-surface.patch"
+          ],
+          "evidence": "pdale-boop's RecompCore#38 (#325): on Arch/X11 with an RTX 5070 Ti on Vulkan, window resizes, fullscreen switches and resizes with F1 open keep drawing, with no VK_ERROR_NATIVE_WINDOW_IN_USE_KHR and no stale-size snapback. The size following runs on Vulkan only; on Metal and Direct3D 12 it does nothing. Suboptimal textures are now presented and a lost surface is reconfigured up to 30 times before being released, on every backend."
+        },
+        "picto_copy_crop": {
+          "runtime": "77d4717d868cec8b4014932bb22978c284a535a7",
+          "tracked_patches": [
+            "patches/recompcore/0180-Aurora-aurora_set_copy_crop-for-pictures-taken-through-a-widened-camera.patch"
+          ],
+          "evidence": "pdale-boop's RecompCore#37 (#338): aurora_set_copy_crop(width, height, fraction) makes a texture copy of that size take the middle fraction of its source's width and scale it back, as a 4:3 camera would; both GXCopyTex and gxcore's EFB copies use it. Nothing calls it unless BLUEWAKE_PICTO_CROP=1 (picto_crop=1). Windows 11, i5-12600KF, RTX 5070 Ti, Direct3D 12, 2560x1080: Picto Box and Deluxe Picto Box photos keep their 4:3 shape at 16:9, 16:10 and 21:9; Arch Linux, Vulkan: the same at all three aspects for the Picto Box and at 16:9 for the Deluxe Picto Box."
+        },
+        "hd_look_sea": {
+          "runtime": "369b7b7e0de46de4bae944a49646b246762759d5",
+          "tracked_patches": [
+            "patches/recompcore/0182-Aurora-HD-look-cloud-shadows-take-the-sea-from-its-plane-and-dither-the-shades.patch"
+          ],
+          "evidence": "RecompCore#41: the HD look's cloud shadows take the sea's place from its plane (only nearer surfaces from depth), with gradient noise turned per octave, and the cloud, sun-shadow, ambient-occlusion and bloom passes dither by half an 8-bit step. M3 Max, Metal, a copied card warped to Outset and Dragon Roost with cloud shadows alone at 0.8: the straight-edged band across Outset's sea is gone; the full HD look renders without shader errors. Vulkan and Direct3D 12, where the panels were reported (#371), not yet checked."
+        },
+        "smooth_motion_flicker": {
+          "runtime": "be07338a68cf4ca85a72a0fc03a54a3aab720283",
+          "tracked_patches": [
+            "patches/recompcore/0179-Aurora-Smooth-Motion-without-the-flicker-in-the-HD-look-clouds-and-wave-crests.patch"
+          ],
+          "evidence": "pdale-boop's RecompCore#40 (#136): Smooth Motion's in-between frames get the HD look on every step (it was only the first of 3 at 120 FPS, 5 at 180), its shadows and lights come from the in-between camera, clouds and wave crests drawn with the view matrix are paired by their vertices' centre (and colours) instead of their place in the list, and the ripples, trail and wake of a swimming Link are paired and blended vertex by vertex. Windows 11, i5-12600KF, RTX 5070 Ti, Direct3D 12: the HD look no longer drops out on in-between frames and its shadows stay on the scenery at 60, 120 and 180 FPS; the title screen's clouds no longer flicker (in-between frames with a cloud brighter or darker than both real frames: 384 to 7 on the title pan); swimming, the rings and wake move smoothly, checked frame by frame in dumps at 180 FPS. Debian (clang 19) compiled the first three commits; Linux, Mac and iOS not played."
+        },
+        "sun_shadow_map": {
+          "runtime": "1446450c79046bd34e43abadc27522eeab768a6e",
+          "tracked_patches": [
+            "patches/recompcore/0183-Aurora-sun-shadows-from-a-shadow-map.patch"
+          ],
+          "evidence": "pdale-boop's RecompCore sun shadow map (1446450: RecompCore#42 on #40 and #44, with its debug tools for testers), the method of BLUEWAKE_HD_SUN_SHADOWS (still off by default): with sun shadows on, the scene's solid draws drawn again from the sun into a depth map, so what is off screen still casts. Arch (i5-12600KF, RTX 5070 Ti, Vulkan), host-only over a trained build, warped to Windfall headless and rendered: the map's 0.04-0.07 ms of GPU time a frame at 60 retraces with Smooth Motion at the display's rate; at 4 pm the town square is in the shadow of a building behind the camera, which the screen's shadows missed. Outset played by hand with sun shadows on: no long streaks. Windows (same PC, Direct3D 12), the later commits played by hand: alpha cutouts, the sail and flags, pots and a chest cast; the game's own shadows left out. Arch, October 18, four cascades and the low-sun bias (6431e33): at Outset in the evening (sun 20 degrees) played by hand from the lookout, the beach and the dock; the rectangle around Link, the island and sea shading themselves and the band on the sea gone, Link's shadow under his shoes; a far palm trunk's shadow starts a little behind its base. Then (e5c99f4) Windfall from 18:00 into the night: long shadows down to a sun 3 degrees up, the moon's from 12 degrees up. Mac and iOS not built."
+        },
+        "dawn_x86_64_v3": {
+          "runtime": "f71c6901a3fe3c93a0a79fc8808a7fa27c7e5baa",
+          "tracked_patches": [
+            "patches/recompcore/0184-Aurora-Dawn-with-BMI2.patch",
+            "patches/recompcore/0185-Dawn-cache-callbacks-with-pinned-headers.patch"
+          ],
+          "evidence": "RecompCore#44 retains jslay88 RecompCore#43 and removes noexcept from two cache callback lambdas for the existing Dawn packages. Original callback failure reproduced with hash-verified iOS headers; fixed block passes Mac, iOS, tvOS and Android NDK source compilation and native callback forwarding. Contributor Clang 18/22 vendored-Dawn host links and synthetic AppImage checks passed on #43. BlueWake CI now covers x86-64-v3; updated host builds and gameplay/visual acceptance are separate checks."
+        },
+        "hd_look_491": {
+          "runtime": "e05ed3cee7819feefb8e30256441ab10c62612bb",
+          "tracked_patches": [
+            "patches/recompcore/0186-Aurora-HD-look-fixes-for-chrissotraidis-bluewake-491-AO-halo-bloom-on-clouds-flickering-shadows-the-far-blur-and-lightning.patch"
+          ],
+          "evidence": "pdale-boop's RecompCore #47, the HD look's fixes for #491, in one commit. pdale-boop's fix for #491: the HD look's ambient occlusion blurred and upscaled only along each surface, so Link's own shade no longer spreads onto the sea behind him, and faded out from 1,000 to 2,500 units, where the sea's swells darkened a band toward the horizon. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from the tour's setup state and stage-select warps, not yet played by hand: at Outset's pier the sea beside Link and the band on the sea are as with AO off (255 of 255 in the AO term, was 180-250), Link's own shading kept; AO's GPU time 0.085 ms a frame on main, 0.089 with this, at 2880x2160. pdale-boop's: the HD look's bloom screened onto the scene instead of added, so Wind Waker's near-white clouds no longer clip to flat white (a fifth of the clouds at Outset's pier did). Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from the tour's setup state and stage-select warps, not yet played by hand: clouds clipped to white at Outset's pier 21% to 0%, at Windfall at noon 8% to 0%. pdale-boop's: with the HD look's sky left sharp under the far blur (DOL_AURORA_FAR_BLUR_BACKGROUND=0), the blur stopped at the horizon's edge in a hard band, and a lightning strike's invisible model (dThunder_c's mInvisModel, depth only, about 100,000 units out) wrote depth into the sky, so the far blur and cloud shadows drew grey columns from the sea to the clouds. The far blur now eases off within 24 pixels of the sky, and a depth-only draw over 50,000 units out writes no depth while the HD look's effects are on. Arch Linux (Vulkan), saved states at sea in a storm and by islands at dusk: the band and the columns gone; twelve other states pixel for pixel as before. pdale-boop's fix for #491's flickering shadows: Wind Waker's motion blur (the camera shaking as a sword hits a tree) lays the previous frame's copy, which already holds the HD look's effects, back over the scene; the effects now go in before it instead of after. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), Smooth Motion frame dumps from a save state at Outset's small trees, two sword swings, 60 and 120 FPS, render scale 1 and 2: shadowed ground held 0.65 of its unshadowed brightness through the hit (main: 0.41 to 0.61, alternating each game frame); frames without the blur pixel-identical to before. Not yet played by hand. pdale-boop's fix for #491's dark patches from the HD look's ambient occlusion: a sample shades a pixel only when it is above the pixel's surface (a normal from the depth) and within the radius of it in the scene, not just on screen, so a floor seen at a low angle is no longer shaded in front of Link; DOL_AURORA_AO_DEBUG=2 tints what it darkens red over the scene. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from save states, not yet played by hand: in a test room (K_Test2) the floor in front of Link was 2.6% darker on average over 29.5% of it, now 0.5% over 7.6%; Outset's long grass 3.7% to 2.1%, creases kept and the halo gone. Bands across the screen in Dale's save states (samples read between depth texels) gone, each sample now read at a whole texel. AO's GPU time a frame 0.150 to 0.215 ms in the test room, 0.186 to 0.378 ms at Outset (render scale 4). pdale-boop's fixes for two sun shadow map artefacts found while tuning the HD look (#491). Near the camera, the lookup's normal offset (0.5 texels) and slope bias (1 texel) were smaller than far off (2 and 10); on a rock wall the sun only grazes, the map's texels showed through as light and dark vertical stripes that shifted with the camera. Near now uses the far values. And the scene's depth was read as near / depth, as if the far plane were infinitely far; with the game's far plane (400,000) the distance came out hundreds of units too far at 8,000 to 20,000, and an island ahead shaded itself in blocks from the waterline up that went as the boat came closer. The host passes the far plane (aurora_set_world_view_far) and the depth is read exactly. Windows 11 (i5-12600KF, RTX 5070 Ti, Direct3D 12), rendered frame captures from pdale-boop's save states: on two Outset rock walls a stripe score went from 2.07 to 1.18 and matched sun shadows off on both (1.18 and 1.11), with Link's shadow still meeting his feet; two states sailing toward islands lose the blocks. Known, not fixed here: gaps at the base of the boat's shadow, a blob at the foot of a sea platform's ladder, and detached streaks at Outset's sunrise."
+        },
+        "texture_pack_optional": {
+          "runtime": "f013169b4dce10fa1b4526545532737dd9f92694",
+          "tracked_patches": [
+            "patches/recompcore/0187-Aurora-a-texture-pack-s-optional-folders-load-over-it-only-when-asked.patch"
+          ],
+          "evidence": "pdale-boop's: a texture pack leaves out its top-level optional/ folder, and DOL_AURORA_TEXTURE_PACK_OPTIONAL names folders of it to load over the pack at priority 1, for the HD look's HD's clouds in the sky switch (BLUEWAKE_HD_CLOUDS). Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered stage-select warps to Diamond Steppe at noon from a fresh native import: the pack loads its 3,546 replacements and nothing from optional/ with the switch off; with it on the log adds optional=hd-clouds replacements=6 and the sky shows HD's clouds. Windows and Mac not yet checked."
+        },
+        "hd_sun_fades": {
+          "runtime": "8e3626b0d2cede7e434a24b24121f0bfe9324e16",
+          "tracked_patches": [
+            "patches/recompcore/0188-Aurora-sun-shadows-timed-as-in-Wind-Waker-HD-the-sun-s-while-its-disk-shows-and-the-moon-s-from-25-degrees-down-to-8-at-dawn.patch"
+          ],
+          "evidence": "pdale-boop's: the sun shadow map's shadows timed against Wind Waker HD in Cemu (the stage select's warps with the clock tracked): the sun's last while the game draws its sun disk, the moon's start from 25 degrees up and last at dawn until it is down to 8 degrees. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk, night and dawn warps to Windfall's dock and the Private Oasis against HD's frames at the same times. Windows and Mac not yet checked."
+        },
+        "hd_sun_sea": {
+          "runtime": "1cc1699c1c33e20015b759c32d11d0cf3ae51b35",
+          "tracked_patches": [
+            "patches/recompcore/0189-Aurora-sun-shadows-on-the-sea-as-in-Wind-Waker-HD-which-takes-them-but-casts-none.patch"
+          ],
+          "evidence": "pdale-boop's: sun shadows on the sea as Wind Waker HD's (HD's sea casts nothing): the sea's surface out of the sun shadow map, no slope or normal bias on it, and the gap fill counting only what the map holds. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), a grid of rendered save states (the boat, three sea platforms, the Outset jetty and sunrise, four under sail, one at dusk): the horizon specks, the trough shading, the hull's gap and the platforms' detached legs gone; nothing else changed. Windows and Mac not yet checked."
+        },
+        "hd_sun_look": {
+          "runtime": "379beb0f122c0014f7a6c26a44b9dc4852abd76e",
+          "tracked_patches": [
+            "patches/recompcore/0190-Aurora-sun-shadows-shaped-as-in-Wind-Waker-HD-held-at-24-degrees-soft-toward-their-tips-and-tinted-by-the-sky.patch"
+          ],
+          "evidence": "pdale-boop's: sun shadows shaped as Wind Waker HD's, measured in Cemu with Link's place and the camera tracked: the sun held at 24 degrees with its shadows thinning to half by -7 and gone by -8 (the Private Oasis, 17:15-17:25); long shadows soft toward their tips; the shadow a colour lit by the sky (0.22, 0.41, 0.60 of what is lit; HD's about 0.21, 0.39, 0.56 on Windfall's dock); two debug views; three cascades (a fourth shaded far islands in light-blue blocks through the haze); aurora_set_sun_shadow_strength for lighter shadows; a slope bias of 20 texels far off (acne on Ice Ring Isle's walls). Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered dusk and noon warps and saved states against HD's frames; Windfall sailed toward from sea room 10 with three cascades and four. Windows and Mac not yet checked."
+        },
+        "gx_short_quads": {
+          "runtime": "e81e5800713309a5444ae234760732a7d7125e1c",
+          "tracked_patches": [
+            "patches/recompcore/0191-GX-three-vertices-left-over-in-a-quad-draw-draw-a-triangle-as-on-the-hardware.patch"
+          ],
+          "evidence": "pdale-boop's: GX_QUADS draws whose vertex count leaves three over draw them as a triangle, as the hardware does; the frontend had dropped them, and the game's night stars are three-vertex quads (dKyr_drawStar), so none showed. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), rendered warps to Windfall's dock at 4:00 and 21:00: the stars show. Smooth Motion keeps them steady: a three-vertex quad is paired from the camera's eye and moved with each in-between camera's eye; sailing at night (Dale's state), 87-100% of an in-between frame's stars stand where the real frames' do, against 5-23% before. Windows and Mac not yet checked."
+        },
+        "hd_brightness": {
+          "runtime": "259627f2d7f6fe34c9f22a74da4a92b35c55b890",
+          "tracked_patches": [
+            "patches/recompcore/0192-Aurora-the-scene-s-brightness-from-the-game-where-there-is-depth-and-not-the-sea.patch"
+          ],
+          "evidence": "pdale-boop's: aurora_set_exposure brightens the scene by the game's factor where there is depth and not the sea, for Wind Waker HD's sunlight for the hour (BLUEWAKE_HD_SKY); the sea is a mask of the draws that sample its textures (d_a_sea's, the island rooms' ring of sea and surf) and the sea rooms' untextured square of sea, covered only by what the sun map takes as solid (an alpha-tested draw by its texture's cutout); still and running water left out too (the oasis pool, rivers, falls); fading out from 10,000 to 25,000 units, where the haze is; tapering off on what is already bright (ice, white rock), read before the effects. Arch Linux (i5-12600KF, RTX 5070 Ti, Vulkan), Windfall's dock from the stage select against HD in Cemu at 23 times from 4:00 to midnight: the deck, cliffs and sea within about 10% of HD's at most hours; the mask in its debug view at sea room 10's beach and swells, Dragon Roost's shore, the open sea from above at the Forsaken Fortress, and Hyrule Castle (nothing marked). Windows and Mac not yet checked."
+        },
+        "guest_alias_lookup": {
+          "runtime": "2e4e5998d4d0e7087b1f4d01b3512b594f11658c",
+          "tracked_patches": [
+            "patches/recompcore/0193-Expose-precise-guest-alias-range-overlap.patch",
+            "patches/recompcore/0194-Track-every-guest-alias-registry-mutation.patch",
+            "patches/recompcore/0195-GXRuntime-guest-alias-lookup-in-constant-time-last-h.patch",
+            "patches/recompcore/0196-GXRuntime-the-remembered-alias-also-builds-with-MSVC.patch"
+          ],
+          "evidence": "irregularthanis's RecompCore #45 (ppc_guest_alias_range_overlaps and an alias registry generation, used by BlueWake #495's gather-pipe alias cache) and #48 (ppc_guest_alias_resolve finds an alias from the last hit, then a 4 KiB page index, with the same results; differential test guest_alias_lookup_test.c, run by BlueWake's Linux and Windows host CI). Steam Deck, rendered, interleaved against 0.9.0 with BlueWake #480 and #495: 31.86 to 36.38 game FPS (+14.2%) over five scenes, the lava room +33%, guest checkpoints identical (BlueWake #501). Merged into bluewake-next with pdale-boop's 0186-0192 for 0.10.0."
+        }
+      }
+    },
+    {
+      "id": "aurora",
+      "url": "https://github.com/encounter/aurora",
+      "sha": "8b690b60e699c92e3327886ebd84cf7f05c5d36c",
+      "license": "MIT",
+      "role": "GameCube SDK/GX compatibility layer (Route B / shared host services)",
+      "verified": "2026-08-21",
+      "local_patch": {
+        "purpose": "preserve signed fixed-point texture LOD bias without native float-to-unsigned undefined behavior, and the per-patch series under patches/aurora registered in this lock",
+        "tracked_patches": [
+          "patches/aurora/0001-preserve-signed-texture-lod-bias.patch",
+          "patches/aurora/0002-j3d-texture-cache-and-misc-state.patch",
+          "patches/aurora/0003-add-cooperative-native-retrace-lifecycle.patch",
+          "patches/aurora/0004-copy-and-present-native-xfb-frames.patch",
+          "patches/aurora/0005-support-clamped-native-display-copies.patch",
+          "patches/aurora/0006-accept-counted-draws-without-gxend.patch",
+          "patches/aurora/0007-wait-for-required-render-pipelines.patch",
+          "patches/aurora/0008-implement-z-texture-depth-pipeline.patch",
+          "patches/aurora/0009-implement-alpha-read-register.patch",
+          "patches/aurora/0010-implement-color-peek-readback.patch"
+        ]
+      },
+      "local_checkout": {
+        "path": "ref/aurora",
+        "sha": "8b690b60e699c92e3327886ebd84cf7f05c5d36c",
+        "stale": false
+      },
+      "vendored_in": "recompcore candidate 18ba3b64 at GXRuntime/graphics/aurora (plain files, not a submodule); the build uses that copy with the BlueWake changes included"
+    },
+    {
+      "id": "sunpad",
+      "url": "https://github.com/chrissotraidis/sunpad",
+      "sha": "e43f0ea6b797e5110787171957c9dc3c6213269c",
+      "license": "GPL-3.0",
+      "role": "Apple host/touch/menu/importer/controller/diagnostics behavioral reference",
+      "verified": "2026-09-23",
+      "local_checkout": {
+        "path": "ref/sunpad",
+        "sha": "e43f0ea6b797e5110787171957c9dc3c6213269c",
+        "stale": false
+      },
+      "component_transfer": {
+        "manifest": "docs/archive/SUNPAD_TRANSFER.md",
+        "adapted": [
+          "apple/ios/SunPadGameOverlay.mm -> apple/ios/src/BWGameOverlay.mm"
+        ],
+        "branch": "main",
+        "dirty": false
+      }
+    },
+    {
+      "id": "gcrecomp",
+      "url": "https://github.com/sp00nznet/gcrecomp",
+      "sha": "67491ae68d29567d41d09ef99989893f94751cbf",
+      "license": "MIT",
+      "role": "experimental CPU/runtime/GX/audio toolkit (research lane)",
+      "verified": "2026-08-21",
+      "local_checkout": null
+    },
+    {
+      "id": "ww-sp00nz",
+      "url": "https://github.com/sp00nznet/ww",
+      "sha": "6098083bc3b53ba26ab929792c5b9ebae306560d",
+      "license": "unclear; no LICENSE file at inspected revision; contains game-derived captures that must never be vendored or used for initialization",
+      "role": "WW-specific experiment (research lane only)",
+      "verified": "2026-08-21",
+      "local_checkout": {
+        "path": "ref/ww-sp00nz",
+        "sha": "146ecde38b683a718cbafffe1555880e872537ad",
+        "stale": true
+      }
+    },
+    {
+      "id": "decomp-toolkit",
+      "url": "https://github.com/encounter/decomp-toolkit",
+      "sha": "e4219e7644fb7b96d920d5bc3d1d950f5569dcaf",
+      "license": "Apache-2.0 OR MIT",
+      "role": "build tooling (dtk) for decomp/source work",
+      "verified": "2026-08-21",
+      "local_checkout": {
+        "path": "ref/decomp-toolkit",
+        "sha": "e4219e7644fb7b96d920d5bc3d1d950f5569dcaf",
+        "stale": false
+      }
+    },
+    {
+      "id": "gamecuberecompiled",
+      "url": "https://github.com/KaiserGranatapfel/GameCubeRecompiled",
+      "sha": "d380537add5aa4116c94c3513b8e3a7dd89f2331",
+      "license": "CC0-1.0",
+      "role": "Rust recompilation research donor/comparison",
+      "verified": "2026-08-21",
+      "local_checkout": {
+        "path": "ref/GameCubeRecompiled",
+        "sha": "d380537add5aa4116c94c3513b8e3a7dd89f2331",
+        "stale": false
+      }
+    },
+    {
+      "id": "betterww",
+      "url": "https://github.com/WideBoner/betterww",
+      "sha": "45014813424a7aebf7e4092fd26cae8f632837ae",
+      "license": "MIT",
+      "role": "Better Wind Waker, the reference for BlueWake's Better Wind Waker settings: mods/betterww/options.txt lists the instructions and values its patches change at this commit (with their original instructions), and runtime/host/src/game_options.c does natively what its added assembly does. Not vendored; no code or assets from it ship.",
+      "verified": "2026-09-28"
+    },
+    {
+      "id": "dolphin-gzle01-widescreen",
+      "url": "https://github.com/dolphin-emu/dolphin/blob/master/Data/Sys/GameSettings/GZLE01.ini",
+      "license": "GPL-2.0-or-later",
+      "role": "the [Gecko] \"$16:9 Widescreen\" code for GZLE01, copied to mods/widescreen/GZLE01.gecko and compiled into the composite as the widescreen mod (docs/MODS.md)",
+      "verified": "2026-09-26"
+    }
+  ],
+  "private_input": {
+    "alias": "GZLE01-disc-image",
+    "location_policy": "ignored; never committed or redistributed",
+    "expected_dol_sha1": "8d28bab68bb5078c38e43f29206f0bd01f7e7a67",
+    "supported_revision": "GZLE01 USA rev 0"
+  }
+}

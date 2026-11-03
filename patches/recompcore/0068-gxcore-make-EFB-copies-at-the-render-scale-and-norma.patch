@@ -1,0 +1,212 @@
+From cc93154e39382aedd6aa5ac0900a334cfc9f7439 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 23:12:33 -0500
+Subject: [PATCH] gxcore: make EFB copies at the render scale and normalize
+ texcoords by guest size
+
+gxcore allocated EFB-copy textures at the guest's copy size. Wind Waker copies
+the whole EFB and draws it back every frame (depth of field, blur, the title's
+composition), so at 3x the 3D scene was replaced by a 640x480 image stretched
+over it: Link and Outset in three-pixel steps under a sharp HUD. Copies are now
+allocated at the render target's scale, as Aurora's own GXCopyTex does.
+
+Because a copy is now larger on the GPU than in the guest, texcoords normalize
+by the texmap's guest size (Dolphin's texdim.xy, now filled into texdims.xy)
+through a gx_texdims helper, falling back to the texture's own size when unset.
+The WGSL tests and the TEV golden are updated for the new normalization.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 24 ++++++++++++++---
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 16 +++++++++++
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 27 +++++++++++++------
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 16 ++++++++---
+ 4 files changed, 67 insertions(+), 16 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 94dacf1d87..d8624b8786 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -11,6 +11,7 @@
+ #include <absl/container/flat_hash_map.h>
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstdlib>
+ #include <cstring>
+ #include <vector>
+@@ -664,10 +665,25 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+       .width = static_cast<int32_t>(cmd.width),
+       .height = static_cast<int32_t>(cmd.height),
+   });
+-  const uint32_t dstWidth =
+-      std::max(cmd.destination_width, static_cast<uint32_t>(1));
+-  const uint32_t dstHeight =
+-      std::max(cmd.destination_height, static_cast<uint32_t>(1));
++  // The copy is made at the render target's scale, as Aurora's own
++  // GXCopyTex does (dolphin/gx/GXFrameBuffer.cpp scale_copy_dst) and as
++  // Dolphin's scaled EFB copies do. Allocated at the guest's size, a game
++  // that copies the whole EFB and draws it back (Wind Waker's depth of field
++  // and blur passes, every frame) replaced its high-resolution scene with a
++  // 640x480 image stretched over it. Sampling uses normalized coordinates,
++  // so a larger texture needs nothing else.
++  uint32_t dstWidth = std::max(cmd.destination_width, static_cast<uint32_t>(1));
++  uint32_t dstHeight = std::max(cmd.destination_height, static_cast<uint32_t>(1));
++  if (gx::g_gxState.viewportPolicy != AURORA_VIEWPORT_NATIVE) {
++    const auto [logicalW, logicalH] = gx::logical_fb_size();
++    const auto [targetW, targetH] = gfx::get_render_target_size();
++    if (logicalW != 0 && logicalH != 0 && targetW != 0 && targetH != 0) {
++      const float sx = static_cast<float>(targetW) / static_cast<float>(logicalW);
++      const float sy = static_cast<float>(targetH) / static_cast<float>(logicalH);
++      dstWidth = std::max<uint32_t>(static_cast<uint32_t>(std::lround(dstWidth * sx)), 1u);
++      dstHeight = std::max<uint32_t>(static_cast<uint32_t>(std::lround(dstHeight * sy)), 1u);
++    }
++  }
+ 
+   const EfbCopyKey key{cmd.dest_address, dstWidth, dstHeight, cmd.format};
+   auto it = g_efbCopyCache.find(key);
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 4ec1f4eda8..a747360764 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -1480,6 +1480,22 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     plan.pixel_constants.texdims[i][3] = static_cast<std::int32_t>(
+         (bp_valid_[treg] ? bits(bp_regs_[treg], 16, 0) : 0u) + 1u);
+   }
++  // texdims[texmap].xy: the size of each sampled texmap as the guest sees
++  // it, which normalizes texcoords (Dolphin's texdim.xy). Slot 0 carries the
++  // single-texmap path's texture; a multi-texmap draw fills each used slot.
++  if (plan.has_texture) {
++    if (plan.texmap_mask == 0u) {
++      plan.pixel_constants.texdims[0][0] = static_cast<std::int32_t>(plan.tex_width);
++      plan.pixel_constants.texdims[0][1] = static_cast<std::int32_t>(plan.tex_height);
++    } else {
++      for (std::uint32_t t = 0; t < 8u; ++t) {
++        if ((plan.texmap_mask & (1u << t)) == 0u || !plan.textures[t].valid)
++          continue;
++        plan.pixel_constants.texdims[t][0] = static_cast<std::int32_t>(plan.textures[t].width);
++        plan.pixel_constants.texdims[t][1] = static_cast<std::int32_t>(plan.textures[t].height);
++      }
++    }
++  }
+ 
+   for (std::uint32_t m = 0; m < 3u; ++m) {
+     const std::uint32_t a = bp_valid_[0x06u + 3u * m]
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 00afce2186..70e3e0c775 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -340,11 +340,12 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+         texcoord < kMaxTexGens && key.tex_gens[texcoord].projection != 0u;
+     if (direct_sample && indirect_enabled) {
+       emitf(out,
+-            "    let stage_dims%u = vec2i(textureDimensions(tex%u));\n"
++            "    let stage_dims%u = vec2i(gx_texdims(psc.texdims[%u].xy, "
++            "textureDimensions(tex%u)));\n"
+             "    let base_coord%u = fixpoint_uv%u;\n"
+             "    var stage_uv%u = vec2f(base_coord%u) / "
+             "(vec2f(stage_dims%u) * 128.0);\n",
+-            n, texunit, n, texcoord, n, n, n);
++            n, texunit, texunit, n, texcoord, n, n, n);
+     }
+ 
+     const bool valid_indirect = s.ind_stage < key.num_ind_stages;
+@@ -360,9 +361,9 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+             "    let ind_coord_scaled%u = fixpoint_uv%u >> "
+             "vec2u(%uu, %uu);\n"
+             "    let ind_uv%u = vec2f(ind_coord_scaled%u) / "
+-            "(vec2f(textureDimensions(tex%u)) * 128.0);\n",
++            "(gx_texdims(psc.texdims[%u].xy, textureDimensions(tex%u)) * 128.0);\n",
+             n, indcoord, static_cast<unsigned>(ind.scale_s),
+-            static_cast<unsigned>(ind.scale_t), n, n, indunit);
++            static_cast<unsigned>(ind.scale_t), n, n, indunit, indunit);
+       emitf(out,
+             "    let ind_raw%u = vec3i(round(textureSample(tex%u, samp%u, "
+             "ind_uv%u).abg * 255.0));\n",
+@@ -461,16 +462,16 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+       } else if (proj) {
+         emitf(out,
+               "    { let uv = vec2f(fixpoint_uv%u) / "
+-              "(vec2f(textureDimensions(tex%u)) * 128.0); "
++              "(gx_texdims(psc.texdims[%u].xy, textureDimensions(tex%u)) * 128.0); "
+               "rawtextemp = vec4i(round(textureSample(tex%u, samp%u, uv) * "
+               "255.0)); }\n",
+-              texcoord, texunit, texunit, texunit);
++              texcoord, texunit, texunit, texunit, texunit);
+       } else {
+         emitf(out,
+               "    { let uv = vec2f(fixpoint_uv%u) / "
+-              "(vec2f(textureDimensions(tex%u)) * 128.0); rawtextemp = "
++              "(gx_texdims(psc.texdims[%u].xy, textureDimensions(tex%u)) * 128.0); rawtextemp = "
+               "vec4i(round(textureSample(tex%u, samp%u, uv) * 255.0)); }\n",
+-              texcoord, texunit, texunit, texunit);
++              texcoord, texunit, texunit, texunit, texunit);
+       }
+       emitf(out, "    textemp = rawtextemp.%c%c%c%c;\n",
+             kRgbaSwizzle[s.tex_swap[0]], kRgbaSwizzle[s.tex_swap[1]],
+@@ -872,6 +873,16 @@ std::string generate_wgsl(const ShaderKey& key) {
+               tex_group, 2u * t, t, tex_group, 2u * t + 1u, t);
+       }
+     }
++    if (tev) {
++      // Texcoords normalize by the texmap's size as the guest sees it
++      // (Dolphin's texdim.xy). An EFB copy is allocated at the render scale,
++      // so its GPU size is larger than the guest's; unset entries fall back
++      // to the texture's own size.
++      emit(out, "fn gx_texdims(logical: vec2i, actual: vec2u) -> vec2f {\n"
++                "    if (logical.x > 0 && logical.y > 0) { return vec2f(logical); }\n"
++                "    return vec2f(actual);\n"
++                "}\n");
++    }
+   }
+ 
+   // Fixed vertex input layout (kVertexStrideBytes); unused inputs are ignored.
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index d2d0a0d44b..32bbbd1fe0 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -671,7 +671,7 @@ void test_five_texgens() {
+   CHECK(w.find("let fixpoint_uv4 = vec2i(in.uv4.xy * "
+                "vec2f(psc.texdims[4].zw * 128))") != std::string::npos);
+   CHECK(w.find("let uv = vec2f(fixpoint_uv4) / "
+-               "(vec2f(textureDimensions(tex0)) * 128.0)") !=
++               "(gx_texdims(psc.texdims[0].xy, textureDimensions(tex0)) * 128.0)") !=
+         std::string::npos);
+ }
+ 
+@@ -860,8 +860,12 @@ void test_tev_texcoord_scale() {
+   CHECK(w.find("texdims: array<vec4i, 8>") != std::string::npos);
+   CHECK(w.find("vec2i(in.uv0.xy * vec2f(psc.texdims[0].zw * 128))") !=
+         std::string::npos);
+-  CHECK(w.find("vec2f(fixpoint_uv0) / (vec2f(textureDimensions(tex0)) * "
+-               "128.0)") != std::string::npos);
++  // Texcoords normalize by the texmap's guest size (texdims.xy), falling
++  // back to the GPU texture's size, so scaled EFB copies sample correctly.
++  CHECK(w.find("vec2f(fixpoint_uv0) / (gx_texdims(psc.texdims[0].xy, "
++               "textureDimensions(tex0)) * 128.0)") != std::string::npos);
++  CHECK(w.find("fn gx_texdims(logical: vec2i, actual: vec2u) -> vec2f") !=
++        std::string::npos);
+ }
+ 
+ // Golden WGSL for the 1-stage modulate TEV key (tex * rasterized color0).
+@@ -889,6 +893,10 @@ struct PixelShaderConstants {
+ @group(2) @binding(0) var<uniform> psc: PixelShaderConstants;
+ @group(3) @binding(0) var tex0: texture_2d<f32>;
+ @group(3) @binding(1) var samp0: sampler;
++fn gx_texdims(logical: vec2i, actual: vec2u) -> vec2f {
++    if (logical.x > 0 && logical.y > 0) { return vec2f(logical); }
++    return vec2f(actual);
++}
+ struct VertexIn {
+     @location(0) rawpos: vec3f,
+     @location(1) posmtx: u32,
+@@ -949,7 +957,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
+     let fixpoint_uv0 = vec2i(in.uv0.xy * vec2f(psc.texdims[0].zw * 128));
+     // TEV stage 0
+     rastemp = col0i.rgba;
+-    { let uv = vec2f(fixpoint_uv0) / (vec2f(textureDimensions(tex0)) * 128.0); rawtextemp = vec4i(round(textureSample(tex0, samp0, uv) * 255.0)); }
++    { let uv = vec2f(fixpoint_uv0) / (gx_texdims(psc.texdims[0].xy, textureDimensions(tex0)) * 128.0); rawtextemp = vec4i(round(textureSample(tex0, samp0, uv) * 255.0)); }
+     textemp = rawtextemp.rgba;
+     tevin_a = vec4i(vec3i(0,0,0), 0) & vec4i(255,255,255,255);
+     tevin_b = vec4i(textemp.rgb, textemp.a) & vec4i(255,255,255,255);
+-- 
+2.41.0
+

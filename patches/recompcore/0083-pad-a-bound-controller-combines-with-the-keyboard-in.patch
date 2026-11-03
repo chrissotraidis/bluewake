@@ -1,0 +1,84 @@
+From 1996d2eddd9a95ff8326fddc5a228d9d8d02ac7f Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 14:11:40 -0500
+Subject: [PATCH] pad: a bound controller combines with the keyboard instead of
+ replacing its stick
+
+PADRead set the stick, substick and triggers from a bound controller by plain
+assignment, after the keyboard had filled them, so with any controller bound
+to the port the keyboard's W/A/S/D and trigger keys were thrown away while its
+buttons (OR'd) still worked. The iPad simulator binds a controller to player
+0, so a hardware keyboard could press A but not walk. The stronger input now
+wins on each axis and the triggers take the larger value, as for the touch
+controls' virtual pad. Verified on the simulator through SDL's keyboard entry
+(BLUEWAKE_KEY_TAPS): W reads stick 0,127 and D 127,0 with controller=1, and
+Link walks up the pier. BLUEWAKE_INPUT_PROBE now also prints the stick and
+whether a controller is bound.
+---
+ .../graphics/aurora/lib/dolphin/pad/pad.cpp   | 22 ++++++++++++-------
+ 1 file changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/dolphin/pad/pad.cpp b/GXRuntime/graphics/aurora/lib/dolphin/pad/pad.cpp
+index 5911df2341..63e660dab4 100644
+--- a/GXRuntime/graphics/aurora/lib/dolphin/pad/pad.cpp
++++ b/GXRuntime/graphics/aurora/lib/dolphin/pad/pad.cpp
+@@ -892,8 +892,13 @@ u32 PADRead(PADStatus* status) {
+         yl = static_cast<Sint16>(-(yl + 1u) / 256u);
+       }
+ 
+-      status[i].stickX = static_cast<int8_t>(xl);
+-      status[i].stickY = static_cast<int8_t>(yl);
++      // Combine with the keyboard's stick rather than replace it: with any
++      // controller bound to the port (the iPad simulator binds one), a plain
++      // assignment here threw away W/A/S/D while the keyboard's buttons, which
++      // are OR'd, still worked. The stronger input on each axis wins, as for
++      // the touch controls' virtual pad (merge_virtual_status).
++      status[i].stickX = static_cast<int8_t>(dominant_axis_value(status[i].stickX, xl, -127, 127));
++      status[i].stickY = static_cast<int8_t>(dominant_axis_value(status[i].stickY, yl, -127, 127));
+ 
+       const auto xrPos = _get_axis_value(controller, PAD_AXIS_RIGHT_X_POS);
+       const auto xrNeg = _get_axis_value(controller, PAD_AXIS_RIGHT_X_NEG);
+@@ -920,8 +925,8 @@ u32 PADRead(PADStatus* status) {
+         yr = static_cast<Sint16>(-(yr + 1u) / 256u);
+       }
+ 
+-      status[i].substickX = static_cast<int8_t>(xr);
+-      status[i].substickY = static_cast<int8_t>(yr);
++      status[i].substickX = static_cast<int8_t>(dominant_axis_value(status[i].substickX, xr, -127, 127));
++      status[i].substickY = static_cast<int8_t>(dominant_axis_value(status[i].substickY, yr, -127, 127));
+ 
+       Sint16 tl = std::max(static_cast<Sint16>(0), _get_axis_value(controller, PAD_AXIS_TRIGGER_L));
+       Sint16 tr = std::max(static_cast<Sint16>(0), _get_axis_value(controller, PAD_AXIS_TRIGGER_R));
+@@ -937,8 +942,8 @@ u32 PADRead(PADStatus* status) {
+       tl /= 128;
+       tr /= 128;
+ 
+-      status[i].triggerLeft = static_cast<int8_t>(tl);
+-      status[i].triggerRight = static_cast<int8_t>(tr);
++      status[i].triggerLeft = std::max(status[i].triggerLeft, static_cast<u8>(std::max<int>(0, tl)));
++      status[i].triggerRight = std::max(status[i].triggerRight, static_cast<u8>(std::max<int>(0, tr)));
+ 
+       // If the digital button is activated, set the analog value to max.
+       if (status[i].button & PAD_TRIGGER_L) {
+@@ -1032,7 +1037,7 @@ u32 PADRead(PADStatus* status) {
+                    "msFocus=%p flags=0x%llX pressed=%d J=%d RETURN=%d "
+                    "codes=%d,%d,%d,%d,%d,%d,%d,%d mappingsSet=%d "
+                    "latched=%d latched_codes=%d,%d,%d,%d,%d,%d,%d,%d "
+-                   "port0_button=0x%04X err=%d\n",
++                   "port0_button=0x%04X err=%d stick=%d,%d controller=%d\n",
+                    s_probe_prints, s_probe_reads, numKeys, (void*)kb_focus,
+                    (void*)ms_focus, flags, pressed_count, j_down, return_down,
+                    pressed_codes[0], pressed_codes[1], pressed_codes[2],
+@@ -1042,7 +1047,8 @@ u32 PADRead(PADStatus* status) {
+                    latched_count, latched_codes[0], latched_codes[1],
+                    latched_codes[2], latched_codes[3], latched_codes[4],
+                    latched_codes[5], latched_codes[6], latched_codes[7],
+-                   button, (int)status[0].err);
++                   button, (int)status[0].err, (int)status[0].stickX, (int)status[0].stickY,
++                   aurora::input::get_controller_for_player(0) != nullptr ? 1 : 0);
+     }
+   }
+   // Every latched press this read could have delivered has now been delivered,
+-- 
+2.41.0
+

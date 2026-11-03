@@ -1,0 +1,145 @@
+From 575d24580ab786ddccbd6a93186a1e98e52018b2 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 11:55:34 -0500
+Subject: [PATCH] aurora: reuse identical uniform blocks and size vertex
+ staging for a whole frame
+
+With the DSP no longer the bottleneck, the game thread on the iOS simulator
+spent 66% of its time waiting for the FIFO translation worker, and the worker
+72% asleep in wait_for_gpu_progress: every other Outset frame overflowed the
+24 MB uniform staging area (about 2 KB of vertex constants per draw, 12k draws),
+the frame was split, and each split waited for a staging buffer. Once uniforms
+fit, the 12 MB vertex area overflowed the same way.
+
+A draw whose vertex or pixel constant block is byte-identical to the previous
+draw's, within the same frame packet, now reuses that range (79% of blocks in
+Outset; DOL_AURORA_UNIFORM_DEDUP=0 disables it), and the vertex area is 24 MB.
+Frame captures at six retraces through the title and prologue are identical
+with and without reuse. On the simulator's heavy Outset view: 0 staging splits
+(was 849), 0 retraces over 100 ms, 34.5 retraces a second (was about 21).
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  4 ++
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  8 +++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 48 +++++++++++++++++--
+ 3 files changed, 56 insertions(+), 4 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 820d385399..5a9b4b42da 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1764,6 +1764,10 @@ Range push_uniform(const uint8_t* data, size_t length) {
+   return push(current_frame_packet().uniforms, data, length, g_cachedLimits.minUniformBufferOffsetAlignment);
+ }
+ 
++uint64_t current_frame_id() {
++  return g_recordingFrame == nullptr ? 0 : current_frame_packet().frameId;
++}
++
+ Range push_storage(const uint8_t* data, size_t length) {
+   ZoneScoped;
+   return push(current_frame_packet().storage, data, length, g_cachedLimits.minStorageBufferOffsetAlignment);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 6678293342..27279bc6e9 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -176,7 +176,10 @@ inline constexpr bool UseTextureBuffer = true;
+ // Keep these slices bounded and segment long command intervals before they
+ // overflow; fixed growth cannot cover an interval with no display copy.
+ inline constexpr uint64_t UniformBufferSize = 25165824;  // 24mb
+-inline constexpr uint64_t VertexBufferSize = 12582912;   // 12mb
++// Wind Waker's Outset frames fill 12 MB of vertices; a full area split the frame
++// into two submissions, and each split waited on the GPU for a staging buffer
++// (measured on the iOS simulator). 24 MB holds a whole frame.
++inline constexpr uint64_t VertexBufferSize = 25165824;   // 24mb
+ inline constexpr uint64_t IndexBufferSize = 8388608;     // 8mb
+ inline constexpr uint64_t StorageBufferSize = 8388608;   // 8mb
+ inline constexpr uint64_t TextureUploadSize = 25165824;  // 24mb
+@@ -294,6 +297,9 @@ static Range push_indices(ArrayRef<T> data, size_t alignment) {
+   return push_indices(reinterpret_cast<const uint8_t*>(data.data()), data.size() * sizeof(T), alignment);
+ }
+ Range push_uniform(const uint8_t* data, size_t length);
++// Identifies the frame packet (a new one per frame and per staging segment)
++// that staging ranges belong to; 0 when no frame is recording.
++uint64_t current_frame_id();
+ template <typename T>
+ static Range push_uniform(const T& data) {
+   return push_uniform(reinterpret_cast<const uint8_t*>(&data), sizeof(T));
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index df3a1d6192..94dacf1d87 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -11,6 +11,7 @@
+ #include <absl/container/flat_hash_map.h>
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <cstring>
+ #include <vector>
+ 
+@@ -704,6 +705,46 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+                     clearDepthValue, fmt);
+ }
+ 
++// Uniform de-duplication across consecutive draws.
++//
++// Each draw carries the full vertex-constant block (every position, texture
++// and normal matrix, about 2 KB) and a pixel-constant block, and consecutive
++// draws of one model often carry byte-identical blocks. Pushing them anyway
++// filled Aurora's 24 MB uniform staging area in the middle of Wind Waker's
++// Outset frames, and each split waited on the GPU. A draw whose block matches
++// the previous draw's, within the same frame packet, reuses that range.
++struct UniformCache {
++  std::vector<uint8_t> bytes;
++  Range range{};
++  uint64_t frameId = 0;
++  uint64_t hits = 0;
++  uint64_t pushes = 0;
++};
++static UniformCache g_vertexUniformCache;
++static UniformCache g_pixelUniformCache;
++
++static Range push_uniform_dedup(UniformCache& cache, const uint8_t* data,
++                                size_t length) {
++  static const bool enabled = [] {
++    const char* env = std::getenv("DOL_AURORA_UNIFORM_DEDUP");
++    return env == nullptr || env[0] != '0';
++  }();
++  const uint64_t frameId = current_frame_id();
++  if (enabled && frameId != 0 && cache.frameId == frameId && cache.bytes.size() == length &&
++      std::memcmp(cache.bytes.data(), data, length) == 0) {
++    ++cache.hits;
++    return cache.range;
++  }
++  ++cache.pushes;
++  if (((cache.hits + cache.pushes) & 0x3FFFFu) == 0)
++    Log.info("GXCore uniform reuse: {} of {} blocks reused",
++             cache.hits, cache.hits + cache.pushes);
++  cache.range = push_uniform(data, length);
++  cache.bytes.assign(data, data + length);
++  cache.frameId = frameId;
++  return cache.range;
++}
++
+ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   if (!plan.ok || plan.vertex_count == 0 || plan.indices.empty()) {
+     return false;
+@@ -950,12 +991,13 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   const auto idxRange = push_indices(
+       reinterpret_cast<const uint8_t*>(plan.indices.data()),
+       indexBytes, 4);
+-  const auto uniformRange = push_uniform(
+-      reinterpret_cast<const uint8_t*>(&plan.constants),
++  const auto uniformRange = push_uniform_dedup(
++      g_vertexUniformCache, reinterpret_cast<const uint8_t*>(&plan.constants),
+       sizeof(plan.constants));
+   Range pixelUniformRange{};
+   if (tev) {
+-    pixelUniformRange = push_uniform(
++    pixelUniformRange = push_uniform_dedup(
++        g_pixelUniformCache,
+         reinterpret_cast<const uint8_t*>(&plan.pixel_constants),
+         sizeof(plan.pixel_constants));
+   }
+-- 
+2.41.0
+

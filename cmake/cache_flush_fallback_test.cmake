@@ -1,0 +1,5 @@
+add_executable(bluewake_cache_flush_fallback_test
+    "${BLUEWAKE_REPO_ROOT}/tests/cache_flush_fallback_test.c")
+target_include_directories(bluewake_cache_flush_fallback_test PRIVATE "${BLUEWAKE_HOST_SRC}")
+target_link_libraries(bluewake_cache_flush_fallback_test PRIVATE gxruntime)
+add_test(NAME bluewake_cache_flush_fallback_test COMMAND bluewake_cache_flush_fallback_test)

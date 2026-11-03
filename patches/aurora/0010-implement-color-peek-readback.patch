@@ -1,0 +1,735 @@
+diff --git a/cmake/aurora_gx.cmake b/cmake/aurora_gx.cmake
+index f8f9461..5d98326 100644
+--- a/cmake/aurora_gx.cmake
++++ b/cmake/aurora_gx.cmake
+@@ -1,6 +1,7 @@
+ add_library(aurora_gx STATIC
+         lib/gfx/clear.cpp
+         lib/gfx/depth_peek.cpp
++        lib/gfx/color_peek.cpp
+         lib/gfx/encoding.cpp
+         lib/gfx/frame.cpp
+         lib/gfx/pipeline_cache.cpp
+diff --git a/include/dolphin/gx/GXAurora.h b/include/dolphin/gx/GXAurora.h
+index 054a6ee..31cd407 100644
+--- a/include/dolphin/gx/GXAurora.h
++++ b/include/dolphin/gx/GXAurora.h
+@@ -82,6 +82,9 @@ extern "C" {
+ // u64 destination, s32 source x/y/w/h, u32 output width/height, u8 clear.
+ #define GX_AURORA_COPY_DISPLAY 0x003B
+ 
++// No payload. Asks the renderer to snapshot the scene colour target for the next GXPeekARGB.
++#define GX_AURORA_REQUEST_COLOR_SNAPSHOT 0x003C
++
+ /**
+  * Draw primitives with the vertex count derived from a byte length, as written by
+  * GXBegin(prim, fmt, GX_AUTO). Must be followed by a u8 draw opcode (vtxfmt|prim),
+diff --git a/lib/dolphin/gx/GXCpu2Efb.cpp b/lib/dolphin/gx/GXCpu2Efb.cpp
+index 41567bc..d8ae7eb 100644
+--- a/lib/dolphin/gx/GXCpu2Efb.cpp
++++ b/lib/dolphin/gx/GXCpu2Efb.cpp
+@@ -2,6 +2,7 @@
+ #include "__gx.h"
+ 
+ #include "../../gfx/depth_peek.hpp"
++#include "../../gfx/color_peek.hpp"
+ 
+ #include <dolphin/gx/GXAurora.h>
+ #include <dolphin/gx/GXCpu2Efb.h>
+@@ -28,3 +29,20 @@ void GXPeekZ(u16 x, u16 y, u32* z) {
+ void GXPokeAlphaRead(GXAlphaReadMode mode) {
+   (void)mode;
+ }
++
++// The colour half of the same read path: the console reads one EFB pixel synchronously, which a
++// renderer that submits asynchronously cannot do, so this answers from the most recent completed
++// snapshot of the scene colour target and asks for the next one. See gfx/color_peek.hpp for the
++// word layout, which the guest's own capture pass pins down.
++void GXPeekARGB(u16 x, u16 y, u32* color) {
++  if (color != nullptr) {
++    u32 value = 0;
++    if (aurora::gfx::color_peek::read_latest(x, y, value)) {
++      *color = value;
++    } else {
++      *color = 0;
++    }
++  }
++
++  GX_WRITE_AURORA(GX_AURORA_REQUEST_COLOR_SNAPSHOT);
++}
+diff --git a/lib/gfx/color_peek.cpp b/lib/gfx/color_peek.cpp
+new file mode 100644
+index 0000000..0972e61
+--- /dev/null
++++ b/lib/gfx/color_peek.cpp
+@@ -0,0 +1,322 @@
++#include "color_peek.hpp"
++
++#include "../dolphin/vi/vi_internal.hpp"
++#include "../gx/gx.hpp"
++#include "../webgpu/gpu.hpp"
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <cmath>
++#include <magic_enum.hpp>
++#include <mutex>
++#include <tracy/Tracy.hpp>
++
++namespace aurora::gfx::color_peek {
++namespace {
++Module Log("aurora::gfx::color_peek");
++
++using webgpu::g_device;
++
++using Clock = std::chrono::steady_clock;
++
++constexpr size_t SlotCount = 3;
++constexpr uint32_t SnapshotHz = 30;
++constexpr auto SnapshotInterval = std::chrono::nanoseconds{1'000'000'000 / SnapshotHz};
++// A texture-to-buffer copy requires the row stride to be a multiple of this, so rows are padded and
++// the reader walks them at the padded stride.
++constexpr uint32_t RowAlignment = 256;
++
++struct LatestSnapshot {
++  uint32_t width = 0;
++  uint32_t height = 0;
++  Mapping mapping{};
++  std::vector<uint32_t> data;
++};
++
++enum class SlotState : uint8_t {
++  Available,
++  CopySubmitted,
++  MapPending,
++};
++
++struct Slot {
++  wgpu::Buffer readbackBuffer;
++  uint32_t width = 0;
++  uint32_t height = 0;
++  uint32_t paddedRowBytes = 0;
++  uint64_t byteSize = 0;
++  SlotState state = SlotState::Available;
++};
++
++struct PendingMap {
++  size_t slotIdx = 0;
++  wgpu::Buffer readbackBuffer;
++  uint64_t byteSize = 0;
++};
++
++bool g_enabled = false;
++std::array<Slot, SlotCount> g_slots;
++size_t g_nextSlot = 0;
++bool g_snapshotRequested = false;
++Clock::time_point g_nextSnapshotTime;
++LatestSnapshot g_latest;
++std::mutex g_mutex;
++
++Mapping make_mapping(wgpu::Extent3D sourceSize) noexcept {
++  Mapping mapping;
++  mapping.srcWidth = sourceSize.width;
++  mapping.srcHeight = sourceSize.height;
++  if (gx::g_gxState.viewportPolicy == AURORA_VIEWPORT_NATIVE) {
++    return mapping;
++  }
++
++  const auto logicalSize = vi::configured_fb_size();
++  if (logicalSize.x == 0 || logicalSize.y == 0 || sourceSize.width == 0 || sourceSize.height == 0) {
++    return mapping;
++  }
++
++  const bool stretch = gx::g_gxState.viewportPolicy == AURORA_VIEWPORT_STRETCH;
++  const float scaleX = static_cast<float>(sourceSize.width) / static_cast<float>(logicalSize.x);
++  const float scaleY = static_cast<float>(sourceSize.height) / static_cast<float>(logicalSize.y);
++  const float scale = std::min(scaleX, scaleY);
++  mapping.scaleX = stretch ? scaleX : scale;
++  mapping.scaleY = stretch ? scaleY : scale;
++  mapping.offsetX = stretch ? 0.f
++                            : (static_cast<float>(sourceSize.width) -
++                               static_cast<float>(logicalSize.x) * scale) * 0.5f;
++  mapping.offsetY = stretch ? 0.f
++                            : (static_cast<float>(sourceSize.height) -
++                               static_cast<float>(logicalSize.y) * scale) * 0.5f;
++  return mapping;
++}
++
++uint32_t padded_row_bytes(uint32_t width) noexcept {
++  const uint32_t unpadded = width * static_cast<uint32_t>(sizeof(uint32_t));
++  return (unpadded + RowAlignment - 1u) / RowAlignment * RowAlignment;
++}
++
++bool ensure_slot(Slot& slot, uint32_t width, uint32_t height) {
++  const uint32_t paddedRow = padded_row_bytes(width);
++  const uint64_t byteSize = static_cast<uint64_t>(paddedRow) * static_cast<uint64_t>(height);
++  if (slot.readbackBuffer && slot.width == width && slot.height == height && slot.byteSize == byteSize) {
++    return true;
++  }
++  if (byteSize == 0 || byteSize > UINT32_MAX) {
++    return false;
++  }
++
++  const wgpu::BufferDescriptor readbackDescriptor{
++      .label = "Color Peek Readback Buffer",
++      .usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst,
++      .size = byteSize,
++  };
++  slot.readbackBuffer = g_device.CreateBuffer(&readbackDescriptor);
++  slot.width = width;
++  slot.height = height;
++  slot.paddedRowBytes = paddedRow;
++  slot.byteSize = byteSize;
++  return slot.readbackBuffer != nullptr;
++}
++
++Slot* find_available_slot(uint32_t width, uint32_t height) {
++  for (size_t i = 0; i < g_slots.size(); ++i) {
++    const size_t idx = (g_nextSlot + i) % g_slots.size();
++    auto& slot = g_slots[idx];
++    if (slot.state != SlotState::Available) {
++      continue;
++    }
++    if (!ensure_slot(slot, width, height)) {
++      continue;
++    }
++    g_nextSlot = (idx + 1) % g_slots.size();
++    return &slot;
++  }
++  return nullptr;
++}
++
++void complete_slot(size_t slotIdx, wgpu::MapAsyncStatus status, wgpu::StringView message) {
++  std::lock_guard lock{g_mutex};
++  auto& slot = g_slots[slotIdx];
++  if (status == wgpu::MapAsyncStatus::Success) {
++    const auto* mapped = static_cast<const uint8_t*>(
++        slot.readbackBuffer.GetConstMappedRange(0, slot.byteSize));
++    if (mapped != nullptr) {
++      g_latest.width = slot.width;
++      g_latest.height = slot.height;
++      g_latest.data.assign(static_cast<size_t>(slot.width) * slot.height, 0u);
++      for (uint32_t y = 0; y < slot.height; ++y) {
++        const uint8_t* row = mapped + static_cast<size_t>(y) * slot.paddedRowBytes;
++        for (uint32_t x = 0; x < slot.width; ++x) {
++          const uint8_t* texel = row + static_cast<size_t>(x) * 4u;
++          g_latest.data[static_cast<size_t>(y) * slot.width + x] =
++              argb_from_rgba8(texel[0], texel[1], texel[2], texel[3]);
++        }
++      }
++    }
++    slot.readbackBuffer.Unmap();
++  } else if (status != wgpu::MapAsyncStatus::CallbackCancelled &&
++             status != wgpu::MapAsyncStatus::Aborted) {
++    Log.warn("Color Peek readback mapping failed {}: {}", magic_enum::enum_name(status), message);
++  }
++  slot.state = SlotState::Available;
++}
++} // namespace
++
++void initialize() {
++  if (!webgpu::g_hasCoreFeatures) {
++    return;
++  }
++  g_enabled = true;
++}
++
++void shutdown() {
++  testing::reset();
++  for (auto& slot : g_slots) {
++    slot = {};
++  }
++  g_enabled = false;
++}
++
++void request_snapshot() noexcept {
++  if (!g_enabled) {
++    return;
++  }
++  std::lock_guard lock{g_mutex};
++  g_snapshotRequested = true;
++}
++
++bool read_latest(uint16_t x, uint16_t y, uint32_t& argb) noexcept {
++  std::lock_guard lock{g_mutex};
++  if (g_latest.width == 0 || g_latest.height == 0 || g_latest.data.empty()) {
++    return false;
++  }
++  uint32_t index = 0;
++  if (!map_guest_to_source(g_latest.mapping, x, y, index) || index >= g_latest.data.size()) {
++    return false;
++  }
++  argb = g_latest.data[index];
++  return true;
++}
++
++void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::Texture& colorTexture,
++                           wgpu::TextureFormat format, wgpu::Extent3D sourceSize,
++                           uint32_t msaaSamples) noexcept {
++  if (!g_enabled) {
++    return;
++  }
++
++  ZoneScoped;
++  const auto now = Clock::now();
++  {
++    std::lock_guard lock{g_mutex};
++    if (!g_snapshotRequested || now < g_nextSnapshotTime) {
++      return;
++    }
++    g_snapshotRequested = false;
++    g_nextSnapshotTime = now + SnapshotInterval;
++  }
++
++  if (!colorTexture || sourceSize.width == 0 || sourceSize.height == 0) {
++    return;
++  }
++  if (format != wgpu::TextureFormat::RGBA8Unorm) {
++    // The readback below reads four channels in RGBA order; anything else would be read wrong rather
++    // than read badly, so it is refused and said out loud instead.
++    Log.warn("Color Peek needs an RGBA8Unorm scene target, got {}", magic_enum::enum_name(format));
++    return;
++  }
++  if (msaaSamples > 1) {
++    Log.fatal("Color Peek from multisampled EFB targets is not supported");
++  }
++
++  const Mapping mapping = make_mapping(sourceSize);
++  wgpu::Buffer readbackBuffer;
++  uint64_t byteSize = 0;
++  {
++    std::lock_guard lock{g_mutex};
++    auto* slot = find_available_slot(sourceSize.width, sourceSize.height);
++    if (slot == nullptr) {
++      return;
++    }
++    slot->state = SlotState::CopySubmitted;
++    readbackBuffer = slot->readbackBuffer;
++    byteSize = slot->byteSize;
++    g_latest.mapping = mapping;
++  }
++
++  const wgpu::TexelCopyTextureInfo source{
++      .texture = colorTexture,
++      .mipLevel = 0,
++      .origin = {0, 0, 0},
++      .aspect = wgpu::TextureAspect::All,
++  };
++  const wgpu::TexelCopyBufferInfo destination{
++      .layout =
++          wgpu::TexelCopyBufferLayout{
++              .offset = 0,
++              .bytesPerRow = padded_row_bytes(sourceSize.width),
++              .rowsPerImage = sourceSize.height,
++          },
++      .buffer = readbackBuffer,
++  };
++  const wgpu::Extent3D copySize{sourceSize.width, sourceSize.height, 1};
++  cmd.CopyTextureToBuffer(&source, &destination, &copySize);
++}
++
++void after_submit() noexcept {
++  if (!g_enabled) {
++    return;
++  }
++
++  std::vector<PendingMap> pendingMaps;
++  {
++    std::lock_guard lock{g_mutex};
++    for (size_t i = 0; i < g_slots.size(); ++i) {
++      auto& slot = g_slots[i];
++      if (slot.state != SlotState::CopySubmitted) {
++        continue;
++      }
++      slot.state = SlotState::MapPending;
++      pendingMaps.push_back({.slotIdx = i, .readbackBuffer = slot.readbackBuffer,
++                             .byteSize = slot.byteSize});
++    }
++  }
++
++  for (const auto& pending : pendingMaps) {
++    pending.readbackBuffer.MapAsync(
++        wgpu::MapMode::Read, 0, pending.byteSize, wgpu::CallbackMode::AllowSpontaneous,
++        [slotIdx = pending.slotIdx](wgpu::MapAsyncStatus status, wgpu::StringView message) {
++          complete_slot(slotIdx, status, message);
++        });
++  }
++}
++
++namespace testing {
++void reset() noexcept {
++  std::lock_guard lock{g_mutex};
++  g_snapshotRequested = false;
++  g_nextSlot = 0;
++  g_nextSnapshotTime = {};
++  g_latest = {};
++  for (auto& slot : g_slots) {
++    slot.state = SlotState::Available;
++  }
++}
++
++bool snapshot_requested() noexcept {
++  std::lock_guard lock{g_mutex};
++  return g_snapshotRequested;
++}
++
++void set_latest(uint32_t width, uint32_t height, const std::vector<uint32_t>& data) {
++  std::lock_guard lock{g_mutex};
++  g_latest.width = width;
++  g_latest.height = height;
++  g_latest.mapping = Mapping{.srcWidth = width, .srcHeight = height};
++  g_latest.data = data;
++}
++
++} // namespace testing
++
++} // namespace aurora::gfx::color_peek
+diff --git a/lib/gfx/color_peek.hpp b/lib/gfx/color_peek.hpp
+new file mode 100644
+index 0000000..9e60b3b
+--- /dev/null
++++ b/lib/gfx/color_peek.hpp
+@@ -0,0 +1,83 @@
++#pragma once
++
++#include "types.hpp"
++
++#include <cstdint>
++#include <cmath>
++#include <vector>
++
++// The colour half of the CPU-to-EFB read path. GXPeekARGB is the console's synchronous read of one
++// EFB pixel; a renderer that submits asynchronously has no synchronous pixel to hand back, so this
++// keeps the most recent completed snapshot of the scene colour target and answers from it. Its
++// reader is therefore one frame behind the console's, which is the whole of the difference.
++//
++// It is not a second depth_peek. That one needs a compute pass because a depth texture cannot be
++// copied to a buffer and because the guest's Z convention has to be reconstructed; a colour target
++// needs neither, so this is a plain texture-to-buffer copy and a mapped readback.
++
++namespace aurora::gfx::color_peek {
++
++// The two pieces of pure logic on this path live here rather than in the translation unit, so that
++// the module and the command-level tests share one definition of them instead of two that can
++// drift: the layout of the word the guest reads back, and the map from a guest pixel to a pixel of
++// the target.
++//
++// The layout is pinned by the guest's own capture pass. It writes its photo index with
++// GXSetDstAlpha(col * 4), leaves colour updates off and alpha updates on, then reads
++// `sp8 >> 26`; the index comes back whole only if alpha is the high byte.
++inline uint32_t argb_from_rgba8(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept {
++  return (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(r) << 16) |
++         (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
++}
++
++// A guest pixel addresses the logical framebuffer; the target may be a different size, which is why
++// the same mapping the depth peek applies is applied here.
++struct Mapping {
++  float offsetX = 0.f;
++  float offsetY = 0.f;
++  float scaleX = 1.f;
++  float scaleY = 1.f;
++  uint32_t srcWidth = 0;
++  uint32_t srcHeight = 0;
++};
++
++inline bool map_guest_to_source(const Mapping& mapping, uint16_t x, uint16_t y,
++                               uint32_t& index) noexcept {
++  if (mapping.srcWidth == 0 || mapping.srcHeight == 0 || mapping.scaleX <= 0.f ||
++      mapping.scaleY <= 0.f) {
++    return false;
++  }
++  const auto sourceX = static_cast<int32_t>(
++      std::floor(mapping.offsetX + (static_cast<float>(x) + 0.5f) * mapping.scaleX));
++  const auto sourceY = static_cast<int32_t>(
++      std::floor(mapping.offsetY + (static_cast<float>(y) + 0.5f) * mapping.scaleY));
++  if (sourceX < 0 || sourceY < 0 || sourceX >= static_cast<int32_t>(mapping.srcWidth) ||
++      sourceY >= static_cast<int32_t>(mapping.srcHeight)) {
++    return false;
++  }
++  index = static_cast<uint32_t>(sourceY) * mapping.srcWidth + static_cast<uint32_t>(sourceX);
++  return true;
++}
++
++void initialize();
++void shutdown();
++
++void request_snapshot() noexcept;
++
++// Answers in the console's peek layout, which the guest's own capture pass pins down: it writes the
++// photo index as GXSetDstAlpha(col * 4) with colour updates off and alpha updates on, then reads
++// `sp8 >> 26`, so the word is 0xAARRGGBB and the top six bits are the index.
++bool read_latest(uint16_t x, uint16_t y, uint32_t& argb) noexcept;
++
++void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::Texture& colorTexture,
++                           wgpu::TextureFormat format, wgpu::Extent3D sourceSize,
++                           uint32_t msaaSamples) noexcept;
++void after_submit() noexcept;
++
++namespace testing {
++void reset() noexcept;
++bool snapshot_requested() noexcept;
++void set_latest(uint32_t width, uint32_t height, const std::vector<uint32_t>& data);
++} // namespace testing
++
++} // namespace aurora::gfx::color_peek
+diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
+index b3054be..59a8e26 100644
+--- a/lib/gfx/encoding.cpp
++++ b/lib/gfx/encoding.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "clear.hpp"
+ #include "depth_peek.hpp"
++#include "color_peek.hpp"
+ #include "pipeline_cache.hpp"
+ #include "tex_copy_conv.hpp"
+ #include "tex_palette_conv.hpp"
+@@ -254,6 +255,13 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+                                       passInfo.colorAttachments[SceneColorAttachmentIndex].size, passInfo.msaaSamples);
+   }
+ 
++  if (passInfo.captureColorSnapshot) {
++    color_peek::encode_frame_snapshot(cmd, passInfo.copySourceTexture,
++                                      passInfo.colorAttachments[SceneColorAttachmentIndex].format,
++                                      passInfo.colorAttachments[SceneColorAttachmentIndex].size,
++                                      passInfo.msaaSamples);
++  }
++
+   if (passInfo.resolveTarget) {
+     const auto& dstSize = passInfo.resolveTarget->size;
+     const bool needsConversion = tex_copy_conv::needs_conversion(passInfo.resolveFormat);
+diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
+index 9fd83ef..1dec653 100644
+--- a/lib/gfx/frame.cpp
++++ b/lib/gfx/frame.cpp
+@@ -1,6 +1,7 @@
+ #include "frame.hpp"
+ 
+ #include "depth_peek.hpp"
++#include "color_peek.hpp"
+ #include "pipeline_cache.hpp"
+ #include "recording.hpp"
+ #include "render_worker.hpp"
+@@ -392,6 +393,7 @@ void initialize() {
+   //   }
+   // });
+   depth_peek::initialize();
++  color_peek::initialize();
+   tex_copy_conv::initialize();
+   tex_palette_conv::initialize();
+ 
+@@ -532,6 +534,7 @@ void shutdown() {
+   }
+   shutdown_pipeline_cache();
+   depth_peek::shutdown();
++  color_peek::shutdown();
+   tex_copy_conv::shutdown();
+   tex_palette_conv::shutdown();
+   texture_replacement::shutdown();
+@@ -698,7 +701,10 @@ void end_frame(EndFrameCallback callback) {
+ 
+ uint32_t current_frame() noexcept { return g_frameIndex; }
+ 
+-void after_submit() noexcept { depth_peek::after_submit(); }
++void after_submit() noexcept {
++  depth_peek::after_submit();
++  color_peek::after_submit();
++}
+ 
+ void gpu_synchronize() { render_worker::synchronize(); }
+ 
+diff --git a/lib/gfx/frame_packet.hpp b/lib/gfx/frame_packet.hpp
+index d50ce6a..5bf4fe0 100644
+--- a/lib/gfx/frame_packet.hpp
++++ b/lib/gfx/frame_packet.hpp
+@@ -103,6 +103,7 @@ struct RenderPass {
+   bool hasDraws = false;
+   bool discardable = false;
+   bool captureDepthSnapshot = false;
++  bool captureColorSnapshot = false;
+   bool sealed = false;
+   std::vector<tex_palette_conv::ConvRequest> paletteConvs;
+ 
+diff --git a/lib/gfx/recording.cpp b/lib/gfx/recording.cpp
+index 01f7db9..8c33d77 100644
+--- a/lib/gfx/recording.cpp
++++ b/lib/gfx/recording.cpp
+@@ -1108,6 +1108,7 @@ void finish() {
+     frame.uniforms.append_zeroes(gx::MaxUniformSize);
+     auto& pass = frame.renderPasses[g_recorder.currentRenderPass];
+     pass.captureDepthSnapshot = true;
++    pass.captureColorSnapshot = true;
+     enqueue_pass(frame, g_recorder.currentRenderPass);
+     g_recorder.currentRenderPass = UINT32_MAX;
+   }
+diff --git a/lib/gx/command_processor.cpp b/lib/gx/command_processor.cpp
+index 587a1a3..71c29e9 100644
+--- a/lib/gx/command_processor.cpp
++++ b/lib/gx/command_processor.cpp
+@@ -1,6 +1,7 @@
+ #include "command_processor.hpp"
+ 
+ #include "../gfx/depth_peek.hpp"
++#include "../gfx/color_peek.hpp"
+ #include "../gfx/recording.hpp"
+ #include "../internal.hpp"
+ #include "dolphin/gd/GDGeometry.h"
+@@ -739,6 +740,8 @@ void handle_aurora(Reader& reader) noexcept {
+     g_gxState.texCopyDest = reinterpret_cast<const void*>(reader.read<u64>());
+   } else if (subCmd == GX_AURORA_REQUEST_DEPTH_SNAPSHOT) {
+     gfx::depth_peek::request_snapshot();
++  } else if (subCmd == GX_AURORA_REQUEST_COLOR_SNAPSHOT) {
++    gfx::color_peek::request_snapshot();
+   } else if (subCmd == GX_AURORA_BEGIN_OFFSCREEN) {
+     const u32 width = reader.read<u32>();
+     const u32 height = reader.read<u32>();
+diff --git a/tests/gx_fifo_test.cpp b/tests/gx_fifo_test.cpp
+index bf00f4c..635b620 100644
+--- a/tests/gx_fifo_test.cpp
++++ b/tests/gx_fifo_test.cpp
+@@ -3649,6 +3649,60 @@ TEST_F(GXFifoTest, PeekZ_OutOfRangeFallsBackToZero) {
+   EXPECT_TRUE(aurora::gfx::depth_peek::testing::snapshot_requested());
+ }
+ 
++TEST(GXColorPeekTest, ArgbWordPutsAlphaInTheHighByte) {
++  // The guest's own capture pass writes its photo index with GXSetDstAlpha(col * 4), leaves colour
++  // updates off and alpha updates on, then reads `sp8 >> 26`. The index therefore comes back whole
++  // only if alpha is the high byte of the peeked word.
++  using aurora::gfx::color_peek::argb_from_rgba8;
++  EXPECT_EQ(argb_from_rgba8(0x11, 0x22, 0x33, 0xFC), 0xFC112233u);
++
++  const u32 index = 37;
++  const u32 dstAlpha = index * 4;
++  EXPECT_EQ(argb_from_rgba8(0xFF, 0x00, 0x00, static_cast<u8>(dstAlpha)) >> 26, index);
++}
++
++TEST_F(GXFifoTest, PeekARGB_FallsBackToZeroAndRequestsSnapshot) {
++  u32 argb = 0xFFFFFFFF;
++  GXPeekARGB(10, 20, &argb);
++
++  EXPECT_EQ(argb, 0u);
++  EXPECT_FALSE(aurora::gfx::color_peek::testing::snapshot_requested());
++
++  auto bytes = capture_fifo();
++  EXPECT_TRUE(has_aurora_cmd(bytes, GX_AURORA_REQUEST_COLOR_SNAPSHOT));
++  decode_fifo(bytes);
++  EXPECT_TRUE(aurora::gfx::color_peek::testing::snapshot_requested());
++}
++
++TEST_F(GXFifoTest, PeekARGB_ReturnsLatestCompletedSnapshot) {
++  aurora::gfx::color_peek::testing::set_latest(
++      2, 2, {0xFF000001u, 0xFF000002u, 0xFF000003u, 0xFC000004u});
++
++  u32 argb = 0;
++  GXPeekARGB(1, 1, &argb);
++
++  EXPECT_EQ(argb, 0xFC000004u);
++  EXPECT_FALSE(aurora::gfx::color_peek::testing::snapshot_requested());
++
++  auto bytes = capture_fifo();
++  decode_fifo(bytes);
++  EXPECT_TRUE(aurora::gfx::color_peek::testing::snapshot_requested());
++}
++
++TEST_F(GXFifoTest, PeekARGB_OutOfRangeFallsBackToZero) {
++  aurora::gfx::color_peek::testing::set_latest(1, 1, {0xFC000001u});
++
++  u32 argb = 0xFFFFFFFF;
++  GXPeekARGB(1, 0, &argb);
++
++  EXPECT_EQ(argb, 0u);
++  EXPECT_FALSE(aurora::gfx::color_peek::testing::snapshot_requested());
++
++  auto bytes = capture_fifo();
++  decode_fifo(bytes);
++  EXPECT_TRUE(aurora::gfx::color_peek::testing::snapshot_requested());
++}
++
+ // ============================================================================
+ // Composite tests (multiple state changes in a single FIFO stream)
+ // ============================================================================
+diff --git a/tests/gx_test_common.hpp b/tests/gx_test_common.hpp
+index 7991810..f911466 100644
+--- a/tests/gx_test_common.hpp
++++ b/tests/gx_test_common.hpp
+@@ -8,6 +8,7 @@
+ #include "gx/fifo.hpp"
+ #include "gx/command_processor.hpp"
+ #include "gfx/depth_peek.hpp"
++#include "gfx/color_peek.hpp"
+ 
+ #include <cstring>
+ #include <vector>
+@@ -22,6 +23,7 @@ protected:
+     aurora::gx::fifo::clear_buffer();
+     aurora::gx::g_gxState = aurora::gx::GXState{};
+     aurora::gfx::depth_peek::testing::reset();
++    aurora::gfx::color_peek::testing::reset();
+   }
+ 
+   void TearDown() override { aurora::gx::fifo::shutdown(); }
+diff --git a/tests/gx_test_stubs.cpp b/tests/gx_test_stubs.cpp
+index 6268a0c..6c18466 100644
+--- a/tests/gx_test_stubs.cpp
++++ b/tests/gx_test_stubs.cpp
+@@ -6,6 +6,7 @@
+ #include "gfx/clear.hpp"
+ #include "gfx/resources.hpp"
+ #include "gfx/depth_peek.hpp"
++#include "gfx/color_peek.hpp"
+ #include "gfx/recording.hpp"
+ #include "gfx/tex_copy_conv.hpp"
+ #include "gfx/tex_palette_conv.hpp"
+@@ -274,6 +275,50 @@ void set_latest(uint32_t width, uint32_t height, const std::vector<uint32_t>& da
+ } // namespace testing
+ } // namespace aurora::gfx::depth_peek
+ 
++// The colour peek's GPU path needs a device, so the command-level tests take the same stub
++// treatment the depth peek gets. What it does not restate is the logic: the word layout and the
++// guest-to-target map come from the header, which the module itself includes, so the tests exercise
++// one definition rather than a copy of it.
++namespace aurora::gfx::color_peek {
++namespace {
++bool s_snapshotRequested = false;
++Mapping s_mapping{};
++std::vector<uint32_t> s_data;
++} // namespace
++
++void initialize() {}
++void shutdown() {}
++void request_snapshot() noexcept { s_snapshotRequested = true; }
++void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::Texture& colorTexture,
++                           wgpu::TextureFormat format, wgpu::Extent3D sourceSize,
++                           uint32_t msaaSamples) noexcept {}
++void after_submit() noexcept {}
++
++bool read_latest(uint16_t x, uint16_t y, uint32_t& argb) noexcept {
++  uint32_t index = 0;
++  if (s_data.empty() || !map_guest_to_source(s_mapping, x, y, index) || index >= s_data.size()) {
++    return false;
++  }
++  argb = s_data[index];
++  return true;
++}
++
++namespace testing {
++void reset() noexcept {
++  s_snapshotRequested = false;
++  s_mapping = {};
++  s_data.clear();
++}
++
++bool snapshot_requested() noexcept { return s_snapshotRequested; }
++
++void set_latest(uint32_t width, uint32_t height, const std::vector<uint32_t>& data) {
++  s_mapping = Mapping{.srcWidth = width, .srcHeight = height};
++  s_data = data;
++}
++} // namespace testing
++} // namespace aurora::gfx::color_peek
++
+ namespace aurora::gfx::tex_copy_conv {
+ bool needs_conversion(GXTexFmt fmt) { return false; }
+ } // namespace aurora::gfx::tex_copy_conv

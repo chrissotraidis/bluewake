@@ -1,0 +1,96 @@
+From 39e70e162580536417a950c1396c40c273f3899d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:06:11 +0900
+Subject: [PATCH] card: flush file and directory around replacement
+
+---
+ GXRuntime/src/memory_card.c | 50 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+
+diff --git a/GXRuntime/src/memory_card.c b/GXRuntime/src/memory_card.c
+index adb652d1..490caef9 100644
+--- a/GXRuntime/src/memory_card.c
++++ b/GXRuntime/src/memory_card.c
+@@ -5,6 +5,13 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
++#include <errno.h>
++#ifdef _WIN32
++#include <io.h>
++#else
++#include <fcntl.h>
++#include <unistd.h>
++#endif
+ 
+ #define DOL_CARD_CONTAINER_VERSION 1u
+ #define DOL_CARD_HEADER_SIZE 40u
+@@ -138,6 +145,36 @@ static u32 payload_size(const DolMemoryCard* card, u32* file_count) {
+     return size;
+ }
+ 
++static bool flush_card_file(FILE* file) {
++    if (fflush(file) != 0)
++        return false;
++#ifdef _WIN32
++    return _commit(_fileno(file)) == 0;
++#elif defined(__APPLE__)
++    return fcntl(fileno(file), F_FULLFSYNC) == 0;
++#else
++    return fsync(fileno(file)) == 0;
++#endif
++}
++
++#ifndef _WIN32
++static int open_card_directory(const char* path) {
++    char* parent = duplicate_string(path);
++    if (parent == NULL)
++        return -1;
++    char* slash = strrchr(parent, '/');
++    if (slash == NULL)
++        strcpy(parent, ".");
++    else if (slash == parent)
++        slash[1] = '\0';
++    else
++        *slash = '\0';
++    int fd = open(parent, O_RDONLY | O_DIRECTORY);
++    free(parent);
++    return fd;
++}
++#endif
++
+ static bool write_container(const DolMemoryCard* card) {
+     if (card->path == NULL)
+         return true;
+@@ -197,15 +234,28 @@ static bool write_container(const DolMemoryCard* card) {
+     FILE* output = fopen(temporary_path, "wb");
+     if (output != NULL) {
+         success = fwrite(bytes, 1, total_size, output) == total_size;
++        if (success && !flush_card_file(output))
++            success = false;
+         if (fclose(output) != 0)
+             success = false;
+         output = NULL;
+     }
+ 
++#ifndef _WIN32
++    int directory_fd = success ? open_card_directory(card->path) : -1;
++    if (success && directory_fd < 0)
++        success = false;
++#endif
+     // POSIX rename and the Windows replacement shim preserve the old card
+     // on failure. Never delete the destination to retry a failed replacement.
+     if (success && rename(temporary_path, card->path) != 0)
+         success = false;
++#ifndef _WIN32
++    if (success && fsync(directory_fd) != 0)
++        success = false;
++    if (directory_fd >= 0 && close(directory_fd) != 0)
++        success = false;
++#endif
+     if (!success)
+         remove(temporary_path);
+ 
+-- 
+2.46.0
+

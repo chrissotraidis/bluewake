@@ -1,0 +1,132 @@
+# BlueWake patch 0054 - dsp: build the predecoded dispatch table with the
+# interpreter's tables instead of behind a per-instruction initialization guard.
+#
+# Apply from ref/recompcore:  patch -p1 < patches/recompcore/0054-dsp-decode-table-without-init-guard.patch
+#
+# Measured on the certified route at -0.37 percent (399.9 M to 398.5 M host
+# instructions per play retrace, digest 83d2590d unchanged); see
+# docs/status/CURRENT.md, 2026-09-22. The call this adds to InitInstructionTables
+# is load-bearing: without it the decoded table reads null opcode templates,
+# because the interpreter is constructed from the DSP core's constructor and the
+# host's own DSP::InitInstructionTable call has not run at that point.
+
+diff --git a/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp b/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp
+index 0eab89d42c..19f42ae874 100644
+--- a/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp
++++ b/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp
+@@ -3,6 +3,8 @@
+ 
+ #include "Core/DSP/Interpreter/DSPIntTables.h"
+ 
++#include "Core/DSP/DSPTables.h"
++
+ #include <array>
+ 
+ #include "Common/CommonTypes.h"
+@@ -242,6 +244,11 @@ std::array<InterpreterFunction, 256> s_ext_op_table;
+ bool s_tables_initialized = false;
+ }  // Anonymous namespace
+ 
++// The predecoded table lives here rather than inside GetDecodedOp so that the
++// dispatch path is an index with no initialization guard in front of it; it is
++// filled at the end of InitInstructionTables, once, from the two tables above.
++std::array<DecodedInterpreterOp, 65536> s_decoded_ops;
++
+ InterpreterFunction GetOp(UDSPInstruction inst)
+ {
+   return s_op_table[inst];
+@@ -257,29 +264,20 @@ InterpreterFunction GetExtOp(UDSPInstruction inst)
+   return s_ext_op_table[inst & 0xFF];
+ }
+ 
+-const DecodedInterpreterOp& GetDecodedOp(UDSPInstruction inst)
+-{
+-  static const std::array<DecodedInterpreterOp, 65536> decoded_ops = [] {
+-    std::array<DecodedInterpreterOp, 65536> table;
+-    for (size_t i = 0; i < table.size(); ++i)
+-    {
+-      const auto instruction = static_cast<UDSPInstruction>(i);
+-      table[i] = {
+-          .main = GetOp(instruction),
+-          .extension = GetExtOp(instruction),
+-          .extended = GetOpTemplate(instruction)->extended,
+-      };
+-    }
+-    return table;
+-  }();
+-  return decoded_ops[inst];
+-}
+-
+ void InitInstructionTables()
+ {
+   if (s_tables_initialized)
+     return;
+ 
++  // The decoded table below reads the opcode templates, which live in
++  // DSPTables.cpp and are filled by DSP::InitInstructionTable. That call is
++  // already made by the host before it initializes the core, but the decoded
++  // table cannot be built on the assumption that it happened: the interpreter
++  // is constructed from the core's own constructor, so building it here without
++  // this call dereferences a null template. InitInstructionTable is a rebuild
++  // from constant data and is safe to repeat.
++  DSP::InitInstructionTable();
++
+   // ext op table
+   for (size_t i = 0; i < s_ext_op_table.size(); i++)
+   {
+@@ -304,6 +302,19 @@ void InitInstructionTables()
+     s_op_table[i] = iter->function;
+   }
+ 
++  // The decoded table is a pure function of the two tables above, so it is built
++  // here with them: one pass at construction instead of a guard, an acquire
++  // load and a call at every dispatched instruction.
++  for (size_t i = 0; i < s_decoded_ops.size(); ++i)
++  {
++    const auto instruction = static_cast<UDSPInstruction>(i);
++    s_decoded_ops[i] = {
++        .main = GetOp(instruction),
++        .extension = GetExtOp(instruction),
++        .extended = GetOpTemplate(instruction)->extended,
++    };
++  }
++
+   s_tables_initialized = true;
+ }
+ }  // namespace DSP::Interpreter
+diff --git a/Source/Core/Core/DSP/Interpreter/DSPIntTables.h b/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
+index a71c9e3a4f..a375bf7f2c 100644
+--- a/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
++++ b/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include <array>
++
+ #include "Core/DSP/DSPCommon.h"
+ 
+ namespace DSP::Interpreter
+@@ -20,6 +22,21 @@ struct DecodedInterpreterOp
+ 
+ InterpreterFunction GetOp(UDSPInstruction inst);
+ InterpreterFunction GetExtOp(UDSPInstruction inst);
+-const DecodedInterpreterOp& GetDecodedOp(UDSPInstruction inst);
++
++// One entry per 16-bit opcode: the main handler, its extension handler and the
++// extended flag, predecoded so that dispatch is an index rather than a search.
++// Built by InitInstructionTables, which the interpreter's constructor calls
++// once, from the two op tables that function fills - so the decoded table is a
++// pure function of them and needs no guard of its own. It used to be a
++// function-local static in GetDecodedOp, which put a thread-safe-initialization
++// guard (adrp, add, ldaprb, tbz) and a call in front of every dispatched DSP
++// instruction; the built host is in docs/status/CURRENT.md, 2026-09-22.
++extern std::array<DecodedInterpreterOp, 65536> s_decoded_ops;
++
++inline const DecodedInterpreterOp& GetDecodedOp(UDSPInstruction inst)
++{
++  return s_decoded_ops[inst];
++}
++
+ void InitInstructionTables();
+ }  // namespace DSP::Interpreter

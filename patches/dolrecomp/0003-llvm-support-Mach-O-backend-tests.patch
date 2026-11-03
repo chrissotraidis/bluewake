@@ -1,0 +1,89 @@
+From 7a51be16c7b76247db79017830d40072dce51704 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 08:15:28 -0500
+Subject: llvm: support Mach-O backend tests
+
+---
+ CMakeLists.txt                           | 1 +
+ src/backend/llvm/fp_fixups.cpp           | 6 +++++-
+ tests/cmake/compile_generated_llvm.cmake | 3 +++
+ tests/llvm_ir_test.cpp                   | 6 ++++++
+ 4 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index dbba0e8..7fce8be 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -404,6 +404,7 @@ if(DOLRECOMP_ENABLE_LLVM)
+         COMMAND ${CMAKE_COMMAND}
+             -DC_COMPILER=${CMAKE_C_COMPILER}
+             -DC_COMPILER_ID=${CMAKE_C_COMPILER_ID}
++            -DC_SYSROOT=${CMAKE_OSX_SYSROOT}
+             -DGENERATED_C=${CMAKE_CURRENT_BINARY_DIR}/llvm_pipeline/out/generated/generated.c
+             -DREPO_SRC=${CMAKE_CURRENT_SOURCE_DIR}/src
+             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/compile_generated_llvm.cmake)
+diff --git a/src/backend/llvm/fp_fixups.cpp b/src/backend/llvm/fp_fixups.cpp
+index 4376667..5f05647 100644
+--- a/src/backend/llvm/fp_fixups.cpp
++++ b/src/backend/llvm/fp_fixups.cpp
+@@ -5,6 +5,7 @@
+ #include <llvm/IR/IRBuilder.h>
+ #include <llvm/IR/Intrinsics.h>
+ #include <llvm/IR/Module.h>
++#include <llvm/TargetParser/Triple.h>
+ 
+ #include "common/types.h"
+ 
+@@ -18,7 +19,10 @@ static void markColdFixup(Function *function) {
+   function->addFnAttr(Attribute::NoInline);
+   function->addFnAttr(Attribute::NoUnwind);
+   function->addFnAttr(Attribute::WillReturn);
+-  function->setSection(".text.unlikely." + function->getName().str());
++  const Triple triple(function->getParent()->getTargetTriple());
++  function->setSection(triple.isOSBinFormatMachO()
++                           ? "__TEXT,__text_cold"
++                           : ".text.unlikely." + function->getName().str());
+ }
+ 
+ Function *getPairNaNFixup(Module &module, Type *pairType) {
+diff --git a/tests/cmake/compile_generated_llvm.cmake b/tests/cmake/compile_generated_llvm.cmake
+index a228eec..922e111 100644
+--- a/tests/cmake/compile_generated_llvm.cmake
++++ b/tests/cmake/compile_generated_llvm.cmake
+@@ -8,6 +8,9 @@ if(C_COMPILER_ID STREQUAL "MSVC")
+ else()
+     set(compile_args -std=c11 -I "${REPO_SRC}" -c "${GENERATED_C}"
+         -o "${GENERATED_C}.o")
++    if(C_SYSROOT)
++        list(PREPEND compile_args -isysroot "${C_SYSROOT}")
++    endif()
+ endif()
+ 
+ execute_process(
+diff --git a/tests/llvm_ir_test.cpp b/tests/llvm_ir_test.cpp
+index f1c94ed..d5b8eb4 100644
+--- a/tests/llvm_ir_test.cpp
++++ b/tests/llvm_ir_test.cpp
+@@ -8,6 +8,7 @@
+ #include <llvm/IR/ModuleSummaryIndex.h>
+ #include <llvm/IRReader/IRReader.h>
+ #include <llvm/Support/SourceMgr.h>
++#include <llvm/TargetParser/Triple.h>
+ 
+ #define CHECK(x)                                                               \
+   do {                                                                         \
+@@ -210,6 +211,11 @@ int main(int argc, char **argv) {
+     CHECK(fixup->hasFnAttribute(llvm::Attribute::Cold));
+     CHECK(fixup->hasFnAttribute(llvm::Attribute::NoInline));
+     CHECK(fixup->getCallingConv() == llvm::CallingConv::PreserveAll);
++    const std::string expectedSection =
++        llvm::Triple(module->getTargetTriple()).isOSBinFormatMachO()
++            ? "__TEXT,__text_cold"
++            : ".text.unlikely." + fixup->getName().str();
++    CHECK(fixup->getSection() == expectedSection);
+   }
+ 
+   llvm::Function *cr_loop = module->getFunction("func_80001000_budget");
+-- 
+2.41.0
+

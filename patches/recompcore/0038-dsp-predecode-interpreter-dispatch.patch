@@ -1,0 +1,89 @@
+From 16308ba1c4ed4d9a4cd748feed27485c5667fac0 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 21:53:50 -0500
+Subject: [PATCH] dsp: predecode interpreter dispatch
+
+---
+ .../Core/Core/DSP/Interpreter/DSPIntTables.cpp | 18 ++++++++++++++++++
+ .../Core/Core/DSP/Interpreter/DSPIntTables.h   |  8 ++++++++
+ .../Core/DSP/Interpreter/DSPInterpreter.cpp    | 10 +++++-----
+ 3 files changed, 31 insertions(+), 5 deletions(-)
+
+diff --git a/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp b/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp
+index 619f5d4164..0eab89d42c 100644
+--- a/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp
++++ b/Source/Core/Core/DSP/Interpreter/DSPIntTables.cpp
+@@ -257,6 +257,24 @@ InterpreterFunction GetExtOp(UDSPInstruction inst)
+   return s_ext_op_table[inst & 0xFF];
+ }
+ 
++const DecodedInterpreterOp& GetDecodedOp(UDSPInstruction inst)
++{
++  static const std::array<DecodedInterpreterOp, 65536> decoded_ops = [] {
++    std::array<DecodedInterpreterOp, 65536> table;
++    for (size_t i = 0; i < table.size(); ++i)
++    {
++      const auto instruction = static_cast<UDSPInstruction>(i);
++      table[i] = {
++          .main = GetOp(instruction),
++          .extension = GetExtOp(instruction),
++          .extended = GetOpTemplate(instruction)->extended,
++      };
++    }
++    return table;
++  }();
++  return decoded_ops[inst];
++}
++
+ void InitInstructionTables()
+ {
+   if (s_tables_initialized)
+diff --git a/Source/Core/Core/DSP/Interpreter/DSPIntTables.h b/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
+index c86fce559d..a71c9e3a4f 100644
+--- a/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
++++ b/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
+@@ -11,7 +11,15 @@ class Interpreter;
+ 
+ using InterpreterFunction = void (Interpreter::*)(UDSPInstruction);
+ 
++struct DecodedInterpreterOp
++{
++  InterpreterFunction main;
++  InterpreterFunction extension;
++  bool extended;
++};
++
+ InterpreterFunction GetOp(UDSPInstruction inst);
+ InterpreterFunction GetExtOp(UDSPInstruction inst);
++const DecodedInterpreterOp& GetDecodedOp(UDSPInstruction inst);
+ void InitInstructionTables();
+ }  // namespace DSP::Interpreter
+diff --git a/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp b/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp
+index 20d9313893..ff9195dfd4 100644
+--- a/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp
++++ b/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp
+@@ -50,16 +50,16 @@ Interpreter::~Interpreter() = default;
+ 
+ void Interpreter::ExecuteInstruction(const UDSPInstruction inst)
+ {
+-  const DSPOPCTemplate* opcode_template = GetOpTemplate(inst);
++  const DecodedInterpreterOp& op = GetDecodedOp(inst);
+ 
+-  if (opcode_template->extended)
++  if (op.extended)
+   {
+-    (this->*GetExtOp(inst))(inst);
++    (this->*op.extension)(inst);
+   }
+ 
+-  (this->*GetOp(inst))(inst);
++  (this->*op.main)(inst);
+ 
+-  if (opcode_template->extended)
++  if (op.extended)
+   {
+     ApplyWriteBackLog();
+   }
+-- 
+2.41.0
+

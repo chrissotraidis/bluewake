@@ -1,0 +1,35 @@
+diff --git a/GXRuntime/graphics/aurora/lib/gx/shader.cpp b/GXRuntime/graphics/aurora/lib/gx/shader.cpp
+index 3e34858496..dd0c7411ed 100644
+--- a/GXRuntime/graphics/aurora/lib/gx/shader.cpp
++++ b/GXRuntime/graphics/aurora/lib/gx/shader.cpp
+@@ -382,6 +382,30 @@ static std::string tev_color_op(GXTevOp op, std::string_view bias, std::string_v
+ static std::string tev_alpha_op(GXTevOp op, std::string_view bias, std::string_view scale, bool clamp,
+                                 std::string_view a, std::string_view b, std::string_view c, std::string_view d) {
+   const auto overflow = [](std::string_view reg) { return fmt::format("tev_overflow_f32({})", reg); };
++  // tev_op is shared with the colour path, where the operands are vec3 and the
++  // R8, GR16 and BGR24 compare forms swizzle into them (`.r`, `.rg`, `.rgb`).
++  // Alpha operands here are scalars, so those same forms emit
++  // `tev_overflow_f32(x).r` - invalid WGSL, and it fails the shader compile
++  // outright rather than degrading: WebGPU reports "cannot index into expression
++  // of type 'f32'" and the run aborts before the route. Every compare form
++  // collapses to the scalar one for alpha, which is also what the hardware does,
++  // since alpha compares are defined over the 8-bit alpha value.
++  switch (op) {
++  case GX_TEV_COMP_R8_GT:
++  case GX_TEV_COMP_GR16_GT:
++  case GX_TEV_COMP_BGR24_GT:
++  case GX_TEV_COMP_RGB8_GT:
++    op = GX_TEV_COMP_RGB8_GT;
++    break;
++  case GX_TEV_COMP_R8_EQ:
++  case GX_TEV_COMP_GR16_EQ:
++  case GX_TEV_COMP_BGR24_EQ:
++  case GX_TEV_COMP_RGB8_EQ:
++    op = GX_TEV_COMP_RGB8_EQ;
++    break;
++  default:
++    break;
++  }
+   std::string expr = tev_op(op, bias, scale, overflow(a), overflow(b), overflow(c), d, "0.0"sv);
+   return clamp ? fmt::format("clamp({}, 0.0, 1.0)", expr) : fmt::format("clamp({}, -4.0, 4.0)", expr);
+ }

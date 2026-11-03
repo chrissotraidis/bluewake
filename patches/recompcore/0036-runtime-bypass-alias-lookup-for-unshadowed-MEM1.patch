@@ -1,0 +1,86 @@
+From 7506b313be7bc671c8ac3d7eba2a8bdf4e50bd41 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 21:14:56 -0500
+Subject: [PATCH] runtime: bypass alias lookup for unshadowed MEM1
+
+---
+ GXRuntime/include/core/cpu.h | 10 ++++++++++
+ GXRuntime/src/core/cpu.c     |  9 +++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index bd669ca5f0..094ad1b477 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -114,6 +114,7 @@ bool ppc_guest_alias_remove(u32 linked_start, u32 size);
+ void ppc_guest_alias_clear(void);
+ bool ppc_guest_alias_resolve(u32 address, u32 size, u8** pointer,
+                              u32* journal_offset);
++extern bool g_ppc_guest_aliases_overlap_mem1;
+ 
+ enum {
+     PPC_CACHE_DCBST,
+@@ -183,6 +184,15 @@ extern PPCMemWriteJournal g_mem_write_journal;
+ extern void* g_mem_write_journal_user;
+ 
+ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size, u32* out_offset) {
++    if (!g_ppc_guest_aliases_overlap_mem1 &&
++        (addr & 0x40000000u) == 0u) {
++        u32 offset = addr - GC_RAM_BASE;
++        if (offset <= cpu->ram_size - size) {
++            if (out_offset) *out_offset = offset;
++            return cpu->ram + offset;
++        }
++    }
++
+     u8* alias = NULL;
+     u32 alias_offset = 0u;
+     if (ppc_guest_alias_resolve(addr, size, &alias, &alias_offset)) {
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 4e49fee18d..55a4aa78d4 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -48,10 +48,12 @@ static PPCGuestAlias g_guest_aliases[PPC_GUEST_ALIAS_MAX];
+ static u32 g_guest_alias_count;
+ static u32 g_guest_alias_min_start = UINT32_MAX;
+ static u64 g_guest_alias_max_end;
++bool g_ppc_guest_aliases_overlap_mem1;
+ 
+ static void ppc_guest_alias_recompute_bounds(void) {
+     g_guest_alias_min_start = UINT32_MAX;
+     g_guest_alias_max_end = 0u;
++    g_ppc_guest_aliases_overlap_mem1 = false;
+     for (u32 i = 0u; i < g_guest_alias_count; ++i) {
+         const PPCGuestAlias* alias = &g_guest_aliases[i];
+         if (alias->linked_start < g_guest_alias_min_start)
+@@ -59,6 +61,9 @@ static void ppc_guest_alias_recompute_bounds(void) {
+         const u64 alias_end = (u64)alias->linked_start + alias->size;
+         if (alias_end > g_guest_alias_max_end)
+             g_guest_alias_max_end = alias_end;
++        if (alias->linked_start < GC_RAM_BASE + GC_MAIN_RAM_SIZE &&
++            alias_end > GC_RAM_BASE)
++            g_ppc_guest_aliases_overlap_mem1 = true;
+     }
+ }
+ 
+@@ -71,6 +76,7 @@ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+     g_guest_alias_count = 0u;
+     g_guest_alias_min_start = UINT32_MAX;
+     g_guest_alias_max_end = 0u;
++    g_ppc_guest_aliases_overlap_mem1 = false;
+ }
+ 
+ static bool ppc_guest_alias_add_storage(u32 linked_start, u32 size,
+@@ -89,6 +95,9 @@ static bool ppc_guest_alias_add_storage(u32 linked_start, u32 size,
+     const u64 alias_end = (u64)alias->linked_start + alias->size;
+     if (alias_end > g_guest_alias_max_end)
+         g_guest_alias_max_end = alias_end;
++    if (alias->linked_start < GC_RAM_BASE + GC_MAIN_RAM_SIZE &&
++        alias_end > GC_RAM_BASE)
++        g_ppc_guest_aliases_overlap_mem1 = true;
+     if (getenv("BLUEWAKE_TRACE_GUEST_ALIASES") != NULL &&
+         alias->linked_start < 0x81516E20u &&
+         (u64)alias->linked_start + alias->size > 0x81512AC0u) {
+-- 
+2.41.0
+

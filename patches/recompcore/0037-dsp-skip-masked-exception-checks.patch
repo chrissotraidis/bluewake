@@ -1,0 +1,29 @@
+From 1deab5723b909de6095053db25e222bf998faea7 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 21:22:15 -0500
+Subject: [PATCH] dsp: skip masked exception checks
+
+---
+ Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp b/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp
+index 43766c1b3c..20d9313893 100644
+--- a/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp
++++ b/Source/Core/Core/DSP/Interpreter/DSPInterpreter.cpp
+@@ -69,7 +69,11 @@ void Interpreter::Step()
+ {
+   auto& state = m_dsp_core.DSPState();
+ 
+-  m_dsp_core.CheckExceptions();
++  constexpr u8 external_exception =
++      1u << static_cast<u8>(ExceptionType::ExternalInterrupt);
++  if ((state.exceptions & external_exception) != 0 ||
++      (state.exceptions != 0 && state.IsSRFlagSet(SR_INT_ENABLE)))
++    m_dsp_core.CheckExceptions();
+   state.AdvanceStepCounter();
+ 
+   const u16 opc = state.FetchInstruction();
+-- 
+2.41.0
+

@@ -1,0 +1,21 @@
+name: Attribution
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  attribution:
+    name: No bot or AI contributors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Check commit authors and co-authors
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python3 scripts/check_attribution.py "${{ github.event.pull_request.base.sha }}..HEAD"
+          else
+            python3 scripts/check_attribution.py HEAD
+          fi

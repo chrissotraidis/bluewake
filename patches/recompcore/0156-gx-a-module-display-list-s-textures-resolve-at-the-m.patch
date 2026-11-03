@@ -1,0 +1,397 @@
+From c7b061300877ece17460ad27a67f641151aa1575 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 16:05:59 +0900
+Subject: [PATCH] gx: a module display list's textures resolve at the module's
+ address
+
+A display list kept in a linked module's data (Wind Waker's d_a_bwdg, Molgera's sand floor) names the module's own texture with SETIMAGE3, whose 24 bits drop the address's top bits: 0xC06A0DA0 >> 5 leaves 0x006A0DA0, unrelated MEM1, and the floor drew with whatever was there. HLE GXCallDisplayList now passes the list's guest address down (call_display_list_guest, falling back to call_display_list), and while the frontend parses a list at an address with 0x40000000 set, the texture slots it sets resolve at 0xC0000000 | that address. A host without module aliases reads that as MEM1's uncached mirror, the same memory as before.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  1 +
+ .../backends/aurora/aurora_backend_private.h  |  3 +-
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 12 +++--
+ .../aurora_recomp/retail_gx_frontend.hpp      | 12 ++++-
+ .../frontend/src/retail_gx_frontend.cpp       | 33 +++++++++----
+ .../frontend/tests/frontend_replay_test.cpp   | 48 +++++++++++++++++++
+ GXRuntime/include/gxruntime/gx_recomp.h       |  7 +++
+ GXRuntime/include/gxruntime/platform.h        |  7 +++
+ GXRuntime/src/gx_recomp.c                     | 18 +++++--
+ GXRuntime/src/hle/hle_core.c                  |  3 +-
+ GXRuntime/src/platform.c                      | 10 ++++
+ 11 files changed, 136 insertions(+), 18 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 4c1c850ff3..b343576bb8 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -221,6 +221,7 @@ void install_platform_ops() {
+         .gx_flush = aurora_backend_gx_flush,
+         .gx_read_draw_sync = aurora_backend_gx_read_draw_sync,
+         .call_display_list = aurora_backend_call_display_list,
++        .call_display_list_guest = aurora_backend_call_display_list_guest,
+         .set_array = aurora_backend_set_array,
+         .set_array_guest = aurora_backend_set_array_guest,
+         .load_texture = aurora_backend_load_texture,
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index ddd738d89e..89f323ac7c 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -151,7 +151,7 @@ void trace_on_present();
+ void shadow_frontend_fail_metadata(const char* reason, u32 attr, u32 guest_address, u32 value);
+ void shadow_frontend_set_array(u32 attr, u32 guest_address, u8 stride);
+ bool frontend_guest_address_resolver_bridge(void*, u32 address, u32 size, DolGuestAddressSpace space, DolGuestResourceKind resource, DolGuestResolvedRange* out);
+-void shadow_frontend_call_display_list(const void* data, u32 size);
++void shadow_frontend_call_display_list(const void* data, u32 size, u32 guest_address);
+ void shadow_frontend_write(u64 value, u8 size);
+ // Waits for the FIFO translation worker to catch up with everything appended so
+ // far. The auras's reset paths call it so the front end is not reset while a
+@@ -204,6 +204,7 @@ void aurora_backend_gx_write_bytes(const u8* bytes, u32 size);
+ void aurora_backend_gx_flush(void);
+ bool aurora_backend_gx_read_draw_sync(u16* token);
+ void aurora_backend_call_display_list(const void* data, u32 size);
++void aurora_backend_call_display_list_guest(u32 guest_address, const void* data, u32 size);
+ void aurora_backend_set_array(u32 attr, const void* data, u32 size, u8 stride);
+ void aurora_backend_set_array_guest(u32 attr, u32 guest_address, const void* data, u32 size, u8 stride);
+ void aurora_backend_load_texture(u8 slot, const void* data, u32 width, u32 height, u32 format, u32 tlut, bool mipmap, u32 object_id, u32 data_version);
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 297da47959..95bb3df480 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -893,7 +893,7 @@ bool frontend_guest_address_resolver_bridge(
+     return true;
+ }
+ 
+-void shadow_frontend_call_display_list(const void* data, u32 size) {
++void shadow_frontend_call_display_list(const void* data, u32 size, u32 guest_address) {
+     if (!g_shadow_frontend_enabled || g_shadow_frontend_failed.load(std::memory_order_relaxed))
+         return;
+     // Same ordering rule as the array mirror: the HLE path parses the list
+@@ -902,7 +902,7 @@ void shadow_frontend_call_display_list(const void* data, u32 size) {
+     const std::span<const std::uint8_t> bytes(
+         static_cast<const std::uint8_t*>(data), size);
+     if (g_gx_core_enabled) {
+-        if (!g_shadow_frontend.write_display_list(bytes, &g_core_sink)) {
++        if (!g_shadow_frontend.write_display_list(bytes, &g_core_sink, guest_address)) {
+             g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+             std::fprintf(stderr,
+                          "[gx-core] frontend rejected HLE display list "
+@@ -916,7 +916,7 @@ void shadow_frontend_call_display_list(const void* data, u32 size) {
+         }
+         return;
+     }
+-    if (!g_shadow_frontend.write_display_list(bytes, &g_shadow_packet_sink)) {
++    if (!g_shadow_frontend.write_display_list(bytes, &g_shadow_packet_sink, guest_address)) {
+         g_shadow_frontend_failed.store(true, std::memory_order_relaxed);
+         std::fprintf(stderr,
+                      "[aurora-recomp] shadow RetailGxFrontend rejected HLE "
+@@ -1753,10 +1753,14 @@ void aurora_backend_mark_gx_begin(void) {
+ }
+ 
+ void aurora_backend_call_display_list(const void* data, u32 size) {
++    aurora_backend_call_display_list_guest(0u, data, size);
++}
++
++void aurora_backend_call_display_list_guest(u32 guest_address, const void* data, u32 size) {
+     if (!gx_aurora::g_initialized || data == nullptr || size == 0)
+         return;
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+-    gx_aurora::shadow_frontend_call_display_list(data, size);
++    gx_aurora::shadow_frontend_call_display_list(data, size, guest_address);
+     if (gx_aurora::trace_should_record())
+         gx_aurora::g_trace_writer.call_display_list(0u, data, size);
+     if (gx_aurora::g_gx_core_enabled) {
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index 48c79970d7..10e954883d 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -108,8 +108,10 @@ public:
+   // (the bytes are already host-visible). Entry point for trace replay
+   // (CALL_DL records) and the backend's DL mirror; keep it
+   // byte-path-identical to the opcode branch.
++  // guest_address is where the list lives, when known (0 when not).
+   bool write_display_list(std::span<const std::uint8_t> bytes,
+-                          AuroraRenderSink* sink = nullptr);
++                          AuroraRenderSink* sink = nullptr,
++                          std::uint32_t guest_address = 0u);
+   std::size_t pending_fifo_size() const { return fifo_buffer_.size(); }
+ 
+   bool replay_fifo(std::span<const std::uint8_t> bytes,
+@@ -194,6 +196,14 @@ private:
+   // Texture slots (bit per slot) whose palette TMEM was reloaded after the
+   // texture event was emitted; re-resolved at the next draw.
+   std::uint8_t tlut_stale_mask_ = 0;
++  // A display list in a linked module's data (an address with 0x40000000
++  // set: 0xC0xxxxxx, or 0x40xxxxxx after OSCachedToPhysical) names the
++  // module's own textures, but SETIMAGE3's 24 bits drop the address's top
++  // bits and leave an unrelated MEM1 address. While such a list is parsed,
++  // its texture slots (bit per slot) resolve at 0xC0000000 | that address,
++  // which the host's module aliases hold (Molgera's sand floor, d_a_bwdg).
++  bool in_module_list_ = false;
++  std::uint8_t module_image_mask_ = 0;
+   std::uint64_t next_packet_sequence_ = 0;
+   // emit_new_packets' reused packet (see there).
+   RenderPacket scratch_packet_{};
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 50759391ce..26170205ef 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -500,6 +500,8 @@ void RetailGxFrontend::reset(const DolGuestAddressResolver* resolver) {
+   last_error_b_ = 0u;
+   last_error_c_ = 0u;
+   last_error_d_ = 0u;
++  in_module_list_ = false;
++  module_image_mask_ = 0u;
+ }
+ 
+ namespace {
+@@ -705,7 +707,8 @@ bool RetailGxFrontend::flush(AuroraRenderSink* sink) {
+ }
+ 
+ bool RetailGxFrontend::write_display_list(std::span<const std::uint8_t> bytes,
+-                                          AuroraRenderSink* sink) {
++                                          AuroraRenderSink* sink,
++                                          std::uint32_t guest_address) {
+   last_error_ = nullptr;
+   std::uint32_t first_event = 0;
+   if (packet_drain_enabled_) {
+@@ -723,7 +726,10 @@ bool RetailGxFrontend::write_display_list(std::span<const std::uint8_t> bytes,
+       return false;
+     std::size_t dl_consumed = 0;
+     parse_sink_ = packet_drain_enabled_ ? sink : nullptr;
++    const bool outer_module_list = in_module_list_;
++    in_module_list_ = (guest_address & 0x40000000u) != 0u;
+     const bool parsed = parse_stream(bytes, false, false, 1u, &dl_consumed);
++    in_module_list_ = outer_module_list;
+     parse_sink_ = nullptr;
+     if (!parsed || dl_consumed != bytes.size()) {
+       return false;
+@@ -938,11 +944,14 @@ bool RetailGxFrontend::parse_stream(std::span<const std::uint8_t> bytes,
+         return false;
+ 
+       std::size_t dl_consumed = 0;
+-      if (!parse_stream(
+-              std::span<const std::uint8_t>{
+-                  static_cast<const std::uint8_t*>(range.data), range.size},
+-              false, false, depth + 1u, &dl_consumed) ||
+-          dl_consumed != range.size) {
++      const bool outer_module_list = in_module_list_;
++      in_module_list_ = outer_module_list || (address & 0x40000000u) != 0u;
++      const bool list_parsed = parse_stream(
++          std::span<const std::uint8_t>{
++              static_cast<const std::uint8_t*>(range.data), range.size},
++          false, false, depth + 1u, &dl_consumed);
++      in_module_list_ = outer_module_list;
++      if (!list_parsed || dl_consumed != range.size) {
+         // A display list that does not parse as GX commands (first met in
+         // Wind Waker's Hyrule stage, 2026-09-26) used to fail the whole FIFO,
+         // and a failed front end presents nothing more: a black screen with
+@@ -1082,6 +1091,12 @@ bool RetailGxFrontend::handle_bp(std::uint32_t raw) {
+   value = state_.bp_regs[reg];
+ 
+   std::uint8_t slot = 0;
++  if (map_image3_reg(reg, &slot) && slot < 8u) {
++    const std::uint8_t bit = static_cast<std::uint8_t>(1u << slot);
++    module_image_mask_ = in_module_list_
++                             ? static_cast<std::uint8_t>(module_image_mask_ | bit)
++                             : static_cast<std::uint8_t>(module_image_mask_ & ~bit);
++  }
+   if (map_image0_reg(reg, &slot) || map_image3_reg(reg, &slot))
+     return maybe_resolve_texture(slot);
+   if (map_tlut_reg(reg, &slot)) {
+@@ -1182,9 +1197,11 @@ bool RetailGxFrontend::maybe_resolve_texture(std::uint8_t slot) {
+   DolGxRecompTexture texture;
+   if (slot < 8u)
+     tlut_stale_mask_ &= static_cast<std::uint8_t>(~(1u << slot));
+-  return dol_gx_recomp_resolve_texture_image(
++  const std::uint32_t address_bits =
++      slot < 8u && ((module_image_mask_ >> slot) & 1u) != 0u ? 0xC0000000u : 0u;
++  return dol_gx_recomp_resolve_texture_image_at(
+       &state_, slot, state_.bp_regs[image0_reg], state_.bp_regs[image3_reg],
+-      &texture);
++      address_bits, &texture);
+ }
+ 
+ bool RetailGxFrontend::handle_copy_trigger(std::uint32_t value) {
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 359cdba8e3..7f5d4e4c1a 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -613,6 +613,53 @@ void test_tlut_written_after_image_selects_palette() {
+   assert(bound_format == 2u);
+ }
+ 
++// A display list kept in a linked module's data names the module's own
++// texture, but SETIMAGE3 holds only 24 bits of the address: 0xC06A0DA0 >> 5
++// leaves 0x006A0DA0, unrelated MEM1. Such a list's texture resolves at
++// 0xC0000000 | that address (Molgera's sand floor, Wind Waker's d_a_bwdg);
++// the same list from anywhere else keeps the physical address.
++struct ModuleTextureMemory {
++  std::uint8_t module_texture[128] = {};
++  std::uint8_t mem1_texture[128] = {};
++};
++
++bool resolve_module_texture(void* user, std::uint32_t address,
++                            std::uint32_t size, DolGuestAddressSpace space,
++                            DolGuestResourceKind, DolGuestResolvedRange* out) {
++  auto* memory = static_cast<ModuleTextureMemory*>(user);
++  std::uint8_t* data = nullptr;
++  if (address == 0xC06A0DA0u)
++    data = memory->module_texture;
++  else if (address == 0x006A0DA0u && space == DOL_GUEST_ADDRESS_PHYSICAL)
++    data = memory->mem1_texture;
++  if (data == nullptr || size > 128u)
++    return false;
++  out->data = data;
++  out->available = 128u;
++  return true;
++}
++
++void test_module_display_list_texture() {
++  ModuleTextureMemory memory;
++  DolGuestAddressResolver resolver;
++  dol_guest_address_resolver_init_callback(&resolver, resolve_module_texture,
++                                           &memory);
++  std::vector<std::uint8_t> list;
++  push_bp(list, DOL_GX_BP_REG_TX_SETIMAGE0, tex_image0(16u, 16u, 0u)); // I4
++  push_bp(list, DOL_GX_BP_REG_TX_SETIMAGE3, 0xC06A0DA0u >> 5u);
++
++  RetailGxFrontend frontend(resolver);
++  RecordingAuroraRenderSink sink;
++  assert(frontend.write_display_list(list, &sink, 0xC06B2000u));
++  assert(frontend.state().textures[0].valid);
++  assert(frontend.state().textures[0].range.data == memory.module_texture);
++
++  assert(frontend.write_display_list(list, &sink, 0x806B2000u));
++  assert(frontend.state().textures[0].range.data == memory.mem1_texture);
++  assert(frontend.write_display_list(list, &sink));
++  assert(frontend.state().textures[0].range.data == memory.mem1_texture);
++}
++
+ // The XF projection register (XF 0x1020) is decoded from a direct XF_LOAD that
+ // covers it, so the recomp's projection transform is inspectable for the
+ // Dolphin-vs-recomp transform diff. A wrong/degenerate projection puts geometry
+@@ -844,6 +891,7 @@ int main() {
+   test_fragmented_zero_vertex_draw_is_noop();
+   test_unresolved_tlut_load_is_noop();
+   test_tlut_written_after_image_selects_palette();
++  test_module_display_list_texture();
+   test_large_batch_drains_instead_of_dropping();
+   test_flush_stops_after_display_copy();
+   test_xf_projection_capture();
+diff --git a/GXRuntime/include/gxruntime/gx_recomp.h b/GXRuntime/include/gxruntime/gx_recomp.h
+index ed6cd648d1..1cf162ed58 100644
+--- a/GXRuntime/include/gxruntime/gx_recomp.h
++++ b/GXRuntime/include/gxruntime/gx_recomp.h
+@@ -307,6 +307,13 @@ bool dol_gx_recomp_texture_size(u16 width, u16 height, u32 format,
+ bool dol_gx_recomp_resolve_texture_image(DolGxRecompState* gx, u8 slot,
+                                          u32 image0, u32 image3,
+                                          DolGxRecompTexture* out);
++// The same with address_bits ORed into the image address and the result read
++// as a virtual address: 0xC0000000 for a texture a linked module's display
++// list names (see RetailGxFrontend::in_module_list_). 0 is the call above.
++bool dol_gx_recomp_resolve_texture_image_at(DolGxRecompState* gx, u8 slot,
++                                            u32 image0, u32 image3,
++                                            u32 address_bits,
++                                            DolGxRecompTexture* out);
+ bool dol_gx_recomp_resolve_tlut(DolGxRecompState* gx, u8 slot,
+                                 u32 load_tlut0, u32 format, u16 entries,
+                                 DolGxRecompTlut* out);
+diff --git a/GXRuntime/include/gxruntime/platform.h b/GXRuntime/include/gxruntime/platform.h
+index 8ce6790c8a..80fe0157ec 100644
+--- a/GXRuntime/include/gxruntime/platform.h
++++ b/GXRuntime/include/gxruntime/platform.h
+@@ -39,6 +39,11 @@ typedef struct DolPlatformOps {
+     void (*gx_flush)(void);
+     bool (*gx_read_draw_sync)(u16* token);
+     void (*call_display_list)(const void* data, u32 size);
++    // The same with the list's guest address, for a backend that needs to
++    // know where a list lives (a list in a linked module's data names that
++    // module's textures). NULL: call_display_list is used.
++    void (*call_display_list_guest)(u32 guest_address, const void* data,
++                                    u32 size);
+     void (*set_array)(u32 attr, const void* data, u32 size, u8 stride);
+     void (*set_array_guest)(u32 attr, u32 guest_address, const void* data,
+                             u32 size, u8 stride);
+@@ -92,6 +97,8 @@ void dol_platform_gx_flush(void);
+ // False means no token was decoded or the backend cannot provide it.
+ bool dol_platform_gx_read_draw_sync(u16* token);
+ void dol_platform_call_display_list(const void* data, u32 size);
++void dol_platform_call_display_list_guest(u32 guest_address, const void* data,
++                                          u32 size);
+ void dol_platform_set_array(u32 attr, const void* data, u32 size, u8 stride);
+ void dol_platform_set_array_guest(u32 attr, u32 guest_address,
+                                   const void* data, u32 size, u8 stride);
+diff --git a/GXRuntime/src/gx_recomp.c b/GXRuntime/src/gx_recomp.c
+index aedde62920..8dc628445e 100644
+--- a/GXRuntime/src/gx_recomp.c
++++ b/GXRuntime/src/gx_recomp.c
+@@ -710,6 +710,14 @@ bool dol_gx_recomp_texture_size(u16 width, u16 height, u32 format,
+ bool dol_gx_recomp_resolve_texture_image(DolGxRecompState* gx, u8 slot,
+                                          u32 image0, u32 image3,
+                                          DolGxRecompTexture* out) {
++    return dol_gx_recomp_resolve_texture_image_at(gx, slot, image0, image3, 0u,
++                                                  out);
++}
++
++bool dol_gx_recomp_resolve_texture_image_at(DolGxRecompState* gx, u8 slot,
++                                            u32 image0, u32 image3,
++                                            u32 address_bits,
++                                            DolGxRecompTexture* out) {
+     if (gx == NULL || out == NULL || slot >= DOL_GX_RECOMP_TEXTURE_SLOTS)
+         return false;
+     const u16 width = (u16)((image0 & 0x3FFu) + 1u);
+@@ -718,10 +726,14 @@ bool dol_gx_recomp_resolve_texture_image(DolGxRecompState* gx, u8 slot,
+     u32 byte_size = 0;
+     if (!dol_gx_recomp_texture_size(width, height, format, &byte_size))
+         return false;
+-    const u32 physical_base = texture_physical_base(image3);
++    const u32 physical_base = texture_physical_base(image3) | address_bits;
+     DolGuestResolvedRange range;
+-    if (!resolve_physical(gx, physical_base, byte_size,
+-                          DOL_GUEST_RESOURCE_TEXTURE, &range))
++    if (address_bits != 0u
++            ? !dol_guest_address_resolver_resolve(
++                  &gx->resolver, physical_base, byte_size,
++                  DOL_GUEST_ADDRESS_VIRTUAL, DOL_GUEST_RESOURCE_TEXTURE, &range)
++            : !resolve_physical(gx, physical_base, byte_size,
++                                DOL_GUEST_RESOURCE_TEXTURE, &range))
+         return false;
+     DolGxRecompTexture texture = {
+         .valid = true,
+diff --git a/GXRuntime/src/hle/hle_core.c b/GXRuntime/src/hle/hle_core.c
+index 937202dbda..24fc55ef08 100644
+--- a/GXRuntime/src/hle/hle_core.c
++++ b/GXRuntime/src/hle/hle_core.c
+@@ -777,7 +777,8 @@ static void finish_GXCallDisplayList(CPUState* cpu) {
+                 available);
+     } else {
+         emit_gx_resource_metadata(cpu);
+-        dol_platform_call_display_list(data, g_display_list_call.size);
++        dol_platform_call_display_list_guest(g_display_list_call.address, data,
++                                             g_display_list_call.size);
+     }
+     cpu->lr = g_display_list_call.caller;
+     cpu->pc = g_display_list_call.caller;
+diff --git a/GXRuntime/src/platform.c b/GXRuntime/src/platform.c
+index cf6b532022..368a050b58 100644
+--- a/GXRuntime/src/platform.c
++++ b/GXRuntime/src/platform.c
+@@ -75,6 +75,16 @@ void dol_platform_call_display_list(const void* data, u32 size) {
+         g_ops.call_display_list(data, size);
+ }
+ 
++void dol_platform_call_display_list_guest(u32 guest_address, const void* data,
++                                          u32 size) {
++    if (data == NULL || size == 0)
++        return;
++    if (g_ops.call_display_list_guest != NULL)
++        g_ops.call_display_list_guest(guest_address, data, size);
++    else
++        dol_platform_call_display_list(data, size);
++}
++
+ void dol_platform_set_array(u32 attr, const void* data, u32 size, u8 stride) {
+     if (g_ops.set_array != NULL)
+         g_ops.set_array(attr, data, size, stride);
+-- 
+2.46.0
+

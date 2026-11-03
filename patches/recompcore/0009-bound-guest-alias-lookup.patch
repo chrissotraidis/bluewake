@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 18:00:00 -0500
+Subject: [PATCH] runtime: reject guest alias lookups outside aggregate bounds
+
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 5f152c6a2d..4cd869de40 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -45,6 +45,8 @@ typedef struct PPCGuestAlias {
+ 
+ static PPCGuestAlias g_guest_aliases[PPC_GUEST_ALIAS_MAX];
+ static u32 g_guest_alias_count;
++static u32 g_guest_alias_min_start = UINT32_MAX;
++static u64 g_guest_alias_max_end;
+ 
+ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+     for (u32 i = 0; i < g_guest_alias_count; ++i) {
+@@ -52,6 +54,8 @@ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+         g_guest_aliases[i].storage = NULL;
+     }
+     g_guest_alias_count = 0u;
++    g_guest_alias_min_start = UINT32_MAX;
++    g_guest_alias_max_end = 0u;
+ }
+ 
+ GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
+@@ -69,6 +73,11 @@ GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
+     alias->linked_start = linked_start & ~0x40000000u;
+     alias->size = size;
+     alias->storage = storage;
++    if (alias->linked_start < g_guest_alias_min_start)
++        g_guest_alias_min_start = alias->linked_start;
++    const u64 alias_end = (u64)alias->linked_start + alias->size;
++    if (alias_end > g_guest_alias_max_end)
++        g_guest_alias_max_end = alias_end;
+     if (getenv("BLUEWAKE_TRACE_GUEST_ALIASES") != NULL &&
+         alias->linked_start < 0x81516E20u &&
+         (u64)alias->linked_start + alias->size > 0x81512AC0u) {
+@@ -84,6 +93,9 @@ GXRUNTIME_EXPORT bool ppc_guest_alias_resolve(u32 address, u32 size,
+                                               u32* journal_offset) {
+     if (pointer == NULL || size == 0u)
+         return false;
++    if (address < g_guest_alias_min_start ||
++        (u64)address + size > g_guest_alias_max_end)
++        return false;
+     for (u32 i = 0; i < g_guest_alias_count; ++i) {
+         const PPCGuestAlias* alias = &g_guest_aliases[i];
+         if (address < alias->linked_start || size > alias->size ||
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index aadd4927f4..4e42e5b1db 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -1055,6 +1055,11 @@ static void test_guest_data_alias(void) {
+     const u32 linked = 0x815581A0u;
+     ppc_guest_alias_clear();
+     assert(ppc_guest_alias_add(linked, sizeof(initial), initial));
++    u8* resolved = NULL;
++    assert(!ppc_guest_alias_resolve(0x80000000u, 4u, &resolved, NULL));
++    assert(!ppc_guest_alias_resolve(0x817FFFFCu, 4u, &resolved, NULL));
++    assert(ppc_guest_alias_resolve(linked, 4u, &resolved, NULL));
++    assert(resolved != NULL);
+     assert(mem_read32(&cpu, linked) == 0x12345678u);
+     assert(mem_read32(&cpu, linked | 0x40000000u) == 0x12345678u);
+     mem_write32(&cpu, linked, 0xAABBCCDDu);
+-- 
+2.50.1

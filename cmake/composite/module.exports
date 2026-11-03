@@ -1,0 +1,6 @@
+{
+  global:
+    staticrecomp_get_module;
+  local:
+    *;
+};

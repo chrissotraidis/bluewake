@@ -1,0 +1,25 @@
+From e3913e365943fa0a78a84018bf96fb1535f183b7 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 14:29:01 -0500
+Subject: [PATCH] llvm: invalidate indexed FP retry cache
+
+---
+ src/app/pipeline.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index 75a05c7..9b62948 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v23"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v24"
+ 
+ typedef struct {
+     const PPCInst* insts;
+-- 
+2.41.0
+

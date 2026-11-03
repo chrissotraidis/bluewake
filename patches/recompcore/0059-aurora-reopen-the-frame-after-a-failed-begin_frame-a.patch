@@ -1,0 +1,161 @@
+From 3d9a70469f0bb0a6921acc9a6404e52ea9035665 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 10:16:21 -0500
+Subject: [PATCH] aurora: reopen the frame after a failed begin_frame, and let
+ the host hold the guest
+
+Only a present opens the next frame, and only the core sink's display copy
+triggers a present. When begin_frame fails - an iOS app returning from the
+background, or a minimized window - no frame is open, every batch goes to the
+packet sink, no display copy reaches the core sink, and the game runs on behind
+a blank window forever. Measured on the iOS simulator: guest retraces kept
+advancing after a trip to the home screen while the screen stayed white.
+
+When the worker's unframed-batch count moves, retry begin_frame from the main
+thread. Add dol_aurora_set_hold() so a host can ask for the guest to be held
+while no frame can be opened (an iOS app that is not active). Measured: the
+picture returns on resume ("frame reopened after 1 unframed batch").
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 11 +++++
+ .../backends/aurora/aurora_backend_private.h  |  4 ++
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 40 +++++++++++++++++++
+ GXRuntime/include/gxruntime/aurora_backend.h  |  5 +++
+ 4 files changed, 60 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index bc65c3962a..2032b9e499 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -25,6 +25,8 @@ DolAuroraOverlayFn g_host_overlay = nullptr;
+ void* g_host_overlay_user = nullptr;
+ DolAuroraEventObserverFn g_host_event_observer = nullptr;
+ void* g_host_event_user = nullptr;
++DolAuroraHoldFn g_host_hold = nullptr;
++void* g_host_hold_user = nullptr;
+ bool g_graphics_log = false;
+ bool g_force_untextured = false;
+ bool g_gx_core_enabled = true;
+@@ -164,6 +166,10 @@ void run_host_overlay() {
+         g_host_overlay(g_host_overlay_user);
+ }
+ 
++bool host_wants_hold() {
++    return g_host_hold != nullptr && g_host_hold(g_host_hold_user);
++}
++
+ void install_platform_ops() {
+ 
+ 
+@@ -440,6 +446,11 @@ void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user)
+     gx_aurora::g_host_event_user = user;
+ }
+ 
++void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user) {
++    gx_aurora::g_host_hold = should_hold;
++    gx_aurora::g_host_hold_user = user;
++}
++
+ void dol_aurora_shutdown(void) {
+     if (!gx_aurora::g_initialized)
+         return;
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 7b56f1016f..88fa0f90c2 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -174,8 +174,12 @@ bool aurora_guest_address_resolver_bridge(void*, std::uint32_t address, std::uin
+ void install_platform_ops();
+ // Host overlay hooks (see gxruntime/aurora_backend.h).
+ void run_host_overlay();
++// True while the host asks for the guest to be held (see dol_aurora_set_hold).
++bool host_wants_hold();
+ // Opens (or closes) the frame begun at initialization to the FIFO worker.
+ void set_initial_frame_recording(bool open);
++// Retries begin_frame after the window could not present (see the definition).
++void reopen_frame_if_unframed();
+ 
+ } // namespace gx_aurora
+ 
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 6f39882d2f..9b9b049bdd 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -10,6 +10,7 @@
+ #include <gx/gx.hpp>
+ #include <gx/recomp.hpp>
+ #include <gxruntime/guest_memory_dirty.h>
++#include <SDL3/SDL_timer.h>
+ #include <atomic>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -737,6 +738,43 @@ void set_initial_frame_recording(bool open) {
+     g_aurora_recording_open = open;
+ }
+ 
++// A present opens the next frame, and only the core sink's display copy
++// triggers a present. When begin_frame fails - the window is minimized or the
++// iOS app is in the background, so the surface is released - no frame is open,
++// every batch goes to the packet sink, no display copy reaches the core sink,
++// and nothing would ever open a frame again: the game keeps running behind a
++// blank window. The worker counts those unframed batches; when that count moves
++// the main thread retries begin_frame here, once per new unframed batch.
++void reopen_frame_if_unframed() {
++    static std::uint64_t s_seen_unframed = 0;
++    if (g_frame_open || g_should_quit)
++        return;
++    const std::uint64_t unframed =
++        g_aurora_unframed_batches.load(std::memory_order_relaxed);
++    if (unframed == s_seen_unframed)
++        return;
++    s_seen_unframed = unframed;
++    std::lock_guard<std::mutex> recording(g_aurora_recording_mutex);
++    poll_events();
++    if (host_wants_hold()) {
++        const Uint64 start = SDL_GetTicks();
++        std::fprintf(stderr, "[gfx] guest held while the host is inactive\n");
++        while (!g_should_quit && host_wants_hold()) {
++            SDL_Delay(50);
++            poll_events();
++        }
++        std::fprintf(stderr, "[gfx] guest released after %.1f s\n",
++                     (SDL_GetTicks() - start) / 1000.0);
++    }
++    if (g_should_quit)
++        return;
++    g_frame_open = aurora_begin_frame();
++    g_aurora_recording_open = g_frame_open;
++    if (g_frame_open)
++        std::fprintf(stderr, "[gfx] frame reopened after %llu unframed batch(es)\n",
++                     static_cast<unsigned long long>(unframed));
++}
++
+ unsigned long long shadow_transform_frame_number() {
+     return g_frame_open ? g_present_count + 1ull : g_present_count;
+ }
+@@ -1212,6 +1250,8 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+     gx_aurora::shadow_frontend_write(value, size);
+     if (gx_aurora::trace_should_record())
+         gx_aurora::g_trace_writer.gx_write(size, value);
++    if (gx_aurora::g_gx_core_enabled && !gx_aurora::g_frame_open)
++        gx_aurora::reopen_frame_if_unframed();
+     if (gx_aurora::g_gx_core_enabled)
+         if (gx_aurora::g_display_copy_pending) {
+             gx_aurora::g_display_copy_pending = false;
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 22a3d57ef5..9d77099c90 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -33,6 +33,11 @@ typedef void (*DolAuroraOverlayFn)(void* user);
+ typedef void (*DolAuroraEventObserverFn)(const void* sdl_event, void* user);
+ void dol_aurora_set_overlay(DolAuroraOverlayFn draw, void* user);
+ void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user);
++// While no frame can be opened, the backend asks this predicate whether the
++// host wants the guest held (for example an iOS app that is not active). If so
++// it pumps events and sleeps on the main thread until the predicate clears.
++typedef bool (*DolAuroraHoldFn)(void* user);
++void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user);
+ 
+ #ifdef __cplusplus
+ }
+-- 
+2.41.0
+

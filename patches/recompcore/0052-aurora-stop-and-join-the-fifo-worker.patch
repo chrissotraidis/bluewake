@@ -1,0 +1,112 @@
+From 412c35ac67dc2511118587a083e2f7a567c22010 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Tue, 22 Sep 2026 16:31:30 -0500
+Subject: [PATCH] aurora: stop and join the FIFO translation worker at shutdown
+
+The worker records into Aurora's frame packet, and nothing stopped it: its thread
+was still alive when dol_aurora_shutdown() destroyed the device, and still
+joinable when process exit destroyed its std::thread, so every rendered run of the
+worker ended by SIGABRT through std::terminate after a normal guest stop. The
+first rendered probe of the zero-charge candidate showed it (exit 134 with
+"Device lost: Device was destroyed" as the last line), and it reproduces on the
+pre-fix host on a 60-retrace run, so it is older than the frame-transition fix and
+independent of it.
+
+dol_aurora_shutdown() now calls shadow_frontend_stop_worker() before
+dol_platform_reset() and before the frame is closed: the worker takes any pending
+bytes into the frame that is about to be submitted, then joins, so nothing is
+recording while the device is torn down and no thread outlives the statics. The
+stop flag is cleared after the join so a later initialization can start the
+worker again.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  5 +++
+ .../backends/aurora/aurora_backend_private.h  |  5 +++
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 33 +++++++++++++++++++
+ 3 files changed, 43 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 8d06fb52f3..655601b7ee 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -399,6 +399,11 @@ bool dol_aurora_initialize(int argc, char** argv,
+ void dol_aurora_shutdown(void) {
+     if (!gx_aurora::g_initialized)
+         return;
++    // The translation worker has to be gone before the frame is closed and the
++    // device destroyed, and before process exit destroys a std::thread that is
++    // still joinable. Stopping it here also lets the bytes it has not parsed
++    // yet be recorded into the frame that is about to be submitted.
++    gx_aurora::shadow_frontend_stop_worker();
+     dol_platform_reset();
+     if (gx_aurora::g_frame_open) {
+         aurora_end_frame();
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 4e4cdb5749..0039962163 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -148,6 +148,11 @@ void shadow_frontend_write(u64 value, u8 size);
+ // far. The auras's reset paths call it so the front end is not reset while a
+ // batch is in flight.
+ void shadow_frontend_flush_pending(void);
++// Stops the FIFO translation worker and waits for it. The platform layer calls
++// this before the device is destroyed; the worker records into Aurora's frame
++// packet, and a worker thread that outlives the process's statics calls
++// std::terminate.
++void shadow_frontend_stop_worker(void);
+ unsigned long long shadow_transform_frame_number();
+ void log_transform_matrix(const char* label, unsigned index, const float* values);
+ void shadow_transform_observer(const gxruntime::aurora_recomp::ConsumedDraw& draw, unsigned long long cumulative_draw, void*);
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 1186a98b1f..3763c82239 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -379,6 +379,34 @@ void g_fifo_worker_start() {
+     g_fifo_worker_thread = std::thread(g_fifo_worker_main);
+ }
+ 
++// Stops the translation worker and waits for it, so that nothing is recording
++// into Aurora while the device is destroyed and so that no worker thread
++// outlives the process's statics. A std::thread still joinable when exit
++// destroys it calls std::terminate: every rendered run of this worker before
++// this existed ended in SIGABRT after a normal guest stop (measured 2026-09-22),
++// and a batch in flight during device teardown is a use-after-free on top of it.
++void g_fifo_worker_stop_and_join() {
++    std::thread worker;
++    {
++        std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
++        if (!g_fifo_worker_started)
++            return;
++        g_fifo_worker_stop = true;
++        // Wake the worker even with no bytes pending, so it is not left in the
++        // predicate wait when this joins it.
++        g_fifo_work_pending = true;
++        worker.swap(g_fifo_worker_thread);
++        g_fifo_worker_started = false;
++    }
++    g_fifo_worker_cv.notify_all();
++    if (worker.joinable())
++        worker.join();
++    std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
++    // A later initialization may start the worker again.
++    g_fifo_worker_stop = false;
++    g_fifo_worker_idle = true;
++}
++
+ void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
+     {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+@@ -659,6 +687,11 @@ void shadow_frontend_flush_pending(void) {
+     shadow_frontend_flush();
+ }
+ 
++// Called by the platform layer before the device is destroyed.
++void shadow_frontend_stop_worker(void) {
++    g_fifo_worker_stop_and_join();
++}
++
+ unsigned long long shadow_transform_frame_number() {
+     return g_frame_open ? g_present_count + 1ull : g_present_count;
+ }
+-- 
+2.41.0
+

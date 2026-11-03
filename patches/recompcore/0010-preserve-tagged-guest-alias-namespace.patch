@@ -1,0 +1,168 @@
+From 118140fcafb1cf944176578ccd095e870674ff87 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 21:09:40 -0500
+Subject: [PATCH] runtime: preserve tagged guest alias namespace
+
+---
+ GXRuntime/include/core/cpu.h    | 13 +++++++---
+ GXRuntime/src/core/cpu.c        | 45 ++++++++++++++++++++++++++++++++-
+ GXRuntime/tests/runtime_tests.c | 21 +++++++++++++++
+ 3 files changed, 75 insertions(+), 4 deletions(-)
+
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index c1fab8d913..18727ab331 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -108,6 +108,7 @@ typedef void (*PPCCacheControl)(CPUState* cpu, u8 operation, u32 ea, u32 cia);
+ // backs it with storage outside the contiguous game heap. The table is owned
+ // by GXRuntime rather than CPUState so the generated CPU ABI remains stable.
+ bool ppc_guest_alias_add(u32 linked_start, u32 size, const u8* initial_bytes);
++bool ppc_guest_alias_remove(u32 linked_start, u32 size);
+ void ppc_guest_alias_clear(void);
+ bool ppc_guest_alias_resolve(u32 address, u32 size, u8** pointer,
+                              u32* journal_offset);
+@@ -180,11 +181,17 @@ extern PPCMemWriteJournal g_mem_write_journal;
+ extern void* g_mem_write_journal_user;
+ 
+ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size, u32* out_offset) {
+-    u32 masked_addr = addr & ~0x40000000u;
+-
+     u8* alias = NULL;
+     u32 alias_offset = 0u;
+-    if (ppc_guest_alias_resolve(masked_addr, size, &alias, &alias_offset)) {
++    if (ppc_guest_alias_resolve(addr, size, &alias, &alias_offset)) {
++        if (out_offset)
++            *out_offset = alias_offset;
++        return alias;
++    }
++
++    u32 masked_addr = addr & ~0x40000000u;
++    if (masked_addr != addr &&
++        ppc_guest_alias_resolve(masked_addr, size, &alias, &alias_offset)) {
+         if (out_offset)
+             *out_offset = alias_offset;
+         return alias;
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 5f152c6a2d..282718a664 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -45,6 +45,21 @@ typedef struct PPCGuestAlias {
+ 
+ static PPCGuestAlias g_guest_aliases[PPC_GUEST_ALIAS_MAX];
+ static u32 g_guest_alias_count;
++static u32 g_guest_alias_min_start = UINT32_MAX;
++static u64 g_guest_alias_max_end;
++
++static void ppc_guest_alias_recompute_bounds(void) {
++    g_guest_alias_min_start = UINT32_MAX;
++    g_guest_alias_max_end = 0u;
++    for (u32 i = 0u; i < g_guest_alias_count; ++i) {
++        const PPCGuestAlias* alias = &g_guest_aliases[i];
++        if (alias->linked_start < g_guest_alias_min_start)
++            g_guest_alias_min_start = alias->linked_start;
++        const u64 alias_end = (u64)alias->linked_start + alias->size;
++        if (alias_end > g_guest_alias_max_end)
++            g_guest_alias_max_end = alias_end;
++    }
++}
+ 
+ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+     for (u32 i = 0; i < g_guest_alias_count; ++i) {
+@@ -52,6 +67,8 @@ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+         g_guest_aliases[i].storage = NULL;
+     }
+     g_guest_alias_count = 0u;
++    g_guest_alias_min_start = UINT32_MAX;
++    g_guest_alias_max_end = 0u;
+ }
+ 
+ GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
+@@ -66,9 +83,14 @@ GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
+         memcpy(storage, initial_bytes, size);
+ 
+     PPCGuestAlias* alias = &g_guest_aliases[g_guest_alias_count++];
+-    alias->linked_start = linked_start & ~0x40000000u;
++    alias->linked_start = linked_start;
+     alias->size = size;
+     alias->storage = storage;
++    if (alias->linked_start < g_guest_alias_min_start)
++        g_guest_alias_min_start = alias->linked_start;
++    const u64 alias_end = (u64)alias->linked_start + alias->size;
++    if (alias_end > g_guest_alias_max_end)
++        g_guest_alias_max_end = alias_end;
+     if (getenv("BLUEWAKE_TRACE_GUEST_ALIASES") != NULL &&
+         alias->linked_start < 0x81516E20u &&
+         (u64)alias->linked_start + alias->size > 0x81512AC0u) {
+@@ -79,11 +101,32 @@ GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
+     return true;
+ }
+ 
++GXRUNTIME_EXPORT bool ppc_guest_alias_remove(u32 linked_start, u32 size) {
++    for (u32 i = 0u; i < g_guest_alias_count; ++i) {
++        PPCGuestAlias* alias = &g_guest_aliases[i];
++        if (alias->linked_start != linked_start || alias->size != size)
++            continue;
++        free(alias->storage);
++        if (i + 1u < g_guest_alias_count) {
++            memmove(alias, alias + 1u,
++                    (g_guest_alias_count - i - 1u) * sizeof(*alias));
++        }
++        g_guest_alias_count--;
++        g_guest_aliases[g_guest_alias_count] = (PPCGuestAlias){0};
++        ppc_guest_alias_recompute_bounds();
++        return true;
++    }
++    return false;
++}
++
+ GXRUNTIME_EXPORT bool ppc_guest_alias_resolve(u32 address, u32 size,
+                                               u8** pointer,
+                                               u32* journal_offset) {
+     if (pointer == NULL || size == 0u)
+         return false;
++    if (address < g_guest_alias_min_start ||
++        (u64)address + size > g_guest_alias_max_end)
++        return false;
+     for (u32 i = 0; i < g_guest_alias_count; ++i) {
+         const PPCGuestAlias* alias = &g_guest_aliases[i];
+         if (address < alias->linked_start || size > alias->size ||
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index aadd4927f4..d1c075b0db 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -1055,11 +1055,32 @@ static void test_guest_data_alias(void) {
+     const u32 linked = 0x815581A0u;
+     ppc_guest_alias_clear();
+     assert(ppc_guest_alias_add(linked, sizeof(initial), initial));
++    u8* resolved = NULL;
++    assert(!ppc_guest_alias_resolve(0x80000000u, 4u, &resolved, NULL));
++    assert(!ppc_guest_alias_resolve(0x817FFFFCu, 4u, &resolved, NULL));
++    assert(ppc_guest_alias_resolve(linked, 4u, &resolved, NULL));
++    assert(resolved != NULL);
+     assert(mem_read32(&cpu, linked) == 0x12345678u);
+     assert(mem_read32(&cpu, linked | 0x40000000u) == 0x12345678u);
++    const u32 tagged_linked = linked | 0x40000000u;
++    const u8 tagged_initial[4] = {0xDEu, 0xADu, 0xBEu, 0xEFu};
++    assert(ppc_guest_alias_add(tagged_linked, sizeof(tagged_initial),
++                               tagged_initial));
++    assert(mem_read32(&cpu, tagged_linked) == 0xDEADBEEFu);
++    assert(mem_read32(&cpu, linked) == 0x12345678u);
+     mem_write32(&cpu, linked, 0xAABBCCDDu);
+     assert(mem_read32(&cpu, linked) == 0xAABBCCDDu);
+     assert(read_be32(cpu.ram + (linked - GC_RAM_BASE)) == 0u);
++    const u32 second_linked = 0x81600000u;
++    assert(ppc_guest_alias_add(second_linked, sizeof(initial), initial));
++    assert(ppc_guest_alias_remove(tagged_linked, sizeof(tagged_initial)));
++    assert(ppc_guest_alias_resolve(linked, 4u, &resolved, NULL));
++    assert(ppc_guest_alias_remove(linked, sizeof(initial)));
++    assert(!ppc_guest_alias_resolve(linked, 4u, &resolved, NULL));
++    assert(ppc_guest_alias_resolve(second_linked, 4u, &resolved, NULL));
++    assert(!ppc_guest_alias_remove(linked, sizeof(initial)));
++    assert(ppc_guest_alias_remove(second_linked, sizeof(initial)));
++    assert(!ppc_guest_alias_resolve(second_linked, 4u, &resolved, NULL));
+     ppc_guest_alias_clear();
+     cpu_free(&cpu);
+ }
+-- 
+2.41.0
+

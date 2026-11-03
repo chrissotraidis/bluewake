@@ -1,0 +1,78 @@
+From 7ae765ca57ef1c85f7d687b621e4dc14ab62777b Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 11:38:10 -0500
+Subject: [PATCH 81/81] gx_recomp: mask the palette load address to the
+ GameCube's 25 bits
+
+Wind Waker's menus write junk into the upper bits of LOADTLUT0: the pause
+menu loads the SAVE tab's palette from 0x110047E0, and others from
+0x08E9FDE0, 0x1CE9F2E0 and the like (1,700 loads in the pause route). The
+resolve rejected each one, so TMEM kept the previous palette and the SAVE
+tab (word_save.bti, C4) was drawn with the arrow icon's palette
+(yazirushi_tri_2.bti): a white blob with no letters. The hardware ignores
+those bits and Dolphin masks the same way in LOADTLUT1. After the mask the
+route has no rejected palette loads and the tab matches Dolphin's texture
+dump index for index. DOL_GXCORE_TLUT_LOG=1 reports every palette load and
+rejection.
+---
+ GXRuntime/src/gx_recomp.c | 29 +++++++++++++++++++++++++++--
+ 1 file changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/src/gx_recomp.c b/GXRuntime/src/gx_recomp.c
+index 8c2e7f36ea..6de3916c1b 100644
+--- a/GXRuntime/src/gx_recomp.c
++++ b/GXRuntime/src/gx_recomp.c
+@@ -1,4 +1,6 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
++#include <stdlib.h>
++#include <stdio.h>
+ #include "gxruntime/gx_recomp.h"
+ #include "gx_recomp_internal.h"
+ 
+@@ -772,11 +774,20 @@ bool dol_gx_recomp_resolve_tmem_tlut(DolGxRecompState* gx, u16 tmem_offset,
+         tmem_offset >= DOL_GX_RECOMP_TMEM_TLUT_SLOTS || entries == 0u)
+         return false;
+     const u32 byte_size = (u32)entries * 2u;
+-    const u32 physical_base = texture_physical_base(load_tlut0);
++    /* The GameCube ignores the upper bits of the palette source address, and
++     * Wind Waker sets some: its menus load palettes from 0x110047E0,
++     * 0x1CE9F2E0 and the like (Dolphin masks the same way in LOADTLUT1). A
++     * rejected load left the previous palette in TMEM, so the pause menu's
++     * SAVE tab was drawn with an arrow icon's palette. */
++    const u32 physical_base = texture_physical_base(load_tlut0) & 0x01FFFFFFu;
+     DolGuestResolvedRange range;
+     if (!resolve_physical(gx, physical_base, byte_size,
+-                          DOL_GUEST_RESOURCE_TLUT, &range))
++                          DOL_GUEST_RESOURCE_TLUT, &range)) {
++        if (getenv("DOL_GXCORE_TLUT_LOG") != NULL)
++            fprintf(stderr, "[tlut-fail] tmem=%u addr=%08X entries=%u\n",
++                    (unsigned)tmem_offset, physical_base, (unsigned)entries);
+         return false;
++    }
+     DolGxRecompTlut tlut = {
+         .valid = true,
+         .slot = tmem_offset < DOL_GX_RECOMP_TLUT_SLOTS ? (u8)tmem_offset
+@@ -790,6 +801,20 @@ bool dol_gx_recomp_resolve_tmem_tlut(DolGxRecompState* gx, u16 tmem_offset,
+     };
+     gx->tmem_tluts[tmem_offset] = tlut;
+     *out = tlut;
++    {
++        /* DOL_GXCORE_TLUT_LOG=1: report each palette load (diagnostics). */
++        static int s_tlut_log = -1;
++        if (s_tlut_log < 0)
++            s_tlut_log = getenv("DOL_GXCORE_TLUT_LOG") != NULL ? 1 : 0;
++        if (s_tlut_log && range.data != NULL) {
++            const u8* b = (const u8*)range.data;
++            fprintf(stderr, "[tlut-load] tmem=%u addr=%08X entries=%u:", (unsigned)tmem_offset,
++                    physical_base, (unsigned)entries);
++            for (u32 e = 0; e < 16u && e < entries; ++e)
++                fprintf(stderr, " %02X%02X", b[e * 2u], b[e * 2u + 1u]);
++            fprintf(stderr, "\n");
++        }
++    }
+     dol_gx_recomp_trace_event(gx, DOL_GX_RECOMP_EVENT_TLUT, tmem_offset, physical_base,
+                 byte_size, format);
+     return true;
+-- 
+2.41.0
+

@@ -1,0 +1,254 @@
+From 22ec40bb028d34f0e568f7c51edc9711d9500657 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 23:50:21 -0500
+Subject: [PATCH] graphics: segment staging without presenting
+
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 55 ++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  | 23 ++++---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 19 +++++-
+ .../aurora/lib/gfx/staging_budget.hpp         | 67 +++++++++++++++++++
+ 4 files changed, 149 insertions(+), 15 deletions(-)
+ create mode 100644 GXRuntime/graphics/aurora/lib/gfx/staging_budget.hpp
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 4c672587f0..820d385399 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -15,6 +15,7 @@
+ #endif
+ #include "pipeline_cache.hpp"
+ #include "render_worker.hpp"
++#include "staging_budget.hpp"
+ #include "tex_copy_conv.hpp"
+ #include "tex_palette_conv.hpp"
+ #include "texture_replacement.hpp"
+@@ -1177,7 +1178,7 @@ static std::optional<size_t> acquire_mapped_staging_buffer() {
+   }
+ }
+ 
+-bool begin_frame() {
++bool begin_frame(bool preserveEfb) {
+   ZoneScoped;
+   // pace_frame_start();
+   const size_t frameSlot = acquire_frame_slot();
+@@ -1222,6 +1223,12 @@ bool begin_frame() {
+   set_efb_targets(pass);
+   pass.clearColorValue = gx::g_gxState.clearColor;
+   pass.clearDepthValue = gx::clear_depth_value();
++  if (preserveEfb) {
++    pass.clearColor = false;
++    pass.clearDepth = false;
++    pass.colorLoadOp = wgpu::LoadOp::Load;
++    pass.depthLoadOp = wgpu::LoadOp::Load;
++  }
+   g_currentRenderPass = 0;
+   // Refresh render viewport/scissor from logical in case FB size changed
+   g_cachedViewport = gx::map_logical_viewport(gx::g_gxState.logicalViewport);
+@@ -1238,6 +1245,52 @@ bool begin_frame() {
+   return true;
+ }
+ 
++bool segment_frame() {
++  const auto& frame = current_frame_packet();
++  Log.info("Segmenting frame {} staging: verts={} uniforms={} indices={} storage={}",
++           frame.frameId, frame.verts.size(), frame.uniforms.size(),
++           frame.indices.size(), frame.storage.size());
++  finish();
++  end_frame([](wgpu::CommandEncoder& encoder) {
++    webgpu::gpu_prof::frame_end(encoder);
++    const wgpu::CommandBufferDescriptor descriptor{
++        .label = "Aurora staging segment command buffer"};
++    const auto buffer = encoder.Finish(&descriptor);
++    g_queue.Submit(1, &buffer);
++    webgpu::gpu_prof::after_submit();
++    after_submit();
++  });
++  return begin_frame(true);
++}
++
++bool staging_has_capacity(size_t vertLength, size_t indexLength,
++                          size_t uniformLength, size_t secondUniformLength,
++                          size_t storageLength) {
++  if (g_recordingFrame == nullptr)
++    return false;
++  const auto& frame = current_frame_packet();
++  return staging_fits(
++      StagingUse{.verts = frame.verts.size(),
++                 .indices = frame.indices.size(),
++                 .uniforms = frame.uniforms.size(),
++                 .storage = frame.storage.size()},
++      StagingRequest{.verts = vertLength,
++                     .indices = indexLength,
++                     .uniforms = uniformLength,
++                     .secondUniforms = secondUniformLength,
++                     .storage = storageLength},
++      StagingLimits{
++          .capacity = StagingUse{.verts = VertexBufferSize,
++                                 .indices = IndexBufferSize,
++                                 .uniforms = UniformBufferSize,
++                                 .storage = StorageBufferSize},
++          .uniformAlignment =
++              g_cachedLimits.minUniformBufferOffsetAlignment,
++          .storageAlignment =
++              g_cachedLimits.minStorageBufferOffsetAlignment,
++          .finishUniformHeadroom = gx::MaxUniformSize});
++}
++
+ void finish() {
+   ZoneScoped;
+   if (g_recordingFrame == nullptr) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 0233ab5e69..6678293342 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -172,16 +172,13 @@ private:
+ 
+ namespace aurora::gfx {
+ inline constexpr bool UseTextureBuffer = true;
+-// Full gameplay through gxcore --core (Dolphin-ported core, triangle-list
+-// expansion) exceeds the menu-scale sizes the live SDK path used. Wind
+-// Waker's opening-to-Outset transition batches more than 24mb of uniform
+-// constants before the next display copy, so keep the fixed frame slices
+-// proportionally sized for that burst. Per-frame staging costs roughly
+-// staging_count * delta RAM.
+-inline constexpr uint64_t UniformBufferSize = 50331648;  // 48mb
+-inline constexpr uint64_t VertexBufferSize = 25165824;   // 24mb
+-inline constexpr uint64_t IndexBufferSize = 16777216;    // 16mb
+-inline constexpr uint64_t StorageBufferSize = 16777216;  // 16mb
++// GXCore triangle-list expansion needs more staging than the live SDK path.
++// Keep these slices bounded and segment long command intervals before they
++// overflow; fixed growth cannot cover an interval with no display copy.
++inline constexpr uint64_t UniformBufferSize = 25165824;  // 24mb
++inline constexpr uint64_t VertexBufferSize = 12582912;   // 12mb
++inline constexpr uint64_t IndexBufferSize = 8388608;     // 8mb
++inline constexpr uint64_t StorageBufferSize = 8388608;   // 8mb
+ inline constexpr uint64_t TextureUploadSize = 25165824;  // 24mb
+ 
+ extern AuroraStats g_stats;
+@@ -234,7 +231,11 @@ enum class ShaderType : uint8_t {
+ void initialize();
+ void shutdown();
+ 
+-bool begin_frame();
++bool begin_frame(bool preserveEfb = false);
++bool segment_frame();
++bool staging_has_capacity(size_t vertLength, size_t indexLength,
++                          size_t uniformLength, size_t secondUniformLength = 0,
++                          size_t storageLength = 0);
+ void finish();
+ void end_frame(EndFrameCallback callback);
+ uint32_t current_frame() noexcept;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 12c22b3eb2..e2ae8f4d7f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -671,16 +671,29 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     }
+   }
+ 
++  const bool tev = plan.pipeline.shader.tev_valid != 0;
++  const size_t vertBytes = plan.vertices.size() * sizeof(float);
++  const size_t indexBytes = plan.indices.size() * sizeof(uint16_t);
++  const size_t pixelUniformBytes = tev ? sizeof(plan.pixel_constants) : 0;
++  if (!staging_has_capacity(vertBytes, indexBytes, sizeof(plan.constants),
++                            pixelUniformBytes)) {
++    if (!segment_frame() ||
++        !staging_has_capacity(vertBytes, indexBytes, sizeof(plan.constants),
++                              pixelUniformBytes)) {
++      Log.error("GXCore draw exceeds an empty Aurora staging segment");
++      return false;
++    }
++  }
++
+   const auto vertRange = push_verts(
+       reinterpret_cast<const uint8_t*>(plan.vertices.data()),
+-      plan.vertices.size() * sizeof(float), 4);
++      vertBytes, 4);
+   const auto idxRange = push_indices(
+       reinterpret_cast<const uint8_t*>(plan.indices.data()),
+-      plan.indices.size() * sizeof(uint16_t), 4);
++      indexBytes, 4);
+   const auto uniformRange = push_uniform(
+       reinterpret_cast<const uint8_t*>(&plan.constants),
+       sizeof(plan.constants));
+-  const bool tev = plan.pipeline.shader.tev_valid != 0;
+   Range pixelUniformRange{};
+   if (tev) {
+     pixelUniformRange = push_uniform(
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/staging_budget.hpp b/GXRuntime/graphics/aurora/lib/gfx/staging_budget.hpp
+new file mode 100644
+index 0000000000..8b7203b462
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/staging_budget.hpp
+@@ -0,0 +1,67 @@
++#pragma once
++
++#include <cstddef>
++
++namespace aurora::gfx {
++
++struct StagingUse {
++  size_t verts = 0;
++  size_t indices = 0;
++  size_t uniforms = 0;
++  size_t storage = 0;
++};
++
++struct StagingRequest {
++  size_t verts = 0;
++  size_t indices = 0;
++  size_t uniforms = 0;
++  size_t secondUniforms = 0;
++  size_t storage = 0;
++};
++
++struct StagingLimits {
++  StagingUse capacity{};
++  size_t uniformAlignment = 1;
++  size_t storageAlignment = 1;
++  size_t finishUniformHeadroom = 0;
++};
++
++constexpr size_t staging_project(size_t current, size_t length,
++                                 size_t alignment) {
++  const size_t aligned = alignment <= 1
++                             ? current
++                             : ((current + alignment - 1) / alignment) * alignment;
++  return aligned + length;
++}
++
++constexpr StagingUse staging_project(const StagingUse& current,
++                                     const StagingRequest& request,
++                                     const StagingLimits& limits) {
++  StagingUse projected{
++      .verts = staging_project(current.verts, request.verts, 4),
++      .indices = staging_project(current.indices, request.indices, 4),
++      .uniforms = staging_project(current.uniforms, request.uniforms,
++                                  limits.uniformAlignment),
++      .storage = staging_project(current.storage, request.storage,
++                                 limits.storageAlignment),
++  };
++  if (request.secondUniforms != 0) {
++    projected.uniforms = staging_project(projected.uniforms,
++                                         request.secondUniforms,
++                                         limits.uniformAlignment);
++  }
++  projected.uniforms += limits.finishUniformHeadroom;
++  return projected;
++}
++
++constexpr bool staging_fits(const StagingUse& current,
++                            const StagingRequest& request,
++                            const StagingLimits& limits) {
++  const StagingUse projected = staging_project(current, request, limits);
++  return projected.verts <= limits.capacity.verts &&
++         projected.indices <= limits.capacity.indices &&
++         projected.uniforms <= limits.capacity.uniforms &&
++         projected.storage <= limits.capacity.storage;
++}
++
++} // namespace aurora::gfx
+-- 
+2.41.0
+

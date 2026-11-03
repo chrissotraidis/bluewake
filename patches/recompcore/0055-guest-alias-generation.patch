@@ -1,0 +1,89 @@
+# BlueWake patch 0055 - GXRuntime: a guest-alias generation counter, for readers
+# that cache a resolved host pointer.
+#
+# Apply from ref/recompcore:  patch -p1 < patches/recompcore/0055-guest-alias-generation.patch
+#
+# Measured on the certified route at -0.42 percent (397.5/397.6 M to 395.9 M host
+# instructions per play retrace, digest 83d2590d unchanged); see
+# docs/status/CURRENT.md, 2026-09-22. The host's per-block overlap observation was
+# revalidating its cached pointer by reading the overlap boolean, which costs a
+# load, a select, a second load and a two-way compare at every block boundary;
+# the counter answers the same question with one load and one compare.
+
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index 1679e342e8..789d227f56 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -115,6 +115,8 @@ void ppc_guest_alias_clear(void);
+ bool ppc_guest_alias_resolve(u32 address, u32 size, u8** pointer,
+                              u32* journal_offset);
+ extern bool g_ppc_guest_aliases_overlap_mem1;
++// Moves whenever the alias set is touched; see the definition.
++extern u32 g_ppc_guest_alias_generation;
+ 
+ enum {
+     PPC_CACHE_DCBST,
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 338de2ee62..8845317cdd 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -49,6 +49,23 @@ static u32 g_guest_alias_count;
+ static u32 g_guest_alias_min_start = UINT32_MAX;
+ static u64 g_guest_alias_max_end;
+ bool g_ppc_guest_aliases_overlap_mem1;
++
++// Guest-alias generation, for readers that cache a resolved host pointer.
++//
++// The host's per-block overlap observation caches the pointer it resolved for a
++// guest address and revalidates it when the aliasing state moves. It used to ask
++// that by reading the boolean above, which cost a load, a select into 0/1, a
++// second load for the cached copy and a two-way compare at every block boundary
++// (docs/status/CURRENT.md, 2026-09-22). A counter that moves whenever the alias
++// set is touched answers the same question with one load and one compare, and it
++// cannot be missed by a write site that updates the boolean without bumping it -
++// every write goes through the setter below.
++u32 g_ppc_guest_alias_generation;
++
++static void ppc_guest_alias_set_overlap_mem1(bool overlaps) {
++    g_ppc_guest_aliases_overlap_mem1 = overlaps;
++    g_ppc_guest_alias_generation++;
++}
+ // Cost census for the alias path (docs/status/REORGANIZATION_2026-09-17.md, W4).
+ // get_ram_ptr sends every untagged MEM1 access through ppc_guest_alias_resolve
+ // as soon as one alias touches MEM1, and the resolver is a linear scan of the
+@@ -90,7 +107,7 @@ static void ppc_guest_alias_cost_report(void) {
+ static void ppc_guest_alias_recompute_bounds(void) {
+     g_guest_alias_min_start = UINT32_MAX;
+     g_guest_alias_max_end = 0u;
+-    g_ppc_guest_aliases_overlap_mem1 = false;
++    ppc_guest_alias_set_overlap_mem1(false);
+     for (u32 i = 0u; i < g_guest_alias_count; ++i) {
+         const PPCGuestAlias* alias = &g_guest_aliases[i];
+         if (alias->linked_start < g_guest_alias_min_start)
+@@ -100,7 +117,7 @@ static void ppc_guest_alias_recompute_bounds(void) {
+             g_guest_alias_max_end = alias_end;
+         if (alias->linked_start < GC_RAM_BASE + GC_MAIN_RAM_SIZE &&
+             alias_end > GC_RAM_BASE)
+-            g_ppc_guest_aliases_overlap_mem1 = true;
++            ppc_guest_alias_set_overlap_mem1(true);
+     }
+ }
+ 
+@@ -113,7 +130,7 @@ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+     g_guest_alias_count = 0u;
+     g_guest_alias_min_start = UINT32_MAX;
+     g_guest_alias_max_end = 0u;
+-    g_ppc_guest_aliases_overlap_mem1 = false;
++    ppc_guest_alias_set_overlap_mem1(false);
+ }
+ 
+ static bool ppc_guest_alias_add_storage(u32 linked_start, u32 size,
+@@ -134,7 +151,7 @@ static bool ppc_guest_alias_add_storage(u32 linked_start, u32 size,
+         g_guest_alias_max_end = alias_end;
+     if (alias->linked_start < GC_RAM_BASE + GC_MAIN_RAM_SIZE &&
+         alias_end > GC_RAM_BASE)
+-        g_ppc_guest_aliases_overlap_mem1 = true;
++        ppc_guest_alias_set_overlap_mem1(true);
+     if (getenv("BLUEWAKE_TRACE_GUEST_ALIASES") != NULL &&
+         alias->linked_start < 0x81516E20u &&
+         (u64)alias->linked_start + alias->size > 0x81512AC0u) {

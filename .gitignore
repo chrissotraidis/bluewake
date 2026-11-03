@@ -1,0 +1,75 @@
+# Private user data - never commit
+ref/
+local-research/
+generated/
+/build*/
+game/
+
+# Disc images and extracted game data
+*.iso
+*.rvz
+*.gcm
+*.nfs
+*.wbfs
+*.wia
+*.ciso
+*.gcz
+*.wud
+*.wux
+*.tik
+*.key
+*.szs
+*.bfres
+*.bflim
+*.dol
+*.rel
+
+# Saves, captures, credentials, signing material
+__pycache__/
+*.sav
+*.gci
+*.card
+*.raw
+*.ipa
+*.profraw
+*.profdata
+dolphin_*.bin
+*.provisionprofile
+*.p12
+*.mobileprovision
+.DS_Store
+
+# Build artifacts
+*.o
+*.a
+*.dylib
+# Windows: gGZLE01_recomp.dll is the translated game (personal build)
+*.dll
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb
+*.app
+*.dmg
+*.xcarchive
+DerivedData/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Left behind by GXRuntime host tests run from the repository root
+gxruntime-memory-card-*.dolcard*
+# Android: personal builds (translated game code) and signing
+*.apk
+*.so
+*.keystore
+*.jks
+
+# Replay of the builder's own translation (native_leaf_gen.py, native_gx_gen.py).
+# The builder writes it into the build folder. A hand run uses this directory.
+cmake/composite/*_gen.inc

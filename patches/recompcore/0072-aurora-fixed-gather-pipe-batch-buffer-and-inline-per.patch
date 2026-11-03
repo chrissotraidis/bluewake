@@ -1,0 +1,88 @@
+From 8686cb93fa67027e343c57af4a1800d0945b55f0 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 05:54:30 -0500
+Subject: [PATCH] aurora: fixed gather-pipe batch buffer and inline per-write
+ checks
+
+Every 1-8 byte guest gather-pipe write did a std::vector insert (1.7 percent of
+the game thread in the iPad simulator's heavy Outset view), an out-of-line
+g_fifo_worker_start() and an out-of-line trace_should_record(). The batch is
+now a fixed 1 KB array filled with memcpy, and both checks test their flag
+inline first. Rendered play-window cost in the save's Outset view: 570/571 ->
+568/568 M host instructions per retrace (two A/B pairs).
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 28 ++++++++++---------
+ 1 file changed, 15 insertions(+), 13 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 2ac2659302..3de4bf9c64 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -518,33 +518,34 @@ void g_fifo_worker_stop_and_join() {
+ // taking the worker mutex once per 1-4 byte guest write cost several percent of
+ // the game thread. Every barrier that needs the worker to have seen the bytes
+ // (g_fifo_drain, shutdown) publishes the local batch first.
+-std::vector<std::uint8_t> g_fifo_local;
++// A fixed buffer: a vector insert per 1-8 byte write was 1.7 percent of the
++// game thread (iPad simulator sample, heavy Outset view).
+ constexpr std::size_t kFifoLocalBatch = 1024u;
++std::uint8_t g_fifo_local[kFifoLocalBatch + 8u];
++std::size_t g_fifo_local_size = 0;
+ 
+ void g_fifo_publish_local() {
+-    if (g_fifo_local.empty())
++    if (g_fifo_local_size == 0)
+         return;
+     bool wake;
+     {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+-        if (g_fifo_handoff.empty())
+-            g_fifo_handoff.swap(g_fifo_local);
+-        else
+-            g_fifo_handoff.insert(g_fifo_handoff.end(), g_fifo_local.begin(),
+-                                  g_fifo_local.end());
++        g_fifo_handoff.insert(g_fifo_handoff.end(), g_fifo_local,
++                              g_fifo_local + g_fifo_local_size);
+         ++g_fifo_appended;
+         g_fifo_work_pending = true;
+         g_fifo_worker_idle = false;
+         wake = g_fifo_worker_sleeping;
+     }
+-    g_fifo_local.clear();
++    g_fifo_local_size = 0;
+     if (wake)
+         g_fifo_worker_cv.notify_one();
+ }
+ 
+-void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
+-    g_fifo_local.insert(g_fifo_local.end(), bytes, bytes + size);
+-    if (g_fifo_local.size() >= kFifoLocalBatch)
++inline void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
++    std::memcpy(g_fifo_local + g_fifo_local_size, bytes, size);
++    g_fifo_local_size += size;
++    if (g_fifo_local_size >= kFifoLocalBatch)
+         g_fifo_publish_local();
+ }
+ 
+@@ -705,7 +706,8 @@ static void shadow_frontend_flush(void);
+ void shadow_frontend_write(u64 value, u8 size) {
+     if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
+         return;
+-    g_fifo_worker_start();
++    if (!g_fifo_worker_started)
++        g_fifo_worker_start();
+     std::uint8_t bytes[8] = {};
+     switch (size) {
+     case 1:
+@@ -1375,7 +1377,7 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+     gx_aurora::g_fifo_bytes += size;
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+     gx_aurora::shadow_frontend_write(value, size);
+-    if (gx_aurora::trace_should_record())
++    if (gx_aurora::g_trace_armed && gx_aurora::trace_should_record())
+         gx_aurora::g_trace_writer.gx_write(size, value);
+     if (gx_aurora::g_gx_core_enabled && !gx_aurora::g_frame_open)
+         gx_aurora::reopen_frame_if_unframed();
+-- 
+2.41.0
+

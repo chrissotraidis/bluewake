@@ -1,0 +1,388 @@
+From a10b7e428a7d64311f1f0d1694d834c2b5fecfa2 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 21:12:35 +0900
+Subject: [PATCH 175/175] Aurora: torch and fire light from the game's own
+ point lights (post_fx, off by default)
+
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   6 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 197 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  11 +-
+ 3 files changed, 208 insertions(+), 6 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 6f034b7..e167cd8 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -182,6 +182,12 @@ void aurora_set_sun_direction(float x, float y, float z);
+ /* Edge light: a warm rim on the sunlit outline of what is near the camera,
+    from the same sun and camera. Takes effect at the next frame. */
+ void aurora_set_edge_light(bool enabled);
++/* Torch and fire light: the point lights last passed to aurora_set_point_lights
++   (up to 16, each x, y, z, radius, then r, g, b from 0 to 1 and a flicker
++   amount, in world space) glow on the surfaces around them, with the camera
++   last passed to aurora_set_world_view. Takes effect at the next frame. */
++void aurora_set_torch_light(bool enabled);
++void aurora_set_point_lights(const float* lights, uint32_t count);
+ /* Cloud shadows on the sea and the land, from the camera last passed to
+    aurora_set_world_view. Takes effect at the next frame. */
+ void aurora_set_cloud_shadows(bool enabled);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 96a5f34..d172ebf 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -6,6 +6,7 @@
+ #include "../webgpu/gpu.hpp"
+ #include "../webgpu/gpu_prof.hpp"
+ 
++#include <algorithm>
+ #include <array>
+ #include <atomic>
+ #include <cmath>
+@@ -23,6 +24,13 @@ std::atomic_bool g_ao{false};
+ std::atomic_bool g_clouds{false};
+ std::atomic_bool g_sun{false};
+ std::atomic_bool g_edge{false};
++std::atomic_bool g_torch{false};
++float g_torchStrength = 0.35f;  // how bright a light's glow is
++float g_torchRadiusScale = 3.f; // the glow's reach, times the radius the game lights with
++constexpr uint32_t kMaxLights = 16;
++// The game's point lights (aurora_set_point_lights): x, y, z, radius, r, g, b, flicker each.
++std::array<float, kMaxLights * 8> g_lights{};
++uint32_t g_lightCount = 0;
+ float g_edgeStrength = 0.4f;  // how bright a sunlit edge gets
+ float g_sunStrength = 0.35f;  // how dark a sun shadow is
+ float g_sunReach = 1500.f;    // how far toward the sun a shadow is looked for, in world units
+@@ -519,6 +527,79 @@ fn fs_edge(in: VertexOutput) -> @location(0) vec4<f32> {
+ }
+ )""";
+ wgpu::ShaderModule g_edgeModule;
++
++// Torch and fire light: the game's own point lights (torches, fires, lanterns,
++// bombs) glow on the surfaces around them, each pixel's place in the world from
++// the camera and the depth, with a smooth falloff to the light's radius.
++constexpr const char* kTorchShader = R"""(
++override strength: f32 = 0.35;
++override radius_scale: f32 = 3.0;
++
++struct Light {
++    place: vec4<f32>,  // x, y, z, radius
++    color: vec4<f32>,  // r, g, b (0 to 1), flicker
++};
++
++struct View {
++    rows: array<vec4<f32>, 3>,
++    lens: vec4<f32>,
++    time: vec4<f32>,
++    count: vec4<f32>,
++    lights: array<Light, 16>,
++};
++
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var unused: texture_2d<f32>;
++@group(0) @binding(2) var depth: texture_depth_2d;
++@group(0) @binding(3) var<uniform> view: View;
++
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++
++@fragment
++fn fs_torch(in: VertexOutput) -> @location(0) vec4<f32> {
++    let d = textureLoad(depth, vec2<i32>(in.pos.xy), 0);
++    if (d <= 0.0) {
++        return vec4(0.0);
++    }
++    let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
++    let ray = vec3(ndc.x * view.lens.x * view.lens.y, ndc.y * view.lens.x, -1.0);
++    let dir = vec3(dot(view.rows[0].xyz, ray), dot(view.rows[1].xyz, ray), dot(view.rows[2].xyz, ray));
++    let eye = vec3(view.rows[0].w, view.rows[1].w, view.rows[2].w);
++    let world = eye + dir * (view.lens.z / d);
++    var glow = vec3(0.0);
++    let n = u32(view.count.x);
++    for (var i = 0u; i < 16u; i++) {
++        if (i >= n) {
++            break;
++        }
++        let light = view.lights[i];
++        let falloff = clamp(1.0 - length(world - light.place.xyz) / (light.place.w * radius_scale), 0.0, 1.0);
++        let flicker = 1.0 + light.color.w * 0.15 * sin(view.time.x * 9.0 + f32(i) * 1.7);
++        glow += light.color.rgb * falloff * falloff * flicker;
++    }
++    return vec4(glow * strength, 0.0);
++}
++)""";
++wgpu::ShaderModule g_torchModule;
++wgpu::BindGroupLayout g_torchLayout;
++wgpu::PipelineLayout g_torchPipelineLayout;
++wgpu::RenderPipeline g_torchPass;
++uint32_t g_torchSamples = 0;
++constexpr size_t kTorchUniformSize = 20 * sizeof(float) + 4 * sizeof(float) + kMaxLights * 8 * sizeof(float);
+ wgpu::RenderPipeline g_edgePass;
+ uint32_t g_edgeSamples = 0;
+ wgpu::RenderPipeline g_sunPass;
+@@ -703,6 +784,39 @@ wgpu::RenderPipeline make_edge_pipeline(wgpu::TextureFormat format, uint32_t sam
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
++wgpu::RenderPipeline make_torch_pipeline(wgpu::TextureFormat format, uint32_t samples) {
++  const std::array constants{
++      wgpu::ConstantEntry{.key = "strength", .value = g_torchStrength},
++      wgpu::ConstantEntry{.key = "radius_scale", .value = g_torchRadiusScale},
++  };
++  const wgpu::BlendState add{
++      .color = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::One,
++                .dstFactor = wgpu::BlendFactor::One},
++      .alpha = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::One},
++  };
++  const std::array targets{wgpu::ColorTargetState{.format = format, .blend = &add, .writeMask = wgpu::ColorWriteMask::All}};
++  const wgpu::FragmentState fragment{
++      .module = g_torchModule,
++      .entryPoint = "fs_torch",
++      .constantCount = constants.size(),
++      .constants = constants.data(),
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = "Torch light",
++      .layout = g_torchPipelineLayout,
++      .vertex = {.module = g_torchModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = samples, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
+ wgpu::RenderPipeline make_far_pipeline(wgpu::TextureFormat format, uint32_t samples) {
+   const std::array constants{
+       wgpu::ConstantEntry{.key = "far_start", .value = g_farStart},
+@@ -750,6 +864,7 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_cloudPass = {};
+     g_sunPass = {};
+     g_edgePass = {};
++    g_torchPass = {};
+     g_composite = {};
+     g_farComposite = {};
+     g_aoApply = {};
+@@ -762,6 +877,10 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+   if (!g_sunPass) {
+     g_sunPass = make_sun_pipeline(format);
+   }
++  if (!g_torchPass || samples != g_torchSamples) {
++    g_torchPass = make_torch_pipeline(format, samples);
++    g_torchSamples = samples;
++  }
+   if (!g_edgePass || samples != g_edgeSamples) {
+     g_edgePass = make_edge_pipeline(format, samples);
+     g_edgeSamples = samples;
+@@ -868,27 +987,39 @@ void draw_depth(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::
+   pass.Draw(3);
+   pass.End();
+ }
++void draw_with_uniform(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
++                       const wgpu::BindGroupLayout& layout, const void* uniform, size_t uniformSize,
++                       const wgpu::TextureView& depthView, const wgpu::TextureView& target,
++                       const wgpu::TextureView& resolve);
++
+ void draw_with_view(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
+                     const std::array<float, 20>& view, const wgpu::TextureView& depthView,
+                     const wgpu::TextureView& target, const wgpu::TextureView& resolve) {
++  draw_with_uniform(cmd, label, pipeline, g_cloudLayout, view.data(), sizeof(view), depthView, target, resolve);
++}
++
++void draw_with_uniform(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
++                       const wgpu::BindGroupLayout& layout, const void* uniform, size_t uniformSize,
++                       const wgpu::TextureView& depthView, const wgpu::TextureView& target,
++                       const wgpu::TextureView& resolve) {
+   // A small buffer for each frame, so a frame still in flight keeps its camera.
+   const wgpu::BufferDescriptor bufferDescriptor{
+       .label = "Post effects view",
+       .usage = wgpu::BufferUsage::Uniform,
+-      .size = sizeof(view),
++      .size = uniformSize,
+       .mappedAtCreation = true,
+   };
+   const auto buffer = g_device.CreateBuffer(&bufferDescriptor);
+-  std::memcpy(buffer.GetMappedRange(0, sizeof(view)), view.data(), sizeof(view));
++  std::memcpy(buffer.GetMappedRange(0, uniformSize), uniform, uniformSize);
+   buffer.Unmap();
+   const std::array entries{
+       wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
+       wgpu::BindGroupEntry{.binding = 1, .textureView = g_farView[0]},
+       wgpu::BindGroupEntry{.binding = 2, .textureView = depthView},
+-      wgpu::BindGroupEntry{.binding = 3, .buffer = buffer, .offset = 0, .size = sizeof(view)},
++      wgpu::BindGroupEntry{.binding = 3, .buffer = buffer, .offset = 0, .size = uniformSize},
+   };
+   const wgpu::BindGroupDescriptor bindGroupDescriptor{
+-      .layout = g_cloudLayout,
++      .layout = layout,
+       .entryCount = entries.size(),
+       .entries = entries.data(),
+   };
+@@ -933,6 +1064,8 @@ void initialize() {
+   g_sunStrength = env_float("DOL_AURORA_SUN_SHADOWS_STRENGTH", g_sunStrength, 0.f, 1.f);
+   g_sunReach = env_float("DOL_AURORA_SUN_SHADOWS_REACH", g_sunReach, 1.f, 1e6f);
+   g_edgeStrength = env_float("DOL_AURORA_EDGE_LIGHT_STRENGTH", g_edgeStrength, 0.f, 4.f);
++  g_torchStrength = env_float("DOL_AURORA_TORCH_LIGHT_STRENGTH", g_torchStrength, 0.f, 4.f);
++  g_torchRadiusScale = env_float("DOL_AURORA_TORCH_LIGHT_REACH", g_torchRadiusScale, 0.1f, 50.f);
+   const char* cloudDebug = std::getenv("DOL_AURORA_CLOUD_SHADOWS_DEBUG");
+   g_cloudDebug = cloudDebug != nullptr && cloudDebug[0] == '1';
+   const char* aoDebug = std::getenv("DOL_AURORA_AO_DEBUG");
+@@ -993,6 +1126,10 @@ void initialize() {
+   edgeSource.code = kEdgeShader;
+   const wgpu::ShaderModuleDescriptor edgeModuleDescriptor{.nextInChain = &edgeSource, .label = "Edge light"};
+   g_edgeModule = g_device.CreateShaderModule(&edgeModuleDescriptor);
++  wgpu::ShaderSourceWGSL torchSource{};
++  torchSource.code = kTorchShader;
++  const wgpu::ShaderModuleDescriptor torchModuleDescriptor{.nextInChain = &torchSource, .label = "Torch light"};
++  g_torchModule = g_device.CreateShaderModule(&torchModuleDescriptor);
+   const std::array depthEntries{
+       layoutEntries[0],
+       layoutEntries[1],
+@@ -1030,6 +1167,17 @@ void initialize() {
+   const wgpu::PipelineLayoutDescriptor cloudPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                      .bindGroupLayouts = &g_cloudLayout};
+   g_cloudPipelineLayout = g_device.CreatePipelineLayout(&cloudPipelineLayoutDescriptor);
++  auto torchEntries = cloudEntries;
++  torchEntries[3].buffer.minBindingSize = kTorchUniformSize;
++  const wgpu::BindGroupLayoutDescriptor torchLayoutDescriptor{
++      .label = "Torch light",
++      .entryCount = torchEntries.size(),
++      .entries = torchEntries.data(),
++  };
++  g_torchLayout = g_device.CreateBindGroupLayout(&torchLayoutDescriptor);
++  const wgpu::PipelineLayoutDescriptor torchPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
++                                                                     .bindGroupLayouts = &g_torchLayout};
++  g_torchPipelineLayout = g_device.CreatePipelineLayout(&torchPipelineLayoutDescriptor);
+ }
+ 
+ void shutdown() {
+@@ -1046,6 +1194,11 @@ void shutdown() {
+   g_edgePass = {};
+   g_edgeSamples = 0;
+   g_edgeModule = {};
++  g_torchPass = {};
++  g_torchSamples = 0;
++  g_torchPipelineLayout = {};
++  g_torchLayout = {};
++  g_torchModule = {};
+   g_cloudPipelineLayout = {};
+   g_cloudLayout = {};
+   g_cloudModule = {};
+@@ -1086,6 +1239,17 @@ bool sun_shadows_enabled() noexcept { return g_sun.load(std::memory_order_relaxe
+ 
+ void set_sun_shadows(bool enabled) noexcept { g_sun.store(enabled, std::memory_order_relaxed); }
+ 
++bool torch_light_enabled() noexcept { return g_torch.load(std::memory_order_relaxed) && webgpu::g_hasCoreFeatures; }
++
++void set_torch_light(bool enabled) noexcept { g_torch.store(enabled, std::memory_order_relaxed); }
++
++void set_point_lights(const float* lights, uint32_t count) noexcept {
++  std::lock_guard lock{g_cameraMutex};
++  g_lightCount = std::min(count, kMaxLights);
++  if (g_lightCount > 0 && lights != nullptr)
++    std::memcpy(g_lights.data(), lights, g_lightCount * 8 * sizeof(float));
++}
++
+ bool edge_light_enabled() noexcept { return g_edge.load(std::memory_order_relaxed) && webgpu::g_hasCoreFeatures; }
+ 
+ void set_edge_light(bool enabled) noexcept { g_edge.store(enabled, std::memory_order_relaxed); }
+@@ -1116,7 +1280,7 @@ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, fl
+ 
+ bool any_enabled() noexcept {
+   return bloom_enabled() || far_blur_enabled() || ambient_occlusion_enabled() || cloud_shadows_enabled() ||
+-         sun_shadows_enabled() || edge_light_enabled();
++         sun_shadows_enabled() || edge_light_enabled() || torch_light_enabled();
+ }
+ 
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+@@ -1164,6 +1328,23 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+       draw_with_view(cmd, "Edge light", g_edgePass, view, depthView, dst, resolve);
+     }
+   }
++  if (torch_light_enabled() && g_module && depthView && msaaSamples == 1) {
++    std::array<float, kTorchUniformSize / sizeof(float)> uniform{};
++    bool valid;
++    {
++      std::lock_guard lock{g_cameraMutex};
++      std::memcpy(uniform.data(), g_camera.data(), sizeof(g_camera));
++      uniform[20] = static_cast<float>(g_lightCount);
++      std::memcpy(uniform.data() + 24, g_lights.data(), sizeof(g_lights));
++      valid = g_cameraValid && g_lightCount > 0;
++    }
++    if (valid) {
++      const webgpu::gpu_prof::Zone zone{cmd, "Torch light"};
++      ensure_targets(size, format, msaaSamples);
++      draw_with_uniform(cmd, "Torch light", g_torchPass, g_torchLayout, uniform.data(), sizeof(uniform), depthView,
++                        dst, resolve);
++    }
++  }
+   if (cloud_shadows_enabled() && g_module && depthView && msaaSamples == 1) {
+     std::array<float, 20> view;
+     bool valid;
+@@ -1227,3 +1408,9 @@ void aurora_set_sun_shadows(bool enabled) { aurora::gfx::post_fx::set_sun_shadow
+ void aurora_set_sun_direction(float x, float y, float z) { aurora::gfx::post_fx::set_sun_direction(x, y, z); }
+ 
+ void aurora_set_edge_light(bool enabled) { aurora::gfx::post_fx::set_edge_light(enabled); }
++
++void aurora_set_torch_light(bool enabled) { aurora::gfx::post_fx::set_torch_light(enabled); }
++
++void aurora_set_point_lights(const float* lights, uint32_t count) {
++  aurora::gfx::post_fx::set_point_lights(lights, count);
++}
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 4d44258..931a7f2 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -38,6 +38,12 @@
+ // Edge light: a warm rim on the sunlit outline of what is near the camera,
+ // toward the same sun. DOL_AURORA_EDGE_LIGHT_STRENGTH (default 0.4). Off unless
+ // aurora_set_edge_light(true).
++//
++// Torch light: the game's point lights (aurora_set_point_lights: up to 16 of
++// x, y, z, radius, r, g, b, flicker) glow on the surfaces around them.
++// DOL_AURORA_TORCH_LIGHT_STRENGTH (default 0.35) and _REACH (the glow's radius,
++// times the game's lighting radius, default 3). Off unless
++// aurora_set_torch_light(true).
+ namespace aurora::gfx::post_fx {
+ void initialize();
+ void shutdown();
+@@ -47,6 +53,9 @@ bool far_blur_enabled() noexcept;
+ void set_far_blur(bool enabled) noexcept;
+ bool ambient_occlusion_enabled() noexcept;
+ void set_ambient_occlusion(bool enabled) noexcept;
++bool torch_light_enabled() noexcept;
++void set_torch_light(bool enabled) noexcept;
++void set_point_lights(const float* lights, uint32_t count) noexcept;
+ bool edge_light_enabled() noexcept;
+ void set_edge_light(bool enabled) noexcept;
+ bool sun_shadows_enabled() noexcept;
+@@ -58,7 +67,7 @@ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, fl
+                     float seconds) noexcept;
+ bool any_enabled() noexcept;
+ // Every effect that is on, in order (ambient occlusion, sun shadows, edge
+-// light, cloud shadows, far blur, bloom);
++// light, torch light, cloud shadows, far blur, bloom);
+ // depthView: the EFB's depth.
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+-- 
+2.46.0
+

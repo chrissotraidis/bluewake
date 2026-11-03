@@ -1,0 +1,56 @@
+From 3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 21:36:12 -0500
+Subject: [PATCH] aurora: aurora_peek_z reads the depth snapshot for a
+ translated GXPeekZ
+
+A translated game peeks the EFB by loading from 0xC8400000 directly, so the host needs a C entry to the existing asynchronous depth snapshot: request the next one and read the latest at EFB coordinates.
+---
+ GXRuntime/graphics/aurora/include/aurora/gfx.h |  9 +++++++++
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp   | 12 ++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/gfx.h b/GXRuntime/graphics/aurora/include/aurora/gfx.h
+index 70fa2c12bd..fc897a183b 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/gfx.h
++++ b/GXRuntime/graphics/aurora/include/aurora/gfx.h
+@@ -45,6 +45,15 @@ bool aurora_take_framebuffer_readback(const uint8_t** rgba, uint32_t* width, uin
+ /* Drive GPU event processing while waiting for take (no frame, no present). */
+ void aurora_pump_framebuffer_readback();
+ 
++/*
++ * EFB depth peek for a translated game, whose GXPeekZ reads 0xC8400000 +
++ * (y << 12) + (x << 2) directly: the latest depth snapshot (24-bit, far
++ * 0xFFFFFF) at EFB coordinates, and a request for the next one. Returns false
++ * before the first snapshot completes. Snapshots are asynchronous (one or
++ * more frames old), which games that peek for visibility tests tolerate.
++ */
++bool aurora_peek_z(uint16_t x, uint16_t y, uint32_t* z);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 5a9b4b42da..df6cd514d0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1861,4 +1861,16 @@ bool aurora_take_framebuffer_readback(const uint8_t** rgba, uint32_t* width, uin
+ }
+ 
+ void aurora_pump_framebuffer_readback() { aurora::gfx::enqueue_process_events(); }
++
++bool aurora_peek_z(uint16_t x, uint16_t y, uint32_t* z) {
++  aurora::gfx::depth_peek::request_snapshot();
++  uint32_t value = 0;
++  if (!aurora::gfx::depth_peek::read_latest(x, y, value)) {
++    return false;
++  }
++  if (z != nullptr) {
++    *z = value;
++  }
++  return true;
++}
+ float aurora_get_fps() { return aurora::gfx::calculate_fps(); }
+-- 
+2.41.0
+

@@ -1,0 +1,402 @@
+From 66205c2b0355217c785ef62c41335af8d4702446 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Tue, 29 Sep 2026 11:44:46 -0400
+Subject: [PATCH 105/106] Aurora: a menu over the paused game, and where frames
+ wait
+
+dol_aurora_set_hold_redraw(true): while the host holds the guest at a
+present, the hold loop keeps presenting the last picture with the host
+overlay drawn over it, so an ImGui menu that pauses the game stays live
+(before, the hold only slept).
+
+For finding the places that miss 60: DolAuroraFrameTiming counts the frames
+shown (in-between frames included) and the in-between frames' totals (game
+frames seen and interpolated, draws, rejected, unmatched), from
+aurora_get_shown_frames and aurora_get_frame_interp_totals. A render worker
+item or a drawable acquire or present that takes 60 ms or more is logged
+([render-slow], DOL_RENDER_SLOW_MS), a GX batch of 100 ms or more logs its
+first bytes ([gx-slow-bytes]), and DOL_GX_STALL_STACKS=1 has the translation
+and render workers write their stacks when a batch runs 200 ms.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  3 +
+ .../backends/aurora/aurora_backend_private.h  |  1 +
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 95 ++++++++++++++++++-
+ .../graphics/aurora/include/aurora/aurora.h   | 11 +++
+ GXRuntime/graphics/aurora/lib/aurora.cpp      | 12 +++
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  7 ++
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  |  9 ++
+ .../graphics/aurora/lib/gfx/render_worker.cpp | 22 +++++
+ .../graphics/aurora/lib/gfx/render_worker.hpp |  4 +
+ GXRuntime/include/gxruntime/aurora_backend.h  | 10 ++
+ 10 files changed, 172 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 2b8a06b..0bcb67d 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -27,6 +27,7 @@ void* g_host_overlay_user = nullptr;
+ DolAuroraEventObserverFn g_host_event_observer = nullptr;
+ void* g_host_event_user = nullptr;
+ DolAuroraHoldFn g_host_hold = nullptr;
++bool g_hold_redraw = false;
+ void* g_host_hold_user = nullptr;
+ bool g_graphics_log = false;
+ bool g_force_untextured = false;
+@@ -508,6 +509,8 @@ void dol_aurora_set_fast_forward(bool on) {
+     aurora_set_present_suppressed(on);
+ }
+ 
++void dol_aurora_set_hold_redraw(bool redraw) { gx_aurora::g_hold_redraw = redraw; }
++
+ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user) {
+     gx_aurora::g_host_hold = should_hold;
+     gx_aurora::g_host_hold_user = user;
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index dc72a45..4d54aaf 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -51,6 +51,7 @@ extern u32 g_audio_sample_rate;
+ extern SDL_AudioStream* g_audio_stream;
+ extern bool g_audio_playing;
+ extern std::atomic_bool g_audio_discard;
++extern bool g_hold_redraw;
+ extern int g_audio_prebuffer_ms;
+ extern int g_audio_max_queue_ms;
+ extern DolPlatformGuestAddressResolverFn g_guest_address_resolver;
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index fc62329..7d62761 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -21,6 +21,11 @@
+ #include <mutex>
+ #include <thread>
+ #include <vector>
++#include <execinfo.h>
++#include <pthread.h>
++#include <signal.h>
++#include <unistd.h>
++#include "../../graphics/aurora/lib/gfx/render_worker.hpp"
+ 
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+ // gxcore substrate submission lives in the Aurora fork (lib/gfx/gxcore_draw.cpp),
+@@ -483,7 +488,63 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     }
+ }
+ 
++// DOL_GX_STALL_STACKS=1: a watchdog that, when a batch has been in the
++// translation worker for more than 200 ms, has the worker and the render
++// worker write their call stacks to stderr ([gx-stall-stack]), so what a long
++// stall waits on is in the session log.
++std::atomic<long long> g_batch_start_ns{0};
++std::atomic<pthread_t> g_fifo_pthread{};
++
++void stall_stack_handler(int) {
++    void* frames[48];
++    const int n = backtrace(frames, 48);
++    static const char kHeader[] = "[gx-stall-stack] begin\n";
++    (void)!write(2, kHeader, sizeof kHeader - 1);
++    backtrace_symbols_fd(frames, n, 2);
++    static const char kFooter[] = "[gx-stall-stack] end\n";
++    (void)!write(2, kFooter, sizeof kFooter - 1);
++}
++
++long long monotonic_ns() {
++    return std::chrono::duration_cast<std::chrono::nanoseconds>(
++               std::chrono::steady_clock::now().time_since_epoch())
++        .count();
++}
++
++void start_stall_watchdog() {
++    static const bool enabled = [] {
++        const char* env = std::getenv("DOL_GX_STALL_STACKS");
++        return env != nullptr && env[0] == '1';
++    }();
++    static std::once_flag once;
++    if (!enabled)
++        return;
++    std::call_once(once, [] {
++        signal(SIGUSR2, stall_stack_handler);
++        std::thread([] {
++            long long reported = 0;
++            for (;;) {
++                std::this_thread::sleep_for(std::chrono::milliseconds(50));
++                const long long start = g_batch_start_ns.load(std::memory_order_acquire);
++                if (start == 0 || start == reported || monotonic_ns() - start < 200000000ll)
++                    continue;
++                reported = start;
++                std::fprintf(stderr, "[gx-stall] a batch has run 200 ms: the translation worker's stack\n");
++                pthread_kill(g_fifo_pthread.load(std::memory_order_acquire), SIGUSR2);
++                std::this_thread::sleep_for(std::chrono::milliseconds(30));
++                const pthread_t render = aurora::gfx::render_worker::native_thread();
++                if (render != pthread_t{}) {
++                    std::fprintf(stderr, "[gx-stall] the render worker's stack\n");
++                    pthread_kill(render, SIGUSR2);
++                }
++            }
++        }).detach();
++    });
++}
++
+ void g_fifo_worker_main() {
++    g_fifo_pthread.store(pthread_self(), std::memory_order_release);
++    start_stall_watchdog();
+     for (;;) {
+         std::vector<std::uint8_t> batch;
+         std::uint64_t parsed = 0;
+@@ -510,14 +571,27 @@ void g_fifo_worker_main() {
+         const auto t0 = std::chrono::steady_clock::now();
+         const uint32_t pipelines0 = aurora_get_stats()->createdPipelines;
+         const unsigned long long uploads0 = aurora::gfx::gxcore::texture_upload_count();
++        g_batch_start_ns.store(monotonic_ns(), std::memory_order_release);
+         g_fifo_translate(batch);
++        g_batch_start_ns.store(0, std::memory_order_release);
+         const long ms = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                               std::chrono::steady_clock::now() - t0)
+                                               .count());
+-        if (slow_ms > 0 && ms >= slow_ms)
++        if (slow_ms > 0 && ms >= slow_ms) {
+             std::fprintf(stderr, "[gx-slow] batch_ms=%ld bytes=%zu pipelines=%u textures=%llu\n", ms,
+                          batch.size(), aurora_get_stats()->createdPipelines - pipelines0,
+                          aurora::gfx::gxcore::texture_upload_count() - uploads0);
++            // A batch that held the game for a tenth of a second or more: its
++            // first bytes (the GX commands), so what it waited on can be told.
++            if (ms >= 100) {
++                char hex[3 * 256 + 1];
++                size_t n = 0;
++                for (size_t i = 0; i < batch.size() && i < 256; ++i)
++                    n += static_cast<size_t>(std::snprintf(hex + n, sizeof hex - n, "%02X ", batch[i]));
++                hex[n] = '\0';
++                std::fprintf(stderr, "[gx-slow-bytes] %s\n", hex);
++            }
++        }
+         {
+             std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+             g_fifo_parsed = parsed;
+@@ -1177,6 +1251,14 @@ void dol_aurora_frame_timing(DolAuroraFrameTiming* out) {
+     out->draws = gx_aurora::g_timing_draws;
+     out->audio_throttles = gx_aurora::g_audio_throttle_count;
+     out->audio_dropped = gx_aurora::g_audio_dropped_count;
++    out->shown = aurora_get_shown_frames();
++    AuroraFrameInterpTotals interp{};
++    aurora_get_frame_interp_totals(&interp);
++    out->interp_frames = interp.frames;
++    out->interp_interpolated = interp.interpolated;
++    out->interp_draws = interp.draws;
++    out->interp_rejected = interp.rejected;
++    out->interp_unmatched = interp.unmatched;
+     out->audio_queued_ms = 0;
+     if (gx_aurora::g_audio_stream != nullptr && gx_aurora::g_audio_sample_rate != 0u) {
+         const int queued = SDL_GetAudioStreamQueued(gx_aurora::g_audio_stream);
+@@ -1458,7 +1540,16 @@ static void aurora_backend_present_impl(void) {
+         std::fprintf(stderr, "[gfx] guest held by the host at present=%llu\n",
+                      gx_aurora::g_present_count);
+         while (!gx_aurora::g_should_quit && gx_aurora::host_wants_hold()) {
+-            SDL_Delay(16);
++            // dol_aurora_set_hold_redraw: a frame with no game drawing presents
++            // the last picture, and the host overlay (a menu) is drawn over
++            // it. The worker records nothing meanwhile (recording is closed
++            // until the begin_frame below) and the display paces the loop.
++            if (gx_aurora::g_hold_redraw && aurora_begin_frame()) {
++                gx_aurora::run_host_overlay();
++                aurora_end_frame();
++            } else {
++                SDL_Delay(16);
++            }
+             gx_aurora::poll_events();
+         }
+         std::fprintf(stderr, "[gfx] guest released after %.1f s\n",
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index b98707f..acab312 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -159,6 +159,17 @@ void aurora_set_frame_interpolation(bool enabled);
+    the starting value. */
+ void aurora_set_fps_overlay(bool enabled);
+ bool aurora_get_frame_interpolation(void);
++/* Frames presented to the window so far, in-between frames included (what
++   the frames-a-second counter counts). */
++unsigned long long aurora_get_shown_frames(void);
++/* The in-between frames' running totals: game frames seen and interpolated,
++   and their draws, the ones rejected as implausible and those with no
++   counterpart in the frame before. Differences between two reads cover the
++   interval. */
++typedef struct AuroraFrameInterpTotals {
++  unsigned long long frames, interpolated, draws, rejected, unmatched;
++} AuroraFrameInterpTotals;
++void aurora_get_frame_interp_totals(AuroraFrameInterpTotals* out);
+ 
+ AuroraBackend aurora_get_backend();
+ const AuroraBackend* aurora_get_available_backends(size_t* count);
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index 911f6fc..416e725 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -320,7 +320,13 @@ void end_frame() noexcept {
+       if (!suppressed && window::is_presentable() && g_surface) {
+         ZoneScopedN("Acquire texture");
+         wgpu::SurfaceTexture surfaceTexture;
++        const auto acquireStart = std::chrono::steady_clock::now();
+         g_surface.GetCurrentTexture(&surfaceTexture);
++        const auto acquireMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                   std::chrono::steady_clock::now() - acquireStart)
++                                   .count();
++        if (acquireMs >= 30)
++          std::fprintf(stderr, "[render-slow] acquire-drawable ms=%lld\n", static_cast<long long>(acquireMs));
+         surfaceStatus = surfaceTexture.status;
+         if (surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal) {
+           currentTexture = std::move(surfaceTexture.texture);
+@@ -404,7 +410,13 @@ void end_frame() noexcept {
+       {
+         window::SurfaceLock surfaceLock;
+         if (window::is_presentable()) {
++          const auto presentStart = std::chrono::steady_clock::now();
+           status = g_surface.Present();
++          const auto presentMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                     std::chrono::steady_clock::now() - presentStart)
++                                     .count();
++          if (presentMs >= 30)
++            std::fprintf(stderr, "[render-slow] present ms=%lld\n", static_cast<long long>(presentMs));
+         }
+       }
+       if (status) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 226bb2f..6ff6c23 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -2002,7 +2002,10 @@ void after_submit() noexcept {
+ 
+ void gpu_synchronize() { render_worker::synchronize(); }
+ 
++static std::atomic<unsigned long long> g_shownFrames{0};
++
+ void after_present() noexcept {
++  g_shownFrames.fetch_add(1, std::memory_order_relaxed);
+   const auto now = PresentClock::now();
+   const int64_t nowNs = timestamp_ns(now);
+   const int64_t previousPresentNs = g_lastPresentNs.exchange(nowNs, std::memory_order_acq_rel);
+@@ -2315,3 +2318,7 @@ bool aurora_peek_z(uint16_t x, uint16_t y, uint32_t* z) {
+   return true;
+ }
+ float aurora_get_fps() { return aurora::gfx::calculate_fps(); }
++
++unsigned long long aurora_get_shown_frames(void) {
++  return aurora::gfx::g_shownFrames.load(std::memory_order_relaxed);
++}
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index fedcd11..22f4972 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -1189,4 +1189,13 @@ uint64_t game_frame_number() noexcept { return g_gameFrame.load(std::memory_orde
+ } // namespace aurora::gfx::frame_interp
+ 
+ void aurora_set_frame_interpolation(bool enabled) { aurora::gfx::frame_interp::set_enabled(enabled); }
++// Read from another thread for diagnostics; each value is one aligned word.
++void aurora_get_frame_interp_totals(AuroraFrameInterpTotals* out) {
++  using namespace aurora::gfx::frame_interp;
++  out->frames = g_framesSeen;
++  out->interpolated = g_framesInterpolated;
++  out->draws = g_totalCounts.draws;
++  out->rejected = g_totalCounts.rejected;
++  out->unmatched = g_totalCounts.unmatched;
++}
+ bool aurora_get_frame_interpolation() { return aurora::gfx::frame_interp::enabled(); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+index c8c94c6..6d82e94 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+@@ -6,7 +6,12 @@
+ 
+ #include <tracy/Tracy.hpp>
+ 
++#include <pthread.h>
++
+ namespace aurora::gfx::render_worker {
++// The worker's thread, for the GX stall watchdog's stack dumps.
++std::atomic<pthread_t> g_renderPthread{};
++pthread_t native_thread() { return g_renderPthread.load(std::memory_order_acquire); }
+ namespace {
+ constexpr size_t QueueCapacity = 256;
+ constexpr auto IdlePumpInterval = std::chrono::milliseconds{1};
+@@ -35,6 +40,7 @@ void worker_main() {
+   tracy::SetThreadName("Aurora render worker");
+ #endif
+   g_workerThreadId = std::this_thread::get_id();
++  g_renderPthread.store(pthread_self(), std::memory_order_release);
+ 
+   while (true) {
+     if (g_idleHook) {
+@@ -51,7 +57,23 @@ void worker_main() {
+ 
+     if (item->work) {
+       ZoneScopedN("QueueItem work");
++      // An item that holds the worker long holds the translation worker too
++      // (its queue fills) and so the game: say which (DOL_RENDER_SLOW_MS, 60).
++      static const long slowMs = [] {
++        const char* env = std::getenv("DOL_RENDER_SLOW_MS");
++        return env != nullptr ? std::strtol(env, nullptr, 10) : 60L;
++      }();
++      const auto start = std::chrono::steady_clock::now();
+       item->work();
++      const long ms = static_cast<long>(
++          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
++      if (slowMs > 0 && ms >= slowMs) {
++        static const char* const kTypes[] = {"begin-frame", "encode-pass", "end-frame", "sync", "shutdown"};
++        const auto type = static_cast<size_t>(item->type);
++        std::fprintf(stderr, "[render-slow] ms=%ld item=%s frame=%llu pass=%u\n", ms,
++                     type < 5 ? kTypes[type] : "?", static_cast<unsigned long long>(item->frameId),
++                     item->passIndex);
++      }
+     }
+     complete_sync(item->sync);
+     g_pendingItems.fetch_sub(1, std::memory_order_acq_rel);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+index 1322d23..bccee8e 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+@@ -1,4 +1,5 @@
+ #pragma once
++#include <pthread.h>
+ 
+ #include <condition_variable>
+ #include <cstddef>
+@@ -14,6 +15,9 @@
+ 
+ namespace aurora::gfx::render_worker {
+ 
++// The worker's thread (0 before it starts), for diagnostics.
++pthread_t native_thread();
++
+ enum class ItemType : uint8_t {
+   BeginFrame,
+   EncodePass,
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 16a37c0..061ed33 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -38,6 +38,10 @@ void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user)
+ // it pumps events and sleeps on the main thread until the predicate clears.
+ typedef bool (*DolAuroraHoldFn)(void* user);
+ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user);
++// While the guest is held at a present, keep drawing frames: the last picture
++// with the host overlay over it, so an overlay menu drawn with ImGui stays live
++// (a menu that pauses the game). Off by default: the hold then only waits.
++void dol_aurora_set_hold_redraw(bool redraw);
+ // Fast-forward, for stretches with nothing to see or hear (a scene change's
+ // black): frames are rendered but not presented, and audio pushes are
+ // dropped, so neither the display nor the audio queue holds the guest to real
+@@ -59,6 +63,12 @@ typedef struct DolAuroraFrameTiming {
+     unsigned long long audio_throttles; /* 1 ms waits for the audio queue to drain */
+     unsigned long long audio_dropped;   /* pushes dropped on a full queue (no throttle) */
+     int audio_queued_ms;                /* audio waiting in the device queue now */
++    unsigned long long shown;           /* frames presented, in-between frames included */
++    unsigned long long interp_frames;   /* game frames the in-between frames saw */
++    unsigned long long interp_interpolated; /* ... and interpolated */
++    unsigned long long interp_draws;
++    unsigned long long interp_rejected; /* draws judged implausible (not blended) */
++    unsigned long long interp_unmatched; /* draws with no counterpart the frame before */
+ } DolAuroraFrameTiming;
+ void dol_aurora_frame_timing(DolAuroraFrameTiming* out);
+ 
+-- 
+2.55.0
+

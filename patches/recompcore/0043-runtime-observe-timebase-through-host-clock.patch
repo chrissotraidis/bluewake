@@ -1,0 +1,64 @@
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index d6746fb7e8..1679e342e8 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -30,7 +30,7 @@ extern "C" {
+ //   consumes and resets it (Dolphin chassis: per-dispatch flush into
+ //   ppc_state.downcount). Hosts that do not meter guest time may ignore it
+ //   (s64: it cannot wrap in any realistic session).
+-#define GXRUNTIME_CPU_ABI_VERSION 4u
++#define GXRUNTIME_CPU_ABI_VERSION 6u
+ #define GXRUNTIME_CPU_ABI_DOLRECOMP_PREFIX 1u
+ #define GXRUNTIME_CPU_ABI_EXTERNAL_POINTER_EXTENSION 1u
+ 
+@@ -175,6 +175,9 @@ struct CPUState {
+     PPCSPRRead spr_read;
+     PPCSPRWrite spr_write;
+     PPCCacheControl cache_control;
++    u32 cycle_observation_suffix;
++    u32 cycle_deadline_active;
++    s64 cycle_deadline_budget;
+ };
+ 
+ #include <stdio.h>
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 55a4aa78d4..5cca51ef95 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -312,6 +312,8 @@ void ppc_alignment_exception(CPUState* cpu, u32 ea, u32 cia) {
+ }
+ 
+ u32 ppc_mftb(CPUState* cpu, u16 tbr, u32 cia) {
++    if ((tbr == 268 || tbr == 269) && cpu->spr_read)
++        return cpu->spr_read(cpu, tbr, cia);
+     if (tbr == 268)
+         return (u32)cpu->timebase;
+     if (tbr == 269)
+diff --git a/GXRuntime/src/core/cpu_interpreter_integer.c b/GXRuntime/src/core/cpu_interpreter_integer.c
+index 38564ee2ab..21ec483860 100644
+--- a/GXRuntime/src/core/cpu_interpreter_integer.c
++++ b/GXRuntime/src/core/cpu_interpreter_integer.c
+@@ -15,8 +15,8 @@ u32 ppc_mfspr(CPUState* cpu, u16 spr, u32 cia) {
+     case 19: return cpu->dar;
+     case 26: return cpu->srr0;
+     case 27: return cpu->srr1;
+-    case 268: return (u32)cpu->timebase;
+-    case 269: return (u32)(cpu->timebase >> 32);
++    case 268: return ppc_mftb(cpu, 268, cia);
++    case 269: return ppc_mftb(cpu, 269, cia);
+     case 282: return cpu->ear;
+     case 287: return cpu->spr_read ? cpu->spr_read(cpu, spr, cia) : 0x00083214u;
+     case 912:
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index 5bd4aba5e8..663ec4033e 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -31,7 +31,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ 
+-_Static_assert(GXRUNTIME_CPU_ABI_VERSION == 4u,
++_Static_assert(GXRUNTIME_CPU_ABI_VERSION == 6u,
+                "update runtime ABI tests when the CPU ABI changes");
+ _Static_assert(GXRUNTIME_CPU_ABI_DOLRECOMP_PREFIX == 1u,
+                "GXRuntime generated-code prefix must stay explicit");

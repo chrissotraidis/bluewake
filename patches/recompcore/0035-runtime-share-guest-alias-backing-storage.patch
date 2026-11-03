@@ -1,0 +1,153 @@
+From e6c09527a28335131a7fb2f0cd6365eac38ddd4d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 18:16:01 -0500
+Subject: [PATCH] runtime: share guest alias backing storage
+
+---
+ GXRuntime/include/core/cpu.h    |  2 ++
+ GXRuntime/src/core/cpu.c        | 56 ++++++++++++++++++++++++++-------
+ GXRuntime/tests/runtime_tests.c | 16 ++++++++++
+ 3 files changed, 63 insertions(+), 11 deletions(-)
+
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index 18727ab331..bd669ca5f0 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -108,6 +108,8 @@ typedef void (*PPCCacheControl)(CPUState* cpu, u8 operation, u32 ea, u32 cia);
+ // backs it with storage outside the contiguous game heap. The table is owned
+ // by GXRuntime rather than CPUState so the generated CPU ABI remains stable.
+ bool ppc_guest_alias_add(u32 linked_start, u32 size, const u8* initial_bytes);
++bool ppc_guest_alias_add_shared(u32 linked_start, u32 size, u8* storage);
++bool ppc_guest_alias_get_storage(u32 linked_start, u32 size, u8** storage);
+ bool ppc_guest_alias_remove(u32 linked_start, u32 size);
+ void ppc_guest_alias_clear(void);
+ bool ppc_guest_alias_resolve(u32 address, u32 size, u8** pointer,
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 282718a664..4e49fee18d 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -41,6 +41,7 @@ typedef struct PPCGuestAlias {
+     u32 linked_start;
+     u32 size;
+     u8* storage;
++    bool owns_storage;
+ } PPCGuestAlias;
+ 
+ static PPCGuestAlias g_guest_aliases[PPC_GUEST_ALIAS_MAX];
+@@ -63,7 +64,8 @@ static void ppc_guest_alias_recompute_bounds(void) {
+ 
+ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+     for (u32 i = 0; i < g_guest_alias_count; ++i) {
+-        free(g_guest_aliases[i].storage);
++        if (g_guest_aliases[i].owns_storage)
++            free(g_guest_aliases[i].storage);
+         g_guest_aliases[i].storage = NULL;
+     }
+     g_guest_alias_count = 0u;
+@@ -71,21 +73,17 @@ GXRUNTIME_EXPORT void ppc_guest_alias_clear(void) {
+     g_guest_alias_max_end = 0u;
+ }
+ 
+-GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
+-                                          const u8* initial_bytes) {
+-    if (size == 0u || g_guest_alias_count >= PPC_GUEST_ALIAS_MAX)
+-        return false;
+-
+-    u8* storage = (u8*)calloc(1u, size);
+-    if (storage == NULL)
++static bool ppc_guest_alias_add_storage(u32 linked_start, u32 size,
++                                        u8* storage, bool owns_storage) {
++    if (size == 0u || storage == NULL ||
++        g_guest_alias_count >= PPC_GUEST_ALIAS_MAX)
+         return false;
+-    if (initial_bytes != NULL)
+-        memcpy(storage, initial_bytes, size);
+ 
+     PPCGuestAlias* alias = &g_guest_aliases[g_guest_alias_count++];
+     alias->linked_start = linked_start;
+     alias->size = size;
+     alias->storage = storage;
++    alias->owns_storage = owns_storage;
+     if (alias->linked_start < g_guest_alias_min_start)
+         g_guest_alias_min_start = alias->linked_start;
+     const u64 alias_end = (u64)alias->linked_start + alias->size;
+@@ -101,12 +99,48 @@ GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
+     return true;
+ }
+ 
++GXRUNTIME_EXPORT bool ppc_guest_alias_add(u32 linked_start, u32 size,
++                                          const u8* initial_bytes) {
++    if (size == 0u)
++        return false;
++    u8* storage = (u8*)calloc(1u, size);
++    if (storage == NULL)
++        return false;
++    if (initial_bytes != NULL)
++        memcpy(storage, initial_bytes, size);
++    if (!ppc_guest_alias_add_storage(linked_start, size, storage, true)) {
++        free(storage);
++        return false;
++    }
++    return true;
++}
++
++GXRUNTIME_EXPORT bool ppc_guest_alias_add_shared(u32 linked_start, u32 size,
++                                                 u8* storage) {
++    return ppc_guest_alias_add_storage(linked_start, size, storage, false);
++}
++
++GXRUNTIME_EXPORT bool ppc_guest_alias_get_storage(u32 linked_start, u32 size,
++                                                  u8** storage) {
++    if (storage == NULL)
++        return false;
++    for (u32 i = 0u; i < g_guest_alias_count; ++i) {
++        const PPCGuestAlias* alias = &g_guest_aliases[i];
++        if (alias->linked_start == linked_start && alias->size == size) {
++            *storage = alias->storage;
++            return true;
++        }
++    }
++    return false;
++}
++
+ GXRUNTIME_EXPORT bool ppc_guest_alias_remove(u32 linked_start, u32 size) {
+     for (u32 i = 0u; i < g_guest_alias_count; ++i) {
+         PPCGuestAlias* alias = &g_guest_aliases[i];
+         if (alias->linked_start != linked_start || alias->size != size)
+             continue;
+-        free(alias->storage);
++        if (alias->owns_storage)
++            free(alias->storage);
+         if (i + 1u < g_guest_alias_count) {
+             memmove(alias, alias + 1u,
+                     (g_guest_alias_count - i - 1u) * sizeof(*alias));
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index f9a70b317a..2670653cab 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -1109,6 +1109,22 @@ static void test_guest_data_alias(void) {
+     assert(ppc_guest_alias_remove(second_linked, sizeof(initial)));
+     assert(!ppc_guest_alias_resolve(second_linked, 4u, &resolved, NULL));
+     ppc_guest_alias_clear();
++
++    u8 shared_storage[4] = {0x01u, 0x23u, 0x45u, 0x67u};
++    assert(ppc_guest_alias_add_shared(linked, sizeof(shared_storage),
++                                      shared_storage));
++    resolved = NULL;
++    assert(ppc_guest_alias_get_storage(linked, sizeof(shared_storage),
++                                       &resolved));
++    assert(resolved == shared_storage);
++    assert(mem_read32(&cpu, linked) == 0x01234567u);
++    mem_write32(&cpu, linked, 0x89ABCDEFu);
++    assert(read_be32(shared_storage) == 0x89ABCDEFu);
++    write_be32(shared_storage, 0x76543210u);
++    assert(mem_read32(&cpu, linked) == 0x76543210u);
++    ppc_guest_alias_clear();
++    shared_storage[0] = 0xAAu;
++    assert(shared_storage[0] == 0xAAu);
+     cpu_free(&cpu);
+ }
+ 
+-- 
+2.41.0
+

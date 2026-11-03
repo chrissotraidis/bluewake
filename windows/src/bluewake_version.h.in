@@ -1,0 +1,3 @@
+/* Made by windows/CMakeLists.txt from version.json, for bluewake.rc. */
+#define BLUEWAKE_VERSION_COMMAS @BLUEWAKE_VERSION_COMMAS@
+#define BLUEWAKE_VERSION_STRING "@BLUEWAKE_VERSION@"

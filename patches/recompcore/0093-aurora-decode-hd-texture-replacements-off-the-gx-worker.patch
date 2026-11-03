@@ -1,0 +1,237 @@
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index c498236..68bfa98 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -225,6 +225,10 @@ struct TextureKey {
+ };
+ 
+ absl::flat_hash_map<TextureKey, TextureHandle> g_textureCache;
++// Original textures drawn while their HD replacement decodes on a background
++// thread. They stay out of g_textureCache so the next draw asks again; the
++// entry goes when the replacement arrives (or with the cache's clears).
++absl::flat_hash_map<TextureKey, TextureHandle> g_textureAwaitingReplacement;
+ // address -> the key currently cached at that guest address. When new content
+ // arrives at an address (movie streaming, screen transitions), the prior entry
+ // for that address is evicted so the content-hashed cache stays bounded to one
+@@ -646,6 +650,7 @@ void note_frame_presented() {
+ 
+ void reset_texture_cache() {
+   g_textureCache.clear();
++  g_textureAwaitingReplacement.clear();
+   g_textureAddrKey.clear();
+   g_efbCopyCache.clear();
+   g_efbCopyTextures.clear();
+@@ -959,17 +964,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     // time these guest bytes are seen, look for a replacement before decoding.
+     // The handle is cached under the same content key as a decode would be,
+     // so later draws of the same texture never repeat the lookup.
++    bool replacementPending = false;
+     if (texture_replacement::has_source_replacements()) {
+       static unsigned long long s_lookups;
+       static const bool s_log_misses = std::getenv("DOL_TEXREP_LOG_MISSES") != nullptr;
+       ++s_lookups;
+       const auto replacement = texture_replacement::find_replacement_for_guest(
+           width, height, format, bytes, size, static_cast<const uint8_t*>(tlut_data),
+-          tlut_data != nullptr ? std::min(tlut_available, tlut_entries * 2u) : 0u);
+-      if (s_log_misses && !(replacement.has_value() && *replacement))
++          tlut_data != nullptr ? std::min(tlut_available, tlut_entries * 2u) : 0u,
++          &replacementPending);
++      if (s_log_misses && !replacementPending && !(replacement.has_value() && *replacement))
+         std::fprintf(stderr, "[mods] texture miss #%llu addr=%08X fmt=%u %ux%u size=%u tlut=%u\n", s_lookups,
+                      address, format, width, height, size, tlut_entries);
+       if (replacement.has_value() && *replacement) {
++        g_textureAwaitingReplacement.erase(key);
+         ++g_textureCacheStats.uploads;
+         static unsigned long long s_replaced;
+         if (++s_replaced <= 3u || (s_replaced % 200u) == 0u)
+@@ -982,6 +990,12 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+             small_hash, verify_frame};
+         return *replacement;
+       }
++      if (replacementPending) {
++        if (auto it = g_textureAwaitingReplacement.find(key); it != g_textureAwaitingReplacement.end())
++          return it->second;
++      } else {
++        g_textureAwaitingReplacement.erase(key);
++      }
+     }
+     // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
+     // upload it as a pre-decoded PC texture (no substrate re-conversion).
+@@ -1045,6 +1059,10 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       ++g_textureCacheStats.uploads;
+       ++g_textureCacheStats.raw_fallback;
+     }
++    if (replacementPending) {
++      g_textureAwaitingReplacement[key] = handle;
++      return handle;
++    }
+     g_textureCache.emplace(key, handle);
+     g_textureAddrKey[address] = TextureAddressState{
+         key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+index 8595d74..1d123c8 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+@@ -25,6 +25,9 @@
+ #include <cstring>
+ #include <filesystem>
+ #include <list>
++#include <condition_variable>
++#include <deque>
++#include <thread>
+ #include <mutex>
+ #include <optional>
+ #include <span>
+@@ -833,6 +836,53 @@ aurora::gfx::TextureHandle load_entry_handle(const aurora::texture::ReplacementK
+   return handle;
+ }
+ 
++// Background decoding of file replacements for find_replacement_for_guest.
++// PNG decoding of an HD texture takes milliseconds to tens of milliseconds, and
++// the gxcore path asks from the GX worker, which the game thread waits on at
++// every draw-done: decoding there held the game for about 55 ms when a scene's
++// HD textures first appeared. The decoder thread fills s_decoded; the GPU
++// texture is still created by the caller (the only thread that uploads).
++struct DecodeJob {
++  aurora::texture::ReplacementKey key;
++  ReplacementEntry entry;
++};
++std::mutex s_decodeMutex;
++std::condition_variable s_decodeCv;
++std::deque<DecodeJob> s_decodeQueue;
++absl::flat_hash_set<aurora::texture::ReplacementKey, ReplacementKeyHash> s_decodePending;
++absl::flat_hash_map<aurora::texture::ReplacementKey, std::optional<aurora::gfx::ConvertedTexture>, ReplacementKeyHash>
++    s_decoded;
++bool s_decoderStarted = false;
++
++void decoder_main() noexcept {
++  for (;;) {
++    DecodeJob job;
++    {
++      std::unique_lock lk(s_decodeMutex);
++      s_decodeCv.wait(lk, [] { return !s_decodeQueue.empty(); });
++      job = std::move(s_decodeQueue.front());
++      s_decodeQueue.pop_front();
++    }
++    auto converted = load_file_replacement(job.entry);
++    std::lock_guard lk(s_decodeMutex);
++    s_decoded.insert_or_assign(job.key, std::move(converted));
++  }
++}
++
++aurora::gfx::TextureHandle insert_cache_locked(const aurora::texture::ReplacementKey& key,
++                                               const ReplacementEntry& entry,
++                                               aurora::gfx::TextureHandle handle) noexcept {
++  const uint64_t replacementBytes =
++      aurora::gfx::calc_texture_size(handle->format, handle->size.width, handle->size.height, handle->mipCount);
++  s_replacementLru.push_front(key);
++  s_cacheByKey.emplace(
++      key,
++      SelectedCache{.handle = handle, .id = entry.id, .bytes = replacementBytes, .lruIt = s_replacementLru.begin()});
++  s_replacementCacheBytes += replacementBytes;
++  evict_replacement_cache_if_needed();
++  return handle;
++}
++
+ std::optional<aurora::gfx::TextureHandle>
+ find_replacement_for_key_locked(const aurora::texture::ReplacementKey& key) noexcept {
+   const auto* entry = find_selected_entry_locked(key);
+@@ -850,16 +900,7 @@ find_replacement_for_key_locked(const aurora::texture::ReplacementKey& key) noex
+   if (!handle) {
+     return std::nullopt;
+   }
+-
+-  const uint64_t replacementBytes =
+-      aurora::gfx::calc_texture_size(handle->format, handle->size.width, handle->size.height, handle->mipCount);
+-  s_replacementLru.push_front(key);
+-  s_cacheByKey.emplace(
+-      key,
+-      SelectedCache{.handle = handle, .id = entry->id, .bytes = replacementBytes, .lruIt = s_replacementLru.begin()});
+-  s_replacementCacheBytes += replacementBytes;
+-  evict_replacement_cache_if_needed();
+-  return handle;
++  return insert_cache_locked(key, *entry, std::move(handle));
+ }
+ 
+ bool dump_editable_texture_dds(const aurora::texture::TextureSourceKey& key, const GXTexObj_& obj) noexcept {
+@@ -1267,7 +1308,8 @@ bool has_source_replacements() noexcept {
+ 
+ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t height, uint32_t format,
+                                                         const uint8_t* data, uint32_t data_size,
+-                                                        const uint8_t* tlut, uint32_t tlut_bytes) noexcept {
++                                                        const uint8_t* tlut, uint32_t tlut_bytes,
++                                                        bool* pending) noexcept {
+   ZoneScoped;
+   if (data == nullptr || width == 0 || height == 0) {
+     return std::nullopt;
+@@ -1319,6 +1361,51 @@ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t
+   if (!replacementKey.has_value()) {
+     return std::nullopt;
+   }
+-  return find_replacement_for_key_locked(*replacementKey);
++  static const bool s_sync = std::getenv("DOL_TEXREP_SYNC") != nullptr;
++  const auto* entry = find_selected_entry_locked(*replacementKey);
++  if (pending == nullptr || s_sync || entry == nullptr || entry->kind != EntryKind::File) {
++    return find_replacement_for_key_locked(*replacementKey);
++  }
++  if (const auto cache = s_cacheByKey.find(*replacementKey);
++      cache != s_cacheByKey.end() && cache->second.id == entry->id) {
++    touch_cached_replacement(cache);
++    return cache->second.handle;
++  }
++  if (s_failedIds.contains(entry->id)) {
++    return std::nullopt;
++  }
++  std::optional<aurora::gfx::ConvertedTexture> decoded;
++  bool ready = false;
++  {
++    std::lock_guard dlk(s_decodeMutex);
++    if (auto it = s_decoded.find(*replacementKey); it != s_decoded.end()) {
++      decoded = std::move(it->second);
++      s_decoded.erase(it);
++      s_decodePending.erase(*replacementKey);
++      ready = true;
++    } else if (!s_decodePending.contains(*replacementKey)) {
++      s_decodePending.insert(*replacementKey);
++      s_decodeQueue.push_back(DecodeJob{*replacementKey, *entry});
++      if (!s_decoderStarted) {
++        s_decoderStarted = true;
++        std::thread(decoder_main).detach();
++      }
++      s_decodeCv.notify_one();
++    }
++  }
++  if (!ready) {
++    *pending = true;
++    return std::nullopt;
++  }
++  if (!decoded.has_value()) {
++    s_failedIds.insert(entry->id);
++    return std::nullopt;
++  }
++  erase_cache_locked(*replacementKey);
++  auto handle = create_converted_texture_handle(*replacementKey, *entry, *decoded);
++  if (!handle) {
++    return std::nullopt;
++  }
++  return insert_cache_locked(*replacementKey, *entry, std::move(handle));
+ }
+ } // namespace aurora::gfx::texture_replacement
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+index 6e506b5..31efb3a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+@@ -15,8 +15,12 @@ std::string build_texture_replacement_name(const GXTexObj_& obj) noexcept;
+ // path): the Dolphin-named replacement for these guest bytes, if one is
+ // registered. data holds the texture (at least its base level); tlut the
+ // palette bytes for C4/C8/C14X2 (tlut_bytes = entries * 2).
++// A file replacement not yet decoded is decoded on a background thread: the
++// call returns nothing and sets *pending, and a later call returns it. With
++// pending == nullptr (or DOL_TEXREP_SYNC=1) it is decoded on the spot.
+ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t height, uint32_t format,
+                                                         const uint8_t* data, uint32_t data_size,
+-                                                        const uint8_t* tlut, uint32_t tlut_bytes) noexcept;
++                                                        const uint8_t* tlut, uint32_t tlut_bytes,
++                                                        bool* pending = nullptr) noexcept;
+ bool has_source_replacements() noexcept;
+ } // namespace aurora::gfx::texture_replacement

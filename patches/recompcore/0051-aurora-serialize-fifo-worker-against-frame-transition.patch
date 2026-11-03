@@ -1,0 +1,174 @@
+From f998ec3df7baffbb0bd9f75c65e96b495f14f468 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Tue, 22 Sep 2026 16:23:19 -0500
+Subject: [PATCH] aurora: serialize the FIFO translation worker against the
+ frame transition
+
+The translation worker records draws into Aurora's frame packet, and that packet
+exists only between Aurora's begin_frame and end_frame. aurora_backend_present()
+runs both ends in one function, so between them the packet pointer is null - and
+the worker, which records on its own thread, was free to be in that window.
+
+Measured on 2026-09-22: the rendered probes of the zero-charge candidate died
+with EXC_BAD_ACCESS, KERN_INVALID_ADDRESS at 0x28 on the worker thread, in
+frames get_render_target_size() <- set_logical_viewport <- submit_draw_plan <-
+core_plan_observer <- on_consumed_draw <- accumulate_assembly <- submit_packet <-
+emit_new_packets <- flush <- g_fifo_worker_main. The 0x28 is the offset into the
+null g_recordingFrame that current_frame_packet() dereferences after a CHECK the
+release build compiles out. Headless never opens a recording frame, which is why
+the same worker only broke the rendered path.
+
+Three changes, all in this backend:
+
+  * g_aurora_recording_mutex is held by the worker across one batch's
+translate and by the main thread across the present transition (flush_frame,
+end_frame, the present, begin_frame), so a batch cannot straddle it. It cannot
+deadlock: the main thread's only wait on the worker is the drain at the
+guest-visible barriers, and the drain now refuses to wait if it is ever called
+inside the transition rather than hanging.
+
+  * g_aurora_recording_open gates the sink per batch. With no frame open - before
+the first present, or in a window Aurora refuses to present - the batch is parsed
+by the shadow packet sink, which keeps the front end's position truthful without
+offering draws to a renderer that has no frame. The count is reported once, so a
+run that hits it is never silent.
+
+  * The inline path is untouched: it runs on the main thread, which never writes
+GX from inside the transition, so it is safe by construction.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 78 ++++++++++++++++++-
+ 1 file changed, 77 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 46a70e2ad2..1186a98b1f 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -10,6 +10,7 @@
+ #include <gx/gx.hpp>
+ #include <gx/recomp.hpp>
+ #include <gxruntime/guest_memory_dirty.h>
++#include <atomic>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -296,13 +297,45 @@ bool g_fifo_worker_idle = true;
+ std::uint64_t g_fifo_appended = 0;
+ std::uint64_t g_fifo_parsed = 0;
+ 
++// Aurora records a frame into a packet that exists only between begin_frame and
++// end_frame, and aurora_backend_present() runs both ends in one function: the
++// finished frame is submitted and then the next one is opened. The translation
++// worker records draws on its own thread, so without this lock a worker batch
++// can straddle that window and dereference the packet pointer Aurora has just
++// cleared - measured on 2026-09-22 as EXC_BAD_ACCESS at 0x28 inside
++// aurora::gfx::get_render_target_size(), which is g_recordingFrame being null
++// (the release build compiles the CHECK out). The main thread holds this lock
++// across the transition and the worker holds it across one batch, so neither
++// can observe the other's half-state. It cannot deadlock: the main thread's
++// only wait on the worker - the drain at the guest-visible barriers - is never
++// taken from inside the transition.
++std::mutex g_aurora_recording_mutex;
++// Whether Aurora has a frame packet open for the worker to record into. Read by
++// the main thread in the write path and by the worker in the batch gate, always
++// under g_aurora_recording_mutex or on the thread that owns the frame.
++bool g_aurora_recording_open = false;
++// True only while the main thread is inside the transition above. The drain
++// reads it on the main thread alone, so it needs no lock of its own.
++bool g_aurora_recording_in_transition = false;
++// Batches that arrived with no frame to record into and were parsed by the
++// packet sink instead. Reported so a run that starts dropping draws is not
++// silent, because before this gate existed that state was a null dereference.
++std::atomic<std::uint64_t> g_aurora_unframed_batches = 0;
++
+ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     if (batch.empty())
+         return;
+     const std::span<const std::uint8_t> bytes(batch.data(), batch.size());
+     bool flushed = false;
++    // One batch, one frame: the lock keeps the main thread from closing the
++    // packet underneath this recording, and the gate below keeps this batch
++    // from recording into a packet that does not exist yet.
++    std::lock_guard<std::mutex> recording(g_aurora_recording_mutex);
++    const bool record_into_aurora = g_gx_core_enabled && g_aurora_recording_open;
++    if (g_gx_core_enabled && !record_into_aurora)
++        g_aurora_unframed_batches.fetch_add(1, std::memory_order_relaxed);
+     if (g_shadow_frontend.write_fifo(bytes)) {
+-        if (g_gx_core_enabled)
++        if (record_into_aurora)
+             flushed = g_shadow_frontend.flush(&g_core_sink);
+         else
+             flushed = g_shadow_frontend.flush(&g_shadow_packet_sink);
+@@ -361,6 +394,19 @@ void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
+ // the barriers and only there.
+ static void g_fifo_drain() {
+     std::unique_lock<std::mutex> lock(g_fifo_worker_mutex);
++    // Called from the guest's synchronization points, which never run inside
++    // the present transition; if one ever does, waiting here would deadlock
++    // against the recording lock the transition holds. Say so rather than hang.
++    if (g_aurora_recording_in_transition) {
++        static bool s_warned = false;
++        if (!s_warned) {
++            s_warned = true;
++            std::fprintf(stderr,
++                         "[gx] FIFO drain requested inside the frame "
++                         "transition; not waiting for the worker\n");
++        }
++        return;
++    }
+     const std::uint64_t target = g_fifo_appended;
+     if (g_fifo_worker_idle && g_fifo_parsed >= target)
+         return;
+@@ -774,6 +820,14 @@ extern "C" {
+ void aurora_backend_present(void) {
+     if (!gx_aurora::g_initialized)
+         return;
++    // Everything below up to the next begin_frame runs with no frame packet for
++    // the translation worker to record into. The lock is what makes that window
++    // invisible to the worker: it waits here for a batch in flight, and a batch
++    // that starts afterwards sees g_aurora_recording_open false and parses
++    // without offering draws to a renderer that has no frame.
++    std::unique_lock<std::mutex> aurora_recording(gx_aurora::g_aurora_recording_mutex);
++    gx_aurora::g_aurora_recording_open = false;
++    gx_aurora::g_aurora_recording_in_transition = true;
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+     if (gx_aurora::g_gx_core_enabled && !gx_aurora::g_shadow_frontend_failed)
+         gx_aurora::g_core_sink.flush_frame();
+@@ -1001,6 +1055,24 @@ void aurora_backend_present(void) {
+     gx_aurora::poll_events();
+     if (!gx_aurora::g_should_quit) {
+         gx_aurora::g_frame_open = aurora_begin_frame();
++        // The frame the worker records into exists from here until the next
++        // present's end_frame, and this is what opens it to the worker.
++        gx_aurora::g_aurora_recording_open = gx_aurora::g_frame_open;
++        // One shout if draws were ever offered to a window with no frame open.
++        // That state used to be a null dereference; it is now a fallback parse,
++        // and a run that hits it should say so rather than lose draws quietly.
++        static bool s_unframed_warned = false;
++        const std::uint64_t unframed =
++            gx_aurora::g_aurora_unframed_batches.load(std::memory_order_relaxed);
++        if (unframed != 0 && !s_unframed_warned) {
++            s_unframed_warned = true;
++            std::fprintf(stderr,
++                         "[gx] %llu FIFO batch(es) arrived with no frame packet; "
++                         "parsed without offering their draws to the renderer "
++                         "(present=%llu)\n",
++                         static_cast<unsigned long long>(unframed),
++                         gx_aurora::g_present_count);
++        }
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+         gx_aurora::g_shadow_transform_next_draw_index = 0;
+ #endif
+@@ -1014,6 +1086,10 @@ void aurora_backend_present(void) {
+     if (gx_aurora::g_graphics_log && present_fifo > 50000ull)
+         std::fprintf(stderr, "[gfx] LARGE present=%llu fifo_this_interval=%llu\n",
+                      gx_aurora::g_present_count, present_fifo);
++    // The transition is over: a packet exists again (or the window is not
++    // presentable), and the worker may record.
++    gx_aurora::g_aurora_recording_in_transition = false;
++    aurora_recording.unlock();
+ }
+ 
+ void aurora_backend_mark_gx_begin(void) {
+-- 
+2.41.0
+

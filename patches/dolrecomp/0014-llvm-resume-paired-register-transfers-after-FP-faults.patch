@@ -1,0 +1,111 @@
+From 4bbe4eb16771e7c114338ef126e043cb3ff6bf7a Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 16:19:24 -0500
+Subject: [PATCH] llvm: resume paired register transfers after FP faults
+
+---
+ src/app/pipeline.c                  |  2 +-
+ src/backend/llvm/register_state.cpp |  8 ++++++--
+ tests/llvm_fixture.cpp              |  7 +++++++
+ tests/llvm_smoke_test.c             | 20 ++++++++++++++++++++
+ 4 files changed, 34 insertions(+), 3 deletions(-)
+
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index 9fb451e..c435441 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v25"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v26"
+ 
+ typedef struct {
+     const PPCInst* insts;
+diff --git a/src/backend/llvm/register_state.cpp b/src/backend/llvm/register_state.cpp
+index 66a7edf..58ddbbc 100644
+--- a/src/backend/llvm/register_state.cpp
++++ b/src/backend/llvm/register_state.cpp
+@@ -137,7 +137,8 @@ void FunctionEmitter::scanRegionLeaders() {
+     region_leaders_[(address - source_.guest_start) / 4u] = true;
+   }
+ 
+-  // The guest's lazy-FP path first faults on an FP/PSQ memory operation.
++  // The guest's lazy-FP path can first fault on an FP/PSQ memory operation or
++  // a paired register transfer after an OS context switch.
+   // Keep that cold entry separate from the hot region so a retry can reload
+   // architectural state without discarding compile-time GQR knowledge. Do
+   // not clone arithmetic-only regions: they are not first-use sites and are
+@@ -167,8 +168,11 @@ void FunctionEmitter::scanRegionLeaders() {
+       const bool indexed_psq = primary == 4u &&
+                                (xo == 6u || xo == 7u || xo == 38u ||
+                                 xo == 39u);
++      const bool paired_register_transfer =
++          primary == 4u &&
++          (xo == 528u || xo == 560u || xo == 592u || xo == 624u);
+       if (!scalar_memory && !indexed_scalar_memory && !direct_psq &&
+-          !indexed_psq)
++          !indexed_psq && !paired_register_transfer)
+         continue;
+       if (!region_leaders_[i])
+         retry_leaders_[i] = true;
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index 375d696..dc816f1 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -368,6 +368,13 @@ int main(int argc, char **argv) {
+   };
+   CHECK(add_chunk(&module, tagged_alias_words, 3, 0x80004000u));
+ 
++  const u32 paired_register_resume_words[] = {
++      0x38A50001u,
++      0x10221C20u,
++      0x4E800020u,
++  };
++  CHECK(add_chunk(&module, paired_register_resume_words, 3, 0x80004100u));
++
+   CHECK(dolir_verify(&module, stderr));
+   DolLLVMOptions options{};
+   options.optimization_level = 2;
+diff --git a/tests/llvm_smoke_test.c b/tests/llvm_smoke_test.c
+index f161f72..bfb2ee7 100644
+--- a/tests/llvm_smoke_test.c
++++ b/tests/llvm_smoke_test.c
+@@ -22,6 +22,7 @@ void func_80003D00(CPUState* cpu);
+ void func_80003E00(CPUState* cpu);
+ void func_80003F00(CPUState* cpu);
+ void func_80004000(CPUState* cpu);
++void func_80004100(CPUState* cpu);
+ 
+ static u32 fallback_count;
+ static int fallback_bad;
+@@ -187,6 +188,25 @@ int main(void) {
+     cpu.external_read = NULL;
+     cpu.external_write = NULL;
+ 
++    prepare_call(&cpu, 0x80004100u);
++    cpu.msr = 0;
++    cpu.hid2 = PPC_HID2_PSE;
++    cpu.gpr[5] = 41;
++    cpu.fpr[2] = 1.25;
++    cpu.fpr[3] = 2.5;
++    u32 fallback_before_paired_register_retry = fallback_count;
++    func_80004100(&cpu);
++    CHECK(cpu.gpr[5] == 42);
++    CHECK(cpu.exception == PPC_EXC_FP_UNAVAILABLE);
++    CHECK(cpu.srr0 == 0x80004104u);
++    cpu.exception = 0;
++    cpu.msr |= 1u << 13;
++    cpu.pc = cpu.srr0;
++    func_80004100(&cpu);
++    CHECK(cpu.fpr[1] == 1.25 && cpu.ps1[1] == 2.5);
++    CHECK(cpu.pc == 0x81234564u);
++    CHECK(fallback_count == fallback_before_paired_register_retry);
++
+     prepare_call(&cpu, 0x80002000u);
+     cpu.gpr[3] = 0xA5A55A5Au;
+     func_80002000(&cpu);
+-- 
+2.41.0
+

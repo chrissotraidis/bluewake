@@ -1,0 +1,65 @@
+--- a/src/backend/emitter.c
++++ b/src/backend/emitter.c
+@@ -2112,13 +2112,38 @@
+ 
+     fprintf(out, "void func_%08X(CPUState* ctx) {\n", func_addr);
+     fprintf(out, "    bool cycle_block_prepaid = false;\n");
+-    fprintf(out, "    switch (ctx->pc) {\n");
+-    for (u32 i = 0; i < count; i++) {
+-        fprintf(out, "    case 0x%08Xu: goto label_%08X;\n",
+-                insts[i].address, insts[i].address);
+-    }
+-    fprintf(out, "    default: return;\n");
+-    fprintf(out, "    }\n");
++    /* Entry dispatch. A chunk function's instructions are contiguous, and a
++     * `switch` over 4,096 contiguous cases is lowered by clang into a 4,096-entry
++     * jump table built on the stack and copied at every call - a 32 KB frame per
++     * entry, measured at 58% of the play-scene cost of the hottest bodies. A
++     * static table of label addresses and a computed goto is exactly equivalent
++     * for a contiguous range and costs nothing per call. */
++    bool contiguous = count > 0u;
++    for (u32 i = 0; contiguous && i < count; ++i)
++        contiguous = insts[i].address == insts[0].address + i * 4u;
++    if (contiguous) {
++        const u32 table_lo = insts[0].address;
++        const u32 table_hi = insts[count - 1u].address;
++        fprintf(out, "    static void* const pc_table_%08X[%u] = {\n",
++                func_addr, count);
++        for (u32 i = 0; i < count; ++i)
++            fprintf(out, "        &&label_%08X%s\n", insts[i].address,
++                    i + 1u < count ? "," : "");
++        fprintf(out, "    };\n");
++        fprintf(out, "    {\n");
++        fprintf(out, "        const u32 pc = ctx->pc;\n");
++        fprintf(out, "        if (pc >= 0x%08Xu && pc <= 0x%08Xu && ((pc - 0x%08Xu) & 3u) == 0u)\n",
++                table_lo, table_hi, table_lo);
++        fprintf(out, "            goto *pc_table_%08X[(pc - 0x%08Xu) >> 2];\n",
++                func_addr, table_lo);
++        fprintf(out, "    }\n");
++        fprintf(out, "    return;\n");
++    } else {
++        fprintf(out, "    switch (ctx->pc) {\n");
++        for (u32 i = 0; i < count; i++) {
++            fprintf(out, "    case 0x%08Xu: goto label_%08X;\n",
++                    insts[i].address, insts[i].address);
++        }
+         fprintf(out, "    default: return;\n");
+         fprintf(out, "    }\n");
+     }
+--- a/tests/test_jumptables.c
++++ b/tests/test_jumptables.c
+@@ -144,8 +144,12 @@
+     for (u32 i = 0; i < CASE_COUNT; i++) {
+         snprintf(needle, sizeof(needle), "case 0x%08Xu: goto label_%08X;",
+                  case_targets[i], case_targets[i]);
+-        snprintf(needle, sizeof(needle), "case 0x%08Xu: goto label_%08X;",
+-                 case_targets[i], case_targets[i]);
++        if (strstr(code, needle))
++            continue;
++        /* A contiguous range is emitted as a static table of label addresses with
++         * a computed goto instead of a switch; the target is a re-entry point
++         * either way. */
++        snprintf(needle, sizeof(needle), "&&label_%08X", case_targets[i]);
+         if (!strstr(code, needle))
+             all_cases_reentrant = 0;
+     }

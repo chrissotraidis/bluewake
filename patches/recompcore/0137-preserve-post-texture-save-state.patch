@@ -1,0 +1,267 @@
+From 18ba3b642588a33b9e8eac4aba7f713bb8d3d778 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 21:32:44 +0900
+Subject: [PATCH] Preserve dual-texture transforms across frontend save states
+
+Append a versioned post-texture extension without changing the legacy register-state layout. Restore legacy saves with identity rows, rebuild derived identity flags, and reject malformed extensions before mutating live state. Cover direct and indexed FIFO capture, draw-time snapshots, normalization and disable propagation, new and legacy saves, and malformed payloads.
+
+Co-authored-by: Elliott Tate <elliotttate@gmail.com>
+---
+ .../aurora_recomp/retail_gx_frontend.hpp      |   4 +-
+ .../frontend/src/retail_gx_frontend.cpp       |  42 +++++-
+ .../frontend/tests/frontend_replay_test.cpp   | 123 ++++++++++++++++++
+ 3 files changed, 164 insertions(+), 5 deletions(-)
+
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index 5750d1e3..0792fcb3 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -50,8 +50,8 @@ struct DrawTransformSnapshot {
+ 
+ // XF post-transform ("dual texture") matrix memory, 0x500..0x5FF: 64 rows of
+ // four floats. Kept beside DolGxRecompState rather than in it, so the saved
+-// front-end state keeps its size; after a load the rows read as identity
+-// until the game loads them again.
++// legacy register-state layout keeps its size. New saves append this state;
++// legacy saves restore identity until the game loads the rows again.
+ struct PostTexMatrices {
+   float rows[64][4]{};
+   std::uint64_t written = 0;  // rows the game has loaded
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 4bdc62ef..323689b4 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -422,6 +422,10 @@ void RetailGxFrontend::reset(const DolGuestAddressResolver* resolver) {
+ namespace {
+ 
+ constexpr std::uint32_t kFrontendStateMagic = 0x47585346u; // "GXSF"
++constexpr std::uint32_t kPostTexStateMagic = 0x50545831u; // "PTX1"
++constexpr std::size_t kPostTexStateSize = 2u * sizeof(std::uint32_t) +
++    sizeof(std::uint64_t) + sizeof(PostTexMatrices::rows);
++
+ 
+ void resolve_saved_range(const DolGuestAddressResolver& resolver,
+                          DolGuestResolvedRange& range, bool& valid) {
+@@ -442,12 +446,12 @@ void resolve_saved_range(const DolGuestAddressResolver& resolver,
+ std::vector<std::uint8_t> RetailGxFrontend::save_state() const {
+   // Header, the register model with its host-only parts (resolver, the C
+   // parser's FIFO copy, the per-flush event trace) cleared, the stale-palette
+-  // mask and the unparsed tail.
++  // mask and the unparsed tail, followed by a versioned post-texture extension.
+   const std::uint32_t header[3] = {
+       kFrontendStateMagic, static_cast<std::uint32_t>(sizeof(DolGxRecompState)),
+       static_cast<std::uint32_t>(fifo_buffer_.size())};
+   std::vector<std::uint8_t> out(sizeof header + sizeof(DolGxRecompState) + 1u +
+-                                fifo_buffer_.size());
++                                fifo_buffer_.size() + kPostTexStateSize);
+   std::uint8_t* at = out.data();
+   std::memcpy(at, header, sizeof header);
+   at += sizeof header;
+@@ -463,6 +467,13 @@ std::vector<std::uint8_t> RetailGxFrontend::save_state() const {
+   *at++ = tlut_stale_mask_;
+   if (!fifo_buffer_.empty())
+     std::memcpy(at, fifo_buffer_.data(), fifo_buffer_.size());
++  at += fifo_buffer_.size();
++  const std::uint32_t post_header[2] = {kPostTexStateMagic, post_tex_.off ? 1u : 0u};
++  std::memcpy(at, post_header, sizeof post_header);
++  at += sizeof post_header;
++  std::memcpy(at, &post_tex_.written, sizeof post_tex_.written);
++  at += sizeof post_tex_.written;
++  std::memcpy(at, post_tex_.rows, sizeof post_tex_.rows);
+   return out;
+ }
+ 
+@@ -471,9 +482,33 @@ bool RetailGxFrontend::load_state(const std::uint8_t* data, std::size_t size) {
+   if (data == nullptr || size < sizeof header + sizeof(DolGxRecompState) + 1u)
+     return false;
+   std::memcpy(header, data, sizeof header);
++  const std::size_t legacy_size = sizeof header + sizeof(DolGxRecompState) + 1u + header[2];
+   if (header[0] != kFrontendStateMagic || header[1] != sizeof(DolGxRecompState) ||
+-      size != sizeof header + sizeof(DolGxRecompState) + 1u + header[2])
++      (size != legacy_size && size != legacy_size + kPostTexStateSize))
+     return false;
++  PostTexMatrices restored_post{};
++  if (size != legacy_size) {
++    const std::uint8_t* post_at = data + legacy_size;
++    std::uint32_t post_header[2];
++    std::memcpy(post_header, post_at, sizeof post_header);
++    if (post_header[0] != kPostTexStateMagic || post_header[1] > 1u)
++      return false;
++    restored_post.off = post_header[1] != 0u;
++    post_at += sizeof post_header;
++    std::memcpy(&restored_post.written, post_at, sizeof restored_post.written);
++    post_at += sizeof restored_post.written;
++    std::memcpy(restored_post.rows, post_at, sizeof restored_post.rows);
++    // Rebuild the derived identity cache rather than trusting serialized bits.
++    for (unsigned row = 0; row < 64u; ++row) {
++      if ((restored_post.written & (1ull << row)) == 0u) continue;
++      const float* r = restored_post.rows[row];
++      for (unsigned k = 0; k < 3u; ++k)
++        if (!(r[0] == (k == 0u ? 1.f : 0.f) &&
++              r[1] == (k == 1u ? 1.f : 0.f) &&
++              r[2] == (k == 2u ? 1.f : 0.f) && r[3] == 0.f))
++          restored_post.identity[k] &= ~(1ull << row);
++    }
++  }
+   const DolGuestAddressResolver resolver = state_.resolver;
+   // The packet sequence keeps counting: a sink that has seen packets from this
+   // front end requires it to rise.
+@@ -495,6 +530,7 @@ bool RetailGxFrontend::load_state(const std::uint8_t* data, std::size_t size) {
+   resolve_saved_range(resolver, state_.copy.range, state_.copy.range_valid);
+   tlut_stale_mask_ = *at++;
+   fifo_buffer_.assign(at, at + header[2]);
++  post_tex_ = restored_post;
+   return true;
+ }
+ 
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 80f649a6..359cdba8 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -6,6 +6,7 @@
+ #include "gxruntime/aurora_recomp/retail_gx_frontend_c.h"
+ 
+ #include <cassert>
++#include <cstdio>
+ #include <cstdint>
+ #include <cstring>
+ #include <span>
+@@ -697,6 +698,126 @@ void test_xf_projection_capture() {
+   assert(both.projection_type == 1u);
+ }
+ 
++// Exercise the actual FIFO -> snapshot -> consuming sink path, including
++// draw-time isolation and save/restore before the guest reloads its matrices.
++void test_post_tex_fifo_and_save_state() {
++  using gxruntime::aurora_recomp::ConsumingAuroraRenderSink;
++  RetailGxFrontend frontend;
++  ConsumingAuroraRenderSink sink;
++  frontend.set_packet_drain_enabled(true);
++  assert(frontend.set_vertex_layout(0u, 12u));
++  auto draw = [](std::vector<std::uint8_t>& fifo) {
++    push_u8(fifo, 0x90u);
++    push_u16(fifo, 3u);
++    for (unsigned i = 0; i < 9; ++i) push_u32(fifo, 0u);
++  };
++  auto flush = [&](const std::vector<std::uint8_t>& fifo) {
++    assert(frontend.write_fifo(fifo));
++    const bool ok = frontend.flush(&sink);
++    if (!ok) std::fprintf(stderr, "post-texture frontend: %s; sink: %s\n", frontend.last_error(), sink.failure_reason());
++    assert(ok);
++    assert(sink.failure_reason() == nullptr);
++  };
++  std::vector<std::uint8_t> fifo;
++  push_cp(fifo, DOL_GX_CP_REG_VCD_LO, 1u << 9u);
++  push_cp(fifo, DOL_GX_CP_REG_VAT_GRP0, 1u | (4u << 1u));
++  push_xf(fifo, 0x1012u, 1u);
++  push_xf(fifo, 0x103Fu, 1u);
++  push_xf(fifo, 0x1040u, 0u);
++  push_xf(fifo, 0x1050u, 0u);
++  push_xf_block(fifo, 0x500u,
++      {f32_bits(2.f), 0u, 0u, f32_bits(4.f),
++       0u, f32_bits(3.f), 0u, f32_bits(5.f),
++       0u, 0u, f32_bits(1.f), f32_bits(6.f)});
++  draw(fifo);
++  push_xf(fifo, 0x503u, f32_bits(9.f));
++  draw(fifo);
++  flush(fifo);
++  assert(sink.draws().size() == 2u);
++  assert(sink.draws()[0].post_tex_mask == 1u);
++  assert(sink.draws()[0].post_tex_normalize == 0u);
++  assert(sink.draws()[0].post_tex_rows[0][3] == 4.f);
++  assert(sink.draws()[1].post_tex_rows[0][3] == 9.f);
++  const auto saved = frontend.save_state();
++  // Malformed extensions fail before mutating the live frontend.
++  const std::size_t extension_size = 2u * sizeof(std::uint32_t) +
++      sizeof(std::uint64_t) + 64u * 4u * sizeof(float);
++  for (unsigned damage = 0; damage < 4; ++damage) {
++    auto bad = saved;
++    if (damage == 0) bad.pop_back();
++    if (damage == 1) bad.push_back(0);
++    if (damage == 2) bad[saved.size() - extension_size] ^= 1u;
++    if (damage == 3) {
++      const std::uint32_t invalid_switch = 2u;
++      std::memcpy(bad.data() + saved.size() - extension_size + sizeof(std::uint32_t),
++                  &invalid_switch, sizeof invalid_switch);
++    }
++    assert(!frontend.load_state(bad.data(), bad.size()));
++    assert(frontend.save_state() == saved);
++  }
++  fifo.clear();
++  push_xf(fifo, 0x503u, f32_bits(15.f));
++  flush(fifo);
++  assert(frontend.load_state(saved.data(), saved.size()));
++  fifo.clear(); draw(fifo); flush(fifo);
++  assert(sink.draws().back().post_tex_mask == 1u);
++  assert(sink.draws().back().post_tex_rows[0][3] == 9.f);
++
++  fifo.clear(); push_xf(fifo, 0x1050u, 1u << 8u); draw(fifo); flush(fifo);
++  assert(sink.draws().back().post_tex_normalize == 1u);
++  fifo.clear(); push_xf(fifo, 0x1012u, 0u); draw(fifo); flush(fifo);
++  assert(sink.draws().back().post_tex_mask == 0u);
++  const auto disabled = frontend.save_state();
++  fifo.clear(); push_xf(fifo, 0x1012u, 1u); flush(fifo);
++  assert(frontend.load_state(disabled.data(), disabled.size()));
++  fifo.clear(); draw(fifo); flush(fifo);
++  assert(sink.draws().back().post_tex_mask == 0u);
++
++  // Legacy payloads still load, with unknown post memory reset to identity.
++  std::uint32_t header[3];
++  std::memcpy(header, saved.data(), sizeof header);
++  const std::size_t legacy_size = sizeof header + sizeof(DolGxRecompState) + 1u + header[2];
++  assert(frontend.load_state(saved.data(), legacy_size));
++  fifo.clear(); draw(fifo); flush(fifo);
++  assert(sink.draws().back().post_tex_mask == 0u);
++}
++
++void test_indexed_post_tex_fifo() {
++  using gxruntime::aurora_recomp::ConsumingAuroraRenderSink;
++  CPUState cpu;
++  assert(cpu_init(&cpu));
++  DolGuestMemory memory;
++  assert(dol_guest_memory_init(&memory, nullptr));
++  DolGuestAddressResolver resolver;
++  dol_guest_address_resolver_init(&resolver, &memory, &cpu);
++  std::vector<std::uint8_t> rows;
++  for (float value : {2.f, 0.f, 0.f, 4.f, 0.f, 3.f, 0.f, 5.f,
++                      0.f, 0.f, 1.f, 6.f}) push_u32(rows, f32_bits(value));
++  std::memcpy(cpu.ram + 0x1000u + 48u, rows.data(), rows.size());
++  RetailGxFrontend frontend(resolver);
++  ConsumingAuroraRenderSink sink;
++  sink.set_guest_resolver(&resolver);
++  std::vector<std::uint8_t> fifo;
++  push_cp(fifo, DOL_GX_CP_REG_VCD_LO, 1u << 9u);
++  push_cp(fifo, DOL_GX_CP_REG_VAT_GRP0, 1u | (4u << 1u));
++  push_cp(fifo, DOL_GX_CP_REG_ARRAYBASE + 12u, 0x1000u);
++  push_cp(fifo, DOL_GX_CP_REG_ARRAYSTRIDE + 12u, 48u);
++  push_xf(fifo, 0x103Fu, 1u);
++  push_xf(fifo, 0x1040u, 0u);
++  push_xf(fifo, 0x1050u, 0u);
++  push_indexed_xf(fifo, 0x20u, 1u, 0x500u, 12u);
++  push_u8(fifo, 0x90u); push_u16(fifo, 3u);
++  for (unsigned i = 0; i < 9; ++i) push_u32(fifo, 0u);
++  assert(frontend.replay_fifo(fifo, &sink));
++  assert(sink.draws().size() == 1u);
++  const auto& draw = sink.draws().front();
++  assert(draw.post_tex_mask == 1u && draw.post_tex_normalize == 0u);
++  for (unsigned i = 0; i < 12; ++i)
++    assert(f32_bits(draw.post_tex_rows[0][i]) == read_fixture_be32(rows.data() + i * 4u));
++  dol_guest_memory_shutdown(&memory);
++  cpu_free(&cpu);
++}
++
+ } // namespace
+ 
+ int main() {
+@@ -726,6 +847,8 @@ int main() {
+   test_large_batch_drains_instead_of_dropping();
+   test_flush_stops_after_display_copy();
+   test_xf_projection_capture();
++  test_post_tex_fifo_and_save_state();
++  test_indexed_post_tex_fifo();
+ 
+   CPUState cpu;
+   assert(cpu_init(&cpu));
+-- 
+2.46.0
+

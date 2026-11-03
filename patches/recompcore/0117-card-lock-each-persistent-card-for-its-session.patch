@@ -1,0 +1,136 @@
+From d8f6ad979c348ee76ebabce1bedacddebc3fb8e5 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:07:57 +0900
+Subject: [PATCH] card: lock each persistent card for its session
+
+---
+ GXRuntime/src/memory_card.c | 65 +++++++++++++++++++++++++++++++++++--
+ 1 file changed, 62 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/src/memory_card.c b/GXRuntime/src/memory_card.c
+index 490caef9..4f16f930 100644
+--- a/GXRuntime/src/memory_card.c
++++ b/GXRuntime/src/memory_card.c
+@@ -8,8 +8,10 @@
+ #include <errno.h>
+ #ifdef _WIN32
+ #include <io.h>
++#include <windows.h>
+ #else
+ #include <fcntl.h>
++#include <sys/file.h>
+ #include <unistd.h>
+ #endif
+ 
+@@ -27,6 +29,11 @@ typedef struct DolMemoryCardFile {
+ 
+ struct DolMemoryCard {
+     char* path;
++#ifdef _WIN32
++    HANDLE lock_handle;
++#else
++    int lock_fd;
++#endif
+     u16 size_mbits;
+     u16 encoding;
+     u64 serial;
+@@ -175,6 +182,38 @@ static int open_card_directory(const char* path) {
+ }
+ #endif
+ 
++static bool lock_card(DolMemoryCard* card) {
++    if (card->path == NULL)
++        return true;
++    size_t size = strlen(card->path) + 6u;
++    char* path = (char*)malloc(size);
++    if (path == NULL)
++        return false;
++    snprintf(path, size, "%s.lock", card->path);
++#ifdef _WIN32
++    HANDLE handle = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
++        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
++    OVERLAPPED offset = {0};
++    bool ok = handle != INVALID_HANDLE_VALUE && LockFileEx(handle,
++        LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &offset);
++    if (ok)
++        card->lock_handle = handle;
++    else if (handle != INVALID_HANDLE_VALUE)
++        CloseHandle(handle);
++#else
++    int fd = open(path, O_CREAT | O_RDWR, 0600);
++    bool ok = fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) == 0;
++    if (ok)
++        card->lock_fd = fd;
++    else if (fd >= 0)
++        close(fd);
++#endif
++    free(path);
++    if (!ok)
++        fprintf(stderr, "[card] cannot lock %s: another BlueWake session may be using this card\n", card->path);
++    return ok;
++}
++
+ static bool write_container(const DolMemoryCard* card) {
+     if (card->path == NULL)
+         return true;
+@@ -222,13 +261,18 @@ static bool write_container(const DolMemoryCard* card) {
+                hash_bytes(bytes + DOL_CARD_HEADER_SIZE, body_size));
+ 
+     size_t path_length = strlen(card->path);
+-    char* temporary_path = (char*)malloc(path_length + 5u);
++    char* temporary_path = (char*)malloc(path_length + 40u);
+     if (temporary_path == NULL) {
+         free(bytes);
+         return false;
+     }
+-    memcpy(temporary_path, card->path, path_length);
+-    memcpy(temporary_path + path_length, ".tmp", 5u);
++    snprintf(temporary_path, path_length + 40u, "%s.tmp-%lu", card->path,
++#ifdef _WIN32
++             (unsigned long)GetCurrentProcessId()
++#else
++             (unsigned long)getpid()
++#endif
++    );
+ 
+     bool success = false;
+     FILE* output = fopen(temporary_path, "wb");
+@@ -401,6 +445,9 @@ DolMemoryCard* dol_card_open(const DolMemoryCardConfig* config) {
+     DolMemoryCard* card = (DolMemoryCard*)calloc(1, sizeof(*card));
+     if (card == NULL)
+         return NULL;
++#ifndef _WIN32
++    card->lock_fd = -1;
++#endif
+     card->path = duplicate_string(config->path);
+     if (config->path != NULL && config->path[0] != '\0' &&
+         card->path == NULL) {
+@@ -419,6 +466,10 @@ DolMemoryCard* dol_card_open(const DolMemoryCardConfig* config) {
+         return NULL;
+     }
+ 
++    if (!lock_card(card)) {
++        dol_card_close(card);
++        return NULL;
++    }
+     if (card->path != NULL && path_exists(card->path)) {
+         if (!load_container(card)) {
+             fprintf(stderr, "[card] invalid card container: %s\n", card->path);
+@@ -442,6 +493,14 @@ void dol_card_close(DolMemoryCard* card) {
+     if (card == NULL)
+         return;
+     clear_files(card);
++#ifdef _WIN32
++    if (card->lock_handle != NULL)
++        CloseHandle(card->lock_handle);
++#else
++    if (card->lock_fd >= 0)
++        close(card->lock_fd);
++#endif
++    // Do not unlink the lock file: another opener may already hold its inode.
+     free(card->path);
+     free(card);
+ }
+-- 
+2.46.0
+

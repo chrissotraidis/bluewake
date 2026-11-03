@@ -1,0 +1,49 @@
+From 3a876b15d0eb0ce5d406b39fb720af98e434581f Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 08:42:09 -0500
+Subject: [PATCH] aurora: DOL_GX_FIFO_BATCH cuts the worker's stream at another
+ size
+
+The game thread hands gather-pipe bytes to the translation worker in 1 KB
+batches, and where a batch ends depends on thread timing, so the parser's
+carry-over of a command split across batches is exercised at places no fixed
+test reaches. DOL_GX_FIFO_BATCH=N (1..1024) publishes every N bytes instead.
+Wind Waker's title, retraces 700-880, every second retrace: batches of 7 and 61
+bytes render byte-identical frames to the default at every common retrace.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 3de4bf9c64..2ed95d336d 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -542,10 +542,24 @@ void g_fifo_publish_local() {
+         g_fifo_worker_cv.notify_one();
+ }
+ 
++// DOL_GX_FIFO_BATCH=N publishes every N bytes instead of kFifoLocalBatch, so
++// the worker sees the stream cut at other places (a test of the parser's
++// carry-over across batches; the guest's work does not depend on it).
++static std::size_t fifo_local_batch_limit() {
++    static const std::size_t limit = [] {
++        const char* env = std::getenv("DOL_GX_FIFO_BATCH");
++        const long value = env != nullptr ? std::strtol(env, nullptr, 10) : 0;
++        return value > 0 && value <= static_cast<long>(kFifoLocalBatch)
++                   ? static_cast<std::size_t>(value)
++                   : kFifoLocalBatch;
++    }();
++    return limit;
++}
++
+ inline void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
+     std::memcpy(g_fifo_local + g_fifo_local_size, bytes, size);
+     g_fifo_local_size += size;
+-    if (g_fifo_local_size >= kFifoLocalBatch)
++    if (g_fifo_local_size >= fifo_local_batch_limit())
+         g_fifo_publish_local();
+ }
+ 
+-- 
+2.41.0
+

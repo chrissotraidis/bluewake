@@ -1,0 +1,46 @@
+From 2d6063614a9bc899f6b4d11c7e7b3cd66e4d96f3 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sun, 27 Sep 2026 21:30:23 +0900
+Subject: [PATCH] BlueWake: the 2D layer's 640x479 scissor covers the last line
+ (patch 0097)
+
+Wind Waker draws its 2D layer (HUD, menus, and the fade to and from black)
+with a 640x479 scissor, so the frame's last line kept the previous scene
+through every fade: hidden in a television's overscan, but a strip of the old
+area along the bottom of an iPad during transitions. That exact full-width
+scissor is extended to 480 lines (DOL_GXCORE_KEEP_SCISSOR_479=1 restores it).
+---
+ GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index a3ccde9..d7732a8 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -844,11 +844,22 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     });
+   }
+   if (plan.scissor_valid) {
++    // Wind Waker draws its 2D layer (HUD, menus and the fade to and from
++    // black) with a 640x479 scissor, so the frame's last line keeps the
++    // previous scene through every fade. A television hides that line in its
++    // overscan; an iPad shows it as a strip of the old area along the bottom
++    // during transitions. Extend that full-width scissor to the full frame.
++    uint32_t scissorHeight = plan.scissor_height;
++    static const bool s_keepLastLine = std::getenv("DOL_GXCORE_KEEP_SCISSOR_479") != nullptr;
++    if (!s_keepLastLine && plan.scissor_x == 0 && plan.scissor_y == 0 && plan.scissor_width == 640 &&
++        plan.scissor_height == 479) {
++      scissorHeight = 480;
++    }
+     gx::set_logical_scissor({
+         .x = plan.scissor_x,
+         .y = plan.scissor_y,
+         .width = plan.scissor_width,
+-        .height = plan.scissor_height,
++        .height = static_cast<int32_t>(scissorHeight),
+     });
+   }
+ 
+-- 
+2.46.0
+

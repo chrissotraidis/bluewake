@@ -1,0 +1,417 @@
+From ec87671307b2848c7a5723b731afd1c5a7c36d48 Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Wed, 30 Sep 2026 19:19:03 -0400
+Subject: [PATCH] Save states: the GX front end's and gxcore's state, a drain,
+ and a cut after a load
+
+dol_aurora_gx_save_state drains the FIFO worker and returns the retail GX
+front end's register model (CP/XF/BP, TMEM palettes, texture and copy
+bindings, with the host-only resolver, FIFO copy and trace cleared) plus the
+bytes of a command the guest has not finished writing, and the gxcore sink's
+register state and cross-draw attribute cache. dol_aurora_gx_load_state puts
+them back under this run's resolver: texture, palette and copy ranges are
+resolved again against the restored guest memory, the texture cache is
+emptied, and Smooth Motion's next game frame gets no in-between frames
+(frame_interp::request_cut), as the frame before it is not the one it
+follows. dol_aurora_gx_drain waits for the worker to finish what the guest
+has written, so a load can replace guest memory the worker would otherwise
+still be reading. dol_hle_callback_idle tells a host whether a memory card
+completion callback is queued or running, when a state must not be taken.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 71 ++++++++++++++++
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  |  5 ++
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  3 +
+ .../aurora_recomp/retail_gx_frontend.hpp      |  9 +++
+ .../frontend/src/retail_gx_frontend.cpp       | 80 +++++++++++++++++++
+ .../include/gxruntime/gxcore/gxcore.hpp       |  7 ++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 42 ++++++++++
+ GXRuntime/include/gxruntime/aurora_backend.h  | 15 ++++
+ GXRuntime/include/gxruntime/hle.h             |  3 +
+ GXRuntime/src/hle/hle_core.c                  |  4 +
+ 10 files changed, 239 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 4fb32f658f..46d9a8ac18 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -26,6 +26,7 @@
+ #include <signal.h>
+ #include <unistd.h>
+ #include "../../graphics/aurora/lib/gfx/render_worker.hpp"
++#include "../../graphics/aurora/lib/gfx/frame_interp.hpp"
+ 
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+ // gxcore substrate submission lives in the Aurora fork (lib/gfx/gxcore_draw.cpp),
+@@ -1912,6 +1913,76 @@ void aurora_backend_set_guest_address_resolver(
+     }
+ }
+ 
++// Save states (debugging). The blob: a magic, the front end's and the gxcore
++// sink's sizes, then their states. The worker is drained on both sides, so the
++// front end has parsed every byte the guest wrote and nothing is in flight.
++size_t dol_aurora_gx_save_state(void** out) {
++    if (out == nullptr)
++        return 0;
++    *out = nullptr;
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    if (!gx_aurora::g_initialized || !gx_aurora::g_shadow_frontend_enabled)
++        return 0;
++    gx_aurora::shadow_frontend_flush_pending();
++    if (gx_aurora::g_shadow_frontend_failed)
++        return 0;
++    const std::vector<std::uint8_t> front = gx_aurora::g_shadow_frontend.save_state();
++    const std::vector<std::uint8_t> sink = gx_aurora::g_core_sink.save_state();
++    const std::uint32_t header[3] = {0x47585354u /* "GXST" */,
++                                     static_cast<std::uint32_t>(front.size()),
++                                     static_cast<std::uint32_t>(sink.size())};
++    const size_t size = sizeof header + front.size() + sink.size();
++    auto* blob = static_cast<std::uint8_t*>(std::malloc(size));
++    if (blob == nullptr)
++        return 0;
++    std::memcpy(blob, header, sizeof header);
++    std::memcpy(blob + sizeof header, front.data(), front.size());
++    std::memcpy(blob + sizeof header + front.size(), sink.data(), sink.size());
++    *out = blob;
++    return size;
++#else
++    return 0;
++#endif
++}
++
++void dol_aurora_gx_drain(void) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    if (gx_aurora::g_initialized && gx_aurora::g_shadow_frontend_enabled)
++        gx_aurora::shadow_frontend_flush_pending();
++#endif
++}
++
++bool dol_aurora_gx_load_state(const void* data, size_t size) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    if (!gx_aurora::g_initialized || !gx_aurora::g_shadow_frontend_enabled || data == nullptr)
++        return false;
++    std::uint32_t header[3];
++    if (size < sizeof header)
++        return false;
++    std::memcpy(header, data, sizeof header);
++    if (header[0] != 0x47585354u || size != sizeof header + (size_t)header[1] + header[2])
++        return false;
++    // Whatever this run had buffered belongs to the frame being replaced.
++    gx_aurora::shadow_frontend_flush_pending();
++    const auto* bytes = static_cast<const std::uint8_t*>(data) + sizeof header;
++    if (!gx_aurora::g_shadow_frontend.load_state(bytes, header[1]))
++        return false;
++    if (gx_aurora::g_gx_core_enabled &&
++        !gx_aurora::g_core_sink.load_state(bytes + header[1], header[2]))
++        return false;
++    // Textures decoded from this run's memory are not the state's, and the
++    // frame before the next is not the one it follows (no in-between frame).
++    aurora::gfx::gxcore::reset_texture_cache();
++    aurora::gfx::frame_interp::request_cut();
++    gx_aurora::g_shadow_frontend_failed = false;
++    return true;
++#else
++    (void)data;
++    (void)size;
++    return false;
++#endif
++}
++
+ void aurora_backend_configure_vi(u32 tv_mode, u16 fb_width, u16 efb_height,
+                                  u16 xfb_height, u16 vi_width, u16 vi_height) {
+     if (!gx_aurora::g_initialized)
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 861e792429..331d581421 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -1801,6 +1801,9 @@ int frame_steps() noexcept { return g_frameSteps; }
+ void set_steps(int steps) noexcept { g_steps.store(std::clamp(steps, 1, kMaxSteps), std::memory_order_relaxed); }
+ int steps() noexcept { return g_steps.load(std::memory_order_relaxed); }
+ bool frame_skipped() noexcept { return g_frameSkipped; }
++
++std::atomic<bool> g_cutRequested{false};
++void request_cut() noexcept { g_cutRequested.store(true, std::memory_order_release); }
+ void note_overload(const char* why) noexcept {
+   g_overloadWhy.store(why, std::memory_order_relaxed);
+   g_overloaded.store(true, std::memory_order_relaxed);
+@@ -1873,6 +1876,8 @@ bool last_blend_repeated() noexcept { return g_blendRepeated; }
+ 
+ bool frame_verdict() noexcept {
+   g_lastVerdict = false;
++  if (g_cutRequested.exchange(false, std::memory_order_acq_rel))
++    return false;
+   if (!enabled() || g_frameSkipped || !g_havePrevious || g_frameCounts.blended == 0)
+     return false;
+   // A cut: most draws have a counterpart that is not plausibly the same thing.
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index 4e6ad6b275..547a09d1f9 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -47,6 +47,9 @@ int frame_steps() noexcept;
+ // in-between frames, or none (frame_skipped), until it has been calm a while.
+ void note_overload(const char* why) noexcept;
+ bool frame_skipped() noexcept;
++// A save state was loaded: the next game frame gets no in-between frames, as
++// the frame before it is not the one it follows.
++void request_cut() noexcept;
+ 
+ // The key for a draw's vertex stream; 0 when the plan carries no payload.
+ uint64_t draw_key(const gxruntime::gxcore::DrawPlan& plan) noexcept;
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index 7028113fa1..487fa233e9 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -95,6 +95,15 @@ public:
+   const DolGxRecompState& state() const { return state_; }
+   DolGxRecompState& state() { return state_; }
+ 
++  // Save states. save_state is the register model (CP/XF/BP, TMEM palettes,
++  // texture and copy bindings) plus the bytes of a command the guest has not
++  // finished writing; take it with every buffered byte parsed (the backend
++  // drains its worker first). load_state puts it back under this front end's
++  // own resolver, resolving the texture, palette and copy ranges again against
++  // the (restored) guest memory; a range that no longer resolves is dropped.
++  std::vector<std::uint8_t> save_state() const;
++  bool load_state(const std::uint8_t* data, std::size_t size);
++
+   std::span<const DolGxRecompTraceEvent> trace_events() const;
+   // Cumulative zero-vertex draw headers consumed as no-ops (s56 conformance:
+   // the frontend emits no Draw packet for them, but Aurora's live decoder
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index ad57afddf3..1d15a452da 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <cstring>
+ #include <cstdio>
++#include <memory>
+ #include <new>
+ 
+ namespace gxruntime::aurora_recomp {
+@@ -330,6 +331,85 @@ void RetailGxFrontend::reset(const DolGuestAddressResolver* resolver) {
+   last_error_d_ = 0u;
+ }
+ 
++namespace {
++
++constexpr std::uint32_t kFrontendStateMagic = 0x47585346u; // "GXSF"
++
++void resolve_saved_range(const DolGuestAddressResolver& resolver,
++                         DolGuestResolvedRange& range, bool& valid) {
++  if (!valid)
++    return;
++  DolGuestResolvedRange out{};
++  if (dol_guest_address_resolver_resolve(&resolver, range.address, range.size,
++                                         range.space, range.resource, &out)) {
++    range = out;
++  } else {
++    range = DolGuestResolvedRange{};
++    valid = false;
++  }
++}
++
++} // namespace
++
++std::vector<std::uint8_t> RetailGxFrontend::save_state() const {
++  // Header, the register model with its host-only parts (resolver, the C
++  // parser's FIFO copy, the per-flush event trace) cleared, the stale-palette
++  // mask and the unparsed tail.
++  const std::uint32_t header[3] = {
++      kFrontendStateMagic, static_cast<std::uint32_t>(sizeof(DolGxRecompState)),
++      static_cast<std::uint32_t>(fifo_buffer_.size())};
++  std::vector<std::uint8_t> out(sizeof header + sizeof(DolGxRecompState) + 1u +
++                                fifo_buffer_.size());
++  std::uint8_t* at = out.data();
++  std::memcpy(at, header, sizeof header);
++  at += sizeof header;
++  // On the heap: the state is most of a megabyte.
++  auto saved = std::make_unique<DolGxRecompState>(state_);
++  std::memset(&saved->resolver, 0, sizeof saved->resolver);
++  saved->fifo.size = 0u;
++  std::memset(saved->fifo.bytes, 0, sizeof saved->fifo.bytes);
++  saved->trace_count = 0u;
++  std::memset(saved->trace, 0, sizeof saved->trace);
++  std::memcpy(at, saved.get(), sizeof(DolGxRecompState));
++  at += sizeof(DolGxRecompState);
++  *at++ = tlut_stale_mask_;
++  if (!fifo_buffer_.empty())
++    std::memcpy(at, fifo_buffer_.data(), fifo_buffer_.size());
++  return out;
++}
++
++bool RetailGxFrontend::load_state(const std::uint8_t* data, std::size_t size) {
++  std::uint32_t header[3];
++  if (data == nullptr || size < sizeof header + sizeof(DolGxRecompState) + 1u)
++    return false;
++  std::memcpy(header, data, sizeof header);
++  if (header[0] != kFrontendStateMagic || header[1] != sizeof(DolGxRecompState) ||
++      size != sizeof header + sizeof(DolGxRecompState) + 1u + header[2])
++    return false;
++  const DolGuestAddressResolver resolver = state_.resolver;
++  // The packet sequence keeps counting: a sink that has seen packets from this
++  // front end requires it to rise.
++  const std::uint64_t sequence = next_packet_sequence_;
++  reset(&resolver);
++  next_packet_sequence_ = sequence;
++  const std::uint8_t* at = data + sizeof header;
++  std::memcpy(&state_, at, sizeof(DolGxRecompState));
++  at += sizeof(DolGxRecompState);
++  state_.resolver = resolver;
++  state_.fifo.size = 0u;
++  state_.trace_count = 0u;
++  for (auto& texture : state_.textures)
++    resolve_saved_range(resolver, texture.range, texture.valid);
++  for (auto& tlut : state_.tluts)
++    resolve_saved_range(resolver, tlut.range, tlut.valid);
++  for (auto& tlut : state_.tmem_tluts)
++    resolve_saved_range(resolver, tlut.range, tlut.valid);
++  resolve_saved_range(resolver, state_.copy.range, state_.copy.range_valid);
++  tlut_stale_mask_ = *at++;
++  fifo_buffer_.assign(at, at + header[2]);
++  return true;
++}
++
+ bool RetailGxFrontend::set_vertex_layout(std::uint8_t vtx_fmt,
+                                          std::uint32_t vertex_size) {
+   return dol_gx_recomp_set_vertex_layout(&state_, vtx_fmt, vertex_size);
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 49fd577df1..0b40141c91 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -184,6 +184,13 @@ public:
+   // Frame boundary: plan the final pending draw of the frame.
+   void flush_frame();
+ 
++  // Save states: the register model the next draws are planned against and
++  // the cross-draw attribute cache. A state is taken with the front end
++  // drained; a draw still pending in the consumer is not carried (load plans
++  // it first, then starts the next draw from the saved registers).
++  std::vector<std::uint8_t> save_state() const;
++  bool load_state(const std::uint8_t* data, std::size_t size);
++
+   const GapCounters& counters() const { return counters_; }
+   GapCounters& counters() { return counters_; }
+   const gxruntime::aurora_recomp::ConsumingAuroraRenderSink& consumer() const {
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index e2f017c4ba..9a6ade4d72 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -7,6 +7,7 @@
+ #include <cstring>
+ #include <limits>
+ #include <memory>
++#include <type_traits>
+ 
+ namespace gxruntime::gxcore {
+ 
+@@ -1794,4 +1795,45 @@ bool GxCoreSink::submit_packet(const ar::RenderPacket& packet) {
+ 
+ void GxCoreSink::flush_frame() { consumer_.flush_assembly(); }
+ 
++namespace {
++constexpr std::uint32_t kSinkStateMagic = 0x47585343u; // "GXSC"
++static_assert(std::is_trivially_copyable_v<GxCoreState>);
++static_assert(std::is_trivially_copyable_v<CachedVertexAttrs>);
++} // namespace
++
++std::vector<std::uint8_t> GxCoreSink::save_state() const {
++  const std::uint32_t header[3] = {kSinkStateMagic,
++                                   static_cast<std::uint32_t>(sizeof(GxCoreState)),
++                                   static_cast<std::uint32_t>(sizeof(CachedVertexAttrs))};
++  std::vector<std::uint8_t> out(sizeof header + sizeof(GxCoreState) +
++                                sizeof(CachedVertexAttrs));
++  std::uint8_t* at = out.data();
++  std::memcpy(at, header, sizeof header);
++  at += sizeof header;
++  std::memcpy(at, &live_state_, sizeof(GxCoreState));
++  at += sizeof(GxCoreState);
++  std::memcpy(at, &cached_attrs_, sizeof(CachedVertexAttrs));
++  return out;
++}
++
++bool GxCoreSink::load_state(const std::uint8_t* data, std::size_t size) {
++  std::uint32_t header[3];
++  if (data == nullptr ||
++      size != sizeof header + sizeof(GxCoreState) + sizeof(CachedVertexAttrs))
++    return false;
++  std::memcpy(header, data, sizeof header);
++  if (header[0] != kSinkStateMagic || header[1] != sizeof(GxCoreState) ||
++      header[2] != sizeof(CachedVertexAttrs))
++    return false;
++  consumer_.flush_assembly();
++  std::memcpy(&live_state_, data + sizeof header, sizeof(GxCoreState));
++  std::memcpy(&cached_attrs_, data + sizeof header + sizeof(GxCoreState),
++              sizeof(CachedVertexAttrs));
++  pending_state_ = live_state_;
++  since_draw_.clear();
++  replay_overflow_ = false;
++  scope_ = scope_left_ = scope_part_ = 0u;
++  return true;
++}
++
+ } // namespace gxruntime::gxcore
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 061ed33149..3cadfff447 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -5,6 +5,7 @@
+ #include "gxruntime/platform.h"
+ 
+ #include <stdbool.h>
++#include <stddef.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -77,6 +78,20 @@ void dol_aurora_frame_timing(DolAuroraFrameTiming* out);
+    at each retrace so a frame finished while the guest idles is not held. */
+ void aurora_backend_service_present(void);
+ 
++/* Save states (debugging). dol_aurora_gx_save_state drains the FIFO worker and
++   returns, in a malloc'd blob (free it), the retail GX front end's register
++   model with the bytes of any command the guest has not finished writing, and
++   the gxcore sink's register state; 0 when there is nothing to save (the
++   recomp path is off, or the front end has failed). dol_aurora_gx_load_state
++   puts one back: resolved texture ranges are resolved again against the
++   current guest memory and the texture cache is emptied. Renderer caches and
++   EFB copies are not saved; they are rebuilt as the game draws. */
++size_t dol_aurora_gx_save_state(void** out);
++bool dol_aurora_gx_load_state(const void* data, size_t size);
++/* Waits for the FIFO worker to finish what the guest has written: before a
++   load replaces guest memory the worker must not still be reading it. */
++void dol_aurora_gx_drain(void);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/GXRuntime/include/gxruntime/hle.h b/GXRuntime/include/gxruntime/hle.h
+index e6f00d5b78..0a33ec7dd0 100644
+--- a/GXRuntime/include/gxruntime/hle.h
++++ b/GXRuntime/include/gxruntime/hle.h
+@@ -34,6 +34,9 @@ void dol_hle_card_close(void);
+ bool dol_hle_poll_callback(CPUState* cpu);
+ bool dol_hle_queue_guest_callback(u32 address, s32 channel, s32 result);
+ bool dol_hle_handle_callback_return(CPUState* cpu, u32 address);
++// True when no completion callback is queued or running: a save state taken
++// then has none of the HLE card's asynchronous work in flight.
++bool dol_hle_callback_idle(void);
+ bool dol_hle_handle_gx_return(CPUState* cpu, u32 address);
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/GXRuntime/src/hle/hle_core.c b/GXRuntime/src/hle/hle_core.c
+index 2bbe975498..937202dbda 100644
+--- a/GXRuntime/src/hle/hle_core.c
++++ b/GXRuntime/src/hle/hle_core.c
+@@ -160,6 +160,10 @@ bool dol_hle_poll_callback(CPUState* cpu) {
+     return true;
+ }
+ 
++bool dol_hle_callback_idle(void) {
++    return !g_callback_active && g_callback_count == 0u;
++}
++
+ bool dol_hle_handle_callback_return(CPUState* cpu, u32 address) {
+     if (address == HLE_CALLBACK_RETURN && g_callback_active) {
+         restore_callback_context(cpu, &g_callback_context);
+-- 
+2.55.0
+

@@ -1,0 +1,145 @@
+From 1f08d14ec511d840b2bb706362c78c254915985d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Tue, 25 Aug 2026 16:26:06 -0500
+Subject: [PATCH] runtime: advance audio DMA from guest clock
+
+
+diff --git a/GXRuntime/include/gxruntime/audio_dma.h b/GXRuntime/include/gxruntime/audio_dma.h
+index f737f44ede..4f75dbdedb 100644
+--- a/GXRuntime/include/gxruntime/audio_dma.h
++++ b/GXRuntime/include/gxruntime/audio_dma.h
+@@ -76,19 +76,27 @@ u16 dol_audio_dma_blocks_left(const DolAudioDma* dma);
+ void dol_audio_dma_ack_interrupt(DolAudioDma* dma);
+ bool dol_audio_dma_interrupt_pending(const DolAudioDma* dma);
+ 
+-// Advance one guest-work unit. Today Strikers feeds this once per recompiled
+-// dispatch through the compatibility VI-clock API, but the unit is deliberately
+-// named as guest work so the caller can switch to instruction/cycle accounting
+-// when DolRecomp exposes it. Returns each 32-byte source chunk at the
+-// hardware's AID consumption cadence.
++// Advance one guest-work unit through the compatibility API. New runtimes
++// should use dol_audio_dma_advance with generated guest-cycle charges.
++// Returns each 32-byte source chunk at the hardware's AID cadence.
+ bool dol_audio_dma_poll(DolAudioDma* dma, u32* source_address);
+ 
++// Advance by an explicit number of units from the caller's guest clock.
++// Unlike poll(), this preserves variable generated-cycle charges and their
++// fractional progress toward the next 32-byte hardware chunk.
++bool dol_audio_dma_advance(DolAudioDma* dma, u64 work_units,
++                           u32* source_address);
++
+ // Consume one timed 32-byte big-endian stereo PCM16 chunk and send its eight
+ // frames to the installed platform audio sink. Returns false until the DMA
+ // cadence is ready or when the source callback fails.
+ bool dol_audio_dma_consume_pcm16_stereo(DolAudioDma* dma,
+                                         DolAudioDmaReadFn read_source,
+                                         void* user);
++bool dol_audio_dma_consume_pcm16_stereo_work(DolAudioDma* dma,
++                                             u64 work_units,
++                                             DolAudioDmaReadFn read_source,
++                                             void* user);
+ 
+ // AI/DSP-AID device register MMIO. The game writes the AI control register to
+ // select the AID sample rate; DSP control carries the AID interrupt status/mask
+diff --git a/GXRuntime/src/audio_dma.c b/GXRuntime/src/audio_dma.c
+index 61e5cd97e5..44b39f29ca 100644
+--- a/GXRuntime/src/audio_dma.c
++++ b/GXRuntime/src/audio_dma.c
+@@ -148,12 +148,14 @@ bool dol_audio_dma_interrupt_pending(const DolAudioDma* dma) {
+     return dma != NULL && dma->interrupt_pending;
+ }
+ 
+-bool dol_audio_dma_poll(DolAudioDma* dma, u32* source_address) {
++bool dol_audio_dma_advance(DolAudioDma* dma, u64 work_units,
++                           u32* source_address) {
+     if (dma == NULL || (dma->control & DOL_AUDIO_DMA_ENABLE) == 0)
+         return false;
+-    if (++dma->work_counter < dma->work_units_per_chunk)
++    dma->work_counter += work_units;
++    if (dma->work_counter < dma->work_units_per_chunk)
+         return false;
+-    dma->work_counter = 0;
++    dma->work_counter -= dma->work_units_per_chunk;
+ 
+     if (source_address != NULL)
+         *source_address = dma->current_source_address;
+@@ -169,15 +171,20 @@ bool dol_audio_dma_poll(DolAudioDma* dma, u32* source_address) {
+     return true;
+ }
+ 
+-bool dol_audio_dma_consume_pcm16_stereo(DolAudioDma* dma,
+-                                        DolAudioDmaReadFn read_source,
+-                                        void* user) {
++bool dol_audio_dma_poll(DolAudioDma* dma, u32* source_address) {
++    return dol_audio_dma_advance(dma, 1u, source_address);
++}
++
++bool dol_audio_dma_consume_pcm16_stereo_work(DolAudioDma* dma,
++                                             u64 work_units,
++                                             DolAudioDmaReadFn read_source,
++                                             void* user) {
+     u32 source_address = 0;
+     u8 bytes[DOL_AUDIO_DMA_FRAMES_PER_CHUNK * 4u];
+     s16 samples[DOL_AUDIO_DMA_FRAMES_PER_CHUNK * 2u];
+ 
+     if (read_source == NULL ||
+-        !dol_audio_dma_poll(dma, &source_address) ||
++        !dol_audio_dma_advance(dma, work_units, &source_address) ||
+         !read_source(user, source_address, bytes, sizeof bytes))
+         return false;
+ 
+@@ -189,6 +196,13 @@ bool dol_audio_dma_consume_pcm16_stereo(DolAudioDma* dma,
+     return true;
+ }
+ 
++bool dol_audio_dma_consume_pcm16_stereo(DolAudioDma* dma,
++                                        DolAudioDmaReadFn read_source,
++                                        void* user) {
++    return dol_audio_dma_consume_pcm16_stereo_work(dma, 1u, read_source,
++                                                   user);
++}
++
+ static u32 latched_dma_source(const DolAudioDma* dma) {
+     // Dolphin AUDIO_DMA_START_HI/LO form a 32-bit source address; the top 10
+     // bits of the high half and the low 11 bits (aligned to 32 bytes) are
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index 38beff0102..aadd4927f4 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -1890,10 +1890,18 @@ static void test_audio_dma(void) {
+     dol_audio_dma_ack_interrupt(&dma);
+     assert(dol_audio_dma_blocks_left(&dma) == 19u);
+ 
+-    for (u32 block = 0; block < 20u; block++) {
++    // Variable guest-cycle charges accumulate without losing the remainder.
++    u32 source = 0;
++    assert(!dol_audio_dma_advance(&dma, 5249u, &source));
++    assert(dol_audio_dma_advance(&dma, 1u, &source));
++    assert(source == 0x00100000u);
++    assert(!dol_audio_dma_advance(&dma, 5000u, &source));
++    assert(dol_audio_dma_advance(&dma, 250u, &source));
++    assert(source == 0x00100020u);
++
++    for (u32 block = 2u; block < 20u; block++) {
+         for (u32 work = 1; work < 5250u; work++)
+             assert(!dol_audio_dma_poll(&dma, NULL));
+-        u32 source = 0;
+         assert(dol_audio_dma_poll(&dma, &source));
+         assert(source == 0x00100000u + block * 32u);
+     }
+@@ -1925,11 +1933,10 @@ static void test_audio_dma_pcm_boundary(void) {
+     dol_audio_dma_write_control(&dma, DOL_AUDIO_DMA_ENABLE | 1u);
+     dol_audio_dma_ack_interrupt(&dma);
+ 
+-    for (u32 i = 0; i < 999u; i++)
+-        assert(!dol_audio_dma_consume_pcm16_stereo(&dma, test_audio_read,
+-                                                   (void*)pcm_chunk));
+-    assert(dol_audio_dma_consume_pcm16_stereo(&dma, test_audio_read,
+-                                              (void*)pcm_chunk));
++    assert(!dol_audio_dma_consume_pcm16_stereo_work(
++        &dma, 999u, test_audio_read, (void*)pcm_chunk));
++    assert(dol_audio_dma_consume_pcm16_stereo_work(
++        &dma, 1u, test_audio_read, (void*)pcm_chunk));
+     assert(g_captured_audio_frames == 8u);
+     assert(g_captured_audio[0] == (s16)0x8000);
+     assert(g_captured_audio[1] == (s16)0x7FFF);

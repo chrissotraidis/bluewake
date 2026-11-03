@@ -1,0 +1,44 @@
+From 8190098ea24f0b7d137188511c141b06f611bfe8 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 11:24:57 -0500
+Subject: [PATCH] runtime: expose the ARAM buffer to a DSP backend
+
+Dolphin's high-level DSP (the Zelda ucode) reads audio samples straight from
+ARAM through DSPManager::GetARAMPtr(). Add aram_buffer() so the BlueWake host
+can hand it the flat buffer the rest of the runtime already uses.
+---
+ GXRuntime/include/gxruntime/aram.h | 3 +++
+ GXRuntime/src/aram.c               | 4 ++++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/GXRuntime/include/gxruntime/aram.h b/GXRuntime/include/gxruntime/aram.h
+index 9c2f7bb37e..f7c35fa0d2 100644
+--- a/GXRuntime/include/gxruntime/aram.h
++++ b/GXRuntime/include/gxruntime/aram.h
+@@ -30,5 +30,8 @@ void aram_write(u32 ea, u64 value, u8 size);
+ // direction. Used by the ARStartDMA intercept.
+ void aram_dma_to_aram(const u8* ram, u32 ram_addr, u32 aram_addr, u32 length);
+ void aram_dma_to_ram(u8* ram, u32 ram_addr, u32 aram_addr, u32 length);
++// The flat ARAM buffer (ARAM_SIZE bytes, guest byte order), for a DSP backend
++// that addresses ARAM directly. NULL before aram_init.
++u8* aram_buffer(void);
+ 
+ #endif
+diff --git a/GXRuntime/src/aram.c b/GXRuntime/src/aram.c
+index 8cda8b4630..60c335b136 100644
+--- a/GXRuntime/src/aram.c
++++ b/GXRuntime/src/aram.c
+@@ -23,6 +23,10 @@ bool aram_contains(u32 ea) {
+     return ea >= ARAM_BASE && ea < ARAM_BASE + ARAM_SIZE;
+ }
+ 
++u8* aram_buffer(void) {
++    return g_aram;
++}
++
+ // Offset of a guest ARAM address into the buffer. Accepts both CPU-window
+ // addresses (>= ARAM_BASE) and raw ARAM-space offsets (< ARAM_SIZE), since the
+ // SDK uses both forms.
+-- 
+2.41.0
+

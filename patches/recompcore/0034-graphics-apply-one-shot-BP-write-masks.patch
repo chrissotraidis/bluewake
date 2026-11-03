@@ -1,0 +1,141 @@
+From f50c396aafa47aff3825a134dd521391e646147b Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 10:55:31 -0500
+Subject: [PATCH] graphics: apply one-shot BP write masks
+
+---
+ .../frontend/src/retail_gx_frontend.cpp       |  3 ++-
+ GXRuntime/include/gxruntime/gx_recomp.h       |  1 +
+ GXRuntime/src/gx_recomp.c                     | 20 +++++++++++++++++++
+ GXRuntime/src/gx_recomp_parser.c              |  3 ++-
+ GXRuntime/tests/runtime_tests.c               | 12 +++++++++++
+ 5 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 521feaf558..adda4a7627 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -690,9 +690,10 @@ bool RetailGxFrontend::parse_stream(std::span<const std::uint8_t> bytes,
+ 
+ bool RetailGxFrontend::handle_bp(std::uint32_t raw) {
+   const std::uint8_t reg = static_cast<std::uint8_t>(raw >> 24u);
+-  const std::uint32_t value = raw & 0x00FFFFFFu;
++  std::uint32_t value = raw & 0x00FFFFFFu;
+   if (!dol_gx_recomp_note_bp_reg(&state_, reg, value))
+     return false;
++  value = state_.bp_regs[reg];
+ 
+   std::uint8_t slot = 0;
+   if (map_image0_reg(reg, &slot) || map_image3_reg(reg, &slot))
+diff --git a/GXRuntime/include/gxruntime/gx_recomp.h b/GXRuntime/include/gxruntime/gx_recomp.h
+index 3dab324a62..76f08eb494 100644
+--- a/GXRuntime/include/gxruntime/gx_recomp.h
++++ b/GXRuntime/include/gxruntime/gx_recomp.h
+@@ -64,6 +64,7 @@ extern "C" {
+ #define DOL_GX_BP_REG_TX_SETIMAGE0_4 0xA8u
+ #define DOL_GX_BP_REG_TX_SETIMAGE3_4 0xB4u
+ #define DOL_GX_BP_REG_TX_SETTLUT_4 0xB8u
++#define DOL_GX_BP_REG_MASK 0xFEu
+ 
+ typedef enum DolGxRecompEventKind {
+     DOL_GX_RECOMP_EVENT_FIFO_BYTES = 1,
+diff --git a/GXRuntime/src/gx_recomp.c b/GXRuntime/src/gx_recomp.c
+index 2b3140dab4..698ad92954 100644
+--- a/GXRuntime/src/gx_recomp.c
++++ b/GXRuntime/src/gx_recomp.c
+@@ -456,6 +456,8 @@ void dol_gx_recomp_init(DolGxRecompState* gx,
+     if (gx == NULL)
+         return;
+     memset(gx, 0, sizeof(*gx));
++    gx->bp_regs[DOL_GX_BP_REG_MASK] = 0x00FFFFFFu;
++    gx->bp_valid[DOL_GX_BP_REG_MASK] = true;
+     if (resolver != NULL)
+         gx->resolver = *resolver;
+ }
+@@ -837,6 +839,24 @@ bool dol_gx_recomp_note_display_copy(DolGxRecompState* gx, u32 clear) {
+ bool dol_gx_recomp_note_bp_reg(DolGxRecompState* gx, u8 reg, u32 value) {
+     if (gx == NULL)
+         return false;
++    value &= 0x00FFFFFFu;
++    if (reg == DOL_GX_BP_REG_MASK) {
++        gx->bp_regs[reg] = value;
++        gx->bp_valid[reg] = true;
++        dol_gx_recomp_trace_event(gx, DOL_GX_RECOMP_EVENT_BP_REG, reg, value,
++                                  0, 0);
++        return true;
++    }
++
++    /* BP mask is a one-shot write mask. J3D relies on this when its material
++     * display lists update blend factors without changing color/alpha writes. */
++    const u32 mask = gx->bp_valid[DOL_GX_BP_REG_MASK]
++                         ? gx->bp_regs[DOL_GX_BP_REG_MASK]
++                         : 0x00FFFFFFu;
++    const u32 old = gx->bp_valid[reg] ? gx->bp_regs[reg] : 0u;
++    value = (old & ~mask) | (value & mask);
++    gx->bp_regs[DOL_GX_BP_REG_MASK] = 0x00FFFFFFu;
++    gx->bp_valid[DOL_GX_BP_REG_MASK] = true;
+     gx->bp_regs[reg] = value;
+     gx->bp_valid[reg] = true;
+     dol_gx_recomp_trace_event(gx, DOL_GX_RECOMP_EVENT_BP_REG, reg, value, 0, 0);
+diff --git a/GXRuntime/src/gx_recomp_parser.c b/GXRuntime/src/gx_recomp_parser.c
+index 8d97ad8f45..c305ebce8a 100644
+--- a/GXRuntime/src/gx_recomp_parser.c
++++ b/GXRuntime/src/gx_recomp_parser.c
+@@ -73,9 +73,10 @@ static bool replay_handle_bp(DolGxRecompState* gx, u32 raw) {
+     if (gx == NULL)
+         return false;
+     const u8 reg = (u8)(raw >> 24);
+-    const u32 value = raw & 0x00FFFFFFu;
++    u32 value = raw & 0x00FFFFFFu;
+     if (!dol_gx_recomp_note_bp_reg(gx, reg, value))
+         return false;
++    value = gx->bp_regs[reg];
+ 
+     u8 slot = 0;
+     if (dol_gx_recomp_map_image0_reg(reg, &slot) || dol_gx_recomp_map_image3_reg(reg, &slot))
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index 74d19798ae..f9a70b317a 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -622,6 +622,14 @@ static void test_gx_recomp_modules(void) {
+     assert(gx.cull_all);
+     assert(dol_gx_recomp_note_bp_reg(&gx, DOL_GX_BP_REG_GENMODE, 0u));
+     assert(!gx.cull_all);
++
++    /* J3D material display lists update blend factors through a one-shot BP
++     * mask while preserving dither/color/alpha writes from J3DSys::drawInit. */
++    assert(dol_gx_recomp_note_bp_reg(&gx, 0x41u, 0x00001Cu));
++    assert(dol_gx_recomp_note_bp_reg(&gx, DOL_GX_BP_REG_MASK, 0x001FE3u));
++    assert(dol_gx_recomp_note_bp_reg(&gx, 0x41u, 0x003104u));
++    assert(gx.bp_regs[0x41u] == 0x00111Cu);
++    assert(gx.bp_regs[DOL_GX_BP_REG_MASK] == 0x00FFFFFFu);
+     assert(dol_gx_recomp_note_xf_load(&gx, 0x0040u, 4u));
+     assert(gx.last_xf_base == 0x0040u);
+     assert(gx.last_xf_count == 4u);
+@@ -637,6 +645,7 @@ static void test_gx_recomp_modules(void) {
+     bool saw_tlut = false;
+     bool saw_copy = false;
+     bool saw_cull = false;
++    bool saw_masked_cmode = false;
+     bool saw_xf = false;
+     for (u32 i = 0; i < trace_count; ++i) {
+         saw_fifo |= trace[i].kind == DOL_GX_RECOMP_EVENT_FIFO_BYTES;
+@@ -645,6 +654,8 @@ static void test_gx_recomp_modules(void) {
+         saw_tlut |= trace[i].kind == DOL_GX_RECOMP_EVENT_TLUT;
+         saw_copy |= trace[i].kind == DOL_GX_RECOMP_EVENT_COPY_DESTINATION;
+         saw_cull |= trace[i].kind == DOL_GX_RECOMP_EVENT_CULL_ALL;
++        saw_masked_cmode |= trace[i].kind == DOL_GX_RECOMP_EVENT_BP_REG &&
++                            trace[i].a == 0x41u && trace[i].b == 0x00111Cu;
+         saw_xf |= trace[i].kind == DOL_GX_RECOMP_EVENT_XF_LOAD;
+     }
+     assert(saw_fifo);
+@@ -653,6 +664,7 @@ static void test_gx_recomp_modules(void) {
+     assert(saw_tlut);
+     assert(saw_copy);
+     assert(saw_cull);
++    assert(saw_masked_cmode);
+     assert(saw_xf);
+ 
+     dol_guest_memory_shutdown(&memory);
+-- 
+2.41.0

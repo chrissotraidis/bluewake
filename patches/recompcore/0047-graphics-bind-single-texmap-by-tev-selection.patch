@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Tue, 1 Sep 2026 02:25:00 -0500
+Subject: [PATCH] graphics: bind single texmap by TEV selection
+
+---
+ GXRuntime/graphics/gxcore/src/gxcore.cpp       | 42 +++++++++++++++-----------
+ .../graphics/gxcore/tests/gxcore_wgsl_test.cpp | 29 ++++++++++++++++++
+ 2 files changed, 56 insertions(+), 15 deletions(-)
+
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 48110c7aad..d311c00c30 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -1375,28 +1375,40 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     }
+   }
+   if (key.textured != 0u) {
++    const std::uint32_t used = used_texmap_mask(key);
++    const ar::ConsumedTexture* primary = &draw.texture;
++    if (texmap_popcount(used) == 1u) {
++      for (std::uint32_t t = 0; t < 8u; ++t) {
++        if ((used & (1u << t)) == 0u)
++          continue;
++        const ar::ConsumedTexture& candidate = draw.textures[t];
++        if (candidate.valid && candidate.resolved && candidate.width > 0u &&
++            candidate.height > 0u)
++          primary = &candidate;
++        break;
++      }
++    }
+     plan.has_texture = true;
+-    plan.tex_slot = draw.texture.slot & 7u;
+-    plan.tex_address = draw.texture.address;
+-    plan.tex_size = draw.texture.size;
+-    plan.tex_format = draw.texture.format;
+-    plan.tex_width = draw.texture.width;
+-    plan.tex_height = draw.texture.height;
+-    plan.tex_data = draw.texture.host_data;
+-    plan.tex_available = draw.texture.host_available;
++    plan.tex_slot = primary->slot & 7u;
++    plan.tex_address = primary->address;
++    plan.tex_size = primary->size;
++    plan.tex_format = primary->format;
++    plan.tex_width = primary->width;
++    plan.tex_height = primary->height;
++    plan.tex_data = primary->host_data;
++    plan.tex_available = primary->host_available;
+     // Carry the resolved TLUT palette for CI-format textures (A3 decode
+     // consumer). Frontend leaves has_tlut false for non-CI/unresolved.
+-    plan.has_tlut = draw.texture.has_tlut;
+-    plan.tlut_address = draw.texture.tlut_address;
+-    plan.tlut_format = draw.texture.tlut_format;
+-    plan.tlut_entries = draw.texture.tlut_entries;
+-    plan.tlut_data = draw.texture.tlut_host_data;
+-    plan.tlut_available = draw.texture.tlut_host_available;
++    plan.has_tlut = primary->has_tlut;
++    plan.tlut_address = primary->tlut_address;
++    plan.tlut_format = primary->tlut_format;
++    plan.tlut_entries = primary->tlut_entries;
++    plan.tlut_data = primary->tlut_host_data;
++    plan.tlut_available = primary->tlut_host_available;
+     // Multi-texmap (63/Mfin): when a TEV combines >1 texmap (THP YUV Y/U/V) the
+     // single flat texture above is not enough. Populate the per-texmap set from
+     // the per-slot bound textures. texmap_mask stays 0 for <=1 distinct texmap
+-    // so single-texmap draws keep the flat fast path byte-for-byte.
+-    const std::uint32_t used = used_texmap_mask(key);
++    // so single-texmap draws retain the flat renderer path.
+     if (texmap_popcount(used) > 1u) {
+       plan.texmap_mask = used;
+       for (std::uint32_t t = 0; t < 8u; ++t) {
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index bf54300af5..d2d0a0d44b 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -1068,6 +1068,35 @@ void test_tev_modulate() {
+   CHECK(counters.tev_multi_texmap == 0);
+   CHECK(counters.alpha_compare_ignored == 0);
+ 
++  // A single-texmap draw must bind the texmap selected by TEV, not the most
++  // recently written texture packet. J3D commonly leaves another slot as the
++  // last write before drawing hair and other layered materials.
++  {
++    gxc::GxCoreState slot_state = state;
++    slot_state.apply(bp(0x28, 3u | (1u << 6))); // stage 0 samples texmap 3
++    ar::ConsumedDraw slot_draw = draw;
++    slot_draw.texture.slot = 7u;
++    slot_draw.texture.address = 0x80700000u;
++    static const std::uint8_t slot3_bytes[64] = {};
++    slot_draw.textures[3] = slot_draw.texture;
++    slot_draw.textures[3].slot = 3u;
++    slot_draw.textures[3].address = 0x80330000u;
++    slot_draw.textures[3].size = sizeof slot3_bytes;
++    slot_draw.textures[3].host_data = slot3_bytes;
++    slot_draw.textures[3].host_available = sizeof slot3_bytes;
++
++    gxc::GapCounters slot_gaps;
++    const gxc::DrawPlan slot_plan =
++        slot_state.build_draw_plan(slot_draw, slot_gaps);
++    CHECK(slot_plan.ok);
++    CHECK(gxc::used_texmap_mask(slot_plan.pipeline.shader) == (1u << 3u));
++    CHECK(slot_plan.texmap_mask == 0u);
++    CHECK(slot_plan.tex_slot == 3u);
++    CHECK(slot_plan.tex_address == 0x80330000u);
++    CHECK(slot_plan.tex_data == slot3_bytes);
++    CHECK(slot_plan.tex_available == sizeof slot3_bytes);
++  }
++
+   // Aliased tev-color vs konst decode (both live off 0xE0/0xE1).
+   CHECK(plan.pixel_constants.colors[0][0] == 100);
+   CHECK(plan.pixel_constants.colors[0][1] == 150);
+-- 
+2.50.1
+

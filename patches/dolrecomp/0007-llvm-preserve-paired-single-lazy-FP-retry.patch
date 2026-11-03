@@ -1,0 +1,373 @@
+From fd22d7e91bfd3980c8ebe5c6e202af2bb67c007d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 13:11:54 -0500
+Subject: [PATCH] llvm: preserve paired-single lazy-FP retry
+
+---
+ CMakeLists.txt                       |  1 +
+ src/app/pipeline.c                   |  2 +-
+ src/backend/llvm/control_flow.cpp    |  6 ++--
+ src/backend/llvm/emitter.cpp         | 11 +++++++
+ src/backend/llvm/emitter.h           |  3 ++
+ src/backend/llvm/exits.cpp           |  6 ++--
+ src/backend/llvm/register_state.cpp  | 13 ++++----
+ src/backend/llvm/retry_regions.cpp   | 48 ++++++++++++++++++++++++++++
+ tests/cmake/check_llvm_codegen.cmake | 16 +++++-----
+ tests/llvm_fixture.cpp               |  8 +++++
+ tests/llvm_ir_test.cpp               | 17 +++++++---
+ tests/llvm_smoke_test.c              | 23 +++++++++++++
+ 12 files changed, 127 insertions(+), 27 deletions(-)
+ create mode 100644 src/backend/llvm/retry_regions.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 27f98fe..7f18455 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -108,6 +108,7 @@ if(DOLRECOMP_ENABLE_LLVM)
+         src/backend/llvm/state_controls.cpp
+         src/backend/llvm/exits.cpp
+         src/backend/llvm/instructions.cpp
++        src/backend/llvm/retry_regions.cpp
+         src/backend/llvm/runtime.cpp
+         src/backend/llvm/floating_point.cpp
+         src/backend/llvm/fp_fixups.cpp
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index f6cadf4..32e57a6 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v21"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v22"
+ 
+ typedef struct {
+     const PPCInst* insts;
+diff --git a/src/backend/llvm/control_flow.cpp b/src/backend/llvm/control_flow.cpp
+index bd0c580..0938c94 100644
+--- a/src/backend/llvm/control_flow.cpp
++++ b/src/backend/llvm/control_flow.cpp
+@@ -101,17 +101,17 @@ void FunctionEmitter::emitFallbackHandler() {
+       BasicBlock::Create(context_, "fallback_repeat_check", function_);
+   u32 nativeEntries = 0;
+   for (u32 i = 0; i < source_.block_count; i++) {
+-    nativeEntries += region_leaders_[i] &&
++    nativeEntries += (region_leaders_[i] || retry_leaders_[i]) &&
+                      source_.blocks[i].terminator.kind != DOLIR_TERM_FALLBACK;
+   }
+   auto *dispatch = builder_.CreateSwitch(returnedPC, repeatCheck,
+                                          nativeEntries);
+   for (u32 i = 0; i < source_.block_count; i++) {
+-    if (!region_leaders_[i] ||
++    if ((!region_leaders_[i] && !retry_leaders_[i]) ||
+         source_.blocks[i].terminator.kind == DOLIR_TERM_FALLBACK)
+       continue;
+     dispatch->addCase(builder_.getInt32(source_.blocks[i].guest_address),
+-                      blocks_[i]);
++                      retry_leaders_[i] ? retry_blocks_[i] : blocks_[i]);
+   }
+ 
+   builder_.SetInsertPoint(repeatCheck);
+diff --git a/src/backend/llvm/emitter.cpp b/src/backend/llvm/emitter.cpp
+index afcd8ee..75c49b5 100644
+--- a/src/backend/llvm/emitter.cpp
++++ b/src/backend/llvm/emitter.cpp
+@@ -78,6 +78,7 @@ bool FunctionEmitter::emit(raw_ostream &diagnostics) {
+   scanLoopHeaders();
+   scanRegionLeaders();
+   blocks_.resize(source_.block_count);
++  retry_blocks_.resize(source_.block_count);
+   BasicBlock *region = nullptr;
+   for (u32 i = 0; i < source_.block_count; i++) {
+     if (source_.blocks[i].terminator.kind == DOLIR_TERM_FALLBACK) {
+@@ -95,6 +96,10 @@ bool FunctionEmitter::emit(raw_ostream &diagnostics) {
+     }
+     blocks_[i] = region;
+   }
++  for (u32 i = 0; i < source_.block_count; i++)
++    if (retry_leaders_[i])
++      retry_blocks_[i] = BasicBlock::Create(
++          context_, "retry_" + blockName(i), function_);
+   emitEntry();
+   for (u32 i = 0; i < source_.block_count; i++) {
+     if (!region_leaders_[i] ||
+@@ -103,6 +108,12 @@ bool FunctionEmitter::emit(raw_ostream &diagnostics) {
+     if (!emitRegion(i, diagnostics))
+       return false;
+   }
++  for (u32 i = 0; i < source_.block_count; i++) {
++    if (!retry_leaders_[i])
++      continue;
++    if (!emitRetryRegion(i, diagnostics))
++      return false;
++  }
+   emitFallbackHandler();
+   finalizeStateSSA();
+   if (verifyFunction(*function_, &diagnostics))
+diff --git a/src/backend/llvm/emitter.h b/src/backend/llvm/emitter.h
+index 38b7cd4..f824f94 100644
+--- a/src/backend/llvm/emitter.h
++++ b/src/backend/llvm/emitter.h
+@@ -80,6 +80,7 @@ private:
+   void sideExit(u32 pc);
+   void emitBudgetGuard(u32 pc);
+   bool emitRegion(u32 index, llvm::raw_ostream &diagnostics);
++  bool emitRetryRegion(u32 index, llvm::raw_ostream &diagnostics);
+   llvm::Value *operand(const DolIRInstruction &instruction, u32 index);
+   llvm::Value *castValue(DolIROp op, llvm::Type *result_type,
+                          llvm::Value *value);
+@@ -215,7 +216,9 @@ private:
+   std::array<bool, DOLIR_STATE_COUNT> used_{};
+   std::array<bool, DOLIR_STATE_COUNT> dirty_{};
+   std::vector<llvm::BasicBlock *> blocks_;
++  std::vector<llvm::BasicBlock *> retry_blocks_;
+   std::vector<bool> region_leaders_;
++  std::vector<bool> retry_leaders_;
+   std::vector<bool> loop_headers_;
+   std::vector<llvm::Value *> values_;
+   std::vector<u32> continuations_;
+diff --git a/src/backend/llvm/exits.cpp b/src/backend/llvm/exits.cpp
+index 9773699..199d2a6 100644
+--- a/src/backend/llvm/exits.cpp
++++ b/src/backend/llvm/exits.cpp
+@@ -103,16 +103,16 @@ void FunctionEmitter::emitEntry() {
+   BasicBlock *bad = BasicBlock::Create(context_, "entry_miss", function_);
+   u32 nativeEntries = 0;
+   for (u32 i = 0; i < source_.block_count; i++)
+-    nativeEntries += region_leaders_[i] &&
++    nativeEntries += (region_leaders_[i] || retry_leaders_[i]) &&
+                      source_.blocks[i].terminator.kind != DOLIR_TERM_FALLBACK;
+   auto *dispatch = builder_.CreateSwitch(entry_pc_, bad, nativeEntries);
+   for (u32 i = 0; i < source_.block_count; i++) {
+-    if (!region_leaders_[i] ||
++    if ((!region_leaders_[i] && !retry_leaders_[i]) ||
+         source_.blocks[i].terminator.kind == DOLIR_TERM_FALLBACK)
+       continue;
+     dispatch->addCase(ConstantInt::get(Type::getInt32Ty(context_),
+                                        source_.blocks[i].guest_address),
+-                      blocks_[i]);
++                      retry_leaders_[i] ? retry_blocks_[i] : blocks_[i]);
+   }
+   emitColdEntry(bad);
+ }
+diff --git a/src/backend/llvm/register_state.cpp b/src/backend/llvm/register_state.cpp
+index f786b00..017f4dd 100644
+--- a/src/backend/llvm/register_state.cpp
++++ b/src/backend/llvm/register_state.cpp
+@@ -110,6 +110,7 @@ void FunctionEmitter::scanLoopHeaders() {
+ 
+ void FunctionEmitter::scanRegionLeaders() {
+   region_leaders_.assign(source_.block_count, false);
++  retry_leaders_.assign(source_.block_count, false);
+   if (!source_.block_count)
+     return;
+   region_leaders_[0] = true;
+@@ -136,9 +137,9 @@ void FunctionEmitter::scanRegionLeaders() {
+     region_leaders_[(address - source_.guest_start) / 4u] = true;
+   }
+ 
+-  // Lazy-FP exceptions retry a faulting scalar FP load/store. Admit that
+-  // exact mid-region PC without splitting paired-single regions and losing
+-  // their compile-time GQR and packed-state optimization.
++  // Lazy-FP exceptions retry the first faulting FP instruction on a path.
++  // Keep that cold entry separate from the hot region so a retry can reload
++  // architectural state without discarding compile-time GQR knowledge.
+   const std::vector<bool> structural_leaders = region_leaders_;
+   bool fp_entry_seen = false;
+   for (u32 i = 0; i < source_.block_count; i++) {
+@@ -151,10 +152,8 @@ void FunctionEmitter::scanRegionLeaders() {
+       if (inst.op != DOLIR_OP_HELPER_CALL ||
+           inst.aux != DOLIR_HELPER_FP_AVAILABLE)
+         continue;
+-      const u32 primary = source_.blocks[i].raw >> 26;
+-      if (primary < 48u || primary > 55u)
+-        continue;
+-      region_leaders_[i] = true;
++      if (!region_leaders_[i])
++        retry_leaders_[i] = true;
+       fp_entry_seen = true;
+       break;
+     }
+diff --git a/src/backend/llvm/retry_regions.cpp b/src/backend/llvm/retry_regions.cpp
+new file mode 100644
+index 0000000..dfcb41f
+--- /dev/null
++++ b/src/backend/llvm/retry_regions.cpp
+@@ -0,0 +1,48 @@
++#include "backend/llvm/emitter.h"
++
++#include <llvm/Support/Format.h>
++#include <llvm/Support/raw_ostream.h>
++
++namespace dolllvm {
++
++using namespace llvm;
++
++bool FunctionEmitter::emitRetryRegion(u32 index, raw_ostream &diagnostics) {
++  resetFPRepresentations();
++  known_state_.fill(nullptr);
++  psq_direct_proven_ = false;
++  psq_indexed_proven_ = false;
++  fp_available_checked_ = false;
++  pending_fprf_ = nullptr;
++  builder_.SetInsertPoint(retry_blocks_[index]);
++  for (u32 current = index; current < source_.block_count; current++) {
++    const DolIRBlock &block = source_.blocks[current];
++    if (current != index && region_leaders_[current]) {
++      materializeFPRF();
++      builder_.CreateBr(blocks_[current]);
++      return true;
++    }
++    if (loop_headers_[current])
++      emitBudgetGuard(block.guest_address);
++    chargeCycles(block.cycle_cost);
++    values_.assign(source_.value_count, nullptr);
++    for (u32 i = 0; i < block.instruction_count; i++) {
++      if (!emitInstruction(block.instructions[i], diagnostics))
++        return false;
++    }
++    if (block.terminator.kind == DOLIR_TERM_FALLTHROUGH) {
++      u32 next = block.terminator.targets[0];
++      if (next != DOLIR_NO_BLOCK && next == current + 1u &&
++          next < source_.block_count && !region_leaders_[next])
++        continue;
++    }
++    materializeFPRF();
++    return emitTerminator(block.terminator, diagnostics);
++  }
++  diagnostics << "dolllvm: unterminated FP retry region at 0x"
++              << format_hex_no_prefix(source_.blocks[index].guest_address, 8)
++              << "\n";
++  return false;
++}
++
++} // namespace dolllvm
+diff --git a/tests/cmake/check_llvm_codegen.cmake b/tests/cmake/check_llvm_codegen.cmake
+index 68d1ead..ae7ddd3 100644
+--- a/tests/cmake/check_llvm_codegen.cmake
++++ b/tests/cmake/check_llvm_codegen.cmake
+@@ -141,17 +141,17 @@ execute_process(
+ if(NOT fixed_gqr_status EQUAL 0)
+     message(FATAL_ERROR "fixed-GQR disassembly failed: ${fixed_gqr_error}")
+ endif()
+-if(fixed_gqr_disassembly MATCHES "ppc_ps_madd" OR
+-   fixed_gqr_disassembly MATCHES "vfm(add|sub)[0-9]*pd")
+-    message(FATAL_ERROR "fixed-GQR FMA left its packed-single fast path")
++if(fixed_gqr_disassembly MATCHES "ppc_ps_madd")
++    message(FATAL_ERROR "fixed-GQR FMA still calls an architectural helper")
+ endif()
+-if(NOT fixed_gqr_disassembly MATCHES "vfm(add|sub)[0-9]*ps")
+-    message(FATAL_ERROR "fixed-GQR FMA has no packed-single fused operation")
++if(NOT fixed_gqr_disassembly MATCHES "vfm(add|sub)[0-9]*ps" OR
++   NOT fixed_gqr_disassembly MATCHES "vfm(add|sub)[0-9]*pd")
++    message(FATAL_ERROR
++        "fixed-GQR FMA is missing its hot or cold-retry fused path")
+ endif()
+-if(fixed_gqr_disassembly MATCHES "jmpq[^\n]*\\*" OR
+-   fixed_gqr_disassembly MATCHES "vcvtsd2ss")
++if(fixed_gqr_disassembly MATCHES "vcvtsd2ss")
+     message(FATAL_ERROR
+-        "fixed-GQR path retained dynamic format dispatch or a store round-trip")
++        "fixed-GQR path retained a packed-store round-trip")
+ endif()
+ 
+ execute_process(
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index e546917..a6e8223 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -346,6 +346,14 @@ int main(int argc, char **argv) {
+   };
+   CHECK(add_chunk(&module, fp_resume_words, 3, 0x80003D00u));
+ 
++  const u32 psq_resume_words[] = {
++      0x38A50001u,
++      psq_dform(false, 0, 2, 0),
++      paired_aform(21, 1, 0, 0, 0),
++      0x4E800020u,
++  };
++  CHECK(add_chunk(&module, psq_resume_words, 4, 0x80003E00u));
++
+   CHECK(dolir_verify(&module, stderr));
+   DolLLVMOptions options{};
+   options.optimization_level = 2;
+diff --git a/tests/llvm_ir_test.cpp b/tests/llvm_ir_test.cpp
+index aa9d3ef..fe469fc 100644
+--- a/tests/llvm_ir_test.cpp
++++ b/tests/llvm_ir_test.cpp
+@@ -206,7 +206,9 @@ int main(int argc, char **argv) {
+   unsigned fixed_double_fma = 0;
+   unsigned fixed_nan_fixups = 0;
+   unsigned gqr_switches = 0;
+-  for (llvm::BasicBlock &block : *fixed_gqr)
++  unsigned fixed_retry_blocks = 0;
++  for (llvm::BasicBlock &block : *fixed_gqr) {
++    fixed_retry_blocks += block.getName().starts_with("retry_guest_80003AAC");
+     for (llvm::Instruction &instruction : block) {
+       if (auto *typeSwitch = llvm::dyn_cast<llvm::SwitchInst>(&instruction))
+         gqr_switches += typeSwitch->getNumCases() >= 5;
+@@ -218,10 +220,15 @@ int main(int argc, char **argv) {
+       fixed_double_fma += name == "llvm.experimental.constrained.fma.v2f64";
+       fixed_nan_fixups += name.starts_with("fix_pair_fma_nan");
+     }
+-  CHECK(fixed_single_fma == 1);
+-  CHECK(fixed_double_fma == 0);
+-  CHECK(fixed_nan_fixups == 0);
+-  CHECK(gqr_switches == 0);
++  }
++  // The hot body remains fixed-GQR and contributes one single-precision FMA.
++  // Its separate cold retry suffix contributes the dynamic single/double
++  // alternatives, fixups, and one GQR type switch.
++  CHECK(fixed_retry_blocks == 1);
++  CHECK(fixed_single_fma == 2);
++  CHECK(fixed_double_fma == 1);
++  CHECK(fixed_nan_fixups == 2);
++  CHECK(gqr_switches == 1);
+ 
+   unsigned fprf_updates = 0;
+   for (llvm::BasicBlock &block : *paired_chain)
+diff --git a/tests/llvm_smoke_test.c b/tests/llvm_smoke_test.c
+index fa85461..5f9f055 100644
+--- a/tests/llvm_smoke_test.c
++++ b/tests/llvm_smoke_test.c
+@@ -19,6 +19,7 @@ void func_80002B00(CPUState* cpu);
+ void func_80002C00(CPUState* cpu);
+ void func_80002D00(CPUState* cpu);
+ void func_80003D00(CPUState* cpu);
++void func_80003E00(CPUState* cpu);
+ 
+ static u32 fallback_count;
+ static int fallback_bad;
+@@ -113,6 +114,28 @@ int main(void) {
+     CHECK(cpu.pc == 0x81234564u);
+     CHECK(fallback_count == fallback_before_fp_retry);
+ 
++    prepare_call(&cpu, 0x80003E00u);
++    cpu.msr = 0;
++    cpu.hid2 = PPC_HID2_PSE | PPC_HID2_LSQE;
++    cpu.gqr[0] = 0;
++    cpu.gpr[2] = GC_RAM_BASE + 0x320u;
++    cpu.gpr[5] = 41;
++    mem_write32(&cpu, cpu.gpr[2], 0x3FC00000u);
++    mem_write32(&cpu, cpu.gpr[2] + 4u, 0x40000000u);
++    u32 fallback_before_psq_retry = fallback_count;
++    func_80003E00(&cpu);
++    CHECK(cpu.gpr[5] == 42);
++    CHECK(cpu.exception == PPC_EXC_FP_UNAVAILABLE);
++    CHECK(cpu.srr0 == 0x80003E04u);
++    cpu.exception = 0;
++    cpu.msr |= 1u << 13;
++    cpu.pc = cpu.srr0;
++    func_80003E00(&cpu);
++    CHECK(cpu.fpr[0] == 1.5 && cpu.ps1[0] == 2.0);
++    CHECK(cpu.fpr[1] == 3.0 && cpu.ps1[1] == 4.0);
++    CHECK(cpu.pc == 0x81234564u);
++    CHECK(fallback_count == fallback_before_psq_retry);
++
+     prepare_call(&cpu, 0x80002000u);
+     cpu.gpr[3] = 0xA5A55A5Au;
+     func_80002000(&cpu);
+-- 
+2.41.0
+

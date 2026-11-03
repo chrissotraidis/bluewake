@@ -1,0 +1,101 @@
+From aeab6d49542bd88242e3d18d20782ea75abc18ae Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 27 Aug 2026 21:09:40 -0500
+Subject: [PATCH] rel: preserve tagged relative branch namespace
+
+---
+ src/frontend/container/rel.c | 22 +++++++++++++++++++---
+ tests/test_rel.c             | 19 +++++++++++++++++++
+ 2 files changed, 38 insertions(+), 3 deletions(-)
+
+diff --git a/src/frontend/container/rel.c b/src/frontend/container/rel.c
+index b894a36..943de3c 100644
+--- a/src/frontend/container/rel.c
++++ b/src/frontend/container/rel.c
+@@ -224,13 +224,15 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+         return 1;
+     case R_PPC_ADDR16:
+     case R_PPC_ADDR16_LO:
+-        write_be16(patch + 2, (u16)target);
++        // REL 16-bit relocation offsets identify the immediate halfword,
++        // rather than the containing instruction word.
++        write_be16(patch, (u16)target);
+         return 1;
+     case R_PPC_ADDR16_HI:
+-        write_be16(patch + 2, (u16)(target >> 16));
++        write_be16(patch, (u16)(target >> 16));
+         return 1;
+     case R_PPC_ADDR16_HA:
+-        write_be16(patch + 2, (u16)((target + 0x8000u) >> 16));
++        write_be16(patch, (u16)((target + 0x8000u) >> 16));
+         return 1;
+     case R_PPC_ADDR14:
+     case R_PPC_ADDR14_BRTAKEN:
+@@ -242,6 +244,16 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+         write_be32(patch, (word & 0xFFFF0003u) | (target & 0x0000FFFCu));
+         return 1;
+     case R_PPC_REL24: {
++        /*
++         * A static-recomp linked namespace may distinguish REL storage from
++         * retail MEM1 with address bit 30. Relative branches retain their
++         * displacement when the DOL target is viewed through the same tag;
++         * the runtime dispatcher canonicalizes that tagged DOL PC.
++         */
++        if ((patch_address & 0x40000000u) != 0u &&
++            (target & 0x40000000u) == 0u) {
++            target |= 0x40000000u;
++        }
+         s64 delta = (s64)(s32)(target - patch_address);
+         if (!check_rel_delta(delta, -0x02000000ll, 0x01FFFFFCll, "REL24"))
+             return 0;
+@@ -249,6 +261,10 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+         return 1;
+     }
+     case R_PPC_REL14: {
++        if ((patch_address & 0x40000000u) != 0u &&
++            (target & 0x40000000u) == 0u) {
++            target |= 0x40000000u;
++        }
+         s64 delta = (s64)(s32)(target - patch_address);
+         if (!check_rel_delta(delta, -0x8000ll, 0x7FFCll, "REL14"))
+             return 0;
+diff --git a/tests/test_rel.c b/tests/test_rel.c
+index 3fb9a9e..6bb4d10 100644
+--- a/tests/test_rel.c
++++ b/tests/test_rel.c
+@@ -113,6 +113,24 @@ static int test_dol_rel24_relocation(void) {
+     return 1;
+ }
+ 
++static int test_tagged_dol_rel24_relocation(void) {
++    const char* path = "test_tagged_dol_rel24.rel";
++    CHECK(write_sample_rel(path, 0, R_PPC_REL24, 0, 0x80003100u, 8),
++          "failed to write tagged sample REL");
++
++    RELFile rel;
++    CHECK(rel_load(&rel, path, 0xC0500000u),
++          "failed to load tagged sample REL");
++    u32 inst = read_be32(rel.sections[1].data);
++    s32 delta = sign_extend(inst & 0x03FFFFFCu, 26);
++    CHECK(0xC0500100u + (u32)delta == 0xC0003100u,
++          "tagged DOL REL24 relocation did not preserve displacement");
++
++    rel_free(&rel);
++    remove(path);
++    return 1;
++}
++
+ static int test_external_import_rejected(void) {
+     const char* path = "test_external.rel";
+     CHECK(write_sample_rel(path, 2, R_PPC_ADDR32, 2, 0, 8),
+@@ -180,6 +198,7 @@ int main(void) {
+     int ok = 1;
+     ok &= test_self_relocation();
+     ok &= test_dol_rel24_relocation();
++    ok &= test_tagged_dol_rel24_relocation();
+     ok &= test_external_import_rejected();
+     ok &= test_external_import_with_map();
+     ok &= test_unaligned_text_rejected();
+-- 
+2.41.0
+

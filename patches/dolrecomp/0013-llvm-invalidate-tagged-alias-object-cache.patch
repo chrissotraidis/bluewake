@@ -1,0 +1,25 @@
+From 7cefb7af0640a091f427b367dea211c52bb88dca Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 15:37:21 -0500
+Subject: [PATCH] llvm: invalidate tagged alias object cache
+
+---
+ src/app/pipeline.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index 9b62948..9fb451e 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v24"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v25"
+ 
+ typedef struct {
+     const PPCInst* insts;
+-- 
+2.41.0
+

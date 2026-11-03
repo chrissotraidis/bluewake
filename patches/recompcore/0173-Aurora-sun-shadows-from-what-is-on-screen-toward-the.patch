@@ -1,0 +1,369 @@
+From 2a20231918edd82a3f8101c5a2eb1a386327e13e Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 20:56:23 +0900
+Subject: [PATCH 173/175] Aurora: sun shadows from what is on screen, toward
+ the game's sun (post_fx, off by default)
+
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   5 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 186 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  12 +-
+ 3 files changed, 192 insertions(+), 11 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 202a169..f2e92f6 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -174,6 +174,11 @@ void aurora_set_far_blur(bool enabled);
+    depth, before the far blur and bloom. Takes effect at the next frame.
+    DOL_AURORA_AO=1 sets the starting value. */
+ void aurora_set_ambient_occlusion(bool enabled);
++/* Sun shadows from what is on screen, toward the direction last passed to
++   aurora_set_sun_direction (world space, toward the sun), with the camera last
++   passed to aurora_set_world_view. Takes effect at the next frame. */
++void aurora_set_sun_shadows(bool enabled);
++void aurora_set_sun_direction(float x, float y, float z);
+ /* Cloud shadows on the sea and the land, from the camera last passed to
+    aurora_set_world_view. Takes effect at the next frame. */
+ void aurora_set_cloud_shadows(bool enabled);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index bb646cc..f9ecf2a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -21,12 +21,16 @@ std::atomic_bool g_bloom{false};
+ std::atomic_bool g_farBlur{false};
+ std::atomic_bool g_ao{false};
+ std::atomic_bool g_clouds{false};
++std::atomic_bool g_sun{false};
++float g_sunStrength = 0.35f;  // how dark a sun shadow is
++float g_sunReach = 1500.f;    // how far toward the sun a shadow is looked for, in world units
+ float g_cloudStrength = 0.28f;  // how dark a cloud's shadow is
+ float g_cloudScale = 7000.f;    // world units across one cloud
+ bool g_cloudDebug = false;
+ // The camera, for the cloud shadows (aurora_set_world_view): the inverse view
+ // matrix's three rows, then tan(fovy / 2), aspect, near, the sea's height, and
+-// the time in seconds. Written by the game thread, read when a frame is encoded.
++// the time in seconds, then the direction to the sun (aurora_set_sun_direction).
++// Written by the game thread, read when a frame is encoded.
+ std::mutex g_cameraMutex;
+ std::array<float, 20> g_camera{};
+ bool g_cameraValid = false;
+@@ -358,6 +362,93 @@ fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
+ }
+ )""";
+ wgpu::ShaderModule g_cloudModule;
++
++// Sun shadows from what is on screen: from each pixel's place in view space,
++// steps toward the sun; a step that lands behind the depth buffer's surface (by
++// less than an object's assumed thickness) is in shadow. Off-screen casters
++// cast nothing; the sun low or below the horizon casts nothing. Drawn at a
++// quarter of the size and blurred (the jittered steps' grain becomes a soft
++// edge), then multiplied into the scene.
++constexpr const char* kSunShader = R"""(
++override strength: f32 = 0.35;
++override reach: f32 = 1500.0;
++
++struct View {
++    rows: array<vec4<f32>, 3>,  // the inverse view matrix (view to world), by rows
++    lens: vec4<f32>,            // tan(fovy / 2), aspect, near, the sea's height
++    time: vec4<f32>,            // seconds, then the direction to the sun (world)
++};
++
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var unused: texture_2d<f32>;
++@group(0) @binding(2) var depth: texture_depth_2d;
++@group(0) @binding(3) var<uniform> view: View;
++
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++
++fn view_depth(uv: vec2<f32>) -> f32 {
++    let size = vec2<f32>(textureDimensions(depth));
++    let p = clamp(vec2<i32>(uv * size), vec2<i32>(0), vec2<i32>(size) - vec2<i32>(1));
++    let d = textureLoad(depth, p, 0);
++    return select(view.lens.z / d, 0.0, d <= 0.0);
++}
++
++@fragment
++fn fs_sun(in: VertexOutput) -> @location(0) vec4<f32> {
++    let z = view_depth(in.uv);
++    let sun = view.time.yzw;
++    if (z <= 0.0 || sun.y < 0.05) {
++        return vec4(1.0);
++    }
++    let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
++    let tx = view.lens.x * view.lens.y;
++    let ty = view.lens.x;
++    let p = vec3(ndc.x * tx, ndc.y * ty, -1.0) * z;
++    // The sun in view space: the inverse view's rotation transposed.
++    let l = normalize(vec3(dot(vec3(view.rows[0].x, view.rows[1].x, view.rows[2].x), sun),
++                           dot(vec3(view.rows[0].y, view.rows[1].y, view.rows[2].y), sun),
++                           dot(vec3(view.rows[0].z, view.rows[1].z, view.rows[2].z), sun)));
++    let jitter = fract(sin(dot(in.pos.xy, vec2(12.9898, 78.233))) * 43758.5453);
++    var lit = 1.0;
++    for (var i = 0; i < 24; i++) {
++        let t = 20.0 + (reach - 20.0) * (f32(i) + jitter) / 24.0;
++        let q = p + l * t;
++        if (-q.z <= view.lens.z) {
++            break;
++        }
++        let s = vec2(q.x / -q.z / tx, q.y / -q.z / ty);
++        let uv = vec2(s.x * 0.5 + 0.5, 0.5 - s.y * 0.5);
++        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
++            break;
++        }
++        let surface = view_depth(uv);
++        let behind = -q.z - surface;
++        if (surface > 0.0 && behind > 12.0 + 0.004 * surface && behind < 250.0) {
++            lit = 0.0;
++            break;
++        }
++    }
++    let fade = (1.0 - smoothstep(4000.0, 9000.0, z)) * smoothstep(0.05, 0.25, sun.y);
++    return vec4(vec3(1.0 - strength * (1.0 - lit) * fade), 1.0);
++}
++)""";
++wgpu::ShaderModule g_sunModule;
++wgpu::RenderPipeline g_sunPass;
++uint32_t g_sunSamples = 0;
+ wgpu::BindGroupLayout g_cloudLayout;
+ wgpu::PipelineLayout g_cloudPipelineLayout;
+ wgpu::RenderPipeline g_cloudPass;
+@@ -483,6 +574,31 @@ wgpu::RenderPipeline make_cloud_pipeline(wgpu::TextureFormat format, uint32_t sa
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
++wgpu::RenderPipeline make_sun_pipeline(wgpu::TextureFormat format) {
++  const std::array constants{
++      wgpu::ConstantEntry{.key = "strength", .value = g_sunStrength},
++      wgpu::ConstantEntry{.key = "reach", .value = g_sunReach},
++  };
++  const std::array targets{wgpu::ColorTargetState{.format = format, .blend = nullptr, .writeMask = wgpu::ColorWriteMask::All}};
++  const wgpu::FragmentState fragment{
++      .module = g_sunModule,
++      .entryPoint = "fs_sun",
++      .constantCount = constants.size(),
++      .constants = constants.data(),
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = "Sun shadows",
++      .layout = g_cloudPipelineLayout,
++      .vertex = {.module = g_sunModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = 1, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
+ wgpu::RenderPipeline make_far_pipeline(wgpu::TextureFormat format, uint32_t samples) {
+   const std::array constants{
+       wgpu::ConstantEntry{.key = "far_start", .value = g_farStart},
+@@ -528,6 +644,7 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_down = make_pipeline("Far blur downsample", "fs_down", format, 1, kReplace);
+     g_aoPass = make_ao_pipeline(format);
+     g_cloudPass = {};
++    g_sunPass = {};
+     g_composite = {};
+     g_farComposite = {};
+     g_aoApply = {};
+@@ -537,6 +654,9 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_composite = make_pipeline("Bloom composite", "fs_composite", format, samples, kAdd);
+     g_compositeSamples = samples;
+   }
++  if (!g_sunPass) {
++    g_sunPass = make_sun_pipeline(format);
++  }
+   if (!g_cloudPass || samples != g_cloudSamples) {
+     g_cloudPass = make_cloud_pipeline(format, samples);
+     g_cloudSamples = samples;
+@@ -639,11 +759,12 @@ void draw_depth(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::
+   pass.Draw(3);
+   pass.End();
+ }
+-void draw_clouds(const wgpu::CommandEncoder& cmd, const std::array<float, 20>& view, const wgpu::TextureView& depthView,
+-                 const wgpu::TextureView& target, const wgpu::TextureView& resolve) {
++void draw_with_view(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
++                    const std::array<float, 20>& view, const wgpu::TextureView& depthView,
++                    const wgpu::TextureView& target, const wgpu::TextureView& resolve) {
+   // A small buffer for each frame, so a frame still in flight keeps its camera.
+   const wgpu::BufferDescriptor bufferDescriptor{
+-      .label = "Cloud shadows view",
++      .label = "Post effects view",
+       .usage = wgpu::BufferUsage::Uniform,
+       .size = sizeof(view),
+       .mappedAtCreation = true,
+@@ -670,13 +791,13 @@ void draw_clouds(const wgpu::CommandEncoder& cmd, const std::array<float, 20>& v
+       .storeOp = wgpu::StoreOp::Store,
+   }};
+   const wgpu::RenderPassDescriptor descriptor{
+-      .label = "Cloud shadows",
++      .label = label,
+       .colorAttachmentCount = attachments.size(),
+       .colorAttachments = attachments.data(),
+-      .timestampWrites = webgpu::gpu_prof::pass_writes("Cloud shadows"),
++      .timestampWrites = webgpu::gpu_prof::pass_writes(label),
+   };
+   const auto pass = cmd.BeginRenderPass(&descriptor);
+-  pass.SetPipeline(g_cloudPass);
++  pass.SetPipeline(pipeline);
+   pass.SetBindGroup(0, bindGroup, 0, nullptr);
+   pass.Draw(3);
+   pass.End();
+@@ -700,6 +821,8 @@ void initialize() {
+   g_aoStrength = env_float("DOL_AURORA_AO_STRENGTH", g_aoStrength, 0.f, 1.f);
+   g_cloudStrength = env_float("DOL_AURORA_CLOUD_SHADOWS_STRENGTH", g_cloudStrength, 0.f, 1.f);
+   g_cloudScale = env_float("DOL_AURORA_CLOUD_SHADOWS_SCALE", g_cloudScale, 1.f, 1e7f);
++  g_sunStrength = env_float("DOL_AURORA_SUN_SHADOWS_STRENGTH", g_sunStrength, 0.f, 1.f);
++  g_sunReach = env_float("DOL_AURORA_SUN_SHADOWS_REACH", g_sunReach, 1.f, 1e6f);
+   const char* cloudDebug = std::getenv("DOL_AURORA_CLOUD_SHADOWS_DEBUG");
+   g_cloudDebug = cloudDebug != nullptr && cloudDebug[0] == '1';
+   const char* aoDebug = std::getenv("DOL_AURORA_AO_DEBUG");
+@@ -752,6 +875,10 @@ void initialize() {
+   cloudSource.code = kCloudShader;
+   const wgpu::ShaderModuleDescriptor cloudModuleDescriptor{.nextInChain = &cloudSource, .label = "Cloud shadows"};
+   g_cloudModule = g_device.CreateShaderModule(&cloudModuleDescriptor);
++  wgpu::ShaderSourceWGSL sunSource{};
++  sunSource.code = kSunShader;
++  const wgpu::ShaderModuleDescriptor sunModuleDescriptor{.nextInChain = &sunSource, .label = "Sun shadows"};
++  g_sunModule = g_device.CreateShaderModule(&sunModuleDescriptor);
+   const std::array depthEntries{
+       layoutEntries[0],
+       layoutEntries[1],
+@@ -799,6 +926,9 @@ void shutdown() {
+   g_aoModule = {};
+   g_cloudPass = {};
+   g_cloudSamples = 0;
++  g_sunPass = {};
++  g_sunSamples = 0;
++  g_sunModule = {};
+   g_cloudPipelineLayout = {};
+   g_cloudLayout = {};
+   g_cloudModule = {};
+@@ -835,6 +965,22 @@ bool cloud_shadows_enabled() noexcept { return g_clouds.load(std::memory_order_r
+ 
+ void set_cloud_shadows(bool enabled) noexcept { g_clouds.store(enabled, std::memory_order_relaxed); }
+ 
++bool sun_shadows_enabled() noexcept { return g_sun.load(std::memory_order_relaxed) && webgpu::g_hasCoreFeatures; }
++
++void set_sun_shadows(bool enabled) noexcept { g_sun.store(enabled, std::memory_order_relaxed); }
++
++void set_sun_direction(float x, float y, float z) noexcept {
++  const float length = std::sqrt(x * x + y * y + z * z);
++  std::lock_guard lock{g_cameraMutex};
++  if (length > 0.f) {
++    g_camera[17] = x / length;
++    g_camera[18] = y / length;
++    g_camera[19] = z / length;
++  } else {
++    g_camera[17] = g_camera[18] = g_camera[19] = 0.f;
++  }
++}
++
+ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, float nearPlane, float seaLevel,
+                     float seconds) noexcept {
+   std::lock_guard lock{g_cameraMutex};
+@@ -848,7 +994,8 @@ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, fl
+ }
+ 
+ bool any_enabled() noexcept {
+-  return bloom_enabled() || far_blur_enabled() || ambient_occlusion_enabled() || cloud_shadows_enabled();
++  return bloom_enabled() || far_blur_enabled() || ambient_occlusion_enabled() || cloud_shadows_enabled() ||
++         sun_shadows_enabled();
+ }
+ 
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+@@ -865,6 +1012,23 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+     // With DOL_AURORA_AO_DEBUG=1 the occlusion replaces the scene.
+     draw(cmd, "Ambient occlusion apply", g_aoApply, g_aoView[0], dst, true, resolve);
+   }
++  if (sun_shadows_enabled() && g_module && depthView && msaaSamples == 1) {
++    std::array<float, 20> view;
++    bool valid;
++    {
++      std::lock_guard lock{g_cameraMutex};
++      view = g_camera;
++      valid = g_cameraValid;
++    }
++    if (valid) {
++      const webgpu::gpu_prof::Zone zone{cmd, "Sun shadows"};
++      ensure_targets(size, format, msaaSamples);
++      draw_with_view(cmd, "Sun shadows", g_sunPass, view, depthView, g_aoView[0], nullptr);
++      draw(cmd, "Sun shadows blur (horizontal)", g_blurH, g_aoView[0], g_aoView[1], false);
++      draw(cmd, "Sun shadows blur (vertical)", g_blurV, g_aoView[1], g_aoView[0], false);
++      draw(cmd, "Sun shadows apply", g_aoApply, g_aoView[0], dst, true, resolve);
++    }
++  }
+   if (cloud_shadows_enabled() && g_module && depthView && msaaSamples == 1) {
+     std::array<float, 20> view;
+     bool valid;
+@@ -876,7 +1040,7 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+     if (valid) {
+       const webgpu::gpu_prof::Zone zone{cmd, "Cloud shadows"};
+       ensure_targets(size, format, msaaSamples);
+-      draw_clouds(cmd, view, depthView, dst, resolve);
++      draw_with_view(cmd, "Cloud shadows", g_cloudPass, view, depthView, dst, resolve);
+     }
+   }
+   if (far_blur_enabled() && g_module && depthView && msaaSamples == 1 && size.width >= 4 && size.height >= 4) {
+@@ -922,3 +1086,7 @@ void aurora_set_world_view(const float inv_view[12], float tan_half_fovy, float
+                            float sea_level, float seconds) {
+   aurora::gfx::post_fx::set_world_view(inv_view, tan_half_fovy, aspect, near_plane, sea_level, seconds);
+ }
++
++void aurora_set_sun_shadows(bool enabled) { aurora::gfx::post_fx::set_sun_shadows(enabled); }
++
++void aurora_set_sun_direction(float x, float y, float z) { aurora::gfx::post_fx::set_sun_direction(x, y, z); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 8241566..077b05a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -29,6 +29,11 @@
+ // camera the game passes in (aurora_set_world_view) and the scene's depth.
+ // DOL_AURORA_CLOUD_SHADOWS_STRENGTH (default 0.28) and _SCALE (world units
+ // across a cloud, default 7000). Off unless aurora_set_cloud_shadows(true).
++//
++// Sun shadows: from what is on screen, toward the direction the game passes in
++// (aurora_set_sun_direction), with the same camera. DOL_AURORA_SUN_SHADOWS_STRENGTH
++// (default 0.35) and _REACH (world units, default 1500). Off unless
++// aurora_set_sun_shadows(true).
+ namespace aurora::gfx::post_fx {
+ void initialize();
+ void shutdown();
+@@ -38,13 +43,16 @@ bool far_blur_enabled() noexcept;
+ void set_far_blur(bool enabled) noexcept;
+ bool ambient_occlusion_enabled() noexcept;
+ void set_ambient_occlusion(bool enabled) noexcept;
++bool sun_shadows_enabled() noexcept;
++void set_sun_shadows(bool enabled) noexcept;
++void set_sun_direction(float x, float y, float z) noexcept;
+ bool cloud_shadows_enabled() noexcept;
+ void set_cloud_shadows(bool enabled) noexcept;
+ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, float nearPlane, float seaLevel,
+                     float seconds) noexcept;
+ bool any_enabled() noexcept;
+-// Every effect that is on, in order (ambient occlusion, cloud shadows, far
+-// blur, bloom);
++// Every effect that is on, in order (ambient occlusion, sun shadows, cloud
++// shadows, far blur, bloom);
+ // depthView: the EFB's depth.
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+-- 
+2.46.0
+

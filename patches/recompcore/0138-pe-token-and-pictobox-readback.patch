@@ -1,0 +1,733 @@
+From 2218107dac0150151b39d736924df57e8dc75104 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 05:34:12 +0900
+Subject: [PATCH] Complete PE draw-sync tokens and Pictobox RAM copies
+
+Model PE token and finish masks, pending events and independent acknowledgments. At a drained draw-sync boundary, submit the capture copy and read I8/RGB565 tiles back to guest RAM before exposing completion. Preserve GPU-only copies and bound asynchronous readback failure.
+
+Validate token MMIO/acks, tiled formats and render scaling with focused tests and ASan/UBSan. Mac Metal regular and Deluxe captures show actual photo content, accept an album photo, repeat, cancel and return to gameplay on copied Windfall fixtures. Persistent game save/reload and native Windows remain open.
+
+Co-authored-by: Elliott Tate <elliotttate@gmail.com>
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  1 +
+ .../backends/aurora/aurora_backend_private.h  |  1 +
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 63 ++++++++++++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 16 ++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  3 +
+ GXRuntime/graphics/aurora/lib/gfx/texture.cpp | 82 ++++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/texture.hpp |  4 +
+ GXRuntime/graphics/gxcore/CMakeLists.txt      |  5 ++
+ .../gxruntime/gxcore/texture_encode.hpp       | 16 ++++
+ .../graphics/gxcore/src/texture_encode.cpp    | 45 ++++++++++
+ .../tests/gxcore_texture_encode_test.cpp      | 52 ++++++++++++
+ GXRuntime/include/gxruntime/interrupts.h      |  9 ++
+ GXRuntime/include/gxruntime/platform.h        |  4 +
+ GXRuntime/src/interrupts.c                    | 38 +++++++--
+ GXRuntime/src/platform.c                      |  5 ++
+ GXRuntime/tests/runtime_tests.c               | 50 ++++++++++-
+ 16 files changed, 383 insertions(+), 11 deletions(-)
+ create mode 100644 GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp
+ create mode 100644 GXRuntime/graphics/gxcore/src/texture_encode.cpp
+ create mode 100644 GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 87990c4e..4c1c850f 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -219,6 +219,7 @@ void install_platform_ops() {
+         // records each write with its size.
+         .gx_write_bytes = g_gx_core_enabled && !g_trace_armed ? aurora_backend_gx_write_bytes : nullptr,
+         .gx_flush = aurora_backend_gx_flush,
++        .gx_read_draw_sync = aurora_backend_gx_read_draw_sync,
+         .call_display_list = aurora_backend_call_display_list,
+         .set_array = aurora_backend_set_array,
+         .set_array_guest = aurora_backend_set_array_guest,
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index d4c59356..ddd738d8 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -202,6 +202,7 @@ void aurora_backend_mark_gx_begin(void);
+ void aurora_backend_gx_write(u64 value, u8 size);
+ void aurora_backend_gx_write_bytes(const u8* bytes, u32 size);
+ void aurora_backend_gx_flush(void);
++bool aurora_backend_gx_read_draw_sync(u16* token);
+ void aurora_backend_call_display_list(const void* data, u32 size);
+ void aurora_backend_set_array(u32 attr, const void* data, u32 size, u8 stride);
+ void aurora_backend_set_array_guest(u32 attr, u32 guest_address, const void* data, u32 size, u8 stride);
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 194d1919..52f995d4 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -37,6 +37,7 @@
+ namespace aurora::gfx::gxcore {
+ bool submit_draw_plan(const gxruntime::gxcore::DrawPlan& plan);
+ void copy_efb_to_texture(const gxruntime::gxcore::EfbCopyCommand& cmd);
++std::vector<uint8_t> read_efb_copy(const gxruntime::gxcore::EfbCopyCommand& cmd);
+ void reset_texture_cache();
+ void note_frame_presented();
+ void set_texture_dirty_epoch_observer(
+@@ -131,8 +132,18 @@ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*) {
+         g_core_rejected.fetch_add(1, std::memory_order_relaxed);
+ }
+ 
++// Written by the FIFO worker and consumed only after its drain. Wind Waker's
++// capture copy is immediately followed by GXSetDrawSync; display copies do
++// not replace this texture-copy descriptor.
++static gxruntime::gxcore::EfbCopyCommand g_draw_sync_copy;
++static bool g_draw_sync_copy_valid;
++
+ void core_copy_observer(const gxruntime::gxcore::EfbCopyCommand& cmd, void*) {
+     aurora::gfx::gxcore::copy_efb_to_texture(cmd);
++    if (cmd.format != 0xFu) {
++        g_draw_sync_copy = cmd;
++        g_draw_sync_copy_valid = true;
++    }
+     if (cmd.format == 0xFu && !g_worker_mode.load(std::memory_order_relaxed))
+         g_display_copy_pending = true;
+ }
+@@ -1726,6 +1737,54 @@ void aurora_backend_call_display_list(const void* data, u32 size) {
+ // draw-done commit, where the guest is about to observe GPU progress, so the
+ // translation is never behind a wait it is supposed to satisfy. Without Aurora
+ // there is no front end to drain.
++bool aurora_backend_gx_read_draw_sync(u16* token) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    if (token == nullptr || !gx_aurora::g_initialized ||
++        !gx_aurora::g_shadow_frontend_enabled)
++        return false;
++    // The frontend worker owns its registers until this drain completes.
++    // Capture copies preceding the token must be submitted before the guest
++    // receives its callback. Repeated identical tokens are still events.
++    gx_aurora::shadow_frontend_flush_pending();
++    if (gx_aurora::g_shadow_frontend_failed.load(std::memory_order_relaxed))
++        return false;
++    const auto& state = gx_aurora::g_shadow_frontend.state();
++    if (!state.bp_valid[0x48u])
++        return false;
++    if (gx_aurora::g_gx_core_enabled && gx_aurora::g_draw_sync_copy_valid) {
++        const auto copy = gx_aurora::g_draw_sync_copy;
++        // These are the regular and Deluxe Picto Box CPU capture formats.
++        // GPU-only copies keep their existing texture path.
++        if (copy.format == 1u || copy.format == 4u) {
++            DolGuestResolvedRange range{};
++            if (!gx_aurora::frontend_guest_address_resolver_bridge(nullptr,
++                    copy.dest_address, copy.byte_size, DOL_GUEST_ADDRESS_PHYSICAL,
++                    DOL_GUEST_RESOURCE_COPY_DESTINATION, &range))
++                return false;
++            std::lock_guard<std::mutex> recording(gx_aurora::g_aurora_recording_mutex);
++            if (!gx_aurora::g_aurora_recording_open)
++                return false;
++            const auto bytes = aurora::gfx::gxcore::read_efb_copy(copy);
++            if (bytes.empty() || bytes.size() > copy.byte_size) {
++                std::fprintf(stderr, "[draw-sync] capture readback failed address=0x%08X format=%u\n",
++                             copy.dest_address, copy.format);
++                return false;
++            }
++            std::memcpy(range.data, bytes.data(), bytes.size());
++            dol_guest_memory_dirty_mark(copy.dest_address, static_cast<u32>(bytes.size()));
++            std::fprintf(stderr, "[draw-sync] capture written address=0x%08X format=%u size=%zu\n",
++                         copy.dest_address, copy.format, bytes.size());
++        }
++        gx_aurora::g_draw_sync_copy_valid = false;
++    }
++    *token = static_cast<u16>(state.bp_regs[0x48u]);
++    return true;
++#else
++    (void)token;
++    return false;
++#endif
++}
++
+ void aurora_backend_gx_flush(void) {
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+     if (!gx_aurora::g_initialized)
+@@ -1961,6 +2020,9 @@ void aurora_backend_set_copy_destination_guest(u32 guest_address,
+ 
+ void aurora_backend_set_guest_address_resolver(
+     DolPlatformGuestAddressResolverFn resolve, void* user) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    gx_aurora::g_draw_sync_copy_valid = false;
++#endif
+     gx_aurora::g_guest_address_resolver = resolve;
+     gx_aurora::g_guest_address_resolver_user = user;
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+@@ -2048,6 +2110,7 @@ bool dol_aurora_gx_load_state(const void* data, size_t size) {
+         return false;
+     // Whatever this run had buffered belongs to the frame being replaced.
+     gx_aurora::shadow_frontend_flush_pending();
++    gx_aurora::g_draw_sync_copy_valid = false;
+     const auto* bytes = static_cast<const std::uint8_t*>(data) + sizeof header;
+     if (!gx_aurora::g_shadow_frontend.load_state(bytes, header[1]))
+         return false;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 38758240..d9be70c8 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -13,6 +13,7 @@
+ 
+ #include <gxruntime/gxcore/gxcore.hpp> // EfbCopyCommand
+ #include <gxruntime/gxcore/texture_decode.hpp>
++#include <gxruntime/gxcore/texture_encode.hpp>
+ 
+ #include <absl/container/flat_hash_map.h>
+ 
+@@ -863,6 +864,21 @@ unsigned long long texture_upload_count() { return g_textureCacheStats.uploads;
+ // incl. depth targets) and optionally clears the EFB to the game's copy-clear
+ // color/Z afterwards. The bound draw's geometry is already in the pass (the
+ // sink flushed the pending draw before firing this).
++std::vector<uint8_t> read_efb_copy(const gxc::EfbCopyCommand& cmd) {
++  const auto it = g_efbCopyTextures.find(cmd.dest_address);
++  if (it == g_efbCopyTextures.end() || !it->second.handle ||
++      (cmd.format != 1u && cmd.format != 4u))
++    return {};
++  const auto texture = it->second.handle;
++  // Submission keeps the current EFB and does not present an extra frame.
++  // The following worker readback is ordered after the copy's render pass.
++  if (!gfx::segment_frame())
++    return {};
++  const auto rgba = gfx::read_texture_rgba8(texture);
++  return gxc::encode_efb_copy(cmd.format, cmd.destination_width,
++      cmd.destination_height, rgba, texture->size.width, texture->size.height);
++}
++
+ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   // Mirror the copy-clear color/Z (BP 0x4F-0x51 at this copy) into the gx
+   // state GXSetCopyClear would have written: begin_frame's pass-0 EFB clear
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 242f9724..e15fb6c4 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -99,6 +99,9 @@ void reset_pass_state();
+ // address samples the copied EFB instead of stale guest memory. Called by the
+ // GxCoreSink copy observer at the copy's stream position (pending draw flushed).
+ void copy_efb_to_texture(const gxruntime::gxcore::EfbCopyCommand& cmd);
++// Submit a preserving frame segment, read the exact captured texture, and
++// encode guest tiles. Recording thread only, with the FIFO worker drained.
++std::vector<uint8_t> read_efb_copy(const gxruntime::gxcore::EfbCopyCommand& cmd);
+ 
+ // Submission layer: turn one headless DrawPlan into buffer pushes, texture
+ // upload (guest-identity cache keyed incl. TLUT identity; gxcore decodes every
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture.cpp
+index d6d9b2fb..d5b369f7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture.cpp
+@@ -5,6 +5,12 @@
+ #include "aurora/aurora.h"
+ #include "texture.hpp"
+ #include "texture_convert.hpp"
++#include "render_worker.hpp"
++#include <chrono>
++#include <condition_variable>
++#include <cstring>
++#include <mutex>
++#include <vector>
+ #include "../gx/gx_fmt.hpp"
+ 
+ #include <algorithm>
+@@ -157,7 +163,7 @@ TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat,
+   };
+   const wgpu::TextureDescriptor textureDescriptor{
+       .label = label,
+-      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::RenderAttachment,
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::RenderAttachment,
+       .dimension = wgpu::TextureDimension::e2D,
+       .size = size,
+       .format = wgpuFormat,
+@@ -190,7 +196,7 @@ TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, co
+   };
+   const wgpu::TextureDescriptor textureDescriptor{
+       .label = label,
+-      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment,
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::RenderAttachment,
+       .dimension = wgpu::TextureDimension::e2D,
+       .size = size,
+       .format = wgpuFormat,
+@@ -212,6 +218,78 @@ TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, co
+                                       std::move(attachmentTextureView), size, wgpuFormat, 1, gxFormat);
+ }
+ 
++std::vector<uint8_t> read_texture_rgba8(const TextureHandle& texture) {
++  if (!texture || render_worker::is_worker_thread())
++    return {};
++  const auto format = texture->format;
++  const bool bgra = format == wgpu::TextureFormat::BGRA8Unorm ||
++                    format == wgpu::TextureFormat::BGRA8UnormSrgb;
++  if (!bgra && format != wgpu::TextureFormat::RGBA8Unorm &&
++      format != wgpu::TextureFormat::RGBA8UnormSrgb)
++    return {};
++  struct Readback {
++    std::mutex mutex;
++    std::condition_variable cv;
++    bool done = false;
++    std::vector<uint8_t> rgba;
++  };
++  auto result = std::make_shared<Readback>();
++  // Keep all resources in the queued work/callback if the caller times out.
++  render_worker::enqueue_work([texture, result, bgra] {
++    const auto width = texture->size.width, height = texture->size.height;
++    const uint32_t stride = (width * 4u + 255u) & ~255u;
++    const uint64_t size = uint64_t(stride) * height;
++    const wgpu::BufferDescriptor desc{
++        .label = "GX copy RAM readback", .usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst,
++        .size = size};
++    auto buffer = g_device.CreateBuffer(&desc);
++    auto encoder = g_device.CreateCommandEncoder();
++    if (!buffer || !encoder) {
++      std::lock_guard lock(result->mutex);
++      result->done = true;
++      result->cv.notify_all();
++      return;
++    }
++    const wgpu::TexelCopyTextureInfo src{.texture = texture->texture};
++    const wgpu::TexelCopyBufferInfo dst{
++        .layout = {.bytesPerRow = stride, .rowsPerImage = height}, .buffer = buffer};
++    encoder.CopyTextureToBuffer(&src, &dst, &texture->size);
++    const auto commands = encoder.Finish();
++    g_queue.Submit(1, &commands);
++    buffer.MapAsync(wgpu::MapMode::Read, 0, size, wgpu::CallbackMode::AllowSpontaneous,
++        [result, buffer, size, stride, width, height, bgra](wgpu::MapAsyncStatus status, wgpu::StringView) {
++          std::lock_guard lock(result->mutex);
++          if (status == wgpu::MapAsyncStatus::Success) {
++            const auto* data = static_cast<const uint8_t*>(buffer.GetConstMappedRange(0, size));
++            if (data != nullptr) {
++              result->rgba.resize(size_t(width) * height * 4u);
++              for (uint32_t y = 0; y < height; ++y) {
++                auto* row = result->rgba.data() + size_t(y) * width * 4u;
++                std::memcpy(row, data + size_t(y) * stride, size_t(width) * 4u);
++                if (bgra)
++                  for (uint32_t x = 0; x < width; ++x)
++                    std::swap(row[x * 4u], row[x * 4u + 2u]);
++              }
++            }
++            buffer.Unmap();
++          }
++          result->done = true;
++          result->cv.notify_all();
++        });
++  });
++  std::unique_lock lock(result->mutex);
++  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
++  while (!result->done && std::chrono::steady_clock::now() < deadline) {
++    result->cv.wait_for(lock, std::chrono::milliseconds(10));
++    if (!result->done) {
++      lock.unlock();
++      render_worker::enqueue_work([] { webgpu::g_instance.ProcessEvents(); });
++      lock.lock();
++    }
++  }
++  return result->done ? std::move(result->rgba) : std::vector<uint8_t>{};
++}
++
+ void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept {
+   ZoneScoped;
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture.hpp b/GXRuntime/graphics/aurora/lib/gfx/texture.hpp
+index 45a8ba80..7372b17e 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture.hpp
+@@ -2,6 +2,7 @@
+ #include <dolphin/gx.h>
+ 
+ #include <utility>
++#include <vector>
+ 
+ #include "common.hpp"
+ 
+@@ -62,6 +63,9 @@ TextureHandle new_dynamic_texture_2d(uint32_t width, uint32_t height, uint32_t m
+ TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat, const char* label) noexcept;
+ TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, const char* label) noexcept;
+ void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept;
++// Caller has submitted the texture's writes. Copy on the render worker and
++// wait for GPU mapping; returns empty on unsupported format or map failure.
++std::vector<uint8_t> read_texture_rgba8(const TextureHandle& texture);
+ }; // namespace aurora::gfx
+ 
+ struct GXTexObj_ {
+diff --git a/GXRuntime/graphics/gxcore/CMakeLists.txt b/GXRuntime/graphics/gxcore/CMakeLists.txt
+index 2ccb6e10..bf160b16 100644
+--- a/GXRuntime/graphics/gxcore/CMakeLists.txt
++++ b/GXRuntime/graphics/gxcore/CMakeLists.txt
+@@ -2,6 +2,7 @@ add_library(gxruntime_gxcore STATIC
+     src/gxcore.cpp
+     src/gxcore_shader.cpp
+     src/texture_decode.cpp
++    src/texture_encode.cpp
+ )
+ add_library(GXRuntime::gxcore ALIAS gxruntime_gxcore)
+ 
+@@ -16,6 +17,10 @@ target_link_libraries(gxruntime_gxcore
+ )
+ 
+ if(BUILD_TESTING)
++    add_executable(gxcore_texture_encode_tests tests/gxcore_texture_encode_test.cpp)
++    target_link_libraries(gxcore_texture_encode_tests PRIVATE GXRuntime::gxcore)
++    add_test(NAME gxcore_texture_encode_tests COMMAND gxcore_texture_encode_tests)
++
+     add_executable(gxcore_tests
+         tests/gxcore_wgsl_test.cpp
+     )
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp
+new file mode 100644
+index 00000000..7d47933c
+--- /dev/null
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp
+@@ -0,0 +1,16 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++#include <cstdint>
++#include <span>
++#include <vector>
++
++namespace gxruntime::gxcore {
++// Encode an already format-converted EFB resolve (RGBA8) into guest tiles.
++// I8 uses the converted intensity channel, without a second luma conversion.
++// Sample render-scaled copies at logical pixel centers. Empty on invalid input
++// or unsupported format. Currently supports the Picto Box's I8 and RGB565.
++std::vector<std::uint8_t> encode_efb_copy(std::uint32_t format,
++    std::uint32_t width, std::uint32_t height,
++    std::span<const std::uint8_t> rgba,
++    std::uint32_t render_width, std::uint32_t render_height);
++}
+diff --git a/GXRuntime/graphics/gxcore/src/texture_encode.cpp b/GXRuntime/graphics/gxcore/src/texture_encode.cpp
+new file mode 100644
+index 00000000..b7938581
+--- /dev/null
++++ b/GXRuntime/graphics/gxcore/src/texture_encode.cpp
+@@ -0,0 +1,45 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include "gxruntime/gxcore/texture_encode.hpp"
++#include <algorithm>
++
++namespace gxruntime::gxcore {
++std::vector<std::uint8_t> encode_efb_copy(std::uint32_t format,
++    std::uint32_t width, std::uint32_t height,
++    std::span<const std::uint8_t> rgba,
++    std::uint32_t render_width, std::uint32_t render_height) {
++  if ((format != 1u && format != 4u) || width == 0 || height == 0 ||
++      render_width == 0 || render_height == 0 ||
++      std::uint64_t(render_width) * render_height > rgba.size() / 4u)
++    return {};
++  const std::uint64_t block_width = format == 1u ? 8u : 4u;
++  const std::uint64_t blocks_x = (std::uint64_t(width) + block_width - 1) / block_width;
++  const std::uint64_t blocks_y = (std::uint64_t(height) + 3) / 4;
++  // Reject oversized untrusted dimensions before allocating or indexing.
++  if (blocks_x * blocks_y > 0x02000000u / 32u)
++    return {};
++  std::vector<std::uint8_t> out(blocks_x * blocks_y * 32u);
++  std::size_t offset = 0;
++  for (std::uint64_t by = 0; by < blocks_y; ++by) {
++    for (std::uint64_t bx = 0; bx < blocks_x; ++bx) {
++      for (std::uint32_t y = 0; y < 4u; ++y) {
++        for (std::uint32_t x = 0; x < block_width; ++x) {
++          const auto lx = std::min(bx * block_width + x, std::uint64_t(width - 1));
++          const auto ly = std::min(by * 4u + y, std::uint64_t(height - 1));
++          const auto sx = ((lx * 2u + 1u) * render_width) / (std::uint64_t(width) * 2u);
++          const auto sy = ((ly * 2u + 1u) * render_height) / (std::uint64_t(height) * 2u);
++          const auto* pixel = rgba.data() + (sy * render_width + sx) * 4u;
++          if (format == 1u) {
++            out[offset++] = pixel[0];
++          } else {
++            const auto rgb565 = std::uint16_t((pixel[0] >> 3u) << 11u |
++                (pixel[1] >> 2u) << 5u | (pixel[2] >> 3u));
++            out[offset++] = std::uint8_t(rgb565 >> 8u);
++            out[offset++] = std::uint8_t(rgb565);
++          }
++        }
++      }
++    }
++  }
++  return out;
++}
++}
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp
+new file mode 100644
+index 00000000..d5fabd06
+--- /dev/null
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#ifdef NDEBUG
++#undef NDEBUG
++#endif
++#include "gxruntime/gxcore/texture_encode.hpp"
++#include "gxruntime/gxcore/texture_decode.hpp"
++#include <cassert>
++#include <cstdint>
++#include <vector>
++using namespace gxruntime::gxcore;
++
++int main() {
++  std::vector<std::uint8_t> rgba(16 * 8 * 4);
++  for (unsigned y = 0; y < 8; ++y)
++    for (unsigned x = 0; x < 16; ++x)
++      for (unsigned c = 0; c < 4; ++c)
++        rgba[(y * 16 + x) * 4 + c] = y * 16 + x;
++  const auto i8 = encode_efb_copy(1, 16, 8, rgba, 16, 8);
++  assert(i8.size() == 128);
++  // Four 8x4 blocks, in block-row order, with no luma clamping/conversion.
++  assert(i8[0] == 0 && i8[7] == 7 && i8[8] == 16 && i8[31] == 55);
++  assert(i8[32] == 8 && i8[63] == 63 && i8[64] == 64 && i8[127] == 127);
++  const auto decoded = decode_texture(1, 16, 8, i8.data(), i8.size());
++  for (unsigned p = 0; p < 128; ++p)
++    assert(decoded[p * 4] == rgba[p * 4]);
++
++  const std::uint8_t colors[4][4] = {
++      {255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}, {255, 255, 255, 255}};
++  rgba.resize(8 * 4 * 4);
++  for (unsigned p = 0; p < 32; ++p)
++    for (unsigned c = 0; c < 4; ++c)
++      rgba[p * 4 + c] = colors[p % 4][c];
++  const auto rgb = encode_efb_copy(4, 8, 4, rgba, 8, 4);
++  assert(rgb.size() == 64);
++  const std::uint8_t words[] = {0xf8,0x00, 0x07,0xe0, 0x00,0x1f, 0xff,0xff};
++  for (unsigned p = 0; p < 64; ++p)
++    assert(rgb[p] == words[p % 8]);
++  const auto rgb_decoded = decode_texture(4, 8, 4, rgb.data(), rgb.size());
++  assert(rgb_decoded == rgba);
++
++  // Logical pixel centers in a 3x render-scale resolve.
++  rgba.assign(6 * 3 * 4, 0);
++  rgba[(1 * 6 + 1) * 4] = 42;
++  rgba[(1 * 6 + 4) * 4] = 198;
++  const auto scaled = encode_efb_copy(1, 2, 1, rgba, 6, 3);
++  assert(scaled.size() == 32 && scaled[0] == 42 && scaled[1] == 198);
++  assert(scaled[7] == 198 && scaled[8] == 42 && scaled[31] == 198);
++  assert(encode_efb_copy(6, 2, 1, rgba, 6, 3).empty());
++  assert(encode_efb_copy(1, 0, 1, rgba, 6, 3).empty());
++  assert(encode_efb_copy(1, 2, 1, rgba, 7, 3).empty());
++  assert(encode_efb_copy(1, UINT32_MAX, UINT32_MAX, rgba, 6, 3).empty());
++}
+diff --git a/GXRuntime/include/gxruntime/interrupts.h b/GXRuntime/include/gxruntime/interrupts.h
+index 2e822cac..3a7f8846 100644
+--- a/GXRuntime/include/gxruntime/interrupts.h
++++ b/GXRuntime/include/gxruntime/interrupts.h
+@@ -11,6 +11,7 @@
+ #define DOL_PI_INTERRUPT_MASK  (DOL_PI_BASE + 0x04u)
+ 
+ #define DOL_PE_INTERRUPT_STATUS 0xCC00100Au
++#define DOL_PE_TOKEN 0xCC00100Eu
+ 
+ #define DOL_PI_CAUSE_PI        0x00000001u
+ #define DOL_PI_CAUSE_RSW       0x00000002u
+@@ -35,12 +36,19 @@
+ #define DOL_VI_DI0_STATUS_BIT 0x80u
+ #define DOL_VI_DI0_MASK_BIT 0x10u
+ 
++#define DOL_PE_TOKEN_ENABLE_BIT 0x0001u
++#define DOL_PE_FINISH_ENABLE_BIT 0x0002u
++#define DOL_PE_TOKEN_ACK_BIT 0x0004u
+ #define DOL_PE_FINISH_ACK_BIT 0x0008u
+ 
+ typedef struct DolInterrupts {
+     u8 vi_regs[DOL_VI_REGISTER_BYTES];
+     u32 pi_cause;
+     u32 pi_mask;
++    u16 pe_token;
++    u16 pe_control;
++    bool pe_token_pending;
++    bool pe_finish_pending;
+ } DolInterrupts;
+ 
+ void dol_interrupts_init(DolInterrupts* interrupts);
+@@ -57,5 +65,6 @@ void dol_interrupts_set_source(DolInterrupts* interrupts, u32 cause_mask,
+                                bool pending);
+ void dol_interrupts_assert_vi_retrace(DolInterrupts* interrupts);
+ void dol_interrupts_commit_pe_finish(DolInterrupts* interrupts);
++void dol_interrupts_commit_pe_token(DolInterrupts* interrupts, u16 token);
+ 
+ #endif
+diff --git a/GXRuntime/include/gxruntime/platform.h b/GXRuntime/include/gxruntime/platform.h
+index 4c5a7efa..8ce6790c 100644
+--- a/GXRuntime/include/gxruntime/platform.h
++++ b/GXRuntime/include/gxruntime/platform.h
+@@ -37,6 +37,7 @@ typedef struct DolPlatformOps {
+     // matter to it). NULL where they do: the host then sends writes one by one.
+     void (*gx_write_bytes)(const u8* bytes, u32 size);
+     void (*gx_flush)(void);
++    bool (*gx_read_draw_sync)(u16* token);
+     void (*call_display_list)(const void* data, u32 size);
+     void (*set_array)(u32 attr, const void* data, u32 size, u8 stride);
+     void (*set_array_guest)(u32 attr, u32 guest_address, const void* data,
+@@ -87,6 +88,9 @@ void dol_platform_gx_write_bytes(const u8* bytes, u32 size);
+ // guest is about to observe GPU progress - the draw-done commit - so the
+ // translation is never behind a wait it is supposed to satisfy.
+ void dol_platform_gx_flush(void);
++// Drain submitted commands and read the last decoded interrupt token.
++// False means no token was decoded or the backend cannot provide it.
++bool dol_platform_gx_read_draw_sync(u16* token);
+ void dol_platform_call_display_list(const void* data, u32 size);
+ void dol_platform_set_array(u32 attr, const void* data, u32 size, u8 stride);
+ void dol_platform_set_array_guest(u32 attr, u32 guest_address,
+diff --git a/GXRuntime/src/interrupts.c b/GXRuntime/src/interrupts.c
+index 87a0c9c3..e6e54529 100644
+--- a/GXRuntime/src/interrupts.c
++++ b/GXRuntime/src/interrupts.c
+@@ -28,6 +28,15 @@ static void sync_vi(DolInterrupts* interrupts) {
+                                          (di0 & DOL_VI_DI0_MASK_BIT) != 0u);
+ }
+ 
++static void sync_pe(DolInterrupts* interrupts) {
++    dol_interrupts_set_source(interrupts, DOL_PI_CAUSE_PE_TOKEN,
++        interrupts->pe_token_pending &&
++        (interrupts->pe_control & DOL_PE_TOKEN_ENABLE_BIT) != 0u);
++    dol_interrupts_set_source(interrupts, DOL_PI_CAUSE_PE_FINISH,
++        interrupts->pe_finish_pending &&
++        (interrupts->pe_control & DOL_PE_FINISH_ENABLE_BIT) != 0u);
++}
++
+ void dol_interrupts_init(DolInterrupts* interrupts) {
+     if (interrupts == NULL)
+         return;
+@@ -41,7 +50,7 @@ void dol_interrupts_init(DolInterrupts* interrupts) {
+ bool dol_interrupts_mmio_contains(u32 ea) {
+     return range_contains(DOL_VI_BASE, DOL_VI_REGISTER_BYTES, ea) ||
+            range_contains(DOL_PI_BASE, 0x40u, ea) ||
+-           ea == DOL_PE_INTERRUPT_STATUS;
++           ea == DOL_PE_INTERRUPT_STATUS || ea == DOL_PE_TOKEN;
+ }
+ 
+ u64 dol_interrupts_mmio_read(DolInterrupts* interrupts, u32 ea, u8 size) {
+@@ -54,9 +63,9 @@ u64 dol_interrupts_mmio_read(DolInterrupts* interrupts, u32 ea, u8 size) {
+     if (ea == DOL_PI_INTERRUPT_MASK)
+         return interrupts->pi_mask;
+     if (ea == DOL_PE_INTERRUPT_STATUS)
+-        return (interrupts->pi_cause & DOL_PI_CAUSE_PE_FINISH)
+-                   ? DOL_PE_FINISH_ACK_BIT
+-                   : 0u;
++        return interrupts->pe_control; // acknowledgment bits are write-only
++    if (ea == DOL_PE_TOKEN)
++        return interrupts->pe_token;
+ 
+     if (range_contains(DOL_VI_BASE, DOL_VI_REGISTER_BYTES, ea)) {
+         const u32 off = ea - DOL_VI_BASE;
+@@ -83,9 +92,13 @@ void dol_interrupts_mmio_write(DolInterrupts* interrupts, u32 ea, u8 size,
+         return;
+     }
+     if (ea == DOL_PE_INTERRUPT_STATUS) {
++        if ((value & DOL_PE_TOKEN_ACK_BIT) != 0u)
++            interrupts->pe_token_pending = false;
+         if ((value & DOL_PE_FINISH_ACK_BIT) != 0u)
+-            dol_interrupts_set_source(interrupts, DOL_PI_CAUSE_PE_FINISH,
+-                                      false);
++            interrupts->pe_finish_pending = false;
++        interrupts->pe_control = (u16)value &
++            (DOL_PE_TOKEN_ENABLE_BIT | DOL_PE_FINISH_ENABLE_BIT);
++        sync_pe(interrupts);
+         return;
+     }
+ 
+@@ -129,5 +142,16 @@ void dol_interrupts_assert_vi_retrace(DolInterrupts* interrupts) {
+ }
+ 
+ void dol_interrupts_commit_pe_finish(DolInterrupts* interrupts) {
+-    dol_interrupts_set_source(interrupts, DOL_PI_CAUSE_PE_FINISH, true);
++    if (interrupts == NULL)
++        return;
++    interrupts->pe_finish_pending = true;
++    sync_pe(interrupts);
++}
++
++void dol_interrupts_commit_pe_token(DolInterrupts* interrupts, u16 token) {
++    if (interrupts == NULL)
++        return;
++    interrupts->pe_token = token;
++    interrupts->pe_token_pending = true;
++    sync_pe(interrupts);
+ }
+diff --git a/GXRuntime/src/platform.c b/GXRuntime/src/platform.c
+index 19d7740c..cf6b5320 100644
+--- a/GXRuntime/src/platform.c
++++ b/GXRuntime/src/platform.c
+@@ -65,6 +65,11 @@ void dol_platform_gx_flush(void) {
+         g_ops.gx_flush();
+ }
+ 
++bool dol_platform_gx_read_draw_sync(u16* token) {
++    return token != NULL && g_ops.gx_read_draw_sync != NULL &&
++           g_ops.gx_read_draw_sync(token);
++}
++
+ void dol_platform_call_display_list(const void* data, u32 size) {
+     if (g_ops.call_display_list != NULL && data != NULL && size != 0)
+         g_ops.call_display_list(data, size);
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index f1064761..ecb42bcf 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -1679,13 +1679,15 @@ static void test_interrupts(void) {
+                               0x1000u);
+     assert((dol_interrupts_pi_cause(&interrupts) & DOL_PI_CAUSE_VI) == 0);
+ 
++    dol_interrupts_mmio_write(&interrupts, DOL_PE_INTERRUPT_STATUS, 2,
++                              DOL_PE_FINISH_ENABLE_BIT);
+     dol_interrupts_commit_pe_finish(&interrupts);
+     assert((dol_interrupts_pi_cause(&interrupts) &
+             DOL_PI_CAUSE_PE_FINISH) != 0);
+     assert(dol_interrupts_mmio_read(&interrupts, DOL_PE_INTERRUPT_STATUS, 2) ==
+-           DOL_PE_FINISH_ACK_BIT);
++           DOL_PE_FINISH_ENABLE_BIT);
+     dol_interrupts_mmio_write(&interrupts, DOL_PE_INTERRUPT_STATUS, 2,
+-                              DOL_PE_FINISH_ACK_BIT);
++                              DOL_PE_FINISH_ENABLE_BIT | DOL_PE_FINISH_ACK_BIT);
+     assert((dol_interrupts_pi_cause(&interrupts) &
+             DOL_PI_CAUSE_PE_FINISH) == 0);
+ 
+@@ -1698,6 +1700,49 @@ static void test_interrupts(void) {
+     assert(!dol_interrupts_external_pending(&interrupts));
+ }
+ 
++static void test_pe_tokens(void) {
++    DolInterrupts irq;
++    dol_interrupts_init(&irq);
++    assert(dol_interrupts_mmio_contains(DOL_PE_TOKEN));
++    assert(dol_interrupts_mmio_read(&irq, DOL_PE_INTERRUPT_STATUS, 2) == 0u);
++    // An interrupt token can be zero. Pending state is distinct from value,
++    // and a disabled PE interrupt must become visible when its mask is enabled.
++    dol_interrupts_commit_pe_token(&irq, 0u);
++    dol_interrupts_commit_pe_finish(&irq);
++    assert(!dol_interrupts_external_pending(&irq));
++    const u16 enabled = DOL_PE_TOKEN_ENABLE_BIT | DOL_PE_FINISH_ENABLE_BIT;
++    dol_interrupts_mmio_write(&irq, DOL_PE_INTERRUPT_STATUS, 2, enabled);
++    assert(!dol_interrupts_external_pending(&irq)); // PI still masks both
++    dol_interrupts_mmio_write(&irq, DOL_PI_INTERRUPT_MASK, 4,
++        DOL_PI_CAUSE_PE_TOKEN | DOL_PI_CAUSE_PE_FINISH);
++    assert(dol_interrupts_external_pending(&irq));
++    assert(dol_interrupts_mmio_read(&irq, DOL_PE_TOKEN, 2) == 0u);
++    assert(dol_interrupts_mmio_read(&irq, DOL_PE_INTERRUPT_STATUS, 2) == enabled);
++    dol_interrupts_mmio_write(&irq, DOL_PE_INTERRUPT_STATUS, 2,
++        enabled | DOL_PE_TOKEN_ACK_BIT);
++    assert((irq.pi_cause & DOL_PI_CAUSE_PE_TOKEN) == 0u);
++    assert((irq.pi_cause & DOL_PI_CAUSE_PE_FINISH) != 0u);
++    // A second identical token still raises a fresh event.
++    dol_interrupts_commit_pe_token(&irq, 0u);
++    assert((irq.pi_cause & DOL_PI_CAUSE_PE_TOKEN) != 0u);
++    dol_interrupts_mmio_write(&irq, DOL_PE_INTERRUPT_STATUS, 2,
++        enabled | DOL_PE_FINISH_ACK_BIT);
++    assert((irq.pi_cause & DOL_PI_CAUSE_PE_TOKEN) != 0u);
++    assert((irq.pi_cause & DOL_PI_CAUSE_PE_FINISH) == 0u);
++    dol_interrupts_commit_pe_token(&irq, 0xabcd);
++    assert(dol_interrupts_mmio_read(&irq, DOL_PE_TOKEN, 2) == 0xabcd);
++    dol_interrupts_mmio_write(&irq, DOL_PE_TOKEN, 2, 0); // read-only
++    assert(dol_interrupts_mmio_read(&irq, DOL_PE_TOKEN, 2) == 0xabcd);
++    dol_interrupts_mmio_write(&irq, DOL_PE_INTERRUPT_STATUS, 2, 0);
++    assert(!dol_interrupts_external_pending(&irq));
++    dol_interrupts_mmio_write(&irq, DOL_PE_INTERRUPT_STATUS, 2, enabled);
++    assert(dol_interrupts_external_pending(&irq));
++    dol_interrupts_mmio_write(&irq, DOL_PE_INTERRUPT_STATUS, 2,
++        enabled | DOL_PE_TOKEN_ACK_BIT | DOL_PE_FINISH_ACK_BIT);
++    assert(!dol_interrupts_external_pending(&irq));
++    assert(dol_interrupts_mmio_read(&irq, DOL_PE_INTERRUPT_STATUS, 2) == enabled);
++}
++
+ static void test_si_device(void) {
+     DolSiDevice si;
+     dol_si_init(&si);
+@@ -2660,6 +2705,7 @@ int main(void) {
+     test_event_clock();
+     test_vi_clock();
+     test_interrupts();
++    test_pe_tokens();
+     test_si_device();
+     test_exi_device();
+     test_di_device();
+-- 
+2.46.0

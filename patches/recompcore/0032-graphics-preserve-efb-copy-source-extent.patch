@@ -1,0 +1,235 @@
+From 634465a275caf479c11a743f9226797ee897a9b2 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 09:36:30 -0500
+Subject: [PATCH] graphics: preserve EFB copy source extent
+
+---
+ GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp    |  6 ++++--
+ .../include/gxruntime/aurora_recomp/render_sink.hpp  |  9 ++++++---
+ GXRuntime/graphics/frontend/src/render_sink.cpp      |  2 ++
+ .../graphics/frontend/tests/frontend_replay_test.cpp |  6 ++++++
+ .../gxcore/include/gxruntime/gxcore/shader.hpp       |  2 ++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp             |  6 ++++--
+ GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp | 12 ++++++++----
+ GXRuntime/include/gxruntime/gx_recomp.h              |  6 ++++++
+ GXRuntime/src/gx_recomp.c                            | 11 +++++++++--
+ GXRuntime/tests/runtime_tests.c                      |  2 ++
+ 10 files changed, 49 insertions(+), 13 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 4d2bda531a..0314d1d819 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -632,8 +632,10 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+       .width = static_cast<int32_t>(cmd.width),
+       .height = static_cast<int32_t>(cmd.height),
+   });
+-  const uint32_t dstWidth = static_cast<uint32_t>(std::max(srcRect.width, 1));
+-  const uint32_t dstHeight = static_cast<uint32_t>(std::max(srcRect.height, 1));
++  const uint32_t dstWidth =
++      std::max(cmd.destination_width, static_cast<uint32_t>(1));
++  const uint32_t dstHeight =
++      std::max(cmd.destination_height, static_cast<uint32_t>(1));
+ 
+   auto it = g_efbCopyTextures.find(cmd.dest_address);
+   if (it == g_efbCopyTextures.end() || !it->second) {
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+index 3b33756078..e915293905 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+@@ -87,12 +87,15 @@ struct RenderResourcePacket {
+   std::uint32_t tlut_address = 0;
+   std::uint32_t tlut_format = 0;
+   std::uint32_t tlut_entries = 0;
+-  // CopyDestination packets only: the EFB source rect origin
+-  // and whether the EFB is cleared after the copy. width/height carry the copy
+-  // dimensions and format carries the GX copy texture format (incl. Z target).
++  // CopyDestination packets only: the EFB source rectangle and whether the
++  // EFB is cleared after the copy. width/height carry destination texture
++  // dimensions; copy_src_width/height retain the unscaled BP source rectangle.
++  // format carries the GX copy texture format (incl. Z target).
+   // Consumed by the gxcore EFB-copy path; in-memory only (never in .dolt).
+   std::uint32_t copy_src_x = 0;
+   std::uint32_t copy_src_y = 0;
++  std::uint32_t copy_src_width = 0;
++  std::uint32_t copy_src_height = 0;
+   std::uint32_t copy_clear = 0;
+ };
+ 
+diff --git a/GXRuntime/graphics/frontend/src/render_sink.cpp b/GXRuntime/graphics/frontend/src/render_sink.cpp
+index da03aa769d..c8ea655b5e 100644
+--- a/GXRuntime/graphics/frontend/src/render_sink.cpp
++++ b/GXRuntime/graphics/frontend/src/render_sink.cpp
+@@ -685,6 +685,8 @@ RenderPacket make_render_packet(std::uint32_t sequence,
+         .height = event.g & 0xFFFFu,
+         .copy_src_x = event.e,
+         .copy_src_y = event.f,
++        .copy_src_width = event.copy_src_width,
++        .copy_src_height = event.copy_src_height,
+         .copy_clear = event.d,
+     };
+     break;
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 89e09b9860..ec1207c5d0 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -706,10 +706,13 @@ int main() {
+     // target 12 under PE_CONTROL Z24 -> GX_TF_Z24X8 (0x16, depth source).
+     std::vector<std::uint32_t> copy_formats;
+     std::vector<std::uint32_t> copy_dimensions;
++    std::vector<std::uint32_t> copy_source_dimensions;
+     for (const auto& ev : trace) {
+       if (ev.kind == DOL_GX_RECOMP_EVENT_COPY_DESTINATION) {
+         copy_formats.push_back(ev.c);
+         copy_dimensions.push_back(ev.g);
++        copy_source_dimensions.push_back((ev.copy_src_width << 16u) |
++                                         ev.copy_src_height);
+       }
+     }
+     assert(copy_formats.size() == 5u);
+@@ -721,6 +724,9 @@ int main() {
+     assert(copy_dimensions[0] == ((8u << 16u) | 8u));
+     assert(copy_dimensions[1] == ((4u << 16u) | 4u));
+     assert(copy_dimensions[2] == ((4u << 16u) | 4u));
++    assert(copy_source_dimensions[0] == ((8u << 16u) | 8u));
++    assert(copy_source_dimensions[1] == ((8u << 16u) | 8u));
++    assert(copy_source_dimensions[2] == ((8u << 16u) | 8u));
+     assert(state.copy.is_depth);
+   }
+   assert(sink.packets().size() == trace.size());
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 02906121ef..824075bd62 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -521,6 +521,8 @@ struct EfbCopyCommand {
+   std::uint32_t src_y = 0;
+   std::uint32_t width = 0;
+   std::uint32_t height = 0;
++  std::uint32_t destination_width = 0;
++  std::uint32_t destination_height = 0;
+   bool clear = false;
+   // EFB clear color/Z applied after the copy (BP 0x4F/0x50/0x51, read from the
+   // sink's live state). rgba 0..255; z is the raw 24-bit copy-clear depth.
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 4b3012d2ec..48110c7aad 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -1621,8 +1621,10 @@ bool GxCoreSink::submit_packet(const ar::RenderPacket& packet) {
+         .format = r.format,
+         .src_x = r.copy_src_x,
+         .src_y = r.copy_src_y,
+-        .width = r.width,
+-        .height = r.height,
++        .width = r.copy_src_width != 0u ? r.copy_src_width : r.width,
++        .height = r.copy_src_height != 0u ? r.copy_src_height : r.height,
++        .destination_width = r.width,
++        .destination_height = r.height,
+         .clear = r.copy_clear != 0u,
+         .clear_r = (c0 >> 0u) & 0xFFu,
+         .clear_g = (c1 >> 8u) & 0xFFu,
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 9d9b48d52b..bf54300af5 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -1827,10 +1827,12 @@ void test_efb_copy_sink() {
+     copy.resource.address = 0x0053A4E0u;
+     copy.resource.size = 6080u;
+     copy.resource.format = 1u; // I8
+-    copy.resource.width = 96u;
+-    copy.resource.height = 32u;
++    copy.resource.width = 320u;
++    copy.resource.height = 240u;
+     copy.resource.copy_src_x = 12u;
+     copy.resource.copy_src_y = 34u;
++    copy.resource.copy_src_width = 640u;
++    copy.resource.copy_src_height = 480u;
+     copy.resource.copy_clear = 1u;
+     sink.submit_packet(copy);
+     CHECK(g_copy_fire_count == 1);
+@@ -1839,8 +1841,10 @@ void test_efb_copy_sink() {
+     CHECK(g_captured_copy.dest_address == 0x0053A4E0u);
+     CHECK(g_captured_copy.byte_size == 6080u);
+     CHECK(g_captured_copy.format == 1u);
+-    CHECK(g_captured_copy.width == 96u);
+-    CHECK(g_captured_copy.height == 32u);
++    CHECK(g_captured_copy.width == 640u);
++    CHECK(g_captured_copy.height == 480u);
++    CHECK(g_captured_copy.destination_width == 320u);
++    CHECK(g_captured_copy.destination_height == 240u);
+     CHECK(g_captured_copy.src_x == 12u);
+     CHECK(g_captured_copy.src_y == 34u);
+     CHECK(g_captured_copy.clear == true);
+diff --git a/GXRuntime/include/gxruntime/gx_recomp.h b/GXRuntime/include/gxruntime/gx_recomp.h
+index add1fa57f7..3dab324a62 100644
+--- a/GXRuntime/include/gxruntime/gx_recomp.h
++++ b/GXRuntime/include/gxruntime/gx_recomp.h
+@@ -107,6 +107,12 @@ typedef struct DolGxRecompTraceEvent {
+     u32 tlut_address;
+     u32 tlut_format;
+     u32 tlut_entries;
++    /* COPY_DESTINATION only: persistent BP 0x4A source dimensions. `g`
++     * remains the packed destination dimensions after half-scale. Keeping
++     * both prevents a 640x480 -> 320x240 copy from cropping the source to its
++     * top-left quarter. In-memory only (never serialized into .dolt). */
++    u32 copy_src_width;
++    u32 copy_src_height;
+ } DolGxRecompTraceEvent;
+ 
+ typedef struct DolGxRecompFifo {
+diff --git a/GXRuntime/src/gx_recomp.c b/GXRuntime/src/gx_recomp.c
+index c30a5cb581..2b3140dab4 100644
+--- a/GXRuntime/src/gx_recomp.c
++++ b/GXRuntime/src/gx_recomp.c
+@@ -20,6 +20,8 @@ void dol_gx_recomp_trace_event(DolGxRecompState* gx, DolGxRecompEventKind kind,
+     event->e = 0u;
+     event->f = 0u;
+     event->g = 0u;
++    event->copy_src_width = 0u;
++    event->copy_src_height = 0u;
+ }
+ 
+ static u32 round_up(u32 value, u32 multiple) {
+@@ -792,14 +794,17 @@ bool dol_gx_recomp_resolve_copy_destination(DolGxRecompState* gx,
+      * trigger, incl. the Z bit (0x10) when PE_CONTROL was Z24 at trigger time
+      * (depth-source copy, Dolphin BPStructs.cpp is_depth_copy) and the CTF bit
+      * (0x20) for channel-select formats — d=clear flag, e=EFB source x,
+-     * f=source y, g=packed dims (width<<16 | height). In-memory only (never
+-     * in .dolt). */
++     * f=source y, g=packed destination dims (width<<16 | height), and the
++     * dedicated fields carry the persistent BP 0x4A source dimensions.
++     * In-memory only (never in .dolt). */
+     dol_gx_recomp_trace_event(gx, DOL_GX_RECOMP_EVENT_COPY_DESTINATION, physical_base,
+                 byte_size, gx->copy.format, gx->copy.clear);
+     if (gx->trace_count > 0u) {
+         DolGxRecompTraceEvent* ev = &gx->trace[gx->trace_count - 1u];
+         ev->e = gx->copy.src_x;
+         ev->f = gx->copy.src_y;
++        ev->copy_src_width = gx->copy.width;
++        ev->copy_src_height = gx->copy.height;
+         const u32 width = gx->copy.destination_width != 0u
+                               ? gx->copy.destination_width
+                               : gx->copy.width;
+@@ -823,6 +828,8 @@ bool dol_gx_recomp_note_display_copy(DolGxRecompState* gx, u32 clear) {
+         ev->e = gx->copy.src_x;
+         ev->f = gx->copy.src_y;
+         ev->g = (gx->copy.width << 16u) | (gx->copy.height & 0xFFFFu);
++        ev->copy_src_width = gx->copy.width;
++        ev->copy_src_height = gx->copy.height;
+     }
+     return true;
+ }
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index 81a74543bc..74d19798ae 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -772,6 +772,8 @@ static void test_gx_recomp_all_module_replay(void) {
+         saw_tlut |= trace[i].kind == DOL_GX_RECOMP_EVENT_TLUT;
+         if (trace[i].kind == DOL_GX_RECOMP_EVENT_COPY_DESTINATION) {
+             saw_copy = true;
++            assert(trace[i].copy_src_width == 8u);
++            assert(trace[i].copy_src_height == 8u);
+             if (copy_count == 0u)
+                 assert(trace[i].g == ((8u << 16u) | 8u));
+             else
+-- 
+2.41.0

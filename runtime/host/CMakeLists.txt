@@ -1,0 +1,906 @@
+cmake_minimum_required(VERSION 3.20)
+project(bluewake_host LANGUAGES C CXX)
+
+include(CTest)
+
+if(APPLE)
+    add_executable(bluewake_windows_getenv_cache_test
+        ../../tests/windows_getenv_cache_test.c)
+    add_test(NAME bluewake_windows_getenv_cache_test
+        COMMAND bluewake_windows_getenv_cache_test)
+    set_tests_properties(bluewake_windows_getenv_cache_test PROPERTIES TIMEOUT 15)
+endif()
+
+set(GXRUNTIME_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/GXRuntime)
+
+option(BLUEWAKE_ENABLE_DSP_ADAPTER
+       "Build the optional source-compatible RecompCore DSP adapter" OFF)
+option(BLUEWAKE_ENABLE_DSP_IPO
+       "Require interprocedural optimization for the donor DSP route" ON)
+option(BLUEWAKE_ENABLE_DEVELOPER_TRACING
+       "Compile opt-in developer trace probes into the host" OFF)
+option(BLUEWAKE_EDGE_CENSUS
+       "Build the chassis edge-service decomposition census (inert when OFF)" OFF)
+set(BLUEWAKE_DSP_DONOR_DIR ""
+    CACHE PATH "RecompCore source checkout for the optional DSP adapter")
+set(BLUEWAKE_DSP_DONOR_BUILD_DIR ""
+    CACHE PATH "RecompCore CMake build directory for the optional DSP adapter")
+
+add_subdirectory(${GXRUNTIME_DIR} gxruntime_build)
+
+add_executable(bluewake_host
+    src/main.c
+    src/aram_dma.c
+    src/audio_capture.c
+    src/ipl_sram.c
+    src/card_runtime.c
+    src/callback_delivery.c
+    src/cycle_domain.c
+    src/delivery_digest.c
+    src/edge_intercepts.c
+    src/game_options.c
+    src/forest_water.c
+    src/hd_look.c
+    src/audio_watch.c
+    src/fast_load.c
+    src/fps_watch.c
+    src/dpad_menus.c
+    src/jump_button.c
+    src/climb.c
+    src/settings_menu.cpp
+    src/desktop_menu.cpp
+    src/desktop_settings.cpp
+    src/texture_pack_menu.cpp
+    src/wwhd/formats.cpp
+    src/wwhd/addrlib.cpp
+    src/wwhd/hd.cpp
+    src/wwhd/imaging.cpp
+    src/wwhd/sha256.cpp
+    src/wwhd/ui.cpp
+    src/wwhd/pack.cpp
+    src/wwhd/output_staging.cpp
+    src/wwhd/import_job.cpp
+    src/wwhd/disc_image.cpp
+    src/wwhd/wiiu_disc.cpp
+    src/sprint.c
+    src/quick_doors.c
+    src/haptics.c
+    src/draw_tags.c
+    src/mouse_camera.c
+    src/return_census.c
+    src/interrupt_sources.c
+    src/cold_fallback.c
+    src/external_memory.c
+    src/fpu_context.c
+    src/pad_event_schedule.c
+    src/pad_waypoint.c
+    src/pad_wire.c
+    src/rel_scratch_allocator.c
+    src/scheduler_contract.c
+    src/save_state.c)
+target_link_libraries(bluewake_host PRIVATE gxruntime GXRuntime::aurora z xxhash)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/wwhd_disc_crypto.cmake")
+target_link_libraries(bluewake_host PRIVATE bluewake_wwhd_disc_crypto)
+# The options menu (settings_menu.cpp) draws with Aurora's Dear ImGui.
+if(TARGET imgui)
+    target_link_libraries(bluewake_host PRIVATE imgui)
+endif()
+set_target_properties(bluewake_host PROPERTIES LINKER_LANGUAGE CXX)
+target_include_directories(bluewake_host PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp
+)
+target_compile_definitions(bluewake_host PRIVATE
+    DOLRECOMP_CPU_HEADER="core/cpu.h"
+    BLUEWAKE_ENABLE_DEVELOPER_TRACING=$<BOOL:${BLUEWAKE_ENABLE_DEVELOPER_TRACING}>
+    BLUEWAKE_EDGE_CENSUS=$<BOOL:${BLUEWAKE_EDGE_CENSUS}>)
+
+if(APPLE)
+    set(BLUEWAKE_APP_DIR "${CMAKE_CURRENT_BINARY_DIR}/BlueWake.app")
+    set(BLUEWAKE_MAC_ICON "${CMAKE_CURRENT_BINARY_DIR}/BlueWake.icns")
+    set(BLUEWAKE_MAC_SEED "${CMAKE_CURRENT_SOURCE_DIR}/../../apple/ios/resources/initial_pipeline_cache.db")
+    add_custom_command(OUTPUT "${BLUEWAKE_MAC_ICON}"
+        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/mac/make_icon.sh"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../apple/ios/resources/BlueWave.png"
+            "${BLUEWAKE_MAC_ICON}"
+        DEPENDS ../../scripts/mac/make_icon.sh ../../apple/ios/resources/BlueWave.png
+        VERBATIM)
+    add_custom_target(bluewake_macos_icon DEPENDS "${BLUEWAKE_MAC_ICON}")
+    add_dependencies(bluewake_host bluewake_macos_icon)
+    set_property(TARGET bluewake_host APPEND PROPERTY LINK_DEPENDS
+        "${BLUEWAKE_MAC_ICON}" "${BLUEWAKE_MAC_SEED}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/BlueWakeInfo.plist")
+    add_custom_command(TARGET bluewake_host POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BLUEWAKE_APP_DIR}/Contents/MacOS"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${BLUEWAKE_APP_DIR}/Contents/Resources"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${BLUEWAKE_MAC_ICON}" "${BLUEWAKE_APP_DIR}/Contents/Resources/BlueWake.icns"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${BLUEWAKE_MAC_SEED}" "${BLUEWAKE_APP_DIR}/Contents/Resources/initial_pipeline_cache.db"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:bluewake_host>"
+            "${BLUEWAKE_APP_DIR}/Contents/MacOS/BlueWake"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/BlueWakeInfo.plist"
+            "${BLUEWAKE_APP_DIR}/Contents/Info.plist"
+        COMMAND /usr/bin/codesign --force --deep --sign -
+            "${BLUEWAKE_APP_DIR}"
+        COMMENT "Assembling BlueWake.app for native macOS inspection"
+        VERBATIM)
+endif()
+
+add_executable(bluewake_cpu_boundary_test ../../tests/cpu_boundary_test.c)
+target_link_libraries(bluewake_cpu_boundary_test PRIVATE gxruntime)
+target_include_directories(bluewake_cpu_boundary_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+)
+
+add_executable(bluewake_scheduler_contract_test
+    ../../tests/scheduler_contract_test.c
+    src/scheduler_contract.c)
+target_link_libraries(bluewake_scheduler_contract_test PRIVATE gxruntime)
+target_include_directories(bluewake_scheduler_contract_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_scheduler_contract_test
+    COMMAND bluewake_scheduler_contract_test)
+
+add_executable(bluewake_cycle_domain_test
+    ../../tests/cycle_domain_test.c
+    src/cycle_domain.c)
+target_link_libraries(bluewake_cycle_domain_test PRIVATE gxruntime)
+target_include_directories(bluewake_cycle_domain_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_cycle_domain_test COMMAND bluewake_cycle_domain_test)
+
+add_executable(bluewake_actor_search_budget_test ../../tests/actor_search_budget_test.c)
+target_include_directories(bluewake_actor_search_budget_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_actor_search_budget_test COMMAND bluewake_actor_search_budget_test)
+
+add_executable(bluewake_fast_load_test ../../tests/fast_load_test.c src/fast_load.c)
+target_link_libraries(bluewake_fast_load_test PRIVATE gxruntime)
+target_include_directories(bluewake_fast_load_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_fast_load_test COMMAND bluewake_fast_load_test)
+
+add_executable(bluewake_fps_watch_test ../../tests/fps_watch_test.c src/fps_watch.c)
+target_link_libraries(bluewake_fps_watch_test PRIVATE gxruntime)
+target_include_directories(bluewake_fps_watch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_fps_watch_test COMMAND bluewake_fps_watch_test)
+
+add_executable(bluewake_bmg_patch_test ../../tests/bmg_patch_test.c)
+target_include_directories(bluewake_bmg_patch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_bmg_patch_test COMMAND bluewake_bmg_patch_test)
+set_tests_properties(bluewake_bmg_patch_test PROPERTIES TIMEOUT 30)
+
+add_executable(bluewake_feature_dispatch_test ../../tests/feature_dispatch_test.c)
+target_link_libraries(bluewake_feature_dispatch_test PRIVATE gxruntime)
+target_include_directories(bluewake_feature_dispatch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_feature_dispatch_test COMMAND bluewake_feature_dispatch_test)
+set_tests_properties(bluewake_feature_dispatch_test PROPERTIES TIMEOUT 30)
+
+add_executable(bluewake_audio_watch_test ../../tests/audio_watch_test.c src/audio_watch.c)
+target_link_libraries(bluewake_audio_watch_test PRIVATE gxruntime)
+target_include_directories(bluewake_audio_watch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_audio_watch_test COMMAND bluewake_audio_watch_test)
+set_tests_properties(bluewake_audio_watch_test PROPERTIES TIMEOUT 30)
+
+# The pinned runtime ships matching/blending/pacing regressions, but does not
+# register this standalone suite in its own CMake. Exercise the actual linked
+# implementation without a disc, graphics device or private fixtures.
+if(TARGET GXRuntime::aurora AND TARGET GXRuntime::gxcore)
+    add_executable(bluewake_frame_interp_test
+        ${GXRUNTIME_DIR}/graphics/aurora/tests/frame_interp_test.cpp)
+    target_link_libraries(bluewake_frame_interp_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+    add_test(NAME bluewake_frame_interp_test COMMAND bluewake_frame_interp_test)
+    set_tests_properties(bluewake_frame_interp_test PROPERTIES TIMEOUT 30)
+endif()
+
+add_executable(bluewake_save_state_test ../../tests/save_state_test.c src/save_state.c)
+target_include_directories(bluewake_save_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(bluewake_save_state_test PRIVATE z)
+add_test(NAME bluewake_save_state_test COMMAND bluewake_save_state_test)
+
+set(BLUEWAKE_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+set(BLUEWAKE_HOST_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+include("${BLUEWAKE_REPO_ROOT}/cmake/host_state_save_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/dvd_completion_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/cache_flush_fallback_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_import_job_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/wwhd_disc_image_test.cmake")
+target_link_libraries(bluewake_dvd_completion_test PRIVATE z)
+include("${BLUEWAKE_REPO_ROOT}/cmake/haptics_test.cmake")
+target_link_libraries(bluewake_host_state_save_failure_test PRIVATE z)
+
+if(APPLE AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    enable_language(OBJC)
+    set(_recovery_source "${BLUEWAKE_REPO_ROOT}/apple/ios/src/ios_entry.m")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_recovery_source}")
+    file(READ "${_recovery_source}" _recovery)
+    string(FIND "${_recovery}" "- (void)replaceFrom:" _replace_start)
+    string(FIND "${_recovery}" "- (void)failure:" _replace_end)
+    math(EXPR _replace_length "${_replace_end} - ${_replace_start}")
+    string(SUBSTRING "${_recovery}" ${_replace_start} ${_replace_length} _replace)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/card_recovery_under_test.inc" "${_replace}")
+    string(FIND "${_recovery}" "static void bw_recover_card(" _guard_start)
+    string(FIND "${_recovery}" "    BWCardRecovery* controller =" _guard_end)
+    math(EXPR _guard_length "${_guard_end} - ${_guard_start}")
+    string(SUBSTRING "${_recovery}" ${_guard_start} ${_guard_length} _guard)
+    string(REPLACE "static void bw_recover_card(" "static bool recovery_offered(" _guard "${_guard}")
+    string(REPLACE "return;" "return false;" _guard "${_guard}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/card_recovery_guard_under_test.inc" "${_guard}return true;\n}\n")
+    add_executable(bluewake_card_recovery_test ../../tests/card_recovery_test.m)
+    target_include_directories(bluewake_card_recovery_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR} ${GXRUNTIME_DIR}/include)
+    target_compile_options(bluewake_card_recovery_test PRIVATE -fobjc-arc)
+    target_link_libraries(bluewake_card_recovery_test PRIVATE gxruntime "-framework Foundation")
+    add_test(NAME bluewake_card_recovery_test COMMAND bluewake_card_recovery_test)
+endif()
+
+add_executable(bluewake_interrupt_sources_test
+    ../../tests/interrupt_sources_test.c
+    src/cycle_domain.c
+    src/interrupt_sources.c)
+target_link_libraries(bluewake_interrupt_sources_test PRIVATE gxruntime)
+target_include_directories(bluewake_interrupt_sources_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_interrupt_sources_test
+    COMMAND bluewake_interrupt_sources_test)
+
+add_executable(bluewake_delivery_digest_test
+    ../../tests/delivery_digest_test.c
+    src/delivery_digest.c)
+target_link_libraries(bluewake_delivery_digest_test PRIVATE gxruntime)
+target_include_directories(bluewake_delivery_digest_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_delivery_digest_test
+    COMMAND bluewake_delivery_digest_test)
+
+add_executable(bluewake_return_census_test
+    ../../tests/return_census_test.c
+    src/return_census.c)
+target_include_directories(bluewake_return_census_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp
+)
+add_test(NAME bluewake_return_census_test
+    COMMAND bluewake_return_census_test)
+
+add_executable(bluewake_composite_dispatch_loop_test
+    ../../tests/composite_dispatch_loop_test.c
+    ../../cmake/composite/dispatch_loop.c)
+target_link_libraries(bluewake_composite_dispatch_loop_test PRIVATE gxruntime)
+target_include_directories(bluewake_composite_dispatch_loop_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/composite
+)
+add_test(NAME bluewake_composite_dispatch_loop_test
+    COMMAND bluewake_composite_dispatch_loop_test)
+
+# Manual A/B qualification consumes two local player-generated modules. It is
+# intentionally absent from CTest: CI must never need or publish game code.
+add_executable(bluewake_fast_blocks_test EXCLUDE_FROM_ALL ../../tests/fast_blocks_test.c)
+target_include_directories(bluewake_fast_blocks_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_fast_blocks_test PRIVATE ${CMAKE_DL_LIBS})
+
+# Source-only contracts for helpers awaiting whole-module qualification.
+foreach(_variant plain global cache)
+    add_executable(bluewake_gather_memory_${_variant}_test
+        ${BLUEWAKE_REPO_ROOT}/tests/gather_memory_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+    target_include_directories(bluewake_gather_memory_${_variant}_test PRIVATE
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite ${GXRUNTIME_DIR}/tests)
+    target_link_libraries(bluewake_gather_memory_${_variant}_test PRIVATE gxruntime)
+    if(_variant STREQUAL "global")
+        target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
+            BW_GUEST_MEM1=bw_test_mem1 BW_GUEST_MEM1_SIZE=0x02000000u)
+    elseif(_variant STREQUAL "cache")
+        target_compile_definitions(bluewake_gather_memory_${_variant}_test PRIVATE
+            BLUEWAKE_GATHER_ALIAS_CACHE=1)
+    endif()
+    add_test(NAME bluewake_gather_memory_${_variant}_test COMMAND bluewake_gather_memory_${_variant}_test)
+endforeach()
+add_executable(bluewake_inline_gpr_memory_test ${BLUEWAKE_REPO_ROOT}/tests/inline_gpr_memory_test.c)
+target_include_directories(bluewake_inline_gpr_memory_test PRIVATE
+    ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_inline_gpr_memory_test PRIVATE gxruntime)
+add_test(NAME bluewake_inline_gpr_memory_test COMMAND bluewake_inline_gpr_memory_test)
+
+add_executable(bluewake_direct_calls_test
+    ${BLUEWAKE_REPO_ROOT}/tests/direct_calls_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/direct_calls.c)
+target_include_directories(bluewake_direct_calls_test PRIVATE
+    ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_REPO_ROOT}/tests)
+target_compile_definitions(bluewake_direct_calls_test PRIVATE
+    BLUEWAKE_EDGE_FILTER=1 BW_EDGE_WATCH_INCLUDE="direct_call_watch.inc")
+add_test(NAME bluewake_direct_calls_test COMMAND bluewake_direct_calls_test)
+
+add_executable(bluewake_guest_checkpoint_test ${BLUEWAKE_REPO_ROOT}/tests/guest_checkpoint_test.c)
+target_include_directories(bluewake_guest_checkpoint_test PRIVATE
+    ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
+target_link_libraries(bluewake_guest_checkpoint_test PRIVATE xxhash)
+add_test(NAME bluewake_guest_checkpoint_test COMMAND bluewake_guest_checkpoint_test)
+
+add_executable(bluewake_gather_host_test
+    ${BLUEWAKE_REPO_ROOT}/tests/gather_host_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+target_include_directories(bluewake_gather_host_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_REPO_ROOT}/runtime/host/src)
+target_link_libraries(bluewake_gather_host_test PRIVATE gxruntime)
+add_test(NAME bluewake_gather_host_test COMMAND bluewake_gather_host_test)
+
+add_executable(bluewake_gather_dispatch_test
+    ${BLUEWAKE_REPO_ROOT}/tests/gather_dispatch_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/dispatch_loop.c)
+target_include_directories(bluewake_gather_dispatch_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_gather_dispatch_test PRIVATE gxruntime)
+target_compile_definitions(bluewake_gather_dispatch_test PRIVATE BLUEWAKE_GATHER_PIPE=1)
+add_test(NAME bluewake_gather_dispatch_test COMMAND bluewake_gather_dispatch_test)
+
+# The native-math oracle requires a local player-owned module and remains an
+# explicit build; the synthetic guard and work-pool tests remain public-safe.
+include("${BLUEWAKE_REPO_ROOT}/cmake/native_math_tests.cmake")
+bluewake_add_native_math_tests()
+add_subdirectory(${BLUEWAKE_REPO_ROOT}/tests/native_work_pool native_work_pool_tests)
+
+# Requires a local player-owned module; built explicitly, never run by public CI.
+# Requires a local player-owned module; built explicitly, never run by public CI.
+add_executable(bluewake_native_game_math_test EXCLUDE_FROM_ALL
+    ${BLUEWAKE_REPO_ROOT}/tests/native_game_math_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_game_math.c)
+target_include_directories(bluewake_native_game_math_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite
+    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_native_game_math_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
+target_compile_options(bluewake_native_game_math_test PRIVATE -ffp-contract=off)
+
+# Requires a local player-owned module; built explicitly, never run by public CI.
+add_executable(bluewake_native_skin_test EXCLUDE_FROM_ALL
+    ${BLUEWAKE_REPO_ROOT}/tests/native_skin_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_skin.c)
+target_include_directories(bluewake_native_skin_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite
+    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_native_skin_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
+target_compile_options(bluewake_native_skin_test PRIVATE -ffp-contract=off)
+
+# Requires a local player-owned module; built explicitly, never run by public CI.
+add_executable(bluewake_native_vec_test EXCLUDE_FROM_ALL
+    ${BLUEWAKE_REPO_ROOT}/tests/native_vec_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_vec.c)
+target_include_directories(bluewake_native_vec_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite
+    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_native_vec_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
+target_compile_options(bluewake_native_vec_test PRIVATE -ffp-contract=off)
+
+# Requires a local player-owned module; built explicitly, never run by public CI.
+add_executable(bluewake_native_j3d_test EXCLUDE_FROM_ALL
+    ${BLUEWAKE_REPO_ROOT}/tests/native_j3d_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_j3d.c)
+target_include_directories(bluewake_native_j3d_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite
+    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_native_j3d_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
+target_compile_options(bluewake_native_j3d_test PRIVATE -ffp-contract=off)
+
+add_executable(bluewake_native_game_math_guard_test
+    ${BLUEWAKE_REPO_ROOT}/tests/native_game_math_guard_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_game_math.c)
+target_include_directories(bluewake_native_game_math_guard_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_native_game_math_guard_test PRIVATE gxruntime)
+target_compile_options(bluewake_native_game_math_guard_test PRIVATE -ffp-contract=off)
+add_test(NAME bluewake_native_game_math_guard_test COMMAND bluewake_native_game_math_guard_test)
+
+add_executable(bluewake_native_skin_guard_test
+    ${BLUEWAKE_REPO_ROOT}/tests/native_skin_guard_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_skin.c)
+target_include_directories(bluewake_native_skin_guard_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_native_skin_guard_test PRIVATE gxruntime)
+target_compile_options(bluewake_native_skin_guard_test PRIVATE -ffp-contract=off)
+add_test(NAME bluewake_native_skin_guard_test COMMAND bluewake_native_skin_guard_test)
+
+add_executable(bluewake_native_vec_guard_test
+    ${BLUEWAKE_REPO_ROOT}/tests/native_vec_guard_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_vec.c)
+target_include_directories(bluewake_native_vec_guard_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_native_vec_guard_test PRIVATE gxruntime)
+target_compile_options(bluewake_native_vec_guard_test PRIVATE -ffp-contract=off)
+add_test(NAME bluewake_native_vec_guard_test COMMAND bluewake_native_vec_guard_test)
+
+add_executable(bluewake_native_j3d_guard_test
+    ${BLUEWAKE_REPO_ROOT}/tests/native_j3d_guard_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_j3d.c)
+target_include_directories(bluewake_native_j3d_guard_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_link_libraries(bluewake_native_j3d_guard_test PRIVATE gxruntime)
+target_compile_options(bluewake_native_j3d_guard_test PRIVATE -ffp-contract=off)
+add_test(NAME bluewake_native_j3d_guard_test COMMAND bluewake_native_j3d_guard_test)
+
+add_executable(bluewake_inline_fp_test ${BLUEWAKE_REPO_ROOT}/tests/inline_fp_test.c)
+target_link_libraries(bluewake_inline_fp_test PRIVATE gxruntime)
+target_include_directories(bluewake_inline_fp_test PRIVATE ${BLUEWAKE_REPO_ROOT}/cmake/composite)
+target_compile_options(bluewake_inline_fp_test PRIVATE -ffp-contract=off)
+add_test(NAME bluewake_inline_fp_test COMMAND bluewake_inline_fp_test)
+
+add_executable(bluewake_module_cpu_contract_test ../../tests/module_cpu_contract_test.c)
+target_link_libraries(bluewake_module_cpu_contract_test PRIVATE GXRuntime::runtime)
+target_include_directories(bluewake_module_cpu_contract_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+add_test(NAME bluewake_module_cpu_contract_test COMMAND bluewake_module_cpu_contract_test)
+
+add_executable(bluewake_fpu_context_test
+    ../../tests/fpu_context_test.c
+    src/fpu_context.c)
+target_link_libraries(bluewake_fpu_context_test PRIVATE gxruntime)
+target_include_directories(bluewake_fpu_context_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_fpu_context_test COMMAND bluewake_fpu_context_test)
+
+add_executable(bluewake_cold_fallback_test
+    ../../tests/cold_fallback_test.c
+    src/cold_fallback.c)
+target_link_libraries(bluewake_cold_fallback_test PRIVATE gxruntime)
+target_include_directories(bluewake_cold_fallback_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_cold_fallback_test COMMAND bluewake_cold_fallback_test)
+
+add_executable(bluewake_aram_dma_contract_test
+    ../../tests/aram_dma_contract_test.c
+    src/aram_dma.c)
+target_link_libraries(bluewake_aram_dma_contract_test PRIVATE gxruntime)
+target_include_directories(bluewake_aram_dma_contract_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_aram_dma_contract_test
+    COMMAND bluewake_aram_dma_contract_test)
+
+add_executable(bluewake_audio_capture_test
+    ../../tests/audio_capture_test.c
+    src/audio_capture.c)
+target_include_directories(bluewake_audio_capture_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_audio_capture_test COMMAND bluewake_audio_capture_test)
+
+add_executable(bluewake_audio_dma_stereo_test ../../tests/audio_dma_stereo_test.c)
+target_include_directories(bluewake_audio_dma_stereo_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_options(bluewake_audio_dma_stereo_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME bluewake_audio_dma_stereo_test COMMAND bluewake_audio_dma_stereo_test)
+
+add_executable(bluewake_ipl_sram_test
+    ../../tests/ipl_sram_test.c
+    src/ipl_sram.c)
+target_include_directories(bluewake_ipl_sram_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_ipl_sram_test COMMAND bluewake_ipl_sram_test)
+
+add_executable(bluewake_card_runtime_test
+    ../../tests/card_runtime_test.c
+    src/card_runtime.c)
+target_link_libraries(bluewake_card_runtime_test PRIVATE gxruntime)
+target_include_directories(bluewake_card_runtime_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_card_runtime_test COMMAND bluewake_card_runtime_test)
+
+add_executable(bluewake_edge_intercepts_test
+    ../../tests/edge_intercepts_test.c
+    src/edge_intercepts.c
+    src/game_options.c
+    src/card_runtime.c)
+target_link_libraries(bluewake_edge_intercepts_test PRIVATE gxruntime)
+target_include_directories(bluewake_edge_intercepts_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_edge_intercepts_test
+    COMMAND bluewake_edge_intercepts_test)
+
+add_executable(bluewake_forest_water_test
+    ../../tests/forest_water_test.c
+    src/forest_water.c)
+target_link_libraries(bluewake_forest_water_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
+target_include_directories(bluewake_forest_water_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+add_test(NAME bluewake_forest_water_test COMMAND bluewake_forest_water_test)
+
+add_executable(bluewake_external_memory_test
+    ../../tests/external_memory_test.c
+    src/external_memory.c)
+target_link_libraries(bluewake_external_memory_test PRIVATE gxruntime)
+target_include_directories(bluewake_external_memory_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_external_memory_test
+    COMMAND bluewake_external_memory_test)
+
+add_executable(bluewake_pad_event_schedule_test
+    ../../tests/pad_event_schedule_test.c
+    src/pad_event_schedule.c)
+target_link_libraries(bluewake_pad_event_schedule_test PRIVATE gxruntime)
+target_include_directories(bluewake_pad_event_schedule_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_pad_event_schedule_test
+    COMMAND bluewake_pad_event_schedule_test)
+
+add_executable(bluewake_pad_waypoint_test
+    ../../tests/pad_waypoint_test.c
+    src/pad_waypoint.c)
+target_link_libraries(bluewake_pad_waypoint_test PRIVATE gxruntime)
+target_include_directories(bluewake_pad_waypoint_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_pad_waypoint_test COMMAND bluewake_pad_waypoint_test)
+
+add_executable(bluewake_pad_wire_test
+    ../../tests/pad_wire_test.c
+    src/pad_wire.c)
+target_link_libraries(bluewake_pad_wire_test PRIVATE gxruntime)
+target_include_directories(bluewake_pad_wire_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+add_test(NAME bluewake_pad_wire_test COMMAND bluewake_pad_wire_test)
+
+add_executable(bluewake_rel_scratch_allocator_test
+    ../../tests/rel_scratch_allocator_test.c
+    src/rel_scratch_allocator.c)
+target_include_directories(bluewake_rel_scratch_allocator_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_rel_scratch_allocator_test
+    COMMAND bluewake_rel_scratch_allocator_test)
+
+add_executable(bluewake_staging_budget_test
+    ../../tests/staging_budget_test.cpp)
+target_compile_features(bluewake_staging_budget_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_staging_budget_test PRIVATE
+    ${GXRUNTIME_DIR}/graphics/aurora/lib)
+add_test(NAME bluewake_staging_budget_test
+    COMMAND bluewake_staging_budget_test)
+
+# Manual GPU oracle: exercises gxcore texture decode, TEV alpha/compare,
+# Aurora blending, and framebuffer readback without private game data.
+add_executable(bluewake_gxcore_alpha_pixels_test
+    ../../tests/gxcore_alpha_pixels_test.cpp)
+target_compile_features(bluewake_gxcore_alpha_pixels_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_gxcore_alpha_pixels_test PRIVATE
+    ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_gxcore_alpha_pixels_test PRIVATE
+    GXRuntime::aurora GXRuntime::gxcore)
+
+# Manual GPU oracle: proves that a TEV indirect stage displaces the regular
+# texture coordinate through the actual gxcore/Aurora pixel path.
+add_executable(bluewake_gxcore_indirect_pixels_test
+    ../../tests/gxcore_indirect_pixels_test.cpp)
+target_compile_features(bluewake_gxcore_indirect_pixels_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_gxcore_indirect_pixels_test PRIVATE
+    ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_gxcore_indirect_pixels_test PRIVATE
+    GXRuntime::aurora GXRuntime::gxcore)
+
+# Manual GPU oracle: proves GX destination-alpha override feeds a later
+# destination-alpha blend through the actual gxcore/Aurora pixel path.
+add_executable(bluewake_gxcore_dstalpha_pixels_test
+    ../../tests/gxcore_dstalpha_pixels_test.cpp)
+target_compile_features(bluewake_gxcore_dstalpha_pixels_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_gxcore_dstalpha_pixels_test PRIVATE
+    ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_gxcore_dstalpha_pixels_test PRIVATE
+    GXRuntime::aurora GXRuntime::gxcore)
+
+# Manual GPU oracle: proves GXSetZCompLoc writes depth before a failing alpha
+# test, so a same-depth draw using a strict comparison remains occluded.
+add_executable(bluewake_gxcore_early_depth_pixels_test
+    ../../tests/gxcore_early_depth_pixels_test.cpp)
+target_compile_features(bluewake_gxcore_early_depth_pixels_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_gxcore_early_depth_pixels_test PRIVATE
+    ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_gxcore_early_depth_pixels_test PRIVATE
+    GXRuntime::aurora GXRuntime::gxcore)
+
+# Manual GPU oracle: proves Wind Waker's late ZTexture REPLACE clear writes
+# sampled 24-bit depth, allowing a later GX_LESS draw past the far clear value.
+add_executable(bluewake_gxcore_ztexture_pixels_test
+    ../../tests/gxcore_ztexture_pixels_test.cpp)
+target_compile_features(bluewake_gxcore_ztexture_pixels_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_gxcore_ztexture_pixels_test PRIVATE
+    ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_gxcore_ztexture_pixels_test PRIVATE
+    GXRuntime::aurora GXRuntime::gxcore)
+
+# Manual GPU oracle: proves a GX half-scale EFB copy samples the complete
+# source rectangle and scales it into the smaller destination texture.
+add_executable(bluewake_gxcore_efb_half_scale_pixels_test
+    ../../tests/gxcore_efb_half_scale_pixels_test.cpp)
+target_compile_features(bluewake_gxcore_efb_half_scale_pixels_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_gxcore_efb_half_scale_pixels_test PRIVATE
+    ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_gxcore_efb_half_scale_pixels_test PRIVATE
+    GXRuntime::aurora GXRuntime::gxcore)
+
+add_executable(bluewake_generated_scheduler_contract_test
+    ../../tests/generated_scheduler_contract_test.c)
+target_link_libraries(bluewake_generated_scheduler_contract_test PRIVATE
+    gxruntime ${CMAKE_DL_LIBS})
+target_include_directories(bluewake_generated_scheduler_contract_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp
+)
+set(BLUEWAKE_COMPOSITE_MODULE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../build/composite-lib/gGZLE01_recomp.dylib)
+if(EXISTS ${BLUEWAKE_COMPOSITE_MODULE})
+    add_test(NAME bluewake_generated_scheduler_contract_test
+        COMMAND bluewake_generated_scheduler_contract_test
+            ${BLUEWAKE_COMPOSITE_MODULE})
+endif()
+
+add_executable(bluewake_generated_aram_stream_contract_test
+    ../../tests/generated_aram_stream_contract_test.c)
+target_link_libraries(bluewake_generated_aram_stream_contract_test PRIVATE
+    gxruntime ${CMAKE_DL_LIBS})
+target_include_directories(bluewake_generated_aram_stream_contract_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp
+)
+if(EXISTS ${BLUEWAKE_COMPOSITE_MODULE})
+    add_test(NAME bluewake_generated_aram_stream_contract_test
+        COMMAND bluewake_generated_aram_stream_contract_test
+            ${BLUEWAKE_COMPOSITE_MODULE})
+endif()
+
+add_executable(bluewake_generated_dvd_callback_contract_test
+    ../../tests/generated_dvd_callback_contract_test.c
+    src/callback_delivery.c)
+target_link_libraries(bluewake_generated_dvd_callback_contract_test PRIVATE
+    gxruntime ${CMAKE_DL_LIBS})
+target_include_directories(bluewake_generated_dvd_callback_contract_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp
+)
+if(EXISTS ${BLUEWAKE_COMPOSITE_MODULE})
+    add_test(NAME bluewake_generated_dvd_callback_contract_test
+        COMMAND bluewake_generated_dvd_callback_contract_test
+            ${BLUEWAKE_COMPOSITE_MODULE})
+endif()
+
+add_executable(bluewake_headless_pad_test ../../tests/headless_pad_test.c)
+target_link_libraries(bluewake_headless_pad_test PRIVATE gxruntime)
+target_include_directories(bluewake_headless_pad_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+)
+
+if(BLUEWAKE_ENABLE_DSP_ADAPTER)
+    if(NOT EXISTS "${BLUEWAKE_DSP_DONOR_DIR}/Source/Core/Core/DSP/DSPCore.h")
+        message(FATAL_ERROR "BLUEWAKE_DSP_DONOR_DIR must point to RecompCore")
+    endif()
+    if(NOT EXISTS "${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Source/Core/Core/libcore.a")
+        message(FATAL_ERROR "BLUEWAKE_DSP_DONOR_BUILD_DIR must contain libcore.a")
+    endif()
+
+    add_library(bluewake_dsp_adapter STATIC
+        src/dsp_adapter.cpp
+        src/dsp_adapter_c.cpp
+        src/dsp_adapter_donor_stubs.cpp
+        src/dsp_hle_backend.cpp)
+    target_compile_features(bluewake_dsp_adapter PUBLIC cxx_std_23)
+    target_include_directories(bluewake_dsp_adapter PRIVATE
+        ${BLUEWAKE_DSP_DONOR_DIR}/Source/Core
+        ${BLUEWAKE_DSP_DONOR_DIR}/Source
+        ${BLUEWAKE_DSP_DONOR_DIR}/Externals
+        ${BLUEWAKE_DSP_DONOR_DIR}/Externals/xxhash/xxHash
+        /opt/homebrew/include
+    )
+    find_library(BLUEWAKE_DSP_FMT_LIBRARY NAMES fmt
+        PATHS /opt/homebrew/opt/fmt/lib /opt/local/lib)
+    if(NOT BLUEWAKE_DSP_FMT_LIBRARY)
+        message(FATAL_ERROR "fmt is required for the optional DSP adapter")
+    endif()
+    file(GLOB BLUEWAKE_DSP_OBJECTS
+        "${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Source/Core/Core/CMakeFiles/core.dir/DSP/*.o"
+        "${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Source/Core/Core/CMakeFiles/core.dir/DSP/Interpreter/*.o"
+        "${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Source/Core/Core/CMakeFiles/core.dir/DSP/Jit/DSPEmitterBase.cpp.o"
+        "${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Source/Core/Core/CMakeFiles/core.dir/HW/DSPHLE/*.o"
+        "${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Source/Core/Core/CMakeFiles/core.dir/HW/DSPHLE/UCodes/*.o")
+    list(LENGTH BLUEWAKE_DSP_OBJECTS BLUEWAKE_DSP_OBJECT_COUNT)
+    if(BLUEWAKE_DSP_OBJECT_COUNT LESS 20)
+        message(FATAL_ERROR "The donor DSP object set is incomplete")
+    endif()
+    set(BLUEWAKE_DSP_ARCHIVE
+        "${CMAKE_CURRENT_BINARY_DIR}/libbluewake-dsp-donor.a")
+    add_custom_command(OUTPUT "${BLUEWAKE_DSP_ARCHIVE}"
+        COMMAND /usr/bin/libtool -static -o "${BLUEWAKE_DSP_ARCHIVE}"
+            ${BLUEWAKE_DSP_OBJECTS}
+        DEPENDS ${BLUEWAKE_DSP_OBJECTS}
+        VERBATIM)
+    add_custom_target(bluewake_dsp_donor_archive
+        DEPENDS "${BLUEWAKE_DSP_ARCHIVE}")
+    add_library(bluewake_dsp_donor STATIC IMPORTED GLOBAL)
+    set_target_properties(bluewake_dsp_donor PROPERTIES
+        IMPORTED_LOCATION "${BLUEWAKE_DSP_ARCHIVE}")
+    add_dependencies(bluewake_dsp_adapter bluewake_dsp_donor_archive)
+    target_link_libraries(bluewake_dsp_adapter PRIVATE
+        bluewake_dsp_donor
+        ${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Source/Core/Common/libcommon.a
+        ${BLUEWAKE_DSP_DONOR_BUILD_DIR}/Externals/xxhash/libxxhash.a
+        ${BLUEWAKE_DSP_FMT_LIBRARY}
+        z
+        iconv
+        "-framework CoreFoundation"
+        "-framework Foundation"
+    )
+
+    add_executable(bluewake_dsp_adapter_test src/dsp_adapter_test.cpp)
+    target_link_libraries(bluewake_dsp_adapter_test PRIVATE bluewake_dsp_adapter)
+    target_include_directories(bluewake_dsp_adapter_test PRIVATE
+        ${BLUEWAKE_DSP_DONOR_DIR}/Source/Core
+        ${BLUEWAKE_DSP_DONOR_DIR}/Source)
+    target_compile_options(bluewake_dsp_adapter_test PRIVATE -UNDEBUG)
+    add_test(NAME bluewake_dsp_adapter_test COMMAND bluewake_dsp_adapter_test
+        ${BLUEWAKE_DSP_DONOR_DIR}/Data/Sys/GC/dsp_rom.bin
+        ${BLUEWAKE_DSP_DONOR_DIR}/Data/Sys/GC/dsp_coef.bin)
+
+    add_executable(bluewake_dsp_adapter_c_test src/dsp_adapter_c_test.c)
+    target_link_libraries(bluewake_dsp_adapter_c_test PRIVATE bluewake_dsp_adapter)
+    target_compile_options(bluewake_dsp_adapter_c_test PRIVATE -UNDEBUG)
+    add_test(NAME bluewake_dsp_adapter_c_test COMMAND bluewake_dsp_adapter_c_test
+        ${BLUEWAKE_DSP_DONOR_DIR}/Data/Sys/GC/dsp_rom.bin
+        ${BLUEWAKE_DSP_DONOR_DIR}/Data/Sys/GC/dsp_coef.bin)
+
+    target_compile_definitions(bluewake_host PRIVATE BLUEWAKE_HAS_DSP_ADAPTER=1)
+    target_link_libraries(bluewake_host PRIVATE bluewake_dsp_adapter)
+
+    if(BLUEWAKE_ENABLE_DSP_IPO)
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT BLUEWAKE_DSP_IPO_SUPPORTED
+            OUTPUT BLUEWAKE_DSP_IPO_ERROR LANGUAGES C CXX)
+        if(NOT BLUEWAKE_DSP_IPO_SUPPORTED)
+            message(FATAL_ERROR
+                "DSP IPO is required but unsupported: ${BLUEWAKE_DSP_IPO_ERROR}")
+        endif()
+
+        file(STRINGS "${BLUEWAKE_DSP_DONOR_BUILD_DIR}/CMakeCache.txt"
+            BLUEWAKE_DSP_DONOR_IPO_CACHE
+            REGEX "^CMAKE_INTERPROCEDURAL_OPTIMIZATION(:[^=]+)?=ON$")
+        if(NOT BLUEWAKE_DSP_DONOR_IPO_CACHE)
+            message(FATAL_ERROR
+                "BLUEWAKE_DSP_DONOR_BUILD_DIR must be configured with "
+                "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON")
+        endif()
+
+        set_property(TARGET
+            bluewake_dsp_adapter
+            bluewake_dsp_adapter_test
+            bluewake_dsp_adapter_c_test
+            bluewake_host
+            PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+endif()
+
+add_executable(bluewake_memory_card_io_test ../../tests/memory_card_io_test.c)
+target_include_directories(bluewake_memory_card_io_test PRIVATE ${GXRUNTIME_DIR}/include)
+target_compile_options(bluewake_memory_card_io_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME bluewake_memory_card_io_test COMMAND bluewake_memory_card_io_test)
+set_tests_properties(bluewake_memory_card_io_test PROPERTIES TIMEOUT 15)
+
+add_executable(bluewake_atomic_file_test ../../tests/atomic_file_test.c)
+target_include_directories(bluewake_atomic_file_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${GXRUNTIME_DIR}/include)
+add_test(NAME bluewake_atomic_file_test COMMAND bluewake_atomic_file_test)
+
+add_executable(bluewake_atomic_copy_race_test ../../tests/atomic_copy_race_test.c)
+target_include_directories(bluewake_atomic_copy_race_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_atomic_copy_race_test COMMAND bluewake_atomic_copy_race_test)
+
+add_executable(bluewake_restart_request_test ../../tests/restart_request_test.cpp)
+add_test(NAME bluewake_restart_request_test COMMAND bluewake_restart_request_test)
+
+add_executable(bluewake_launch_marker_test ../../tests/launch_marker_test.c)
+target_include_directories(bluewake_launch_marker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_launch_marker_test COMMAND bluewake_launch_marker_test)
+
+add_executable(bluewake_settings_state_test ../../tests/settings_state_test.cpp)
+target_compile_features(bluewake_settings_state_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_settings_state_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/include)
+add_test(NAME bluewake_settings_state_test COMMAND bluewake_settings_state_test)
+
+add_executable(bluewake_settings_table_test ../../tests/settings_table_test.cpp)
+target_compile_features(bluewake_settings_table_test PRIVATE cxx_std_20)
+add_test(NAME bluewake_settings_table_test COMMAND bluewake_settings_table_test)
+
+add_executable(bluewake_settings_file_test ../../tests/settings_file_test.cpp)
+target_compile_features(bluewake_settings_file_test PRIVATE cxx_std_20)
+add_test(NAME bluewake_settings_file_test COMMAND bluewake_settings_file_test)
+if(UNIX)
+    add_executable(bluewake_process_close_test ../../tests/process_close_test.c)
+    target_include_directories(bluewake_process_close_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    add_test(NAME bluewake_process_close_test COMMAND bluewake_process_close_test)
+endif()
+
+add_executable(bluewake_pipeline_shutdown_test ${GXRUNTIME_DIR}/graphics/aurora/tests/pipeline_shutdown_test.cpp)
+target_link_libraries(bluewake_pipeline_shutdown_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_pipeline_shutdown_test COMMAND bluewake_pipeline_shutdown_test)
+set_tests_properties(bluewake_pipeline_shutdown_test PROPERTIES TIMEOUT 45)
+
+add_executable(bluewake_crash_text_test ../../tests/crash_text_test.c)
+add_test(NAME bluewake_crash_text_test COMMAND bluewake_crash_text_test)
+
+add_executable(bluewake_audio_sink_test ${GXRUNTIME_DIR}/graphics/aurora/tests/audio_sink_test.cpp)
+target_include_directories(bluewake_audio_sink_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_audio_sink_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_audio_sink_test COMMAND bluewake_audio_sink_test)
+set_tests_properties(bluewake_audio_sink_test PROPERTIES TIMEOUT 15)
+
+add_executable(bluewake_face_button_swap_test ../../tests/face_button_swap_test.c)
+target_include_directories(bluewake_face_button_swap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_face_button_swap_test COMMAND bluewake_face_button_swap_test)
+add_executable(bluewake_dpad_menus_test ../../tests/dpad_menus_test.c)
+target_include_directories(bluewake_dpad_menus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_dpad_menus_test COMMAND bluewake_dpad_menus_test)
+add_executable(bluewake_gyro_aim_test ../../tests/gyro_aim_test.c)
+target_include_directories(bluewake_gyro_aim_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(NOT WIN32)
+    target_link_libraries(bluewake_gyro_aim_test PRIVATE m)
+endif()
+add_test(NAME bluewake_gyro_aim_test COMMAND bluewake_gyro_aim_test)
+
+add_executable(bluewake_desktop_controller_test ../../tests/desktop_controller_test.cpp)
+target_include_directories(bluewake_desktop_controller_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(bluewake_desktop_controller_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_desktop_controller_test COMMAND bluewake_desktop_controller_test)
+set_tests_properties(bluewake_desktop_controller_test PROPERTIES TIMEOUT 15)
+
+add_executable(bluewake_gx_flush_metrics_test ../../tests/gx_flush_metrics_test.c)
+target_include_directories(bluewake_gx_flush_metrics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_gx_flush_metrics_test COMMAND bluewake_gx_flush_metrics_test)
+
+add_executable(bluewake_render_worker_identity_test ../../tests/render_worker_identity_test.cpp)
+target_include_directories(bluewake_render_worker_identity_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_render_worker_identity_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_render_worker_identity_test COMMAND bluewake_render_worker_identity_test)
+set_tests_properties(bluewake_render_worker_identity_test PROPERTIES TIMEOUT 30)
+
+include("${BLUEWAKE_REPO_ROOT}/cmake/fifo_trace_worker_test.cmake")
+include("${BLUEWAKE_REPO_ROOT}/cmake/mouse_motion_test.cmake")
+
+add_executable(bluewake_renderer_shared_flags_test ../../tests/renderer_shared_flags_test.cpp)
+target_compile_definitions(bluewake_renderer_shared_flags_test PRIVATE GXRUNTIME_HAS_AURORA_RECOMP=1)
+target_include_directories(bluewake_renderer_shared_flags_test PRIVATE ${GXRUNTIME_DIR}/backends/aurora ${GXRUNTIME_DIR}/graphics/aurora/lib)
+target_link_libraries(bluewake_renderer_shared_flags_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+add_test(NAME bluewake_renderer_shared_flags_test COMMAND bluewake_renderer_shared_flags_test)
+set_tests_properties(bluewake_renderer_shared_flags_test PROPERTIES TIMEOUT 15)
+# Keep the shared-field race regression meaningful in normal Mac CTest runs.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(bluewake_renderer_shared_flags_test PRIVATE -fsanitize=thread)
+    target_link_options(bluewake_renderer_shared_flags_test PRIVATE -fsanitize=thread)
+endif()
+
+add_executable(bluewake_card_dispatch_lock_test ../../tests/card_dispatch_lock_test.c)
+target_include_directories(bluewake_card_dispatch_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${GXRUNTIME_DIR}/include)
+target_link_libraries(bluewake_card_dispatch_lock_test PRIVATE gxruntime)
+add_test(NAME bluewake_card_dispatch_lock_test COMMAND bluewake_card_dispatch_lock_test)

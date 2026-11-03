@@ -1,0 +1,108 @@
+From 9eb90469b726d424011bb94a6432556ea8514dd2 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 22:15:07 -0500
+Subject: [PATCH] dsp: inline common instruction fetch
+
+---
+ Source/Core/Core/DSP/DSPCore.h        | 24 ++++++++++++++++++++---
+ Source/Core/Core/DSP/DSPMemoryMap.cpp | 28 +++------------------------
+ 2 files changed, 24 insertions(+), 28 deletions(-)
+
+diff --git a/Source/Core/Core/DSP/DSPCore.h b/Source/Core/Core/DSP/DSPCore.h
+index 8b9676c5f7..660660a335 100644
+--- a/Source/Core/Core/DSP/DSPCore.h
++++ b/Source/Core/Core/DSP/DSPCore.h
+@@ -355,7 +355,18 @@ struct SDSP
+   void WriteMailboxHigh(Mailbox mailbox, u16 value);
+ 
+   // Reads from instruction memory.
+-  u16 ReadIMEM(u16 address) const;
++  u16 ReadIMEM(u16 address) const
++  {
++    switch (address >> 12)
++    {
++    case 0:
++      return iram[address & DSP_IRAM_MASK];
++    case 8:
++      return irom[address & DSP_IROM_MASK];
++    default:
++      return ReadIMEMFallback(address);
++    }
++  }
+ 
+   // Reads from data memory.
+   u16 ReadDMEM(u16 address);
+@@ -364,14 +375,21 @@ struct SDSP
+   void WriteDMEM(u16 address, u16 value);
+ 
+   // Fetches the next instruction and increments the PC.
+-  u16 FetchInstruction();
++  u16 FetchInstruction()
++  {
++    const u16 opcode = ReadIMEM(pc);
++    ++pc;
++    return opcode;
++  }
+ 
+   // Fetches the instruction at the PC address, but doesn't increment the PC.
+-  u16 PeekInstruction() const;
++  u16 PeekInstruction() const { return ReadIMEM(pc); }
+ 
+   // Skips over the next instruction in memory.
+   void SkipInstruction();
+ 
++  u16 ReadIMEMFallback(u16 address) const;
++
+   // Sets the given flags in the SR register.
+   void SetSRFlag(u16 flag) { r.sr |= flag; }
+ 
+diff --git a/Source/Core/Core/DSP/DSPMemoryMap.cpp b/Source/Core/Core/DSP/DSPMemoryMap.cpp
+index 1554e52ae9..29d5f621ba 100644
+--- a/Source/Core/Core/DSP/DSPMemoryMap.cpp
++++ b/Source/Core/Core/DSP/DSPMemoryMap.cpp
+@@ -10,20 +10,10 @@
+ 
+ namespace DSP
+ {
+-u16 SDSP::ReadIMEM(u16 address) const
++u16 SDSP::ReadIMEMFallback(u16 address) const
+ {
+-  switch (address >> 12)
+-  {
+-  case 0:  // 0xxx IRAM
+-    return iram[address & DSP_IRAM_MASK];
+-
+-  case 8:  // 8xxx IROM - contains code to receive code for IRAM, and a bunch of mixing loops.
+-    return irom[address & DSP_IROM_MASK];
+-
+-  default:  // Unmapped/non-existing memory
+-    ERROR_LOG_FMT(DSPLLE, "{:04x} DSP ERROR: Executing from invalid ({:04x}) memory", pc, address);
+-    return 0;
+-  }
++  ERROR_LOG_FMT(DSPLLE, "{:04x} DSP ERROR: Executing from invalid ({:04x}) memory", pc, address);
++  return 0;
+ }
+ 
+ u16 SDSP::ReadDMEM(u16 address)
+@@ -64,18 +54,6 @@ void SDSP::WriteDMEM(u16 address, u16 value)
+   }
+ }
+ 
+-u16 SDSP::FetchInstruction()
+-{
+-  const u16 opc = PeekInstruction();
+-  pc++;
+-  return opc;
+-}
+-
+-u16 SDSP::PeekInstruction() const
+-{
+-  return ReadIMEM(pc);
+-}
+-
+ void SDSP::SkipInstruction()
+ {
+   pc += GetOpTemplate(PeekInstruction())->size;
+-- 
+2.41.0
+

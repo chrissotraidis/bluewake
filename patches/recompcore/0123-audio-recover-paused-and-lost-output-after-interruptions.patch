@@ -1,0 +1,146 @@
+From b1da5277a153977d4899001aec2a8ecdbd26c838 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:35:04 +0900
+Subject: [PATCH] audio: recover paused and lost output after interruptions
+
+---
+ GXRuntime/backends/aurora/aurora_audio.cpp    | 30 +++++++++++++++++++
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  1 +
+ .../backends/aurora/aurora_backend_private.h  |  1 +
+ .../graphics/aurora/tests/audio_sink_test.cpp | 12 ++++++++
+ GXRuntime/include/gxruntime/aurora_backend.h  |  3 ++
+ 5 files changed, 47 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_audio.cpp b/GXRuntime/backends/aurora/aurora_audio.cpp
+index 591f3df8..c7d16068 100644
+--- a/GXRuntime/backends/aurora/aurora_audio.cpp
++++ b/GXRuntime/backends/aurora/aurora_audio.cpp
+@@ -53,6 +53,7 @@ bool stretch_enabled() {
+ }  // namespace
+ 
+ namespace gx_aurora {
++static std::atomic_bool resume_requested{false};
+ void close_audio_capture() {
+     if (g_sink_capture && std::fclose(g_sink_capture) != 0)
+         std::fprintf(stderr, "[audio-sink] capture close failed\n");
+@@ -61,6 +62,22 @@ void close_audio_capture() {
+     g_sink_capture_bytes = 0;
+     g_sink_capture_rate = 0;
+ }
++void recover_audio_output() {
++    static Uint64 next_check;
++    bool requested = resume_requested.exchange(false, std::memory_order_relaxed);
++    Uint64 now = SDL_GetTicks();
++    if (!requested && now < next_check) return;
++    next_check = now + 250;
++    if (g_audio_stream) {
++        SDL_AudioDeviceID device = SDL_GetAudioStreamDevice(g_audio_stream);
++        SDL_AudioSpec format;
++        if (!device || !SDL_GetAudioDeviceFormat(device, &format, nullptr)) {
++            SDL_DestroyAudioStream(g_audio_stream); g_audio_stream = nullptr;
++            g_audio_playing = false;
++        } else if (SDL_AudioDevicePaused(device)) g_audio_playing = false;
++    }
++    if (requested) retry_audio_open(true);
++}
+ bool retry_audio_open(bool force) {
+     if (g_audio_stream != nullptr) return true;
+     static Uint64 next_attempt;
+@@ -86,6 +103,10 @@ bool retry_audio_open(bool force) {
+ } // namespace gx_aurora
+ 
+ extern "C" {
++void dol_aurora_audio_resume(void) {
++    gx_aurora::resume_requested.store(true, std::memory_order_relaxed);
++}
++
+ 
+ void aurora_backend_audio_set_sample_rate(u32 sample_rate) {
+     if (sample_rate != 48000)
+@@ -110,6 +131,7 @@ void aurora_backend_audio_set_sample_rate(u32 sample_rate) {
+ 
+ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+     if (samples == nullptr || frames == 0) return;
++    gx_aurora::recover_audio_output();
+     gx_aurora::g_audio_push_count++;
+     if (!gx_aurora::retry_audio_open(false)) {
+         gx_aurora::g_audio_dropped_count++;
+@@ -136,6 +158,14 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+     }
+ 
+     int queued = SDL_GetAudioStreamQueued(gx_aurora::g_audio_stream);
++    if (queued < 0) {
++        gx_aurora::g_audio_dropped_count++;
++        gx_aurora::g_audio_dropped_frames += frames;
++        SDL_DestroyAudioStream(gx_aurora::g_audio_stream);
++        gx_aurora::g_audio_stream = nullptr;
++        gx_aurora::g_audio_playing = false;
++        return;
++    }
+     // Fast-forward (dol_aurora_set_fast_forward): the sound made faster than
+     // real time is kept only up to the stretcher's target, so the queue neither
+     // holds it late after the fast-forward nor runs dry during it.
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 3d5785d5..2f84b7ba 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -184,6 +184,7 @@ void poll_events() {
+         ++count;
+         ++event;
+     }
++    recover_audio_output();
+     retry_audio_open(false);
+     const auto ms = [](clock::duration d) { return std::chrono::duration<double, std::milli>(d).count(); };
+     if (clock::now() - start >= std::chrono::milliseconds(100))
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index d688f8e2..1710e49c 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -174,6 +174,7 @@ long long_env(const char* name, long fallback);
+ void log_callback(AuroraLogLevel level, const char* module, const char* message, unsigned int);
+ bool retry_audio_open(bool force);
+ void close_audio_capture();
++void recover_audio_output();
+ void poll_events();
+ void write_aurora_command(u16 command);
+ void flush_pending_resource_metadata();
+diff --git a/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+index 09bf7ec5..d643b19a 100644
+--- a/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+@@ -50,6 +50,18 @@ int main() {
+     assert(input.gcount() == sizeof actual && std::memcmp(actual, samples, sizeof actual) == 0);
+     assert(input.peek() == std::ifstream::traits_type::eof());
+     input.close(); std::filesystem::remove(capture);
++    gx_aurora::g_audio_playing = true;
++    assert(SDL_PauseAudioStreamDevice(stream));
++    dol_aurora_audio_resume();
++    gx_aurora::recover_audio_output();
++    assert(!gx_aurora::g_audio_playing);
++    assert(SDL_ClearAudioStream(stream));
++    gx_aurora::g_audio_prebuffer_ms = 1;
++    dol_aurora_audio_resume();
++    aurora_backend_audio_push(samples, 256);
++    assert(gx_aurora::g_audio_playing && !SDL_AudioDevicePaused(SDL_GetAudioStreamDevice(stream)));
++    gx_aurora::close_audio_capture();
++    std::filesystem::remove(capture);
+     SDL_DestroyAudioStream(stream); gx_aurora::g_audio_stream = nullptr;
+     SDL_QuitSubSystem(SDL_INIT_AUDIO);
+ }
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 1a0aeeb1..3f4b234b 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -97,6 +97,9 @@ bool dol_aurora_gx_load_state(const void* data, size_t size);
+    load replaces guest memory the worker must not still be reading it. */
+ void dol_aurora_gx_drain(void);
+ 
++// Request recovery on the audio-owning host thread after an OS interruption.
++void dol_aurora_audio_resume(void);
++
+ #ifdef __cplusplus
+ }
+ #endif
+-- 
+2.46.0
+

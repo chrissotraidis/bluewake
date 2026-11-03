@@ -1,0 +1,75 @@
+diff --git a/GXRuntime/src/core/cpu_interpreter_integer.c b/GXRuntime/src/core/cpu_interpreter_integer.c
+--- a/GXRuntime/src/core/cpu_interpreter_integer.c
++++ b/GXRuntime/src/core/cpu_interpreter_integer.c
+@@ -53,11 +53,19 @@ void ppc_mtspr(CPUState* cpu, u16 spr, u32 value, u32 cia) {
+     case 27: cpu->srr1 = value; return;
+     case 282: cpu->ear = value; return;
+     case 284:
++        if (cpu->spr_write) {
++            cpu->spr_write(cpu, spr, value, cia);
++            return;
++        }
+         cpu->timebase = (cpu->timebase & 0xFFFFFFFF00000000ull) | value;
+-        break;
++        return;
+     case 285:
++        if (cpu->spr_write) {
++            cpu->spr_write(cpu, spr, value, cia);
++            return;
++        }
+         cpu->timebase = ((u64)value << 32) | (cpu->timebase & 0xFFFFFFFFull);
+-        break;
++        return;
+     case 912:
+     case 913:
+     case 914:
+@@ -79,8 +87,7 @@ void ppc_mtspr(CPUState* cpu, u16 spr, u32 value, u32 cia) {
+         cpu->spr_write(cpu, spr, value, cia);
+         return;
+     }
+-    if (spr != 284 && spr != 285)
+-        ppc_program_exception(cpu, PPC_PROGRAM_ILLEGAL, cia);
++    ppc_program_exception(cpu, PPC_PROGRAM_ILLEGAL, cia);
+ }
+ 
+ static bool wrapped_register_range_contains(u8 first, u32 count, u8 reg) {
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -95,6 +95,7 @@ static unsigned g_platform_tlut_guest_calls;
+ static unsigned g_platform_copy_guest_calls;
+ static unsigned g_spr_reads;
+ static unsigned g_spr_writes;
++static u64 g_spr_write_timebase;
+ static unsigned g_cache_controls;
+ static u16 g_last_spr;
+ static u32 g_last_spr_value;
+@@ -109,11 +110,11 @@ static u32 test_spr_read(CPUState* cpu, u16 spr, u32 cia) {
+ }
+ 
+ static void test_spr_write(CPUState* cpu, u16 spr, u32 value, u32 cia) {
+-    (void)cpu;
+     (void)cia;
+     g_spr_writes++;
+     g_last_spr = spr;
+     g_last_spr_value = value;
++    g_spr_write_timebase = cpu->timebase;
+ }
+ 
+ static void test_cache_control(CPUState* cpu, u8 operation, u32 ea, u32 cia) {
+@@ -2495,6 +2496,15 @@ static void test_native_system_helpers(void) {
+     assert(g_spr_writes == 1 && g_last_spr == 1008);
+     assert(g_last_spr_value == 0xCAFEBABEu);
+ 
++    cpu.timebase = 0x1122334455667788ull;
++    g_spr_writes = 0;
++    g_spr_write_timebase = 0u;
++    ppc_mtspr(&cpu, 284, 0xAABBCCDDu, 0x8000100Cu);
++    assert(g_spr_writes == 1 && g_last_spr == 284);
++    assert(g_last_spr_value == 0xAABBCCDDu);
++    assert(g_spr_write_timebase == 0x1122334455667788ull);
++    assert(cpu.timebase == 0x1122334455667788ull);
++
+     cpu.xer = 5;
+     cpu.gpr[10] = 0x80000100u;
+     cpu.gpr[11] = 0;

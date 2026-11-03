@@ -1,0 +1,138 @@
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 32da245..ecb9020 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -1055,9 +1055,13 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       // Multi-texmap: bind each used texmap at 2t (texture) / 2t+1 (sampler),
+       // matching the WGSL declarations. If any referenced texmap fails to
+       // resolve the draw is not drawable (avoids a missing-bind-group error).
+-      std::vector<TextureHandle> held;
+-      std::vector<wgpu::Sampler> heldSamplers;
+-      std::vector<WGPUBindGroupEntry> entries;
++      // At most eight texmaps, two entries each: fixed arrays, so a draw does
++      // not allocate (the title screen issues about 20,000 draws a frame).
++      std::array<TextureHandle, 8> held{};
++      std::array<wgpu::Sampler, 8> heldSamplers{};
++      std::array<WGPUBindGroupEntry, 16> entries{};
++      size_t heldCount = 0;
++      size_t entryCount = 0;
+       bool complete = true;
+       for (uint32_t t = 0; t < 8u; ++t) {
+         if ((plan.texmap_mask & (1u << t)) == 0u)
+@@ -1073,20 +1077,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+           complete = false;
+           break;
+         }
+-        held.push_back(bound);
+-        heldSamplers.push_back(
+-            sampler_ref(sampler_descriptor(plan.samplers[t])));
+-        entries.push_back(WGPUBindGroupEntry{
+-            .binding = 2u * t, .textureView = bound->sampleTextureView.Get()});
+-        entries.push_back(WGPUBindGroupEntry{.binding = 2u * t + 1u,
+-                                             .sampler = heldSamplers.back().Get()});
++        held[heldCount] = bound;
++        heldSamplers[heldCount] = sampler_ref(sampler_descriptor(plan.samplers[t]));
++        entries[entryCount++] = WGPUBindGroupEntry{
++            .binding = 2u * t, .textureView = bound->sampleTextureView.Get()};
++        entries[entryCount++] = WGPUBindGroupEntry{
++            .binding = 2u * t + 1u, .sampler = heldSamplers[heldCount].Get()};
++        ++heldCount;
+       }
+       if (!complete)
+         return false;
+       const WGPUBindGroupDescriptor descriptor{
+           .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
+           .layout = texture_bind_group_layout(plan.texmap_mask).Get(),
+-          .entryCount = entries.size(),
++          .entryCount = entryCount,
+           .entries = entries.data(),
+       };
+       textureBindGroup = bind_group_ref(descriptor);
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index a1bc6dc..b8e1318 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -117,6 +117,11 @@ public:
+   DrawPlan build_draw_plan(const gxruntime::aurora_recomp::ConsumedDraw& draw,
+                            GapCounters& counters,
+                            CachedVertexAttrs* cached = nullptr) const;
++  // As build_draw_plan, into a caller-owned plan whose vector capacity is kept
++  // across draws (no per-draw allocation of the vertex and index arrays).
++  void build_draw_plan_into(const gxruntime::aurora_recomp::ConsumedDraw& draw,
++                            GapCounters& counters, CachedVertexAttrs* cached,
++                            DrawPlan& plan) const;
+ 
+   std::uint32_t bp(std::uint8_t reg) const { return bp_regs_[reg]; }
+   bool bp_valid(std::uint8_t reg) const { return bp_valid_[reg]; }
+@@ -192,6 +197,7 @@ private:
+   std::vector<gxruntime::aurora_recomp::RenderStatePacket> since_draw_;
+   bool replay_overflow_ = false;
+   CachedVertexAttrs cached_attrs_{}; // cross-draw N/B/T fallback (stream order)
++  DrawPlan scratch_plan_{};          // reused by on_consumed_draw
+   PlanObserver plan_observer_ = nullptr;
+   void* plan_observer_user_ = nullptr;
+   CopyObserver copy_observer_ = nullptr;
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 1ff6a36..2fee1b9 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -566,17 +566,36 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+                                       GapCounters& counters,
+                                       CachedVertexAttrs* cached) const {
+   DrawPlan plan;
++  build_draw_plan_into(draw, counters, cached, plan);
++  return plan;
++}
++
++// The same plan, written into a caller-owned object. The sink builds one plan
++// per draw (about 20,000 a frame on Wind Waker's title), and returning a fresh
++// DrawPlan allocated and freed its vertex and index arrays every time; reusing
++// one object keeps their capacity. Every other field is reset to its default.
++void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
++                                       GapCounters& counters,
++                                       CachedVertexAttrs* cached,
++                                       DrawPlan& plan) const {
++  {
++    std::vector<float> vertices = std::move(plan.vertices);
++    std::vector<std::uint16_t> indices = std::move(plan.indices);
++    plan = DrawPlan{};
++    vertices.clear();
++    indices.clear();
++    plan.vertices = std::move(vertices);
++    plan.indices = std::move(indices);
++  }
+   auto skip = [&](const char* reason) {
+     plan.ok = false;
+     plan.skip_reason = reason;
+     ++counters.draws_skipped;
+-    return plan;
+   };
+   auto noop = [&](const char* reason) {
+     plan.ok = false;
+     plan.skip_reason = reason;
+     ++counters.draws_noop;
+-    return plan;
+   };
+ 
+   if (draw.cull_all) {
+@@ -1613,7 +1632,7 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+ 
+   plan.ok = true;
+   ++counters.draws_planned;
+-  return plan;
++  return;
+ }
+ 
+ // --- Sink ---------------------------------------------------------------------
+@@ -1628,8 +1647,9 @@ void GxCoreSink::on_consumed_draw(const ar::ConsumedDraw& draw,
+   auto* self = static_cast<GxCoreSink*>(user);
+   if (self->plan_observer_ == nullptr)
+     return;
+-  const DrawPlan plan = self->pending_state_.build_draw_plan(
+-      draw, self->counters_, &self->cached_attrs_);
++  DrawPlan& plan = self->scratch_plan_;
++  self->pending_state_.build_draw_plan_into(draw, self->counters_,
++                                            &self->cached_attrs_, plan);
+   self->plan_observer_(plan, self->plan_observer_user_);
+ }
+ 

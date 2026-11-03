@@ -1,0 +1,44 @@
+From b0a232239dd494a6b19cfda50f23445265af8b75 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 22:52:07 -0500
+Subject: [PATCH] aurora: let the host hold the guest at any frame boundary
+
+The host hold was only consulted when a frame could not be opened, which
+covers backgrounding but not a host menu. aurora_backend_present now checks
+it after polling events and, while it holds, keeps pumping events (so the
+host UI stays live) with the last frame on screen and no GPU work, and
+resumes when the host releases it. BlueWake iOS uses it for its pause-reason
+set: the three-dot menu, settings, layout editor and alerts.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 8403893420..a950e2f00b 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -1203,6 +1203,21 @@ void aurora_backend_present(void) {
+     const unsigned long long present_fifo = gx_aurora::g_fifo_bytes;
+     gx_aurora::g_fifo_bytes = 0;
+     gx_aurora::poll_events();
++    // The host may hold the guest at this frame boundary: a menu or layout
++    // editor is open, or the app is leaving the foreground. Events keep being
++    // pumped so the host UI stays live, the last frame stays on screen, and
++    // no GPU work is issued until the hold ends.
++    if (!gx_aurora::g_should_quit && gx_aurora::host_wants_hold()) {
++        const Uint64 start = SDL_GetTicks();
++        std::fprintf(stderr, "[gfx] guest held by the host at present=%llu\n",
++                     gx_aurora::g_present_count);
++        while (!gx_aurora::g_should_quit && gx_aurora::host_wants_hold()) {
++            SDL_Delay(16);
++            gx_aurora::poll_events();
++        }
++        std::fprintf(stderr, "[gfx] guest released after %.1f s\n",
++                     (SDL_GetTicks() - start) / 1000.0);
++    }
+     if (!gx_aurora::g_should_quit) {
+         gx_aurora::g_frame_open = aurora_begin_frame();
+         // The frame the worker records into exists from here until the next
+-- 
+2.41.0
+

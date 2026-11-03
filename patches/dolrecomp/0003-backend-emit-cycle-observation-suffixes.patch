@@ -1,0 +1,1081 @@
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index 3306611..1dc6759 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -1196,6 +1196,7 @@ int emit_code_sections_split(const LoadedCodeSection* sections,
+             fprintf(stderr, "error: out of memory\n");
+             smc_analysis_free(&smc);
+             function_list_free(&funcs);
++            free(chunk_jobs);
+             free(insts);
+             fclose(header);
+             fclose(manifest);
+diff --git a/src/backend/c_cfg.c b/src/backend/c_cfg.c
+index 3bd8850..b8dd283 100644
+--- a/src/backend/c_cfg.c
++++ b/src/backend/c_cfg.c
+@@ -70,6 +70,7 @@ static bool instruction_ends_block(const PPCInst* inst) {
+     case PPC_OP_BCCTR:
+     case PPC_OP_SC:
+     case PPC_OP_RFI:
++    case PPC_OP_MTMSR:
+         return true;
+     default:
+         return instruction_uses_fallback(inst);
+@@ -130,6 +131,10 @@ static u32 instruction_cycles(const PPCInst* inst) {
+     }
+ }
+ 
++u32 c_function_cfg_instruction_cycles(const PPCInst* inst) {
++    return instruction_cycles(inst);
++}
++
+ static bool instruction_is_pc_transparent(const PPCInst* inst) {
+     switch (inst->op) {
+     case PPC_OP_MULLI:
+@@ -336,6 +341,16 @@ void c_function_cfg_destroy(CFunctionCFG* cfg) {
+     memset(cfg, 0, sizeof(*cfg));
+ }
+ 
++u32 c_function_cfg_suffix_cycles(const CFunctionCFG* cfg,
++                                 const PPCInst* insts, u32 index) {
++    u32 cycles = 0u;
++    if (!cfg || !insts || index >= cfg->count)
++        return 0u;
++    for (u32 i = index + 1u; i < cfg->count && !cfg->leaders[i]; ++i)
++        cycles += instruction_cycles(&insts[i]);
++    return cycles;
++}
++
+ bool c_function_cfg_can_loop_directly(const CFunctionCFG* cfg,
+                                       const PPCInst* insts,
+                                       u32 function_address,
+diff --git a/src/backend/c_cfg.h b/src/backend/c_cfg.h
+index 4f732f2..acac7b8 100644
+--- a/src/backend/c_cfg.h
++++ b/src/backend/c_cfg.h
+@@ -25,5 +25,8 @@ bool c_function_cfg_can_loop_directly(const CFunctionCFG* cfg,
+                                       const PPCInst* insts,
+                                       u32 function_address,
+                                       u32 branch_index);
++u32 c_function_cfg_suffix_cycles(const CFunctionCFG* cfg,
++                                 const PPCInst* insts, u32 index);
++u32 c_function_cfg_instruction_cycles(const PPCInst* inst);
+ 
+ #endif
+diff --git a/src/backend/emitter.c b/src/backend/emitter.c
+index aefb5cb..d8f5ed4 100644
+--- a/src/backend/emitter.c
++++ b/src/backend/emitter.c
+@@ -499,9 +499,19 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "#endif\n"
+         "\n"
+         "#ifndef DOLRECOMP_C_LOOP_CYCLE_BUDGET\n"
+-        "#define DOLRECOMP_C_LOOP_CYCLE_BUDGET 256\n"
++        "static inline s64 dolrecomp_loop_cycle_budget(const CPUState* ctx) {\n"
++        "    return ctx->cycle_budget > 0 ? ctx->cycle_budget : 256;\n"
++        "}\n"
++        "#define DOLRECOMP_C_LOOP_CYCLE_BUDGET dolrecomp_loop_cycle_budget(ctx)\n"
+         "#endif\n"
+         "\n"
++        "static inline bool dolrecomp_block_can_precharge(\n"
++        "    const CPUState* ctx, u32 block_cycles) {\n"
++        "    if (ctx->cycle_deadline_budget <= 0) return true;\n"
++        "    const s64 remaining = ctx->cycle_deadline_budget + ctx->downcount;\n"
++        "    return remaining >= 0 && (u64)remaining >= (u64)block_cycles;\n"
++        "}\n"
++        "\n"
+         "/* Cross-chunk calls turn guest recursion into host recursion, and a\n"
+         "   chunk frame is not small. Without a ceiling a deep guest call chain\n"
+         "   overflows the host stack, which is a crash rather than a slow\n"
+@@ -1762,6 +1772,8 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+ 
+     case PPC_OP_MTMSR:
+         fprintf(out, "    ctx->msr = ctx->gpr[%u];\n", inst->rS);
++        fprintf(out, "    ctx->pc = 0x%08Xu;\n", inst->address + 4u);
++        fprintf(out, "    return;\n");
+         break;
+ 
+     case PPC_OP_MFSR:
+@@ -1892,6 +1904,122 @@ void emit_instruction(FILE* out, const PPCInst* inst) {
+     emit_instruction_with_range(out, inst, 0, (u32)-1, false, false);
+ }
+ 
++static bool instruction_may_observe_cycle_domain(const PPCInst* inst) {
++    switch (inst->op) {
++    case PPC_OP_MFTB:
++    case PPC_OP_MFSPR:
++    case PPC_OP_MTSPR:
++    case PPC_OP_LWZ:
++    case PPC_OP_LWZU:
++    case PPC_OP_LBZ:
++    case PPC_OP_LBZU:
++    case PPC_OP_LHZ:
++    case PPC_OP_LHZU:
++    case PPC_OP_LHA:
++    case PPC_OP_LHAU:
++    case PPC_OP_LWZX:
++    case PPC_OP_LWZUX:
++    case PPC_OP_LBZX:
++    case PPC_OP_LBZUX:
++    case PPC_OP_LHZX:
++    case PPC_OP_LHZUX:
++    case PPC_OP_LHAX:
++    case PPC_OP_LHAUX:
++    case PPC_OP_LWBRX:
++    case PPC_OP_LHBRX:
++    case PPC_OP_LFS:
++    case PPC_OP_LFSU:
++    case PPC_OP_LFD:
++    case PPC_OP_LFDU:
++    case PPC_OP_LFSX:
++    case PPC_OP_LFSUX:
++    case PPC_OP_LFDX:
++    case PPC_OP_LFDUX:
++    case PPC_OP_PSQ_L:
++    case PPC_OP_PSQ_LU:
++    case PPC_OP_PSQ_LX:
++    case PPC_OP_PSQ_LUX:
++    case PPC_OP_STW:
++    case PPC_OP_STWU:
++    case PPC_OP_STB:
++    case PPC_OP_STBU:
++    case PPC_OP_STH:
++    case PPC_OP_STHU:
++    case PPC_OP_STWX:
++    case PPC_OP_STWUX:
++    case PPC_OP_STBX:
++    case PPC_OP_STBUX:
++    case PPC_OP_STHX:
++    case PPC_OP_STHUX:
++    case PPC_OP_STFS:
++    case PPC_OP_STFSU:
++    case PPC_OP_STFD:
++    case PPC_OP_STFDU:
++    case PPC_OP_STFSX:
++    case PPC_OP_STFSUX:
++    case PPC_OP_STFDX:
++    case PPC_OP_STFDUX:
++    case PPC_OP_PSQ_ST:
++    case PPC_OP_PSQ_STU:
++    case PPC_OP_PSQ_STX:
++    case PPC_OP_PSQ_STUX:
++    case PPC_OP_STWBRX:
++    case PPC_OP_STHBRX:
++    case PPC_OP_LSWI:
++    case PPC_OP_LSWX:
++    case PPC_OP_STSWI:
++    case PPC_OP_STSWX:
++    case PPC_OP_LWARX:
++    case PPC_OP_STWCX:
++    case PPC_OP_STFIWX:
++    case PPC_OP_LMW:
++    case PPC_OP_STMW:
++    case PPC_OP_ECIWX:
++    case PPC_OP_ECOWX:
++        return true;
++    default:
++        return false;
++    }
++}
++
++static void emit_cycle_observation_suffix(FILE* out, const PPCInst* insts,
++                                          const CFunctionCFG* cfg,
++                                          u32 index) {
++    if (instruction_may_observe_cycle_domain(&insts[index])) {
++        fprintf(out, "    ctx->cycle_observation_suffix = "
++                     "cycle_block_prepaid ? %uu : 0u;\n",
++                c_function_cfg_suffix_cycles(cfg, insts, index));
++    }
++}
++
++static void emit_cycle_observation_reconcile(FILE* out,
++                                             const PPCInst* inst) {
++    if (!instruction_may_observe_cycle_domain(inst))
++        return;
++    fprintf(out, "    if (cycle_block_prepaid &&\n");
++    fprintf(out, "        ctx->cycle_deadline_budget > 0 &&\n");
++    fprintf(out, "        (s64)ctx->cycle_observation_suffix > "
++                 "ctx->cycle_deadline_budget) {\n");
++    fprintf(out, "        ctx->downcount += "
++                 "(s64)ctx->cycle_observation_suffix;\n");
++    fprintf(out, "        cycle_block_prepaid = false;\n");
++    fprintf(out, "    }\n");
++}
++
++static void emit_precise_instruction_charge(FILE* out, const PPCInst* inst) {
++    const u32 cycles = c_function_cfg_instruction_cycles(inst);
++    if (cycles == 0u)
++        return;
++    fprintf(out, "    if (!cycle_block_prepaid) {\n");
++    fprintf(out, "        if (ctx->downcount <= "
++                 "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) {\n");
++    fprintf(out, "            ctx->pc = 0x%08Xu;\n", inst->address);
++    fprintf(out, "            return;\n");
++    fprintf(out, "        }\n");
++    fprintf(out, "        ctx->downcount -= %uu;\n", cycles);
++    fprintf(out, "    }\n");
++}
++
+ static void emit_counted_loop(FILE* out, const PPCInst* insts,
+                               const CFunctionCFG* cfg, u32 function_address,
+                               u32 function_end, u32 first, u32 last) {
+@@ -1910,11 +2038,25 @@ static void emit_counted_loop(FILE* out, const PPCInst* insts,
+         branch->branch_target == loop_address;
+ 
+     fprintf(out, "static void loop_%08X(CPUState* ctx) {\n", loop_address);
++    fprintf(out, "    bool cycle_block_prepaid = false;\n");
+     fprintf(out, "label_%08X:\n", loop_address);
+-    fprintf(out, "    ctx->downcount -= %u;\n", cfg->block_cycles[first]);
++    fprintf(out, "    cycle_block_prepaid = "
++                 "dolrecomp_block_can_precharge(ctx, %uu);\n",
++            cfg->block_cycles[first]);
++    fprintf(out, "    if (cycle_block_prepaid) {\n");
++    fprintf(out, "        if (ctx->downcount <= "
++                 "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) {\n");
++    fprintf(out, "            ctx->pc = 0x%08Xu;\n", loop_address);
++    fprintf(out, "            return;\n");
++    fprintf(out, "        }\n");
++    fprintf(out, "        ctx->downcount -= %u;\n",
++            cfg->block_cycles[first]);
++    fprintf(out, "    }\n");
+     for (u32 i = first; i <= last; ++i) {
+         if (cfg->materialize_pc[i])
+             fprintf(out, "    ctx->pc = 0x%08Xu;\n", insts[i].address);
++        emit_precise_instruction_charge(out, &insts[i]);
++        emit_cycle_observation_suffix(out, insts, cfg, i);
+         if (stable_zero_poll && i == last) {
+             fprintf(out, "    {\n");
+             emit_branch_condition(out, branch->bo, branch->bi);
+@@ -1922,7 +2064,8 @@ static void emit_counted_loop(FILE* out, const PPCInst* insts,
+             fprintf(out, "            u32 poll_ea = ");
+             emit_dform_ea(out, load->rA, load->simm, false);
+             fprintf(out, ";\n");
+-            fprintf(out, "            if (DOLRECOMP_POLL_READ_STABLE(ctx, poll_ea, 4u)) {\n");
++            fprintf(out, "            if (cycle_block_prepaid && "
++                         "DOLRECOMP_POLL_READ_STABLE(ctx, poll_ea, 4u)) {\n");
+             fprintf(out, "                s64 remaining = ctx->downcount + (s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET;\n");
+             fprintf(out, "                if (remaining > 0) {\n");
+             fprintf(out, "                    u64 iterations = ((u64)remaining + %uu) / %uu;\n",
+@@ -1941,6 +2084,7 @@ static void emit_counted_loop(FILE* out, const PPCInst* insts,
+         }
+         emit_instruction_with_range(out, &insts[i], function_address,
+                                     function_end, i == last, false);
++        emit_cycle_observation_reconcile(out, &insts[i]);
+     }
+     fprintf(out, "    ctx->pc = 0x%08Xu;\n", continuation);
+     fprintf(out, "}\n\n");
+@@ -1967,6 +2111,7 @@ bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr) {
+     }
+ 
+     fprintf(out, "void func_%08X(CPUState* ctx) {\n", func_addr);
++    fprintf(out, "    bool cycle_block_prepaid = false;\n");
+     fprintf(out, "    switch (ctx->pc) {\n");
+     for (u32 i = 0; i < count; i++) {
+         fprintf(out, "    case 0x%08Xu: goto label_%08X;\n",
+@@ -1989,12 +2134,30 @@ bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr) {
+         }
+         if (cfg.materialize_pc[i])
+             fprintf(out, "    ctx->pc = 0x%08Xu;\n", insts[i].address);
+-        if (cfg.leaders[i] && cfg.block_cycles[i] != 0)
+-            fprintf(out, "    ctx->downcount -= %u;\n", cfg.block_cycles[i]);
++        if (cfg.leaders[i]) {
++            fprintf(out, "    cycle_block_prepaid = "
++                         "dolrecomp_block_can_precharge(ctx, %uu);\n",
++                    cfg.block_cycles[i]);
++            if (cfg.block_cycles[i] != 0) {
++                fprintf(out, "    if (cycle_block_prepaid) {\n");
++                fprintf(out, "        if (ctx->downcount <= "
++                             "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) {\n");
++                fprintf(out, "            ctx->pc = 0x%08Xu;\n",
++                        insts[i].address);
++                fprintf(out, "            return;\n");
++                fprintf(out, "        }\n");
++                fprintf(out, "        ctx->downcount -= %u;\n",
++                        cfg.block_cycles[i]);
++                fprintf(out, "    }\n");
++            }
++        }
++        emit_precise_instruction_charge(out, &insts[i]);
++        emit_cycle_observation_suffix(out, insts, &cfg, i);
+         emit_instruction_with_range(
+             out, &insts[i], func_addr, func_end,
+             c_function_cfg_can_loop_directly(&cfg, insts, func_addr, i),
+             has_local_returns);
++        emit_cycle_observation_reconcile(out, &insts[i]);
+     }
+ 
+     fprintf(out, "    ctx->pc = 0x%08Xu;\n", func_end);
+diff --git a/src/backend/emitter.h b/src/backend/emitter.h
+index 39d8f3c..9478273 100644
+--- a/src/backend/emitter.h
++++ b/src/backend/emitter.h
+@@ -35,4 +35,4 @@ void emit_footer(FILE* out);
+ #endif /* DOLRECOMP_EMITTER_H */
+ 
+ // i would just like to mention, that those comments have been here since the beginning of time.
+-// do not judge old me
+\ No newline at end of file
++// do not judge old me
+diff --git a/src/cpu/cpu.h b/src/cpu/cpu.h
+index 29510f8..87cf055 100644
+--- a/src/cpu/cpu.h
++++ b/src/cpu/cpu.h
+@@ -122,6 +122,9 @@ struct CPUState {
+     PPCSPRRead spr_read;
+     PPCSPRWrite spr_write;
+     PPCCacheControl cache_control;
++    u32 cycle_observation_suffix;
++    u32 cycle_deadline_active;
++    s64 cycle_deadline_budget;
+ };
+ 
+ typedef void (*PPCMemWriteJournal)(u32 offset, u32 size, void* user);
+diff --git a/src/frontend/container/rel.c b/src/frontend/container/rel.c
+index b894a36..943de3c 100644
+--- a/src/frontend/container/rel.c
++++ b/src/frontend/container/rel.c
+@@ -224,13 +224,15 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+         return 1;
+     case R_PPC_ADDR16:
+     case R_PPC_ADDR16_LO:
+-        write_be16(patch + 2, (u16)target);
++        // REL 16-bit relocation offsets identify the immediate halfword,
++        // rather than the containing instruction word.
++        write_be16(patch, (u16)target);
+         return 1;
+     case R_PPC_ADDR16_HI:
+-        write_be16(patch + 2, (u16)(target >> 16));
++        write_be16(patch, (u16)(target >> 16));
+         return 1;
+     case R_PPC_ADDR16_HA:
+-        write_be16(patch + 2, (u16)((target + 0x8000u) >> 16));
++        write_be16(patch, (u16)((target + 0x8000u) >> 16));
+         return 1;
+     case R_PPC_ADDR14:
+     case R_PPC_ADDR14_BRTAKEN:
+@@ -242,6 +244,16 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+         write_be32(patch, (word & 0xFFFF0003u) | (target & 0x0000FFFCu));
+         return 1;
+     case R_PPC_REL24: {
++        /*
++         * A static-recomp linked namespace may distinguish REL storage from
++         * retail MEM1 with address bit 30. Relative branches retain their
++         * displacement when the DOL target is viewed through the same tag;
++         * the runtime dispatcher canonicalizes that tagged DOL PC.
++         */
++        if ((patch_address & 0x40000000u) != 0u &&
++            (target & 0x40000000u) == 0u) {
++            target |= 0x40000000u;
++        }
+         s64 delta = (s64)(s32)(target - patch_address);
+         if (!check_rel_delta(delta, -0x02000000ll, 0x01FFFFFCll, "REL24"))
+             return 0;
+@@ -249,6 +261,10 @@ static int apply_relocation(RELSection* section, u32 offset, u32 patch_address,
+         return 1;
+     }
+     case R_PPC_REL14: {
++        if ((patch_address & 0x40000000u) != 0u &&
++            (target & 0x40000000u) == 0u) {
++            target |= 0x40000000u;
++        }
+         s64 delta = (s64)(s32)(target - patch_address);
+         if (!check_rel_delta(delta, -0x8000ll, 0x7FFCll, "REL14"))
+             return 0;
+diff --git a/tests/cmake/codegen_compile.cmake b/tests/cmake/codegen_compile.cmake
+index 91c5305..c09ae5a 100644
+--- a/tests/cmake/codegen_compile.cmake
++++ b/tests/cmake/codegen_compile.cmake
+@@ -27,6 +27,18 @@ endif()
+ if(NOT generated_source MATCHES "DOLRECOMP_C_LOOP_CYCLE_BUDGET")
+     message(FATAL_ERROR "generated code has no native-loop timing budget")
+ endif()
++if(NOT generated_source MATCHES "cycle_block_prepaid = dolrecomp_block_can_precharge")
++    message(FATAL_ERROR "generated code has no extent-aware deadline path")
++endif()
++if(NOT generated_source MATCHES "ctx->cycle_observation_suffix = cycle_block_prepaid")
++    message(FATAL_ERROR "generated observations do not distinguish prepaid blocks")
++endif()
++string(FIND "${generated_source}"
++    "ctx->downcount += (s64)ctx->cycle_observation_suffix"
++    reconcile_offset)
++if(reconcile_offset EQUAL -1)
++    message(FATAL_ERROR "generated observations cannot relinquish stale precharge")
++endif()
+ if(NOT generated_source MATCHES "goto label_80004020;")
+     message(FATAL_ERROR "known backward branch still returns through dispatch")
+ endif()
+diff --git a/tests/test_c_cfg.c b/tests/test_c_cfg.c
+index 9999080..8bba588 100644
+--- a/tests/test_c_cfg.c
++++ b/tests/test_c_cfg.c
+@@ -32,6 +32,8 @@ static void test_integer_loop(void) {
+     check(cfg.leaders[0] && cfg.leaders[3], "discover loop blocks");
+     check(cfg.block_cycles[0] == 3 && cfg.block_cycles[3] == 1,
+           "charge loop blocks");
++    check(c_function_cfg_instruction_cycles(&insts[0]) == 1u,
++          "expose instruction charge for deadline stepping");
+     check(c_function_cfg_can_loop_directly(&cfg, insts, BASE, 2),
+           "keep integer backedge native");
+     check(!cfg.materialize_pc[0] && !cfg.materialize_pc[1] &&
+@@ -57,6 +59,8 @@ static void test_timebase_loop(void) {
+           "yield before repeating a timebase read");
+     check(cfg.materialize_pc[0] && cfg.materialize_pc[1],
+           "materialize PC around timebase loop");
++    check(c_function_cfg_suffix_cycles(&cfg, insts, 0) == 1u,
++          "report cycles after a mid-block timebase observation");
+     c_function_cfg_destroy(&cfg);
+ }
+ 
+@@ -99,6 +103,8 @@ static void test_memory_loop(void) {
+               !cfg.materialize_pc[2] && !cfg.materialize_pc[3] &&
+               !cfg.materialize_pc[4],
+           "materialize PC only for memory slow path");
++    check(c_function_cfg_suffix_cycles(&cfg, insts, 0) == 4u,
++          "report cycles after a potentially external memory read");
+     c_function_cfg_destroy(&cfg);
+ }
+ 
+diff --git a/tests/test_c_execute.c b/tests/test_c_execute.c
+index 512af36..5943f6d 100644
+--- a/tests/test_c_execute.c
++++ b/tests/test_c_execute.c
+@@ -9,6 +9,194 @@ void func_80004040(CPUState* ctx);
+ void func_80004060(CPUState* ctx);
+ void func_80004068(CPUState* ctx);
+ void func_80004070(CPUState* ctx);
++void func_800040A0(CPUState* ctx);
++void func_800040C0(CPUState* ctx);
++void func_800040E0(CPUState* ctx);
++void func_80004140(CPUState* ctx);
++int dolrecomp_test_dispatch(CPUState* ctx);
++
++#define TEST_PPC_MSR_EE 0x00008000u
++
++typedef struct QuantumResult {
++    u32 pc;
++    u32 r3;
++    u32 r4;
++    u32 cr;
++    u64 elapsed;
++} QuantumResult;
++
++static QuantumResult run_quantum_loop(s64 cap, u64 deadline) {
++    CPUState cpu;
++    QuantumResult result = {0};
++    if (!cpu_init(&cpu))
++        return result;
++
++    cpu.pc = 0x800040C0u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 1000u;
++    cpu.gpr[4] = 3u;
++    cpu.gpr[5] = 7u;
++    while (result.elapsed < deadline && cpu.pc != cpu.lr) {
++        const u64 distance = deadline - result.elapsed;
++        cpu.downcount = 0;
++        cpu.cycle_budget = distance < (u64)cap ? (s64)distance : cap;
++        cpu.cycle_deadline_budget = (s64)distance;
++        func_800040C0(&cpu);
++        if (cpu.downcount >= 0)
++            break;
++        result.elapsed += (u64)(-cpu.downcount);
++    }
++    result.pc = cpu.pc;
++    result.r3 = cpu.gpr[3];
++    result.r4 = cpu.gpr[4];
++    result.cr = cpu.cr;
++    cpu_free(&cpu);
++    return result;
++}
++
++typedef struct ObservationRun {
++    u64 absolute;
++    u64 deadline;
++    s64 cap;
++} ObservationRun;
++
++static ObservationRun* active_observation;
++
++static u64 observe_external_read(CPUState* cpu, u32 ea, u8 size) {
++    (void)ea;
++    (void)size;
++    const u64 charged = cpu->downcount < 0 ? (u64)(-cpu->downcount) : 0u;
++    const u64 suffix = cpu->cycle_observation_suffix < charged
++                           ? cpu->cycle_observation_suffix
++                           : charged;
++    active_observation->absolute += charged - suffix;
++    cpu->downcount = -(s64)suffix;
++    const u64 distance = active_observation->deadline > active_observation->absolute
++                             ? active_observation->deadline - active_observation->absolute
++                             : 1u;
++    cpu->cycle_budget = distance < (u64)active_observation->cap
++                            ? (s64)distance
++                            : active_observation->cap;
++    cpu->cycle_deadline_budget = (s64)distance;
++    return 7u;
++}
++
++static QuantumResult run_observed_loop(s64 cap, u64 deadline) {
++    CPUState cpu;
++    QuantumResult result = {0};
++    ObservationRun observation = {.deadline = deadline, .cap = cap};
++    if (!cpu_init(&cpu))
++        return result;
++
++    active_observation = &observation;
++    cpu.external_read = observe_external_read;
++    cpu.pc = 0x800040E0u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 1000u;
++    cpu.gpr[4] = 3u;
++    cpu.gpr[5] = 0xCC005004u;
++    while (observation.absolute < deadline && cpu.pc != cpu.lr) {
++        const u64 distance = deadline - observation.absolute;
++        cpu.downcount = 0;
++        cpu.cycle_budget = distance < (u64)cap ? (s64)distance : cap;
++        cpu.cycle_deadline_budget = (s64)distance;
++        func_800040E0(&cpu);
++        if (cpu.downcount < 0)
++            observation.absolute += (u64)(-cpu.downcount);
++        else
++            break;
++    }
++    result.pc = cpu.pc;
++    result.r3 = cpu.gpr[3];
++    result.r4 = cpu.gpr[4];
++    result.cr = cpu.cr;
++    result.elapsed = observation.absolute;
++    active_observation = NULL;
++    cpu_free(&cpu);
++    return result;
++}
++
++static QuantumResult run_cross_dispatch(s64 cap, u64 deadline) {
++    CPUState cpu;
++    QuantumResult result = {0};
++    if (!cpu_init(&cpu))
++        return result;
++
++    cpu.pc = 0x80004100u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 1000u;
++    cpu.gpr[4] = 3u;
++    cpu.gpr[5] = 7u;
++    while (result.elapsed < deadline) {
++        const u64 distance = deadline - result.elapsed;
++        cpu.downcount = 0;
++        cpu.cycle_budget = distance < (u64)cap ? (s64)distance : cap;
++        cpu.cycle_deadline_budget = (s64)distance;
++        if (!dolrecomp_test_dispatch(&cpu))
++            break;
++        if (cpu.downcount >= 0)
++            break;
++        result.elapsed += (u64)(-cpu.downcount);
++    }
++    result.pc = cpu.pc;
++    result.r3 = cpu.gpr[3];
++    result.r4 = cpu.gpr[4];
++    result.cr = cpu.cr;
++    cpu_free(&cpu);
++    return result;
++}
++
++static QuantumResult run_indirect_dispatch(s64 cap, u64 deadline) {
++    CPUState cpu;
++    QuantumResult result = {0};
++    if (!cpu_init(&cpu))
++        return result;
++
++    cpu.pc = 0x80004120u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 1000u;
++    cpu.gpr[5] = 7u;
++    cpu.gpr[11] = cpu.lr;
++    cpu.gpr[12] = 0x80005120u;
++    while (result.elapsed < deadline && cpu.pc != cpu.lr) {
++        const u64 distance = deadline - result.elapsed;
++        cpu.downcount = 0;
++        cpu.cycle_budget = distance < (u64)cap ? (s64)distance : cap;
++        cpu.cycle_deadline_budget = (s64)distance;
++        if (!dolrecomp_test_dispatch(&cpu))
++            break;
++        if (cpu.downcount >= 0)
++            break;
++        result.elapsed += (u64)(-cpu.downcount);
++    }
++    result.pc = cpu.pc;
++    result.r3 = cpu.gpr[3];
++    result.r4 = cpu.gpr[4];
++    result.cr = cpu.cr;
++    cpu_free(&cpu);
++    return result;
++}
++
++static QuantumResult run_interrupt_enable_boundary(s64 cap) {
++    CPUState cpu;
++    QuantumResult result = {0};
++    if (!cpu_init(&cpu))
++        return result;
++
++    cpu.pc = 0x80004140u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 0u;
++    cpu.gpr[4] = TEST_PPC_MSR_EE;
++    cpu.cycle_budget = cap;
++    cpu.downcount = 0;
++    func_80004140(&cpu);
++    result.pc = cpu.pc;
++    result.r3 = cpu.gpr[3];
++    result.r4 = cpu.msr;
++    result.elapsed = cpu.downcount < 0 ? (u64)(-cpu.downcount) : 0u;
++    cpu_free(&cpu);
++    return result;
++}
+ 
+ static u64 bits_of(f64 value) {
+     u64 bits;
+@@ -38,6 +226,192 @@ int main(void) {
+         fprintf(stderr, "pc=%08X r3=%u cr=%08X calls=%u\n",
+                 cpu.pc, cpu.gpr[3], cpu.cr, calls);
+     }
++
++    cpu.pc = 0x80004020u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 3u;
++    cpu.downcount = 0;
++    cpu.cycle_budget = 2;
++    cpu.cycle_deadline_active = 1u;
++    cpu.cycle_deadline_budget = 2;
++    func_80004020(&cpu);
++    int deadline_ok = cpu.pc == 0x80004028u && cpu.gpr[3] == 2u &&
++                      cpu.downcount == -2;
++    calls = 1u;
++    while (cpu.pc != cpu.lr && calls < 32u) {
++        cpu.downcount = 0;
++        func_80004020(&cpu);
++        calls++;
++    }
++    deadline_ok = deadline_ok && cpu.pc == cpu.lr && cpu.gpr[3] == 0u &&
++                  (cpu.cr & 0xF0000000u) == 0x20000000u;
++    if (!deadline_ok) {
++        fprintf(stderr,
++                "deadline pc=%08X r3=%u cr=%08X downcount=%lld calls=%u\n",
++                cpu.pc, cpu.gpr[3], cpu.cr, (long long)cpu.downcount, calls);
++    }
++    cpu.cycle_deadline_active = 0u;
++    cpu.cycle_deadline_budget = 0;
++    cpu.cycle_budget = 0;
++
++    cpu.pc = 0x800040A0u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 0u;
++    cpu.cr = 0u;
++    cpu.downcount = 0;
++    cpu.cycle_budget = 2;
++    cpu.cycle_deadline_budget = 3;
++    func_800040A0(&cpu);
++    int cap_plus_one_ok = cpu.pc == 0x800040A8u && cpu.gpr[3] == 2u &&
++                          cpu.downcount == -2;
++    cpu.downcount = 0;
++    cpu.cycle_budget = 1;
++    cpu.cycle_deadline_budget = 1;
++    func_800040A0(&cpu);
++    const u32 narrow_pc = cpu.pc;
++    const u32 narrow_gpr3 = cpu.gpr[3];
++    const u32 narrow_cr = cpu.cr;
++
++    cpu.pc = 0x800040A0u;
++    cpu.lr = 0x81234564u;
++    cpu.gpr[3] = 0u;
++    cpu.cr = 0u;
++    cpu.downcount = 0;
++    cpu.cycle_budget = 3;
++    cpu.cycle_deadline_budget = 3;
++    func_800040A0(&cpu);
++    cap_plus_one_ok = cap_plus_one_ok && cpu.pc == narrow_pc &&
++                      cpu.gpr[3] == narrow_gpr3 && cpu.cr == narrow_cr &&
++                      cpu.pc == 0x800040ACu && cpu.gpr[3] == 3u;
++    if (!cap_plus_one_ok) {
++        fprintf(stderr,
++                "cap+1 narrow=%08X/%u/%08X wide=%08X/%u/%08X\n",
++                narrow_pc, narrow_gpr3, narrow_cr, cpu.pc, cpu.gpr[3],
++                cpu.cr);
++    }
++    cpu.downcount = 0;
++    cpu.cycle_budget = 0;
++    cpu.cycle_deadline_budget = 0;
++
++    const QuantumResult quantum_17 = run_quantum_loop(17, 263u);
++    const QuantumResult quantum_64 = run_quantum_loop(64, 263u);
++    const QuantumResult quantum_256 = run_quantum_loop(256, 263u);
++    const int quantum_ok =
++        quantum_17.pc == quantum_64.pc && quantum_17.pc == quantum_256.pc &&
++        quantum_17.r3 == quantum_64.r3 && quantum_17.r3 == quantum_256.r3 &&
++        quantum_17.r4 == quantum_64.r4 && quantum_17.r4 == quantum_256.r4 &&
++        quantum_17.cr == quantum_64.cr && quantum_17.cr == quantum_256.cr &&
++        quantum_17.elapsed == quantum_64.elapsed &&
++        quantum_17.elapsed == quantum_256.elapsed;
++    if (!quantum_ok) {
++        fprintf(stderr,
++                "quantum cap17=%08X/%u/%u/%08X/%llu "
++                "cap64=%08X/%u/%u/%08X/%llu "
++                "cap256=%08X/%u/%u/%08X/%llu\n",
++                quantum_17.pc, quantum_17.r3, quantum_17.r4, quantum_17.cr,
++                (unsigned long long)quantum_17.elapsed,
++                quantum_64.pc, quantum_64.r3, quantum_64.r4, quantum_64.cr,
++                (unsigned long long)quantum_64.elapsed,
++                quantum_256.pc, quantum_256.r3, quantum_256.r4,
++                quantum_256.cr, (unsigned long long)quantum_256.elapsed);
++    }
++
++    const QuantumResult observed_17 = run_observed_loop(17, 263u);
++    const QuantumResult observed_64 = run_observed_loop(64, 263u);
++    const QuantumResult observed_256 = run_observed_loop(256, 263u);
++    const int observed_ok =
++        observed_17.pc == observed_64.pc && observed_17.pc == observed_256.pc &&
++        observed_17.r3 == observed_64.r3 && observed_17.r3 == observed_256.r3 &&
++        observed_17.r4 == observed_64.r4 && observed_17.r4 == observed_256.r4 &&
++        observed_17.cr == observed_64.cr && observed_17.cr == observed_256.cr &&
++        observed_17.elapsed == observed_64.elapsed &&
++        observed_17.elapsed == observed_256.elapsed;
++    if (!observed_ok) {
++        fprintf(stderr,
++                "observed cap17=%08X/%u/%u/%08X/%llu "
++                "cap64=%08X/%u/%u/%08X/%llu "
++                "cap256=%08X/%u/%u/%08X/%llu\n",
++                observed_17.pc, observed_17.r3, observed_17.r4, observed_17.cr,
++                (unsigned long long)observed_17.elapsed,
++                observed_64.pc, observed_64.r3, observed_64.r4, observed_64.cr,
++                (unsigned long long)observed_64.elapsed,
++                observed_256.pc, observed_256.r3, observed_256.r4,
++                observed_256.cr, (unsigned long long)observed_256.elapsed);
++    }
++
++    const QuantumResult cross_3 = run_cross_dispatch(3, 263u);
++    const QuantumResult cross_17 = run_cross_dispatch(17, 263u);
++    const QuantumResult cross_256 = run_cross_dispatch(256, 263u);
++    const int cross_ok =
++        cross_3.pc == cross_17.pc && cross_3.pc == cross_256.pc &&
++        cross_3.r3 == cross_17.r3 && cross_3.r3 == cross_256.r3 &&
++        cross_3.r4 == cross_17.r4 && cross_3.r4 == cross_256.r4 &&
++        cross_3.cr == cross_17.cr && cross_3.cr == cross_256.cr &&
++        cross_3.elapsed == cross_17.elapsed &&
++        cross_3.elapsed == cross_256.elapsed;
++    if (!cross_ok) {
++        fprintf(stderr,
++                "cross cap3=%08X/%u/%u/%08X/%llu "
++                "cap17=%08X/%u/%u/%08X/%llu "
++                "cap256=%08X/%u/%u/%08X/%llu\n",
++                cross_3.pc, cross_3.r3, cross_3.r4, cross_3.cr,
++                (unsigned long long)cross_3.elapsed,
++                cross_17.pc, cross_17.r3, cross_17.r4, cross_17.cr,
++                (unsigned long long)cross_17.elapsed,
++                cross_256.pc, cross_256.r3, cross_256.r4, cross_256.cr,
++                (unsigned long long)cross_256.elapsed);
++    }
++
++    int indirect_ok = 1;
++    for (u64 deadline = 1u; deadline <= 16u; ++deadline) {
++        const QuantumResult indirect_3 = run_indirect_dispatch(3, deadline);
++        const QuantumResult indirect_17 = run_indirect_dispatch(17, deadline);
++        const QuantumResult indirect_256 = run_indirect_dispatch(256, deadline);
++        const int deadline_ok =
++            indirect_3.pc == indirect_17.pc &&
++            indirect_3.pc == indirect_256.pc &&
++            indirect_3.r3 == indirect_17.r3 &&
++            indirect_3.r3 == indirect_256.r3 &&
++            indirect_3.r4 == indirect_17.r4 &&
++            indirect_3.r4 == indirect_256.r4 &&
++            indirect_3.cr == indirect_17.cr &&
++            indirect_3.cr == indirect_256.cr &&
++            indirect_3.elapsed == indirect_17.elapsed &&
++            indirect_3.elapsed == indirect_256.elapsed;
++        if (!deadline_ok) {
++            fprintf(stderr,
++                    "indirect deadline=%llu cap3=%08X/%u/%u/%08X/%llu "
++                    "cap17=%08X/%u/%u/%08X/%llu "
++                    "cap256=%08X/%u/%u/%08X/%llu\n",
++                    (unsigned long long)deadline, indirect_3.pc,
++                    indirect_3.r3, indirect_3.r4, indirect_3.cr,
++                    (unsigned long long)indirect_3.elapsed,
++                    indirect_17.pc, indirect_17.r3, indirect_17.r4,
++                    indirect_17.cr, (unsigned long long)indirect_17.elapsed,
++                    indirect_256.pc, indirect_256.r3, indirect_256.r4,
++                    indirect_256.cr, (unsigned long long)indirect_256.elapsed);
++            indirect_ok = 0;
++            break;
++        }
++    }
++
++    const QuantumResult enable_2 = run_interrupt_enable_boundary(2);
++    const QuantumResult enable_256 = run_interrupt_enable_boundary(256);
++    const int interrupt_enable_ok =
++        enable_2.pc == 0x80004148u && enable_256.pc == enable_2.pc &&
++        enable_2.r3 == 1u && enable_256.r3 == enable_2.r3 &&
++        enable_2.r4 == TEST_PPC_MSR_EE && enable_256.r4 == enable_2.r4 &&
++        enable_2.elapsed == 2u && enable_256.elapsed == enable_2.elapsed;
++    if (!interrupt_enable_ok) {
++        fprintf(stderr,
++                "interrupt-enable cap2=%08X/%u/%08X/%llu "
++                "cap256=%08X/%u/%08X/%llu\n",
++                enable_2.pc, enable_2.r3, enable_2.r4,
++                (unsigned long long)enable_2.elapsed,
++                enable_256.pc, enable_256.r3, enable_256.r4,
++                (unsigned long long)enable_256.elapsed);
++    }
++
+     for (u32 i = 0; i < 1000; ++i)
+         mem_write32(&cpu, 0x80001000u + i * 4u, i);
+     cpu.pc = 0x80004040u;
+@@ -93,5 +467,7 @@ int main(void) {
+     }
+ 
+     cpu_free(&cpu);
+-    return !(integer_ok && memory_ok && compare_ok && record_ok && merge_ok);
++    return !(integer_ok && deadline_ok && cap_plus_one_ok && quantum_ok &&
++             observed_ok && cross_ok && indirect_ok && interrupt_enable_ok &&
++             memory_ok && compare_ok && record_ok && merge_ok);
+ }
+diff --git a/tests/test_codegen_emit.c b/tests/test_codegen_emit.c
+index acee7d6..872448b 100644
+--- a/tests/test_codegen_emit.c
++++ b/tests/test_codegen_emit.c
+@@ -177,6 +177,151 @@ int main(int argc, char** argv) {
+     if (!emit_function(out, paired_merge, 2, BASE + 0x1070))
+         return 1;
+ 
++    PPCInst deadline_crossing[5];
++    deadline_crossing[0] = ppc_decode(0x38630001u, BASE + 0x10A0);
++    deadline_crossing[1] = ppc_decode(0x38630001u, BASE + 0x10A4);
++    deadline_crossing[2] = ppc_decode(0x38630001u, BASE + 0x10A8);
++    deadline_crossing[3] = ppc_decode(0x38630001u, BASE + 0x10AC);
++    deadline_crossing[4] = ppc_decode(0x4E800020u, BASE + 0x10B0);
++    if (!emit_function(out, deadline_crossing, 5, BASE + 0x10A0))
++        return 1;
++
++    static const u32 quantum_loop_words[] = {
++        0x7C8429D6u, // mullw r4,r4,r5
++        0x3863FFFFu, // addi r3,r3,-1
++        0x2C030000u, // cmpwi r3,0
++        0x4082FFF4u, // bne quantum_loop
++        0x4E800020u, // blr
++    };
++    PPCInst quantum_loop[sizeof(quantum_loop_words) /
++                         sizeof(quantum_loop_words[0])];
++    for (u32 i = 0; i < sizeof(quantum_loop_words) /
++                            sizeof(quantum_loop_words[0]); ++i) {
++        quantum_loop[i] =
++            ppc_decode(quantum_loop_words[i], BASE + 0x10C0u + i * 4u);
++    }
++    if (!emit_function(out, quantum_loop,
++                       (u32)(sizeof(quantum_loop) /
++                             sizeof(quantum_loop[0])),
++                       BASE + 0x10C0u))
++        return 1;
++
++    static const u32 observed_loop_words[] = {
++        0x80C50000u, // lwz r6,0(r5)
++        0x7C8431D6u, // mullw r4,r4,r6
++        0x3863FFFFu, // addi r3,r3,-1
++        0x2C030000u, // cmpwi r3,0
++        0x4082FFF0u, // bne observed_loop
++        0x4E800020u, // blr
++    };
++    PPCInst observed_loop[sizeof(observed_loop_words) /
++                          sizeof(observed_loop_words[0])];
++    for (u32 i = 0; i < sizeof(observed_loop_words) /
++                            sizeof(observed_loop_words[0]); ++i) {
++        observed_loop[i] =
++            ppc_decode(observed_loop_words[i], BASE + 0x10E0u + i * 4u);
++    }
++    if (!emit_function(out, observed_loop,
++                       (u32)(sizeof(observed_loop) /
++                             sizeof(observed_loop[0])),
++                       BASE + 0x10E0u))
++        return 1;
++
++    static const u32 cross_caller_words[] = {
++        0x48001001u, // bl cross_callee
++        0x3863FFFFu, // addi r3,r3,-1
++        0x2C030000u, // cmpwi r3,0
++        0x4082FFF4u, // bne cross_caller
++        0x4E800020u, // blr
++    };
++    PPCInst cross_caller[sizeof(cross_caller_words) /
++                         sizeof(cross_caller_words[0])];
++    for (u32 i = 0; i < sizeof(cross_caller_words) /
++                            sizeof(cross_caller_words[0]); ++i) {
++        cross_caller[i] =
++            ppc_decode(cross_caller_words[i], BASE + 0x1100u + i * 4u);
++    }
++    if (!emit_function(out, cross_caller,
++                       (u32)(sizeof(cross_caller) /
++                             sizeof(cross_caller[0])),
++                       BASE + 0x1100u))
++        return 1;
++
++    static const u32 cross_callee_words[] = {
++        0x7C8429D6u, // mullw r4,r4,r5
++        0x4E800020u, // blr
++    };
++    PPCInst cross_callee[sizeof(cross_callee_words) /
++                         sizeof(cross_callee_words[0])];
++    for (u32 i = 0; i < sizeof(cross_callee_words) /
++                            sizeof(cross_callee_words[0]); ++i) {
++        cross_callee[i] =
++            ppc_decode(cross_callee_words[i], BASE + 0x2100u + i * 4u);
++    }
++    if (!emit_function(out, cross_callee,
++                       (u32)(sizeof(cross_callee) /
++                             sizeof(cross_callee[0])),
++                       BASE + 0x2100u))
++        return 1;
++    static const u32 indirect_caller_words[] = {
++        0x7D8C6378u, // mr r12,r12
++        0x7C631B78u, // mr r3,r3
++        0x38800001u, // li r4,1
++        0x7D8903A6u, // mtctr r12
++        0x4E800421u, // bctrl
++        0x3863FFFFu, // addi r3,r3,-1
++        0x7D6803A6u, // mtlr r11
++        0x4E800020u, // blr
++    };
++    PPCInst indirect_caller[sizeof(indirect_caller_words) /
++                            sizeof(indirect_caller_words[0])];
++    for (u32 i = 0; i < sizeof(indirect_caller_words) /
++                            sizeof(indirect_caller_words[0]); ++i) {
++        indirect_caller[i] =
++            ppc_decode(indirect_caller_words[i], BASE + 0x1120u + i * 4u);
++    }
++    if (!emit_function(out, indirect_caller,
++                       (u32)(sizeof(indirect_caller) /
++                             sizeof(indirect_caller[0])),
++                       BASE + 0x1120u))
++        return 1;
++
++    static const u32 indirect_callee_words[] = {
++        0x7C8429D6u, // mullw r4,r4,r5
++        0x4E800020u, // blr
++    };
++    PPCInst indirect_callee[sizeof(indirect_callee_words) /
++                            sizeof(indirect_callee_words[0])];
++    for (u32 i = 0; i < sizeof(indirect_callee_words) /
++                            sizeof(indirect_callee_words[0]); ++i) {
++        indirect_callee[i] =
++            ppc_decode(indirect_callee_words[i], BASE + 0x2120u + i * 4u);
++    }
++    if (!emit_function(out, indirect_callee,
++                       (u32)(sizeof(indirect_callee) /
++                             sizeof(indirect_callee[0])),
++                       BASE + 0x2120u))
++        return 1;
++
++    static const u32 interrupt_enable_words[] = {
++        0x38630001u, // addi r3,r3,1
++        0x7C800124u, // mtmsr r4
++        0x38630001u, // addi r3,r3,1
++        0x4E800020u, // blr
++    };
++    PPCInst interrupt_enable[sizeof(interrupt_enable_words) /
++                             sizeof(interrupt_enable_words[0])];
++    for (u32 i = 0; i < sizeof(interrupt_enable_words) /
++                            sizeof(interrupt_enable_words[0]); ++i) {
++        interrupt_enable[i] =
++            ppc_decode(interrupt_enable_words[i], BASE + 0x1140u + i * 4u);
++    }
++    if (!emit_function(out, interrupt_enable,
++                       (u32)(sizeof(interrupt_enable) /
++                             sizeof(interrupt_enable[0])),
++                       BASE + 0x1140u))
++        return 1;
++
+     static const u32 poll_words[] = {
+         0x800D9950u, // lwz r0,-26288(r13)
+         0x28000000u, // cmplwi r0,0
+@@ -202,13 +347,24 @@ int main(int argc, char** argv) {
+         !function_list_add(&funcs, BASE + 0x1060, BASE + 0x1068) ||
+         !function_list_add(&funcs, BASE + 0x1068, BASE + 0x1070) ||
+         !function_list_add(&funcs, BASE + 0x1070, BASE + 0x1078) ||
+-        !function_list_add(&funcs, BASE + 0x1080, BASE + 0x1090)) {
++        !function_list_add(&funcs, BASE + 0x1080, BASE + 0x1090) ||
++        !function_list_add(&funcs, BASE + 0x10A0, BASE + 0x10B4) ||
++        !function_list_add(&funcs, BASE + 0x10C0, BASE + 0x10D4) ||
++        !function_list_add(&funcs, BASE + 0x10E0, BASE + 0x10F8) ||
++        !function_list_add(&funcs, BASE + 0x1100, BASE + 0x1114) ||
++        !function_list_add(&funcs, BASE + 0x1120, BASE + 0x1140) ||
++        !function_list_add(&funcs, BASE + 0x1140, BASE + 0x1150) ||
++        !function_list_add(&funcs, BASE + 0x2100, BASE + 0x2108) ||
++        !function_list_add(&funcs, BASE + 0x2120, BASE + 0x2128)) {
+         function_list_free(&funcs);
+         free(insts);
+         if (out != stdout) fclose(out);
+         return 1;
+     }
+     emit_dispatch_helpers(out, &funcs, BASE);
++    fprintf(out,
++            "int dolrecomp_test_dispatch(CPUState* ctx) { "
++            "return dolrecomp_call(ctx, ctx->pc); }\n");
+     function_list_free(&funcs);
+ 
+     emit_footer(out);
+diff --git a/tests/test_module_abi.c b/tests/test_module_abi.c
+index 46224f3..b8f32ae 100644
+--- a/tests/test_module_abi.c
++++ b/tests/test_module_abi.c
+@@ -23,7 +23,7 @@ static int arm(CPUState* state, u32 blocks) {
+ 
+ int main(void) {
+ #if UINTPTR_MAX == UINT64_MAX
+-    CHECK(sizeof(CPUState) == 3536u);
++    CHECK(sizeof(CPUState) == 3552u);
+     CHECK(offsetof(CPUState, downcount) == 3480u);
+     CHECK(offsetof(CPUState, cycle_budget) == 3488u);
+     CHECK(offsetof(CPUState, exram) == 3496u);
+@@ -31,6 +31,9 @@ int main(void) {
+     CHECK(offsetof(CPUState, spr_read) == 3512u);
+     CHECK(offsetof(CPUState, spr_write) == 3520u);
+     CHECK(offsetof(CPUState, cache_control) == 3528u);
++    CHECK(offsetof(CPUState, cycle_observation_suffix) == 3536u);
++    CHECK(offsetof(CPUState, cycle_deadline_active) == 3540u);
++    CHECK(offsetof(CPUState, cycle_deadline_budget) == 3544u);
+ #endif
+     const DolRecompVariantV4 variants[] = {
+         {DOLRECOMP_FEATURE_X86_V2, DOLRECOMP_SEMANTICS_EXACT, v2, "v2"},
+diff --git a/tests/test_rel.c b/tests/test_rel.c
+index 3fb9a9e..6bb4d10 100644
+--- a/tests/test_rel.c
++++ b/tests/test_rel.c
+@@ -113,6 +113,24 @@ static int test_dol_rel24_relocation(void) {
+     return 1;
+ }
+ 
++static int test_tagged_dol_rel24_relocation(void) {
++    const char* path = "test_tagged_dol_rel24.rel";
++    CHECK(write_sample_rel(path, 0, R_PPC_REL24, 0, 0x80003100u, 8),
++          "failed to write tagged sample REL");
++
++    RELFile rel;
++    CHECK(rel_load(&rel, path, 0xC0500000u),
++          "failed to load tagged sample REL");
++    u32 inst = read_be32(rel.sections[1].data);
++    s32 delta = sign_extend(inst & 0x03FFFFFCu, 26);
++    CHECK(0xC0500100u + (u32)delta == 0xC0003100u,
++          "tagged DOL REL24 relocation did not preserve displacement");
++
++    rel_free(&rel);
++    remove(path);
++    return 1;
++}
++
+ static int test_external_import_rejected(void) {
+     const char* path = "test_external.rel";
+     CHECK(write_sample_rel(path, 2, R_PPC_ADDR32, 2, 0, 8),
+@@ -180,6 +198,7 @@ int main(void) {
+     int ok = 1;
+     ok &= test_self_relocation();
+     ok &= test_dol_rel24_relocation();
++    ok &= test_tagged_dol_rel24_relocation();
+     ok &= test_external_import_rejected();
+     ok &= test_external_import_with_map();
+     ok &= test_unaligned_text_rejected();

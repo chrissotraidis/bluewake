@@ -1,0 +1,126 @@
+From 0c8bf21214a65ec55d39b889078d0d5c698c34dc Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 01:08:39 -0500
+Subject: [PATCH] graphics: classify incomplete primitives as noops
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  4 ++--
+ .../include/gxruntime/gxcore/gxcore.hpp       |  1 +
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 24 ++++++++++++-------
+ .../gxcore/tests/gxcore_wgsl_test.cpp         |  5 +++-
+ 4 files changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 34d75a58eb..8e383eb833 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -399,7 +399,7 @@ void dol_aurora_shutdown(void) {
+         const auto& gaps = gx_aurora::g_core_sink.counters();
+         std::fprintf(stderr,
+                      "[gx-core] shutdown: submitted=%llu rejected=%llu "
+-                     "failed=%d planned=%llu skipped=%llu cull_all=%llu "
++                     "failed=%d planned=%llu skipped=%llu noops=%llu cull_all=%llu "
+                      "missing_vcd=%llu vertex_decode_failures=%llu "
+                      "projection_missing=%llu payload_empty=%llu "
+                      "walk_underivable=%llu stride_mismatch=%llu "
+@@ -421,7 +421,7 @@ void dol_aurora_shutdown(void) {
+                      gx_aurora::g_core_submitted, gx_aurora::g_core_rejected,
+                      gx_aurora::g_shadow_frontend_failed ? 1 : 0,
+                      gaps.draws_planned, gaps.draws_skipped,
+-                     gaps.cull_all_draws, gaps.missing_vcd,
++                     gaps.draws_noop, gaps.cull_all_draws, gaps.missing_vcd,
+                      gaps.vertex_decode_failures,
+                      gaps.vertex_projection_missing,
+                      gaps.vertex_payload_empty,
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 5504f11927..2f6a932f05 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -21,6 +21,7 @@ namespace gxruntime::gxcore {
+ struct GapCounters {
+   unsigned long long draws_planned = 0;
+   unsigned long long draws_skipped = 0;         // plan.ok == false
++  unsigned long long draws_noop = 0;            // valid incomplete primitive
+   unsigned long long cull_all_draws = 0;        // culled by state, not a gap
+   unsigned long long missing_vcd = 0;           // draw before VCD/VAT seen
+   unsigned long long vertex_decode_failures = 0;
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 2c4fe1c658..a54a323f0b 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -480,6 +480,12 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     ++counters.draws_skipped;
+     return plan;
+   };
++  auto noop = [&](const char* reason) {
++    plan.ok = false;
++    plan.skip_reason = reason;
++    ++counters.draws_noop;
++    return plan;
++  };
+ 
+   if (draw.cull_all) {
+     ++counters.cull_all_draws;
+@@ -744,34 +750,34 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+       primitive, 0u, static_cast<std::uint16_t>(draw.vertex_count),
+       &plan.indices);
+   if (index_count == 0u) {
+-    ++counters.vertex_decode_failures;
+-    ++counters.vertex_topology_unsupported;
+     switch (primitive) {
+     case ar::GxPrimitive::Quads:
+       ++counters.topology_zero_quads;
+-      break;
++      return noop("incomplete quad no-op");
+     case ar::GxPrimitive::Triangles:
+       ++counters.topology_zero_triangles;
+-      break;
++      return noop("incomplete triangle no-op");
+     case ar::GxPrimitive::TriangleStrip:
+       ++counters.topology_zero_triangle_strip;
+-      break;
++      return noop("incomplete triangle strip no-op");
+     case ar::GxPrimitive::TriangleFan:
+       ++counters.topology_zero_triangle_fan;
+-      break;
++      return noop("incomplete triangle fan no-op");
+     case ar::GxPrimitive::Lines:
+       ++counters.topology_zero_lines;
+-      break;
++      return noop("incomplete line no-op");
+     case ar::GxPrimitive::LineStrip:
+       ++counters.topology_zero_line_strip;
+-      break;
++      return noop("incomplete line strip no-op");
+     case ar::GxPrimitive::Points:
+       ++counters.topology_zero_points;
+-      break;
++      return noop("incomplete point no-op");
+     default:
+       ++counters.topology_zero_unknown;
+       break;
+     }
++    ++counters.vertex_decode_failures;
++    ++counters.vertex_topology_unsupported;
+     return skip("unsupported or empty primitive");
+   }
+ 
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 3ade5e3873..af2f762572 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -226,7 +226,10 @@ void test_state_to_plan_and_wgsl() {
+     const gxc::DrawPlan partial_plan =
+         state.build_draw_plan(partial_quad, counters);
+     CHECK(!partial_plan.ok);
+-    CHECK(counters.vertex_topology_unsupported == 1u);
++    CHECK(counters.draws_noop == 1u);
++    CHECK(counters.draws_skipped == 0u);
++    CHECK(counters.vertex_decode_failures == 0u);
++    CHECK(counters.vertex_topology_unsupported == 0u);
+     CHECK(counters.topology_zero_quads == 1u);
+     CHECK(counters.topology_zero_lines == 0u);
+     CHECK(counters.topology_zero_points == 0u);
+-- 
+2.41.0
+

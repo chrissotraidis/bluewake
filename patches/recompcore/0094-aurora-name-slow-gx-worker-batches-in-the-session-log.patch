@@ -1,0 +1,67 @@
+From d068efcb402c889d0b540cb38179bdbdbbd18c56 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sun, 27 Sep 2026 01:51:38 +0900
+Subject: [PATCH] BlueWake: name slow GX worker batches in the session log
+ (patch 0094)
+
+A batch the worker takes 20 ms or more over (DOL_GX_SLOW_BATCH_MS) holds the
+game thread at its next draw-done. Log its duration, size, and the pipelines
+and textures it created, so a device log shows whether a hitch is texture or
+pipeline creation or the worker waiting on present.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp  | 18 ++++++++++++++++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp    |  1 +
+ 2 files changed, 19 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index c4fb2ad..fc62329 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -32,6 +32,7 @@ void reset_texture_cache();
+ void note_frame_presented();
+ void set_texture_dirty_epoch_observer(
+     bool (*observer)(uint32_t, uint32_t, uint64_t*));
++unsigned long long texture_upload_count();
+ } // namespace aurora::gfx::gxcore
+ #endif
+ 
+@@ -499,7 +500,24 @@ void g_fifo_worker_main() {
+             batch.swap(g_fifo_handoff);
+             parsed = g_fifo_appended;
+         }
++        // A slow batch holds the game thread at its next draw-done; say what
++        // the worker made in it (pipelines, decoded textures) so the cause
++        // is in the session log. DOL_GX_SLOW_BATCH_MS sets the bar (20).
++        static const long slow_ms = [] {
++            const char* env = std::getenv("DOL_GX_SLOW_BATCH_MS");
++            return env != nullptr ? std::strtol(env, nullptr, 10) : 20L;
++        }();
++        const auto t0 = std::chrono::steady_clock::now();
++        const uint32_t pipelines0 = aurora_get_stats()->createdPipelines;
++        const unsigned long long uploads0 = aurora::gfx::gxcore::texture_upload_count();
+         g_fifo_translate(batch);
++        const long ms = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(
++                                              std::chrono::steady_clock::now() - t0)
++                                              .count());
++        if (slow_ms > 0 && ms >= slow_ms)
++            std::fprintf(stderr, "[gx-slow] batch_ms=%ld bytes=%zu pipelines=%u textures=%llu\n", ms,
++                         batch.size(), aurora_get_stats()->createdPipelines - pipelines0,
++                         aurora::gfx::gxcore::texture_upload_count() - uploads0);
+         {
+             std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+             g_fifo_parsed = parsed;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 68bfa98..0654fd8 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -662,6 +662,7 @@ void set_texture_dirty_epoch_observer(TextureDirtyEpochObserver observer) {
+ }
+ 
+ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
++unsigned long long texture_upload_count() { return g_textureCacheStats.uploads; }
+ 
+ // Resolve the current EFB region into a texture the guest-identity path can bind
+ // later, keyed by the copy's destination address (63/S16). Mirrors aurora
+-- 
+2.46.0
+

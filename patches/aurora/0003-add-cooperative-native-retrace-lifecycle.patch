@@ -1,0 +1,279 @@
+--- a/lib/dolphin/vi/vi.cpp
++++ b/lib/dolphin/vi/vi.cpp
+@@ -5,9 +5,85 @@
+ #include "vi_internal.hpp"
+ 
+ #include <optional>
++#include <aurora/time.hpp>
++#include <algorithm>
++#include <cstdlib>
++#include <mutex>
++#include <thread>
+ 
+ namespace aurora::vi {
+ std::optional<GXRenderModeObj> g_renderMode;
++namespace {
++struct RetraceState {
++  std::mutex mutex;
++  std::thread::id owner;
++  std::chrono::nanoseconds period{1000000000 / 60};
++  time::game_clock::time_point last = time::game_clock::now();
++  u32 count = 0;
++  VIRetraceCallback pre = nullptr;
++  VIRetraceCallback post = nullptr;
++  void* configuredBuffer = nullptr;
++  void* nextBuffer = nullptr;
++  void* currentBuffer = nullptr;
++  bool configuredBlack = true;
++  bool nextBlack = true;
++  bool currentBlack = true;
++  bool flushed = false;
++  bool dispatching = false;
++};
++RetraceState& retrace_state() {
++  static RetraceState state;
++  return state;
++}
++} // namespace
++
++bool output_black() noexcept {
++  auto& state = retrace_state();
++  std::lock_guard lock(state.mutex);
++  return state.currentBlack;
++}
++
++// Cooperative native VI: callbacks execute on the VI/graphics owner, never on
++// an unrelated timer thread. Call at native frame/wait boundaries. Late polling
++// coalesces elapsed retraces; this is not console interrupt-latency emulation.
++bool service_retrace() {
++  auto& state = retrace_state();
++  VIRetraceCallback pre;
++  u32 count;
++  {
++    std::lock_guard lock(state.mutex);
++    if (state.owner != std::this_thread::get_id() || state.dispatching) std::abort();
++    const auto now = time::game_clock::now();
++    // Native cadence policy: PAL 50 Hz, other supported modes 60 Hz. Physical
++    // scanline/field timing is not represented by the host window.
++    const auto period = state.period;
++    if (now - state.last < period) return false;
++    const auto elapsed = (now - state.last) / period;
++    state.last += period * elapsed;
++    state.count += static_cast<u32>(elapsed);
++    count = state.count;
++    pre = state.pre;
++    state.dispatching = true;
++  }
++  if (pre) pre(count);
++  VIRetraceCallback post;
++  {
++    std::lock_guard lock(state.mutex);
++    // Original VI ordering: pre callback, apply flushed settings, post callback.
++    if (state.flushed) {
++      state.currentBuffer = state.nextBuffer;
++      state.currentBlack = state.nextBlack;
++      state.flushed = false;
++    }
++    post = state.post;
++  }
++  if (post) post(count);
++  {
++    std::lock_guard lock(state.mutex);
++    state.dispatching = false;
++  }
++  return true;
++}
+ 
+ Vec2<uint32_t> render_mode_size() noexcept {
+   if (!g_renderMode) {
+@@ -17,6 +93,12 @@
+ }
+ 
+ void configure(const GXRenderModeObj* rm) noexcept {
++  {
++    auto& state = retrace_state();
++    std::lock_guard lock(state.mutex);
++    const u32 format = rm ? rm->viTVmode >> 2 : 0;
++    state.period = std::chrono::nanoseconds(1000000000 / (format == 1 || format == 4 ? 50 : 60));
++  }
+   const auto oldSize = render_mode_size();
+   if (rm == nullptr) {
+     g_renderMode.reset();
+@@ -34,7 +116,14 @@
+ } // namespace aurora::vi
+ 
+ extern "C" {
+-void VIInit() {}
++void VIInit() {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  if (state.owner == std::thread::id{}) {
++    state.owner = std::this_thread::get_id();
++    state.last = aurora::time::game_clock::now();
++  }
++}
+ void VIConfigure(const GXRenderModeObj* rm) { aurora::vi::configure(rm); }
+ void VIConfigurePan(u16 xOrg, u16 yOrg, u16 width, u16 height) {
+   (void)xOrg;
+@@ -43,7 +132,72 @@
+   (void)height;
+ }
+ u32 VIGetTvFormat() { return 0; }
+-void VIFlush() {}
++void VIFlush() {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  state.nextBuffer = state.configuredBuffer;
++  state.nextBlack = state.configuredBlack;
++  state.flushed = true;
++}
++void VIWaitForRetrace() {
++  auto& state = aurora::vi::retrace_state();
++  bool owner;
++  std::chrono::nanoseconds period;
++  {
++    std::lock_guard lock(state.mutex);
++    owner = state.owner == std::this_thread::get_id();
++    period = state.period;
++  }
++  if (owner) {
++    while (!aurora::vi::service_retrace()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
++  } else {
++    // DVD retry workers also wait on VI. They wait in game time but never run
++    // callbacks or take ownership from the video thread, including before init.
++    const auto until = aurora::time::game_clock::now() + period;
++    while (aurora::time::game_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(1));
++  }
++}
++u32 VIGetRetraceCount() {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  return state.count;
++}
++u32 VIGetDTVStatus() { return 1; } // Native window supports progressive output.
++void VISetNextFrameBuffer(void* fb) {
++  if (reinterpret_cast<uintptr_t>(fb) % 32 != 0) std::abort();
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  state.configuredBuffer = fb;
++}
++void* VIGetNextFrameBuffer() {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  return state.nextBuffer;
++}
++void* VIGetCurrentFrameBuffer() {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  return state.currentBuffer;
++}
++void VISetBlack(BOOL black) {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  state.configuredBlack = black != 0;
++}
++VIRetraceCallback VISetPreRetraceCallback(VIRetraceCallback cb) {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  auto old = state.pre;
++  state.pre = cb;
++  return old;
++}
++VIRetraceCallback VISetPostRetraceCallback(VIRetraceCallback cb) {
++  auto& state = aurora::vi::retrace_state();
++  std::lock_guard lock(state.mutex);
++  auto old = state.post;
++  state.post = cb;
++  return old;
++}
+ 
+ void VISetWindowTitle(const char* title) { aurora::window::set_title(title); }
+ void VISetWindowFullscreen(bool fullscreen) { aurora::window::set_fullscreen(fullscreen); }
+--- a/lib/dolphin/vi/vi_internal.hpp
++++ b/lib/dolphin/vi/vi_internal.hpp
+@@ -7,6 +7,8 @@
+ #include <aurora/math.hpp>
+ 
+ namespace aurora::vi {
++bool service_retrace();
++bool output_black() noexcept;
+ void configure(const GXRenderModeObj* rm) noexcept;
+ Vec2<uint32_t> configured_fb_size() noexcept;
+ } // namespace aurora::vi
+--- a/lib/dolphin/gx/GXFrameBuffer.cpp
++++ b/lib/dolphin/gx/GXFrameBuffer.cpp
+@@ -220,8 +220,72 @@
+   aurora::gx::fifo::publish();
+ }
+ 
+-// TODO GXGetYScaleFactor
+-// TODO GXGetNumXfbLines
++// Preserve the pinned SDK quantization/line-rounding used by original JUTXfb.
++static u32 __GXGetNumXfbLines(u32 height, u32 scale) {
++    AURORA_ASSERT(height > 0 && scale > 0, "Invalid XFB size/scale");
++    u32 numLines;
++    u32 actualHeight;
++    u32 newScale;
++
++    numLines = (height - 1) * 0x100;
++    actualHeight = (numLines / scale) + 1;
++
++    newScale = scale;
++
++    if (newScale > 0x80 && newScale < 0x100) {
++        while (newScale % 2 == 0) {
++            newScale /= 2;
++        }
++
++        if (height % newScale == 0) {
++            actualHeight++;
++        }
++    }
++
++    if (actualHeight > 0x400) {
++        actualHeight = 0x400;
++    }
++
++    return actualHeight;
++}
++
++u16 GXGetNumXfbLines(u16 efbHeight, f32 yScale) {
++    u32 scale = (u32)(256.0f / yScale) & 0x1FF;
++
++    return static_cast<u16>(__GXGetNumXfbLines(efbHeight, scale));
++}
++
++f32 GXGetYScaleFactor(u16 efbHeight, u16 xfbHeight) {
++    u32 scale;
++    u32 height1;
++    u32 height2;
++    f32 scale2;
++    f32 scale1;
++
++    height1 = xfbHeight;
++    scale1 = (f32)xfbHeight / (f32)efbHeight;
++    scale = (u32)(256.0f / scale1) & 0x1FF;
++    height2 = __GXGetNumXfbLines(efbHeight, scale);
++
++    while (height2 > xfbHeight) {
++        height1--;
++        scale1 = (f32)height1 / (f32)efbHeight;
++        scale = (u32)(256.0f / scale1) & 0x1FF;
++        height2 = __GXGetNumXfbLines(efbHeight, scale);
++    }
++
++    scale2 = scale1;
++    while (height2 < xfbHeight) {
++        scale2 = scale1;
++        height1++;
++        scale1 = (f32)height1 / (f32)efbHeight;
++        scale = (u32)(256.0f / scale1) & 0x1FF;
++        height2 = __GXGetNumXfbLines(efbHeight, scale);
++    }
++
++    return scale2;
++}
++
+ // TODO GXClearBoundingBox
+ // TODO GXReadBoundingBox
+ }

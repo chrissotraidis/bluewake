@@ -1,0 +1,104 @@
+From 69ada85d0445b126bb9c2d2c483c4304d893d176 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 09:30:06 -0500
+Subject: [PATCH] llvm: resume scalar FP faults natively
+
+---
+ src/backend/llvm/register_state.cpp | 24 ++++++++++++++++++++++++
+ tests/llvm_fixture.cpp              |  7 +++++++
+ tests/llvm_smoke_test.c             | 19 +++++++++++++++++++
+ 3 files changed, 50 insertions(+)
+
+diff --git a/src/backend/llvm/register_state.cpp b/src/backend/llvm/register_state.cpp
+index 8de0335..f786b00 100644
+--- a/src/backend/llvm/register_state.cpp
++++ b/src/backend/llvm/register_state.cpp
+@@ -135,6 +135,30 @@ void FunctionEmitter::scanRegionLeaders() {
+       continue;
+     region_leaders_[(address - source_.guest_start) / 4u] = true;
+   }
++
++  // Lazy-FP exceptions retry a faulting scalar FP load/store. Admit that
++  // exact mid-region PC without splitting paired-single regions and losing
++  // their compile-time GQR and packed-state optimization.
++  const std::vector<bool> structural_leaders = region_leaders_;
++  bool fp_entry_seen = false;
++  for (u32 i = 0; i < source_.block_count; i++) {
++    if (structural_leaders[i])
++      fp_entry_seen = false;
++    if (fp_entry_seen)
++      continue;
++    for (u32 op = 0; op < source_.blocks[i].instruction_count; op++) {
++      const DolIRInstruction &inst = source_.blocks[i].instructions[op];
++      if (inst.op != DOLIR_OP_HELPER_CALL ||
++          inst.aux != DOLIR_HELPER_FP_AVAILABLE)
++        continue;
++      const u32 primary = source_.blocks[i].raw >> 26;
++      if (primary < 48u || primary > 55u)
++        continue;
++      region_leaders_[i] = true;
++      fp_entry_seen = true;
++      break;
++    }
++  }
+ }
+ 
+ Value *FunctionEmitter::bytePtr(size_t offset) {
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index a6b8b59..5bd4213 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -339,6 +339,13 @@ int main(int argc, char **argv) {
+   CHECK(add_chunk(&module, return_continuation_words, 3, 0x80003B08u));
+   CHECK(add_chunk(&module, return_callee_words, 2, 0x80003C00u));
+ 
++  const u32 fp_resume_words[] = {
++      0x38A50001u,
++      0xC0020000u,
++      0x4E800020u,
++  };
++  CHECK(add_chunk(&module, fp_resume_words, 3, 0x80003D00u));
++
+   CHECK(dolir_verify(&module, stderr));
+   DolLLVMOptions options{};
+   options.optimization_level = 2;
+diff --git a/tests/llvm_smoke_test.c b/tests/llvm_smoke_test.c
+index 093a586..fa85461 100644
+--- a/tests/llvm_smoke_test.c
++++ b/tests/llvm_smoke_test.c
+@@ -18,6 +18,7 @@ void func_80002A00(CPUState* cpu);
+ void func_80002B00(CPUState* cpu);
+ void func_80002C00(CPUState* cpu);
+ void func_80002D00(CPUState* cpu);
++void func_80003D00(CPUState* cpu);
+ 
+ static u32 fallback_count;
+ static int fallback_bad;
+@@ -94,6 +95,24 @@ int main(void) {
+     CHECK(cpu.gpr[5] == 0x12345678u && fallback_count == 1 && !fallback_bad);
+     CHECK(cpu.downcount < 0 && cpu.downcount > -100);
+ 
++    prepare_call(&cpu, 0x80003D00u);
++    cpu.msr = 0;
++    cpu.gpr[2] = GC_RAM_BASE + 0x300u;
++    cpu.gpr[5] = 41;
++    mem_write32(&cpu, cpu.gpr[2], 0x3FC00000u);
++    u32 fallback_before_fp_retry = fallback_count;
++    func_80003D00(&cpu);
++    CHECK(cpu.gpr[5] == 42);
++    CHECK(cpu.exception == PPC_EXC_FP_UNAVAILABLE);
++    CHECK(cpu.srr0 == 0x80003D04u);
++    cpu.exception = 0;
++    cpu.msr |= 1u << 13;
++    cpu.pc = cpu.srr0;
++    func_80003D00(&cpu);
++    CHECK(cpu.fpr[0] == 1.5 && cpu.ps1[0] == 1.5);
++    CHECK(cpu.pc == 0x81234564u);
++    CHECK(fallback_count == fallback_before_fp_retry);
++
+     prepare_call(&cpu, 0x80002000u);
+     cpu.gpr[3] = 0xA5A55A5Au;
+     func_80002000(&cpu);
+-- 
+2.41.0
+

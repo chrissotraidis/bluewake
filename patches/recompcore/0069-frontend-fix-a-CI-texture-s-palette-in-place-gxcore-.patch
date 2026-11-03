@@ -1,0 +1,156 @@
+From f76641bec6bf62000bc1d94dc130e1a2a30691b0 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 23:35:38 -0500
+Subject: [PATCH] frontend: fix a CI texture's palette in place; gxcore: opaque
+ copies without EFB alpha
+
+0066 resolved a palette texture a second time at its SETTLUT write, which
+emitted a second texture event per load. On the simulator's heavy Outset view
+that cost about a fifth of the frame rate (47.5 -> 38 retraces a second, A/B
+with the re-resolve switched off: 45.2). SETTLUT now corrects the palette of
+the texture event SETIMAGE3 just emitted, while it is still unconsumed, and
+only re-resolves when that event is gone; non-palette textures are skipped.
+The title frame hash is unchanged from 0066 (0x1A8413020CADE626 at retrace
+1800) and the heavy view is back to 48.1 / 47.3 retraces a second.
+
+gxcore's EFB copies now carry whether the EFB has alpha (PE_CONTROL
+RGBA6_Z24); without it, the copy's view reads alpha as one, as Aurora's
+GXCopyTex does, and the copy cache keys on it. DOL_GXCORE_COPY_SCALE=0 turns
+off 0068's render-scale copies for A/B measurement.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 17 +++++++----
+ .../frontend/src/retail_gx_frontend.cpp       | 28 +++++++++++++++++--
+ .../include/gxruntime/gxcore/shader.hpp       |  4 +++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  3 ++
+ 4 files changed, 44 insertions(+), 8 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index d8624b8786..a7f1142790 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -247,11 +247,12 @@ struct EfbCopyKey {
+   uint32_t width;
+   uint32_t height;
+   uint32_t format;
++  bool opaque;  // the view reads alpha as one (EFB without alpha)
+   bool operator==(const EfbCopyKey&) const = default;
+   template <typename H>
+   friend H AbslHashValue(H h, const EfbCopyKey& key) {
+     return H::combine(std::move(h), key.address, key.width, key.height,
+-                      key.format);
++                      key.format, key.opaque);
+   }
+ };
+ absl::flat_hash_map<EfbCopyKey, TextureHandle> g_efbCopyCache;
+@@ -674,7 +675,11 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   // so a larger texture needs nothing else.
+   uint32_t dstWidth = std::max(cmd.destination_width, static_cast<uint32_t>(1));
+   uint32_t dstHeight = std::max(cmd.destination_height, static_cast<uint32_t>(1));
+-  if (gx::g_gxState.viewportPolicy != AURORA_VIEWPORT_NATIVE) {
++  static const bool scale_copies = [] {
++    const char* env = std::getenv("DOL_GXCORE_COPY_SCALE");
++    return env == nullptr || env[0] != '0';
++  }();
++  if (scale_copies && gx::g_gxState.viewportPolicy != AURORA_VIEWPORT_NATIVE) {
+     const auto [logicalW, logicalH] = gx::logical_fb_size();
+     const auto [targetW, targetH] = gfx::get_render_target_size();
+     if (logicalW != 0 && logicalH != 0 && targetW != 0 && targetH != 0) {
+@@ -685,15 +690,17 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+     }
+   }
+ 
+-  const EfbCopyKey key{cmd.dest_address, dstWidth, dstHeight, cmd.format};
++  const EfbCopyKey key{cmd.dest_address, dstWidth, dstHeight, cmd.format, !cmd.efb_has_alpha};
+   auto it = g_efbCopyCache.find(key);
+   if (it == g_efbCopyCache.end() || !it->second) {
+     TextureHandle handle;
+     if (gfx::tex_copy_conv::needs_conversion(fmt)) {
+       handle = gfx::new_conv_texture(dstWidth, dstHeight, fmt, "GXCore Copy Conv");
+     } else {
+-      handle = gfx::new_render_texture(dstWidth, dstHeight, GX_TF_RGBA8,
+-                                       "GXCore Copy");
++      // As Aurora's GXCopyTex: an RGB565 target, or an EFB without alpha,
++      // gets a view whose alpha reads one.
++      const auto viewFmt = fmt == GX_TF_RGB565 || !cmd.efb_has_alpha ? GX_TF_RGB565 : GX_TF_RGBA8;
++      handle = gfx::new_render_texture(dstWidth, dstHeight, viewFmt, "GXCore Copy");
+     }
+     it = g_efbCopyCache.insert_or_assign(key, handle).first;
+   }
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index fa4183927d..e521303e6e 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -705,9 +705,31 @@ bool RetailGxFrontend::handle_bp(std::uint32_t raw) {
+     state_.texture_tlut_format[slot] = bp_get(value, 2u, 10u);
+     // GXLoadTexObj writes SETTLUT after SETIMAGE0-3 (the SDK's
+     // GXLoadTexObjPreLoaded), so the texture event emitted at SETIMAGE3
+-    // carried the palette this slot had for the previous texture. Resolve
+-    // the slot again now that its palette register is current; the later
+-    // event is the one a draw binds.
++    // carried the palette this slot had for the previous texture. Only a
++    // palette (C4/C8/C14X2) texture needs the current one.
++    const DolGxRecompTexture& texture = state_.textures[slot];
++    if (!texture.valid ||
++        (texture.format != 0x8u && texture.format != 0x9u && texture.format != 0xAu))
++      return true;
++    // Usually that texture event is still the newest one and not yet handed
++    // to the sink: correct its palette in place. A second texture event per
++    // load cost about a fifth of the simulator's heavy Outset view.
++    if (state_.trace_count > emitted_trace_count_) {
++      DolGxRecompTraceEvent& ev = state_.trace[state_.trace_count - 1u];
++      if (ev.kind == DOL_GX_RECOMP_EVENT_TEXTURE && ev.a == slot) {
++        const std::uint16_t offset = state_.texture_tlut_tmem_offset[slot];
++        if (offset < DOL_GX_RECOMP_TMEM_TLUT_SLOTS && state_.tmem_tluts[offset].valid) {
++          ev.tlut_address = state_.tmem_tluts[offset].physical_base;
++          ev.tlut_format = state_.texture_tlut_format[slot];
++          ev.tlut_entries = state_.tmem_tluts[offset].entries;
++        } else {
++          ev.tlut_address = 0u;
++          ev.tlut_format = 0u;
++          ev.tlut_entries = 0u;
++        }
++        return true;
++      }
++    }
+     return maybe_resolve_texture(slot);
+   }
+ 
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 824075bd62..a644625547 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -534,6 +534,10 @@ struct EfbCopyCommand {
+   bool color_update = true;
+   bool alpha_update = true;
+   bool depth_update = true;
++  // PE_CONTROL pixel format at the copy: RGBA6_Z24 has an alpha channel, the
++  // other formats do not, and reading their alpha yields one (Dolphin, and
++  // Aurora's GXCopyTex, which then gives the copy an opaque alpha).
++  bool efb_has_alpha = true;
+ };
+ 
+ // --- WGSL generation ----------------------------------------------------------
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index a747360764..adb872d871 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -1662,6 +1662,8 @@ bool GxCoreSink::submit_packet(const ar::RenderPacket& packet) {
+     const bool zmode_seen = live_state_.bp_valid(0x40u);
+     const std::uint32_t cmode0 = live_state_.bp(0x41u);
+     const std::uint32_t zmode = live_state_.bp(0x40u);
++    const bool pe_control_seen = live_state_.bp_valid(0x43u);
++    const std::uint32_t pe_control = live_state_.bp(0x43u);
+     const EfbCopyCommand cmd{
+         .dest_address = r.address,
+         .byte_size = r.size,
+@@ -1681,6 +1683,7 @@ bool GxCoreSink::submit_packet(const ar::RenderPacket& packet) {
+         .color_update = !cmode0_seen || ((cmode0 >> 3u) & 1u) != 0u,
+         .alpha_update = !cmode0_seen || ((cmode0 >> 4u) & 1u) != 0u,
+         .depth_update = !zmode_seen || ((zmode >> 4u) & 1u) != 0u,
++        .efb_has_alpha = !pe_control_seen || (pe_control & 7u) == 1u,
+     };
+     copy_observer_(cmd, copy_observer_user_);
+     if (r.format == 0xFu) {
+-- 
+2.41.0
+

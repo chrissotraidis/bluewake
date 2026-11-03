@@ -1,0 +1,134 @@
+From 3607dd93b49b04b0b2323201d621ebbe49198cde Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 08:08:36 -0500
+Subject: [PATCH 73/74] frontend: reuse one render packet instead of zeroing a
+ draw snapshot per event
+
+RenderPacket carries RenderDrawPacket, the draw's full matrix, light and XF
+snapshot (about 2.5 KB), and emit_new_packets built a fresh packet for every
+trace event, so each BP/XF/CP state event zeroed it. That memset was 9 percent
+of the GX translation worker in a sample of the iPad simulator's heavy Outset
+view. The frontend now reuses one packet and clears its draw section only for a
+Draw event and the event after one, so every packet a sink sees still reads as
+freshly built. make_render_packet keeps its by-value form on top of the new
+in-place fill_render_packet.
+
+Rendered play window in the save's Outset view: 568 -> 542 M host instructions
+per retrace; seven captured frames byte-identical.
+---
+ .../gxruntime/aurora_recomp/render_sink.hpp   |  3 ++
+ .../aurora_recomp/retail_gx_frontend.hpp      |  3 ++
+ .../graphics/frontend/src/render_sink.cpp     | 35 ++++++++++++-------
+ .../frontend/src/retail_gx_frontend.cpp       | 10 +++++-
+ 4 files changed, 37 insertions(+), 14 deletions(-)
+
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+index 80d5d0ea40..732508bc2f 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+@@ -509,6 +509,9 @@ std::uint32_t build_array_sizes(const ConsumedDraw& draw, std::uint32_t* out,
+ 
+ RenderPacket make_render_packet(std::uint64_t sequence,
+                                 const DolGxRecompTraceEvent& event);
++// In-place form for a reused packet: packet.draw must already be zeroed.
++void fill_render_packet(RenderPacket& packet, std::uint64_t sequence,
++                        const DolGxRecompTraceEvent& event);
+ const char* trace_event_name(DolGxRecompEventKind kind);
+ 
+ } // namespace gxruntime::aurora_recomp
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index 4ee3073647..befce7c355 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -151,6 +151,9 @@ private:
+   void* event_observer_user_ = nullptr;
+   std::uint32_t emitted_trace_count_ = 0;
+   std::uint64_t next_packet_sequence_ = 0;
++  // emit_new_packets' reused packet (see there).
++  RenderPacket scratch_packet_{};
++  bool scratch_draw_dirty_ = false;
+   const char* last_error_ = nullptr;
+   std::size_t last_error_offset_ = 0;
+   std::uint8_t last_error_opcode_ = 0;
+diff --git a/GXRuntime/graphics/frontend/src/render_sink.cpp b/GXRuntime/graphics/frontend/src/render_sink.cpp
+index d37ad79c00..8ac4fed144 100644
+--- a/GXRuntime/graphics/frontend/src/render_sink.cpp
++++ b/GXRuntime/graphics/frontend/src/render_sink.cpp
+@@ -529,13 +529,19 @@ std::uint32_t build_array_sizes(const ConsumedDraw& draw, std::uint32_t* out,
+   return non_zero;
+ }
+ 
+-RenderPacket make_render_packet(std::uint64_t sequence,
+-                                const DolGxRecompTraceEvent& event) {
+-  RenderPacket packet{
+-      .kind = RenderPacketKind::TraceEvent,
+-      .sequence = sequence,
+-      .event = event,
+-  };
++// Fills everything but the draw section, which the caller must hand over
++// zeroed (make_render_packet does; the frontend's reused packet clears it only
++// around Draw events). RenderDrawPacket carries the full matrix, light and XF
++// snapshots, about 2.5 KB, and zeroing it for every BP/XF state event was 9% of
++// the translation worker (iPad simulator sample, heavy Outset view).
++void fill_render_packet(RenderPacket& packet, std::uint64_t sequence,
++                        const DolGxRecompTraceEvent& event) {
++  packet.kind = RenderPacketKind::TraceEvent;
++  packet.sequence = sequence;
++  packet.event = event;
++  packet.stream = {};
++  packet.state = {};
++  packet.resource = {};
+ 
+   switch (event.kind) {
+   case DOL_GX_RECOMP_EVENT_FIFO_BYTES:
+@@ -692,17 +698,20 @@ RenderPacket make_render_packet(std::uint64_t sequence,
+     break;
+   case DOL_GX_RECOMP_EVENT_DRAW:
+     packet.kind = RenderPacketKind::Draw;
+-    packet.draw = {
+-        .primitive = event.a,
+-        .vtx_fmt = event.b,
+-        .vertex_count = event.c,
+-        .vertex_size = event.d,
+-    };
++    packet.draw.primitive = event.a;
++    packet.draw.vtx_fmt = event.b;
++    packet.draw.vertex_count = event.c;
++    packet.draw.vertex_size = event.d;
+     break;
+   default:
+     break;
+   }
++}
+ 
++RenderPacket make_render_packet(std::uint64_t sequence,
++                                const DolGxRecompTraceEvent& event) {
++  RenderPacket packet{};
++  fill_render_packet(packet, sequence, event);
+   return packet;
+ }
+ 
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 75eb0080af..aaae388c25 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -926,7 +926,15 @@ bool RetailGxFrontend::emit_new_packets(AuroraRenderSink& sink,
+   for (std::uint32_t i = first_event; i < events.size(); ++i) {
+     const std::uint64_t sequence =
+         packet_drain_enabled_ ? next_packet_sequence_++ : i;
+-    RenderPacket packet = make_render_packet(sequence, events[i]);
++    // One packet reused across the loop; its draw section is zeroed only for a
++    // Draw event and for the event after one, so every packet a sink sees still
++    // reads as freshly built.
++    const bool is_draw = events[i].kind == DOL_GX_RECOMP_EVENT_DRAW;
++    RenderPacket& packet = scratch_packet_;
++    if (is_draw || scratch_draw_dirty_)
++      packet.draw = {};
++    scratch_draw_dirty_ = is_draw;
++    fill_render_packet(packet, sequence, events[i]);
+     // Draw events are emitted exactly once, in order, so the retained payloads
+     // pop FIFO in lockstep. Attach this draw's raw bytes for the issuing sink.
+     if (packet.kind == RenderPacketKind::Draw &&
+-- 
+2.41.0
+

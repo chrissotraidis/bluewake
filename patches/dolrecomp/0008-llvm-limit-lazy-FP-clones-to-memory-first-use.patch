@@ -1,0 +1,48 @@
+From 312a4181fd8904ea09cec86042ea00dea1455f4d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 13:22:45 -0500
+Subject: [PATCH] llvm: limit lazy-FP clones to memory first use
+
+---
+ src/backend/llvm/register_state.cpp | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/src/backend/llvm/register_state.cpp b/src/backend/llvm/register_state.cpp
+index 017f4dd..ea0721a 100644
+--- a/src/backend/llvm/register_state.cpp
++++ b/src/backend/llvm/register_state.cpp
+@@ -137,9 +137,11 @@ void FunctionEmitter::scanRegionLeaders() {
+     region_leaders_[(address - source_.guest_start) / 4u] = true;
+   }
+ 
+-  // Lazy-FP exceptions retry the first faulting FP instruction on a path.
++  // The guest's lazy-FP path first faults on an FP/PSQ memory operation.
+   // Keep that cold entry separate from the hot region so a retry can reload
+-  // architectural state without discarding compile-time GQR knowledge.
++  // architectural state without discarding compile-time GQR knowledge. Do
++  // not clone arithmetic-only regions: they are not first-use sites and are
++  // common enough to make full-game object generation prohibitively costly.
+   const std::vector<bool> structural_leaders = region_leaders_;
+   bool fp_entry_seen = false;
+   for (u32 i = 0; i < source_.block_count; i++) {
+@@ -152,6 +154,17 @@ void FunctionEmitter::scanRegionLeaders() {
+       if (inst.op != DOLIR_OP_HELPER_CALL ||
+           inst.aux != DOLIR_HELPER_FP_AVAILABLE)
+         continue;
++      const u32 raw = source_.blocks[i].raw;
++      const u32 primary = raw >> 26;
++      const u32 xo = (raw >> 1) & 0x3FFu;
++      const bool scalar_memory = primary >= 48u && primary <= 55u;
++      const bool direct_psq = primary == 56u || primary == 57u ||
++                              primary == 60u || primary == 61u;
++      const bool indexed_psq = primary == 4u &&
++                               (xo == 6u || xo == 7u || xo == 38u ||
++                                xo == 39u);
++      if (!scalar_memory && !direct_psq && !indexed_psq)
++        continue;
+       if (!region_leaders_[i])
+         retry_leaders_[i] = true;
+       fp_entry_seen = true;
+-- 
+2.41.0
+

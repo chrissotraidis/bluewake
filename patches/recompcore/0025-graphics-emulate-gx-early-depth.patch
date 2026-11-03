@@ -1,0 +1,317 @@
+From 306dd58857da16acbd26fd23d8fb893fb7b379e6 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 06:25:15 -0500
+Subject: [PATCH] graphics: emulate GX early depth
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |   6 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 103 +++++++++++++++---
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   7 +-
+ .../include/gxruntime/gxcore/gxcore.hpp       |   1 +
+ .../include/gxruntime/gxcore/shader.hpp       |   2 +-
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |   3 +
+ .../gxcore/tests/gxcore_wgsl_test.cpp         |  13 +++
+ 7 files changed, 114 insertions(+), 21 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 131036b3bf..60d36fc921 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -425,7 +425,8 @@ void dol_aurora_shutdown(void) {
+                      "efb_copies=%llu efb_copy_depth=%llu "
+                      "efb_display_copies=%llu fog_ignored=%llu "
+                      "indirect_active=%llu indirect_ignored=%llu "
+-                     "logic_op_ignored=%llu dst_alpha_active=%llu\n",
++                     "logic_op_ignored=%llu dst_alpha_active=%llu "
++                     "early_depth_active=%llu\n",
+                      gx_aurora::g_core_submitted, gx_aurora::g_core_rejected,
+                      gx_aurora::g_shadow_frontend_failed ? 1 : 0,
+                      gaps.draws_planned, gaps.draws_skipped,
+@@ -469,7 +470,8 @@ void dol_aurora_shutdown(void) {
+                      gaps.efb_copy_depth, gaps.efb_display_copies,
+                      gaps.fog_ignored, gaps.indirect_active,
+                      gaps.indirect_ignored,
+-                     gaps.logic_op_ignored, gaps.dst_alpha_active);
++                     gaps.logic_op_ignored, gaps.dst_alpha_active,
++                     gaps.early_depth_active);
+     }
+ #endif
+     if (gx_aurora::g_audio_stream != nullptr) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 01a6a47a69..808d323d6d 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -188,12 +188,50 @@ absl::flat_hash_map<uint32_t, TextureHandle> g_efbCopyTextures;
+ 
+ } // namespace
+ 
++bool needs_early_depth_emulation(const gxc::PipelineKey& key) {
++  if (key.depth_test == 0u || key.depth_update == 0u ||
++      key.early_depth_test == 0u || key.shader.tev_valid == 0u) {
++    return false;
++  }
++
++  // Mirror AlphaTest::TestResult enough to omit the extra pass when the test is
++  // statically guaranteed to pass. Fail and undetermined both need an early
++  // depth write; the ordinary color shader will discard failures afterward.
++  const bool c0_never = key.shader.alpha_comp0 == 0u;
++  const bool c1_never = key.shader.alpha_comp1 == 0u;
++  const bool c0_always = key.shader.alpha_comp0 == 7u;
++  const bool c1_always = key.shader.alpha_comp1 == 7u;
++  bool always_passes = false;
++  switch (key.shader.alpha_logic) {
++  case 0u: // And
++    always_passes = c0_always && c1_always;
++    break;
++  case 1u: // Or
++    always_passes = c0_always || c1_always;
++    break;
++  case 2u: // Xor
++    always_passes = (c0_always && c1_never) ||
++                    (c0_never && c1_always);
++    break;
++  case 3u: // Xnor
++    always_passes = (c0_always && c1_always) ||
++                    (c0_never && c1_never);
++    break;
++  }
++  return !always_passes;
++}
++
+ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+   const gxc::PipelineKey& key = config.key;
++  const bool depthOnly = config.depthOnly != 0u;
+   CHECK(key.shader.use_dst_alpha == 0 ||
+             webgpu::g_dualSourceBlendingSupported,
+         "GX destination alpha requires WebGPU dual-source blending");
+-  const std::string wgsl = gxc::generate_wgsl(key.shader);
++  std::string wgsl = gxc::generate_wgsl(key.shader);
++  if (depthOnly) {
++    wgsl += "\n@fragment\nfn fs_depth_only() -> @location(0) vec4f {\n"
++            "    return vec4f(0.0);\n}\n";
++  }
+   wgpu::ShaderSourceWGSL sourceDescriptor{};
+   sourceDescriptor.code = wgsl.c_str();
+   const wgpu::ShaderModuleDescriptor moduleDescriptor{
+@@ -218,7 +256,8 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+       tev ? g_uniformBindGroupLayout : texture_bind_group_layout(tex_mask),
+       texture_bind_group_layout(tex_mask),
+   };
+-  const size_t layoutCount = tev ? (textured ? 4 : 3) : (textured ? 3 : 2);
++  const size_t layoutCount =
++      depthOnly ? 2 : tev ? (textured ? 4 : 3) : (textured ? 3 : 2);
+   const wgpu::PipelineLayoutDescriptor layoutDescriptor{
+       .label = "GXCore Pipeline Layout",
+       .bindGroupLayoutCount = layoutCount,
+@@ -342,14 +381,20 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+       .attributes = attributes.data(),
+   };
+ 
++  const bool emulateEarlyDepth = needs_early_depth_emulation(key);
+   const bool depthCompare = key.depth_test != 0;
+   const wgpu::DepthStencilState depthStencil{
+       .format = g_graphicsConfig.depthFormat,
+-      .depthWriteEnabled = depthCompare && key.depth_update != 0,
++      .depthWriteEnabled =
++          depthOnly ? depthCompare && key.depth_update != 0
++                    : depthCompare && key.depth_update != 0 &&
++                          !emulateEarlyDepth,
+       .depthCompare =
+-          depthCompare ? to_compare(static_cast<gxc::CompareMode>(
+-                             key.depth_func))
+-                       : wgpu::CompareFunction::Always,
++          emulateEarlyDepth && !depthOnly
++              ? wgpu::CompareFunction::Equal
++              : depthCompare ? to_compare(static_cast<gxc::CompareMode>(
++                                   key.depth_func))
++                             : wgpu::CompareFunction::Always,
+   };
+ 
+   // GC subtract mode forces ONE/ONE with dst - src (Dolphin RenderState).
+@@ -398,11 +443,16 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+       .blend = blending ? &blendState : nullptr,
+       .writeMask = writeMask,
+   };
++  const wgpu::ColorTargetState depthOnlyTarget{
++      .format = g_graphicsConfig.surfaceConfiguration.format,
++      .blend = nullptr,
++      .writeMask = wgpu::ColorWriteMask::None,
++  };
+   const wgpu::FragmentState fragmentState{
+       .module = module,
+-      .entryPoint = "fs_main",
++      .entryPoint = depthOnly ? "fs_depth_only" : "fs_main",
+       .targetCount = 1,
+-      .targets = &colorTarget,
++      .targets = depthOnly ? &depthOnlyTarget : &colorTarget,
+   };
+ 
+   auto cullMode = wgpu::CullMode::None;
+@@ -453,11 +503,26 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+ }
+ 
+ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
++  // Ensure both asynchronous pipelines are ready before the prepass writes any
++  // depth. Binding the color pipeline first is harmless; it is rebound below.
+   if (!bind_pipeline(data.pipeline, pass)) {
+     return;
+   }
++  if (data.depthPipeline != 0 && !bind_pipeline(data.depthPipeline, pass))
++    return;
+   const std::array vsOffsets{data.uniformRange.offset};
+   pass.SetBindGroup(1, g_uniformBindGroup, vsOffsets.size(), vsOffsets.data());
++  pass.SetVertexBuffer(0, g_vertexBuffer, data.vertRange.offset,
++                       data.vertRange.size);
++  pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16,
++                      data.idxRange.offset, data.idxRange.size);
++  if (data.depthPipeline != 0) {
++    pass.DrawIndexed(data.indexCount);
++    if (!bind_pipeline(data.pipeline, pass))
++      return;
++    pass.SetBindGroup(1, g_uniformBindGroup, vsOffsets.size(),
++                      vsOffsets.data());
++  }
+   if (data.tev) {
+     // group 2 = PS uniform (same dynamic-uniform bind group, its own offset);
+     // group 3 = texture.
+@@ -470,10 +535,6 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+   } else if (data.textureBindGroup != 0) {
+     pass.SetBindGroup(2, find_bind_group(data.textureBindGroup));
+   }
+-  pass.SetVertexBuffer(0, g_vertexBuffer, data.vertRange.offset,
+-                       data.vertRange.size);
+-  pass.SetIndexBuffer(g_indexBuffer, wgpu::IndexFormat::Uint16,
+-                      data.idxRange.offset, data.idxRange.size);
+   pass.DrawIndexed(data.indexCount);
+ }
+ 
+@@ -752,12 +813,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+         sizeof(plan.pixel_constants));
+   }
+ 
++  const PipelineConfig colorConfig{
++      .version = GXCorePipelineConfigVersion,
++      .key = plan.pipeline,
++      .msaaSamples = get_sample_count(),
++  };
++  PipelineRef depthPipeline = 0;
++  if (needs_early_depth_emulation(plan.pipeline)) {
++    PipelineConfig depthConfig = colorConfig;
++    depthConfig.depthOnly = 1u;
++    depthPipeline = pipeline_ref(depthConfig);
++  }
+   push_draw_command(DrawData{
+-      .pipeline = pipeline_ref(PipelineConfig{
+-          .version = GXCorePipelineConfigVersion,
+-          .key = plan.pipeline,
+-          .msaaSamples = get_sample_count(),
+-      }),
++      .pipeline = pipeline_ref(colorConfig),
++      .depthPipeline = depthPipeline,
+       .vertRange = vertRange,
+       .idxRange = idxRange,
+       .uniformRange = uniformRange,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index c90b594730..e16b415fc1 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -15,6 +15,7 @@ namespace aurora::gfx::gxcore {
+ 
+ struct DrawData {
+   PipelineRef pipeline;
++  PipelineRef depthPipeline; // early-Z depth-only pass, 0 when unnecessary
+   Range vertRange;
+   Range idxRange;
+   Range uniformRange;       // VertexShaderConstants (group 1)
+@@ -35,16 +36,20 @@ struct DrawData {
+ // stages add shader structure, pixel constants, and indirect texmap bindings.
+ // v7: fifth texgen adds UV4 and a high per-vertex matrix-index word. v8:
+ // destination-alpha override adds a dual-source fragment output/blend state.
+-constexpr uint32_t GXCorePipelineConfigVersion = 8;
++// v9: GXSetZCompLoc early depth adds a depth-only pipeline variant.
++constexpr uint32_t GXCorePipelineConfigVersion = 9;
+ 
+ struct PipelineConfig {
+   uint32_t version = GXCorePipelineConfigVersion;
+   gxruntime::gxcore::PipelineKey key;
+   uint32_t msaaSamples = 1;
++  uint32_t depthOnly = 0;
+ };
+ static_assert(std::has_unique_object_representations_v<PipelineConfig>);
+ 
+ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config);
++bool needs_early_depth_emulation(
++    const gxruntime::gxcore::PipelineKey& key);
+ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass);
+ 
+ // Perform one EFB copy-to-texture (63/S16): resolve the current EFB region into
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 2584ea5555..a6965ae69a 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -72,6 +72,7 @@ struct GapCounters {
+   unsigned long long indirect_ignored = 0;      // invalid/undefined indirect state
+   unsigned long long logic_op_ignored = 0;      // cmode0 logic-op enable
+   unsigned long long dst_alpha_active = 0;      // BP 0x42 forced EFB alpha
++  unsigned long long early_depth_active = 0;    // GXSetZCompLoc before alpha test
+ };
+ 
+ // Cross-draw cached vertex attributes (Dolphin VertexLoaderManager::
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 9547f97ff3..60be69f125 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -267,6 +267,7 @@ struct PipelineKey {
+   std::uint8_t depth_test = 0; // BP zmode bit 0
+   std::uint8_t depth_func = 0; // CompareMode (zmode bits 1-3)
+   std::uint8_t depth_update = 0; // zmode bit 4
++  std::uint8_t early_depth_test = 0; // PEControl bit 6 (GXSetZCompLoc)
+   std::uint8_t blend_enable = 0; // cmode0 bit 0
+   std::uint8_t blend_subtract = 0; // cmode0 bit 11
+   std::uint8_t src_factor = 0;     // SrcBlendFactor (cmode0 bits 8-10)
+@@ -276,7 +277,6 @@ struct PipelineKey {
+   // 0 triangle list, 1 line list, 2 point list. Line strips are expanded to
+   // line-list pairs by build_topology_indices.
+   std::uint8_t primitive_topology = 0;
+-  std::uint8_t pad1 = 0;
+ };
+ static_assert(std::has_unique_object_representations_v<PipelineKey>);
+ 
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 86e6c6e77b..7092df1b0d 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -819,6 +819,9 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   pipe.alpha_update = static_cast<std::uint8_t>(bits(cmode0, 1, 4));
+   const std::uint32_t dst_alpha = bp_valid_[0x42] ? bp_regs_[0x42] : 0u;
+   const std::uint32_t pe_control = bp_valid_[0x43] ? bp_regs_[0x43] : 0u;
++  pipe.early_depth_test = static_cast<std::uint8_t>(bits(pe_control, 1, 6));
++  if (pipe.depth_test != 0u && pipe.early_depth_test != 0u)
++    ++counters.early_depth_active;
+   const bool use_dst_alpha = bits(dst_alpha, 1, 8) != 0u &&
+                              pipe.alpha_update != 0u &&
+                              bits(pe_control, 3, 0) == 1u;
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index d48d9bdd5b..3ad7c634b4 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -228,6 +228,19 @@ void test_state_to_plan_and_wgsl() {
+           std::string::npos);
+   }
+ 
++  // GXSetZCompLoc is PEControl bit 6. It must remain draw state so the backend
++  // can preserve an early depth update when the fragment alpha test discards.
++  {
++    gxc::GxCoreState early_z_state = state;
++    early_z_state.apply(bp(0x43u, 1u << 6u));
++    gxc::GapCounters gaps;
++    const gxc::DrawPlan early_z_plan =
++        early_z_state.build_draw_plan(draw, gaps);
++    CHECK(early_z_plan.ok);
++    CHECK(early_z_plan.pipeline.early_depth_test == 1u);
++    CHECK(gaps.early_depth_active == 1u);
++  }
++
+   // Texgen residuals are classified by the unsupported source row. Emboss
+   // without per-vertex NBT is not a gap: it uses the cached N/B/T uniform.
+   auto classify_texgen = [&](std::uint32_t info, gxc::GapCounters& gaps) {

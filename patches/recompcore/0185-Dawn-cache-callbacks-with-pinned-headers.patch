@@ -1,0 +1,30 @@
+From f71c6901a3fe3c93a0a79fc8808a7fa27c7e5baa Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 10:30:52 +0900
+Subject: [PATCH] Keep Dawn cache callbacks compatible with pinned Apple
+ headers
+
+---
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+index 7ab3a6cd4d..0325aca8e8 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+@@ -976,11 +976,11 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+ #ifdef WEBGPU_DAWN
+     wgpu::DawnCacheDeviceDescriptor cacheDescriptor({.nextInChain = nullptr});
+     cacheDescriptor.SetDawnLoadCacheDataCallback(
+-        [](std::span<const std::byte> key, std::span<std::byte> value) noexcept -> size_t {
++        [](std::span<const std::byte> key, std::span<std::byte> value) -> size_t {
+           return load_from_cache(key.data(), key.size(), value.data(), value.size(), nullptr);
+         });
+     cacheDescriptor.SetDawnStoreCacheDataCallback(
+-        [](std::span<const std::byte> key, std::span<const std::byte> value) noexcept {
++        [](std::span<const std::byte> key, std::span<const std::byte> value) {
+           store_to_cache(key.data(), key.size(), value.data(), value.size(), nullptr);
+         });
+ 
+-- 
+2.46.0

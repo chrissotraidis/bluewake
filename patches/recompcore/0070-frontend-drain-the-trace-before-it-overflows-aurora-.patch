@@ -1,0 +1,278 @@
+From c3408b39bca5b4cd847167bb75f150b024faf3c1 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 01:58:33 -0500
+Subject: [PATCH] frontend: drain the trace before it overflows; aurora: map
+ EFB readback outside its lock
+
+The decode trace holds DOL_GX_RECOMP_MAX_TRACE_EVENTS (8,192) events and
+silently dropped the rest, while the frontend's own register image stayed
+correct. A batch larger than that therefore handed the sink stale CP/BP/XF
+state: in Wind Waker's title sequence gxcore skipped about 4,200 draws per
+3,700 retraces ("walk stride != frontend stride": the dropped event was a VCD
+write adding a position-matrix index), and the number varied with batch size,
+so the FIFO worker made it nondeterministic. In drain mode the parser now hands
+pending events to the sink at a command boundary before the trace can fill.
+Same run after: 0 skipped, 0 dropped, and the worker and synchronous paths
+submit an identical 12,269,794 draws. A drop now logs loudly. New frontend
+test: a 9,192-event batch reaches the sink whole (fails before, passes after).
+
+efb_readback::after_submit called MapAsync (AllowSpontaneous) under g_mutex,
+whose callback takes g_mutex: a frame-capture run deadlocked the render worker
+and then the main thread. MapAsync is now issued after the lock is released.
+
+DOL_GX_FIFO_WORKER=0 translates on the guest thread for A/B and diagnosis.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp |  7 +++
+ .../graphics/aurora/lib/gfx/efb_readback.cpp  | 20 ++++++--
+ .../aurora_recomp/retail_gx_frontend.hpp      |  4 ++
+ .../frontend/src/retail_gx_frontend.cpp       | 46 ++++++++++++++++---
+ .../frontend/tests/frontend_replay_test.cpp   | 34 ++++++++++++++
+ GXRuntime/src/gx_recomp.c                     | 14 +++++-
+ 6 files changed, 113 insertions(+), 12 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index a950e2f00b..0015370654 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -422,6 +422,13 @@ void g_fifo_worker_main() {
+ void g_fifo_worker_start() {
+     if (g_fifo_worker_started || trace_should_record())
+         return;
++    // DOL_GX_FIFO_WORKER=0 translates on the guest thread (A/B and diagnosis).
++    static const bool disabled = [] {
++        const char* env = std::getenv("DOL_GX_FIFO_WORKER");
++        return env != nullptr && env[0] == '0';
++    }();
++    if (disabled)
++        return;
+     g_fifo_worker_started = true;
+     g_fifo_worker_thread = std::thread(g_fifo_worker_main);
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/efb_readback.cpp b/GXRuntime/graphics/aurora/lib/gfx/efb_readback.cpp
+index 5d13a0d6a7..090b2a853f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/efb_readback.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/efb_readback.cpp
+@@ -72,6 +72,12 @@ void after_submit() noexcept {
+   if (!g_requested.load(std::memory_order_acquire)) {
+     return;
+   }
++  // MapAsync is issued after g_mutex is released: with AllowSpontaneous the
++  // callback may run inside MapAsync, and complete_map takes g_mutex, so
++  // mapping under the lock deadlocked the render worker (and then the main
++  // thread in take()) - seen as a frame-capture run hanging for good.
++  wgpu::Buffer mapBuffer;
++  uint64_t mapSize = 0;
+   {
+     std::lock_guard lock{g_mutex};
+     if (g_inFlight) {
+@@ -142,11 +148,15 @@ void after_submit() noexcept {
+     };
+     const auto buffer = encoder.Finish(&CommandBufferDescriptor);
+     webgpu::g_queue.Submit(1, &buffer);
+-    g_buffer.MapAsync(wgpu::MapMode::Read, 0, byteSize,
+-                      wgpu::CallbackMode::AllowSpontaneous,
+-                      [](wgpu::MapAsyncStatus status, wgpu::StringView message) {
+-                        complete_map(status, message);
+-                      });
++    mapBuffer = g_buffer;
++    mapSize = byteSize;
++  }
++  if (mapBuffer) {
++    mapBuffer.MapAsync(wgpu::MapMode::Read, 0, mapSize,
++                       wgpu::CallbackMode::AllowSpontaneous,
++                       [](wgpu::MapAsyncStatus status, wgpu::StringView message) {
++                         complete_map(status, message);
++                       });
+   }
+   g_requested.store(false, std::memory_order_release);
+ }
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index 5cf4e0ee41..1b86f87413 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -119,6 +119,10 @@ private:
+                    std::size_t command_offset);
+   bool emit_new_packets(AuroraRenderSink& sink, std::uint32_t first_event);
+   void drain_emitted_packets(std::uint32_t emitted_count);
++  // Drain mode only: hand every pending event to the sink and reclaim the
++  // trace, so one large batch cannot overflow it (see parse_stream).
++  bool emit_and_drain(AuroraRenderSink& sink);
++  AuroraRenderSink* parse_sink_ = nullptr;
+ 
+   DolGxRecompState state_{};
+   std::vector<std::uint8_t> fifo_buffer_;
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index e521303e6e..efafa5e4a2 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -377,8 +377,13 @@ bool RetailGxFrontend::flush(AuroraRenderSink* sink) {
+   }
+ 
+   std::size_t consumed = 0;
+-  if (!parse_stream(fifo_buffer_, true, true, 0u, &consumed))
++  parse_sink_ = packet_drain_enabled_ ? sink : nullptr;
++  const bool parsed = parse_stream(fifo_buffer_, true, true, 0u, &consumed);
++  parse_sink_ = nullptr;
++  if (!parsed)
+     return false;
++  if (packet_drain_enabled_)
++    first_event = emitted_trace_count_;
+ 
+   if (consumed != 0u) {
+     fifo_buffer_.erase(fifo_buffer_.begin(),
+@@ -414,10 +419,14 @@ bool RetailGxFrontend::write_display_list(std::span<const std::uint8_t> bytes,
+                                  static_cast<std::uint32_t>(bytes.size())))
+       return false;
+     std::size_t dl_consumed = 0;
+-    if (!parse_stream(bytes, false, false, 1u, &dl_consumed) ||
+-        dl_consumed != bytes.size()) {
++    parse_sink_ = packet_drain_enabled_ ? sink : nullptr;
++    const bool parsed = parse_stream(bytes, false, false, 1u, &dl_consumed);
++    parse_sink_ = nullptr;
++    if (!parsed || dl_consumed != bytes.size()) {
+       return false;
+     }
++    if (packet_drain_enabled_)
++      first_event = emitted_trace_count_;
+   }
+   notify_events(first_event);
+ 
+@@ -441,11 +450,16 @@ bool RetailGxFrontend::replay_fifo(std::span<const std::uint8_t> bytes,
+   }
+ 
+   std::size_t consumed = 0;
+-  if (bytes.empty() ||
+-      !parse_stream(bytes, false, true, 0u, &consumed) ||
+-      consumed != bytes.size()) {
++  if (bytes.empty())
++    return false;
++  parse_sink_ = packet_drain_enabled_ ? sink : nullptr;
++  const bool parsed = parse_stream(bytes, false, true, 0u, &consumed);
++  parse_sink_ = nullptr;
++  if (!parsed || consumed != bytes.size()) {
+     return false;
+   }
++  if (packet_drain_enabled_)
++    first_event = emitted_trace_count_;
+   notify_events(first_event);
+ 
+   if (sink == nullptr)
+@@ -497,6 +511,17 @@ bool RetailGxFrontend::parse_stream(std::span<const std::uint8_t> bytes,
+ 
+   std::size_t pos = 0;
+   while (pos < bytes.size()) {
++    // The trace holds DOL_GX_RECOMP_MAX_TRACE_EVENTS events and silently drops
++    // the rest, while this parser's own register image stays correct - so an
++    // overflowing batch left the sink with stale VCD/BP/XF state: gxcore
++    // skipped thousands of draws on a stride it had not been told about, and
++    // how many depended on batch size (the Wind Waker title's sky went missing
++    // in some frames). In drain mode, hand the pending events to the sink at a
++    // command boundary before the trace can fill.
++    if (parse_sink_ != nullptr &&
++        state_.trace_count + 512u >= DOL_GX_RECOMP_MAX_TRACE_EVENTS &&
++        !emit_and_drain(*parse_sink_))
++      return false;
+     const std::uint8_t cmd = bytes[pos];
+     if (cmd == 0x00u) {
+       if (record_fifo_bytes &&
+@@ -973,6 +998,15 @@ void RetailGxFrontend::drain_emitted_packets(std::uint32_t emitted_count) {
+   emitted_trace_count_ = 0u;
+ }
+ 
++bool RetailGxFrontend::emit_and_drain(AuroraRenderSink& sink) {
++  const std::uint32_t first_event = emitted_trace_count_;
++  notify_events(first_event);
++  if (!emit_new_packets(sink, first_event))
++    return false;
++  drain_emitted_packets(state_.trace_count);
++  return true;
++}
++
+ } // namespace gxruntime::aurora_recomp
+ 
+ extern "C" {
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index c2df257ea1..845c4be0e8 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -503,6 +503,39 @@ void test_unresolved_tlut_load_is_noop() {
+   assert(!saw_packet(unresolved_source_sink, DOL_GX_RECOMP_EVENT_TLUT));
+ }
+ 
++// One drain-mode batch that produces more trace events than the trace holds
++// (DOL_GX_RECOMP_MAX_TRACE_EVENTS) must still hand every event to the sink:
++// the parser's own register image stays right when events are dropped, so a
++// dropped VCD write left the consumer decoding draws with a stale stride.
++void test_large_batch_drains_instead_of_dropping() {
++  std::vector<std::uint8_t> fifo;
++  const std::uint32_t writes = DOL_GX_RECOMP_MAX_TRACE_EVENTS + 1000u;
++  for (std::uint32_t i = 0; i < writes; ++i)
++    push_bp(fifo, DOL_GX_BP_REG_GENMODE, i & 0xFu);
++  push_cp(fifo, DOL_GX_CP_REG_VCD_LO, 0x6601u);
++
++  RetailGxFrontend frontend;
++  frontend.set_packet_drain_enabled(true);
++  RecordingAuroraRenderSink sink;
++  assert(frontend.write_fifo(fifo));
++  assert(frontend.flush(&sink));
++  assert(frontend.last_error() == nullptr);
++  std::size_t bp_packets = 0;
++  bool saw_vcd = false;
++  for (const auto& packet : sink.packets()) {
++    if (packet.kind != RenderPacketKind::State)
++      continue;
++    if (packet.state.kind == RenderStateKind::BpReg &&
++        packet.state.index == DOL_GX_BP_REG_GENMODE)
++      ++bp_packets;
++    if (packet.state.kind == RenderStateKind::CpVcd &&
++        packet.state.index == 0u && packet.state.value == 0x6601u)
++      saw_vcd = true;
++  }
++  assert(bp_packets == writes);
++  assert(saw_vcd);
++}
++
+ // GXLoadTexObj writes SETIMAGE0-3 and then SETTLUT for a CI texture. The
+ // texture a draw binds must carry the palette named by that later SETTLUT,
+ // not the one the slot held for the previous texture (the Wind Waker title
+@@ -658,6 +691,7 @@ int main() {
+   test_fragmented_zero_vertex_draw_is_noop();
+   test_unresolved_tlut_load_is_noop();
+   test_tlut_written_after_image_selects_palette();
++  test_large_batch_drains_instead_of_dropping();
+   test_xf_projection_capture();
+ 
+   CPUState cpu;
+diff --git a/GXRuntime/src/gx_recomp.c b/GXRuntime/src/gx_recomp.c
+index 698ad92954..8c2e7f36ea 100644
+--- a/GXRuntime/src/gx_recomp.c
++++ b/GXRuntime/src/gx_recomp.c
+@@ -2,12 +2,24 @@
+ #include "gxruntime/gx_recomp.h"
+ #include "gx_recomp_internal.h"
+ 
++#include <stdio.h>
+ #include <string.h>
+ 
+ void dol_gx_recomp_trace_event(DolGxRecompState* gx, DolGxRecompEventKind kind,
+                         u32 a, u32 b, u32 c, u32 d) {
+ 
+-    if (gx == NULL || gx->trace_count >= DOL_GX_RECOMP_MAX_TRACE_EVENTS)
++    if (gx != NULL && gx->trace_count >= DOL_GX_RECOMP_MAX_TRACE_EVENTS) {
++        /* A dropped event leaves a consumer with state the parser has but it
++         * does not; the frontend drains before this in drain mode, so saying
++         * so loudly (at powers of two) is the right failure. */
++        static unsigned long long dropped = 0;
++        ++dropped;
++        if ((dropped & (dropped - 1u)) == 0u)
++            fprintf(stderr, "[gx-trace] trace full: %llu event(s) dropped (last kind %u)\n",
++                    dropped, (unsigned)kind);
++        return;
++    }
++    if (gx == NULL)
+         return;
+     DolGxRecompTraceEvent* event = &gx->trace[gx->trace_count++];
+     event->kind = kind;
+-- 
+2.41.0
+

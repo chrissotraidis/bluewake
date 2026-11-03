@@ -1,0 +1,208 @@
+diff --git a/GXRuntime/include/gxruntime/audio_dma.h b/GXRuntime/include/gxruntime/audio_dma.h
+index 4f75dbdedb..c598087d39 100644
+--- a/GXRuntime/include/gxruntime/audio_dma.h
++++ b/GXRuntime/include/gxruntime/audio_dma.h
+@@ -19,9 +19,12 @@
+ #define DOL_AUDIO_DMA_DSP_REG_BYTES 0x40u
+ 
+ #define DOL_AUDIO_DMA_AI_CONTROL_OFF 0x00u
++#define DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF 0x08u
+ // AICR bits (Dolphin AudioInterface.h). AIDFR is intentionally inverted w.r.t.
+ // the rate name: AIDFR set == 32 kHz AID, clear == 48 kHz AID.
++#define DOL_AUDIO_DMA_AI_PSTAT_BIT 0x00000001u
+ #define DOL_AUDIO_DMA_AI_AISFR_BIT 0x00000002u
++#define DOL_AUDIO_DMA_AI_SCRESET_BIT 0x00000020u
+ #define DOL_AUDIO_DMA_AI_AIDFR_BIT 0x00000040u
+ #define DOL_AUDIO_DMA_AI_CONTROL_INIT \
+     (DOL_AUDIO_DMA_AI_AISFR_BIT | DOL_AUDIO_DMA_AI_AIDFR_BIT)
+@@ -49,6 +52,9 @@ typedef struct DolAudioDma {
+     u64 work_units_per_second;
+     u64 work_units_per_frame;
+     u64 work_units_per_chunk;
++    u64 sample_counter_remainder;
++    u32 sample_counter;
++    u32 stream_sample_rate;
+     bool interrupt_pending;
+     // Big-endian AI/DSP register files. AI CR DRIVES the AID sample rate; DSP
+     // control carries the AID interrupt mask and DMA address/length state.
+@@ -98,6 +104,10 @@ bool dol_audio_dma_consume_pcm16_stereo_work(DolAudioDma* dma,
+                                              DolAudioDmaReadFn read_source,
+                                              void* user);
+ 
++// Advance the AI streaming sample counter from the same guest-cycle domain as
++// DMA. Reads do not advance time, and elapsed-work partitioning is invariant.
++void dol_audio_dma_advance_stream(DolAudioDma* dma, u64 work_units);
++
+ // AI/DSP-AID device register MMIO. The game writes the AI control register to
+ // select the AID sample rate; DSP control carries the AID interrupt status/mask
+ // and the audio-DMA source address/control/blocks-left. These are reusable
+diff --git a/GXRuntime/src/audio_dma.c b/GXRuntime/src/audio_dma.c
+index fe8e6a242c..96dbe1a49e 100644
+--- a/GXRuntime/src/audio_dma.c
++++ b/GXRuntime/src/audio_dma.c
+@@ -50,16 +50,31 @@ static void recompute_work_units_per_chunk(DolAudioDma* dma) {
+ }
+ 
+ static void apply_ai_control(DolAudioDma* dma) {
+-    const u32 control = load_be32(dma->ai_regs + DOL_AUDIO_DMA_AI_CONTROL_OFF);
++    u32 control = load_be32(dma->ai_regs + DOL_AUDIO_DMA_AI_CONTROL_OFF);
+     // Dolphin: AIDFR set == 32 kHz AID, clear == 48 kHz AID (inverted w.r.t.
+     // the rate name).
+     const u32 rate = (control & DOL_AUDIO_DMA_AI_AIDFR_BIT) != 0u
+                          ? DOL_AUDIO_DMA_32KHZ
+                          : DOL_AUDIO_DMA_48KHZ;
+-    if (dma->sample_rate == rate)
+-        return;
+-    dol_audio_dma_set_sample_rate(dma, rate);
+-    dol_platform_audio_set_sample_rate(rate);
++    if (dma->sample_rate != rate) {
++        dol_audio_dma_set_sample_rate(dma, rate);
++        dol_platform_audio_set_sample_rate(rate);
++    }
++
++    const u32 stream_rate =
++        (control & DOL_AUDIO_DMA_AI_AISFR_BIT) != 0u
++            ? DOL_AUDIO_DMA_48KHZ
++            : DOL_AUDIO_DMA_32KHZ;
++    if (dma->stream_sample_rate != stream_rate) {
++        dma->stream_sample_rate = stream_rate;
++        dma->sample_counter_remainder = 0u;
++    }
++    if ((control & DOL_AUDIO_DMA_AI_SCRESET_BIT) != 0u) {
++        dma->sample_counter = 0u;
++        dma->sample_counter_remainder = 0u;
++        control &= ~DOL_AUDIO_DMA_AI_SCRESET_BIT;
++        store_be32(dma->ai_regs + DOL_AUDIO_DMA_AI_CONTROL_OFF, control);
++    }
+ }
+ 
+ void dol_audio_dma_init(DolAudioDma* dma) {
+@@ -67,6 +82,7 @@ void dol_audio_dma_init(DolAudioDma* dma) {
+     dma->sample_rate = DOL_AUDIO_DMA_32KHZ;
+     dma->chunks_per_second =
+         DOL_AUDIO_DMA_32KHZ / DOL_AUDIO_DMA_FRAMES_PER_CHUNK;
++    dma->stream_sample_rate = DOL_AUDIO_DMA_48KHZ;
+     dma->work_units_per_chunk = 1;
+     store_be32(dma->ai_regs + DOL_AUDIO_DMA_AI_CONTROL_OFF,
+                DOL_AUDIO_DMA_AI_CONTROL_INIT);
+@@ -211,6 +227,22 @@ bool dol_audio_dma_consume_pcm16_stereo(DolAudioDma* dma,
+                                                    user);
+ }
+ 
++void dol_audio_dma_advance_stream(DolAudioDma* dma, u64 work_units) {
++    if (dma == NULL || dma->work_units_per_second == 0u ||
++        (load_be32(dma->ai_regs + DOL_AUDIO_DMA_AI_CONTROL_OFF) &
++         DOL_AUDIO_DMA_AI_PSTAT_BIT) == 0u)
++        return;
++
++    const u64 rate = dma->stream_sample_rate;
++    const u64 denominator = dma->work_units_per_second;
++    const u64 whole_seconds = work_units / denominator;
++    const u64 partial_work = work_units % denominator;
++    const u64 scaled = partial_work * rate + dma->sample_counter_remainder;
++    dma->sample_counter +=
++        (u32)(whole_seconds * rate + scaled / denominator);
++    dma->sample_counter_remainder = scaled % denominator;
++}
++
+ static u32 latched_dma_source(const DolAudioDma* dma) {
+     // Dolphin AUDIO_DMA_START_HI/LO form a 32-bit source address; the top 10
+     // bits of the high half and the low 11 bits (aligned to 32 bytes) are
+@@ -227,6 +259,10 @@ void dol_audio_dma_ai_mmio_read(DolAudioDma* dma, u32 offset, u8 size,
+                                 u64* value) {
+     if (dma == NULL || value == NULL)
+         return;
++    if (offset == DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF && size == 4u) {
++        *value = dma->sample_counter;
++        return;
++    }
+     *value = register_read(dma->ai_regs, offset, size);
+ }
+ 
+@@ -235,6 +271,11 @@ void dol_audio_dma_ai_mmio_write(DolAudioDma* dma, u32 offset, u8 size,
+     if (dma == NULL)
+         return;
+     register_write(dma->ai_regs, offset, size, value);
++    if (offset == DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF && size == 4u) {
++        dma->sample_counter = (u32)value;
++        dma->sample_counter_remainder = 0u;
++        return;
++    }
+     if (offset < DOL_AUDIO_DMA_AI_CONTROL_OFF + 4u &&
+         offset + size > DOL_AUDIO_DMA_AI_CONTROL_OFF)
+         apply_ai_control(dma);
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index a3915e9406..f1064761ca 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -2057,6 +2057,62 @@ static void test_audio_dma_pcm_boundary(void) {
+     dol_platform_reset();
+ }
+ 
++static void test_audio_stream_counter(void) {
++    DolAudioDma aggregate;
++    DolAudioDma sliced;
++    u64 value = 0u;
++    dol_audio_dma_init(&aggregate);
++    dol_audio_dma_init(&sliced);
++    dol_audio_dma_set_work_rate(&aggregate, 486000000u);
++    dol_audio_dma_set_work_rate(&sliced, 486000000u);
++
++    dol_audio_dma_ai_mmio_write(
++        &aggregate, DOL_AUDIO_DMA_AI_CONTROL_OFF, 4u,
++        DOL_AUDIO_DMA_AI_CONTROL_INIT | DOL_AUDIO_DMA_AI_PSTAT_BIT);
++    dol_audio_dma_ai_mmio_write(
++        &sliced, DOL_AUDIO_DMA_AI_CONTROL_OFF, 4u,
++        DOL_AUDIO_DMA_AI_CONTROL_INIT | DOL_AUDIO_DMA_AI_PSTAT_BIT);
++
++    dol_audio_dma_advance_stream(&aggregate, 30375u);
++    dol_audio_dma_advance_stream(&sliced, 10000u);
++    dol_audio_dma_advance_stream(&sliced, 10000u);
++    dol_audio_dma_advance_stream(&sliced, 10375u);
++    assert(aggregate.sample_counter == 3u);
++    assert(sliced.sample_counter == aggregate.sample_counter);
++    assert(sliced.sample_counter_remainder ==
++           aggregate.sample_counter_remainder);
++
++    dol_audio_dma_ai_mmio_read(
++        &aggregate, DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF, 4u, &value);
++    assert(value == 3u);
++    value = 0u;
++    dol_audio_dma_ai_mmio_read(
++        &aggregate, DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF, 4u, &value);
++    assert(value == 3u);
++
++    dol_audio_dma_ai_mmio_write(
++        &aggregate, DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF, 4u, 41u);
++    dol_audio_dma_ai_mmio_read(
++        &aggregate, DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF, 4u, &value);
++    assert(value == 41u);
++    dol_audio_dma_ai_mmio_write(
++        &aggregate, DOL_AUDIO_DMA_AI_CONTROL_OFF, 4u,
++        DOL_AUDIO_DMA_AI_CONTROL_INIT | DOL_AUDIO_DMA_AI_PSTAT_BIT |
++            DOL_AUDIO_DMA_AI_SCRESET_BIT);
++    dol_audio_dma_ai_mmio_read(
++        &aggregate, DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF, 4u, &value);
++    assert(value == 0u);
++    assert(aggregate.sample_counter_remainder == 0u);
++
++    dol_audio_dma_ai_mmio_write(
++        &aggregate, DOL_AUDIO_DMA_AI_CONTROL_OFF, 4u,
++        DOL_AUDIO_DMA_AI_CONTROL_INIT);
++    dol_audio_dma_advance_stream(&aggregate, 486000000u);
++    dol_audio_dma_ai_mmio_read(
++        &aggregate, DOL_AUDIO_DMA_AI_SAMPLE_COUNTER_OFF, 4u, &value);
++    assert(value == 0u);
++}
++
+ static void test_audio_adpcm_decoder(void) {
+     const DolDspAdpcmInfo info = {
+         .coef = {0},
+@@ -2609,6 +2665,7 @@ int main(void) {
+     test_di_device();
+     test_audio_dma();
+     test_audio_dma_pcm_boundary();
++    test_audio_stream_counter();
+     test_audio_adpcm_decoder();
+     test_audio_voice_mixer();
+     test_audio_event_adapter();

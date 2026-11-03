@@ -1,0 +1,485 @@
+From 44a4ae1332e3735bec4a5f4f68fa407d76001755 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 01:00:11 -0500
+Subject: [PATCH 1/2] Aurora: a window resized on Vulkan keeps its surface and
+ keeps drawing
+
+On Linux (X11, NVIDIA) dragging the window's edge lost the surface: Dawn
+reports Lost when the swapchain is still out of date after its own rebuild, the
+surface was released, and the one made in its place for the same window failed
+with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR while the old swapchain still held the
+window, losing the device (#325). And while the window was dragged, the picture
+grew in steps behind its edges.
+
+- Lost is configured again, as Outdated is, once per configure; only a surface
+  lost through 30 configures in a row without a frame is released.
+- A Lost or Outdated texture is asked for again, up to twice in the same frame,
+  and a suboptimal texture is presented (with one configure after it) rather
+  than dropped.
+- Vulkan only: at the game's retraces (every 8 ms at most) the window's messages
+  are pumped and left queued, and the render worker configures the surface alone
+  at the window's newest size before its next texture. The frame buffers keep
+  theirs until the resize event, and the present stretches them to the window
+  meanwhile. The resize event then configures the surface only if its size
+  still differs.
+- The first texture of a newly configured surface is not counted as the GPU
+  falling behind, which turned Smooth Motion's in-between frames off for 3 s at
+  every step of a resize.
+
+Checked on Arch (X11, XFCE, NVIDIA, Vulkan): drag-resizes at 21:9 and 16:9 and
+F11 fullscreen switches, hundreds of lost surfaces, all configured again, no
+surface released, no crash.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp |  14 +-
+ .../graphics/aurora/include/aurora/gfx.h      |   4 +
+ GXRuntime/graphics/aurora/lib/aurora.cpp      | 122 ++++++++++++++++--
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp  |  50 ++++++-
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp  |  10 ++
+ GXRuntime/graphics/aurora/lib/window.cpp      |  27 ++++
+ GXRuntime/graphics/aurora/lib/window.hpp      |   3 +
+ 7 files changed, 214 insertions(+), 16 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 2380cf7ad1..e173087dfa 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -1416,7 +1416,19 @@ void dol_aurora_frame_timing(DolAuroraFrameTiming* out) {
+ // ([late] lines, 2026-09-26). The host calls this at every retrace as well.
+ void aurora_backend_service_present(void) {
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+-    if (!gx_aurora::g_initialized || !gx_aurora::g_gx_core_enabled)
++    if (!gx_aurora::g_initialized)
++        return;
++    // The window's size as well, at most every 8 ms of real time (retraces
++    // come in bursts when the game catches up): aurora_follow_window_size.
++    {
++        static Uint64 s_last_follow_ns = 0;
++        const Uint64 now = SDL_GetTicksNS();
++        if (now - s_last_follow_ns >= 8000000u) {
++            s_last_follow_ns = now;
++            aurora_follow_window_size();
++        }
++    }
++    if (!gx_aurora::g_gx_core_enabled)
+         return;
+     if (gx_aurora::g_display_copy_pending.load(std::memory_order_relaxed) &&
+         gx_aurora::g_display_copy_pending.exchange(false))
+diff --git a/GXRuntime/graphics/aurora/include/aurora/gfx.h b/GXRuntime/graphics/aurora/include/aurora/gfx.h
+index ac8195d89f..b4b255921a 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/gfx.h
++++ b/GXRuntime/graphics/aurora/include/aurora/gfx.h
+@@ -64,6 +64,10 @@ bool aurora_peek_z(uint16_t x, uint16_t y, uint32_t* z);
+ bool aurora_color_peek_ready(void);
+ bool aurora_peek_argb(uint16_t x, uint16_t y, uint32_t* color);
+ 
++/* Vulkan: the surface follows the window's size between the game's frames
++   (window.cpp, follow_window_size). Call it on the thread that polls events. */
++void aurora_follow_window_size(void);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index bfea632908..576bf1337a 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -328,6 +328,28 @@ static void draw_fps_overlay() {
+ 
+ static std::atomic_bool g_presentSuppressed{false};
+ 
++// The surface configure count when its texture was last Lost (render worker
++// only), or kNotLost, and how many times a Lost surface has been configured
++// again since the last frame that had a texture.
++constexpr uint32_t kNotLost = UINT32_MAX;
++static uint32_t g_lostAtConfigure = kNotLost;
++static uint32_t g_lostReconfigures = 0;
++static uint32_t g_lostWaits = 0;
++// A window dragged to a new size can lose the surface again before the frame
++// after its reconfigure: each of those is a new loss, not a surface that stays
++// lost, so it is only released after this many configures in a row without a
++// frame (#325).
++constexpr uint32_t kLostReconfigureLimit = 30;
++// How many more times a Lost or Outdated texture is asked for in the same
++// frame, and how many times that has happened (render worker only).
++constexpr int kAcquireRetries = 2;
++static uint64_t g_acquireRetries = 0;
++static uint64_t g_acquireRecovered = 0;
++// The configure count when a suboptimal texture last asked for a configure.
++static uint32_t g_suboptimalAtConfigure = kNotLost;
++// The configure count at the last texture acquired (render worker only).
++static uint32_t g_configuresAtAcquire = 0;
++
+ void end_frame() noexcept {
+   ZoneScoped;
+ #ifdef AURORA_ENABLE_GX
+@@ -353,6 +375,7 @@ void end_frame() noexcept {
+ 
+   gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
+                   imguiDrawData = std::move(imguiDrawData)](wgpu::CommandEncoder& encoder) {
++    auto presentViewport = viewport;
+     wgpu::Texture currentTexture;
+     wgpu::TextureView currentView;
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
+@@ -365,19 +388,64 @@ void end_frame() noexcept {
+       window::SurfaceLock surfaceLock;
+       if (!suppressed && !occluded && window::is_presentable() && g_surface) {
+         ZoneScopedN("Acquire texture");
++        // The window's newest size first (Vulkan, window::follow_window_size):
++        // the picture is placed in the surface at its new size.
++        webgpu::follow_surface_size();
++        presentViewport = webgpu::calculate_present_viewport(
++            webgpu::g_graphicsConfig.surfaceConfiguration.width, webgpu::g_graphicsConfig.surfaceConfiguration.height,
++            webgpu::present_source().size.width, webgpu::present_source().size.height);
+         wgpu::SurfaceTexture surfaceTexture;
+         const auto acquireStart = std::chrono::steady_clock::now();
+         g_surface.GetCurrentTexture(&surfaceTexture);
++        // While a window is being resized, Vulkan's swapchain goes out of date
++        // with every step. Dawn rebuilds it at the window's size and acquires
++        // again, and reports Lost when the window has changed again in
++        // between. Asking again rebuilds it at the newest size, and the frame
++        // is drawn (stretched by Dawn until the main thread resizes the frame
++        // buffers) instead of skipped, which left the window's old contents
++        // trailing behind its edges for the whole drag (#325).
++        bool retried = false;
++        for (int retry = 0; retry < kAcquireRetries &&
++                            (surfaceTexture.status == wgpu::SurfaceGetCurrentTextureStatus::Lost ||
++                             surfaceTexture.status == wgpu::SurfaceGetCurrentTextureStatus::Outdated);
++             ++retry) {
++          surfaceTexture = {};
++          g_surface.GetCurrentTexture(&surfaceTexture);
++          ++g_acquireRetries;
++          retried = true;
++          if (surfaceTexture.status == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal ||
++              surfaceTexture.status == wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal) {
++            if (++g_acquireRecovered % 50 == 1)
++              Log.info("Surface texture acquired on a retry ({} of {} retries)", g_acquireRecovered,
++                       g_acquireRetries);
++          }
++        }
+         const auto acquireMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - acquireStart)
+                                    .count();
+         if (acquireMs >= 30)
+           std::fprintf(stderr, "[render-slow] acquire-drawable ms=%lld\n", static_cast<long long>(acquireMs));
+-        // Every drawable still queued behind the GPU's work: fewer in-between frames.
+-        if (acquireMs >= 20)
++        // Every drawable still queued behind the GPU's work: fewer in-between
++        // frames. Not the first texture of a surface configured since the last
++        // one, or one asked for again: that wait is the driver making the new
++        // swapchain, and it turned Smooth Motion's in-between frames off for 3 s
++        // after every step of a window being resized (#325).
++        const uint32_t configures = webgpu::g_surfaceConfigures.load(std::memory_order_relaxed);
++        const bool newSwapchain = configures != g_configuresAtAcquire || retried;
++        g_configuresAtAcquire = configures;
++        if (acquireMs >= 20 && !newSwapchain)
+           gfx::note_render_overload();
+         surfaceStatus = surfaceTexture.status;
+-        if (surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal) {
++        if (surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal ||
++            surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal) {
++          g_lostAtConfigure = kNotLost;
++          g_lostReconfigures = 0;
++          g_lostWaits = 0;
++        }
++        // A suboptimal texture can still be presented: it is drawn, and the
++        // surface is configured again after it (below).
++        if (surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal ||
++            surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal) {
+           currentTexture = std::move(surfaceTexture.texture);
+           currentView = currentTexture.CreateView();
+         }
+@@ -390,7 +458,7 @@ void end_frame() noexcept {
+       if (rmlBindGroup && !rmlOverlay) {
+         presentBindGroup = rmlBindGroup;
+       } else {
+-        const auto& resampledSource = webgpu::resample_present_source(encoder, viewport);
++        const auto& resampledSource = webgpu::resample_present_source(encoder, presentViewport);
+         presentBindGroup = webgpu::create_copy_bind_group(resampledSource);
+       }
+       {
+@@ -411,7 +479,7 @@ void end_frame() noexcept {
+         // Copy EFB -> XFB (swapchain)
+         pass.SetPipeline(webgpu::g_CopyPipeline);
+         pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
+-        set_present_viewport(pass, viewport, webgpu::g_graphicsConfig.surfaceConfiguration.width,
++        set_present_viewport(pass, presentViewport, webgpu::g_graphicsConfig.surfaceConfiguration.width,
+                              webgpu::g_graphicsConfig.surfaceConfiguration.height);
+ 
+         pass.Draw(3);
+@@ -470,6 +538,15 @@ void end_frame() noexcept {
+       }
+       if (status) {
+         gfx::after_present();
++        // Presented, but the swapchain no longer matches the window: configure
++        // it again, once per configure (it stays suboptimal until then).
++        if (surfaceStatus == wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal) {
++          const uint32_t configures = webgpu::g_surfaceConfigures.load(std::memory_order_relaxed);
++          if (g_suboptimalAtConfigure != configures) {
++            g_suboptimalAtConfigure = configures;
++            window::push_custom_event(window::CustomEvent::RefreshSurface);
++          }
++        }
+       } else {
+         Log.warn("Surface present failed");
+         webgpu::release_surface();
+@@ -489,10 +566,39 @@ void end_frame() noexcept {
+         Log.info("Surface texture is {}, reconfiguring swapchain", magic_enum::enum_name(surfaceStatus));
+         window::push_custom_event(window::CustomEvent::RefreshSurface);
+         break;
+-      case wgpu::SurfaceGetCurrentTextureStatus::Lost:
+-        Log.warn("Surface texture is {}, releasing surface", magic_enum::enum_name(surfaceStatus));
+-        webgpu::release_surface();
++      case wgpu::SurfaceGetCurrentTextureStatus::Lost: {
++        // Reconfigure the surface first, as for Outdated. Releasing it at
++        // once made Vulkan on Linux (X11 and Wayland) lose it on a resize or
++        // a fullscreen switch, and the surface made in its place for the same
++        // window then failed with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR while the
++        // old swapchain still held the window (#325). A loss while the
++        // reconfigure asked for is still waiting asks for nothing more; only a
++        // surface lost through kLostReconfigureLimit configures in a row,
++        // with no frame between them, is released and made anew.
++        const uint32_t configures = webgpu::g_surfaceConfigures.load(std::memory_order_relaxed);
++        if (g_lostAtConfigure == configures) {
++          // A refresh can end without a configure (a window not presentable
++          // for a moment): ask again now and then rather than wait for good.
++          if (++g_lostWaits % 60 == 0)
++            window::push_custom_event(window::CustomEvent::RefreshSurface);
++          break;
++        }
++        g_lostWaits = 0;
++        if (g_lostReconfigures < kLostReconfigureLimit) {
++          ++g_lostReconfigures;
++          Log.warn("Surface texture is {}, reconfiguring swapchain ({} in a row)",
++                   magic_enum::enum_name(surfaceStatus), g_lostReconfigures);
++          g_lostAtConfigure = configures;
++          window::push_custom_event(window::CustomEvent::RefreshSurface);
++        } else {
++          Log.warn("Surface texture is still {} after {} reconfigures, releasing surface",
++                   magic_enum::enum_name(surfaceStatus), g_lostReconfigures);
++          g_lostAtConfigure = kNotLost;
++          g_lostReconfigures = 0;
++          webgpu::release_surface();
++        }
+         break;
++      }
+       case wgpu::SurfaceGetCurrentTextureStatus::Error:
+         Log.warn("Surface texture is {}, dropping surface", magic_enum::enum_name(surfaceStatus));
+         g_surface = {};
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+index fcb50a80ef..cac53bcd6e 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+@@ -41,6 +41,7 @@ static Module Log("aurora::gpu");
+ wgpu::Device g_device;
+ wgpu::Queue g_queue;
+ wgpu::Surface g_surface;
++std::atomic_uint32_t g_surfaceConfigures{0};
+ wgpu::BackendType g_backendType;
+ GraphicsConfig g_graphicsConfig;
+ TextureWithSampler g_frameBuffer;
+@@ -1140,13 +1141,20 @@ static void resize_swapchain_internal(uint32_t width, uint32_t height, uint32_t
+     gx::clear_copy_texture_cache();
+     gfx::clear_caches();
+   }
+-  g_graphicsConfig.surfaceConfiguration.width = nativeWidth;
+-  g_graphicsConfig.surfaceConfiguration.height = nativeHeight;
+-  auto surfaceConfiguration = g_graphicsConfig.surfaceConfiguration;
+-  surfaceConfiguration.device = g_device;
+-  {
+-    window::SurfaceLock surfaceLock;
+-    g_surface.Configure(&surfaceConfiguration);
++  // The render worker may have configured the surface at this size already
++  // (follow_surface_size); then only the frame buffers change.
++  const bool surfaceChanged = g_graphicsConfig.surfaceConfiguration.width != nativeWidth ||
++                              g_graphicsConfig.surfaceConfiguration.height != nativeHeight;
++  if (force || surfaceChanged) {
++    g_graphicsConfig.surfaceConfiguration.width = nativeWidth;
++    g_graphicsConfig.surfaceConfiguration.height = nativeHeight;
++    auto surfaceConfiguration = g_graphicsConfig.surfaceConfiguration;
++    surfaceConfiguration.device = g_device;
++    {
++      window::SurfaceLock surfaceLock;
++      g_surface.Configure(&surfaceConfiguration);
++    }
++    g_surfaceConfigures.fetch_add(1, std::memory_order_relaxed);
+   }
+   g_frameBuffer = create_render_texture(width, height, true);
+   g_frameBufferResolved = create_render_texture(width, height, false);
+@@ -1154,6 +1162,34 @@ static void resize_swapchain_internal(uint32_t width, uint32_t height, uint32_t
+   g_CopyBindGroup = create_copy_bind_group(present_source());
+ }
+ 
++// The window's newest size in pixels (width << 32 | height), 0 for none.
++static std::atomic_uint64_t g_followSize{0};
++
++void set_follow_size(uint32_t nativeWidth, uint32_t nativeHeight) noexcept {
++  g_followSize.store(static_cast<uint64_t>(nativeWidth) << 32 | nativeHeight, std::memory_order_relaxed);
++}
++
++bool follow_surface_size() noexcept {
++  const uint64_t size = g_followSize.load(std::memory_order_relaxed);
++  const auto nativeWidth = static_cast<uint32_t>(size >> 32);
++  const auto nativeHeight = static_cast<uint32_t>(size);
++  auto& config = g_graphicsConfig.surfaceConfiguration;
++  if (!g_surface || !g_device || nativeWidth == 0 || nativeHeight == 0 ||
++      (config.width == nativeWidth && config.height == nativeHeight)) {
++    return false;
++  }
++  config.width = nativeWidth;
++  config.height = nativeHeight;
++  auto surfaceConfiguration = config;
++  surfaceConfiguration.device = g_device;
++  {
++    window::SurfaceLock surfaceLock;
++    g_surface.Configure(&surfaceConfiguration);
++  }
++  g_surfaceConfigures.fetch_add(1, std::memory_order_relaxed);
++  return true;
++}
++
+ bool refresh_surface(bool recreate) {
+   const gfx::render_worker::Pause pause{gfx::flush_deferred_presents};
+   if (!g_instance || !g_device) {
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
+index d05332204c..4320dfb757 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
+@@ -6,6 +6,7 @@
+ #include "wgpu.hpp"
+ 
+ #include <array>
++#include <atomic>
+ #include <cstdint>
+ 
+ struct SDL_Window;
+@@ -42,6 +43,8 @@ struct Viewport {
+ extern wgpu::Device g_device;
+ extern wgpu::Queue g_queue;
+ extern wgpu::Surface g_surface;
++// How many times the surface has been configured (read on the render worker).
++extern std::atomic_uint32_t g_surfaceConfigures;
+ extern wgpu::BackendType g_backendType;
+ extern GraphicsConfig g_graphicsConfig;
+ extern TextureWithSampler g_frameBuffer;
+@@ -66,6 +69,13 @@ void shutdown();
+ void release_surface() noexcept;
+ bool refresh_surface(bool recreate = true);
+ void resize_swapchain(uint32_t width, uint32_t height, uint32_t nativeWidth, uint32_t nativeHeight, bool force = false);
++// The window's newest size (window::follow_window_size, the thread that polls
++// events), and the render worker taking it: the surface alone is configured at
++// it before the next texture is acquired, the frame buffers left as they are
++// (the present stretches them to it until resize_swapchain sizes them too).
++// True when the surface changed.
++void set_follow_size(uint32_t nativeWidth, uint32_t nativeHeight) noexcept;
++bool follow_surface_size() noexcept;
+ TextureWithSampler create_render_texture(uint32_t width, uint32_t height, bool multisampled);
+ const TextureWithSampler& present_source() noexcept;
+ // Render worker: presents `source` in place of the frame buffer while set
+diff --git a/GXRuntime/graphics/aurora/lib/window.cpp b/GXRuntime/graphics/aurora/lib/window.cpp
+index 48463a0977..a73c359d9f 100644
+--- a/GXRuntime/graphics/aurora/lib/window.cpp
++++ b/GXRuntime/graphics/aurora/lib/window.cpp
+@@ -504,6 +504,31 @@ AuroraWindowSize get_window_size() {
+   };
+ }
+ 
++// A window dragged to a new size on X11 is shown at that size at once, but
++// its events reach poll_events only once a game frame (20 to 30 times a
++// second while dragging): the swapchain stayed at the old size, Vulkan called
++// it out of date, and the picture grew in steps behind the window's edges.
++// Between frames (at the game's retraces) the window's messages are pumped
++// and left queued, and the render worker configures the surface alone at the
++// window's size before its next texture (webgpu::follow_surface_size); the
++// frame buffers keep theirs until the event's resize_swapchain, the present
++// stretching them to the window meanwhile (#325). Vulkan only: Direct3D 12
++// and Metal never lost the surface on a resize.
++void follow_window_size() noexcept {
++#ifdef AURORA_ENABLE_GX
++  if (g_window == nullptr || webgpu::g_backendType != wgpu::BackendType::Vulkan || !is_presentable()) {
++    return;
++  }
++  SDL_PumpEvents();
++  int width = 0;
++  int height = 0;
++  if (!SDL_GetWindowSizeInPixels(g_window, &width, &height) || width <= 0 || height <= 0) {
++    return;
++  }
++  webgpu::set_follow_size(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
++#endif
++}
++
+ SDL_Window* get_sdl_window() { return g_window; }
+ 
+ SDL_Renderer* get_sdl_renderer() { return g_renderer; }
+@@ -621,3 +646,5 @@ extern "C" JNIEXPORT void JNICALL Java_org_libsdl_app_SDLSurface_auroraNativeSet
+   aurora::window::set_surface_ready(ready == JNI_TRUE);
+ }
+ #endif
++
++extern "C" void aurora_follow_window_size(void) { aurora::window::follow_window_size(); }
+diff --git a/GXRuntime/graphics/aurora/lib/window.hpp b/GXRuntime/graphics/aurora/lib/window.hpp
+index d729cdfefc..794be8c665 100644
+--- a/GXRuntime/graphics/aurora/lib/window.hpp
++++ b/GXRuntime/graphics/aurora/lib/window.hpp
+@@ -36,6 +36,9 @@ void destroy_window();
+ void show_window();
+ AuroraWindowSize get_window_size();
+ const AuroraEvent* poll_events();
++// Vulkan: the window's newest size, read between the game's frames (its
++// messages pumped and left queued for poll_events), taken by the surface.
++void follow_window_size() noexcept;
+ SDL_Window* get_sdl_window();
+ SDL_Renderer* get_sdl_renderer();
+ bool is_paused() noexcept;
+
+From bcc1b03a4dbc05c1824092a230f9b3e9db6b1336 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 11:43:02 -0500
+Subject: [PATCH 2/2] Aurora: a resize keeps the followed window size up to
+ date
+
+The window size the render worker follows (g_followSize) was only written
+by the retrace service, aurora_backend_service_present. With the game held
+by the settings menu that service does not run, so a resize through the
+event path configured the new size and follow_surface_size could then
+configure the surface back to the last cached one. resize_swapchain_internal
+now stores the size it is asked for, so the cache always matches the last
+resize, from either path.
+---
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+index cac53bcd6e..8c362f0b18 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+@@ -1126,11 +1126,19 @@ void release_surface() noexcept {
+   }
+ }
+ 
++// The window's newest size in pixels (width << 32 | height), 0 for none:
++// window::follow_window_size between the game's frames, and every resize
++// here, so a resize from the event path (with the game held by a menu, the
++// retrace service that follows the window does not run) is never undone by
++// follow_surface_size going back to an older cached size.
++static std::atomic_uint64_t g_followSize{0};
++
+ static void resize_swapchain_internal(uint32_t width, uint32_t height, uint32_t nativeWidth, uint32_t nativeHeight,
+                                       bool force) {
+   if (!g_surface || !g_device || width == 0 || height == 0 || nativeHeight == 0 || nativeWidth == 0) {
+     return;
+   }
++  g_followSize.store(static_cast<uint64_t>(nativeWidth) << 32 | nativeHeight, std::memory_order_relaxed);
+   const bool sizeChanged = g_graphicsConfig.surfaceConfiguration.width != nativeWidth ||
+                            g_graphicsConfig.surfaceConfiguration.height != nativeHeight ||
+                            g_frameBuffer.size.width != width || g_frameBuffer.size.height != height;
+@@ -1162,9 +1170,6 @@ static void resize_swapchain_internal(uint32_t width, uint32_t height, uint32_t
+   g_CopyBindGroup = create_copy_bind_group(present_source());
+ }
+ 
+-// The window's newest size in pixels (width << 32 | height), 0 for none.
+-static std::atomic_uint64_t g_followSize{0};
+-
+ void set_follow_size(uint32_t nativeWidth, uint32_t nativeHeight) noexcept {
+   g_followSize.store(static_cast<uint64_t>(nativeWidth) << 32 | nativeHeight, std::memory_order_relaxed);
+ }

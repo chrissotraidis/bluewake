@@ -1,0 +1,2108 @@
+From 8ab24daee9c641634fda5cac30389ad4b2cfda5e Mon Sep 17 00:00:00 2001
+From: elliotttate <elliotttate@gmail.com>
+Date: Wed Sep 30 19:26:28 2026 -0400
+Subject: [PATCH] Merge windows-release: cheaper GX worker draws, thread timing, cache folder
+
+The Windows build's RecompCore work since 6892947 (e8c2bb3, f93c05f, 2a85bd1,
+825f103, 4f7a3ec, 82607d4): the derived pipeline state cached by a register
+version, no assembly totals walk, the last pipeline lookup and bind group
+reused, Smooth Motion jobs without a copy for repeated constants and with a
+fence only when the helper may sleep; constant blocks compared against a copy
+off Apple GPUs; gather-pipe writes as a run of bytes; DOL_AURORA_CACHE_DIR;
+the stall watchdog on Mac and Linux only; graphics threads' CPU time and slow
+presents in the log.
+
+With save states: a register state put back from a state takes a fresh
+derived-cache version (GxCoreState::renew_version), since the saved one
+belongs to the run that saved it. On an M3 Max, Outset's spawn view at Smooth
+Motion 60: the FIFO worker 55.4 -> 53.2 percent busy, 95.6 percent of draws
+hitting the derived cache, and DOL_GXCORE_DERIVED_VERIFY=1 finds no mismatch
+in 5.7 M hits on a walk nor in 7.0 M after a save state load.
+
+---
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 684506ee64..957d602dde 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -9,6 +9,7 @@
+ #include <gfx/gxcore_draw.hpp>
+ #endif
+ #include <SDL3/SDL_init.h>
++#include <chrono>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -157,14 +158,32 @@ void log_callback(AuroraLogLevel level, const char* module, const char* message,
+ }
+ 
+ void poll_events() {
++    // An event pump that holds the game thread 100 ms or more says whether
++    // SDL's pump (window messages, device detection) or the host's handlers
++    // took the time, and the last event type ([events-slow]).
++    using clock = std::chrono::steady_clock;
++    const clock::time_point start = clock::now();
+     const AuroraEvent* event = aurora_update();
++    const clock::time_point pumped = clock::now();
++    clock::duration observers{};
++    unsigned count = 0;
++    unsigned last_type = 0;
+     while (event != nullptr && event->type != AURORA_NONE) {
+         if (event->type == AURORA_EXIT)
+             g_should_quit = true;
+-        if (event->type == AURORA_SDL_EVENT && g_host_event_observer != nullptr)
++        if (event->type == AURORA_SDL_EVENT && g_host_event_observer != nullptr) {
++            const clock::time_point before = clock::now();
+             g_host_event_observer(&event->sdl, g_host_event_user);
++            observers += clock::now() - before;
++            last_type = event->sdl.type;
++        }
++        ++count;
+         ++event;
+     }
++    const auto ms = [](clock::duration d) { return std::chrono::duration<double, std::milli>(d).count(); };
++    if (clock::now() - start >= std::chrono::milliseconds(100))
++        std::fprintf(stderr, "[events-slow] pump=%.0f ms host=%.0f ms events=%u last=0x%X\n", ms(pumped - start),
++                     ms(observers), count, last_type);
+ }
+ 
+ void run_host_overlay() {
+@@ -184,6 +203,9 @@ void install_platform_ops() {
+         .present = aurora_backend_present,
+         .mark_gx_begin = aurora_backend_mark_gx_begin,
+         .gx_write = aurora_backend_gx_write,
++        // The FIFO is a byte stream only through the GX core, and a trace
++        // records each write with its size.
++        .gx_write_bytes = g_gx_core_enabled && !g_trace_armed ? aurora_backend_gx_write_bytes : nullptr,
+         .gx_flush = aurora_backend_gx_flush,
+         .call_display_list = aurora_backend_call_display_list,
+         .set_array = aurora_backend_set_array,
+@@ -241,6 +263,12 @@ bool dol_aurora_initialize(int argc, char** argv,
+         backend_config->app_name != nullptr ? backend_config->app_name
+                                             : defaults.app_name;
+     config.desiredBackend = BACKEND_AUTO;
++    // DOL_AURORA_CACHE_DIR: where the shader and pipeline caches live
++    // (default: SDL's preference folder for the app name). A host that keeps
++    // several data folders points each at its own, so two copies running at
++    // once never write one SQLite file together.
++    if (const char* cache_dir = std::getenv("DOL_AURORA_CACHE_DIR"); cache_dir != nullptr && cache_dir[0] != '\0')
++        config.cachePath = strdup(cache_dir);
+     config.vsync = backend_config->vsync;
+     config.windowWidth = backend_config->window_width != 0
+                              ? backend_config->window_width
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 4d54aafaf3..eea6111a16 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -196,6 +196,7 @@ bool aurora_backend_should_quit(void);
+ void aurora_backend_present(void);
+ void aurora_backend_mark_gx_begin(void);
+ void aurora_backend_gx_write(u64 value, u8 size);
++void aurora_backend_gx_write_bytes(const u8* bytes, u32 size);
+ void aurora_backend_gx_flush(void);
+ void aurora_backend_call_display_list(const void* data, u32 size);
+ void aurora_backend_set_array(u32 attr, const void* data, u32 size, u8 stride);
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 46d9a8ac18..4624f002b6 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -21,12 +21,15 @@
+ #include <mutex>
+ #include <thread>
+ #include <vector>
++#if !defined(_WIN32)
+ #include <execinfo.h>
+ #include <pthread.h>
+ #include <signal.h>
+ #include <unistd.h>
++#endif
+ #include "../../graphics/aurora/lib/gfx/render_worker.hpp"
+ #include "../../graphics/aurora/lib/gfx/frame_interp.hpp"
++#include "../../graphics/aurora/lib/gfx/thread_cpu.hpp"
+ 
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+ // gxcore substrate submission lives in the Aurora fork (lib/gfx/gxcore_draw.cpp),
+@@ -494,6 +497,7 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+ // worker write their call stacks to stderr ([gx-stall-stack]), so what a long
+ // stall waits on is in the session log.
+ std::atomic<long long> g_batch_start_ns{0};
++#if !defined(_WIN32)
+ std::atomic<pthread_t> g_fifo_pthread{};
+ 
+ void stall_stack_handler(int) {
+@@ -506,12 +510,19 @@ void stall_stack_handler(int) {
+     (void)!write(2, kFooter, sizeof kFooter - 1);
+ }
+ 
++#endif
++
+ long long monotonic_ns() {
+     return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+         .count();
+ }
+ 
++#if defined(_WIN32)
++// Windows has no backtrace() or thread signals: DOL_GX_STALL_STACKS is a
++// Mac and Linux diagnostic.
++void start_stall_watchdog() {}
++#else
+ void start_stall_watchdog() {
+     static const bool enabled = [] {
+         const char* env = std::getenv("DOL_GX_STALL_STACKS");
+@@ -542,10 +553,14 @@ void start_stall_watchdog() {
+         }).detach();
+     });
+ }
++#endif
+ 
+ void g_fifo_worker_main() {
++#if !defined(_WIN32)
+     g_fifo_pthread.store(pthread_self(), std::memory_order_release);
++#endif
+     start_stall_watchdog();
++    aurora::gfx::thread_cpu::register_current(aurora::gfx::thread_cpu::Role::GxWorker);
+     // Kept across batches: the swap below hands its capacity back to the
+     // handoff, so the game thread's appends reuse it instead of growing a new
+     // vector (and this thread freeing the old one) every batch.
+@@ -930,6 +945,30 @@ static inline void shadow_frontend_enqueue_word(u64 value, u8 size) {
+         g_fifo_publish_local();
+ }
+ 
++// A run of consecutive gather-pipe writes, their bytes in guest order, for the
++// running translation worker: shadow_frontend_enqueue_word's bookkeeping for
++// the run, and the bytes appended to the worker's batch in pieces that publish
++// it at the same limit.
++static inline void shadow_frontend_enqueue_bytes(const std::uint8_t* bytes, std::size_t size) {
++    g_shadow_frontend_pending_bytes += size;
++    const std::size_t limit = fifo_local_batch_limit();
++    while (size != 0u) {
++        if (g_fifo_local_size >= limit) {
++            g_fifo_publish_local();
++            continue;
++        }
++        std::size_t piece = limit - g_fifo_local_size;
++        if (piece > size)
++            piece = size;
++        std::memcpy(g_fifo_local + g_fifo_local_size, bytes, piece);
++        g_fifo_local_size += piece;
++        bytes += piece;
++        size -= piece;
++        if (g_fifo_local_size >= limit)
++            g_fifo_publish_local();
++    }
++}
++
+ void shadow_frontend_write(u64 value, u8 size) {
+     if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
+         return;
+@@ -1297,6 +1336,12 @@ void dol_aurora_frame_timing(DolAuroraFrameTiming* out) {
+     out->interp_draws = interp.draws;
+     out->interp_rejected = interp.rejected;
+     out->interp_unmatched = interp.unmatched;
++    {
++        using aurora::gfx::thread_cpu::Role;
++        out->gx_worker_cpu_us = aurora::gfx::thread_cpu::cpu_us(Role::GxWorker);
++        out->interp_helper_cpu_us = aurora::gfx::thread_cpu::cpu_us(Role::InterpHelper);
++        out->render_worker_cpu_us = aurora::gfx::thread_cpu::cpu_us(Role::RenderWorker);
++    }
+     out->audio_queued_ms = 0;
+     if (gx_aurora::g_audio_stream != nullptr && gx_aurora::g_audio_sample_rate != 0u) {
+         const int queued = SDL_GetAudioStreamQueued(gx_aurora::g_audio_stream);
+@@ -1329,12 +1374,19 @@ void aurora_backend_service_present(void) {
+ static void aurora_backend_present_impl(void) {
+     if (!gx_aurora::g_initialized)
+         return;
++    // A present that holds the game thread 100 ms or more says which part took
++    // the time ([present-slow]): waiting for the worker's batch, Aurora's end
++    // of frame, the window's events, or the next frame's begin (a frame slot
++    // or the swapchain's next texture).
++    const unsigned long long slow_start = gx_aurora::timing_now_us();
++    unsigned long long slow_lock = 0, slow_end = 0, slow_events = 0, slow_begin = 0;
+     // Everything below up to the next begin_frame runs with no frame packet for
+     // the translation worker to record into. The lock is what makes that window
+     // invisible to the worker: it waits here for a batch in flight, and a batch
+     // that starts afterwards sees g_aurora_recording_open false and parses
+     // without offering draws to a renderer that has no frame.
+     std::unique_lock<std::mutex> aurora_recording(gx_aurora::g_aurora_recording_mutex);
++    slow_lock = gx_aurora::timing_now_us() - slow_start;
+     gx_aurora::g_aurora_recording_open = false;
+     gx_aurora::g_aurora_recording_in_transition = true;
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+@@ -1365,7 +1417,8 @@ static void aurora_backend_present_impl(void) {
+         gx_aurora::g_timing_draws += aurora_get_stats()->drawCallCount;
+         const unsigned long long end_frame_start = gx_aurora::timing_now_us();
+         aurora_end_frame();
+-        gx_aurora::g_timing_end_frame_us += gx_aurora::timing_now_us() - end_frame_start;
++        slow_end = gx_aurora::timing_now_us() - end_frame_start;
++        gx_aurora::g_timing_end_frame_us += slow_end;
+         gx_aurora::g_frame_open = false;
+     }
+     ++gx_aurora::g_present_count;
+@@ -1568,7 +1621,9 @@ static void aurora_backend_present_impl(void) {
+     }
+     const unsigned long long present_fifo = gx_aurora::g_fifo_bytes;
+     gx_aurora::g_fifo_bytes = 0;
++    const unsigned long long events_start = gx_aurora::timing_now_us();
+     gx_aurora::poll_events();
++    slow_events = gx_aurora::timing_now_us() - events_start;
+     // The host may hold the guest at this frame boundary: a menu or layout
+     // editor is open, or the app is leaving the foreground. Events keep being
+     // pumped so the host UI stays live, the last frame stays on screen, and
+@@ -1594,7 +1649,9 @@ static void aurora_backend_present_impl(void) {
+                      (SDL_GetTicks() - start) / 1000.0);
+     }
+     if (!gx_aurora::g_should_quit) {
++        const unsigned long long begin_start = gx_aurora::timing_now_us();
+         gx_aurora::g_frame_open = aurora_begin_frame();
++        slow_begin = gx_aurora::timing_now_us() - begin_start;
+         // The frame the worker records into exists from here until the next
+         // present's end_frame, and this is what opens it to the worker.
+         gx_aurora::g_aurora_recording_open = gx_aurora::g_frame_open;
+@@ -1626,6 +1683,12 @@ static void aurora_backend_present_impl(void) {
+     if (gx_aurora::g_graphics_log && present_fifo > 50000ull)
+         std::fprintf(stderr, "[gfx] LARGE present=%llu fifo_this_interval=%llu\n",
+                      gx_aurora::g_present_count, present_fifo);
++    if (const unsigned long long total = gx_aurora::timing_now_us() - slow_start; total >= 100000ull)
++        std::fprintf(stderr,
++                     "[present-slow] present=%llu ms=%.0f lock=%.0f end_frame=%.0f events=%.0f begin_frame=%.0f "
++                     "frame_open=%d\n",
++                     gx_aurora::g_present_count, total / 1000.0, slow_lock / 1000.0, slow_end / 1000.0,
++                     slow_events / 1000.0, slow_begin / 1000.0, gx_aurora::g_frame_open ? 1 : 0);
+     // The transition is over: a packet exists again (or the window is not
+     // presentable), and the worker may record.
+     gx_aurora::g_aurora_recording_in_transition = false;
+@@ -1670,6 +1733,26 @@ void aurora_backend_gx_flush(void) {
+ #endif
+ }
+ 
++// A run of consecutive gather-pipe writes as their bytes in guest order (the
++// game module's batch). Installed only where the FIFO is a byte stream - the
++// GX core on and nothing traced (install_platform_ops) - so a byte at a time
++// through aurora_backend_gx_write is the same stream as the writes it came
++// from; in play the run goes to the worker's batch in one piece.
++void aurora_backend_gx_write_bytes(const u8* bytes, u32 size) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    if (gx_aurora::g_initialized && gx_aurora::g_gx_core_enabled && gx_aurora::g_frame_open &&
++        !gx_aurora::g_trace_armed && gx_aurora::g_fifo_worker_started &&
++        gx_aurora::g_shadow_frontend_enabled && !gx_aurora::g_shadow_frontend_failed &&
++        !gx_aurora::g_display_copy_pending.load(std::memory_order_relaxed)) {
++        gx_aurora::g_fifo_bytes += size;
++        gx_aurora::shadow_frontend_enqueue_bytes(bytes, size);
++        return;
++    }
++#endif
++    for (u32 i = 0; i < size; ++i)
++        aurora_backend_gx_write(bytes[i], 1u);
++}
++
+ void aurora_backend_gx_write(u64 value, u8 size) {
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+     // Every gather-pipe word in play: the recorder open, the translation
+diff --git a/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake b/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
+index 7402e2cf5c..835ed0ca91 100644
+--- a/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
++++ b/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
+@@ -5,6 +5,7 @@ add_library(aurora_gx STATIC
+         lib/gfx/efb_readback.cpp
+         lib/gfx/pipeline_cache.cpp
+         lib/gfx/render_worker.cpp
++        lib/gfx/thread_cpu.cpp
+         lib/gfx/dds_io.cpp
+         lib/gfx/tex_copy_conv.cpp
+         lib/gfx/tex_palette_conv.cpp
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 1bdb2721b1..7b58c93777 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1074,8 +1074,28 @@ DrawData* last_recorded_draw() noexcept {
+ 
+ template <>
+ PipelineRef pipeline_ref(const gxcore::PipelineConfig& config) {
+-  return find_pipeline(ShaderType::GXCore, config,
+-                       [=] { return gxcore::create_pipeline(config); });
++  // Most draws use the pipeline of the draw before them (a draw with early
++  // depth looks up its depth pipeline too, so one entry for each). A lookup
++  // built a std::function holding a copy of the whole config - a heap
++  // allocation - and hashed the config before find_pipeline's own check of the
++  // last pipeline, at every draw. A config find_pipeline has seen stays known
++  // to it (queued, compiling or ready) until the cache is shut down.
++  struct Memo {
++    gxcore::PipelineConfig config{};
++    PipelineRef ref = 0;
++    uint32_t generation = 0;
++    bool valid = false;
++  };
++  thread_local Memo memo[2];
++  Memo& m = memo[config.depthOnly != 0 ? 1 : 0];
++  const uint32_t generation = pipeline_cache_generation();
++  if (m.valid && m.generation == generation && std::memcmp(&m.config, &config, sizeof config) == 0)
++    return m.ref;
++  m.ref = find_pipeline(ShaderType::GXCore, config, [=] { return gxcore::create_pipeline(config); });
++  m.config = config;
++  m.generation = generation;
++  m.valid = true;
++  return m.ref;
+ }
+ #endif
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index c94aa14195..a6203f1e5c 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -5,6 +5,8 @@
+ #include "../webgpu/gpu.hpp"
+ #include "../gx/gx.hpp" // UseReversedZ + set_logical_viewport (substrate glue)
+ #include "frame_interp.hpp"
++#include "pipeline_cache.hpp"
++#include "thread_cpu.hpp"
+ #include "texture.hpp"
+ #include "tex_copy_conv.hpp" // EFB-copy format conversion (63/S16)
+ #include "texture_replacement.hpp" // Dolphin-format HD texture packs
+@@ -957,24 +959,58 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+ // filled Aurora's 24 MB uniform staging area in the middle of Wind Waker's
+ // Outset frames, and each split waited on the GPU. A draw whose block matches
+ // the previous draw's, within the same frame packet, reuses that range.
+-// The block a cache last took is compared where it was staged (uniform_bytes,
+-// or interp_uniform_bytes for the in-between frames'): a copy of each block
+-// kept aside for the comparison was a tenth of the FIFO worker's copying.
++// On Apple GPUs the block a cache last took is compared where it was staged
++// (uniform_bytes, or interp_uniform_bytes for the in-between frames'): the
++// staging area is ordinary memory there, and a copy of each block kept aside
++// for the comparison was a tenth of the FIFO worker's copying. Elsewhere
++// (Direct3D 12, Vulkan) the staging area is the GPU's upload memory, which the
++// CPU reads uncached: comparing there took Wind Waker's Outset frames (14,000
++// draws) 400 ms on the FIFO worker, so the block is kept aside.
++#if defined(__APPLE__)
++#define AURORA_UNIFORM_COMPARE_STAGED 1
++#else
++#define AURORA_UNIFORM_COMPARE_STAGED 0
++#endif
+ struct UniformCache {
+   Range range{};
+   uint64_t frameId = 0;
+   uint64_t hits = 0;
+   uint64_t pushes = 0;
++#if !AURORA_UNIFORM_COMPARE_STAGED
++  std::vector<uint8_t> bytes; // the block range holds
++#endif
+ };
+ static UniformCache g_vertexUniformCache;
+ static UniformCache g_interpUniformCache;
+ static UniformCache g_pixelUniformCache;
+ 
++// The block the cache last took: `staged` where it was staged, or the copy.
++static const uint8_t* cached_bytes(const UniformCache& cache, const uint8_t* staged) {
++#if AURORA_UNIFORM_COMPARE_STAGED
++  return staged;
++#else
++  (void)staged;
++  return cache.bytes.data();
++#endif
++}
++
++// The cache took `data` (staged at cache.range).
++static void keep_cached(UniformCache& cache, const uint8_t* data, size_t length) {
++#if AURORA_UNIFORM_COMPARE_STAGED
++  (void)cache;
++  (void)data;
++  (void)length;
++#else
++  cache.bytes.assign(data, data + length);
++#endif
++}
++
+ // Whether `data` is the block the cache last took, in this frame packet.
+ static bool repeats_cached(const UniformCache& cache, const uint8_t* data, size_t length) {
+   const uint64_t frameId = current_frame_id();
+   return frameId != 0 && cache.frameId == frameId && cache.range.size == length &&
+-         std::memcmp(uniform_bytes(cache.range), data, length) == 0;
++         std::memcmp(cached_bytes(cache, AURORA_UNIFORM_COMPARE_STAGED ? uniform_bytes(cache.range) : nullptr), data,
++                     length) == 0;
+ }
+ 
+ // The in-between frame's blocks, de-duplicated the same way. repeated: the
+@@ -984,13 +1020,17 @@ static bool repeats_cached(const UniformCache& cache, const uint8_t* data, size_
+ static Range push_interp_uniform_dedup(UniformCache& cache, uint64_t frameId, size_t slot, const uint8_t* data,
+                                        size_t length, bool repeated) {
+   if (frameId != 0 && cache.frameId == frameId && cache.range.size == length &&
+-      (repeated || std::memcmp(interp_uniform_bytes(slot, cache.range), data, length) == 0)) {
++      (repeated ||
++       std::memcmp(cached_bytes(cache, AURORA_UNIFORM_COMPARE_STAGED ? interp_uniform_bytes(slot, cache.range)
++                                                                     : nullptr),
++                   data, length) == 0)) {
+     ++cache.hits;
+     return cache.range;
+   }
+   ++cache.pushes;
+   cache.range = push_interp_uniform(slot, data, length);
+   cache.frameId = frameId;
++  keep_cached(cache, data, length);
+   return cache.range;
+ }
+ 
+@@ -1012,6 +1052,10 @@ struct InterpJob {
+   uint64_t frameId;
+   size_t slot;
+   bool repeatsLastDraw; // the constants are the draw before's (repeats_cached)
++  // The constants, copied only where they differ from the job before's
++  // (constantsCopied); a job that repeats them leaves the 2.8 KB copy to the
++  // helper, which keeps the last it was given (InterpHelper::constants).
++  bool constantsCopied;
+   gxc::VertexShaderConstants constants;
+ };
+ 
+@@ -1045,6 +1089,9 @@ struct InterpHelper {
+   // Helper thread: the last block it staged per step, and a particle's vertices.
+   UniformCache cache[frame_interp::kMaxSteps];
+   std::vector<float> vertices;
++  // Helper thread: the constants of the last job that carried them, which the
++  // jobs after it that repeat them use.
++  gxc::VertexShaderConstants constants;
+ };
+ 
+ // Made with the thread and never destroyed: the detached thread may still be
+@@ -1052,6 +1099,7 @@ struct InterpHelper {
+ std::atomic<InterpHelper*> g_interpHelper{nullptr};
+ 
+ void interp_helper_main(InterpHelper* h) {
++  thread_cpu::register_current(thread_cpu::Role::InterpHelper);
+   for (;;) {
+     const uint64_t tail = h->consumed.load(std::memory_order_relaxed);
+     if (tail == h->produced.load(std::memory_order_seq_cst)) {
+@@ -1083,7 +1131,9 @@ void interp_helper_main(InterpHelper* h) {
+     const InterpJob& job = h->ring[tail % InterpHelper::Capacity];
+     InterpRanges ranges{};
+     const int steps = frame_interp::frame_steps();
+-    if (frame_interp::blend_draw(job.input, job.constants, job.repeatsLastDraw) != nullptr) {
++    if (job.constantsCopied)
++      std::memcpy(&h->constants, &job.constants, sizeof(h->constants));
++    if (frame_interp::blend_draw(job.input, h->constants, job.repeatsLastDraw) != nullptr) {
+       const bool repeated = frame_interp::last_blend_repeated();
+       for (int step = 0; step < steps; ++step)
+         ranges.uniform[step] =
+@@ -1124,13 +1174,26 @@ uint32_t queue_interp_job(const gxc::DrawPlan& plan, bool repeatsLastDraw) {
+   job.frameId = frameId;
+   job.slot = recording_frame_slot();
+   job.repeatsLastDraw = repeatsLastDraw;
+-  std::memcpy(&job.constants, &plan.constants, sizeof(plan.constants));
+-  h->produced.store(head + 1, std::memory_order_seq_cst);
+-  // Asleep, it consumes nothing: the jobs waiting reach WakeBatch exactly once.
+-  if (h->sleeping.load(std::memory_order_seq_cst) &&
+-      head + 1 - h->consumed.load(std::memory_order_acquire) >= InterpHelper::WakeBatch) {
+-    std::lock_guard lock{h->mutex};
+-    h->work.notify_one();
++  // repeatsLastDraw: the constants are those last pushed in this frame packet,
++  // and every push while frames are interpolated here queues a job, so they
++  // are those of this packet's job before (the helper's copy). The first job
++  // of a packet carries its own.
++  job.constantsCopied = !repeatsLastDraw || h->jobs == 0u;
++  if (job.constantsCopied)
++    std::memcpy(&job.constants, &plan.constants, sizeof(plan.constants));
++  h->produced.store(head + 1, std::memory_order_release);
++  // Asleep, it consumes nothing, so a sleeping helper has WakeBatch or more
++  // waiting before it is woken. Only then is `sleeping` read, after a full
++  // fence: the helper sets it before its last look at `produced`, so one of
++  // the two sees the other. Every job paid for a sequentially consistent store
++  // and load here, which waited for the job's copies to leave the store buffer
++  // (4 percent of the translation worker).
++  if (head + 1 - h->consumed.load(std::memory_order_acquire) >= InterpHelper::WakeBatch) {
++    std::atomic_thread_fence(std::memory_order_seq_cst);
++    if (h->sleeping.load(std::memory_order_relaxed)) {
++      std::lock_guard lock{h->mutex};
++      h->work.notify_one();
++    }
+   }
+   return h->jobs++;
+ }
+@@ -1165,7 +1228,9 @@ static Range push_uniform_dedup(UniformCache& cache, const uint8_t* data,
+   }();
+   const uint64_t frameId = current_frame_id();
+   if (enabled && frameId != 0 && cache.frameId == frameId && cache.range.size == length &&
+-      (known >= 0 ? known == 1 : std::memcmp(uniform_bytes(cache.range), data, length) == 0)) {
++      (known >= 0 ? known == 1
++                  : std::memcmp(cached_bytes(cache, AURORA_UNIFORM_COMPARE_STAGED ? uniform_bytes(cache.range) : nullptr),
++                                data, length) == 0)) {
+     ++cache.hits;
+     return cache.range;
+   }
+@@ -1175,6 +1240,7 @@ static Range push_uniform_dedup(UniformCache& cache, const uint8_t* data,
+              cache.hits, cache.hits + cache.pushes);
+   cache.range = push_uniform(data, length);
+   cache.frameId = frameId;
++  keep_cached(cache, data, length);
+   return cache.range;
+ }
+ 
+@@ -1526,21 +1592,42 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+             plan.tlut_address, plan.tlut_format, plan.tlut_entries,
+             plan.tlut_data, plan.tlut_available);
+         if (bound) {
+-          const auto sampler =
+-              sampler_ref(sampler_descriptor(plan.samplers[plan.tex_slot & 7u]));
+-          const std::array entries{
+-              WGPUBindGroupEntry{.binding = 0,
+-                                 .textureView =
+-                                     bound->sampleTextureView.Get()},
+-              WGPUBindGroupEntry{.binding = 1, .sampler = sampler.Get()},
+-          };
+-          const WGPUBindGroupDescriptor descriptor{
+-              .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
+-              .layout = texture_bind_group_layout(1u).Get(),
+-              .entryCount = entries.size(),
+-              .entries = entries.data(),
++          // Draws mostly bind the texture and sampler of the draw before. In
++          // one frame (the bind group cache keeps what a frame used) the same
++          // view and sampler state are the same bind group, without the
++          // layout's, the sampler's and the bind group's hash and lock. The
++          // generation changes when the renderer is set up again, whose frame
++          // count starts over.
++          struct LastBind {
++            WGPUTextureView view = nullptr;
++            gxc::PlanSampler sampler{};
++            uint32_t frame = UINT32_MAX;
++            uint32_t generation = 0;
++            BindGroupRef ref = 0;
+           };
+-          textureBindGroup = bind_group_ref(descriptor);
++          thread_local LastBind s_last;
++          const gxc::PlanSampler& samplerState = plan.samplers[plan.tex_slot & 7u];
++          const WGPUTextureView view = bound->sampleTextureView.Get();
++          const uint32_t frame = current_frame();
++          const uint32_t generation = pipeline_cache_generation();
++          if (s_last.frame == frame && s_last.generation == generation && s_last.view == view &&
++              std::memcmp(&s_last.sampler, &samplerState, sizeof samplerState) == 0) {
++            textureBindGroup = s_last.ref;
++          } else {
++            const auto sampler = sampler_ref(sampler_descriptor(samplerState));
++            const std::array entries{
++                WGPUBindGroupEntry{.binding = 0, .textureView = view},
++                WGPUBindGroupEntry{.binding = 1, .sampler = sampler.Get()},
++            };
++            const WGPUBindGroupDescriptor descriptor{
++                .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
++                .layout = texture_bind_group_layout(1u).Get(),
++                .entryCount = entries.size(),
++                .entries = entries.data(),
++            };
++            textureBindGroup = bind_group_ref(descriptor);
++            s_last = LastBind{view, samplerState, frame, generation, textureBindGroup};
++          }
+         }
+       }
+     } else {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
+index 822a5601a4..b807ac8ed7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
+@@ -1152,7 +1152,12 @@ PipelineRef find_pipeline(ShaderType type, const gxcore::PipelineConfig& config,
+ }
+ #endif
+ 
++static std::atomic<uint32_t> g_pipelineCacheGeneration{0};
++
++uint32_t pipeline_cache_generation() { return g_pipelineCacheGeneration.load(std::memory_order_acquire); }
++
+ void initialize_pipeline_cache() {
++  g_pipelineCacheGeneration.fetch_add(1, std::memory_order_acq_rel);
+   g_pipelineCacheBroken = false;
+   g_pipelineCacheWriterStop = false;
+   g_pipelineThreadEnd = false;
+@@ -1176,6 +1181,7 @@ void initialize_pipeline_cache() {
+ }
+ 
+ void shutdown_pipeline_cache() {
++  g_pipelineCacheGeneration.fetch_add(1, std::memory_order_acq_rel);
+   if (g_hasPipelineThread) {
+     g_pipelineThreadEnd = true;
+     g_pipelineQueueCv.notify_all();
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.hpp b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.hpp
+index 2e87f4c4de..ab473b3552 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.hpp
+@@ -22,6 +22,9 @@ using NewPipelineCallback = std::function<wgpu::RenderPipeline()>;
+ 
+ void initialize_pipeline_cache();
+ void shutdown_pipeline_cache();
++// Changes each time the cache is initialized or shut down: a pipeline reference
++// remembered from before names nothing the cache still knows.
++uint32_t pipeline_cache_generation();
+ void begin_pipeline_frame();
+ void end_pipeline_frame();
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+index 6d82e940b3..99eb0bc768 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.cpp
+@@ -1,4 +1,5 @@
+ #include "render_worker.hpp"
++#include "thread_cpu.hpp"
+ 
+ #include <algorithm>
+ #include <atomic>
+@@ -6,12 +7,16 @@
+ 
+ #include <tracy/Tracy.hpp>
+ 
++#if !defined(_WIN32)
+ #include <pthread.h>
++#endif
+ 
+ namespace aurora::gfx::render_worker {
+-// The worker's thread, for the GX stall watchdog's stack dumps.
++#if !defined(_WIN32)
++// The worker's thread, for the GX stall watchdog's stack dumps (not on Windows).
+ std::atomic<pthread_t> g_renderPthread{};
+ pthread_t native_thread() { return g_renderPthread.load(std::memory_order_acquire); }
++#endif
+ namespace {
+ constexpr size_t QueueCapacity = 256;
+ constexpr auto IdlePumpInterval = std::chrono::milliseconds{1};
+@@ -39,8 +44,11 @@ void worker_main() {
+ #ifdef TRACY_ENABLE
+   tracy::SetThreadName("Aurora render worker");
+ #endif
++  thread_cpu::register_current(thread_cpu::Role::RenderWorker);
+   g_workerThreadId = std::this_thread::get_id();
++#if !defined(_WIN32)
+   g_renderPthread.store(pthread_self(), std::memory_order_release);
++#endif
+ 
+   while (true) {
+     if (g_idleHook) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+index bccee8e2b5..d24253b74a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/render_worker.hpp
+@@ -1,5 +1,7 @@
+ #pragma once
++#if !defined(_WIN32)
+ #include <pthread.h>
++#endif
+ 
+ #include <condition_variable>
+ #include <cstddef>
+@@ -15,8 +17,10 @@
+ 
+ namespace aurora::gfx::render_worker {
+ 
++#if !defined(_WIN32)
+ // The worker's thread (0 before it starts), for diagnostics.
+ pthread_t native_thread();
++#endif
+ 
+ enum class ItemType : uint8_t {
+   BeginFrame,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/thread_cpu.cpp b/GXRuntime/graphics/aurora/lib/gfx/thread_cpu.cpp
+new file mode 100644
+index 0000000000..e98d836070
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/thread_cpu.cpp
+@@ -0,0 +1,89 @@
++#include "thread_cpu.hpp"
++
++#include <atomic>
++
++#if defined(_WIN32)
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#elif defined(__APPLE__)
++#include <mach/mach.h>
++#include <pthread.h>
++#else
++#include <pthread.h>
++#include <time.h>
++#endif
++
++namespace aurora::gfx::thread_cpu {
++namespace {
++constexpr uint32_t kRoles = static_cast<uint32_t>(Role::Count);
++#if defined(_WIN32)
++std::atomic<HANDLE> g_threads[kRoles]{};
++#elif defined(__APPLE__)
++std::atomic<mach_port_t> g_threads[kRoles]{};
++#else
++std::atomic<bool> g_registered[kRoles]{};
++clockid_t g_clocks[kRoles]{};
++#endif
++} // namespace
++
++void register_current(Role role) {
++  const uint32_t i = static_cast<uint32_t>(role);
++  if (i >= kRoles)
++    return;
++#if defined(_WIN32)
++  HANDLE handle = nullptr;
++  if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &handle,
++                       THREAD_QUERY_LIMITED_INFORMATION, FALSE, 0))
++    return;
++  if (HANDLE old = g_threads[i].exchange(handle, std::memory_order_acq_rel))
++    CloseHandle(old);
++#elif defined(__APPLE__)
++  g_threads[i].store(pthread_mach_thread_np(pthread_self()), std::memory_order_release);
++#else
++  clockid_t clock;
++  if (pthread_getcpuclockid(pthread_self(), &clock) != 0)
++    return;
++  g_clocks[i] = clock;
++  g_registered[i].store(true, std::memory_order_release);
++#endif
++}
++
++uint64_t cpu_us(Role role) {
++  const uint32_t i = static_cast<uint32_t>(role);
++  if (i >= kRoles)
++    return 0;
++#if defined(_WIN32)
++  const HANDLE handle = g_threads[i].load(std::memory_order_acquire);
++  FILETIME created, exited, kernel, user;
++  if (handle == nullptr || !GetThreadTimes(handle, &created, &exited, &kernel, &user))
++    return 0;
++  const auto ticks = [](const FILETIME& t) {
++    return (static_cast<uint64_t>(t.dwHighDateTime) << 32) | t.dwLowDateTime;
++  };
++  return (ticks(kernel) + ticks(user)) / 10u;
++#elif defined(__APPLE__)
++  const mach_port_t thread = g_threads[i].load(std::memory_order_acquire);
++  if (thread == MACH_PORT_NULL)
++    return 0;
++  thread_basic_info_data_t info;
++  mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
++  if (thread_info(thread, THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) != KERN_SUCCESS)
++    return 0;
++  return static_cast<uint64_t>(info.user_time.seconds + info.system_time.seconds) * 1000000u +
++         static_cast<uint64_t>(info.user_time.microseconds + info.system_time.microseconds);
++#else
++  if (!g_registered[i].load(std::memory_order_acquire))
++    return 0;
++  timespec ts{};
++  if (clock_gettime(g_clocks[i], &ts) != 0)
++    return 0;
++  return static_cast<uint64_t>(ts.tv_sec) * 1000000u + static_cast<uint64_t>(ts.tv_nsec) / 1000u;
++#endif
++}
++
++} // namespace aurora::gfx::thread_cpu
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/thread_cpu.hpp b/GXRuntime/graphics/aurora/lib/gfx/thread_cpu.hpp
+new file mode 100644
+index 0000000000..6caeedceb8
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/thread_cpu.hpp
+@@ -0,0 +1,22 @@
++#pragma once
++
++#include <cstdint>
++
++// The CPU time of the graphics threads, for the per-second frame diagnostics:
++// which of them is the one holding the game back on a slower PC. Each thread
++// registers itself when it starts; the reads come from another thread.
++namespace aurora::gfx::thread_cpu {
++
++enum class Role : uint32_t {
++  GxWorker,     // the GX FIFO translation worker
++  InterpHelper, // Smooth Motion's matching and blending
++  RenderWorker, // Aurora's encoding and presenting
++  Count,
++};
++
++void register_current(Role role);
++// Microseconds of CPU time the thread in that role has used, 0 if none has
++// registered.
++uint64_t cpu_us(Role role);
++
++} // namespace aurora::gfx::thread_cpu
+diff --git a/GXRuntime/graphics/aurora/lib/system_info.cpp b/GXRuntime/graphics/aurora/lib/system_info.cpp
+index 2c96d86a8e..448b9f9ac1 100644
+--- a/GXRuntime/graphics/aurora/lib/system_info.cpp
++++ b/GXRuntime/graphics/aurora/lib/system_info.cpp
+@@ -1,4 +1,7 @@
+ #include "system_info.hpp"
++
++#include <cstring>
++#include <string>
+ #include "internal.hpp"
+ 
+ #if _WIN32
+@@ -9,6 +12,8 @@
+ #include <comutil.h>
+ #include <dxgi.h>
+ #include <wrl/client.h>
++#include <intrin.h>
++#include <vector>
+ 
+ template<typename T>
+ using ComPtr = Microsoft::WRL::ComPtr<T>;
+@@ -89,7 +94,76 @@ static std::string wideStringToUtf8(std::wstring_view str) {
+   return result;
+ }
+ 
++static std::string GetCpuModelWmi();
++
++// The processor's own brand string (CPUID 0x80000002-4): no COM, so it works
++// after something else in the process (the first launch's disc picker) has
++// already set up COM security, which made the WMI query below fail.
++static std::string GetCpuBrand() {
++#if defined(_M_X64) || defined(__x86_64__)
++  int regs[4]{};
++  __cpuid(regs, static_cast<int>(0x80000000u));
++  if (static_cast<unsigned>(regs[0]) < 0x80000004u)
++    return {};
++  char brand[49]{};
++  for (unsigned i = 0; i < 3; ++i) {
++    __cpuid(regs, static_cast<int>(0x80000002u + i));
++    std::memcpy(brand + 16 * i, regs, 16);
++  }
++  std::string result(brand);
++  const auto first = result.find_first_not_of(' ');
++  const auto last = result.find_last_not_of(' ');
++  return first == std::string::npos ? std::string{} : result.substr(first, last - first + 1);
++#else
++  return {};
++#endif
++}
++
+ std::string GetCpuModel() {
++  if (std::string brand = GetCpuBrand(); !brand.empty())
++    return brand;
++  return GetCpuModelWmi();
++}
++
++// Cores and threads, for telling a slower PC's limits apart in a session log:
++// "6 cores, 12 threads", or on a hybrid CPU "24 cores (8 performance, 16
++// efficiency), 32 threads".
++static std::string GetCpuTopology() {
++  DWORD length = 0;
++  GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length);
++  if (length == 0)
++    return Unknown;
++  std::vector<std::uint8_t> buffer(length);
++  auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
++  if (!GetLogicalProcessorInformationEx(RelationProcessorCore, info, &length))
++    return Unknown;
++  unsigned cores = 0, threads = 0, efficient = 0;
++  BYTE top_class = 0;
++  for (DWORD offset = 0; offset < length;) {
++    const auto* entry = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
++    if (entry->Relationship == RelationProcessorCore) {
++      ++cores;
++      if (entry->Processor.EfficiencyClass > top_class)
++        top_class = entry->Processor.EfficiencyClass;
++      for (WORD g = 0; g < entry->Processor.GroupCount; ++g)
++        threads += static_cast<unsigned>(__popcnt64(entry->Processor.GroupMask[g].Mask));
++    }
++    offset += entry->Size;
++  }
++  if (top_class != 0) {
++    for (DWORD offset = 0; offset < length;) {
++      const auto* entry = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
++      if (entry->Relationship == RelationProcessorCore && entry->Processor.EfficiencyClass < top_class)
++        ++efficient;
++      offset += entry->Size;
++    }
++    return std::to_string(cores) + " cores (" + std::to_string(cores - efficient) + " performance, " +
++           std::to_string(efficient) + " efficiency), " + std::to_string(threads) + " threads";
++  }
++  return std::to_string(cores) + " cores, " + std::to_string(threads) + " threads";
++}
++
++static std::string GetCpuModelWmi() {
+   // Good fucking lord Microsoft, what the fuck is this?
+   // https://learn.microsoft.com/en-us/windows/win32/wmisdk/example--getting-wmi-data-from-the-local-computer
+ 
+@@ -110,7 +184,9 @@ std::string GetCpuModel() {
+                               NULL                         // Reserved
+   );
+ 
+-  if (FAILED(hres)) {
++  // RPC_E_TOO_LATE: the process set up COM security already (the disc
++  // picker's file dialog does), which serves this query as well.
++  if (FAILED(hres) && hres != RPC_E_TOO_LATE) {
+     Log.error("COM security initialization failed");
+     return Unknown;
+   }
+@@ -238,6 +314,7 @@ static void LogGpus() {
+ }
+ 
+ void LogMisc() {
++  Log.info("CPU cores: {}", GetCpuTopology());
+   LogGpus();
+ }
+ 
+diff --git a/GXRuntime/graphics/aurora/tests/CMakeLists.txt b/GXRuntime/graphics/aurora/tests/CMakeLists.txt
+index f978cc5592..eac9cb7828 100644
+--- a/GXRuntime/graphics/aurora/tests/CMakeLists.txt
++++ b/GXRuntime/graphics/aurora/tests/CMakeLists.txt
+@@ -77,6 +77,7 @@ if (AURORA_ENABLE_GX)
+   add_executable(render_worker_tests
+     render_worker_test.cpp
+     ../lib/gfx/render_worker.cpp
++    ../lib/gfx/thread_cpu.cpp
+   )
+   target_include_directories(render_worker_tests PRIVATE
+     ../include
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+index 732508bc2f..7f287243e5 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+@@ -303,6 +303,10 @@ public:
+   // accumulate. The immediately-following INDEXED_SPAN packets still patch the
+   // retained draw. Tests leave this off to inspect the full draw list.
+   void set_streaming(bool streaming) { streaming_ = streaming; }
++  // Whether each span-complete draw is also walked for the assembly totals
++  // (assembled_draws(), topology_index_bytes(), storage_bytes(), ...). A
++  // consumer whose totals nothing reads turns it off.
++  void set_assembly_totals(bool enabled) { assembly_totals_ = enabled; }
+   // Optional observer called exactly once when a draw becomes span-complete:
+   // either when the next draw arrives or when flush_assembly() is called at a
+   // frame boundary. This lets a live backend export focused diagnostics without
+@@ -400,6 +404,7 @@ private:
+ 
+   const DolGuestAddressResolver* resolver_ = nullptr;
+   bool streaming_ = false;
++  bool assembly_totals_ = true;
+   ConsumedDrawObserver draw_observer_ = nullptr;
+   void* draw_observer_user_ = nullptr;
+   ConsumedArrayBinding arrays_[kArrayCount]{};
+diff --git a/GXRuntime/graphics/frontend/src/render_sink.cpp b/GXRuntime/graphics/frontend/src/render_sink.cpp
+index b5595051f0..af2e63b792 100644
+--- a/GXRuntime/graphics/frontend/src/render_sink.cpp
++++ b/GXRuntime/graphics/frontend/src/render_sink.cpp
+@@ -301,6 +301,16 @@ bool ConsumingAuroraRenderSink::resolve_array_input(
+ void ConsumingAuroraRenderSink::accumulate_assembly(const ConsumedDraw& draw) {
+   if (back_assembled_)
+     return;
++  // The gxcore renderer's consumer reports none of the totals below; the
++  // shadow packet sink's frame comparison and the replay tools read them.
++  // Walking every vertex's indices for them was about 2 percent of the
++  // translation worker at 14,000 draws a frame.
++  if (!assembly_totals_) {
++    if (draw_observer_ != nullptr)
++      draw_observer_(draw, total_draws_, draw_observer_user_);
++    back_assembled_ = true;
++    return;
++  }
+   // Count-only (nullptr): the live path does not retain per-vertex elements.
+   const AssembledDrawStats stats = assemble_consumed_draw(draw, nullptr);
+   ++assembled_draws_;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 0b40141c91..6f62524dc7 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -135,6 +135,10 @@ public:
+   static constexpr std::uint8_t kDrawTagAgeRegister = 0x7Du;
+   static constexpr std::uint8_t kDrawScopeRegister = 0x7Cu;
+   static constexpr std::uint8_t kDrawScopeCountRegister = 0x7Bu;
++  // A register state put back from a save state takes a version no draw has
++  // been derived from in this run (the saved one belongs to the run that saved
++  // it).
++  void renew_version() { version_ = next_version(); }
+ 
+ private:
+   std::uint32_t bp_regs_[256]{};
+@@ -150,6 +154,12 @@ private:
+   bool vcd_hi_valid_ = false;
+   std::uint32_t vat_[8][3]{};
+   std::uint8_t vat_valid_[8]{}; // bit per group
++  // Changes with every change apply() makes to the BP, VCD and VAT registers
++  // (next_version), except the host's draw tag registers above, which no
++  // derived state reads; build_draw_plan_into's cache of the state derived
++  // from them compares it instead of the registers.
++  std::uint64_t version_ = 0;
++  static std::uint64_t next_version();
+ };
+ 
+ // AuroraRenderSink that owns a ConsumingAuroraRenderSink (streaming mode) and
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 9a6ade4d72..c6eadd3ff9 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <atomic>
+ #include <cstring>
+ #include <limits>
+ #include <memory>
+@@ -126,11 +127,29 @@ void decode_scissor(DrawPlan& plan, std::uint32_t tl, std::uint32_t br,
+ 
+ void GxCoreState::reset() { *this = GxCoreState{}; }
+ 
++// A version no other state, and no earlier change of this one, has: the
++// thread's own count, tagged with the thread, so no atomic operation is needed
++// and none is ever reused. A copy of a state carries its version with its
++// registers; a reset state, like a new one, is version 0 with every register
++// at its default.
++std::uint64_t GxCoreState::next_version() {
++  static std::atomic<std::uint32_t> s_threads{0};
++  static thread_local const std::uint64_t s_tag =
++      static_cast<std::uint64_t>(s_threads.fetch_add(1, std::memory_order_relaxed) + 1u) << 40;
++  static thread_local std::uint64_t s_count = 0;
++  return s_tag | ++s_count;
++}
++
+ void GxCoreState::apply(const ar::RenderStatePacket& state) {
+   using ar::RenderStateKind;
+   switch (state.kind) {
+   case RenderStateKind::BpReg:
+     if (state.index < 256u) {
++      // The draw tag registers change at nearly every particle draw and feed
++      // no derived state, so they leave the version alone.
++      const bool tag = state.index >= kDrawScopeCountRegister && state.index <= kDrawTagRegister;
++      if (!tag && (!bp_valid_[state.index] || bp_regs_[state.index] != state.value))
++        version_ = next_version();
+       bp_regs_[state.index] = state.value;
+       bp_valid_[state.index] = true;
+       // TEV color/konst registers (BP 0xE0-0xE7, TevReg RA/BG). The TevRegType
+@@ -156,15 +175,21 @@ void GxCoreState::apply(const ar::RenderStatePacket& state) {
+     break;
+   case RenderStateKind::CpVcd:
+     if (state.index == 0u) {
++      if (!vcd_lo_valid_ || vcd_lo_ != state.value)
++        version_ = next_version();
+       vcd_lo_ = state.value;
+       vcd_lo_valid_ = true;
+     } else {
++      if (!vcd_hi_valid_ || vcd_hi_ != state.value)
++        version_ = next_version();
+       vcd_hi_ = state.value;
+       vcd_hi_valid_ = true;
+     }
+     break;
+   case RenderStateKind::CpVat:
+     if (state.index < 8u && state.aux0 < 3u) {
++      if ((vat_valid_[state.index] & (1u << state.aux0)) == 0u || vat_[state.index][state.aux0] != state.value)
++        version_ = next_version();
+       vat_[state.index][state.aux0] = state.value;
+       vat_valid_[state.index] |= static_cast<std::uint8_t>(1u << state.aux0);
+     }
+@@ -652,8 +677,23 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+   }
+ 
+   // Payload walk from raw VCD/VAT.
+-  WalkLayout walk;
+-  if (!derive_walk(vcd_lo_, vcd_hi_, vat_[draw.vtx_fmt], walk)) {
++  struct WalkCacheEntry {
++    std::array<std::uint32_t, 5> key{};
++    WalkLayout walk{};
++    bool valid = false;
++  };
++  static thread_local std::array<WalkCacheEntry, 16> walk_cache{};
++  const std::array walk_key{vcd_lo_, vcd_hi_, vat_[draw.vtx_fmt][0],
++                            vat_[draw.vtx_fmt][1], vat_[draw.vtx_fmt][2]};
++  auto &entry = walk_cache[(vcd_lo_ ^ vcd_hi_ ^ vat_[draw.vtx_fmt][0] ^
++                            vat_[draw.vtx_fmt][1] ^ vat_[draw.vtx_fmt][2]) %
++                           walk_cache.size()];
++  if (!entry.valid || entry.key != walk_key) {
++    entry.valid = derive_walk(vcd_lo_, vcd_hi_, vat_[draw.vtx_fmt], entry.walk);
++    entry.key = walk_key;
++  }
++  const WalkLayout &walk = entry.walk;
++  if (!entry.valid) {
+     ++counters.vertex_decode_failures;
+     ++counters.vertex_walk_underivable;
+     return skip("VCD/VAT walk underivable");
+@@ -664,407 +704,531 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+     ++counters.vertex_stride_mismatch;
+     return skip("walk stride != frontend stride");
+   }
+-  // Shader key.
+-  ShaderKey& key = plan.pipeline.shader;
+-  const std::uint32_t xf_numtexgens_reg = 0x103Fu - 0x1018u;
+-  std::uint32_t num_tex_gens = 0;
+-  if (draw.xf_reg_mask & (1ull << xf_numtexgens_reg))
+-    num_tex_gens = draw.xf_regs[xf_numtexgens_reg] & 0xFu;
+-  else
+-    num_tex_gens = bits(gen_mode, 4, 0);
+-  if (num_tex_gens == 5u)
+-    ++counters.texgen_count_5;
+-  else if (num_tex_gens == 6u)
+-    ++counters.texgen_count_6;
+-  else if (num_tex_gens == 7u)
+-    ++counters.texgen_count_7;
+-  else if (num_tex_gens >= 8u)
+-    ++counters.texgen_count_8plus;
+-  if (num_tex_gens > kMaxTexGens) {
+-    ++counters.unsupported_texgen;
+-    ++counters.texgen_count_overflow;
+-    num_tex_gens = kMaxTexGens;
+-  }
+-  key.num_tex_gens = static_cast<std::uint8_t>(num_tex_gens);
+-  key.has_pos_mtx_idx = walk.has_pos_mtx_idx ? 1u : 0u;
+-  key.has_tex_mtx_idx = walk.has_tex_mtx_idx ? 1u : 0u;
+-  key.tex_mtx_idx_mask = walk.tex_mtx_idx_mask;
+-  key.has_color0 = walk.has_color[0] ? 1u : 0u;
+-  key.has_color1 = walk.has_color[1] ? 1u : 0u;
+-  key.uv_mask = static_cast<std::uint8_t>(
+-      walk.uv_mask & ((1u << kMaxTexGens) - 1u));
+-  // Vertex-format N/B/T presence (GC packs all three in one NBT attribute, so
+-  // binormal/tangent presence follows has_nbt). A lit/emboss draw that omits
+-  // one substitutes the cached fallback from the uniform instead of a
+-  // per-vertex input (Dolphin I_CACHED_NORMAL, populated below from the last
+-  // decoded vertex of a draw that DID carry the attribute).
+-  key.has_vertex_normal = walk.has_normal ? 1u : 0u;
+-  key.has_vertex_binormal = walk.has_nbt ? 1u : 0u;
+-  key.has_vertex_tangent = walk.has_nbt ? 1u : 0u;
+-
+-  // Lighting key (S15). LitChannel bitfields (XFMemory.h): matsource@0,
+-  // enablelighting@1, lightMask0_3@2, ambsource@6, diffusefunc@7, attnfunc@9,
+-  // lightMask4_7@11. chan_regs slot = xf_addr - 0x1009: [0]=numColorChans,
+-  // [1..4]=amb0/amb1/mat0/mat1, [5..8]=color0/color1/alpha0/alpha1 ctrl.
+-  auto lit_chan = [&](std::uint32_t slot, LightChanKey& ch) {
+-    if ((draw.chan_reg_mask & (1u << slot)) == 0u)
+-      return;
+-    const std::uint32_t v = draw.chan_regs[slot];
+-    ch.matsource = static_cast<std::uint8_t>(bits(v, 1, 0));
+-    ch.enablelighting = static_cast<std::uint8_t>(bits(v, 1, 1));
+-    ch.ambsource = static_cast<std::uint8_t>(bits(v, 1, 6));
+-    ch.diffusefunc = static_cast<std::uint8_t>(bits(v, 2, 7));
+-    ch.attnfunc = static_cast<std::uint8_t>(bits(v, 2, 9));
+-    const std::uint32_t mask = bits(v, 4, 2) | (bits(v, 4, 11) << 4);
+-    ch.light_mask = ch.enablelighting ? static_cast<std::uint8_t>(mask) : 0u;
++  // Cache only register-derived pipeline state. Geometry, mutable guest
++  // arrays, uniforms, texture bytes and cross-draw NBT remain live each draw.
++  // Thread-local storage keeps separate FIFO consumers independent. The key is
++  // the register state's version (next_version: never reused, carried by a
++  // copy) with the vertex format it reads, and the draw's own transform,
++  // channel, light and texture values - where it was every register, 2 KB
++  // copied and compared at each of thousands of draws a frame.
++  struct DerivedCache {
++    std::uint64_t version = 0;
++    std::uint32_t vtx_fmt = 0;
++    std::uint32_t xf_regs[DOL_GX_RECOMP_XF_REG_COUNT]{};
++    decltype(draw.xf_reg_mask) xf_reg_mask{};
++    std::uint32_t chan_regs[DOL_GX_RECOMP_CHAN_REG_COUNT]{};
++    decltype(draw.chan_reg_mask) chan_reg_mask{};
++    std::uint16_t light_word_mask[DOL_GX_RECOMP_LIGHT_COUNT]{};
++    std::array<std::uint32_t, 9 * 6> textures{};
++    PipelineKey pipeline{};
++    GapCounters delta{};
++    bool valid = false;
++    unsigned long long hits = 0, misses = 0, verified = 0, mismatches = 0;
++    ~DerivedCache() {
++      if (std::getenv("DOL_GXCORE_OPT_LOG") || verified != 0)
++        std::fprintf(stderr, "[gx-derived] hits=%llu misses=%llu verified=%llu mismatches=%llu\n", hits,
++                     misses, verified, mismatches);
++    }
+   };
+-  lit_chan(5u, key.litchan[0]);
+-  lit_chan(6u, key.litchan[1]);
+-  lit_chan(7u, key.litchan[2]);
+-  lit_chan(8u, key.litchan[3]);
+-  // Record which channel-control regs were actually loaded (slots 5..8 map to
+-  // litchan 0..3). A captured channel selecting MatSource::Register drives the
+-  // material register; an unconfigured channel stays vertex-color passthrough.
+-  for (std::uint32_t j = 0; j < 4u; ++j)
+-    if (draw.chan_reg_mask & (1u << (5u + j)))
+-      key.chan_captured_mask |= static_cast<std::uint8_t>(1u << j);
+-  if (draw.chan_reg_mask & 0x1u) {
+-    std::uint32_t n = bits(draw.chan_regs[0], 2, 0);
+-    if (n > 2u)
+-      n = 2u;
+-    key.num_color_chans = static_cast<std::uint8_t>(n);
++  static thread_local DerivedCache derived;
++  static const bool cache_enabled = [] {
++    const char *value = std::getenv("DOL_GXCORE_DERIVED_CACHE");
++    return !value || std::strcmp(value, "0") != 0;
++  }();
++  static_assert(sizeof(draw.xf_regs) == sizeof(derived.xf_regs) &&
++                    sizeof(draw.chan_regs) == sizeof(derived.chan_regs) &&
++                    sizeof(draw.light_word_mask) == sizeof(derived.light_word_mask),
++                "the derived cache mirrors the draw's register arrays");
++  std::array<std::uint32_t, 9 * 6> textures;
++  {
++    std::uint32_t *out = textures.data();
++    auto texture_key = [&](const ar::ConsumedTexture &t) {
++      out[0] = t.valid;
++      out[1] = t.resolved;
++      out[2] = t.slot;
++      out[3] = t.format;
++      out[4] = t.width;
++      out[5] = t.height;
++      out += 6;
++    };
++    texture_key(draw.texture);
++    for (const auto &t : draw.textures)
++      texture_key(t);
++  }
++  static constexpr auto counter_members = std::array{
++      &GapCounters::dst_alpha_active,
++      &GapCounters::early_depth_active,
++      &GapCounters::indirect_active,
++      &GapCounters::indirect_ignored,
++      &GapCounters::lighting_ignored,
++      &GapCounters::lit_light_missing,
++      &GapCounters::logic_op_ignored,
++      &GapCounters::normals_ignored,
++      &GapCounters::per_vertex_normal_matrix,
++      &GapCounters::tev_multi_texmap,
++      &GapCounters::texcoord_scale_active,
++      &GapCounters::texcoord_scale_mismatch,
++      &GapCounters::texgen_color_lit,
++      &GapCounters::texgen_color_unlit,
++      &GapCounters::texgen_count_5,
++      &GapCounters::texgen_count_6,
++      &GapCounters::texgen_count_7,
++      &GapCounters::texgen_count_8plus,
++      &GapCounters::texgen_count_overflow,
++      &GapCounters::texgen_emboss_cached_nbt,
++      &GapCounters::texgen_source_binormal,
++      &GapCounters::texgen_source_colors,
++      &GapCounters::texgen_source_normal,
++      &GapCounters::texgen_source_normal_default,
++      &GapCounters::texgen_source_tex47,
++      &GapCounters::texgen_source_unknown,
++      &GapCounters::tlut_texture,
++      &GapCounters::unsupported_texgen,
++      &GapCounters::ztexture_active,
++      &GapCounters::ztexture_ignored,
++  };
++  // DOL_GXCORE_DERIVED_VERIFY=1: a hit derives the state again and compares
++  // it with the cached (a mismatch is reported and the fresh state used).
++  static const bool verify = [] {
++    const char *value = std::getenv("DOL_GXCORE_DERIVED_VERIFY");
++    return value != nullptr && value[0] != '\0' && value[0] != '0';
++  }();
++  ShaderKey& key = plan.pipeline.shader;
++  PipelineKey &pipe = plan.pipeline;
++  const bool hit = cache_enabled && derived.valid && derived.version == version_ &&
++      derived.vtx_fmt == draw.vtx_fmt && derived.xf_reg_mask == draw.xf_reg_mask &&
++      derived.chan_reg_mask == draw.chan_reg_mask && derived.textures == textures &&
++      std::memcmp(derived.xf_regs, draw.xf_regs, sizeof(derived.xf_regs)) == 0 &&
++      std::memcmp(derived.chan_regs, draw.chan_regs, sizeof(derived.chan_regs)) == 0 &&
++      std::memcmp(derived.light_word_mask, draw.light_word_mask, sizeof(derived.light_word_mask)) == 0;
++  if (hit && !verify) {
++    plan.pipeline = derived.pipeline;
++    for (auto member : counter_members)
++      counters.*member += derived.delta.*member;
++    ++derived.hits;
+   } else {
+-    // numColorChans reg (XF 0x1009) never captured. GX games always program it;
+-    // a 0 here is a capture artifact, not "no channels". Assume both channels
+-    // present so the WGSL numColorChans gate never spuriously blacks a draw whose
+-    // count we simply did not observe.
+-    key.num_color_chans = 2u;
+-  }
+-  key.lit_valid = (key.litchan[0].enablelighting || key.litchan[1].enablelighting ||
+-                    key.litchan[2].enablelighting || key.litchan[3].enablelighting)
+-                      ? 1u
+-                      : 0u;
+-  if (key.has_pos_mtx_idx != 0u && key.lit_valid != 0u)
+-    ++counters.per_vertex_normal_matrix;
+-  for (std::uint32_t c = 0; c < 4u; ++c) {
+-    const std::uint8_t mask = key.litchan[c].light_mask;
+-    for (std::uint32_t l = 0; l < 8u; ++l)
+-      if ((mask & (1u << l)) && draw.light_word_mask[l] == 0u) {
+-        ++counters.lit_light_missing;
+-        c = 4u;
+-        break;
+-      }
+-  }
+-  // Only count normals/lighting as ignored when we fall back to passthrough.
+-  if (walk.has_normal && key.lit_valid == 0u)
+-    ++counters.normals_ignored;
+-  if (key.lit_valid == 0u && (draw.chan_reg_mask & (1u << 5)) &&
+-      (draw.chan_regs[5] & 0x2u) != 0u)
+-    ++counters.lighting_ignored;
+-
+-  for (std::uint32_t i = 0; i < num_tex_gens; ++i) {
+-    const std::uint32_t reg = (0x1040u - 0x1018u) + i;
+-    TexGenKey& tg = key.tex_gens[i];
+-    tg.enabled = 1;
+-    if (draw.xf_reg_mask & (1ull << reg)) {
+-      const std::uint32_t info = draw.xf_regs[reg];
+-      // XFMemory.h TexMtxInfo bitfields.
+-      tg.projection = static_cast<std::uint8_t>(bits(info, 1, 1));
+-      tg.inputform = static_cast<std::uint8_t>(bits(info, 1, 2));
+-      tg.texgentype = static_cast<std::uint8_t>(bits(info, 3, 4));
+-      tg.sourcerow = static_cast<std::uint8_t>(bits(info, 5, 7));
+-      tg.embosssourceshift = static_cast<std::uint8_t>(bits(info, 3, 12));
+-      tg.embosslightshift = static_cast<std::uint8_t>(bits(info, 3, 15));
++    GapCounters before = counters;
++    // Shader key.
++    const std::uint32_t xf_numtexgens_reg = 0x103Fu - 0x1018u;
++    std::uint32_t num_tex_gens = 0;
++    if (draw.xf_reg_mask & (1ull << xf_numtexgens_reg))
++      num_tex_gens = draw.xf_regs[xf_numtexgens_reg] & 0xFu;
++    else
++      num_tex_gens = bits(gen_mode, 4, 0);
++    if (num_tex_gens == 5u)
++      ++counters.texgen_count_5;
++    else if (num_tex_gens == 6u)
++      ++counters.texgen_count_6;
++    else if (num_tex_gens == 7u)
++      ++counters.texgen_count_7;
++    else if (num_tex_gens >= 8u)
++      ++counters.texgen_count_8plus;
++    if (num_tex_gens > kMaxTexGens) {
++      ++counters.unsupported_texgen;
++      ++counters.texgen_count_overflow;
++      num_tex_gens = kMaxTexGens;
++    }
++    key.num_tex_gens = static_cast<std::uint8_t>(num_tex_gens);
++    key.has_pos_mtx_idx = walk.has_pos_mtx_idx ? 1u : 0u;
++    key.has_tex_mtx_idx = walk.has_tex_mtx_idx ? 1u : 0u;
++    key.tex_mtx_idx_mask = walk.tex_mtx_idx_mask;
++    key.has_color0 = walk.has_color[0] ? 1u : 0u;
++    key.has_color1 = walk.has_color[1] ? 1u : 0u;
++    key.uv_mask =
++        static_cast<std::uint8_t>(walk.uv_mask & ((1u << kMaxTexGens) - 1u));
++    // Vertex-format N/B/T presence (GC packs all three in one NBT attribute, so
++    // binormal/tangent presence follows has_nbt). A lit/emboss draw that omits
++    // one substitutes the cached fallback from the uniform instead of a
++    // per-vertex input (Dolphin I_CACHED_NORMAL, populated below from the last
++    // decoded vertex of a draw that DID carry the attribute).
++    key.has_vertex_normal = walk.has_normal ? 1u : 0u;
++    key.has_vertex_binormal = walk.has_nbt ? 1u : 0u;
++    key.has_vertex_tangent = walk.has_nbt ? 1u : 0u;
++
++    // Lighting key (S15). LitChannel bitfields (XFMemory.h): matsource@0,
++    // enablelighting@1, lightMask0_3@2, ambsource@6, diffusefunc@7, attnfunc@9,
++    // lightMask4_7@11. chan_regs slot = xf_addr - 0x1009: [0]=numColorChans,
++    // [1..4]=amb0/amb1/mat0/mat1, [5..8]=color0/color1/alpha0/alpha1 ctrl.
++    auto lit_chan = [&](std::uint32_t slot, LightChanKey &ch) {
++      if ((draw.chan_reg_mask & (1u << slot)) == 0u)
++        return;
++      const std::uint32_t v = draw.chan_regs[slot];
++      ch.matsource = static_cast<std::uint8_t>(bits(v, 1, 0));
++      ch.enablelighting = static_cast<std::uint8_t>(bits(v, 1, 1));
++      ch.ambsource = static_cast<std::uint8_t>(bits(v, 1, 6));
++      ch.diffusefunc = static_cast<std::uint8_t>(bits(v, 2, 7));
++      ch.attnfunc = static_cast<std::uint8_t>(bits(v, 2, 9));
++      const std::uint32_t mask = bits(v, 4, 2) | (bits(v, 4, 11) << 4);
++      ch.light_mask = ch.enablelighting ? static_cast<std::uint8_t>(mask) : 0u;
++    };
++    lit_chan(5u, key.litchan[0]);
++    lit_chan(6u, key.litchan[1]);
++    lit_chan(7u, key.litchan[2]);
++    lit_chan(8u, key.litchan[3]);
++    // Record which channel-control regs were actually loaded (slots 5..8 map to
++    // litchan 0..3). A captured channel selecting MatSource::Register drives
++    // the material register; an unconfigured channel stays vertex-color
++    // passthrough.
++    for (std::uint32_t j = 0; j < 4u; ++j)
++      if (draw.chan_reg_mask & (1u << (5u + j)))
++        key.chan_captured_mask |= static_cast<std::uint8_t>(1u << j);
++    if (draw.chan_reg_mask & 0x1u) {
++      std::uint32_t n = bits(draw.chan_regs[0], 2, 0);
++      if (n > 2u)
++        n = 2u;
++      key.num_color_chans = static_cast<std::uint8_t>(n);
+     } else {
+-      tg.sourcerow =
+-          static_cast<std::uint8_t>(TexSourceRow::Tex0) +
+-          static_cast<std::uint8_t>(i);
++      // numColorChans reg (XF 0x1009) never captured. GX games always program
++      // it; a 0 here is a capture artifact, not "no channels". Assume both
++      // channels present so the WGSL numColorChans gate never spuriously blacks
++      // a draw whose count we simply did not observe.
++      key.num_color_chans = 2u;
+     }
+-    // Regular / Color0 / Color1 / Emboss are all generated (item 5). Emboss
+-    // without per-vertex NBT uses the cross-draw cached tangent/binormal, so it
+-    // is an exercised fallback rather than an unsupported path.
+-    if (static_cast<TexGenType>(tg.texgentype) == TexGenType::EmbossMap &&
+-        !walk.has_nbt)
+-      ++counters.texgen_emboss_cached_nbt;
+-    {
+-      const auto t = static_cast<TexGenType>(tg.texgentype);
+-      if (t == TexGenType::Color0 || t == TexGenType::Color1) {
+-        const std::uint32_t ch = t == TexGenType::Color0 ? 0u : 1u;
+-        if (key.litchan[ch].enablelighting)
+-          ++counters.texgen_color_lit;
+-        else
+-          ++counters.texgen_color_unlit;
+-      }
++    key.lit_valid =
++        (key.litchan[0].enablelighting || key.litchan[1].enablelighting ||
++         key.litchan[2].enablelighting || key.litchan[3].enablelighting)
++            ? 1u
++            : 0u;
++    if (key.has_pos_mtx_idx != 0u && key.lit_valid != 0u)
++      ++counters.per_vertex_normal_matrix;
++    for (std::uint32_t c = 0; c < 4u; ++c) {
++      const std::uint8_t mask = key.litchan[c].light_mask;
++      for (std::uint32_t l = 0; l < 8u; ++l)
++        if ((mask & (1u << l)) && draw.light_word_mask[l] == 0u) {
++          ++counters.lit_light_missing;
++          c = 4u;
++          break;
++        }
+     }
+-
+-    // The current vertex layout emits position and Tex0..Tex3 source rows for
+-    // regular matrix texgens. Classify every other legal source instead of
+-    // silently leaving its coordinate at the shader default.
+-    if (static_cast<TexGenType>(tg.texgentype) == TexGenType::Regular) {
+-      const auto source = static_cast<TexSourceRow>(tg.sourcerow);
+-      bool unsupported_source = true;
+-      if (source == TexSourceRow::Geom ||
+-          (tg.sourcerow >= static_cast<std::uint8_t>(TexSourceRow::Tex0) &&
+-           tg.sourcerow <
+-               static_cast<std::uint8_t>(TexSourceRow::Tex0) + kMaxTexGens)) {
+-        unsupported_source = false;
+-      } else if (source == TexSourceRow::Normal) {
+-        ++counters.texgen_source_normal;
+-        if (!walk.has_normal)
+-          ++counters.texgen_source_normal_default;
+-        unsupported_source = false;
+-      } else if (source == TexSourceRow::Colors) {
+-        ++counters.texgen_source_colors;
+-      } else if (source == TexSourceRow::BinormalT ||
+-                 source == TexSourceRow::BinormalB) {
+-        ++counters.texgen_source_binormal;
+-      } else if (tg.sourcerow <
+-                 static_cast<std::uint8_t>(TexSourceRow::Tex0) + 8u) {
+-        ++counters.texgen_source_tex47;
++    // Only count normals/lighting as ignored when we fall back to passthrough.
++    if (walk.has_normal && key.lit_valid == 0u)
++      ++counters.normals_ignored;
++    if (key.lit_valid == 0u && (draw.chan_reg_mask & (1u << 5)) &&
++        (draw.chan_regs[5] & 0x2u) != 0u)
++      ++counters.lighting_ignored;
++
++    for (std::uint32_t i = 0; i < num_tex_gens; ++i) {
++      const std::uint32_t reg = (0x1040u - 0x1018u) + i;
++      TexGenKey &tg = key.tex_gens[i];
++      tg.enabled = 1;
++      if (draw.xf_reg_mask & (1ull << reg)) {
++        const std::uint32_t info = draw.xf_regs[reg];
++        // XFMemory.h TexMtxInfo bitfields.
++        tg.projection = static_cast<std::uint8_t>(bits(info, 1, 1));
++        tg.inputform = static_cast<std::uint8_t>(bits(info, 1, 2));
++        tg.texgentype = static_cast<std::uint8_t>(bits(info, 3, 4));
++        tg.sourcerow = static_cast<std::uint8_t>(bits(info, 5, 7));
++        tg.embosssourceshift = static_cast<std::uint8_t>(bits(info, 3, 12));
++        tg.embosslightshift = static_cast<std::uint8_t>(bits(info, 3, 15));
+       } else {
+-        ++counters.texgen_source_unknown;
++        tg.sourcerow = static_cast<std::uint8_t>(TexSourceRow::Tex0) +
++                       static_cast<std::uint8_t>(i);
++      }
++      // Regular / Color0 / Color1 / Emboss are all generated (item 5). Emboss
++      // without per-vertex NBT uses the cross-draw cached tangent/binormal, so
++      // it is an exercised fallback rather than an unsupported path.
++      if (static_cast<TexGenType>(tg.texgentype) == TexGenType::EmbossMap &&
++          !walk.has_nbt)
++        ++counters.texgen_emboss_cached_nbt;
++      {
++        const auto t = static_cast<TexGenType>(tg.texgentype);
++        if (t == TexGenType::Color0 || t == TexGenType::Color1) {
++          const std::uint32_t ch = t == TexGenType::Color0 ? 0u : 1u;
++          if (key.litchan[ch].enablelighting)
++            ++counters.texgen_color_lit;
++          else
++            ++counters.texgen_color_unlit;
++        }
++      }
++
++      // The current vertex layout emits position and Tex0..Tex3 source rows for
++      // regular matrix texgens. Classify every other legal source instead of
++      // silently leaving its coordinate at the shader default.
++      if (static_cast<TexGenType>(tg.texgentype) == TexGenType::Regular) {
++        const auto source = static_cast<TexSourceRow>(tg.sourcerow);
++        bool unsupported_source = true;
++        if (source == TexSourceRow::Geom ||
++            (tg.sourcerow >= static_cast<std::uint8_t>(TexSourceRow::Tex0) &&
++             tg.sourcerow <
++                 static_cast<std::uint8_t>(TexSourceRow::Tex0) + kMaxTexGens)) {
++          unsupported_source = false;
++        } else if (source == TexSourceRow::Normal) {
++          ++counters.texgen_source_normal;
++          if (!walk.has_normal)
++            ++counters.texgen_source_normal_default;
++          unsupported_source = false;
++        } else if (source == TexSourceRow::Colors) {
++          ++counters.texgen_source_colors;
++        } else if (source == TexSourceRow::BinormalT ||
++                   source == TexSourceRow::BinormalB) {
++          ++counters.texgen_source_binormal;
++        } else if (tg.sourcerow <
++                   static_cast<std::uint8_t>(TexSourceRow::Tex0) + 8u) {
++          ++counters.texgen_source_tex47;
++        } else {
++          ++counters.texgen_source_unknown;
++        }
++        if (unsupported_source)
++          ++counters.unsupported_texgen;
+       }
+-      if (unsupported_source)
+-        ++counters.unsupported_texgen;
+     }
+-  }
+-  std::uint32_t num_ind_stages = bits(gen_mode, 3, 16);
+-  if (num_ind_stages > kMaxIndirectStages) {
+-    ++counters.indirect_ignored;
+-    num_ind_stages = kMaxIndirectStages;
+-  }
+-  key.num_ind_stages = static_cast<std::uint8_t>(num_ind_stages);
+-  if (num_ind_stages != 0u)
+-    ++counters.indirect_active;
+-  const std::uint32_t indref = bp_valid_[0x27] ? bp_regs_[0x27] : 0u;
+-  for (std::uint32_t i = 0; i < num_ind_stages; ++i) {
+-    IndirectStageKey& ind = key.ind_stages[i];
+-    ind.texmap = static_cast<std::uint8_t>(bits(indref, 3, 6u * i));
+-    ind.texcoord = static_cast<std::uint8_t>(bits(indref, 3, 6u * i + 3u));
+-    const std::uint32_t scale =
+-        bp_valid_[0x25u + i / 2u] ? bp_regs_[0x25u + i / 2u] : 0u;
+-    const std::uint32_t shift = (i & 1u) != 0u ? 8u : 0u;
+-    ind.scale_s = static_cast<std::uint8_t>(bits(scale, 4, shift));
+-    ind.scale_t = static_cast<std::uint8_t>(bits(scale, 4, shift + 4u));
+-  }
+-  const std::uint32_t tex_format = draw.texture.format;
+-  if (draw.texture.valid &&
+-      (tex_format == 0x8u || tex_format == 0x9u || tex_format == 0xAu))
+-    ++counters.tlut_texture;
+-  key.textured = (draw.texture.valid && draw.texture.resolved &&
+-                  num_tex_gens > 0u && draw.texture.width > 0u &&
+-                  draw.texture.height > 0u)
+-                      ? 1u
+-                      : 0u;
+-
+-  // TEV combiner (S14). Combiner reg 0xC0 present => port the integer TEV;
+-  // otherwise leave tev_valid 0 and the passthrough fragment renders (used by
+-  // synthetic slices that never write combiner state).
+-  if (bp_valid_[0xC0]) {
+-    key.tev_valid = 1;
+-    std::uint32_t stages = bits(gen_mode, 4, 10) + 1u; // numtevstages + 1
+-    if (stages > kMaxTevStages) {
+-      counters.tev_stages_over += stages - kMaxTevStages;
+-      stages = kMaxTevStages;
++    std::uint32_t num_ind_stages = bits(gen_mode, 3, 16);
++    if (num_ind_stages > kMaxIndirectStages) {
++      ++counters.indirect_ignored;
++      num_ind_stages = kMaxIndirectStages;
+     }
+-    key.num_tev_stages = static_cast<std::uint8_t>(stages);
+-    auto swap_table = [&](std::uint32_t id, std::uint8_t out[4]) {
+-      const std::uint32_t rg = bp_regs_[0xF6u + 2u * id];
+-      const std::uint32_t ba = bp_regs_[0xF6u + 2u * id + 1u];
+-      out[0] = static_cast<std::uint8_t>(bits(rg, 2, 0)); // swap_rb -> red
+-      out[1] = static_cast<std::uint8_t>(bits(rg, 2, 2)); // swap_ga -> green
+-      out[2] = static_cast<std::uint8_t>(bits(ba, 2, 0)); // blue
+-      out[3] = static_cast<std::uint8_t>(bits(ba, 2, 2)); // alpha
+-    };
+-    for (std::uint32_t n = 0; n < stages; ++n) {
+-      TevStageKey& ts = key.tev_stages[n];
+-      const std::uint32_t cc = bp_regs_[0xC0u + 2u * n]; // ColorCombiner
+-      const std::uint32_t ac = bp_regs_[0xC1u + 2u * n]; // AlphaCombiner
+-      ts.cc_d = static_cast<std::uint8_t>(bits(cc, 4, 0));
+-      ts.cc_c = static_cast<std::uint8_t>(bits(cc, 4, 4));
+-      ts.cc_b = static_cast<std::uint8_t>(bits(cc, 4, 8));
+-      ts.cc_a = static_cast<std::uint8_t>(bits(cc, 4, 12));
+-      ts.cc_bias = static_cast<std::uint8_t>(bits(cc, 2, 16));
+-      ts.cc_op = static_cast<std::uint8_t>(bits(cc, 1, 18));
+-      ts.cc_clamp = static_cast<std::uint8_t>(bits(cc, 1, 19));
+-      ts.cc_scale = static_cast<std::uint8_t>(bits(cc, 2, 20));
+-      ts.cc_dest = static_cast<std::uint8_t>(bits(cc, 2, 22));
+-      ts.ac_a = static_cast<std::uint8_t>(bits(ac, 3, 13));
+-      ts.ac_b = static_cast<std::uint8_t>(bits(ac, 3, 10));
+-      ts.ac_c = static_cast<std::uint8_t>(bits(ac, 3, 7));
+-      ts.ac_d = static_cast<std::uint8_t>(bits(ac, 3, 4));
+-      ts.ac_bias = static_cast<std::uint8_t>(bits(ac, 2, 16));
+-      ts.ac_op = static_cast<std::uint8_t>(bits(ac, 1, 18));
+-      ts.ac_clamp = static_cast<std::uint8_t>(bits(ac, 1, 19));
+-      ts.ac_scale = static_cast<std::uint8_t>(bits(ac, 2, 20));
+-      ts.ac_dest = static_cast<std::uint8_t>(bits(ac, 2, 22));
+-      // TwoTevStageOrders (BP 0x28 + n/2), even/odd halves.
+-      const std::uint32_t ord = bp_regs_[0x28u + n / 2u];
+-      const bool odd = (n & 1u) != 0u;
+-      ts.tevorders_texmap =
+-          static_cast<std::uint8_t>(odd ? bits(ord, 3, 12) : bits(ord, 3, 0));
+-      ts.tevorders_texcoord =
+-          static_cast<std::uint8_t>(odd ? bits(ord, 3, 15) : bits(ord, 3, 3));
+-      ts.tevorders_enable =
+-          static_cast<std::uint8_t>(odd ? bits(ord, 1, 18) : bits(ord, 1, 6));
+-      ts.tevorders_colorchan =
+-          static_cast<std::uint8_t>(odd ? bits(ord, 3, 19) : bits(ord, 3, 7));
+-      const std::uint32_t indirect =
+-          bp_valid_[0x10u + n] ? bp_regs_[0x10u + n] : 0u;
+-      ts.ind_stage = static_cast<std::uint8_t>(bits(indirect, 2, 0));
+-      ts.ind_format = static_cast<std::uint8_t>(bits(indirect, 2, 2));
+-      ts.ind_bias = static_cast<std::uint8_t>(bits(indirect, 3, 4));
+-      ts.ind_bump_alpha = static_cast<std::uint8_t>(bits(indirect, 2, 7));
+-      ts.ind_matrix_index = static_cast<std::uint8_t>(bits(indirect, 2, 9));
+-      ts.ind_matrix_id = static_cast<std::uint8_t>(bits(indirect, 2, 11));
+-      ts.ind_wrap_s = static_cast<std::uint8_t>(bits(indirect, 3, 13));
+-      ts.ind_wrap_t = static_cast<std::uint8_t>(bits(indirect, 3, 16));
+-      ts.ind_use_original_lod =
+-          static_cast<std::uint8_t>(bits(indirect, 1, 19));
+-      ts.ind_add_prev = static_cast<std::uint8_t>(bits(indirect, 1, 20));
+-      const bool samples_indirect =
+-          ts.ind_matrix_index != 0u || ts.ind_bump_alpha != 0u;
+-      if (samples_indirect && ts.ind_stage >= num_ind_stages)
+-        ++counters.indirect_ignored;
+-      if (ts.ind_matrix_id == 3u || ts.ind_use_original_lod != 0u)
+-        ++counters.indirect_ignored;
+-      if (ts.tevorders_enable != 0u && ts.tevorders_texmap != 0u)
+-        ++counters.tev_multi_texmap;
+-      // Konst selectors (AllTevKSels ksel[n/2]).
+-      const std::uint32_t ksel = bp_regs_[0xF6u + n / 2u];
+-      ts.ksel_kc =
+-          static_cast<std::uint8_t>(odd ? bits(ksel, 5, 14) : bits(ksel, 5, 4));
+-      ts.ksel_ka =
+-          static_cast<std::uint8_t>(odd ? bits(ksel, 5, 19) : bits(ksel, 5, 9));
+-      swap_table(bits(ac, 2, 0), ts.ras_swap); // rswap
+-      swap_table(bits(ac, 2, 2), ts.tex_swap); // tswap
++    key.num_ind_stages = static_cast<std::uint8_t>(num_ind_stages);
++    if (num_ind_stages != 0u)
++      ++counters.indirect_active;
++    const std::uint32_t indref = bp_valid_[0x27] ? bp_regs_[0x27] : 0u;
++    for (std::uint32_t i = 0; i < num_ind_stages; ++i) {
++      IndirectStageKey &ind = key.ind_stages[i];
++      ind.texmap = static_cast<std::uint8_t>(bits(indref, 3, 6u * i));
++      ind.texcoord = static_cast<std::uint8_t>(bits(indref, 3, 6u * i + 3u));
++      const std::uint32_t scale =
++          bp_valid_[0x25u + i / 2u] ? bp_regs_[0x25u + i / 2u] : 0u;
++      const std::uint32_t shift = (i & 1u) != 0u ? 8u : 0u;
++      ind.scale_s = static_cast<std::uint8_t>(bits(scale, 4, shift));
++      ind.scale_t = static_cast<std::uint8_t>(bits(scale, 4, shift + 4u));
+     }
+-    if (bp_valid_[0xF3]) { // AlphaTest (BP 0xF3)
+-      const std::uint32_t at = bp_regs_[0xF3];
+-      key.alpha_comp0 = static_cast<std::uint8_t>(bits(at, 3, 16));
+-      key.alpha_comp1 = static_cast<std::uint8_t>(bits(at, 3, 19));
+-      key.alpha_logic = static_cast<std::uint8_t>(bits(at, 2, 22));
++    const std::uint32_t tex_format = draw.texture.format;
++    if (draw.texture.valid &&
++        (tex_format == 0x8u || tex_format == 0x9u || tex_format == 0xAu))
++      ++counters.tlut_texture;
++    key.textured =
++        (draw.texture.valid && draw.texture.resolved && num_tex_gens > 0u &&
++         draw.texture.width > 0u && draw.texture.height > 0u)
++            ? 1u
++            : 0u;
++
++    // TEV combiner (S14). Combiner reg 0xC0 present => port the integer TEV;
++    // otherwise leave tev_valid 0 and the passthrough fragment renders (used by
++    // synthetic slices that never write combiner state).
++    if (bp_valid_[0xC0]) {
++      key.tev_valid = 1;
++      std::uint32_t stages = bits(gen_mode, 4, 10) + 1u; // numtevstages + 1
++      if (stages > kMaxTevStages) {
++        counters.tev_stages_over += stages - kMaxTevStages;
++        stages = kMaxTevStages;
++      }
++      key.num_tev_stages = static_cast<std::uint8_t>(stages);
++      auto swap_table = [&](std::uint32_t id, std::uint8_t out[4]) {
++        const std::uint32_t rg = bp_regs_[0xF6u + 2u * id];
++        const std::uint32_t ba = bp_regs_[0xF6u + 2u * id + 1u];
++        out[0] = static_cast<std::uint8_t>(bits(rg, 2, 0)); // swap_rb -> red
++        out[1] = static_cast<std::uint8_t>(bits(rg, 2, 2)); // swap_ga -> green
++        out[2] = static_cast<std::uint8_t>(bits(ba, 2, 0)); // blue
++        out[3] = static_cast<std::uint8_t>(bits(ba, 2, 2)); // alpha
++      };
++      for (std::uint32_t n = 0; n < stages; ++n) {
++        TevStageKey &ts = key.tev_stages[n];
++        const std::uint32_t cc = bp_regs_[0xC0u + 2u * n]; // ColorCombiner
++        const std::uint32_t ac = bp_regs_[0xC1u + 2u * n]; // AlphaCombiner
++        ts.cc_d = static_cast<std::uint8_t>(bits(cc, 4, 0));
++        ts.cc_c = static_cast<std::uint8_t>(bits(cc, 4, 4));
++        ts.cc_b = static_cast<std::uint8_t>(bits(cc, 4, 8));
++        ts.cc_a = static_cast<std::uint8_t>(bits(cc, 4, 12));
++        ts.cc_bias = static_cast<std::uint8_t>(bits(cc, 2, 16));
++        ts.cc_op = static_cast<std::uint8_t>(bits(cc, 1, 18));
++        ts.cc_clamp = static_cast<std::uint8_t>(bits(cc, 1, 19));
++        ts.cc_scale = static_cast<std::uint8_t>(bits(cc, 2, 20));
++        ts.cc_dest = static_cast<std::uint8_t>(bits(cc, 2, 22));
++        ts.ac_a = static_cast<std::uint8_t>(bits(ac, 3, 13));
++        ts.ac_b = static_cast<std::uint8_t>(bits(ac, 3, 10));
++        ts.ac_c = static_cast<std::uint8_t>(bits(ac, 3, 7));
++        ts.ac_d = static_cast<std::uint8_t>(bits(ac, 3, 4));
++        ts.ac_bias = static_cast<std::uint8_t>(bits(ac, 2, 16));
++        ts.ac_op = static_cast<std::uint8_t>(bits(ac, 1, 18));
++        ts.ac_clamp = static_cast<std::uint8_t>(bits(ac, 1, 19));
++        ts.ac_scale = static_cast<std::uint8_t>(bits(ac, 2, 20));
++        ts.ac_dest = static_cast<std::uint8_t>(bits(ac, 2, 22));
++        // TwoTevStageOrders (BP 0x28 + n/2), even/odd halves.
++        const std::uint32_t ord = bp_regs_[0x28u + n / 2u];
++        const bool odd = (n & 1u) != 0u;
++        ts.tevorders_texmap =
++            static_cast<std::uint8_t>(odd ? bits(ord, 3, 12) : bits(ord, 3, 0));
++        ts.tevorders_texcoord =
++            static_cast<std::uint8_t>(odd ? bits(ord, 3, 15) : bits(ord, 3, 3));
++        ts.tevorders_enable =
++            static_cast<std::uint8_t>(odd ? bits(ord, 1, 18) : bits(ord, 1, 6));
++        ts.tevorders_colorchan =
++            static_cast<std::uint8_t>(odd ? bits(ord, 3, 19) : bits(ord, 3, 7));
++        const std::uint32_t indirect =
++            bp_valid_[0x10u + n] ? bp_regs_[0x10u + n] : 0u;
++        ts.ind_stage = static_cast<std::uint8_t>(bits(indirect, 2, 0));
++        ts.ind_format = static_cast<std::uint8_t>(bits(indirect, 2, 2));
++        ts.ind_bias = static_cast<std::uint8_t>(bits(indirect, 3, 4));
++        ts.ind_bump_alpha = static_cast<std::uint8_t>(bits(indirect, 2, 7));
++        ts.ind_matrix_index = static_cast<std::uint8_t>(bits(indirect, 2, 9));
++        ts.ind_matrix_id = static_cast<std::uint8_t>(bits(indirect, 2, 11));
++        ts.ind_wrap_s = static_cast<std::uint8_t>(bits(indirect, 3, 13));
++        ts.ind_wrap_t = static_cast<std::uint8_t>(bits(indirect, 3, 16));
++        ts.ind_use_original_lod =
++            static_cast<std::uint8_t>(bits(indirect, 1, 19));
++        ts.ind_add_prev = static_cast<std::uint8_t>(bits(indirect, 1, 20));
++        const bool samples_indirect =
++            ts.ind_matrix_index != 0u || ts.ind_bump_alpha != 0u;
++        if (samples_indirect && ts.ind_stage >= num_ind_stages)
++          ++counters.indirect_ignored;
++        if (ts.ind_matrix_id == 3u || ts.ind_use_original_lod != 0u)
++          ++counters.indirect_ignored;
++        if (ts.tevorders_enable != 0u && ts.tevorders_texmap != 0u)
++          ++counters.tev_multi_texmap;
++        // Konst selectors (AllTevKSels ksel[n/2]).
++        const std::uint32_t ksel = bp_regs_[0xF6u + n / 2u];
++        ts.ksel_kc = static_cast<std::uint8_t>(odd ? bits(ksel, 5, 14)
++                                                   : bits(ksel, 5, 4));
++        ts.ksel_ka = static_cast<std::uint8_t>(odd ? bits(ksel, 5, 19)
++                                                   : bits(ksel, 5, 9));
++        swap_table(bits(ac, 2, 0), ts.ras_swap); // rswap
++        swap_table(bits(ac, 2, 2), ts.tex_swap); // tswap
++      }
++      if (bp_valid_[0xF3]) { // AlphaTest (BP 0xF3)
++        const std::uint32_t at = bp_regs_[0xF3];
++        key.alpha_comp0 = static_cast<std::uint8_t>(bits(at, 3, 16));
++        key.alpha_comp1 = static_cast<std::uint8_t>(bits(at, 3, 19));
++        key.alpha_logic = static_cast<std::uint8_t>(bits(at, 2, 22));
++      }
+     }
+-  }
+ 
+-  if (key.tev_valid != 0u && key.textured != 0u &&
+-      key.num_tex_gens != 0u) {
+-    ++counters.texcoord_scale_active;
+-    bool scale_mismatch = false;
+-    auto compare_scale = [&](std::uint32_t coord, std::uint32_t texmap) {
+-      if (coord >= key.num_tex_gens)
+-        coord = 0u;
+-      texmap &= 7u;
+-      const ar::ConsumedTexture* texture = &draw.textures[texmap];
+-      if (!texture->valid || !texture->resolved || texture->width == 0u ||
+-          texture->height == 0u) {
+-        if (!draw.texture.valid || !draw.texture.resolved ||
+-            (draw.texture.slot & 7u) != texmap)
+-          return;
+-        texture = &draw.texture;
+-      }
+-      const std::uint32_t sreg = 0x30u + 2u * coord;
+-      const std::uint32_t treg = sreg + 1u;
+-      const std::uint32_t scale_s =
+-          (bp_valid_[sreg] ? bits(bp_regs_[sreg], 16, 0) : 0u) + 1u;
+-      const std::uint32_t scale_t =
+-          (bp_valid_[treg] ? bits(bp_regs_[treg], 16, 0) : 0u) + 1u;
+-      scale_mismatch |=
+-          scale_s != texture->width || scale_t != texture->height;
+-    };
+-    for (std::uint32_t n = 0; n < key.num_tev_stages; ++n) {
+-      const TevStageKey& ts = key.tev_stages[n];
+-      if (ts.tevorders_enable != 0u)
+-        compare_scale(ts.tevorders_texcoord, ts.tevorders_texmap);
+-      if (ts.ind_stage < key.num_ind_stages &&
+-          (ts.ind_matrix_index != 0u || ts.ind_bump_alpha != 0u)) {
+-        const IndirectStageKey& ind = key.ind_stages[ts.ind_stage];
+-        compare_scale(ind.texcoord, ind.texmap);
++    if (key.tev_valid != 0u && key.textured != 0u && key.num_tex_gens != 0u) {
++      ++counters.texcoord_scale_active;
++      bool scale_mismatch = false;
++      auto compare_scale = [&](std::uint32_t coord, std::uint32_t texmap) {
++        if (coord >= key.num_tex_gens)
++          coord = 0u;
++        texmap &= 7u;
++        const ar::ConsumedTexture *texture = &draw.textures[texmap];
++        if (!texture->valid || !texture->resolved || texture->width == 0u ||
++            texture->height == 0u) {
++          if (!draw.texture.valid || !draw.texture.resolved ||
++              (draw.texture.slot & 7u) != texmap)
++            return;
++          texture = &draw.texture;
++        }
++        const std::uint32_t sreg = 0x30u + 2u * coord;
++        const std::uint32_t treg = sreg + 1u;
++        const std::uint32_t scale_s =
++            (bp_valid_[sreg] ? bits(bp_regs_[sreg], 16, 0) : 0u) + 1u;
++        const std::uint32_t scale_t =
++            (bp_valid_[treg] ? bits(bp_regs_[treg], 16, 0) : 0u) + 1u;
++        scale_mismatch |=
++            scale_s != texture->width || scale_t != texture->height;
++      };
++      for (std::uint32_t n = 0; n < key.num_tev_stages; ++n) {
++        const TevStageKey &ts = key.tev_stages[n];
++        if (ts.tevorders_enable != 0u)
++          compare_scale(ts.tevorders_texcoord, ts.tevorders_texmap);
++        if (ts.ind_stage < key.num_ind_stages &&
++            (ts.ind_matrix_index != 0u || ts.ind_bump_alpha != 0u)) {
++          const IndirectStageKey &ind = key.ind_stages[ts.ind_stage];
++          compare_scale(ind.texcoord, ind.texmap);
++        }
+       }
++      if (scale_mismatch)
++        ++counters.texcoord_scale_mismatch;
+     }
+-    if (scale_mismatch)
+-      ++counters.texcoord_scale_mismatch;
+-  }
+ 
+-  PipelineKey& pipe = plan.pipeline;
+-  pipe.cull_mode = static_cast<std::uint8_t>(cull);
+-  const std::uint32_t zmode = bp_valid_[0x40] ? bp_regs_[0x40] : 0x17u;
+-  pipe.depth_test = static_cast<std::uint8_t>(bits(zmode, 1, 0));
+-  pipe.depth_func = static_cast<std::uint8_t>(bits(zmode, 3, 1));
+-  pipe.depth_update = static_cast<std::uint8_t>(bits(zmode, 1, 4));
+-  const std::uint32_t cmode0 = bp_valid_[0x41] ? bp_regs_[0x41] : 0u;
+-  pipe.blend_enable = static_cast<std::uint8_t>(bits(cmode0, 1, 0));
+-  pipe.blend_subtract = static_cast<std::uint8_t>(bits(cmode0, 1, 11));
+-  pipe.dst_factor = static_cast<std::uint8_t>(bits(cmode0, 3, 5));
+-  pipe.src_factor = static_cast<std::uint8_t>(bits(cmode0, 3, 8));
+-  pipe.color_update = static_cast<std::uint8_t>(bits(cmode0, 1, 3));
+-  const std::uint32_t dst_alpha = bp_valid_[0x42] ? bp_regs_[0x42] : 0u;
+-  const std::uint32_t pe_control = bp_valid_[0x43] ? bp_regs_[0x43] : 0u;
+-  const bool target_has_alpha = bits(pe_control, 3, 0) == 1u;
+-  pipe.alpha_update = static_cast<std::uint8_t>(
+-      bits(cmode0, 1, 4) != 0u && target_has_alpha);
+-
+-  // Dolphin BlendingState keeps RGB and alpha factors separate. EFB formats
+-  // without alpha read destination alpha as one, and color factors collapse to
+-  // their alpha equivalents when operating on the alpha channel.
+-  if (!target_has_alpha) {
+-    if (pipe.src_factor == 6u)
+-      pipe.src_factor = 1u;
+-    else if (pipe.src_factor == 7u)
+-      pipe.src_factor = 0u;
+-    if (pipe.dst_factor == 6u)
+-      pipe.dst_factor = 1u;
+-    else if (pipe.dst_factor == 7u)
+-      pipe.dst_factor = 0u;
+-  }
+-  pipe.src_factor_alpha = pipe.src_factor;
+-  pipe.dst_factor_alpha = pipe.dst_factor;
+-  if (pipe.src_factor_alpha == 2u)
+-    pipe.src_factor_alpha = 6u;
+-  else if (pipe.src_factor_alpha == 3u)
+-    pipe.src_factor_alpha = 7u;
+-  if (pipe.dst_factor_alpha == 2u)
+-    pipe.dst_factor_alpha = 4u;
+-  else if (pipe.dst_factor_alpha == 3u)
+-    pipe.dst_factor_alpha = 5u;
+-
+-  pipe.early_depth_test = static_cast<std::uint8_t>(bits(pe_control, 1, 6));
+-  if (pipe.depth_test != 0u && pipe.early_depth_test != 0u)
+-    ++counters.early_depth_active;
+-
+-  // BP F4/F5 ZTexture. Dolphin writes the sampled depth only for late Z tests;
+-  // Wind Waker's JFWDisplay clear quad is REPLACE/U24 with depth writes on.
+-  // Keep early-Z/fog-only and malformed forms explicit gaps rather than
+-  // silently emitting the wrong fragment-depth contract.
+-  const std::uint32_t ztex2 = bp_valid_[0xF5] ? bp_regs_[0xF5] : 0u;
+-  const std::uint32_t ztex_type = bits(ztex2, 2, 0);
+-  const std::uint32_t ztex_op = bits(ztex2, 2, 2);
+-  if (ztex_op != 0u) {
+-    const bool supported = ztex_op <= 2u && ztex_type <= 2u &&
+-                           key.tev_valid != 0u && key.textured != 0u &&
+-                           pipe.depth_test != 0u && pipe.depth_update != 0u &&
+-                           pipe.early_depth_test == 0u;
+-    if (supported) {
+-      key.ztex_op = static_cast<std::uint8_t>(ztex_op);
+-      key.ztex_type = static_cast<std::uint8_t>(ztex_type);
+-      ++counters.ztexture_active;
++    pipe.cull_mode = static_cast<std::uint8_t>(cull);
++    const std::uint32_t zmode = bp_valid_[0x40] ? bp_regs_[0x40] : 0x17u;
++    pipe.depth_test = static_cast<std::uint8_t>(bits(zmode, 1, 0));
++    pipe.depth_func = static_cast<std::uint8_t>(bits(zmode, 3, 1));
++    pipe.depth_update = static_cast<std::uint8_t>(bits(zmode, 1, 4));
++    const std::uint32_t cmode0 = bp_valid_[0x41] ? bp_regs_[0x41] : 0u;
++    pipe.blend_enable = static_cast<std::uint8_t>(bits(cmode0, 1, 0));
++    pipe.blend_subtract = static_cast<std::uint8_t>(bits(cmode0, 1, 11));
++    pipe.dst_factor = static_cast<std::uint8_t>(bits(cmode0, 3, 5));
++    pipe.src_factor = static_cast<std::uint8_t>(bits(cmode0, 3, 8));
++    pipe.color_update = static_cast<std::uint8_t>(bits(cmode0, 1, 3));
++    const std::uint32_t dst_alpha = bp_valid_[0x42] ? bp_regs_[0x42] : 0u;
++    const std::uint32_t pe_control = bp_valid_[0x43] ? bp_regs_[0x43] : 0u;
++    const bool target_has_alpha = bits(pe_control, 3, 0) == 1u;
++    pipe.alpha_update =
++        static_cast<std::uint8_t>(bits(cmode0, 1, 4) != 0u && target_has_alpha);
++
++    // Dolphin BlendingState keeps RGB and alpha factors separate. EFB formats
++    // without alpha read destination alpha as one, and color factors collapse
++    // to their alpha equivalents when operating on the alpha channel.
++    if (!target_has_alpha) {
++      if (pipe.src_factor == 6u)
++        pipe.src_factor = 1u;
++      else if (pipe.src_factor == 7u)
++        pipe.src_factor = 0u;
++      if (pipe.dst_factor == 6u)
++        pipe.dst_factor = 1u;
++      else if (pipe.dst_factor == 7u)
++        pipe.dst_factor = 0u;
++    }
++    pipe.src_factor_alpha = pipe.src_factor;
++    pipe.dst_factor_alpha = pipe.dst_factor;
++    if (pipe.src_factor_alpha == 2u)
++      pipe.src_factor_alpha = 6u;
++    else if (pipe.src_factor_alpha == 3u)
++      pipe.src_factor_alpha = 7u;
++    if (pipe.dst_factor_alpha == 2u)
++      pipe.dst_factor_alpha = 4u;
++    else if (pipe.dst_factor_alpha == 3u)
++      pipe.dst_factor_alpha = 5u;
++
++    pipe.early_depth_test = static_cast<std::uint8_t>(bits(pe_control, 1, 6));
++    if (pipe.depth_test != 0u && pipe.early_depth_test != 0u)
++      ++counters.early_depth_active;
++
++    // BP F4/F5 ZTexture. Dolphin writes the sampled depth only for late Z
++    // tests; Wind Waker's JFWDisplay clear quad is REPLACE/U24 with depth
++    // writes on. Keep early-Z/fog-only and malformed forms explicit gaps rather
++    // than silently emitting the wrong fragment-depth contract.
++    const std::uint32_t ztex2 = bp_valid_[0xF5] ? bp_regs_[0xF5] : 0u;
++    const std::uint32_t ztex_type = bits(ztex2, 2, 0);
++    const std::uint32_t ztex_op = bits(ztex2, 2, 2);
++    if (ztex_op != 0u) {
++      const bool supported = ztex_op <= 2u && ztex_type <= 2u &&
++                             key.tev_valid != 0u && key.textured != 0u &&
++                             pipe.depth_test != 0u && pipe.depth_update != 0u &&
++                             pipe.early_depth_test == 0u;
++      if (supported) {
++        key.ztex_op = static_cast<std::uint8_t>(ztex_op);
++        key.ztex_type = static_cast<std::uint8_t>(ztex_type);
++        ++counters.ztexture_active;
++      } else {
++        ++counters.ztexture_ignored;
++      }
++    }
++    const bool use_dst_alpha = bits(dst_alpha, 1, 8) != 0u &&
++                               pipe.alpha_update != 0u && target_has_alpha;
++    if (use_dst_alpha) {
++      pipe.src_factor_alpha = 1u;
++      pipe.dst_factor_alpha = 0u;
++    }
++    key.use_dst_alpha = use_dst_alpha ? 1u : 0u;
++    key.dst_alpha = static_cast<std::uint8_t>(bits(dst_alpha, 8, 0));
++    if (use_dst_alpha)
++      ++counters.dst_alpha_active;
++    if (bits(cmode0, 1, 1) != 0u)
++      ++counters.logic_op_ignored;
++
++    derived.version = version_;
++    derived.vtx_fmt = draw.vtx_fmt;
++    std::memcpy(derived.xf_regs, draw.xf_regs, sizeof(derived.xf_regs));
++    derived.xf_reg_mask = draw.xf_reg_mask;
++    std::memcpy(derived.chan_regs, draw.chan_regs, sizeof(derived.chan_regs));
++    derived.chan_reg_mask = draw.chan_reg_mask;
++    std::memcpy(derived.light_word_mask, draw.light_word_mask, sizeof(derived.light_word_mask));
++    derived.textures = textures;
++    derived.pipeline = plan.pipeline;
++    derived.valid = true;
++    for (auto member : counter_members)
++      derived.delta.*member = counters.*member - before.*member;
++    if (hit) {
++      ++derived.verified;
++      if (std::memcmp(&derived.pipeline, &plan.pipeline, sizeof(plan.pipeline)) != 0 &&
++          ++derived.mismatches <= 8)
++        std::fprintf(stderr, "[gx-derived] mismatch #%llu: vtx_fmt=%u version=%llx\n", derived.mismatches,
++                     draw.vtx_fmt, static_cast<unsigned long long>(version_));
+     } else {
+-      ++counters.ztexture_ignored;
++      ++derived.misses;
+     }
+   }
+-  const bool use_dst_alpha = bits(dst_alpha, 1, 8) != 0u &&
+-                             pipe.alpha_update != 0u &&
+-                             target_has_alpha;
+-  if (use_dst_alpha) {
+-    pipe.src_factor_alpha = 1u;
+-    pipe.dst_factor_alpha = 0u;
+-  }
+-  key.use_dst_alpha = use_dst_alpha ? 1u : 0u;
+-  key.dst_alpha = static_cast<std::uint8_t>(bits(dst_alpha, 8, 0));
+-  if (use_dst_alpha)
+-    ++counters.dst_alpha_active;
+-  if (bits(cmode0, 1, 1) != 0u)
+-    ++counters.logic_op_ignored;
+ 
+   // Topology.
+   const auto primitive =
+@@ -1670,6 +1834,7 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+ 
+ GxCoreSink::GxCoreSink() {
+   consumer_.set_streaming(true);
++  consumer_.set_assembly_totals(false);
+   consumer_.set_draw_observer(&GxCoreSink::on_consumed_draw, this);
+ }
+ 
+@@ -1829,6 +1994,9 @@ bool GxCoreSink::load_state(const std::uint8_t* data, std::size_t size) {
+   std::memcpy(&live_state_, data + sizeof header, sizeof(GxCoreState));
+   std::memcpy(&cached_attrs_, data + sizeof header + sizeof(GxCoreState),
+               sizeof(CachedVertexAttrs));
++  // The saved version belongs to the run that saved it: in another run it may
++  // be one this run's derived-state cache holds for other registers.
++  live_state_.renew_version();
+   pending_state_ = live_state_;
+   since_draw_.clear();
+   replay_overflow_ = false;
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 3cadfff447..1a0aeeb15a 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -70,6 +70,11 @@ typedef struct DolAuroraFrameTiming {
+     unsigned long long interp_draws;
+     unsigned long long interp_rejected; /* draws judged implausible (not blended) */
+     unsigned long long interp_unmatched; /* draws with no counterpart the frame before */
++    /* CPU time of the graphics threads, microseconds: the FIFO translation
++       worker, Smooth Motion's helper and Aurora's render worker. */
++    unsigned long long gx_worker_cpu_us;
++    unsigned long long interp_helper_cpu_us;
++    unsigned long long render_worker_cpu_us;
+ } DolAuroraFrameTiming;
+ void dol_aurora_frame_timing(DolAuroraFrameTiming* out);
+ 
+diff --git a/GXRuntime/include/gxruntime/platform.h b/GXRuntime/include/gxruntime/platform.h
+index dc0787f8bb..4c5a7efa32 100644
+--- a/GXRuntime/include/gxruntime/platform.h
++++ b/GXRuntime/include/gxruntime/platform.h
+@@ -32,6 +32,10 @@ typedef struct DolPlatformOps {
+ 
+     void (*mark_gx_begin)(void);
+     void (*gx_write)(u64 value, u8 size);
++    // Consecutive gather-pipe writes as their bytes in guest order, for a
++    // backend whose FIFO parser takes a byte stream (the write sizes do not
++    // matter to it). NULL where they do: the host then sends writes one by one.
++    void (*gx_write_bytes)(const u8* bytes, u32 size);
+     void (*gx_flush)(void);
+     void (*call_display_list)(const void* data, u32 size);
+     void (*set_array)(u32 attr, const void* data, u32 size, u8 stride);
+@@ -74,6 +78,11 @@ bool dol_platform_should_quit(void);
+ void dol_platform_present(void);
+ void dol_platform_mark_gx_begin(void);
+ void dol_platform_gx_write(u64 value, u8 size);
++// Whether the backend takes gather-pipe writes as a byte stream
++// (DolPlatformOps.gx_write_bytes), and a run of them in guest byte order. A
++// caller that has not asked gets a backend without it one byte at a time.
++bool dol_platform_gx_write_bytes_available(void);
++void dol_platform_gx_write_bytes(const u8* bytes, u32 size);
+ // Parse whatever the FIFO write path has buffered. The host calls this where the
+ // guest is about to observe GPU progress - the draw-done commit - so the
+ // translation is never behind a wait it is supposed to satisfy.
+diff --git a/GXRuntime/src/platform.c b/GXRuntime/src/platform.c
+index bac24d4c29..19d7740c58 100644
+--- a/GXRuntime/src/platform.c
++++ b/GXRuntime/src/platform.c
+@@ -47,6 +47,19 @@ void dol_platform_gx_write(u64 value, u8 size) {
+         g_ops.gx_write(value, size);
+ }
+ 
++bool dol_platform_gx_write_bytes_available(void) {
++    return g_ops.gx_write_bytes != NULL;
++}
++
++void dol_platform_gx_write_bytes(const u8* bytes, u32 size) {
++    if (g_ops.gx_write_bytes != NULL) {
++        g_ops.gx_write_bytes(bytes, size);
++        return;
++    }
++    for (u32 i = 0; i < size; ++i)
++        dol_platform_gx_write(bytes[i], 1);
++}
++
+ void dol_platform_gx_flush(void) {
+     if (g_ops.gx_flush != NULL)
+         g_ops.gx_flush();

@@ -1,0 +1,19 @@
+--- a/lib/gfx/pipeline_cache.cpp
++++ b/lib/gfx/pipeline_cache.cpp
+@@ -1101,12 +1101,14 @@
+ 
+ template <>
+ PipelineRef find_pipeline(ShaderType type, const clear::PipelineConfig& config, NewPipelineCallback&& cb) {
+-  return find_pipeline_impl(type, config, std::move(cb));
++  // Required EFB writes must not disappear while a pipeline compiles.
++  return find_pipeline_impl(type, config, std::move(cb), PipelinePriority::Blocking);
+ }
+ 
+ template <>
+ PipelineRef find_pipeline(ShaderType type, const gx::PipelineConfig& config, NewPipelineCallback&& cb) {
+-  return find_pipeline_impl(type, config, std::move(cb));
++  // Required EFB writes must not disappear while a pipeline compiles.
++  return find_pipeline_impl(type, config, std::move(cb), PipelinePriority::Blocking);
+ }
+ 
+ #ifdef AURORA_ENABLE_RMLUI

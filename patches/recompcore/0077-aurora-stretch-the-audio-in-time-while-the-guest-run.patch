@@ -1,0 +1,314 @@
+From 62fc460f53584da51fe59c519c5c171c4fe3a482 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 09:07:15 -0500
+Subject: [PATCH] aurora: stretch the audio in time while the guest runs slow
+
+When the game produces its 32 kHz mix slower than real time, the device drains
+the queue and plays silence between pushes: in the iPad simulator's heavy
+Outset view 84,072 of 213,206 pushes found less than 10 ms queued. The output
+now goes through a synchronous overlap-add stretcher (audio_stretch.hpp:
+40 ms sequences, 8 ms crossfades at the best-matching point within 15 ms),
+which lengthens the sound without changing its pitch, so a slowdown sounds
+slower rather than choppy. The factor aims the queue at 100 ms: 1 (bit-exact
+pass-through) at or above it, up to 2 as it empties, smoothed over about
+100 ms; nothing is stretched before playback starts. DOL_AUDIO_STRETCH=0 turns
+it off. Standalone test: pass-through bit-exact; 1.1/1.3/1.6 give 1.088/1.288/
+1.584 times the input with no step larger than the source's own; leaving the
+stretcher is continuous. The shutdown line reports pushes, starved pushes,
+stretched pushes and throttles. The acceptance capture is taken upstream, in
+the host, and is unaffected.
+---
+ GXRuntime/backends/aurora/audio_stretch.hpp   | 144 ++++++++++++++++++
+ GXRuntime/backends/aurora/aurora_audio.cpp    |  53 ++++++-
+ GXRuntime/backends/aurora/aurora_backend.cpp  |   7 +
+ .../backends/aurora/aurora_backend_private.h  |   2 +
+ 4 files changed, 203 insertions(+), 3 deletions(-)
+ create mode 100644 GXRuntime/backends/aurora/audio_stretch.hpp
+
+diff --git a/GXRuntime/backends/aurora/audio_stretch.hpp b/GXRuntime/backends/aurora/audio_stretch.hpp
+new file mode 100644
+index 0000000000..7f646f8771
+--- /dev/null
++++ b/GXRuntime/backends/aurora/audio_stretch.hpp
+@@ -0,0 +1,144 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Time stretching for the audio output while the guest runs slower than real
++// time (the Dolphin option of the same name, without its SoundTouch).
++//
++// When the game produces 32 kHz audio at, say, 77 percent of real time, the
++// device drains the queue and plays silence between pushes: the heavy Outset
++// view on the iPad simulator starved 39 percent of its pushes. Stretching the
++// output in time - same pitch, slower tempo - turns that stutter into
++// continuous sound that runs as slow as the game does. At full speed the
++// stretcher is idle and samples pass through untouched.
++//
++// The method is synchronous overlap-add (SOLA): output a 40 ms sequence of
++// input, then find where in the next 15 ms of input the waveform best matches
++// the last 8 ms written, crossfade there, and advance the input by less than
++// the output (by the stretch factor), so material repeats seamlessly.
++#pragma once
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <cstring>
++#include <vector>
++
++namespace gx_aurora {
++
++class AudioStretcher {
++public:
++    // Frames at the stream rate; defaults suit 32 kHz (40 / 8 / 15 ms).
++    explicit AudioStretcher(int sequence = 1280, int overlap = 256, int seek = 480)
++        : seq_(sequence), ovl_(overlap), seek_(seek), mid_(static_cast<size_t>(overlap) * 2) {}
++
++    bool active() const { return active_; }
++
++    // Adds stereo frames and appends stretched output to out. stretch >= 1 is
++    // output length over input length; 1 leaves the stretcher (flushing what
++    // it holds, continuously) and passes input through bit-exactly.
++    void process(const int16_t* in, size_t frames, double stretch, std::vector<int16_t>& out) {
++        if (stretch <= 1.0005) {
++            if (active_)
++                leave(out);
++            out.insert(out.end(), in, in + frames * 2);
++            return;
++        }
++        if (!active_) {
++            active_ = true;
++            first_ = true;
++            skip_fract_ = 0.0;
++            in_.clear();
++        }
++        in_.insert(in_.end(), in, in + frames * 2);
++        const double nominal_skip = static_cast<double>(seq_ - ovl_) / stretch;
++        while (static_cast<int>(in_.size() / 2) >= seq_ + seek_) {
++            int offset = 0;
++            if (!first_) {
++                offset = best_offset();
++                // Crossfade the previous tail into the matched position.
++                for (int i = 0; i < ovl_; ++i) {
++                    const float w = static_cast<float>(i) / static_cast<float>(ovl_);
++                    for (int c = 0; c < 2; ++c) {
++                        const float a = mid_[static_cast<size_t>(i) * 2 + c];
++                        const float b = in_[static_cast<size_t>(offset + i) * 2 + c];
++                        out.push_back(clamp16(a * (1.0f - w) + b * w));
++                    }
++                }
++            } else {
++                out.insert(out.end(), in_.begin(), in_.begin() + ovl_ * 2);
++                first_ = false;
++            }
++            // The body of the sequence, then keep its last ovl_ frames.
++            const size_t body_begin = static_cast<size_t>(offset + ovl_) * 2;
++            const size_t body_end = static_cast<size_t>(offset + seq_ - ovl_) * 2;
++            out.insert(out.end(), in_.begin() + body_begin, in_.begin() + body_end);
++            std::memcpy(mid_.data(), in_.data() + body_end, static_cast<size_t>(ovl_) * 2 * sizeof(int16_t));
++            // Where the input continues after the tail just kept, before the skip.
++            next_after_mid_ = offset + seq_;
++            skip_fract_ += nominal_skip;
++            const int skip = static_cast<int>(skip_fract_);
++            skip_fract_ -= skip;
++            in_.erase(in_.begin(), in_.begin() + static_cast<size_t>(skip) * 2);
++            next_after_mid_ -= skip;
++        }
++    }
++
++    // Drops all state (a new stream, or a flush without output).
++    void reset() {
++        active_ = false;
++        in_.clear();
++    }
++
++private:
++    static int16_t clamp16(float v) {
++        v = std::nearbyint(v);
++        return static_cast<int16_t>(std::clamp(v, -32768.0f, 32767.0f));
++    }
++
++    // The position in [0, seek_) whose next ovl_ frames best match the kept
++    // tail, by normalised cross-correlation of the channel sum.
++    int best_offset() const {
++        double best = -1e300;
++        int best_at = 0;
++        for (int off = 0; off < seek_; off += 2) {
++            double corr = 0.0, norm = 0.0;
++            for (int i = 0; i < ovl_; i += 2) {
++                const size_t m = static_cast<size_t>(i) * 2;
++                const size_t n = static_cast<size_t>(off + i) * 2;
++                const double a = static_cast<double>(mid_[m]) + mid_[m + 1];
++                const double b = static_cast<double>(in_[n]) + in_[n + 1];
++                corr += a * b;
++                norm += b * b;
++            }
++            const double score = corr / std::sqrt(norm + 1.0);
++            if (score > best) {
++                best = score;
++                best_at = off;
++            }
++        }
++        return best_at;
++    }
++
++    // Back to pass-through without a gap or a jump: the kept tail, then the
++    // input exactly where it continues after that tail.
++    void leave(std::vector<int16_t>& out) {
++        active_ = false;
++        if (first_) {
++            out.insert(out.end(), in_.begin(), in_.end());
++        } else {
++            out.insert(out.end(), mid_.begin(), mid_.begin() + ovl_ * 2);
++            const size_t from = static_cast<size_t>(std::max(next_after_mid_, 0)) * 2;
++            if (from < in_.size())
++                out.insert(out.end(), in_.begin() + from, in_.end());
++        }
++        in_.clear();
++    }
++
++    int seq_, ovl_, seek_;
++    bool active_ = false;
++    bool first_ = true;
++    double skip_fract_ = 0.0;
++    int next_after_mid_ = 0;
++    std::vector<int16_t> in_;
++    std::vector<int16_t> mid_;
++};
++
++}  // namespace gx_aurora
+diff --git a/GXRuntime/backends/aurora/aurora_audio.cpp b/GXRuntime/backends/aurora/aurora_audio.cpp
+index 3031d749f5..ac521846b4 100644
+--- a/GXRuntime/backends/aurora/aurora_audio.cpp
++++ b/GXRuntime/backends/aurora/aurora_audio.cpp
+@@ -1,9 +1,31 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ #include "aurora_backend_private.h"
++#include "audio_stretch.hpp"
++#include <cstdlib>
++#include <vector>
+ #include <SDL3/SDL_audio.h>
+ #include <SDL3/SDL_timer.h>
+ #include <cstdio>
+ 
++namespace {
++// Stretch control (DOL_AUDIO_STRETCH=0 turns it off). The factor aims the
++// queue at kStretchTargetMs: 1 at or above it, rising to kStretchMax as the
++// queue empties, smoothed over about 100 ms of pushes. Nothing is stretched
++// before playback starts, so the prebuffer fills with the game's own timing.
++constexpr double kStretchTargetMs = 100.0;
++constexpr double kStretchMax = 2.0;
++gx_aurora::AudioStretcher g_stretcher;
++std::vector<int16_t> g_stretch_out;
++double g_stretch = 1.0;
++bool stretch_enabled() {
++    static const bool enabled = [] {
++        const char* env = std::getenv("DOL_AUDIO_STRETCH");
++        return env == nullptr || env[0] != '0';
++    }();
++    return enabled;
++}
++}  // namespace
++
+ extern "C" {
+ 
+ void aurora_backend_audio_set_sample_rate(u32 sample_rate) {
+@@ -69,6 +91,10 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+ 
+     const bool low_queue =
+         queued >= 0 && queued < bytes_per_second / 100;
++    // A push that finds less than 10 ms queued while playing means the device
++    // ran dry or nearly so: the output played silence in between (stutter).
++    if (low_queue && gx_aurora::g_audio_playing)
++        gx_aurora::g_audio_starved_count++;
+     if (gx_aurora::g_audio_queue_log &&
+         (gx_aurora::g_audio_push_count <= 16 || (gx_aurora::g_audio_push_count % 4000) == 0 ||
+          (low_queue && gx_aurora::g_audio_push_count - gx_aurora::g_audio_low_log_push >= 4000))) {
+@@ -81,9 +107,30 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+                      gx_aurora::g_audio_playing ? 1u : 0u, nonzero_samples, peak_sample,
+                      sample_hash, gx_aurora::g_audio_throttle_count);
+     }
+-    if (!SDL_PutAudioStreamData(gx_aurora::g_audio_stream, samples, bytes))
++    const s16* out_samples = samples;
++    int out_bytes = bytes;
++    if (stretch_enabled() && queued >= 0) {
++        double desired = 1.0;
++        if (gx_aurora::g_audio_playing) {
++            const double queued_ms = queued * 1000.0 / bytes_per_second;
++            if (queued_ms < kStretchTargetMs)
++                desired = 1.0 + (kStretchMax - 1.0) * (kStretchTargetMs - queued_ms) / kStretchTargetMs;
++        }
++        g_stretch += 0.1 * (desired - g_stretch);
++        const double factor = g_stretch < 1.01 && !g_stretcher.active() ? 1.0
++                              : (g_stretch < 1.002 ? 1.0 : g_stretch);
++        if (factor > 1.0 || g_stretcher.active()) {
++            g_stretch_out.clear();
++            g_stretcher.process(samples, frames, factor, g_stretch_out);
++            out_samples = g_stretch_out.data();
++            out_bytes = static_cast<int>(g_stretch_out.size() * sizeof(s16));
++            if (factor > 1.0)
++                gx_aurora::g_audio_stretched_count++;
++        }
++    }
++    if (out_bytes > 0 && !SDL_PutAudioStreamData(gx_aurora::g_audio_stream, out_samples, out_bytes))
+         std::fprintf(stderr, "[audio] failed to queue samples: %s\n", SDL_GetError());
+-    else if (!gx_aurora::g_audio_playing && queued + bytes >= prebuffer_bytes) {
++    else if (!gx_aurora::g_audio_playing && queued + out_bytes >= prebuffer_bytes) {
+         if (SDL_ResumeAudioStreamDevice(gx_aurora::g_audio_stream))
+         {
+             gx_aurora::g_audio_playing = true;
+@@ -92,7 +139,7 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+                              "[audio-queue] playback-start push=%llu "
+                              "queued_before=%d queued_after=%d prebuffer=%d "
+                              "nonzero=%u peak=%d hash=0x%08X\n",
+-                             gx_aurora::g_audio_push_count, queued, queued + bytes,
++                             gx_aurora::g_audio_push_count, queued, queued + out_bytes,
+                              prebuffer_bytes, nonzero_samples, peak_sample, sample_hash);
+         }
+         else
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index d9026ebe77..b068676952 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -42,6 +42,8 @@ u32 g_audio_sample_rate = 32000;
+ SDL_AudioStream* g_audio_stream = nullptr;
+ bool g_audio_playing = false;
+ int g_audio_prebuffer_ms = 40;
++unsigned long long g_audio_starved_count = 0;
++unsigned long long g_audio_stretched_count = 0;
+ int g_audio_max_queue_ms = 250;
+ DolPlatformGuestAddressResolverFn g_guest_address_resolver = nullptr;
+ void* g_guest_address_resolver_user = nullptr;
+@@ -409,6 +411,8 @@ bool dol_aurora_initialize(int argc, char** argv,
+         gx_aurora::audio_ms_env("DOL_AUDIO_MAX_QUEUE_MS", 250, gx_aurora::g_audio_prebuffer_ms, 1000);
+     gx_aurora::g_audio_push_count = 0;
+     gx_aurora::g_audio_throttle_count = 0;
++    gx_aurora::g_audio_starved_count = 0;
++    gx_aurora::g_audio_stretched_count = 0;
+     gx_aurora::g_audio_low_log_push = 0;
+     gx_aurora::g_audio_sample_rate = 32000;
+ 
+@@ -572,6 +576,9 @@ void dol_aurora_shutdown(void) {
+     }
+ #endif
+     if (gx_aurora::g_audio_stream != nullptr) {
++        std::fprintf(stderr, "[audio] summary pushes=%llu starved=%llu stretched=%llu throttles=%llu\n",
++                     gx_aurora::g_audio_push_count, gx_aurora::g_audio_starved_count,
++                     gx_aurora::g_audio_stretched_count, gx_aurora::g_audio_throttle_count);
+         SDL_DestroyAudioStream(gx_aurora::g_audio_stream);
+         gx_aurora::g_audio_stream = nullptr;
+         gx_aurora::g_audio_playing = false;
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 13c18fcaf8..ff70c79939 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -43,6 +43,8 @@ extern unsigned long long g_present_count;
+ extern unsigned long long g_fifo_bytes;
+ extern unsigned long long g_audio_push_count;
+ extern unsigned long long g_audio_throttle_count;
++extern unsigned long long g_audio_starved_count;
++extern unsigned long long g_audio_stretched_count;
+ extern unsigned long long g_audio_low_log_push;
+ extern u32 g_audio_sample_rate;
+ extern SDL_AudioStream* g_audio_stream;
+-- 
+2.41.0
+

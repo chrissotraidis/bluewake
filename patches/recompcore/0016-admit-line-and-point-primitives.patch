@@ -1,0 +1,166 @@
+From a3457e76b9cca332a07da5c5c9a4f7b6955f41de Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 00:40:40 -0500
+Subject: [PATCH] graphics: admit line and point primitives
+
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp     | 10 +++++++++-
+ .../gxruntime/aurora_recomp/render_sink.hpp     |  7 ++++---
+ GXRuntime/graphics/frontend/src/render_sink.cpp | 17 ++++++++++++++++-
+ .../frontend/tests/frontend_replay_test.cpp     | 15 +++++++++++++--
+ .../gxcore/include/gxruntime/gxcore/shader.hpp  |  5 +++--
+ GXRuntime/graphics/gxcore/src/gxcore.cpp        |  8 +++++++-
+ 6 files changed, 52 insertions(+), 10 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index e2ae8f4d7f..99729e41b7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -373,6 +373,14 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+   default:
+     break; // None here; All was skipped at plan time
+   }
++  auto topology = wgpu::PrimitiveTopology::TriangleList;
++  if (key.primitive_topology == 1u) {
++    topology = wgpu::PrimitiveTopology::LineList;
++    cullMode = wgpu::CullMode::None;
++  } else if (key.primitive_topology == 2u) {
++    topology = wgpu::PrimitiveTopology::PointList;
++    cullMode = wgpu::CullMode::None;
++  }
+ 
+   const wgpu::RenderPipelineDescriptor descriptor{
+       .label = "GXCore Pipeline",
+@@ -386,7 +394,7 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+           },
+       .primitive =
+           wgpu::PrimitiveState{
+-              .topology = wgpu::PrimitiveTopology::TriangleList,
++              .topology = topology,
+               // Substrate winding convention (gx/gx.cpp to_primitive_state).
+               .frontFace = wgpu::FrontFace::CW,
+               .cullMode = cullMode,
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+index 9c2236ab8c..3b33756078 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+@@ -482,12 +482,13 @@ enum class GxPrimitive : std::uint32_t {
+   Points = 0xB8,
+ };
+ 
+-// Build the triangle-list topology index buffer for `primitive` over
++// Build the topology index buffer for `primitive` over
+ // [vtx_start, vtx_start+vtx_count), mirroring Aurora's prepare_idx_buffer
+ // (command_processor.cpp:27). Aurora issues every primitive as an indexed
+ // triangle list; this is the idxRange a cutover draw must supply. Appends u16
+-// indices to `out` and returns the number appended. Returns 0 for line/point
+-// primitives (Aurora handles those separately) and unknown opcodes.
++// indices to `out` and returns the number appended. Triangle primitives become
++// triangle lists; line strips become explicit line-list pairs; lines and points
++// retain their source order. Returns 0 for unknown opcodes.
+ std::uint32_t build_topology_indices(GxPrimitive primitive,
+                                      std::uint16_t vtx_start,
+                                      std::uint16_t vtx_count,
+diff --git a/GXRuntime/graphics/frontend/src/render_sink.cpp b/GXRuntime/graphics/frontend/src/render_sink.cpp
+index 1c9295fdee..da03aa769d 100644
+--- a/GXRuntime/graphics/frontend/src/render_sink.cpp
++++ b/GXRuntime/graphics/frontend/src/render_sink.cpp
+@@ -486,8 +486,23 @@ std::uint32_t build_topology_indices(GxPrimitive primitive,
+       }
+     }
+     break;
++  case GxPrimitive::Lines:
++    for (std::uint16_t v = 0; v + 2u <= vtx_count; v += 2u) {
++      push(static_cast<std::uint16_t>(vtx_start + v));
++      push(static_cast<std::uint16_t>(vtx_start + v + 1u));
++    }
++    break;
++  case GxPrimitive::LineStrip:
++    for (std::uint16_t v = 0; v + 1u < vtx_count; ++v) {
++      push(static_cast<std::uint16_t>(vtx_start + v));
++      push(static_cast<std::uint16_t>(vtx_start + v + 1u));
++    }
++    break;
++  case GxPrimitive::Points:
++    for (std::uint16_t v = 0; v < vtx_count; ++v)
++      push(static_cast<std::uint16_t>(vtx_start + v));
++    break;
+   default:
+-    // Lines/points/unknown: Aurora handles separately; no triangle topology.
+     break;
+   }
+   return num;
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index e3174bf20f..14b4475daa 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -897,8 +897,19 @@ int main() {
+ 
+       // Count-only (out == nullptr) must agree.
+       assert(build_topology_indices(GxPrimitive::Quads, 0u, 8u, nullptr) == 12u);
+-      // Lines/points have no triangle topology.
+-      assert(build_topology_indices(GxPrimitive::Lines, 0u, 4u, nullptr) == 0u);
++      idx.clear();
++      assert(build_topology_indices(GxPrimitive::Lines, 3u, 5u, &idx) == 4u);
++      const std::uint16_t expect_lines[] = {3, 4, 5, 6};
++      for (std::size_t i = 0; i < 4u; ++i)
++        assert(idx[i] == expect_lines[i]);
++      idx.clear();
++      assert(build_topology_indices(GxPrimitive::LineStrip, 2u, 4u, &idx) == 6u);
++      const std::uint16_t expect_strip[] = {2, 3, 3, 4, 4, 5};
++      for (std::size_t i = 0; i < 6u; ++i)
++        assert(idx[i] == expect_strip[i]);
++      idx.clear();
++      assert(build_topology_indices(GxPrimitive::Points, 7u, 3u, &idx) == 3u);
++      assert(idx[0] == 7u && idx[1] == 8u && idx[2] == 9u);
+     }
+ 
+     // arraySizes for the cutover draw map directly from the resolved spans: the
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 9b14f85814..c7a5e0d372 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -245,7 +245,9 @@ struct PipelineKey {
+   std::uint8_t dst_factor = 0;     // DstBlendFactor (cmode0 bits 5-7)
+   std::uint8_t color_update = 0;   // cmode0 bit 3
+   std::uint8_t alpha_update = 0;   // cmode0 bit 4
+-  std::uint8_t pad0 = 0;
++  // 0 triangle list, 1 line list, 2 point list. Line strips are expanded to
++  // line-list pairs by build_topology_indices.
++  std::uint8_t primitive_topology = 0;
+   std::uint8_t pad1 = 0;
+ };
+ static_assert(std::has_unique_object_representations_v<PipelineKey>);
+@@ -470,4 +472,3 @@ std::string generate_wgsl(const ShaderKey& key);
+ bool channel_lit_path(const ShaderKey& k, unsigned j);
+ 
+ } // namespace gxruntime::gxcore
+-
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index ec6c04c7f2..66f15cf3c9 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -734,13 +734,19 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   // Topology.
+   const auto primitive =
+       static_cast<ar::GxPrimitive>(draw.primitive & 0xF8u);
++  if (primitive == ar::GxPrimitive::Lines ||
++      primitive == ar::GxPrimitive::LineStrip) {
++    pipe.primitive_topology = 1u;
++  } else if (primitive == ar::GxPrimitive::Points) {
++    pipe.primitive_topology = 2u;
++  }
+   const std::uint32_t index_count = ar::build_topology_indices(
+       primitive, 0u, static_cast<std::uint16_t>(draw.vertex_count),
+       &plan.indices);
+   if (index_count == 0u) {
+     ++counters.vertex_decode_failures;
+     ++counters.vertex_topology_unsupported;
+-    return skip("line/point primitive (outside slice)");
++    return skip("unsupported or empty primitive");
+   }
+ 
+   // Vertex decode to the fixed layout.
+-- 
+2.41.0
+

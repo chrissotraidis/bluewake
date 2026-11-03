@@ -1,0 +1,85 @@
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index 41ffaa6..a3aa852 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -147,6 +147,8 @@ private:
+ 
+   bool packet_drain_enabled_ = false;
+   std::uint64_t zero_vertex_draws_ = 0;
++  std::uint64_t unknown_opcodes_skipped_ = 0;
++  std::uint64_t display_lists_skipped_ = 0;
+   TraceEventObserver event_observer_ = nullptr;
+   void* event_observer_user_ = nullptr;
+   std::uint32_t emitted_trace_count_ = 0;
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index f07e126..9fd9eee 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -3,6 +3,7 @@
+ #include "gxruntime/aurora_recomp/retail_gx_frontend_c.h"
+ 
+ #include <cstring>
++#include <cstdio>
+ #include <new>
+ 
+ namespace gxruntime::aurora_recomp {
+@@ -637,7 +638,22 @@ bool RetailGxFrontend::parse_stream(std::span<const std::uint8_t> bytes,
+                   static_cast<const std::uint8_t*>(range.data), range.size},
+               false, false, depth + 1u, &dl_consumed) ||
+           dl_consumed != range.size) {
+-        return false;
++        // A display list that does not parse as GX commands (first met in
++        // Wind Waker's Hyrule stage, 2026-09-26) used to fail the whole FIFO,
++        // and a failed front end presents nothing more: a black screen with
++        // the game running. Drop that list, name it once, and go on; the
++        // cost is whatever that one list would have drawn.
++        static unsigned s_bad_lists = 0;
++        if (s_bad_lists < 8u) {
++          ++s_bad_lists;
++          std::fprintf(stderr,
++                       "[gx-frontend] skipped display list 0x%08X (%u bytes): %s "
++                       "(parsed %zu)\n",
++                       address, size, last_error_ != nullptr ? last_error_ : "trailing bytes",
++                       dl_consumed);
++        }
++        last_error_ = nullptr;
++        ++display_lists_skipped_;
+       }
+       continue;
+     }
+@@ -714,7 +730,34 @@ bool RetailGxFrontend::parse_stream(std::span<const std::uint8_t> bytes,
+       continue;
+     }
+ 
+-    return fail_parse("unsupported FIFO opcode", cmd, pos);
++    // Dolphin's OpcodeDecoder hands an opcode it does not know to
++    // HandleUnknownOpcode, charges one cycle and continues with the next
++    // byte (0x44, "unknown metrics", is a known no-op the same way). Failing
++    // the parse instead stopped every later present: Wind Waker's Hyrule
++    // stage met an 0x7F just after loading and the screen stayed black
++    // (2026-09-26). Skip the byte, say so for the first few, and carry on.
++    {
++      static unsigned s_unknown_reports = 0;
++      if (cmd != 0x44u && s_unknown_reports < 8u) {
++        ++s_unknown_reports;
++        char context[64] = {0};
++        std::size_t n = 0;
++        for (std::size_t i = pos >= 6u ? pos - 6u : 0u;
++             i < bytes.size() && i < pos + 10u && n + 3u < sizeof(context); ++i)
++          n += static_cast<std::size_t>(std::snprintf(context + n, sizeof(context) - n,
++                                                      i == pos ? "[%02X]" : "%02X ", bytes[i]));
++        std::fprintf(stderr,
++                     "[gx-frontend] skipped unknown FIFO opcode 0x%02X at offset %zu "
++                     "depth %u: %s\n",
++                     static_cast<unsigned>(cmd), pos, static_cast<unsigned>(depth), context);
++      }
++      ++unknown_opcodes_skipped_;
++      if (record_fifo_bytes &&
++          !dol_gx_recomp_push_fifo(&state_, bytes.data() + pos, 1u))
++        return false;
++      ++pos;
++      continue;
++    }
+   }
+ 
+   *consumed = pos;

@@ -1,0 +1,288 @@
+From fc305dff8820a13e03b82902e33f205a80ecdd66 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 21:03:43 +0900
+Subject: [PATCH 174/175] Aurora: edge light, a warm rim on the sunlit outline
+ of what is near the camera (post_fx, off by default)
+
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   3 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 139 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  10 +-
+ 3 files changed, 149 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index f2e92f6..6f034b7 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -179,6 +179,9 @@ void aurora_set_ambient_occlusion(bool enabled);
+    passed to aurora_set_world_view. Takes effect at the next frame. */
+ void aurora_set_sun_shadows(bool enabled);
+ void aurora_set_sun_direction(float x, float y, float z);
++/* Edge light: a warm rim on the sunlit outline of what is near the camera,
++   from the same sun and camera. Takes effect at the next frame. */
++void aurora_set_edge_light(bool enabled);
+ /* Cloud shadows on the sea and the land, from the camera last passed to
+    aurora_set_world_view. Takes effect at the next frame. */
+ void aurora_set_cloud_shadows(bool enabled);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index f9ecf2a..96a5f34 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -22,6 +22,8 @@ std::atomic_bool g_farBlur{false};
+ std::atomic_bool g_ao{false};
+ std::atomic_bool g_clouds{false};
+ std::atomic_bool g_sun{false};
++std::atomic_bool g_edge{false};
++float g_edgeStrength = 0.4f;  // how bright a sunlit edge gets
+ float g_sunStrength = 0.35f;  // how dark a sun shadow is
+ float g_sunReach = 1500.f;    // how far toward the sun a shadow is looked for, in world units
+ float g_cloudStrength = 0.28f;  // how dark a cloud's shadow is
+@@ -447,6 +449,78 @@ fn fs_sun(in: VertexOutput) -> @location(0) vec4<f32> {
+ }
+ )""";
+ wgpu::ShaderModule g_sunModule;
++
++// Edge light: a warm rim on the sunlit outline of what is near the camera (Link,
++// people, objects). A pixel is on such an outline when, a few pixels from it
++// toward the sun on screen, the depth jumps far behind it or there is none.
++constexpr const char* kEdgeShader = R"""(
++override strength: f32 = 0.4;
++
++struct View {
++    rows: array<vec4<f32>, 3>,
++    lens: vec4<f32>,
++    time: vec4<f32>,
++};
++
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var unused: texture_2d<f32>;
++@group(0) @binding(2) var depth: texture_depth_2d;
++@group(0) @binding(3) var<uniform> view: View;
++
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++
++fn view_depth(p: vec2<i32>) -> f32 {
++    let size = vec2<i32>(textureDimensions(depth));
++    let d = textureLoad(depth, clamp(p, vec2<i32>(0), size - vec2<i32>(1)), 0);
++    return select(view.lens.z / d, 0.0, d <= 0.0);
++}
++
++@fragment
++fn fs_edge(in: VertexOutput) -> @location(0) vec4<f32> {
++    let here = vec2<i32>(in.pos.xy);
++    let z = view_depth(here);
++    let sun = view.time.yzw;
++    if (z <= 0.0 || z > 1500.0 || sun.y < 0.05) {
++        return vec4(0.0);
++    }
++    // The sun's direction in view space, then on screen (y down).
++    let l = vec3(dot(vec3(view.rows[0].x, view.rows[1].x, view.rows[2].x), sun),
++                 dot(vec3(view.rows[0].y, view.rows[1].y, view.rows[2].y), sun),
++                 dot(vec3(view.rows[0].z, view.rows[1].z, view.rows[2].z), sun));
++    var dir = vec2(l.x, -l.y);
++    if (length(dir) < 0.05) {
++        dir = vec2(0.0, -1.0);
++    }
++    dir = normalize(dir);
++    let scale = f32(textureDimensions(depth).y) / 1080.0;
++    var rim = 0.0;
++    for (var i = 1; i <= 3; i++) {
++        let n = view_depth(here + vec2<i32>(round(dir * f32(i) * 1.5 * scale)));
++        if (n <= 0.0 || n > z * 1.5 + 100.0) {
++            rim = max(rim, 1.0 - f32(i - 1) / 3.0);
++        }
++    }
++    let fade = 1.0 - smoothstep(800.0, 1500.0, z);
++    return vec4(vec3(1.0, 0.95, 0.82) * rim * strength * fade, 0.0);
++}
++)""";
++wgpu::ShaderModule g_edgeModule;
++wgpu::RenderPipeline g_edgePass;
++uint32_t g_edgeSamples = 0;
+ wgpu::RenderPipeline g_sunPass;
+ uint32_t g_sunSamples = 0;
+ wgpu::BindGroupLayout g_cloudLayout;
+@@ -599,6 +673,36 @@ wgpu::RenderPipeline make_sun_pipeline(wgpu::TextureFormat format) {
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
++wgpu::RenderPipeline make_edge_pipeline(wgpu::TextureFormat format, uint32_t samples) {
++  const std::array constants{wgpu::ConstantEntry{.key = "strength", .value = g_edgeStrength}};
++  const wgpu::BlendState add{
++      .color = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::One,
++                .dstFactor = wgpu::BlendFactor::One},
++      .alpha = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::One},
++  };
++  const std::array targets{wgpu::ColorTargetState{.format = format, .blend = &add, .writeMask = wgpu::ColorWriteMask::All}};
++  const wgpu::FragmentState fragment{
++      .module = g_edgeModule,
++      .entryPoint = "fs_edge",
++      .constantCount = constants.size(),
++      .constants = constants.data(),
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = "Edge light",
++      .layout = g_cloudPipelineLayout,
++      .vertex = {.module = g_edgeModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = samples, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
+ wgpu::RenderPipeline make_far_pipeline(wgpu::TextureFormat format, uint32_t samples) {
+   const std::array constants{
+       wgpu::ConstantEntry{.key = "far_start", .value = g_farStart},
+@@ -645,6 +749,7 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_aoPass = make_ao_pipeline(format);
+     g_cloudPass = {};
+     g_sunPass = {};
++    g_edgePass = {};
+     g_composite = {};
+     g_farComposite = {};
+     g_aoApply = {};
+@@ -657,6 +762,10 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+   if (!g_sunPass) {
+     g_sunPass = make_sun_pipeline(format);
+   }
++  if (!g_edgePass || samples != g_edgeSamples) {
++    g_edgePass = make_edge_pipeline(format, samples);
++    g_edgeSamples = samples;
++  }
+   if (!g_cloudPass || samples != g_cloudSamples) {
+     g_cloudPass = make_cloud_pipeline(format, samples);
+     g_cloudSamples = samples;
+@@ -823,6 +932,7 @@ void initialize() {
+   g_cloudScale = env_float("DOL_AURORA_CLOUD_SHADOWS_SCALE", g_cloudScale, 1.f, 1e7f);
+   g_sunStrength = env_float("DOL_AURORA_SUN_SHADOWS_STRENGTH", g_sunStrength, 0.f, 1.f);
+   g_sunReach = env_float("DOL_AURORA_SUN_SHADOWS_REACH", g_sunReach, 1.f, 1e6f);
++  g_edgeStrength = env_float("DOL_AURORA_EDGE_LIGHT_STRENGTH", g_edgeStrength, 0.f, 4.f);
+   const char* cloudDebug = std::getenv("DOL_AURORA_CLOUD_SHADOWS_DEBUG");
+   g_cloudDebug = cloudDebug != nullptr && cloudDebug[0] == '1';
+   const char* aoDebug = std::getenv("DOL_AURORA_AO_DEBUG");
+@@ -879,6 +989,10 @@ void initialize() {
+   sunSource.code = kSunShader;
+   const wgpu::ShaderModuleDescriptor sunModuleDescriptor{.nextInChain = &sunSource, .label = "Sun shadows"};
+   g_sunModule = g_device.CreateShaderModule(&sunModuleDescriptor);
++  wgpu::ShaderSourceWGSL edgeSource{};
++  edgeSource.code = kEdgeShader;
++  const wgpu::ShaderModuleDescriptor edgeModuleDescriptor{.nextInChain = &edgeSource, .label = "Edge light"};
++  g_edgeModule = g_device.CreateShaderModule(&edgeModuleDescriptor);
+   const std::array depthEntries{
+       layoutEntries[0],
+       layoutEntries[1],
+@@ -929,6 +1043,9 @@ void shutdown() {
+   g_sunPass = {};
+   g_sunSamples = 0;
+   g_sunModule = {};
++  g_edgePass = {};
++  g_edgeSamples = 0;
++  g_edgeModule = {};
+   g_cloudPipelineLayout = {};
+   g_cloudLayout = {};
+   g_cloudModule = {};
+@@ -969,6 +1086,10 @@ bool sun_shadows_enabled() noexcept { return g_sun.load(std::memory_order_relaxe
+ 
+ void set_sun_shadows(bool enabled) noexcept { g_sun.store(enabled, std::memory_order_relaxed); }
+ 
++bool edge_light_enabled() noexcept { return g_edge.load(std::memory_order_relaxed) && webgpu::g_hasCoreFeatures; }
++
++void set_edge_light(bool enabled) noexcept { g_edge.store(enabled, std::memory_order_relaxed); }
++
+ void set_sun_direction(float x, float y, float z) noexcept {
+   const float length = std::sqrt(x * x + y * y + z * z);
+   std::lock_guard lock{g_cameraMutex};
+@@ -995,7 +1116,7 @@ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, fl
+ 
+ bool any_enabled() noexcept {
+   return bloom_enabled() || far_blur_enabled() || ambient_occlusion_enabled() || cloud_shadows_enabled() ||
+-         sun_shadows_enabled();
++         sun_shadows_enabled() || edge_light_enabled();
+ }
+ 
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+@@ -1029,6 +1150,20 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+       draw(cmd, "Sun shadows apply", g_aoApply, g_aoView[0], dst, true, resolve);
+     }
+   }
++  if (edge_light_enabled() && g_module && depthView && msaaSamples == 1) {
++    std::array<float, 20> view;
++    bool valid;
++    {
++      std::lock_guard lock{g_cameraMutex};
++      view = g_camera;
++      valid = g_cameraValid;
++    }
++    if (valid) {
++      const webgpu::gpu_prof::Zone zone{cmd, "Edge light"};
++      ensure_targets(size, format, msaaSamples);
++      draw_with_view(cmd, "Edge light", g_edgePass, view, depthView, dst, resolve);
++    }
++  }
+   if (cloud_shadows_enabled() && g_module && depthView && msaaSamples == 1) {
+     std::array<float, 20> view;
+     bool valid;
+@@ -1090,3 +1225,5 @@ void aurora_set_world_view(const float inv_view[12], float tan_half_fovy, float
+ void aurora_set_sun_shadows(bool enabled) { aurora::gfx::post_fx::set_sun_shadows(enabled); }
+ 
+ void aurora_set_sun_direction(float x, float y, float z) { aurora::gfx::post_fx::set_sun_direction(x, y, z); }
++
++void aurora_set_edge_light(bool enabled) { aurora::gfx::post_fx::set_edge_light(enabled); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 077b05a..4d44258 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -34,6 +34,10 @@
+ // (aurora_set_sun_direction), with the same camera. DOL_AURORA_SUN_SHADOWS_STRENGTH
+ // (default 0.35) and _REACH (world units, default 1500). Off unless
+ // aurora_set_sun_shadows(true).
++//
++// Edge light: a warm rim on the sunlit outline of what is near the camera,
++// toward the same sun. DOL_AURORA_EDGE_LIGHT_STRENGTH (default 0.4). Off unless
++// aurora_set_edge_light(true).
+ namespace aurora::gfx::post_fx {
+ void initialize();
+ void shutdown();
+@@ -43,6 +47,8 @@ bool far_blur_enabled() noexcept;
+ void set_far_blur(bool enabled) noexcept;
+ bool ambient_occlusion_enabled() noexcept;
+ void set_ambient_occlusion(bool enabled) noexcept;
++bool edge_light_enabled() noexcept;
++void set_edge_light(bool enabled) noexcept;
+ bool sun_shadows_enabled() noexcept;
+ void set_sun_shadows(bool enabled) noexcept;
+ void set_sun_direction(float x, float y, float z) noexcept;
+@@ -51,8 +57,8 @@ void set_cloud_shadows(bool enabled) noexcept;
+ void set_world_view(const float invView[12], float tanHalfFovy, float aspect, float nearPlane, float seaLevel,
+                     float seconds) noexcept;
+ bool any_enabled() noexcept;
+-// Every effect that is on, in order (ambient occlusion, sun shadows, cloud
+-// shadows, far blur, bloom);
++// Every effect that is on, in order (ambient occlusion, sun shadows, edge
++// light, cloud shadows, far blur, bloom);
+ // depthView: the EFB's depth.
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+-- 
+2.46.0
+

@@ -1,0 +1,151 @@
+From 8f9021b36ab51e2e7821b2286d9331889ac83cfa Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 09:41:11 -0500
+Subject: [PATCH 58/58] aurora: host overlay and event hooks, and
+ aspect-correct output on iOS
+
+Add dol_aurora_set_overlay() and dol_aurora_set_event_observer() so a host can
+draw ImGui over the open Aurora frame just before it is submitted and observe
+the SDL events Aurora forwards. BlueWake's iPad touch controls use both: a
+UIKit layer over SDL's Metal view never composited while the game loop owns the
+main thread, and drawing inside the frame is the approach Dusklight ships.
+
+Also fit the frame to the guest's configured aspect instead of stretching it to
+the window on iOS, where windows are rarely 4:3. macOS keeps its current
+behaviour; DOL_AURORA_ASPECT_FIT=0/1 overrides either default.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 39 +++++++++++++++++++
+ .../backends/aurora/aurora_backend_private.h  |  2 +
+ GXRuntime/backends/aurora/aurora_graphics.cpp |  1 +
+ GXRuntime/include/gxruntime/aurora_backend.h  |  9 +++++
+ 4 files changed, 51 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index d33a6b4365..bc65c3962a 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -11,12 +11,20 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
++#include <window.hpp>
++#if defined(__APPLE__)
++#include <TargetConditionals.h>
++#endif
+ 
+ namespace gx_aurora {
+ 
+ bool g_initialized = false;
+ bool g_frame_open = false;
+ bool g_should_quit = false;
++DolAuroraOverlayFn g_host_overlay = nullptr;
++void* g_host_overlay_user = nullptr;
++DolAuroraEventObserverFn g_host_event_observer = nullptr;
++void* g_host_event_user = nullptr;
+ bool g_graphics_log = false;
+ bool g_force_untextured = false;
+ bool g_gx_core_enabled = true;
+@@ -145,10 +153,17 @@ void poll_events() {
+     while (event != nullptr && event->type != AURORA_NONE) {
+         if (event->type == AURORA_EXIT)
+             g_should_quit = true;
++        if (event->type == AURORA_SDL_EVENT && g_host_event_observer != nullptr)
++            g_host_event_observer(&event->sdl, g_host_event_user);
+         ++event;
+     }
+ }
+ 
++void run_host_overlay() {
++    if (g_host_overlay != nullptr)
++        g_host_overlay(g_host_overlay_user);
++}
++
+ void install_platform_ops() {
+ 
+ 
+@@ -232,6 +247,20 @@ bool dol_aurora_initialize(int argc, char** argv,
+     if (!gx_aurora::g_initialized)
+         return false;
+ 
++    // Keep the guest's configured frame aspect instead of stretching it to the
++    // window. iPad and iPhone windows are rarely 4:3; the macOS window is
++    // created 4:3 and stays unchanged unless DOL_AURORA_ASPECT_FIT is set.
++    {
++        bool aspect_fit = false;
++#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
++        aspect_fit = true;
++#endif
++        const char* fit_env = std::getenv("DOL_AURORA_ASPECT_FIT");
++        if (fit_env != nullptr && fit_env[0] != '\0')
++            aspect_fit = fit_env[0] != '0';
++        aurora::window::set_frame_buffer_aspect_fit(aspect_fit);
++    }
++
+     gx_aurora::g_graphics_log = backend_config->graphics_logging;
+     gx_aurora::g_force_untextured = backend_config->force_untextured;
+     gx_aurora::g_frame_pacing_log = std::getenv("DOL_FRAME_PACING_LOG") != nullptr;
+@@ -401,6 +430,16 @@ bool dol_aurora_initialize(int argc, char** argv,
+     return true;
+ }
+ 
++void dol_aurora_set_overlay(DolAuroraOverlayFn draw, void* user) {
++    gx_aurora::g_host_overlay = draw;
++    gx_aurora::g_host_overlay_user = user;
++}
++
++void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user) {
++    gx_aurora::g_host_event_observer = observe;
++    gx_aurora::g_host_event_user = user;
++}
++
+ void dol_aurora_shutdown(void) {
+     if (!gx_aurora::g_initialized)
+         return;
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 68c9b7c090..7b56f1016f 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -172,6 +172,8 @@ DolGuestResourceKind map_resource_kind(aurora::gx::recomp::ResourceKind kind);
+ bool aurora_guest_address_resolver_bridge(void*, std::uint32_t address, std::uint32_t size, aurora::gx::recomp::AddressSpace space, aurora::gx::recomp::ResourceKind resource, const void** data, std::uint32_t* available);
+ 
+ void install_platform_ops();
++// Host overlay hooks (see gxruntime/aurora_backend.h).
++void run_host_overlay();
+ // Opens (or closes) the frame begun at initialization to the FIFO worker.
+ void set_initial_frame_recording(bool open);
+ 
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 4aeb456011..6f39882d2f 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -930,6 +930,7 @@ void aurora_backend_present(void) {
+     }
+ #endif
+     if (gx_aurora::g_frame_open) {
++        gx_aurora::run_host_overlay();
+         aurora_end_frame();
+         gx_aurora::g_frame_open = false;
+     }
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index c9ec4b9a42..22a3d57ef5 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -25,6 +25,15 @@ bool dol_aurora_initialize(int argc, char** argv,
+                            const AuroraBackendConfig* config);
+ void dol_aurora_shutdown(void);
+ 
++// Host overlay hooks. The overlay callback runs on the main thread inside the
++// open Aurora frame, just before it is submitted, so it may issue ImGui draw
++// calls that composite over the game. The event observer sees every SDL event
++// Aurora forwards (touch, keyboard, controller) as a const SDL_Event*.
++typedef void (*DolAuroraOverlayFn)(void* user);
++typedef void (*DolAuroraEventObserverFn)(const void* sdl_event, void* user);
++void dol_aurora_set_overlay(DolAuroraOverlayFn draw, void* user);
++void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user);
++
+ #ifdef __cplusplus
+ }
+ #endif
+-- 
+2.41.0
+

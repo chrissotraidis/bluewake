@@ -1,0 +1,497 @@
+From a5a7652a94111370fcf6da8eb5e242b80dbf5e51 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sun, 30 Aug 2026 15:47:28 -0500
+Subject: [PATCH] graphics: cache texture hashes by guest dirtiness
+
+---
+ GXRuntime/CMakeLists.txt                      |  1 +
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 11 ++-
+ .../backends/aurora/aurora_backend_private.h  |  2 +
+ GXRuntime/backends/aurora/aurora_graphics.cpp |  8 ++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 95 ++++++++++++++++---
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  6 ++
+ .../include/gxruntime/guest_memory_dirty.h    | 23 +++++
+ GXRuntime/src/aram.c                          |  2 +
+ GXRuntime/src/dvd.c                           |  2 +
+ GXRuntime/src/guest_memory.c                  |  2 +
+ GXRuntime/src/guest_memory_dirty.c            | 55 +++++++++++
+ GXRuntime/tests/runtime_tests.c               | 21 ++++
+ 12 files changed, 214 insertions(+), 14 deletions(-)
+ create mode 100644 GXRuntime/include/gxruntime/guest_memory_dirty.h
+ create mode 100644 GXRuntime/src/guest_memory_dirty.c
+
+diff --git a/GXRuntime/CMakeLists.txt b/GXRuntime/CMakeLists.txt
+index d118bb2598..02ce4d157e 100644
+--- a/GXRuntime/CMakeLists.txt
++++ b/GXRuntime/CMakeLists.txt
+@@ -19,6 +19,7 @@ add_library(gxruntime STATIC
+     src/dvd.c
+     src/event_clock.c
+     src/guest_memory.c
++    src/guest_memory_dirty.c
+     src/gx_recomp.c
+     src/gx_recomp_parser.c
+     src/interrupts.c
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index a6860ca2f7..33c8084de1 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -3,6 +3,7 @@
+ #include <aurora/aurora.h>
+ #include <aurora/event.h>
+ #include <aurora/gfx.h>
++#include <gxruntime/guest_memory_dirty.h>
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+ #include <gfx/gxcore_draw.hpp>
+ #endif
+@@ -309,6 +310,9 @@ bool dol_aurora_initialize(int argc, char** argv,
+         std::getenv("DOL_AURORA_RECOMP_FRONTEND_SHADOW") != nullptr ||
+         gx_aurora::g_shadow_transform_log_enabled || gx_aurora::g_trace_armed || gx_aurora::g_gx_core_enabled;
+     if (gx_aurora::g_gx_core_enabled) {
++        dol_guest_memory_dirty_reset();
++        aurora::gfx::gxcore::set_texture_dirty_epoch_observer(
++            gx_aurora::core_texture_dirty_epoch);
+         gx_aurora::g_core_sink.set_plan_observer(gx_aurora::core_plan_observer, nullptr);
+         gx_aurora::g_core_sink.set_copy_observer(gx_aurora::core_copy_observer, nullptr);
+         gx_aurora::g_core_submitted = 0;
+@@ -485,11 +489,14 @@ void dol_aurora_shutdown(void) {
+         std::fprintf(stderr,
+                      "[gx-core] texture-cache: uploads=%llu hits=%llu "
+                      "ci_uploads=%llu raw_fallback=%llu hashed=%llu "
+-                     "palette_hashed=%llu\n",
++                     "palette_hashed=%llu generation_hits=%llu "
++                     "generation_fallbacks=%llu\n",
+                      texture_stats.uploads, texture_stats.hits,
+                      texture_stats.ci_uploads, texture_stats.raw_fallback,
+                      texture_stats.hashed_lookups,
+-                     texture_stats.palette_hashes);
++                     texture_stats.palette_hashes,
++                     texture_stats.generation_hits,
++                     texture_stats.generation_fallbacks);
+     }
+ #endif
+     if (gx_aurora::g_audio_stream != nullptr) {
+diff --git a/GXRuntime/backends/aurora/aurora_backend_private.h b/GXRuntime/backends/aurora/aurora_backend_private.h
+index 5127174846..8008a0f82e 100644
+--- a/GXRuntime/backends/aurora/aurora_backend_private.h
++++ b/GXRuntime/backends/aurora/aurora_backend_private.h
+@@ -89,6 +89,8 @@ extern bool g_display_copy_pending;
+ 
+ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*);
+ void core_copy_observer(const gxruntime::gxcore::EfbCopyCommand& cmd, void*);
++bool core_texture_dirty_epoch(uint32_t address, uint32_t size,
++                              uint64_t* epoch);
+ 
+ extern unsigned long long g_shadow_last_draw_total;
+ extern unsigned long long g_shadow_last_vertex_total;
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 1216fb28c6..30a579b8e5 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -9,6 +9,7 @@
+ #include <gx/fifo.hpp>
+ #include <gx/gx.hpp>
+ #include <gx/recomp.hpp>
++#include <gxruntime/guest_memory_dirty.h>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -21,12 +22,19 @@ namespace aurora::gfx::gxcore {
+ bool submit_draw_plan(const gxruntime::gxcore::DrawPlan& plan);
+ void copy_efb_to_texture(const gxruntime::gxcore::EfbCopyCommand& cmd);
+ void reset_texture_cache();
++void set_texture_dirty_epoch_observer(
++    bool (*observer)(uint32_t, uint32_t, uint64_t*));
+ } // namespace aurora::gfx::gxcore
+ #endif
+ 
+ namespace gx_aurora {
+ 
+ #if GXRUNTIME_HAS_AURORA_RECOMP
++bool core_texture_dirty_epoch(uint32_t address, uint32_t size,
++                              uint64_t* epoch) {
++    return dol_guest_memory_dirty_epoch(address, size, epoch);
++}
++
+ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*) {
+     if (!plan.ok)
+         return; // skip reasons are tallied in the sink gap counters
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index d8baca635c..df3a1d6192 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -225,8 +225,16 @@ absl::flat_hash_map<TextureKey, TextureHandle> g_textureCache;
+ // arrives at an address (movie streaming, screen transitions), the prior entry
+ // for that address is evicted so the content-hashed cache stays bounded to one
+ // live entry per buffer instead of accumulating every historical frame.
+-absl::flat_hash_map<uint32_t, TextureKey> g_textureAddrKey;
++struct TextureAddressState {
++  TextureKey key;
++  uint64_t texel_epoch = 0;
++  uint64_t tlut_epoch = 0;
++  bool texel_epoch_valid = false;
++  bool tlut_epoch_valid = false;
++};
++absl::flat_hash_map<uint32_t, TextureAddressState> g_textureAddrKey;
+ TextureCacheStats g_textureCacheStats;
++TextureDirtyEpochObserver g_textureDirtyEpochObserver = nullptr;
+ 
+ // EFB copy allocations mirror GXState::copyTextureCache: one guest destination
+ // may be reused with different dimensions or formats, which require distinct GPU
+@@ -245,7 +253,13 @@ struct EfbCopyKey {
+   }
+ };
+ absl::flat_hash_map<EfbCopyKey, TextureHandle> g_efbCopyCache;
+-absl::flat_hash_map<uint32_t, TextureHandle> g_efbCopyTextures;
++struct EfbCopyBinding {
++  TextureHandle handle;
++  uint32_t byte_size = 0;
++  uint64_t memory_epoch = 0;
++  bool memory_epoch_valid = false;
++};
++absl::flat_hash_map<uint32_t, EfbCopyBinding> g_efbCopyTextures;
+ 
+ } // namespace
+ 
+@@ -609,6 +623,10 @@ void reset_texture_cache() {
+   g_textureCacheStats = {};
+ }
+ 
++void set_texture_dirty_epoch_observer(TextureDirtyEpochObserver observer) {
++  g_textureDirtyEpochObserver = observer;
++}
++
+ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
+ 
+ // Resolve the current EFB region into a texture the guest-identity path can bind
+@@ -665,7 +683,13 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   if (!it->second) {
+     return;
+   }
+-  g_efbCopyTextures.insert_or_assign(cmd.dest_address, it->second);
++  uint64_t memoryEpoch = 0;
++  const bool memoryEpochValid =
++      g_textureDirtyEpochObserver != nullptr && cmd.byte_size != 0u &&
++      g_textureDirtyEpochObserver(cmd.dest_address, cmd.byte_size, &memoryEpoch);
++  g_efbCopyTextures.insert_or_assign(
++      cmd.dest_address,
++      EfbCopyBinding{it->second, cmd.byte_size, memoryEpoch, memoryEpochValid});
+   float clearDepthValue = static_cast<float>(cmd.clear_z) / 16777215.f;
+   if (gx::UseReversedZ) {
+     clearDepthValue = 1.f - clearDepthValue;
+@@ -723,23 +747,67 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+           uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
+           const void* tlut_data, uint32_t tlut_available) -> TextureHandle {
+     auto efbIt = g_efbCopyTextures.find(address);
+-    if (efbIt != g_efbCopyTextures.end() && efbIt->second) {
+-      ++g_textureCacheStats.hits;
+-      return efbIt->second;
++    if (efbIt != g_efbCopyTextures.end() && efbIt->second.handle) {
++      uint64_t memoryEpoch = 0;
++      const bool memoryUnchanged =
++          !efbIt->second.memory_epoch_valid ||
++          (g_textureDirtyEpochObserver != nullptr &&
++           g_textureDirtyEpochObserver(address, efbIt->second.byte_size,
++                                       &memoryEpoch) &&
++           memoryEpoch == efbIt->second.memory_epoch);
++      if (memoryUnchanged) {
++        ++g_textureCacheStats.hits;
++        return efbIt->second.handle;
++      }
++      g_efbCopyTextures.erase(efbIt);
+     }
+     if (data == nullptr)
+       return TextureHandle{};
+     const auto* bytes = static_cast<const uint8_t*>(data);
+     const uint32_t size = std::min(tsize, available);
++    uint64_t texelEpoch = 0;
++    uint64_t tlutEpoch = 0;
++    const bool texelEpochValid =
++        g_textureDirtyEpochObserver != nullptr &&
++        g_textureDirtyEpochObserver(address, size, &texelEpoch);
++    const uint32_t tlutSize =
++        gxc::is_ci_format(format) && has_tlut && tlut_data != nullptr
++            ? std::min(tlut_available, tlut_entries * 2u)
++            : 0u;
++    const bool tlutEpochValid =
++        tlutSize == 0u ||
++        (g_textureDirtyEpochObserver != nullptr &&
++         g_textureDirtyEpochObserver(tlut_address, tlutSize, &tlutEpoch));
++    auto addrIt = g_textureAddrKey.find(address);
++    if (texelEpochValid && tlutEpochValid && addrIt != g_textureAddrKey.end()) {
++      const TextureAddressState& previous = addrIt->second;
++      const TextureKey& priorKey = previous.key;
++      const bool sameIdentity =
++          priorKey.address == address && priorKey.size == tsize &&
++          priorKey.format == format && priorKey.width == width &&
++          priorKey.height == height && priorKey.tlut_address == tlut_address &&
++          priorKey.tlut_format == tlut_format &&
++          priorKey.tlut_entries == tlut_entries;
++      if (sameIdentity && previous.texel_epoch_valid &&
++          previous.tlut_epoch_valid && previous.texel_epoch == texelEpoch &&
++          previous.tlut_epoch == tlutEpoch) {
++        auto cached = g_textureCache.find(priorKey);
++        if (cached != g_textureCache.end()) {
++          ++g_textureCacheStats.hits;
++          ++g_textureCacheStats.generation_hits;
++          return cached->second;
++        }
++      }
++    } else if (!texelEpochValid || !tlutEpochValid) {
++      ++g_textureCacheStats.generation_fallbacks;
++    }
+     ++g_textureCacheStats.hashed_lookups;
+     uint64_t content_hash = XXH3_64bits(bytes, size);
+     if (gxc::is_ci_format(format) && has_tlut && tlut_data != nullptr) {
+       ++g_textureCacheStats.palette_hashes;
+       // Resolvers report bytes available to the end of their mapped range. Only
+       // the declared GX palette belongs to this texture cache identity.
+-      const uint32_t tlut_size =
+-          std::min(tlut_available, tlut_entries * 2u);
+-      content_hash = XXH3_64bits_withSeed(tlut_data, tlut_size, content_hash);
++      content_hash = XXH3_64bits_withSeed(tlut_data, tlutSize, content_hash);
+     }
+     const TextureKey key{address,     tsize,        format,      width,
+                          height,      tlut_address, tlut_format, tlut_entries,
+@@ -747,13 +815,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     auto it = g_textureCache.find(key);
+     if (it != g_textureCache.end()) {
+       ++g_textureCacheStats.hits;
++      g_textureAddrKey[address] = TextureAddressState{
++          key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid};
+       return it->second;
+     }
+     // New content for this identity: evict any prior entry cached at the same
+     // guest address (its buffer was overwritten) to keep the cache bounded.
+-    auto addrIt = g_textureAddrKey.find(address);
++    addrIt = g_textureAddrKey.find(address);
+     if (addrIt != g_textureAddrKey.end())
+-      g_textureCache.erase(addrIt->second);
++      g_textureCache.erase(addrIt->second.key);
+     // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
+     // upload it as a pre-decoded PC texture (no substrate re-conversion).
+     std::vector<uint8_t> decoded;
+@@ -785,7 +855,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       ++g_textureCacheStats.raw_fallback;
+     }
+     g_textureCache.emplace(key, handle);
+-    g_textureAddrKey[address] = key;
++    g_textureAddrKey[address] = TextureAddressState{
++        key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid};
+     return handle;
+   };
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index bf6df73307..8b1914e720 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -68,6 +68,10 @@ bool submit_draw_plan(const gxruntime::gxcore::DrawPlan& plan);
+ // Drop the texture cache + reset its stats (start of a replay run).
+ void reset_texture_cache();
+ 
++using TextureDirtyEpochObserver =
++    bool (*)(uint32_t address, uint32_t size, uint64_t* epoch);
++void set_texture_dirty_epoch_observer(TextureDirtyEpochObserver observer);
++
+ // Texture-cache telemetry (S13 A3): proves the no-reconvert property. `uploads`
+ // counts actual decode+upload (cache miss); `hits` counts cache reuse (no
+ // re-decode) — on a static replay scene `uploads` must go to 0 after warm-up.
+@@ -82,6 +86,8 @@ struct TextureCacheStats {
+   unsigned long long raw_fallback = 0;
+   unsigned long long hashed_lookups = 0;
+   unsigned long long palette_hashes = 0;
++  unsigned long long generation_hits = 0;
++  unsigned long long generation_fallbacks = 0;
+ };
+ const TextureCacheStats& texture_cache_stats();
+ 
+diff --git a/GXRuntime/include/gxruntime/guest_memory_dirty.h b/GXRuntime/include/gxruntime/guest_memory_dirty.h
+new file mode 100644
+index 0000000000..be60a639a9
+--- /dev/null
++++ b/GXRuntime/include/gxruntime/guest_memory_dirty.h
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#ifndef GXRUNTIME_GUEST_MEMORY_DIRTY_H
++#define GXRUNTIME_GUEST_MEMORY_DIRTY_H
++
++#include "core/types.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++// Tracks GPU-visible changes to physical MEM1 at page granularity. Writers
++// mark ranges when the guest flushes CPU cache lines or a device completes a
++// bulk transfer. Callers outside physical MEM1 receive false and must use
++// content comparison instead.
++void dol_guest_memory_dirty_reset(void);
++void dol_guest_memory_dirty_mark(u32 address, u32 size);
++bool dol_guest_memory_dirty_epoch(u32 address, u32 size, u64* epoch);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/GXRuntime/src/aram.c b/GXRuntime/src/aram.c
+index 264500b1d0..8cda8b4630 100644
+--- a/GXRuntime/src/aram.c
++++ b/GXRuntime/src/aram.c
+@@ -2,6 +2,7 @@
+ // ARAM model: a flat 16 MB buffer mapped into a synthetic CPU-addressable
+ // window [ARAM_BASE, ARAM_BASE + ARAM_SIZE). See aram.h.
+ #include "gxruntime/aram.h"
++#include "gxruntime/guest_memory_dirty.h"
+ 
+ #include <stdlib.h>
+ #include <string.h>
+@@ -64,4 +65,5 @@ void aram_dma_to_ram(u8* ram, u32 ram_addr, u32 aram_addr, u32 length) {
+     u32 r = ram_addr - 0x80000000u;
+     for (u32 i = 0; i < length; i++)
+         ram[r + i] = g_aram[(off + i) & (ARAM_SIZE - 1u)];
++    dol_guest_memory_dirty_mark(ram_addr, length);
+ }
+diff --git a/GXRuntime/src/dvd.c b/GXRuntime/src/dvd.c
+index b007339356..7cbd075fbc 100644
+--- a/GXRuntime/src/dvd.c
++++ b/GXRuntime/src/dvd.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ // Host-backed GameCube DVD layer. See dvd.h.
+ #include "gxruntime/dvd.h"
++#include "gxruntime/guest_memory_dirty.h"
+ 
+ #include <ctype.h>
+ #include <stdio.h>
+@@ -265,6 +266,7 @@ void dvd_read_to_guest(CPUState* cpu, u32 guest_addr, u32 disc_off, u32 length)
+             got = fread(dst, 1, length, g_iso);
+         if (got < length)
+             memset(dst + got, 0, length - got);  // zero-fill past image end
++        dol_guest_memory_dirty_mark(guest_addr, length);
+         if (g_materialization_trace && guest_addr == 0x814DE360u &&
+             length == 0x52060u) {
+             const u32 target_offset = 0x81512AC0u - guest_addr;
+diff --git a/GXRuntime/src/guest_memory.c b/GXRuntime/src/guest_memory.c
+index c4268e4330..4ca33aed6a 100644
+--- a/GXRuntime/src/guest_memory.c
++++ b/GXRuntime/src/guest_memory.c
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ #include "gxruntime/guest_memory.h"
++#include "gxruntime/guest_memory_dirty.h"
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -378,6 +379,7 @@ void dol_guest_memory_copy(DolGuestMemory* memory, CPUState* cpu, u32 dest,
+             trace_reports++;
+         }
+         memmove(dest_ptr, src_ptr, bytes);
++        dol_guest_memory_dirty_mark(dest, bytes);
+         return;
+     }
+ 
+diff --git a/GXRuntime/src/guest_memory_dirty.c b/GXRuntime/src/guest_memory_dirty.c
+new file mode 100644
+index 0000000000..fb17c71a2b
+--- /dev/null
++++ b/GXRuntime/src/guest_memory_dirty.c
+@@ -0,0 +1,55 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include "gxruntime/guest_memory_dirty.h"
++
++#include <string.h>
++
++#define DOL_MEM1_TRACKED_SIZE 0x02000000u
++#define DOL_MEM1_DIRTY_PAGE_SHIFT 12u
++#define DOL_MEM1_DIRTY_PAGE_SIZE (1u << DOL_MEM1_DIRTY_PAGE_SHIFT)
++#define DOL_MEM1_DIRTY_PAGE_COUNT \
++    (DOL_MEM1_TRACKED_SIZE / DOL_MEM1_DIRTY_PAGE_SIZE)
++
++static u64 g_page_epochs[DOL_MEM1_DIRTY_PAGE_COUNT];
++static u64 g_next_epoch;
++
++static bool physical_range(u32 address, u32 size, u32* start, u32* end) {
++    if (size == 0u)
++        return false;
++    const u32 physical = address & 0x3FFFFFFFu;
++    const u64 physical_end = (u64)physical + size;
++    if (physical >= DOL_MEM1_TRACKED_SIZE ||
++        physical_end > DOL_MEM1_TRACKED_SIZE)
++        return false;
++    *start = physical >> DOL_MEM1_DIRTY_PAGE_SHIFT;
++    *end = (u32)(physical_end - 1u) >> DOL_MEM1_DIRTY_PAGE_SHIFT;
++    return true;
++}
++
++void dol_guest_memory_dirty_reset(void) {
++    memset(g_page_epochs, 0, sizeof(g_page_epochs));
++    g_next_epoch = 0u;
++}
++
++void dol_guest_memory_dirty_mark(u32 address, u32 size) {
++    u32 start;
++    u32 end;
++    if (!physical_range(address, size, &start, &end))
++        return;
++    const u64 epoch = ++g_next_epoch;
++    for (u32 page = start; page <= end; ++page)
++        g_page_epochs[page] = epoch;
++}
++
++bool dol_guest_memory_dirty_epoch(u32 address, u32 size, u64* epoch) {
++    u32 start;
++    u32 end;
++    if (epoch == NULL || !physical_range(address, size, &start, &end))
++        return false;
++    u64 newest = 0u;
++    for (u32 page = start; page <= end; ++page) {
++        if (g_page_epochs[page] > newest)
++            newest = g_page_epochs[page];
++    }
++    *epoch = newest;
++    return true;
++}
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index eec1366876..5bd4aba5e8 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -14,6 +14,7 @@
+ #include "gxruntime/event_clock.h"
+ #include "gxruntime/exi.h"
+ #include "gxruntime/guest_memory.h"
++#include "gxruntime/guest_memory_dirty.h"
+ #include "gxruntime/gx_recomp.h"
+ #include "gxruntime/headless_backend.h"
+ #include "gxruntime/interrupts.h"
+@@ -2520,8 +2521,28 @@ static void test_native_system_helpers(void) {
+     cpu_free(&cpu);
+ }
+ 
++static void test_guest_memory_dirty_epochs(void) {
++    u64 epoch = 99u;
++    dol_guest_memory_dirty_reset();
++    assert(dol_guest_memory_dirty_epoch(0x80001000u, 0x20u, &epoch));
++    assert(epoch == 0u);
++
++    dol_guest_memory_dirty_mark(0xC0001FF0u, 0x40u);
++    assert(dol_guest_memory_dirty_epoch(0x00001000u, 0x1000u, &epoch));
++    assert(epoch == 1u);
++    assert(dol_guest_memory_dirty_epoch(0x80002000u, 0x1000u, &epoch));
++    assert(epoch == 1u);
++
++    dol_guest_memory_dirty_mark(0x80001020u, 0x20u);
++    assert(dol_guest_memory_dirty_epoch(0x00001000u, 0x2000u, &epoch));
++    assert(epoch == 2u);
++    assert(!dol_guest_memory_dirty_epoch(0x82000000u, 1u, &epoch));
++    assert(!dol_guest_memory_dirty_epoch(0u, 0u, &epoch));
++}
++
+ int main(void) {
+     test_guest_memory();
++    test_guest_memory_dirty_epochs();
+     test_store_reservation();
+     test_native_system_helpers();
+     test_savestate_roundtrip();
+-- 
+2.41.0

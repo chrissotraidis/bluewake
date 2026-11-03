@@ -1,0 +1,51 @@
+From 32c6c3198a185c6df0fa4085ead272220b5f92dd Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 00:17:00 -0500
+Subject: [PATCH] graphics: report gxcore coverage at shutdown
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp | 25 ++++++++++++++++++--
+ 1 file changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index f5741eb3f9..c16364d727 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -396,11 +396,32 @@ void dol_aurora_shutdown(void) {
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+     gx_aurora::trace_close_and_log();
+     if (gx_aurora::g_gx_core_enabled) {
++        const auto& gaps = gx_aurora::g_core_sink.counters();
+         std::fprintf(stderr,
+                      "[gx-core] shutdown: submitted=%llu rejected=%llu "
+-                     "failed=%d\n",
++                     "failed=%d planned=%llu skipped=%llu cull_all=%llu "
++                     "missing_vcd=%llu vertex_decode_failures=%llu "
++                     "unsupported_texgen=%llu per_vertex_tex_mtx=%llu "
++                     "unresolved_tex_matrix=%llu normals_ignored=%llu "
++                     "lighting_ignored=%llu tlut_texture=%llu "
++                     "alpha_compare_ignored=%llu tev_stages_over=%llu "
++                     "tev_multi_texmap=%llu efb_copy_ignored=%llu "
++                     "efb_copies=%llu efb_copy_depth=%llu "
++                     "efb_display_copies=%llu fog_ignored=%llu "
++                     "indirect_ignored=%llu logic_op_ignored=%llu\n",
+                      gx_aurora::g_core_submitted, gx_aurora::g_core_rejected,
+-                     gx_aurora::g_shadow_frontend_failed ? 1 : 0);
++                     gx_aurora::g_shadow_frontend_failed ? 1 : 0,
++                     gaps.draws_planned, gaps.draws_skipped,
++                     gaps.cull_all_draws, gaps.missing_vcd,
++                     gaps.vertex_decode_failures, gaps.unsupported_texgen,
++                     gaps.per_vertex_tex_mtx, gaps.unresolved_tex_matrix,
++                     gaps.normals_ignored, gaps.lighting_ignored,
++                     gaps.tlut_texture, gaps.alpha_compare_ignored,
++                     gaps.tev_stages_over, gaps.tev_multi_texmap,
++                     gaps.efb_copy_ignored, gaps.efb_copies,
++                     gaps.efb_copy_depth, gaps.efb_display_copies,
++                     gaps.fog_ignored, gaps.indirect_ignored,
++                     gaps.logic_op_ignored);
+     }
+ #endif
+     if (gx_aurora::g_audio_stream != nullptr) {
+-- 
+2.41.0
+

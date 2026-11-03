@@ -1,0 +1,138 @@
+From b00c01433305ec222945f7d3eeeec3dcbd4eb918 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sun, 27 Sep 2026 02:05:16 +0900
+Subject: [PATCH] BlueWake: decode the TX_SETMODE0 min filter as Dolphin does;
+ forced anisotropy (patch 0095)
+
+gxcore split the three-bit hardware min filter with a table that swapped
+GX_LIN_MIP_NEAR (5) and GX_NEAR_MIP_LIN (2): bit 7 is the minification filter
+and bits 5-6 the mip mode (Dolphin's TexMode0). Wind Waker's scenes use 4, 1
+and 6, which were already right; the test covers 5 and 2 now.
+
+aurora_set_forced_anisotropy (and DOL_AURORA_FORCE_ANISO) forces 2-16
+anisotropic samples with Dolphin's rule: every texture not filtered nearest
+both ways, all filters linear. Off (1) by default.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  5 ++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 23 +++++++++++++++++++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  7 ++++--
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 15 ++++++++++++
+ 4 files changed, 48 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index defa390..6091706 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -140,6 +140,11 @@ void aurora_set_resampler(AuroraSampler sampler);
+    buffer (3 renders 1920x1440 and scales the result to the window); 0 renders
+    at the window's native pixel size. Takes effect at the next frame. */
+ void aurora_set_frame_buffer_scale(float scale);
++/* Anisotropic filtering for every mipmapped, linearly filtered texture, as
++   Dolphin's "Anisotropic Filtering" enhancement: 1 (or 0) leaves the game's
++   own sampler settings, 2-16 forces that many samples. Takes effect at the
++   next draw. DOL_AURORA_FORCE_ANISO sets the starting value. */
++void aurora_set_forced_anisotropy(unsigned samples);
+ 
+ AuroraBackend aurora_get_backend();
+ const AuroraBackend* aurora_get_available_backends(size_t* count);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 0654fd8..a3ccde9 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -1,5 +1,7 @@
+ #include "gxcore_draw.hpp"
+ 
++#include <aurora/aurora.h> // aurora_set_forced_anisotropy
++
+ #include "../webgpu/gpu.hpp"
+ #include "../gx/gx.hpp" // UseReversedZ + set_logical_viewport (substrate glue)
+ #include "texture.hpp"
+@@ -106,6 +108,14 @@ wgpu::BlendFactor to_blend_factor_dst(gxc::DstBlendFactor factor,
+   }
+ }
+ 
++// Forced anisotropy (aurora_set_forced_anisotropy): 1 leaves the game's samplers.
++std::uint16_t initial_forced_anisotropy() {
++  const char* env = std::getenv("DOL_AURORA_FORCE_ANISO");
++  const long samples = env != nullptr ? std::strtol(env, nullptr, 10) : 1L;
++  return static_cast<std::uint16_t>(std::clamp(samples, 1L, 16L));
++}
++std::atomic<std::uint16_t> g_forcedAnisotropy{initial_forced_anisotropy()};
++
+ wgpu::AddressMode to_address_mode(std::uint8_t wrap) {
+   switch (wrap) {
+   case 1:
+@@ -129,6 +139,14 @@ wgpu::SamplerDescriptor sampler_descriptor(const gxc::PlanSampler& sampler) {
+                         : std::max<std::uint16_t>(
+                               webgpu::g_graphicsConfig.textureAnisotropy, 1u);
+   }
++  // The player's forced anisotropy (aurora_set_forced_anisotropy), with
++  // Dolphin's rule: every texture except one filtered nearest both ways (pixel
++  // art, fonts), all filters linear. Most of Wind Waker's textures have no
++  // mips (TX_SETMODE0 filter 4), so the anisotropic taps are what sharpen the
++  // ground and the walls at a glancing angle.
++  const std::uint16_t forced = g_forcedAnisotropy.load(std::memory_order_relaxed);
++  if (forced > 1u && (sampler.min_filter != 0u || sampler.mag_filter != 0u))
++    maxAnisotropy = std::max(maxAnisotropy, forced);
+   auto magFilter = sampler.mag_filter != 0u ? wgpu::FilterMode::Linear
+                                              : wgpu::FilterMode::Nearest;
+   auto minFilter = sampler.min_filter != 0u ? wgpu::FilterMode::Linear
+@@ -1202,3 +1220,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+ }
+ 
+ } // namespace aurora::gfx::gxcore
++
++void aurora_set_forced_anisotropy(unsigned samples) {
++  aurora::gfx::gxcore::g_forcedAnisotropy.store(
++      static_cast<std::uint16_t>(std::clamp(samples, 1u, 16u)), std::memory_order_relaxed);
++}
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 8930496..42c084f 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -1401,11 +1401,14 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+     if (bp_valid_[mode0_reg]) {
+       const std::uint32_t mode0 = bp_regs_[mode0_reg];
+       const std::uint32_t min_filter = bits(mode0, 3, 5);
++      // TX_SETMODE0 bits 5-7: the mip mode in bits 5-6 (none, point, linear;
++      // 3 samples as point) and the minification filter in bit 7 (Dolphin's
++      // TexMode0). GX_LIN_MIP_NEAR is 5 and GX_NEAR_MIP_LIN 2 here.
+       static constexpr std::uint8_t kMinFilter[8] = {
+-          0, 0, 1, 0, 1, 0, 1, 0,
++          0, 0, 0, 0, 1, 1, 1, 1,
+       };
+       static constexpr std::uint8_t kMipmapFilter[8] = {
+-          0, 1, 1, 0, 0, 2, 2, 0,
++          0, 1, 2, 1, 0, 1, 2, 1,
+       };
+       sampler.wrap_s = static_cast<std::uint8_t>(bits(mode0, 2, 0));
+       sampler.wrap_t = static_cast<std::uint8_t>(bits(mode0, 2, 2));
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 32bbbd1..408ae31 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -230,6 +230,21 @@ void test_state_to_plan_and_wgsl() {
+     CHECK(sampler_plan.samplers[0].mipmap_filter == 2u);
+   }
+ 
++  // Hardware 5 (GX_LIN_MIP_NEAR) and 2 (GX_NEAR_MIP_LIN): bit 7 is the
++  // minification filter, bits 5-6 the mip mode (Dolphin's TexMode0).
++  {
++    gxc::GxCoreState sampler_state = state;
++    sampler_state.apply(bp(0x80u, 5u << 5u));
++    gxc::GapCounters gaps;
++    const gxc::DrawPlan lin_mip_near = sampler_state.build_draw_plan(draw, gaps);
++    CHECK(lin_mip_near.samplers[0].min_filter == 1u);
++    CHECK(lin_mip_near.samplers[0].mipmap_filter == 1u);
++    sampler_state.apply(bp(0x80u, 2u << 5u));
++    const gxc::DrawPlan near_mip_lin = sampler_state.build_draw_plan(draw, gaps);
++    CHECK(near_mip_lin.samplers[0].min_filter == 0u);
++    CHECK(near_mip_lin.samplers[0].mipmap_filter == 2u);
++  }
++
+   // J3D writes BP SU_SSIZE/SU_TSIZE for every active texcoord. Dolphin turns
+   // scale_minus_1 back into the rasterized fixed-point S/T scale; it is not a
+   // texture-unit sampler property and can differ from the sampled image size.
+-- 
+2.46.0
+

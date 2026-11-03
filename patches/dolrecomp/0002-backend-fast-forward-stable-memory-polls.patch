@@ -1,0 +1,161 @@
+From 208d2b4063b5474a62f4dbebf84d525dd22e81cc Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 23:45:15 -0500
+Subject: [PATCH] backend: fast-forward stable memory polls
+
+---
+ src/backend/emitter.c             | 52 +++++++++++++++++++++++++++++--
+ tests/cmake/codegen_compile.cmake |  3 ++
+ tests/test_codegen_emit.c         | 17 +++++++++-
+ 3 files changed, 68 insertions(+), 4 deletions(-)
+
+diff --git a/src/backend/emitter.c b/src/backend/emitter.c
+index 45c3286..aefb5cb 100644
+--- a/src/backend/emitter.c
++++ b/src/backend/emitter.c
+@@ -493,6 +493,11 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "#endif\n"
+         "#include DOLRECOMP_CPU_HEADER\n"
+         "\n"
++        "#ifndef DOLRECOMP_POLL_READ_STABLE\n"
++        "#define DOLRECOMP_POLL_READ_STABLE(cpu, addr, size) \\\n"
++        "    ((void)(cpu), (void)(addr), (void)(size), 0)\n"
++        "#endif\n"
++        "\n"
+         "#ifndef DOLRECOMP_C_LOOP_CYCLE_BUDGET\n"
+         "#define DOLRECOMP_C_LOOP_CYCLE_BUDGET 256\n"
+         "#endif\n"
+@@ -508,17 +513,23 @@ void emit_header_for_cpu(FILE* out, DolRecompCPU cpu) {
+         "#ifndef DOLRECOMP_C_MAX_CALL_DEPTH\n"
+         "#define DOLRECOMP_C_MAX_CALL_DEPTH 24\n"
+         "#endif\n"
++        "#if defined(__GNUC__) || defined(__clang__)\n"
++        "#define DOLRECOMP_UNUSED __attribute__((unused))\n"
++        "#else\n"
++        "#define DOLRECOMP_UNUSED\n"
++        "#endif\n"
+         "extern unsigned dolrecomp_call_depth;\n"
+-        "static inline int dolrecomp_call_enter(void) {\n"
++        "static inline DOLRECOMP_UNUSED int dolrecomp_call_enter(void) {\n"
+         "    if (dolrecomp_call_depth >= (unsigned)DOLRECOMP_C_MAX_CALL_DEPTH)\n"
+         "        return 0;\n"
+         "    dolrecomp_call_depth++;\n"
+         "    return 1;\n"
+         "}\n"
+-        "static inline void dolrecomp_call_leave(void) {\n"
++        "static inline DOLRECOMP_UNUSED void dolrecomp_call_leave(void) {\n"
+         "    if (dolrecomp_call_depth)\n"
+         "        dolrecomp_call_depth--;\n"
+         "}\n"
++        "#undef DOLRECOMP_UNUSED\n"
+         "\n"
+         "static inline u32 dolrecomp_rotl32(u32 value, u32 sh) {\n"
+         "    sh &= 31u;\n"
+@@ -1886,6 +1897,17 @@ static void emit_counted_loop(FILE* out, const PPCInst* insts,
+                               u32 function_end, u32 first, u32 last) {
+     u32 loop_address = insts[first].address;
+     u32 continuation = insts[last].address + 4u;
++    const PPCInst* load = &insts[first];
++    const PPCInst* compare = first + 2u == last ? &insts[first + 1u] : NULL;
++    const PPCInst* branch = &insts[last];
++    bool stable_zero_poll =
++        first + 2u == last && load->op == PPC_OP_LWZ &&
++        (load->rA == 0u || load->rA != load->rD) &&
++        compare->op == PPC_OP_CMPLI && compare->l == 0u &&
++        compare->rA == load->rD && compare->uimm == 0u &&
++        branch->op == PPC_OP_BC && branch->bo == 12u &&
++        branch->bi == compare->crfD * 4u + 2u &&
++        branch->branch_target == loop_address;
+ 
+     fprintf(out, "static void loop_%08X(CPUState* ctx) {\n", loop_address);
+     fprintf(out, "label_%08X:\n", loop_address);
+@@ -1893,6 +1915,30 @@ static void emit_counted_loop(FILE* out, const PPCInst* insts,
+     for (u32 i = first; i <= last; ++i) {
+         if (cfg->materialize_pc[i])
+             fprintf(out, "    ctx->pc = 0x%08Xu;\n", insts[i].address);
++        if (stable_zero_poll && i == last) {
++            fprintf(out, "    {\n");
++            emit_branch_condition(out, branch->bo, branch->bi);
++            fprintf(out, "        if (ctr_ok && cr_ok) {\n");
++            fprintf(out, "            u32 poll_ea = ");
++            emit_dform_ea(out, load->rA, load->simm, false);
++            fprintf(out, ";\n");
++            fprintf(out, "            if (DOLRECOMP_POLL_READ_STABLE(ctx, poll_ea, 4u)) {\n");
++            fprintf(out, "                s64 remaining = ctx->downcount + (s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET;\n");
++            fprintf(out, "                if (remaining > 0) {\n");
++            fprintf(out, "                    u64 iterations = ((u64)remaining + %uu) / %uu;\n",
++                    cfg->block_cycles[first] - 1u, cfg->block_cycles[first]);
++            fprintf(out, "                    ctx->downcount -= (s64)(iterations * %uu);\n",
++                    cfg->block_cycles[first]);
++            fprintf(out, "                }\n");
++            fprintf(out, "                ctx->pc = 0x%08Xu;\n", loop_address);
++            fprintf(out, "                return;\n");
++            fprintf(out, "            }\n");
++            emit_direct_branch(out, branch, true, true,
++                               function_address, function_end);
++            fprintf(out, "        }\n");
++            fprintf(out, "    }\n");
++            continue;
++        }
+         emit_instruction_with_range(out, &insts[i], function_address,
+                                     function_end, i == last, false);
+     }
+@@ -1970,4 +2016,4 @@ bool emit_function(FILE* out, const PPCInst* insts, u32 count, u32 func_addr) {
+     c_function_cfg_destroy(&cfg);
+     return true;
+ }
+-// dear lord this thing is huge
+\ No newline at end of file
++// dear lord this thing is huge
+diff --git a/tests/cmake/codegen_compile.cmake b/tests/cmake/codegen_compile.cmake
+index b1f2258..91c5305 100644
+--- a/tests/cmake/codegen_compile.cmake
++++ b/tests/cmake/codegen_compile.cmake
+@@ -42,6 +42,9 @@ endif()
+ if(NOT generated_source MATCHES "static void loop_80004040\\(CPUState\\* ctx\\)")
+     message(FATAL_ERROR "ordinary RAM loop was not outlined")
+ endif()
++if(NOT generated_source MATCHES "DOLRECOMP_POLL_READ_STABLE\\(ctx, poll_ea, 4u\\)")
++    message(FATAL_ERROR "stable RAM polling loop has no budget fast-forward")
++endif()
+ if(NOT generated_source MATCHES "if \\(!ppc_fp_available_inline\\(ctx, 0x8000317Cu\\)\\) return;")
+     message(FATAL_ERROR "generated floating-point code has no MSR FP gate")
+ endif()
+diff --git a/tests/test_codegen_emit.c b/tests/test_codegen_emit.c
+index dccd17e..acee7d6 100644
+--- a/tests/test_codegen_emit.c
++++ b/tests/test_codegen_emit.c
+@@ -177,6 +177,20 @@ int main(int argc, char** argv) {
+     if (!emit_function(out, paired_merge, 2, BASE + 0x1070))
+         return 1;
+ 
++    static const u32 poll_words[] = {
++        0x800D9950u, // lwz r0,-26288(r13)
++        0x28000000u, // cmplwi r0,0
++        0x4182FFF8u, // beq poll
++        0x4E800020u, // blr
++    };
++    PPCInst poll_loop[sizeof(poll_words) / sizeof(poll_words[0])];
++    for (u32 i = 0; i < sizeof(poll_words) / sizeof(poll_words[0]); ++i)
++        poll_loop[i] = ppc_decode(poll_words[i], BASE + 0x1080u + i * 4u);
++    if (!emit_function(out, poll_loop,
++                       (u32)(sizeof(poll_loop) / sizeof(poll_loop[0])),
++                       BASE + 0x1080u))
++        return 1;
++
+     FunctionList funcs = {0};
+     if (!function_list_add(&funcs, BASE, BASE + (u32)count * 4u) ||
+         !function_list_add(&funcs, BASE + 0x1000, BASE + 0x100C) ||
+@@ -187,7 +201,8 @@ int main(int argc, char** argv) {
+         !function_list_add(&funcs, BASE + 0x1040, BASE + 0x1058) ||
+         !function_list_add(&funcs, BASE + 0x1060, BASE + 0x1068) ||
+         !function_list_add(&funcs, BASE + 0x1068, BASE + 0x1070) ||
+-        !function_list_add(&funcs, BASE + 0x1070, BASE + 0x1078)) {
++        !function_list_add(&funcs, BASE + 0x1070, BASE + 0x1078) ||
++        !function_list_add(&funcs, BASE + 0x1080, BASE + 0x1090)) {
+         function_list_free(&funcs);
+         free(insts);
+         if (out != stdout) fclose(out);
+-- 
+2.41.0
+

@@ -1,0 +1,10 @@
+# Attach the app-owned tool manifest without editing the pinned translator.
+if(MSVC AND PROJECT_NAME STREQUAL "DolRecomp")
+    function(bluewake_dolrecomp_utf8)
+        if(NOT TARGET dolrecomp)
+            message(FATAL_ERROR "The pinned DolRecomp executable target is missing")
+        endif()
+        target_sources(dolrecomp PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/tools-utf8.manifest")
+    endfunction()
+    cmake_language(DEFER CALL bluewake_dolrecomp_utf8)
+endif()

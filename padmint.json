@@ -1,0 +1,234 @@
+{
+  "schema_version": 2,
+  "id": "bluewake",
+  "name": "BlueWake",
+  "game": "The Legend of Zelda: The Wind Waker (GameCube, GZLE01)",
+  "kind": "disc-translation",
+  "status": "experimental",
+  "inputs": [
+    {
+      "type": "gamecube-disc",
+      "formats": [
+        "iso"
+      ],
+      "description": "Your own GZLE01 disc image; the backend verifies it."
+    }
+  ],
+  "targets": {
+    "ios": {
+      "hosts": {
+        "macos-arm64": "experimental",
+        "linux-x86_64": "planned",
+        "linux-arm64": "planned",
+        "windows-x86_64": "experimental",
+        "windows-arm64": "experimental"
+      },
+      "tools": [
+        "git",
+        "cmake",
+        "ninja",
+        "libcxx"
+      ],
+      "published_app": "BlueWake-v{version}-ios-unsigned.ipa",
+      "ios_module": {
+        "on": [
+          "windows",
+          "linux"
+        ],
+        "result": "{work}/ios-module-result.json"
+      },
+      "output": "ipa",
+      "check": "ipa",
+      "command": [
+        "{python}",
+        "{repo}/scripts/builder/padmint.py",
+        "{disc}",
+        "--out",
+        "{work}",
+        "--jobs",
+        "{jobs}",
+        "--ios-toolchain",
+        "{ios_toolchain}"
+      ],
+      "modes": {
+        "full": [
+          "--app",
+          "{app}",
+          "--train-pgo",
+          "--ipa",
+          "{output}"
+        ],
+        "source-only": [
+          "--source-only"
+        ]
+      },
+      "options": {
+        "no-mods": [
+          "--no-mods"
+        ]
+      }
+    },
+    "macos": {
+      "hosts": {
+        "macos-arm64": "planned"
+      }
+    },
+    "linux": {
+      "hosts": {
+        "linux-x86_64": "experimental"
+      },
+      "tools": [
+        "git",
+        "cmake",
+        "ninja"
+      ],
+      "command": [
+        "{python}",
+        "{repo}/scripts/linux/build.py",
+        "{disc}",
+        "--out",
+        "{work}",
+        "--jobs",
+        "{jobs}"
+      ],
+      "modes": {
+        "full": [],
+        "source-only": [
+          "--source-only"
+        ]
+      },
+      "options": {
+        "no-mods": [
+          "--no-mods"
+        ]
+      },
+      "output": "folder",
+      "folder": "{work}/BlueWake",
+      "check": "none"
+    }
+  },
+  "requirements": {
+    "disk_gb": 25,
+    "tools": [
+      {
+        "name": "git",
+        "version_args": [
+          "--version"
+        ]
+      },
+      {
+        "name": "cmake",
+        "version_args": [
+          "--version"
+        ]
+      },
+      {
+        "name": "ninja",
+        "version_args": [
+          "--version"
+        ]
+      },
+      {
+        "name": "python3",
+        "version_args": [
+          "--version"
+        ],
+        "hosts": [
+          "macos-arm64",
+          "linux-x86_64",
+          "linux-arm64"
+        ]
+      },
+      {
+        "name": "xcodebuild",
+        "version_args": [
+          "-version"
+        ],
+        "player": true,
+        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough.",
+        "hosts": [
+          "macos-arm64"
+        ]
+      },
+      {
+        "name": "xcrun",
+        "label": "Xcode iPhoneOS SDK",
+        "version_args": [
+          "--sdk",
+          "iphoneos",
+          "--show-sdk-path"
+        ],
+        "player": true,
+        "note": "Install full Xcode and its iOS platform, then select that Xcode in Xcode Settings > Locations > Command Line Tools; Command Line Tools alone are not enough.",
+        "hosts": [
+          "macos-arm64"
+        ]
+      },
+      {
+        "name": "cc",
+        "label": "C compiler",
+        "version_args": [
+          "--version"
+        ],
+        "player": true,
+        "hosts": [
+          "linux-arm64",
+          "linux-x86_64"
+        ],
+        "note": "Install a C compiler for the disc tool, for example: sudo apt install build-essential"
+      },
+      {
+        "name": "clang",
+        "label": "Clang C/C++ compiler",
+        "version_args": [
+          "--version"
+        ],
+        "player": true,
+        "hosts": [
+          "linux-x86_64",
+          "linux-arm64"
+        ],
+        "note": "The host (Aurora/SDL3) build needs clang: install it, for example: sudo apt install clang"
+      },
+      {
+        "name": "%ProgramFiles(x86)%/Microsoft Visual Studio/Installer/vswhere.exe",
+        "label": "Visual Studio Build Tools with C++ Clang",
+        "version_args": [
+          "-latest",
+          "-products",
+          "*",
+          "-requires",
+          "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+          "Microsoft.VisualStudio.Component.VC.Llvm.Clang",
+          "-property",
+          "catalog_productDisplayVersion"
+        ],
+        "min_version": "17",
+        "player": true,
+        "note": "Install Visual Studio Build Tools 2022 (free) from https://visualstudio.microsoft.com/downloads/ with Desktop development with C++, then in Individual components add C++ Clang Compiler for Windows. Run PadMint again when it finishes.",
+        "hosts": [
+          "windows-x86_64",
+          "windows-arm64"
+        ]
+      }
+    ]
+  },
+  "stages": [
+    "preflight",
+    "dependencies",
+    "extract",
+    "translate",
+    "generate",
+    "mods",
+    "train-build",
+    "train-run",
+    "train-merge",
+    "compile",
+    "app",
+    "package"
+  ],
+  "publication": {
+    "public_binaries": false,
+    "reason": "The release publishes the app without game code; PadMint adds the module translated from the player's own disc, which stays personal."
+  }
+}

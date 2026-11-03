@@ -1,0 +1,496 @@
+From bcb87c2acbf90f0ca958fbd61e6e496501619e5b Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 04:25:57 -0500
+Subject: [PATCH] graphics: support fifth texgen
+
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  27 +++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   3 +-
+ .../include/gxruntime/gxcore/shader.hpp       |  23 +--
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  36 +++--
+ .../graphics/gxcore/src/gxcore_shader.cpp     |  23 ++-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 140 +++++++++++++++++-
+ 6 files changed, 218 insertions(+), 34 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 99729e41b7..efc1a336cc 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -267,16 +267,22 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+   // NBT normal/binormal/tangent + light dir; a Color1/emboss key that is unlit
+   // still declares the normal (location 8). Detect emboss demand from the key.
+   bool has_emboss = false;
++  bool has_normal_source = false;
+   for (std::uint32_t i = 0; i < key.shader.num_tex_gens; ++i) {
+-    if (static_cast<gxc::TexGenType>(key.shader.tex_gens[i].texgentype) ==
+-        gxc::TexGenType::EmbossMap)
++    const auto type =
++        static_cast<gxc::TexGenType>(key.shader.tex_gens[i].texgentype);
++    if (type == gxc::TexGenType::EmbossMap)
+       has_emboss = true;
++    if (type == gxc::TexGenType::Regular &&
++        static_cast<gxc::TexSourceRow>(key.shader.tex_gens[i].sourcerow) ==
++            gxc::TexSourceRow::Normal)
++      has_normal_source = true;
+   }
+   // Mirror the generator exactly: locations 8/10/11 are declared only when the
+   // vertex FORMAT carries that attribute. A lit/emboss draw whose format omits
+   // it reads the cached fallback from the uniform instead (I_CACHED_NORMAL), so
+   // the shader does not declare the input and the layout must not provide it.
+-  if ((key.shader.lit_valid != 0 || has_emboss) &&
++  if ((key.shader.lit_valid != 0 || has_emboss || has_normal_source) &&
+       key.shader.has_vertex_normal != 0) {
+     attributes.push_back(wgpu::VertexAttribute{
+         .format = wgpu::VertexFormat::Float32x3,
+@@ -305,6 +311,21 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+         .shaderLocation = 11,
+     });
+   }
++  if ((key.shader.uv_mask & (1u << 4u)) != 0u) {
++    attributes.push_back(wgpu::VertexAttribute{
++        .format = wgpu::VertexFormat::Float32x2,
++        .offset = gxc::kVertexUvOffset + 32u,
++        .shaderLocation = 12,
++    });
++  }
++  if (key.shader.has_tex_mtx_idx != 0 &&
++      (key.shader.tex_mtx_idx_mask & 0xF0u) != 0u) {
++    attributes.push_back(wgpu::VertexAttribute{
++        .format = wgpu::VertexFormat::Uint32,
++        .offset = gxc::kVertexTexMtxIdxHiOffset,
++        .shaderLocation = 13,
++    });
++  }
+   const wgpu::VertexBufferLayout vertexLayout{
+       .arrayStride = gxc::kVertexStrideBytes,
+       .stepMode = wgpu::VertexStepMode::Vertex,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index b2c403af62..c96445c049 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -33,7 +33,8 @@ struct DrawData {
+ // now emits per-texmap samplers + a wider texture bind group under an unchanged
+ // key, so a persisted v4 pipeline for such a draw is stale). v6: indirect TEV
+ // stages add shader structure, pixel constants, and indirect texmap bindings.
+-constexpr uint32_t GXCorePipelineConfigVersion = 6;
++// v7: fifth texgen adds UV4 and a high per-vertex matrix-index word.
++constexpr uint32_t GXCorePipelineConfigVersion = 7;
+ 
+ struct PipelineConfig {
+   uint32_t version = GXCorePipelineConfigVersion;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index b293ad5cd4..95d3c49f1d 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -101,8 +101,10 @@ enum class FogProjection : std::uint8_t { Perspective = 0, Orthographic = 1 };
+ 
+ // --- Shader / pipeline keys -------------------------------------------------
+ 
+-// Slice cap: the S9 corpus histogram shows texgens <= 4 across all scenes.
+-inline constexpr std::uint32_t kMaxTexGens = 4;
++// Wind Waker's first-play scene requests five texgens. The hardware supports
++// eight; keep the admitted slice at the measured route maximum until a later
++// scene proves another count.
++inline constexpr std::uint32_t kMaxTexGens = 5;
+ 
+ // Slice cap: the S9 gameplay histogram shows numtevstages <= 6.
+ inline constexpr std::uint32_t kMaxTevStages = 8;
+@@ -200,7 +202,7 @@ struct ShaderKey {
+   std::uint8_t has_tex_mtx_idx = 0; // per-vertex TEXMTXIDX attr present (item 5)
+   std::uint8_t has_color0 = 0;
+   std::uint8_t has_color1 = 0;
+-  std::uint8_t uv_mask = 0;  // raw uv inputs present (bit per tex0..3)
++  std::uint8_t uv_mask = 0;  // raw uv inputs present (bit per tex0..4)
+   std::uint8_t textured = 0; // fragment samples texmap0 via texcoord0
+   // TEV combiner (S14). tev_valid==0 keeps the S12/S13 passthrough fragment
+   // (used when combiner regs were never seen, e.g. synthetic slices).
+@@ -296,7 +298,7 @@ static_assert(sizeof(GpuLight) == 5 * 16);
+ struct VertexShaderConstants {
+   float posnormalmatrix[6][4]{};    // rows 0-2 current pos mtx, 3-5 normal
+   float projection[4][4]{};         // row-dot form (VertexShaderGen o.pos)
+-  float texmatrices[24][4]{};       // per texgen: 3 rows resolved via matidx
++  float texmatrices[24][4]{};       // hardware max 8 texgens * 3 matrix rows
+   float transformmatrices[64][4]{}; // raw XF matrix memory rows
+   // Lighting (S15): the 8 XF lights and the four material/ambient registers
+   // (Dolphin I_MATERIALS: [0]=ambient0, [1]=ambient1, [2]=material0,
+@@ -344,14 +346,14 @@ static_assert(sizeof(PixelShaderConstants) ==
+ // The CPU vertex decoder (Dolphin VertexLoader semantics) normalizes every
+ // draw to this one interleaved layout so the pipeline vertex state is
+ // constant: pos vec3f | posmtx u32 (matrix ROW index) | color0 vec4f |
+-// color1 vec4f | uv0..3 vec2f | normal vec3f | texmtxidx u32 | binormal vec3f |
+-// tangent vec3f. Each block is appended at the end so every earlier offset is
+-// unchanged and shaders that omit the trailing @locations stay byte-identical:
++// color1 vec4f | uv0..4 vec2f | normal vec3f | texmtxidx low/high u32 |
++// binormal vec3f | tangent vec3f. Input locations preserve the established
++// uv0..3/NBT ABI; uv4 and the high matrix-index word use locations 12/13.
+ // normal (S15, @location 8), then the item-5 texgen block — per-vertex tex-matrix
+ // indices packed one byte per texgen (@location 9), and the NBT binormal/tangent
+ // emboss needs in view space (@location 10/11).
+ inline constexpr std::uint32_t kVertexFloats =
+-    3 + 1 + 4 + 4 + 2 * kMaxTexGens + 3 + 1 + 3 + 3;
++    3 + 1 + 4 + 4 + 2 * kMaxTexGens + 3 + 2 + 3 + 3;
+ inline constexpr std::uint32_t kVertexStrideBytes = kVertexFloats * 4;
+ inline constexpr std::uint32_t kVertexPosOffset = 0;
+ inline constexpr std::uint32_t kVertexPosMtxOffset = 12;
+@@ -360,7 +362,10 @@ inline constexpr std::uint32_t kVertexColor1Offset = 32;
+ inline constexpr std::uint32_t kVertexUvOffset = 48; // + 8*i
+ inline constexpr std::uint32_t kVertexNormalOffset = 48 + 8 * kMaxTexGens;
+ inline constexpr std::uint32_t kVertexTexMtxIdxOffset = kVertexNormalOffset + 12;
+-inline constexpr std::uint32_t kVertexBinormalOffset = kVertexTexMtxIdxOffset + 4;
++inline constexpr std::uint32_t kVertexTexMtxIdxHiOffset =
++    kVertexTexMtxIdxOffset + 4;
++inline constexpr std::uint32_t kVertexBinormalOffset =
++    kVertexTexMtxIdxHiOffset + 4;
+ inline constexpr std::uint32_t kVertexTangentOffset = kVertexBinormalOffset + 12;
+ 
+ // --- Draw plan ---------------------------------------------------------------
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 22aca9c794..9a85e38ed2 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -156,7 +156,7 @@ struct WalkLayout {
+   bool has_nbt = false; // normal attr carries binormal+tangent (emboss inputs)
+   bool has_color[2] = {false, false};
+   std::uint8_t uv_mask = 0;          // tex0-7 presence
+-  std::uint8_t tex_mtx_idx_mask = 0; // per-vertex TEXMTXIDX per texgen (0..3)
++  std::uint8_t tex_mtx_idx_mask = 0; // per-vertex TEXMTXIDX per texgen (0..4)
+ };
+ 
+ // Derive the payload walk from raw VCD/VAT (CPMemory.h bit positions).
+@@ -548,17 +548,17 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     num_tex_gens = draw.xf_regs[xf_numtexgens_reg] & 0xFu;
+   else
+     num_tex_gens = bits(gen_mode, 4, 0);
++  if (num_tex_gens == 5u)
++    ++counters.texgen_count_5;
++  else if (num_tex_gens == 6u)
++    ++counters.texgen_count_6;
++  else if (num_tex_gens == 7u)
++    ++counters.texgen_count_7;
++  else if (num_tex_gens >= 8u)
++    ++counters.texgen_count_8plus;
+   if (num_tex_gens > kMaxTexGens) {
+     ++counters.unsupported_texgen;
+     ++counters.texgen_count_overflow;
+-    if (num_tex_gens == 5u)
+-      ++counters.texgen_count_5;
+-    else if (num_tex_gens == 6u)
+-      ++counters.texgen_count_6;
+-    else if (num_tex_gens == 7u)
+-      ++counters.texgen_count_7;
+-    else
+-      ++counters.texgen_count_8plus;
+     num_tex_gens = kMaxTexGens;
+   }
+   key.num_tex_gens = static_cast<std::uint8_t>(num_tex_gens);
+@@ -567,7 +567,8 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   key.tex_mtx_idx_mask = walk.tex_mtx_idx_mask;
+   key.has_color0 = walk.has_color[0] ? 1u : 0u;
+   key.has_color1 = walk.has_color[1] ? 1u : 0u;
+-  key.uv_mask = static_cast<std::uint8_t>(walk.uv_mask & 0xFu);
++  key.uv_mask = static_cast<std::uint8_t>(
++      walk.uv_mask & ((1u << kMaxTexGens) - 1u));
+   // Vertex-format N/B/T presence (GC packs all three in one NBT attribute, so
+   // binormal/tangent presence follows has_nbt). A lit/emboss draw that omits
+   // one substitutes the cached fallback from the uniform instead of a
+@@ -660,7 +661,7 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+       if (source == TexSourceRow::Geom ||
+           (tg.sourcerow >= static_cast<std::uint8_t>(TexSourceRow::Tex0) &&
+            tg.sourcerow <
+-               static_cast<std::uint8_t>(TexSourceRow::Tex0) + 4u)) {
++               static_cast<std::uint8_t>(TexSourceRow::Tex0) + kMaxTexGens)) {
+         unsupported_source = false;
+       } else if (source == TexSourceRow::Normal) {
+         ++counters.texgen_source_normal;
+@@ -877,7 +878,8 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     // entries); a single 9-component entry decodes all three at once.
+     std::uint32_t normal_part = 0;
+     std::uint32_t posmtx_row = draw.current_pn_matrix * 3u;
+-    std::uint32_t texmtxidx_packed = 0; // one byte per texgen (item-5 TEXMTXIDX)
++    std::uint32_t texmtxidx_packed = 0; // texgens 0..3, one byte each
++    std::uint32_t texmtxidx_packed_hi = 0; // texgens 4..7, one byte each
+     std::size_t offset =
+         static_cast<std::size_t>(v) * walk.vertex_size;
+     for (std::uint32_t e = 0; e < walk.entry_count; ++e) {
+@@ -899,9 +901,13 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+         // GX per-vertex TEXMTXIDX: the byte is a matrix-memory row index (GX
+         // pre-multiplies by 3, same convention as PNMTXIDX). Pack one byte per
+         // texgen so the VS can select transformmatrices[row] per vertex.
+-        if (entry.out_slot < 4u)
++        if (entry.out_slot < 4u) {
+           texmtxidx_packed |= static_cast<std::uint32_t>(p[0])
+                               << (8u * entry.out_slot);
++        } else if (entry.out_slot < 8u) {
++          texmtxidx_packed_hi |= static_cast<std::uint32_t>(p[0])
++                                 << (8u * (entry.out_slot - 4u));
++        }
+         offset += 1;
+         continue;
+       }
+@@ -999,6 +1005,8 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     std::memcpy(out_vertex + 3, &posmtx_row, sizeof posmtx_row);
+     std::memcpy(out_vertex + kVertexTexMtxIdxOffset / 4u, &texmtxidx_packed,
+                 sizeof texmtxidx_packed);
++    std::memcpy(out_vertex + kVertexTexMtxIdxHiOffset / 4u,
++                &texmtxidx_packed_hi, sizeof texmtxidx_packed_hi);
+   }
+ 
+   // Uniforms.
+@@ -1101,6 +1109,8 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+       row = bits(mat_idx_a, 6, 6 + 6 * i);
+       row_known = true;
+     } else if (i >= 4u && mat_idx_b_valid) {
++      // CPMemory.h TMatrixIndexB begins Tex4MtxIdx at bit 0; unlike A it has
++      // no leading PosNormalMtxIdx field.
+       row = bits(mat_idx_b, 6, 6 * (i - 4u));
+       row_known = true;
+     }
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 6564908063..3d5585856a 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -676,12 +676,17 @@ std::string generate_wgsl(const ShaderKey& key) {
+   // tangent space, so detect demand up front to widen the varyings/uniform/inputs.
+   bool needs_color1 = false;
+   bool has_emboss = false;
++  bool has_normal_source = false;
+   for (std::uint32_t i = 0; i < key.num_tex_gens; ++i) {
+     const auto t = static_cast<TexGenType>(key.tex_gens[i].texgentype);
+     if (t == TexGenType::Color1)
+       needs_color1 = true;
+     else if (t == TexGenType::EmbossMap)
+       has_emboss = true;
++    if (t == TexGenType::Regular &&
++        static_cast<TexSourceRow>(key.tex_gens[i].sourcerow) ==
++            TexSourceRow::Normal)
++      has_normal_source = true;
+   }
+   // Emboss transforms the light dir into tangent space, so the lights uniform +
+   // the NBT binormal/tangent vertex attrs must be present even on an unlit draw.
+@@ -798,7 +803,7 @@ std::string generate_wgsl(const ShaderKey& key) {
+             "    @location(5) rawtex1: vec2f,\n"
+             "    @location(6) rawtex2: vec2f,\n"
+             "    @location(7) rawtex3: vec2f,\n");
+-  if ((lit || emit_nbt) && has_normal)
++  if ((lit || emit_nbt || has_normal_source) && has_normal)
+     emit(out, "    @location(8) rawnormal: vec3f,\n");
+   if (key.has_tex_mtx_idx != 0)
+     emit(out, "    @location(9) texmtxidx: u32,\n");
+@@ -806,6 +811,10 @@ std::string generate_wgsl(const ShaderKey& key) {
+     emit(out, "    @location(10) rawbinormal: vec3f,\n");
+   if (emit_nbt && has_tangent)
+     emit(out, "    @location(11) rawtangent: vec3f,\n");
++  if ((key.uv_mask & (1u << 4u)) != 0u)
++    emit(out, "    @location(12) rawtex4: vec2f,\n");
++  if (key.has_tex_mtx_idx != 0 && (key.tex_mtx_idx_mask & 0xF0u) != 0u)
++    emit(out, "    @location(13) texmtxidx_hi: u32,\n");
+   emit(out, "};\n");
+ 
+   emit(out, "struct VertexOut {\n"
+@@ -908,7 +917,7 @@ std::string generate_wgsl(const ShaderKey& key) {
+         emit(out, "        coord = vec4f(in.rawnormal, 1.0);\n");
+     } else if (tg.sourcerow >= static_cast<std::uint8_t>(TexSourceRow::Tex0) &&
+                tg.sourcerow <
+-                   static_cast<std::uint8_t>(TexSourceRow::Tex0) + 4u) {
++                   static_cast<std::uint8_t>(TexSourceRow::Tex0) + kMaxTexGens) {
+       const std::uint32_t texnum =
+           tg.sourcerow - static_cast<std::uint8_t>(TexSourceRow::Tex0);
+       if ((key.uv_mask & (1u << texnum)) != 0u) {
+@@ -931,8 +940,14 @@ std::string generate_wgsl(const ShaderKey& key) {
+       const bool per_vertex =
+           key.has_tex_mtx_idx != 0 && (key.tex_mtx_idx_mask & (1u << i)) != 0u;
+       if (per_vertex) {
+-        emitf(out, "        let ti%u = (in.texmtxidx >> (8u * %uu)) & 0xFFu;\n",
+-              i, i);
++        if (i < 4u)
++          emitf(out,
++                "        let ti%u = (in.texmtxidx >> (8u * %uu)) & 0xFFu;\n",
++                i, i);
++        else
++          emitf(out,
++                "        let ti%u = (in.texmtxidx_hi >> (8u * %uu)) & 0xFFu;\n",
++                i, i - 4u);
+         emitf(out, "        let m%u0 = vsc.transformmatrices[ti%u];\n", i, i);
+         emitf(out, "        let m%u1 = vsc.transformmatrices[ti%u + 1u];\n", i, i);
+         emitf(out, "        let m%u2 = vsc.transformmatrices[ti%u + 2u];\n", i, i);
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index b171a9ec8a..1fd1371543 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -233,8 +233,8 @@ void test_state_to_plan_and_wgsl() {
+   {
+     gxc::GapCounters gaps;
+     CHECK(classify_texgen(9u << 7u, gaps).ok); // Tex4
+-    CHECK(gaps.unsupported_texgen == 1u);
+-    CHECK(gaps.texgen_source_tex47 == 1u);
++    CHECK(gaps.unsupported_texgen == 0u);
++    CHECK(gaps.texgen_source_tex47 == 0u);
+   }
+   {
+     gxc::GapCounters gaps;
+@@ -253,8 +253,8 @@ void test_state_to_plan_and_wgsl() {
+     ar::ConsumedDraw overflow = draw;
+     overflow.xf_regs[0x27] = 5u;
+     CHECK(state.build_draw_plan(overflow, gaps).ok);
+-    CHECK(gaps.unsupported_texgen == 1u);
+-    CHECK(gaps.texgen_count_overflow == 1u);
++    CHECK(gaps.unsupported_texgen == 0u);
++    CHECK(gaps.texgen_count_overflow == 0u);
+     CHECK(gaps.texgen_count_5 == 1u);
+   }
+ 
+@@ -490,6 +490,8 @@ void test_texgen_normal_source() {
+   key.tex_gens[0].sourcerow = static_cast<std::uint8_t>(gxc::TexSourceRow::Normal);
+   key.has_vertex_normal = 1;
+   const std::string with_normal = gxc::generate_wgsl(key);
++  CHECK(with_normal.find("@location(8) rawnormal: vec3f") !=
++        std::string::npos);
+   CHECK(with_normal.find("coord = vec4f(in.rawnormal, 1.0);") !=
+         std::string::npos);
+ 
+@@ -499,6 +501,134 @@ void test_texgen_normal_source() {
+         std::string::npos);
+ }
+ 
++// Wind Waker's first-play scene requests exactly five texgens. Keep the fifth
++// raw coordinate and high per-vertex matrix-index word at new locations so the
++// established 0..3/NBT shader ABI remains stable.
++void test_five_texgens() {
++  CHECK(gxc::kMaxTexGens >= 5u);
++  if (gxc::kMaxTexGens < 5u)
++    return;
++
++  gxc::ShaderKey key{};
++  key.num_tex_gens = 5;
++  key.uv_mask = 0x1Fu;
++  key.textured = 1;
++  key.tev_valid = 1;
++  key.num_tev_stages = 1;
++  key.has_tex_mtx_idx = 1;
++  key.tex_mtx_idx_mask = 0x10u;
++  for (std::uint32_t i = 0; i < 5u; ++i) {
++    key.tex_gens[i].enabled = 1;
++    key.tex_gens[i].texgentype =
++        static_cast<std::uint8_t>(gxc::TexGenType::Regular);
++    key.tex_gens[i].sourcerow =
++        static_cast<std::uint8_t>(gxc::TexSourceRow::Tex0) + i;
++  }
++  key.tev_stages[0].tevorders_enable = 1;
++  key.tev_stages[0].tevorders_texmap = 0;
++  key.tev_stages[0].tevorders_texcoord = 4;
++
++  const std::string w = gxc::generate_wgsl(key);
++  CHECK(w.find("@location(12) rawtex4: vec2f") != std::string::npos);
++  CHECK(w.find("@location(13) texmtxidx_hi: u32") != std::string::npos);
++  CHECK(w.find("@location(6) uv4: vec3f") != std::string::npos);
++  CHECK(w.find("coord = vec4f(in.rawtex4.x, in.rawtex4.y, 1.0, 1.0)") !=
++        std::string::npos);
++  CHECK(w.find("let ti4 = (in.texmtxidx_hi >> (8u * 0u)) & 0xFFu") !=
++        std::string::npos);
++  CHECK(w.find("let uv = in.uv4.xy; rawtextemp") != std::string::npos);
++}
++
++void test_fifth_texgen_plan_decode() {
++  gxc::GxCoreState state;
++  state.reset();
++  state.apply(bp(0x00u, 5u));
++  state.apply({.kind = ar::RenderStateKind::CpVcd,
++               .index = 0u,
++               .value = (1u << 5u) | (1u << 9u)}); // TEXMTXIDX4 + position
++  state.apply({.kind = ar::RenderStateKind::CpVcd,
++               .index = 1u,
++               .value = 1u << 8u}); // tex4 direct
++  state.apply({.kind = ar::RenderStateKind::CpVat,
++               .index = 0u,
++               .value = 1u | (4u << 1u),
++               .aux0 = 0u});
++  state.apply({.kind = ar::RenderStateKind::CpVat,
++               .index = 0u,
++               .value = (1u << 27u) | (4u << 28u),
++               .aux0 = 1u});
++  state.apply({.kind = ar::RenderStateKind::CpVat,
++               .index = 0u,
++               .value = 0u,
++               .aux0 = 2u});
++
++  ar::ConsumedDraw draw{};
++  draw.primitive = 0x80u;
++  draw.vertex_count = 4u;
++  draw.vertex_size = 21u; // matrix index + f32x3 position + f32x2 tex4
++  constexpr float vertices[4][5] = {
++      {-1.f, -1.f, 0.f, 0.25f, 0.5f},
++      {1.f, -1.f, 0.f, 0.75f, 0.5f},
++      {1.f, 1.f, 0.f, 0.75f, 1.f},
++      {-1.f, 1.f, 0.f, 0.25f, 1.f},
++  };
++  for (const auto& vertex : vertices) {
++    draw.vertex_payload.push_back(33u); // fifth matrix row from MatrixIndexB
++    for (float value : vertex)
++      append_be_f32(draw.vertex_payload, value);
++  }
++
++  draw.transform_flags = ar::kDrawTransformProjectionValid;
++  draw.projection[0] = 1.f;
++  draw.projection[2] = 1.f;
++  draw.projection[4] = -1.f;
++  draw.projection_type = 1u;
++  draw.current_pn_matrix = 0u;
++  draw.position_matrix_valid_mask = 1u;
++  draw.position_matrices[0][0] = 1.f;
++  draw.position_matrices[0][5] = 1.f;
++  draw.position_matrices[0][10] = 1.f;
++
++  std::uint32_t matrix_a = 0u;
++  for (std::uint32_t i = 0; i < 4u; ++i)
++    matrix_a |= 60u << (6u + 6u * i);
++  draw.xf_regs[0] = matrix_a;
++  draw.xf_regs[1] = 33u;
++  draw.xf_regs[0x27] = 5u;
++  draw.xf_regs[0x2C] = 9u << 7u; // texgen4 regular source Tex4
++  draw.xf_reg_mask =
++      (1ull << 0u) | (1ull << 1u) | (1ull << 0x27u) | (1ull << 0x2Cu);
++  draw.tex_matrices[10][0] = 1.f;
++  draw.tex_matrices[10][5] = 1.f;
++  draw.tex_matrices[10][10] = 1.f;
++  draw.tex_matrix_word_mask[10] = 0xFFFu;
++  draw.tex_matrices[1][0] = 2.f;
++  draw.tex_matrices[1][5] = 3.f;
++  draw.tex_matrices[1][10] = 4.f;
++  draw.tex_matrix_word_mask[1] = 0xFFFu;
++
++  gxc::GapCounters gaps;
++  const gxc::DrawPlan plan = state.build_draw_plan(draw, gaps);
++  CHECK(plan.ok);
++  CHECK(plan.pipeline.shader.num_tex_gens == 5u);
++  CHECK(plan.pipeline.shader.uv_mask == 0x10u);
++  CHECK(plan.pipeline.shader.tex_mtx_idx_mask == 0x10u);
++  CHECK(gaps.texgen_count_5 == 1u);
++  CHECK(gaps.texgen_count_overflow == 0u);
++  CHECK(gaps.unsupported_texgen == 0u);
++  CHECK(plan.constants.texmatrices[12][0] == 2.f);
++  CHECK(plan.constants.texmatrices[13][1] == 3.f);
++  CHECK(plan.constants.texmatrices[14][2] == 4.f);
++  const float* vertex = plan.vertices.data();
++  CHECK(vertex[(gxc::kVertexUvOffset + 32u) / 4u] == 0.25f);
++  CHECK(vertex[(gxc::kVertexUvOffset + 36u) / 4u] == 0.5f);
++  std::uint32_t texidx_hi = 0u;
++  std::memcpy(&texidx_hi,
++              vertex + gxc::kVertexTexMtxIdxHiOffset / 4u,
++              sizeof texidx_hi);
++  CHECK((texidx_hi & 0xFFu) == 33u);
++}
++
+ // Item 5: Emboss texgen (Dolphin VertexShaderGen) adds the view-space light dir
+ // projected onto tangent/binormal to the emboss-source texgen's coords. Needs
+ // the lights uniform + NBT vertex inputs even on an unlit draw.
+@@ -1538,6 +1668,8 @@ int main() {
+   test_untextured_defaults();
+   test_texgen_color();
+   test_texgen_normal_source();
++  test_five_texgens();
++  test_fifth_texgen_plan_decode();
+   test_texgen_emboss();
+   test_texgen_per_vertex_mtx();
+   test_tev_indirect_matrix();
+-- 
+2.41.0

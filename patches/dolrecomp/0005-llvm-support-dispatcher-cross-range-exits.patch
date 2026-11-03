@@ -1,0 +1,252 @@
+From d30b390bfc065d768959dfb09cedf47d2a9726ad Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 10:39:06 -0500
+Subject: [PATCH] llvm: support dispatcher cross-range exits
+
+---
+ CMakeLists.txt                      |  3 ++-
+ src/app/cli.c                       |  6 ++++++
+ src/app/cli.h                       |  1 +
+ src/app/pipeline.c                  |  8 +++++++-
+ src/backend/llvm/branch_targets.cpp |  2 ++
+ src/backend/llvm/emitter.cpp        |  1 +
+ src/backend/llvm/emitter.h          |  1 +
+ src/backend/llvm/llvm_backend.h     |  1 +
+ tests/llvm_fixture.cpp              |  9 +++++++++
+ tests/llvm_ir_test.cpp              | 26 +++++++++++++++++++++++++-
+ tests/test_cli.c                    |  2 ++
+ 11 files changed, 57 insertions(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7fce8be..0383575 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -339,7 +339,8 @@ if(DOLRECOMP_ENABLE_LLVM)
+              ${CMAKE_CURRENT_BINARY_DIR}/dolir_test.ll.instrumented
+              ${CMAKE_CURRENT_BINARY_DIR}/dolir_test.ll.pgo
+              ${CMAKE_CURRENT_BINARY_DIR}/dolir_test.o.v2.bc
+-             ${CMAKE_CURRENT_BINARY_DIR}/dolir_test.ll.fast)
++             ${CMAKE_CURRENT_BINARY_DIR}/dolir_test.ll.fast
++             ${CMAKE_CURRENT_BINARY_DIR}/dolir_test.ll.dispatch)
+     set_tests_properties(llvm_ir PROPERTIES DEPENDS llvm_fixture)
+     set(DOLRECOMP_TEST_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/dolir_execute.o)
+     set(DOLRECOMP_TEST_IR ${CMAKE_CURRENT_BINARY_DIR}/dolir_execute.ll)
+diff --git a/src/app/cli.c b/src/app/cli.c
+index 648dfd8..7b24c32 100644
+--- a/src/app/cli.c
++++ b/src/app/cli.c
+@@ -23,6 +23,7 @@ void print_usage(const char* argv0) {
+     fprintf(stderr, "  --profile-use <path>           Optimize with an existing profile\n");
+     fprintf(stderr, "  --partition-instructions <n>   Reproducible object partition size\n");
+     fprintf(stderr, "  --partition-seed <n>           Stable partition naming seed\n");
++    fprintf(stderr, "  --llvm-dispatch-cross-range    Return cross-partition control to the dispatcher\n");
+     fprintf(stderr, "  --gamecube                     GameCube mode (no title ID required)\n");
+     fprintf(stderr, "  --rel-base <addr>              Override first virtual load address for REL codegen\n");
+     fprintf(stderr, "  --map <path>                   Load optional function names from a linker MAP\n");
+@@ -334,6 +335,11 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+             continue;
+         }
+ 
++        if (strcmp(arg, "--llvm-dispatch-cross-range") == 0) {
++            opts->llvm_dispatch_cross_range = 1;
++            continue;
++        }
++
+         if (strcmp(arg, "--cpu") == 0) {
+             if (i + 1 >= argc) {
+                 fprintf(stderr, "error: --cpu needs gekko, broadway, or espresso\n");
+diff --git a/src/app/cli.h b/src/app/cli.h
+index 77f867a..83ad152 100644
+--- a/src/app/cli.h
++++ b/src/app/cli.h
+@@ -31,6 +31,7 @@ typedef struct {
+     int show_help;
+     int fast_semantics;
+     int lockstep_instrumentation;
++    int llvm_dispatch_cross_range;
+ } CliOptions;
+ 
+ void print_usage(const char* argv0);
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index 3306611..e884cfc 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v19"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v20"
+ 
+ typedef struct {
+     const PPCInst* insts;
+@@ -70,6 +70,7 @@ typedef struct {
+     DolLLVMTargetProfile target_profile;
+     DolLLVMSemantics semantics;
+     DolLLVMInstrumentation instrumentation;
++    int dispatch_cross_range;
+     const char* profile_generate_path;
+     const char* profile_use_path;
+     u64 partition_seed;
+@@ -260,6 +261,8 @@ static u64 llvm_job_hash(const LLVMChunkJob* job) {
+     hash = hash_bytes(hash, &job->semantics, sizeof(job->semantics));
+     hash = hash_bytes(hash, &job->instrumentation,
+                       sizeof(job->instrumentation));
++    hash = hash_bytes(hash, &job->dispatch_cross_range,
++                      sizeof(job->dispatch_cross_range));
+     hash = hash_bytes(hash, &job->partition_seed,
+                       sizeof(job->partition_seed));
+     hash = hash_bytes(hash, &job->ram_size, sizeof(job->ram_size));
+@@ -461,6 +464,7 @@ static int emit_llvm_chunk_job(const void* data, void* user) {
+     options.target_profile = job->target_profile;
+     options.semantics = job->semantics;
+     options.instrumentation = job->instrumentation;
++    options.dispatch_cross_range = job->dispatch_cross_range;
+     options.symbol_suffix = job->symbol_suffix;
+     options.profile_generate_path = job->profile_generate_path;
+     options.profile_use_path = job->profile_use_path;
+@@ -876,6 +880,8 @@ static int emit_code_sections_llvm(const LoadedCodeSection* sections,
+                 target_job->instrumentation = options->lockstep_instrumentation
+                                                   ? DOLLLVM_INSTRUMENTATION_LOCKSTEP
+                                                   : DOLLLVM_INSTRUMENTATION_NONE;
++                target_job->dispatch_cross_range =
++                    options->llvm_dispatch_cross_range;
+                 target_job->profile_generate_path =
+                     options->profile_generate_path;
+                 target_job->profile_use_path = options->profile_use_path;
+diff --git a/src/backend/llvm/branch_targets.cpp b/src/backend/llvm/branch_targets.cpp
+index 43ed05c..dcf6ca6 100644
+--- a/src/backend/llvm/branch_targets.cpp
++++ b/src/backend/llvm/branch_targets.cpp
+@@ -37,6 +37,8 @@ BasicBlock *FunctionEmitter::externalDestination(const DolIRTerminator &term,
+   const DolLLVMFunctionRange *range = rangeFor(target);
+   if (!range)
+     return nullptr;
++  if (dispatch_cross_range_)
++    return exitDestination(target);
+   BasicBlock *callBlock = BasicBlock::Create(
+       context_, term.linked ? "direct_call" : "direct_tail", function_);
+   IRBuilderBase::InsertPoint saved = builder_.saveIP();
+diff --git a/src/backend/llvm/emitter.cpp b/src/backend/llvm/emitter.cpp
+index e26aa07..afcd8ee 100644
+--- a/src/backend/llvm/emitter.cpp
++++ b/src/backend/llvm/emitter.cpp
+@@ -26,6 +26,7 @@ FunctionEmitter::FunctionEmitter(LLVMContext &context, Module &module,
+       entry_point_count_(options.entry_point_count),
+       write_journal_(options.instrumentation ==
+                      DOLLLVM_INSTRUMENTATION_LOCKSTEP),
++      dispatch_cross_range_(options.dispatch_cross_range != 0),
+       semantics_(options.semantics),
+       symbol_suffix_(options.symbol_suffix ? options.symbol_suffix : ""),
+       fixed_memory_layout_(options.fixed_memory_layout != 0),
+diff --git a/src/backend/llvm/emitter.h b/src/backend/llvm/emitter.h
+index dbce5d9..38b7cd4 100644
+--- a/src/backend/llvm/emitter.h
++++ b/src/backend/llvm/emitter.h
+@@ -224,6 +224,7 @@ private:
+   const u32 *entry_points_ = nullptr;
+   u32 entry_point_count_ = 0;
+   bool write_journal_ = false;
++  bool dispatch_cross_range_ = false;
+   DolLLVMSemantics semantics_ = DOLLLVM_SEMANTICS_EXACT;
+   std::string symbol_suffix_;
+   bool fixed_memory_layout_ = false;
+diff --git a/src/backend/llvm/llvm_backend.h b/src/backend/llvm/llvm_backend.h
+index 71790a3..c4c8b87 100644
+--- a/src/backend/llvm/llvm_backend.h
++++ b/src/backend/llvm/llvm_backend.h
+@@ -48,6 +48,7 @@ typedef struct {
+     u32 ram_size;
+     u32 mem2_size;
+     u64 partition_seed;
++    int dispatch_cross_range;
+     const DolLLVMFunctionRange* function_ranges;
+     u32 function_range_count;
+     const u32* entry_points;
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index 5bd4213..b6ff0f5 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -369,6 +369,15 @@ int main(int argc, char **argv) {
+   CHECK(dolllvm_emit_object(&module, argv[1], &options, stderr));
+   CHECK(dolllvm_object_matches_options(argv[1], &options));
+ 
++  const std::string dispatch_path = std::string(argv[1]) + ".dispatch";
++  const std::string dispatch_ir = std::string(argv[2]) + ".dispatch";
++  options.dispatch_cross_range = 1;
++  options.ir_path = dispatch_ir.c_str();
++  CHECK(dolllvm_emit_object(&module, dispatch_path.c_str(), &options, stderr));
++  CHECK(dolllvm_object_matches_options(dispatch_path.c_str(), &options));
++  options.dispatch_cross_range = 0;
++  options.ir_path = argv[2];
++
+   const std::string v2_path = std::string(argv[1]) + ".v2";
+   const std::string v2_copy = std::string(argv[1]) + ".v2.copy";
+   options.emit_ir = 0;
+diff --git a/tests/llvm_ir_test.cpp b/tests/llvm_ir_test.cpp
+index d5b8eb4..aa9d3ef 100644
+--- a/tests/llvm_ir_test.cpp
++++ b/tests/llvm_ir_test.cpp
+@@ -20,7 +20,7 @@
+   } while (0)
+ 
+ int main(int argc, char **argv) {
+-  CHECK(argc == 6);
++  CHECK(argc == 7);
+   llvm::LLVMContext context;
+   llvm::SMDiagnostic diagnostic;
+   std::unique_ptr<llvm::Module> module =
+@@ -73,6 +73,30 @@ int main(int argc, char **argv) {
+   CHECK(known_edge);
+   CHECK(state_phi && tail_edge && weighted_branch);
+ 
++  llvm::LLVMContext dispatchContext;
++  std::unique_ptr<llvm::Module> dispatchModule =
++      llvm::parseIRFile(argv[6], diagnostic, dispatchContext);
++  CHECK(dispatchModule != nullptr);
++  llvm::Function *dispatchCross =
++      dispatchModule->getFunction("func_80002D00_budget");
++  CHECK(dispatchCross != nullptr);
++  bool crossRangeCall = false;
++  bool targetMaterialized = false;
++  for (llvm::BasicBlock &block : *dispatchCross) {
++    for (llvm::Instruction &instruction : block) {
++      if (auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
++        if (call->getCalledFunction() &&
++            call->getCalledFunction()->getName() == "func_80002E00_budget")
++          crossRangeCall = true;
++      }
++      for (llvm::Use &operand : instruction.operands()) {
++        auto *value = llvm::dyn_cast<llvm::ConstantInt>(operand.get());
++        targetMaterialized |= value && value->getZExtValue() == 0x80002E00u;
++      }
++    }
++  }
++  CHECK(!crossRangeCall && targetMaterialized);
++
+   auto check_paired_function = [](llvm::Function *function,
+                                   unsigned minimum_math,
+                                   unsigned minimum_single_math) {
+diff --git a/tests/test_cli.c b/tests/test_cli.c
+index 6300202..af314fd 100644
+--- a/tests/test_cli.c
++++ b/tests/test_cli.c
+@@ -11,6 +11,7 @@ int main(void) {
+         "dolrecomp", "--gamecube", "--backend=llvm",
+         "--targets=x86-64-v2,x86-64-v3", "--semantics=fast",
+         "--instrumentation=lockstep", "--profile-use=profile.profdata",
++        "--llvm-dispatch-cross-range",
+         "--partition-instructions", "512", "--partition-seed", "42",
+         "input.dol", "output",
+     };
+@@ -20,6 +21,7 @@ int main(void) {
+     CHECK(options.backend == DOLRECOMP_BACKEND_LLVM);
+     CHECK(strcmp(options.llvm_targets, "x86-64-v2,x86-64-v3") == 0);
+     CHECK(options.fast_semantics && options.lockstep_instrumentation);
++    CHECK(options.llvm_dispatch_cross_range);
+     CHECK(strcmp(options.profile_use_path, "profile.profdata") == 0);
+     CHECK(options.partition_instructions == 512u);
+     CHECK(options.partition_seed == 42u);
+-- 
+2.41.0
+

@@ -1,0 +1,529 @@
+From 7f23ea22eba50b43855f1a8445ce96dac488c827 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 03:15:03 -0500
+Subject: [PATCH] graphics: implement indirect TEV coordinates
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |   6 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   5 +-
+ .../include/gxruntime/gxcore/gxcore.hpp       |   3 +-
+ .../include/gxruntime/gxcore/shader.hpp       |  34 +++-
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  68 ++++++-
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 167 +++++++++++++++++-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         |  27 +++
+ 7 files changed, 293 insertions(+), 17 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 8e383eb833..4e6e5f7e76 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -417,7 +417,8 @@ void dol_aurora_shutdown(void) {
+                      "tev_multi_texmap=%llu efb_copy_ignored=%llu "
+                      "efb_copies=%llu efb_copy_depth=%llu "
+                      "efb_display_copies=%llu fog_ignored=%llu "
+-                     "indirect_ignored=%llu logic_op_ignored=%llu\n",
++                     "indirect_active=%llu indirect_ignored=%llu "
++                     "logic_op_ignored=%llu\n",
+                      gx_aurora::g_core_submitted, gx_aurora::g_core_rejected,
+                      gx_aurora::g_shadow_frontend_failed ? 1 : 0,
+                      gaps.draws_planned, gaps.draws_skipped,
+@@ -446,7 +447,8 @@ void dol_aurora_shutdown(void) {
+                      gaps.tev_stages_over, gaps.tev_multi_texmap,
+                      gaps.efb_copy_ignored, gaps.efb_copies,
+                      gaps.efb_copy_depth, gaps.efb_display_copies,
+-                     gaps.fog_ignored, gaps.indirect_ignored,
++                     gaps.fog_ignored, gaps.indirect_active,
++                     gaps.indirect_ignored,
+                      gaps.logic_op_ignored);
+     }
+ #endif
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index f5bb4ee625..b2c403af62 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -31,8 +31,9 @@ struct DrawData {
+ // v3: S15 lit vertex layout. v4: S16 fog (PixelShaderConstants grows +
+ // fog fragment on the TEV path). v5: Mfin multi-texmap (a TEV combining >1 texmap
+ // now emits per-texmap samplers + a wider texture bind group under an unchanged
+-// key, so a persisted v4 pipeline for such a draw is stale).
+-constexpr uint32_t GXCorePipelineConfigVersion = 5;
++// key, so a persisted v4 pipeline for such a draw is stale). v6: indirect TEV
++// stages add shader structure, pixel constants, and indirect texmap bindings.
++constexpr uint32_t GXCorePipelineConfigVersion = 6;
+ 
+ struct PipelineConfig {
+   uint32_t version = GXCorePipelineConfigVersion;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 2f6a932f05..07355bde7f 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -55,7 +55,8 @@ struct GapCounters {
+   unsigned long long efb_copy_depth = 0;        // of which Z-source (PE Z24)
+   unsigned long long efb_display_copies = 0;    // GXCopyDisp (clear-only, 0xF)
+   unsigned long long fog_ignored = 0;           // fog enabled on a non-TEV draw
+-  unsigned long long indirect_ignored = 0;      // genMode ind stages (nonscope)
++  unsigned long long indirect_active = 0;       // plans using an indirect stage
++  unsigned long long indirect_ignored = 0;      // invalid/undefined indirect state
+   unsigned long long logic_op_ignored = 0;      // cmode0 logic-op enable
+ };
+ 
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index c7a5e0d372..b293ad5cd4 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -107,6 +107,17 @@ inline constexpr std::uint32_t kMaxTexGens = 4;
+ // Slice cap: the S9 gameplay histogram shows numtevstages <= 6.
+ inline constexpr std::uint32_t kMaxTevStages = 8;
+ 
++// Hardware exposes four indirect lookups, referenced by each TEV stage.
++inline constexpr std::uint32_t kMaxIndirectStages = 4;
++
++struct IndirectStageKey {
++  std::uint8_t texmap = 0;
++  std::uint8_t texcoord = 0;
++  std::uint8_t scale_s = 0;
++  std::uint8_t scale_t = 0;
++};
++static_assert(std::has_unique_object_representations_v<IndirectStageKey>);
++
+ // One TEV stage's structural config (Dolphin PixelShaderGen stagehash shape).
+ // All fields are raw BP register subfields (BPMemory.h TevStageCombiner /
+ // TwoTevStageOrders / AllTevKSels); resolved swap tables and konst selectors
+@@ -138,6 +149,17 @@ struct TevStageKey {
+   std::uint8_t tevorders_texmap = 0;
+   std::uint8_t tevorders_colorchan = 0; // RasColorChan
+   std::uint8_t tevorders_enable = 0;    // reads texture when set
++  // TevStageIndirect (BP 0x10+n).
++  std::uint8_t ind_stage = 0;
++  std::uint8_t ind_format = 0;
++  std::uint8_t ind_bias = 0;
++  std::uint8_t ind_bump_alpha = 0;
++  std::uint8_t ind_matrix_index = 0;
++  std::uint8_t ind_matrix_id = 0;
++  std::uint8_t ind_wrap_s = 0;
++  std::uint8_t ind_wrap_t = 0;
++  std::uint8_t ind_use_original_lod = 0;
++  std::uint8_t ind_add_prev = 0;
+   std::uint8_t pad0 = 0;
+   std::uint8_t pad1 = 0;
+ };
+@@ -184,6 +206,7 @@ struct ShaderKey {
+   // (used when combiner regs were never seen, e.g. synthetic slices).
+   std::uint8_t tev_valid = 0;
+   std::uint8_t num_tev_stages = 0; // 1..kMaxTevStages when tev_valid
++  std::uint8_t num_ind_stages = 0; // BP genMode numindstages, capped at 4
+   // Alpha test (BP 0xF3 AlphaTest): comp0/comp1 CompareMode, logic AlphaTestOp.
+   std::uint8_t alpha_comp0 = 7; // default Always
+   std::uint8_t alpha_comp1 = 7;
+@@ -225,9 +248,9 @@ struct ShaderKey {
+   // Re-pad the scalar block to a multiple of 4, keeping ShaderKey a
+   // unique-object-representation (memcmp identity) type.
+   std::uint8_t pad2 = 0;
+-  std::uint8_t pad3 = 0;
+   LightChanKey litchan[4]{}; // color0, color1, alpha0, alpha1
+   TexGenKey tex_gens[kMaxTexGens]{};
++  IndirectStageKey ind_stages[kMaxIndirectStages]{};
+   TevStageKey tev_stages[kMaxTevStages]{};
+ };
+ static_assert(std::has_unique_object_representations_v<ShaderKey>);
+@@ -309,8 +332,12 @@ struct PixelShaderConstants {
+   std::int32_t fogi[4]{};       // .y = b_magnitude, .w = b_shift
+   float fogf[4]{};              // .x=A .y=C .z=center .w=width
+   float fogrange[3][4]{};       // Dolphin I_FOGRANGE K table (indices 0..9)
++  // Dolphin I_INDTEXMTX: two signed integer rows per matrix. xyz are the BP
++  // coefficients; w is the post-dot shift (17 - the BP matrix scale).
++  std::int32_t indtexmtx[6][4]{};
+ };
+-static_assert(sizeof(PixelShaderConstants) == (4 + 4 + 1 + 1 + 1 + 1 + 3) * 16);
++static_assert(sizeof(PixelShaderConstants) ==
++              (4 + 4 + 1 + 1 + 1 + 1 + 3 + 6) * 16);
+ 
+ // --- Fixed decoded-vertex layout (slice) ------------------------------------
+ //
+@@ -361,6 +388,9 @@ inline std::uint32_t used_texmap_mask(const ShaderKey& key) {
+     const TevStageKey& s = key.tev_stages[n];
+     if (s.tevorders_enable != 0u)
+       mask |= (1u << (s.tevorders_texmap & 7u));
++    if (s.ind_stage < key.num_ind_stages &&
++        (s.ind_matrix_index != 0u || s.ind_bump_alpha != 0u))
++      mask |= (1u << (key.ind_stages[s.ind_stage].texmap & 7u));
+   }
+   return mask != 0u ? mask : 1u;
+ }
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index a54a323f0b..7bfecd260a 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -16,6 +16,10 @@ std::uint32_t bits(std::uint32_t value, std::uint32_t count,
+   return (value >> shift) & ((1u << count) - 1u);
+ }
+ 
++std::int32_t sx11(std::uint32_t value) {
++  return static_cast<std::int32_t>(value << 21) >> 21;
++}
++
+ // FogParam0/FogParam3 FloatValue (Dolphin BPMemory.cpp): mant(11)/exp(8)/sign(1)
+ // re-expanded to an IEEE-754 f32 (mantissa scaled from 11 to 23 bits).
+ float fog_param_float(std::uint32_t raw) {
+@@ -515,8 +519,6 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     ++counters.cull_all_draws;
+     return skip("genMode culls all");
+   }
+-  if (bits(gen_mode, 3, 16) != 0u)
+-    ++counters.indirect_ignored;
+   // Alpha test is consumed by the TEV path (below); only count it as ignored
+   // when no combiner was captured and we fall back to the passthrough fragment.
+   if (!bp_valid_[0xC0] && bp_valid_[0xF3]) {
+@@ -640,6 +642,25 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+         !walk.has_nbt)
+       ++counters.unsupported_texgen;
+   }
++  std::uint32_t num_ind_stages = bits(gen_mode, 3, 16);
++  if (num_ind_stages > kMaxIndirectStages) {
++    ++counters.indirect_ignored;
++    num_ind_stages = kMaxIndirectStages;
++  }
++  key.num_ind_stages = static_cast<std::uint8_t>(num_ind_stages);
++  if (num_ind_stages != 0u)
++    ++counters.indirect_active;
++  const std::uint32_t indref = bp_valid_[0x27] ? bp_regs_[0x27] : 0u;
++  for (std::uint32_t i = 0; i < num_ind_stages; ++i) {
++    IndirectStageKey& ind = key.ind_stages[i];
++    ind.texmap = static_cast<std::uint8_t>(bits(indref, 3, 6u * i));
++    ind.texcoord = static_cast<std::uint8_t>(bits(indref, 3, 6u * i + 3u));
++    const std::uint32_t scale =
++        bp_valid_[0x25u + i / 2u] ? bp_regs_[0x25u + i / 2u] : 0u;
++    const std::uint32_t shift = (i & 1u) != 0u ? 8u : 0u;
++    ind.scale_s = static_cast<std::uint8_t>(bits(scale, 4, shift));
++    ind.scale_t = static_cast<std::uint8_t>(bits(scale, 4, shift + 4u));
++  }
+   const std::uint32_t tex_format = draw.texture.format;
+   if (draw.texture.valid &&
+       (tex_format == 0x8u || tex_format == 0x9u || tex_format == 0xAu))
+@@ -702,6 +723,25 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+           static_cast<std::uint8_t>(odd ? bits(ord, 1, 18) : bits(ord, 1, 6));
+       ts.tevorders_colorchan =
+           static_cast<std::uint8_t>(odd ? bits(ord, 3, 19) : bits(ord, 3, 7));
++      const std::uint32_t indirect =
++          bp_valid_[0x10u + n] ? bp_regs_[0x10u + n] : 0u;
++      ts.ind_stage = static_cast<std::uint8_t>(bits(indirect, 2, 0));
++      ts.ind_format = static_cast<std::uint8_t>(bits(indirect, 2, 2));
++      ts.ind_bias = static_cast<std::uint8_t>(bits(indirect, 3, 4));
++      ts.ind_bump_alpha = static_cast<std::uint8_t>(bits(indirect, 2, 7));
++      ts.ind_matrix_index = static_cast<std::uint8_t>(bits(indirect, 2, 9));
++      ts.ind_matrix_id = static_cast<std::uint8_t>(bits(indirect, 2, 11));
++      ts.ind_wrap_s = static_cast<std::uint8_t>(bits(indirect, 3, 13));
++      ts.ind_wrap_t = static_cast<std::uint8_t>(bits(indirect, 3, 16));
++      ts.ind_use_original_lod =
++          static_cast<std::uint8_t>(bits(indirect, 1, 19));
++      ts.ind_add_prev = static_cast<std::uint8_t>(bits(indirect, 1, 20));
++      const bool samples_indirect =
++          ts.ind_matrix_index != 0u || ts.ind_bump_alpha != 0u;
++      if (samples_indirect && ts.ind_stage >= num_ind_stages)
++        ++counters.indirect_ignored;
++      if (ts.ind_matrix_id == 3u || ts.ind_use_original_lod != 0u)
++        ++counters.indirect_ignored;
+       if (ts.tevorders_enable != 0u && ts.tevorders_texmap != 0u)
+         ++counters.tev_multi_texmap;
+       // Konst selectors (AllTevKSels ksel[n/2]).
+@@ -1104,6 +1144,30 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+         static_cast<std::int32_t>(bits(bp_regs_[0xF3], 8, 8));
+   }
+ 
++  for (std::uint32_t m = 0; m < 3u; ++m) {
++    const std::uint32_t a = bp_valid_[0x06u + 3u * m]
++                                ? bp_regs_[0x06u + 3u * m]
++                                : 0u;
++    const std::uint32_t b = bp_valid_[0x07u + 3u * m]
++                                ? bp_regs_[0x07u + 3u * m]
++                                : 0u;
++    const std::uint32_t cword = bp_valid_[0x08u + 3u * m]
++                                    ? bp_regs_[0x08u + 3u * m]
++                                    : 0u;
++    const std::int32_t matrix_shift = 17 - static_cast<std::int32_t>(
++        bits(a, 2, 22) | (bits(b, 2, 22) << 2u) |
++        (bits(cword, 1, 22) << 4u));
++    plan.pixel_constants.indtexmtx[2u * m][0] = sx11(bits(a, 11, 0));
++    plan.pixel_constants.indtexmtx[2u * m][1] = sx11(bits(b, 11, 0));
++    plan.pixel_constants.indtexmtx[2u * m][2] = sx11(bits(cword, 11, 0));
++    plan.pixel_constants.indtexmtx[2u * m][3] = matrix_shift;
++    plan.pixel_constants.indtexmtx[2u * m + 1u][0] = sx11(bits(a, 11, 11));
++    plan.pixel_constants.indtexmtx[2u * m + 1u][1] = sx11(bits(b, 11, 11));
++    plan.pixel_constants.indtexmtx[2u * m + 1u][2] =
++        sx11(bits(cword, 11, 11));
++    plan.pixel_constants.indtexmtx[2u * m + 1u][3] = matrix_shift;
++  }
++
+   // Fog (S16, Dolphin PixelShaderManager fog constants). The fog uniform lives
+   // in PixelShaderConstants, bound only on the TEV path, so fog emits on TEV
+   // draws; a fog-enabled non-TEV draw is counted and renders fog-free.
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 773e77fc75..39120746fe 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -250,6 +250,7 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+   // Single-texmap (<=1 distinct texmap) samples tex0 exactly as before; a
+   // multi-texmap TEV (e.g. THP YUV Y/U/V on texmap 0/1/2) samples tex{texmap}.
+   const bool multi_texmap = texmap_popcount(used_texmap_mask(key)) > 1u;
++  const bool indirect_enabled = key.num_ind_stages != 0u;
+   emit(out, "@fragment\nfn fs_main(in: VertexOut) -> @location(0) vec4f {\n");
+   emit(out, "    var prev = psc.colors[0];\n"
+             "    var c0 = psc.colors[1];\n"
+@@ -262,7 +263,11 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+             "    var tevin_a = vec4i(0,0,0,0);\n"
+             "    var tevin_b = vec4i(0,0,0,0);\n"
+             "    var tevin_c = vec4i(0,0,0,0);\n"
+-            "    var tevin_d = vec4i(0,0,0,0);\n"
++            "    var tevin_d = vec4i(0,0,0,0);\n");
++  if (indirect_enabled)
++    emit(out, "    var alphabump = 0;\n"
++              "    var tevcoord = vec2i(0,0);\n");
++  emit(out,
+             "    let col0i = vec4i(round(in.color0 * 255.0));\n"
+             "    let col1i = vec4i(round(in.color1 * 255.0));\n");
+ 
+@@ -273,7 +278,9 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+     // Rasterized color, if referenced (RASC=10/RASA=11 color; RASA=5 alpha).
+     const bool uses_ras =
+         cc_uses(s, 10) || cc_uses(s, 11) || ac_uses(s, 5);
+-    if (uses_ras) {
++    const bool uses_bump_ras = indirect_enabled && uses_ras &&
++        (s.tevorders_colorchan == 5u || s.tevorders_colorchan == 6u);
++    if (uses_ras && !uses_bump_ras) {
+       const char* src = s.tevorders_colorchan == 0
+                             ? "col0i"
+                             : s.tevorders_colorchan == 1 ? "col1i"
+@@ -289,20 +296,151 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+     if (texcoord >= key.num_tex_gens)
+       texcoord = 0;
+     const std::uint32_t texunit = multi_texmap ? (s.tevorders_texmap & 7u) : 0u;
+-    if (s.tevorders_enable != 0 && key.num_tex_gens > 0 && key.textured != 0) {
+-      const bool proj =
+-          texcoord < kMaxTexGens && key.tex_gens[texcoord].projection != 0u;
++    const bool direct_sample =
++        s.tevorders_enable != 0 && key.num_tex_gens > 0 && key.textured != 0;
++    const bool proj =
++        texcoord < kMaxTexGens && key.tex_gens[texcoord].projection != 0u;
++    if (direct_sample && indirect_enabled) {
+       if (proj)
++        emitf(out, "    var stage_uv%u = in.uv%u.xy / max(in.uv%u.z, 1e-6);\n",
++              n, texcoord, texcoord);
++      else
++        emitf(out, "    var stage_uv%u = in.uv%u.xy;\n", n, texcoord);
++      emitf(out,
++            "    let stage_dims%u = vec2i(textureDimensions(tex%u));\n"
++            "    let base_coord%u = vec2i(round(stage_uv%u * "
++            "vec2f(stage_dims%u) * 128.0));\n",
++            n, texunit, n, n, n);
++    }
++
++    const bool valid_indirect = s.ind_stage < key.num_ind_stages;
++    const bool sample_indirect = valid_indirect &&
++        (s.ind_matrix_index != 0u || s.ind_bump_alpha != 0u);
++    if (sample_indirect) {
++      const IndirectStageKey& ind = key.ind_stages[s.ind_stage];
++      std::uint32_t indcoord = ind.texcoord;
++      if (indcoord >= key.num_tex_gens)
++        indcoord = 0u;
++      const std::uint32_t indunit = multi_texmap ? (ind.texmap & 7u) : 0u;
++      const bool indproj = indcoord < kMaxTexGens &&
++                           key.tex_gens[indcoord].projection != 0u;
++      if (indproj)
++        emitf(out,
++              "    let ind_uv%u = (in.uv%u.xy / max(in.uv%u.z, 1e-6)) / "
++              "vec2f(%u.0, %u.0);\n",
++              n, indcoord, indcoord, 1u << ind.scale_s,
++              1u << ind.scale_t);
++      else
++        emitf(out,
++              "    let ind_uv%u = in.uv%u.xy / vec2f(%u.0, %u.0);\n",
++              n, indcoord, 1u << ind.scale_s, 1u << ind.scale_t);
++      emitf(out,
++            "    let ind_raw%u = vec3i(round(textureSample(tex%u, samp%u, "
++            "ind_uv%u).abg * 255.0));\n",
++            n, indunit, indunit, n);
++      if (s.ind_bump_alpha != 0u) {
++        constexpr std::uint32_t alpha_shift[4] = {0u, 5u, 4u, 3u};
++        const std::uint32_t shift = alpha_shift[s.ind_format];
++        const char component = " xyz"[s.ind_bump_alpha];
++        emitf(out, "    alphabump = (ind_raw%u.%c << %uu) & 248;\n",
++              n, component, shift);
++      }
++      if (s.ind_matrix_index != 0u && direct_sample) {
++        constexpr std::uint32_t format_shift[4] = {0u, 3u, 4u, 5u};
++        emitf(out, "    var ind_coord%u = ind_raw%u >> vec3u(%uu);\n",
++              n, n, format_shift[s.ind_format]);
++        const int bias = s.ind_format == 0u ? -128 : 1;
++        if ((s.ind_bias & 1u) != 0u)
++          emitf(out, "    ind_coord%u.x += %d;\n", n, bias);
++        if ((s.ind_bias & 2u) != 0u)
++          emitf(out, "    ind_coord%u.y += %d;\n", n, bias);
++        if ((s.ind_bias & 4u) != 0u)
++          emitf(out, "    ind_coord%u.z += %d;\n", n, bias);
++        const std::uint32_t matrix = 2u * (s.ind_matrix_index - 1u);
++        if (s.ind_matrix_id == 0u) {
++          emitf(out,
++                "    var ind_trans%u = vec2i("
++                "psc.indtexmtx[%u].x * ind_coord%u.x + "
++                "psc.indtexmtx[%u].y * ind_coord%u.y + "
++                "psc.indtexmtx[%u].z * ind_coord%u.z, "
++                "psc.indtexmtx[%u].x * ind_coord%u.x + "
++                "psc.indtexmtx[%u].y * ind_coord%u.y + "
++                "psc.indtexmtx[%u].z * ind_coord%u.z) >> vec2u(3u);\n",
++                n, matrix, n, matrix, n, matrix, n, matrix + 1u, n,
++                matrix + 1u, n, matrix + 1u, n);
++        } else if (s.ind_matrix_id == 1u) {
++          emitf(out,
++                "    var ind_trans%u = (base_coord%u * "
++                "vec2i(ind_coord%u.x)) >> vec2u(8u);\n",
++                n, n, n);
++        } else if (s.ind_matrix_id == 2u) {
++          emitf(out,
++                "    var ind_trans%u = (base_coord%u * "
++                "vec2i(ind_coord%u.y)) >> vec2u(8u);\n",
++                n, n, n);
++        } else {
++          emitf(out, "    var ind_trans%u = vec2i(0,0);\n", n);
++        }
++        emitf(out,
++              "    if (psc.indtexmtx[%u].w >= 0) { ind_trans%u = "
++              "ind_trans%u >> vec2u(u32(psc.indtexmtx[%u].w)); } "
++              "else { ind_trans%u = ind_trans%u << "
++              "vec2u(u32(-psc.indtexmtx[%u].w)); }\n",
++              matrix, n, n, matrix, n, n, matrix);
++      }
++    }
++
++    if (direct_sample && indirect_enabled) {
++      auto wrap_expr = [](std::uint8_t wrap, const std::string& coord) {
++        if (wrap == 0u)
++          return coord;
++        if (wrap >= 6u)
++          return std::string("0");
++        const std::uint32_t period = (256u >> (wrap - 1u)) << 7u;
++        return "(" + coord + " & " + std::to_string(period - 1u) + ")";
++      };
++      const std::string sx = wrap_expr(s.ind_wrap_s,
++                                       "base_coord" + std::to_string(n) + ".x");
++      const std::string sy = wrap_expr(s.ind_wrap_t,
++                                       "base_coord" + std::to_string(n) + ".y");
++      emitf(out, "    let wrapped%u = vec2i(%s, %s);\n", n, sx.c_str(),
++            sy.c_str());
++      const bool has_translation =
++          sample_indirect && s.ind_matrix_index != 0u;
++      const std::string translation = has_translation
++                                          ? "ind_trans" + std::to_string(n)
++                                          : "vec2i(0,0)";
++      if (s.ind_add_prev != 0u)
++        emitf(out, "    tevcoord += wrapped%u + %s;\n", n,
++              translation.c_str());
++      else
++        emitf(out, "    tevcoord = wrapped%u + %s;\n", n,
++              translation.c_str());
++      emit(out, "    tevcoord = (tevcoord << vec2u(8u)) >> vec2u(8u);\n");
++      emitf(out,
++            "    stage_uv%u = vec2f(tevcoord) / "
++            "(vec2f(stage_dims%u) * 128.0);\n",
++            n, n);
++    }
++
++    if (direct_sample) {
++      if (indirect_enabled) {
++        emitf(out,
++              "    rawtextemp = vec4i(round(textureSample(tex%u, samp%u, "
++              "stage_uv%u) * 255.0));\n",
++              texunit, texunit, n);
++      } else if (proj) {
+         emitf(out,
+               "    { let uv = in.uv%u.xy / max(in.uv%u.z, 1e-6); "
+               "rawtextemp = vec4i(round(textureSample(tex%u, samp%u, uv) * "
+               "255.0)); }\n",
+               texcoord, texcoord, texunit, texunit);
+-      else
++      } else {
+         emitf(out,
+               "    { let uv = in.uv%u.xy; rawtextemp = "
+               "vec4i(round(textureSample(tex%u, samp%u, uv) * 255.0)); }\n",
+               texcoord, texunit, texunit);
++      }
+       emitf(out, "    textemp = rawtextemp.%c%c%c%c;\n",
+             kRgbaSwizzle[s.tex_swap[0]], kRgbaSwizzle[s.tex_swap[1]],
+             kRgbaSwizzle[s.tex_swap[2]], kRgbaSwizzle[s.tex_swap[3]]);
+@@ -312,6 +450,17 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+       emit(out, "    textemp = vec4i(255,255,255,255);\n");
+     }
+ 
++    if (uses_bump_ras) {
++      const char* bump = s.tevorders_colorchan == 5u
++                             ? "alphabump"
++                             : "(alphabump | (alphabump >> 5))";
++      emitf(out,
++            "    rastemp = vec4i(%s,%s,%s,%s).%c%c%c%c;\n",
++            bump, bump, bump, bump, kRgbaSwizzle[s.ras_swap[0]],
++            kRgbaSwizzle[s.ras_swap[1]], kRgbaSwizzle[s.ras_swap[2]],
++            kRgbaSwizzle[s.ras_swap[3]]);
++    }
++
+     // Konst, if referenced (KONST=14 color / 6 alpha).
+     if (cc_uses(s, 14) || ac_uses(s, 6))
+       emitf(out, "    konsttemp = vec4i(%s, %s);\n", kKselC[s.ksel_kc],
+@@ -611,8 +760,10 @@ std::string generate_wgsl(const ShaderKey& key) {
+               "    fogcolor: vec4i,\n"
+               "    fogi: vec4i,\n"
+               "    fogf: vec4f,\n"
+-              "    fogrange: array<vec4f, 3>,\n"
+-              "};\n"
++              "    fogrange: array<vec4f, 3>,\n");
++    if (key.num_ind_stages != 0u)
++      emit(out, "    indtexmtx: array<vec4i, 6>,\n");
++    emit(out, "};\n"
+               "@group(2) @binding(0) var<uniform> psc: PixelShaderConstants;\n");
+   }
+   if (key.textured != 0) {
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index af2f762572..0237e9ee7b 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -479,6 +479,32 @@ void test_texgen_per_vertex_mtx() {
+   CHECK(w2.find("in.texmtxidx") == std::string::npos);
+ }
+ 
++void test_tev_indirect_matrix() {
++  gxc::ShaderKey key{};
++  key.textured = 1;
++  key.tev_valid = 1;
++  key.num_tex_gens = 1;
++  key.num_tev_stages = 1;
++  key.num_ind_stages = 1;
++  key.tex_gens[0].enabled = 1;
++  key.ind_stages[0].texmap = 1;
++  key.ind_stages[0].texcoord = 0;
++  key.tev_stages[0].tevorders_enable = 1;
++  key.tev_stages[0].tevorders_texmap = 0;
++  key.tev_stages[0].tevorders_texcoord = 0;
++  key.tev_stages[0].ind_stage = 0;
++  key.tev_stages[0].ind_matrix_index = 1;
++
++  CHECK(gxc::used_texmap_mask(key) == 0x3u);
++  const std::string w = gxc::generate_wgsl(key);
++  CHECK(w.find("indtexmtx: array<vec4i, 6>") != std::string::npos);
++  CHECK(w.find("textureSample(tex1, samp1, ind_uv0).abg") !=
++        std::string::npos);
++  CHECK(w.find("stage_uv0 = vec2f(tevcoord)") != std::string::npos);
++  CHECK(w.find("textureSample(tex0, samp0, stage_uv0)") !=
++        std::string::npos);
++}
++
+ // Golden WGSL for the 1-stage modulate TEV key (tex * rasterized color0).
+ // Regenerate with GXCORE_PRINT_WGSL=1.
+ constexpr const char* kGoldenTevWgsl =
+@@ -1439,6 +1465,7 @@ int main() {
+   test_texgen_color();
+   test_texgen_emboss();
+   test_texgen_per_vertex_mtx();
++  test_tev_indirect_matrix();
+   test_vertex_texmtxidx_and_nbt();
+   test_tev_modulate();
+   test_tev_konst_and_alpha();
+-- 
+2.41.0

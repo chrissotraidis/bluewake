@@ -1,0 +1,14 @@
+--- a/lib/dolphin/gx/GXVert.cpp
++++ b/lib/dolphin/gx/GXVert.cpp
+@@ -12,7 +12,10 @@
+ bool sBeginAuto = false;
+ 
+ void pre_begin() {
+-  CHECK(!sInBegin, "GXBegin: called without matching GXEnd");
++  // Retail counted primitives end at their declared vertex count; GXEnd is
++  // optional (an empty SDK inline). Only the native GX_AUTO extension needs
++  // GXEnd to patch its byte length before another primitive can start.
++  CHECK(!sInBegin || !sBeginAuto, "GXBegin: GX_AUTO requires matching GXEnd");
+ 
+   // Flush dirty state before starting a draw
+   if (__gx->dirtyState != 0) {

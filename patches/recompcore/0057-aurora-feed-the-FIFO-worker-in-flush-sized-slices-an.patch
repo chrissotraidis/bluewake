@@ -1,0 +1,95 @@
+From e7d3f5b292997b4888387924b2375a1dd038f59a Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 09:41:11 -0500
+Subject: [PATCH 57/58] aurora: feed the FIFO worker in flush-sized slices and
+ name its failures
+
+The translation worker handed RetailGxFrontend whole batches. Its per-flush
+event trace holds DOL_GX_RECOMP_MAX_TRACE_EVENTS (8,192) events and drops the
+rest, so a heavy batch (60,483 bytes measured in the Outset play scene) failed
+the flush; the failure flag is sticky, so every later frame froze while the
+game kept running (gx-core failed=1 at shutdown). The worker also set that flag
+without a message, unlike the single-threaded path.
+
+Feed each batch in the 1 KiB slices the single-threaded path always flushed at
+(partial commands carry over in the parser), and report the first front-end
+failure with its opcode, offset and consumer. Measured on the iOS simulator
+route to controllable Outset: failed=0, 27.0 M draws submitted.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 46 +++++++++++++++++--
+ 1 file changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index e93a531ff7..4aeb456011 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -325,8 +325,7 @@ std::atomic<std::uint64_t> g_aurora_unframed_batches = 0;
+ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     if (batch.empty())
+         return;
+-    const std::span<const std::uint8_t> bytes(batch.data(), batch.size());
+-    bool flushed = false;
++    bool flushed = true;
+     // One batch, one frame: the lock keeps the main thread from closing the
+     // packet underneath this recording, and the gate below keeps this batch
+     // from recording into a packet that does not exist yet.
+@@ -334,7 +333,20 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     const bool record_into_aurora = g_gx_core_enabled && g_aurora_recording_open;
+     if (g_gx_core_enabled && !record_into_aurora)
+         g_aurora_unframed_batches.fetch_add(1, std::memory_order_relaxed);
+-    if (g_shadow_frontend.write_fifo(bytes)) {
++    // Feed the front end in the slices the single-threaded path flushes at.
++    // Its per-flush event trace holds DOL_GX_RECOMP_MAX_TRACE_EVENTS (8,192)
++    // events and silently drops the rest, so one heavy batch (60 KB measured in
++    // the Outset play scene) overflowed it, failed the flush and, because the
++    // failure is sticky, froze every later frame. A command split across two
++    // slices is carried over by the parser's partial-command handling.
++    constexpr std::size_t kSlice = 1024u;
++    for (std::size_t offset = 0; offset < batch.size() && flushed; offset += kSlice) {
++        const std::size_t size = std::min(kSlice, batch.size() - offset);
++        const std::span<const std::uint8_t> bytes(batch.data() + offset, size);
++        if (!g_shadow_frontend.write_fifo(bytes)) {
++            flushed = false;
++            break;
++        }
+         if (record_into_aurora)
+             flushed = g_shadow_frontend.flush(&g_core_sink);
+         else
+@@ -342,6 +354,34 @@ void g_fifo_translate(std::vector<std::uint8_t>& batch) {
+     }
+     if (!flushed) {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
++        if (!g_shadow_frontend_failed) {
++            // The single-threaded path names its failure; the worker has to as
++            // well, because a failed front end stops every later present.
++            std::fprintf(stderr,
++                         "[gx-core] worker frontend rejected FIFO: %s "
++                         "(opcode=0x%02X offset=%llu a=0x%08X b=0x%08X "
++                         "c=0x%08X d=0x%08X) consumer=%s recording=%d "
++                         "batch=%zu present=%llu\n",
++                         g_shadow_frontend.last_error() != nullptr
++                             ? g_shadow_frontend.last_error()
++                             : "none",
++                         static_cast<unsigned>(g_shadow_frontend.last_error_opcode()),
++                         static_cast<unsigned long long>(
++                             g_shadow_frontend.last_error_offset()),
++                         g_shadow_frontend.last_error_a(),
++                         g_shadow_frontend.last_error_b(),
++                         g_shadow_frontend.last_error_c(),
++                         g_shadow_frontend.last_error_d(),
++                         record_into_aurora
++                             ? (g_core_sink.failure_reason() != nullptr
++                                    ? g_core_sink.failure_reason()
++                                    : "none")
++                             : (g_shadow_packet_sink.failure_reason() != nullptr
++                                    ? g_shadow_packet_sink.failure_reason()
++                                    : "none"),
++                         record_into_aurora ? 1 : 0, batch.size(),
++                         static_cast<unsigned long long>(g_present_count));
++        }
+         g_shadow_frontend_failed = true;
+     }
+ }
+-- 
+2.41.0
+

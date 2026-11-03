@@ -1,0 +1,60 @@
+From 57cc2879656d3448955d71c725e8acaa2281bf38 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 19:24:56 +0900
+Subject: [PATCH] pipeline: synchronize shutdown with predicate wait
+
+---
+ .../aurora/lib/gfx/pipeline_cache.cpp         |  7 +++++-
+ .../aurora/tests/pipeline_shutdown_test.cpp   | 22 +++++++++++++++++++
+ 2 files changed, 28 insertions(+), 1 deletion(-)
+ create mode 100644 GXRuntime/graphics/aurora/tests/pipeline_shutdown_test.cpp
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
+index b807ac8e..eb83db38 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/pipeline_cache.cpp
+@@ -1183,7 +1183,12 @@ void initialize_pipeline_cache() {
+ void shutdown_pipeline_cache() {
+   g_pipelineCacheGeneration.fetch_add(1, std::memory_order_acq_rel);
+   if (g_hasPipelineThread) {
+-    g_pipelineThreadEnd = true;
++    {
++      // Publish under the predicate wait's mutex, so notification cannot land
++      // between the worker's false check and its transition to sleep.
++      std::lock_guard lock{g_pipelineMutex};
++      g_pipelineThreadEnd = true;
++    }
+     g_pipelineQueueCv.notify_all();
+     g_pipelineReadyCv.notify_all();
+     g_pipelineThread.join();
+diff --git a/GXRuntime/graphics/aurora/tests/pipeline_shutdown_test.cpp b/GXRuntime/graphics/aurora/tests/pipeline_shutdown_test.cpp
+new file mode 100644
+index 00000000..24dfe7d0
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/tests/pipeline_shutdown_test.cpp
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include "../lib/gfx/pipeline_cache.hpp"
++#include "../lib/internal.hpp"
++#include <chrono>
++#include <filesystem>
++#include <string>
++#include <thread>
++int main() {
++    auto directory = std::filesystem::temp_directory_path() /
++        ("bluewake-pipeline-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
++    std::filesystem::create_directory(directory);
++    std::string path = directory.string();
++    aurora::g_config.cachePath = path.c_str();
++    aurora::g_config.userPath = path.c_str();
++    aurora::g_config.resourcesPath = path.c_str(); // empty synthetic cache, no bundled game pipelines
++    for (unsigned i = 0; i < 1000; ++i) {
++        aurora::gfx::initialize_pipeline_cache();
++        if (i % 2) std::this_thread::yield();
++        aurora::gfx::shutdown_pipeline_cache();
++    }
++    std::filesystem::remove_all(directory);
++}
+-- 
+2.46.0
+

@@ -1,0 +1,224 @@
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index a3aa852..7028113 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -3,6 +3,7 @@
+ 
+ #include "gxruntime/aurora_recomp/render_sink.hpp"
+ 
++#include <atomic>
+ #include <cstddef>
+ #include <cstdint>
+ #include <span>
+@@ -100,6 +101,7 @@ public:
+   // counts each unmerged one in drawCallCount). Replay adds this to its draw
+   // count when gating against recorded PRESENT_STATS.
+   std::uint64_t zero_vertex_draws() const { return zero_vertex_draws_; }
++  std::uint64_t display_copies() const { return display_copies_.load(std::memory_order_relaxed); }
+   const char* last_error() const { return last_error_; }
+   std::size_t last_error_offset() const { return last_error_offset_; }
+   std::uint8_t last_error_opcode() const { return last_error_opcode_; }
+@@ -141,6 +143,7 @@ private:
+   // inner heap storage the emitted packets point at.
+   std::vector<std::vector<std::uint8_t>> draw_payload_queue_;
+   std::vector<DrawTransformSnapshot> draw_transform_queue_;
++  std::size_t draw_queue_count_ = 0; // live slots; the vectors keep capacity
+   std::size_t draw_payload_head_ = 0;
+   std::size_t draw_transform_head_ = 0;
+   void notify_events(std::uint32_t first_event);
+@@ -149,6 +152,7 @@ private:
+   std::uint64_t zero_vertex_draws_ = 0;
+   std::uint64_t unknown_opcodes_skipped_ = 0;
+   std::uint64_t display_lists_skipped_ = 0;
++  std::atomic<std::uint64_t> display_copies_{0};
+   TraceEventObserver event_observer_ = nullptr;
+   void* event_observer_user_ = nullptr;
+   std::uint32_t emitted_trace_count_ = 0;
+diff --git a/GXRuntime/graphics/frontend/src/render_sink.cpp b/GXRuntime/graphics/frontend/src/render_sink.cpp
+index 7ecfa96..b559505 100644
+--- a/GXRuntime/graphics/frontend/src/render_sink.cpp
++++ b/GXRuntime/graphics/frontend/src/render_sink.cpp
+@@ -209,10 +209,12 @@ bool ConsumingAuroraRenderSink::submit_packet(const RenderPacket& packet) {
+     ConsumedDraw* slot;
+     if (streaming_ && draws_.size() == 1u) {
+       slot = &draws_[0];
+-      std::vector<std::uint8_t> keep = std::move(slot->vertex_payload);
+-      *slot = ConsumedDraw{};
+-      keep.clear();
+-      slot->vertex_payload = std::move(keep);
++      // Every other field is assigned below, and arrays[] entries are fully
++      // written when a span appends them, so resetting the count and the
++      // payload is the whole reset (a value-initialize here zeroed 3.7 KB per
++      // draw only for the copies below to overwrite it).
++      slot->array_input_count = 0u;
++      slot->vertex_payload.clear();
+     } else {
+       if (streaming_)
+         draws_.clear();
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 9fd9eee..ad57afd 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -247,11 +247,21 @@ std::uint32_t payload_pn_matrix_mask(const DolGxRecompState& state,
+   return mask;
+ }
+ 
+-DrawTransformSnapshot snapshot_transform(const DolGxRecompState& state,
+-                                         const DolGxRecompVertexLayout& layout,
+-                                         std::span<const std::uint8_t> vertex_data,
+-                                         std::uint16_t vertex_count) {
+-  DrawTransformSnapshot out{};
++// Fills a queue slot in place. Every field is written (the arrays by a copy or,
++// for an invalid position matrix, a zero of that slot), so a reused slot reads
++// exactly as a value-initialized one would, without zeroing 2.3 KB first and
++// copying the result into the queue afterwards (both were per-draw memsets and
++// memmoves on the GX worker, about 18,000 draws a frame in heavy scenes).
++void snapshot_transform_into(DrawTransformSnapshot& out,
++                             const DolGxRecompState& state,
++                             const DolGxRecompVertexLayout& layout,
++                             std::span<const std::uint8_t> vertex_data,
++                             std::uint16_t vertex_count) {
++  out.transform_flags = 0u;
++  out.position_matrix_valid_mask = 0u;
++  std::memset(out.viewport, 0, sizeof(out.viewport));
++  std::memset(out.projection, 0, sizeof(out.projection));
++  out.projection_type = 0u;
+   if (state.viewport_valid) {
+     out.transform_flags |= kDrawTransformViewportValid;
+     std::memcpy(out.viewport, state.viewport, sizeof(out.viewport));
+@@ -267,8 +277,11 @@ DrawTransformSnapshot snapshot_transform(const DolGxRecompState& state,
+   if (out.payload_pn_matrix_mask != 0u)
+     out.transform_flags |= kDrawTransformPayloadPnMatrixValid;
+   for (std::uint32_t i = 0; i < DOL_GX_RECOMP_POSITION_MATRIX_COUNT; ++i) {
+-    if (!state.position_matrix_valid[i])
++    if (!state.position_matrix_valid[i]) {
++      std::memset(out.position_matrices[i], 0,
++                  sizeof(out.position_matrices[i]));
+       continue;
++    }
+     out.position_matrix_valid_mask |= (1u << i);
+     std::memcpy(out.position_matrices[i], state.position_matrices[i],
+                 sizeof(out.position_matrices[i]));
+@@ -287,7 +300,6 @@ DrawTransformSnapshot snapshot_transform(const DolGxRecompState& state,
+               sizeof(out.tex_matrix_word_mask));
+   std::memcpy(out.xf_regs, state.xf_regs, sizeof(out.xf_regs));
+   out.xf_reg_mask = state.xf_reg_mask;
+-  return out;
+ }
+ 
+ } // namespace
+@@ -303,6 +315,7 @@ void RetailGxFrontend::reset(const DolGuestAddressResolver* resolver) {
+   fifo_buffer_.clear();
+   draw_payload_queue_.clear();
+   draw_transform_queue_.clear();
++  draw_queue_count_ = 0u;
+   draw_payload_head_ = 0u;
+   draw_transform_head_ = 0u;
+   zero_vertex_draws_ = 0u;
+@@ -678,6 +691,11 @@ bool RetailGxFrontend::parse_stream(std::span<const std::uint8_t> bytes,
+         return fail_parse("BP register handler rejected", cmd, pos,
+                           bytes[pos + 1u], read_be32(bytes, pos + 1u));
+       pos += 5u;
++      // Display copies (BP 0x52 with bit 14, GXCopyDisp): the game's own
++      // frames, counted to tell a game running at 15 fps from frames lost
++      // between the game and the screen.
++      if (bytes[pos - 4u] == DOL_GX_BP_REG_TRIGGER_EFB_COPY && (bytes[pos - 2u] & 0x40u) != 0u)
++        display_copies_.fetch_add(1u, std::memory_order_relaxed);
+       if (stop_at_display_copy_ && allow_partial && depth == 0u &&
+           bytes[pos - 4u] == DOL_GX_BP_REG_TRIGGER_EFB_COPY &&
+           (bytes[pos - 2u] & 0x40u) != 0u) {
+@@ -947,9 +965,18 @@ bool RetailGxFrontend::handle_draw(std::uint8_t command,
+     };
+     // Retain this draw's raw per-vertex bytes in trace order; emit_new_packets
+     // pops them in lockstep so each Draw packet references its own payload.
+-    draw_payload_queue_.emplace_back(vertex_data.begin(), vertex_data.end());
+-    draw_transform_queue_.push_back(
+-        snapshot_transform(state_, *layout, vertex_data, vertex_count));
++    // Both queues keep their slots across drains (draw_queue_count_ is the
++    // live length), so a slot's payload vector keeps its capacity instead of
++    // being allocated and freed for every draw.
++    if (draw_queue_count_ == draw_payload_queue_.size()) {
++      draw_payload_queue_.emplace_back();
++      draw_transform_queue_.emplace_back();
++    }
++    draw_payload_queue_[draw_queue_count_].assign(vertex_data.begin(),
++                                                  vertex_data.end());
++    snapshot_transform_into(draw_transform_queue_[draw_queue_count_], state_,
++                            *layout, vertex_data, vertex_count);
++    ++draw_queue_count_;
+   }
+ 
+   for (std::uint32_t i = 0u; i < layout->indexed_attr_count; ++i) {
+@@ -1005,14 +1032,28 @@ bool RetailGxFrontend::emit_new_packets(AuroraRenderSink& sink,
+     // reads as freshly built.
+     const bool is_draw = events[i].kind == DOL_GX_RECOMP_EVENT_DRAW;
+     RenderPacket& packet = scratch_packet_;
+-    if (is_draw || scratch_draw_dirty_)
++    // A Draw packet whose transform snapshot is queued has every array
++    // overwritten below, so only its payload pointer needs resetting; the
++    // full 2.3 KB zero is kept for a draw without one. After a draw only the
++    // header is cleared: the sinks read packet.draw for Draw packets alone.
++    const bool draw_has_transform =
++        is_draw && draw_transform_head_ < draw_queue_count_;
++    if (is_draw && !draw_has_transform) {
+       packet.draw = {};
++    } else if (is_draw || scratch_draw_dirty_) {
++      packet.draw.primitive = 0u;
++      packet.draw.vtx_fmt = 0u;
++      packet.draw.vertex_count = 0u;
++      packet.draw.vertex_size = 0u;
++      packet.draw.vertex_payload = nullptr;
++      packet.draw.vertex_payload_size = 0u;
++    }
+     scratch_draw_dirty_ = is_draw;
+     fill_render_packet(packet, sequence, events[i]);
+     // Draw events are emitted exactly once, in order, so the retained payloads
+     // pop FIFO in lockstep. Attach this draw's raw bytes for the issuing sink.
+     if (packet.kind == RenderPacketKind::Draw &&
+-        draw_payload_head_ < draw_payload_queue_.size()) {
++        draw_payload_head_ < draw_queue_count_) {
+       const std::vector<std::uint8_t>& payload =
+           draw_payload_queue_[draw_payload_head_++];
+       packet.draw.vertex_payload = payload.data();
+@@ -1020,7 +1061,7 @@ bool RetailGxFrontend::emit_new_packets(AuroraRenderSink& sink,
+           static_cast<std::uint32_t>(payload.size());
+     }
+     if (packet.kind == RenderPacketKind::Draw &&
+-        draw_transform_head_ < draw_transform_queue_.size()) {
++        draw_transform_head_ < draw_queue_count_) {
+       const DrawTransformSnapshot& transform =
+           draw_transform_queue_[draw_transform_head_++];
+       packet.draw.transform_flags = transform.transform_flags;
+@@ -1072,8 +1113,7 @@ void RetailGxFrontend::drain_emitted_packets(std::uint32_t emitted_count) {
+   // Drain mode emits every pending event each flush, so all retained draw
+   // payloads were just consumed; release them and reset the FIFO cursor so the
+   // queue cannot grow unbounded across a long run.
+-  draw_payload_queue_.clear();
+-  draw_transform_queue_.clear();
++  draw_queue_count_ = 0u;
+   draw_payload_head_ = 0u;
+   draw_transform_head_ = 0u;
+   if (emitted_count >= state_.trace_count) {
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 2fee1b9..8930496 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -1242,8 +1242,16 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+ 
+   // Uniforms.
+   VertexShaderConstants& c = plan.constants;
+-  for (std::uint32_t row = 0; row < 63u; ++row)
+-    (void)load_matrix_row(draw, row, c.transformmatrices[row]);
++  // Rows 0-29 are position_matrices laid end to end (3 rows of 4 per matrix)
++  // and rows 30-62 are tex_matrices the same way, so the 63 per-row copies
++  // load_matrix_row made (their validity result was discarded) are two block
++  // copies. This ran for every draw, about 18,000 a frame in heavy scenes.
++  static_assert(sizeof(draw.position_matrices) == 30u * 4u * sizeof(float));
++  static_assert(sizeof(draw.tex_matrices) == 33u * 4u * sizeof(float));
++  std::memcpy(&c.transformmatrices[0][0], draw.position_matrices,
++              sizeof(draw.position_matrices));
++  std::memcpy(&c.transformmatrices[30][0], draw.tex_matrices,
++              sizeof(draw.tex_matrices));
+   const std::uint32_t pn_row = draw.current_pn_matrix * 3u;
+   for (std::uint32_t k = 0; k < 3u; ++k)
+     (void)load_matrix_row(draw, pn_row + k, c.posnormalmatrix[k]);

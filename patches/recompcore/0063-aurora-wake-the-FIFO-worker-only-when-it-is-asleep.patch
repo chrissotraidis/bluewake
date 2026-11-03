@@ -1,0 +1,67 @@
+From feb5644104f0dbaef0e0a0a445d7e5edf7382555 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 12:16:01 -0500
+Subject: [PATCH] aurora: wake the FIFO worker only when it is asleep
+
+The enqueue path runs once per guest write to the GX gather pipe and signalled
+the worker's condition variable every time, which was 2.1% of the game thread in
+pthread_cond_signal on the iOS simulator. A worker that is already awake finds
+the new bytes when it next takes the handoff, so the enqueue now signals only
+when the worker is blocked. scripts/bench_rendered.sh: both configurations stop
+normally at the certified turn counts.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 9b9b049bdd..1abb9649d3 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -295,6 +295,10 @@ bool g_fifo_worker_started = false;
+ bool g_fifo_worker_stop = false;
+ bool g_fifo_work_pending = false;
+ bool g_fifo_worker_idle = true;
++// True only while the worker is blocked on g_fifo_worker_cv. The enqueue path
++// runs once per guest FIFO write; signalling a worker that is already awake
++// cost 2.1% of the game thread in pthread_cond_signal (iOS simulator sample).
++bool g_fifo_worker_sleeping = false;
+ std::uint64_t g_fifo_appended = 0;
+ std::uint64_t g_fifo_parsed = 0;
+ 
+@@ -393,9 +397,11 @@ void g_fifo_worker_main() {
+         std::uint64_t parsed = 0;
+         {
+             std::unique_lock<std::mutex> lock(g_fifo_worker_mutex);
+-            g_fifo_worker_cv.wait(lock, [] {
+-                return g_fifo_work_pending || g_fifo_worker_stop;
+-            });
++            while (!g_fifo_work_pending && !g_fifo_worker_stop) {
++                g_fifo_worker_sleeping = true;
++                g_fifo_worker_cv.wait(lock);
++                g_fifo_worker_sleeping = false;
++            }
+             if (!g_fifo_work_pending)
+                 return;
+             g_fifo_work_pending = false;
+@@ -449,14 +455,17 @@ void g_fifo_worker_stop_and_join() {
+ }
+ 
+ void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
++    bool wake;
+     {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+         g_fifo_handoff.insert(g_fifo_handoff.end(), bytes, bytes + size);
+         ++g_fifo_appended;
+         g_fifo_work_pending = true;
+         g_fifo_worker_idle = false;
++        wake = g_fifo_worker_sleeping;
+     }
+-    g_fifo_worker_cv.notify_one();
++    if (wake)
++        g_fifo_worker_cv.notify_one();
+ }
+ 
+ // Waits until the worker has translated everything appended so far. Called at
+-- 
+2.41.0
+

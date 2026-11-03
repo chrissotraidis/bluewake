@@ -1,0 +1,102 @@
+From 73ca709f9f7e6818b4e855b016cd4c217a11256b Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 12:00:17 -0500
+Subject: [PATCH] frontend: a palette loaded after its texture is bound is the
+ one it draws with
+
+The hardware reads a palette from TMEM when it draws. J2D pictures with two
+textures give both GX_TLUT0, so the second texture's palette load replaces
+the first's before the draw: Wind Waker's pause-menu cursor draws
+cursor_00_01's texels with cursor_00_02's palette (Dolphin's texture dump
+has exactly that pairing, and never cursor_00_01 with its own). The
+frontend attached each texture's palette when the texture was bound, so the
+cursor's corner brackets drew with a black outline where Dolphin shows grey
+shading. A palette load now marks any bound palette texture on the loaded
+TMEM range, and the next draw re-emits it with the palette TMEM holds.
+Rendered save view: 481/482 -> 482/483 M instructions per 100 retraces,
+cycles within noise; Outset frames byte-identical at every common retrace.
+---
+ .../aurora_recomp/retail_gx_frontend.hpp      |  3 ++
+ .../frontend/src/retail_gx_frontend.cpp       | 31 +++++++++++++++++++
+ 2 files changed, 34 insertions(+)
+
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index befce7c355..41ffaa66a0 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -150,6 +150,9 @@ private:
+   TraceEventObserver event_observer_ = nullptr;
+   void* event_observer_user_ = nullptr;
+   std::uint32_t emitted_trace_count_ = 0;
++  // Texture slots (bit per slot) whose palette TMEM was reloaded after the
++  // texture event was emitted; re-resolved at the next draw.
++  std::uint8_t tlut_stale_mask_ = 0;
+   std::uint64_t next_packet_sequence_ = 0;
+   // emit_new_packets' reused packet (see there).
+   RenderPacket scratch_packet_{};
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index aaae388c25..f07e126057 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -760,6 +760,7 @@ bool RetailGxFrontend::handle_bp(std::uint32_t raw) {
+           ev.tlut_format = 0u;
+           ev.tlut_entries = 0u;
+         }
++        tlut_stale_mask_ &= static_cast<std::uint8_t>(~(1u << slot));
+         return true;
+       }
+     }
+@@ -793,6 +794,24 @@ bool RetailGxFrontend::handle_bp(std::uint32_t raw) {
+     (void)dol_gx_recomp_resolve_tmem_tlut(
+         &state_, tmem_offset, state_.bp_regs[DOL_GX_BP_REG_LOAD_TLUT0], 0u,
+         static_cast<std::uint16_t>(line_count * 16u), &tlut);
++    // The hardware reads a palette from TMEM when it draws, so a palette loaded
++    // after a texture is bound is the one that texture draws with. J2D pictures
++    // with two textures do this: both use TLUT0, and the second texture's palette
++    // load replaces the first's before the draw (Wind Waker's pause-menu cursor
++    // draws cursor_00_01's texels with cursor_00_02's palette on hardware and in
++    // Dolphin). A bound palette texture on the loaded TMEM range is re-resolved
++    // before the next draw (handle_draw). A load moves 32 bytes a line; SETTLUT
++    // offsets count 512-byte units.
++    const std::uint32_t units = (line_count * 32u + 511u) / 512u;
++    for (std::uint8_t s = 0; s < DOL_GX_RECOMP_TEXTURE_SLOTS && s < 8u; ++s) {
++      const DolGxRecompTexture& texture = state_.textures[s];
++      if (!texture.valid || !state_.texture_tlut_valid[s] ||
++          (texture.format != 0x8u && texture.format != 0x9u && texture.format != 0xAu))
++        continue;
++      const std::uint32_t offset = state_.texture_tlut_tmem_offset[s];
++      if (offset >= tmem_offset && offset < tmem_offset + units)
++        tlut_stale_mask_ |= static_cast<std::uint8_t>(1u << s);
++    }
+     return true;
+   }
+   default:
+@@ -808,6 +827,8 @@ bool RetailGxFrontend::maybe_resolve_texture(std::uint8_t slot) {
+   if (!state_.bp_valid[image0_reg] || !state_.bp_valid[image3_reg])
+     return true;
+   DolGxRecompTexture texture;
++  if (slot < 8u)
++    tlut_stale_mask_ &= static_cast<std::uint8_t>(~(1u << slot));
+   return dol_gx_recomp_resolve_texture_image(
+       &state_, slot, state_.bp_regs[image0_reg], state_.bp_regs[image3_reg],
+       &texture);
+@@ -862,6 +883,16 @@ bool RetailGxFrontend::handle_draw(std::uint8_t command,
+       !state_.vertex_layouts[vtx_fmt].valid)
+     return fail_parse("draw vertex layout missing", command, command_offset);
+ 
++  // A palette loaded since its texture was bound (see LOAD_TLUT1): emit the
++  // texture again so this draw decodes with the palette TMEM now holds.
++  if (tlut_stale_mask_ != 0u) {
++    const std::uint8_t stale = tlut_stale_mask_;
++    for (std::uint8_t s = 0; s < 8u; ++s)
++      if ((stale & (1u << s)) != 0u && !maybe_resolve_texture(s))
++        return fail_parse("stale palette texture resolve failed", command,
++                          command_offset, s);
++    tlut_stale_mask_ = 0u;
++  }
+   const DolGxRecompVertexLayout* layout = &state_.vertex_layouts[vtx_fmt];
+   if (state_.trace_count < DOL_GX_RECOMP_MAX_TRACE_EVENTS) {
+     state_.trace[state_.trace_count++] = {
+-- 
+2.41.0
+

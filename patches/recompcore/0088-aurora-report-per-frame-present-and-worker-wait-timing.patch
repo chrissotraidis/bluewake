@@ -1,0 +1,94 @@
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index d642ed8..592d433 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -630,7 +630,25 @@ inline void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
+ 
+ // Waits until the worker has translated everything appended so far. Called at
+ // the barriers and only there.
++static void g_fifo_drain_impl();
++std::atomic<unsigned long long> g_timing_drain_us{0};
++std::atomic<unsigned long long> g_timing_present_us{0};
++std::atomic<unsigned long long> g_timing_end_frame_us{0};
++std::atomic<unsigned long long> g_timing_draws{0};
++std::atomic<unsigned long long> g_timing_present_in_drain_us{0};
++bool g_timing_in_drain = false;  // main thread only
++static unsigned long long timing_now_us() {
++    return static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::microseconds>(
++        std::chrono::steady_clock::now().time_since_epoch()).count());
++}
+ static void g_fifo_drain() {
++    const unsigned long long start = timing_now_us();
++    g_timing_in_drain = true;
++    g_fifo_drain_impl();
++    g_timing_in_drain = false;
++    g_timing_drain_us += timing_now_us() - start;
++}
++static void g_fifo_drain_impl() {
+     g_fifo_publish_local();
+     std::unique_lock<std::mutex> lock(g_fifo_worker_mutex);
+     // Called from the guest's synchronization points, which never run inside
+@@ -1121,7 +1139,27 @@ void shadow_transform_observer(
+ 
+ extern "C" {
+ 
++static void aurora_backend_present_impl(void);
++
++// Timed for the per-second frame diagnostics (dol_aurora_frame_timing).
+ void aurora_backend_present(void) {
++    const unsigned long long start = gx_aurora::timing_now_us();
++    aurora_backend_present_impl();
++    const unsigned long long spent = gx_aurora::timing_now_us() - start;
++    gx_aurora::g_timing_present_us += spent;
++    if (gx_aurora::g_timing_in_drain)
++        gx_aurora::g_timing_present_in_drain_us += spent;
++}
++
++void dol_aurora_frame_timing(DolAuroraFrameTiming* out) {
++    out->presents = gx_aurora::g_present_count;
++    out->drain_us = gx_aurora::g_timing_drain_us - gx_aurora::g_timing_present_in_drain_us;
++    out->present_us = gx_aurora::g_timing_present_us;
++    out->end_frame_us = gx_aurora::g_timing_end_frame_us;
++    out->draws = gx_aurora::g_timing_draws;
++}
++
++static void aurora_backend_present_impl(void) {
+     if (!gx_aurora::g_initialized)
+         return;
+     // Everything below up to the next begin_frame runs with no frame packet for
+@@ -1157,7 +1195,10 @@ void aurora_backend_present(void) {
+ #endif
+     if (gx_aurora::g_frame_open) {
+         gx_aurora::run_host_overlay();
++        gx_aurora::g_timing_draws += aurora_get_stats()->drawCallCount;
++        const unsigned long long end_frame_start = gx_aurora::timing_now_us();
+         aurora_end_frame();
++        gx_aurora::g_timing_end_frame_us += gx_aurora::timing_now_us() - end_frame_start;
+         gx_aurora::g_frame_open = false;
+     }
+     ++gx_aurora::g_present_count;
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 9d77099..3085828 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -39,6 +39,20 @@ void dol_aurora_set_event_observer(DolAuroraEventObserverFn observe, void* user)
+ typedef bool (*DolAuroraHoldFn)(void* user);
+ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user);
+ 
++/* Cumulative main-thread frame timing, for per-second diagnostics: time spent
++   waiting for the FIFO translation worker at the guest's GX barriers, time in
++   the present (including that wait's own present), the part of it inside
++   aurora_end_frame (GPU submission and waiting for a drawable), and the draw
++   calls submitted. Differences between two reads cover the interval. */
++typedef struct DolAuroraFrameTiming {
++    unsigned long long presents;
++    unsigned long long drain_us;
++    unsigned long long present_us;
++    unsigned long long end_frame_us;
++    unsigned long long draws;
++} DolAuroraFrameTiming;
++void dol_aurora_frame_timing(DolAuroraFrameTiming* out);
++
+ #ifdef __cplusplus
+ }
+ #endif

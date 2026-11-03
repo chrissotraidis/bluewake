@@ -1,0 +1,198 @@
+From 57faa208c170a52e3160c917dbff67e7866eddb1 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 07:32:07 -0500
+Subject: [PATCH] graphics: preserve EFB copy source dimensions
+
+---
+ .../frontend/src/retail_gx_frontend.cpp       |  4 +--
+ .../frontend/tests/frontend_replay_test.cpp   | 27 ++++++++++++++-----
+ GXRuntime/include/gxruntime/gx_recomp.h       |  4 +++
+ GXRuntime/src/gx_recomp.c                     |  9 +++++--
+ GXRuntime/src/gx_recomp_parser.c              |  4 +--
+ GXRuntime/tests/runtime_tests.c               | 17 ++++++++++--
+ 6 files changed, 51 insertions(+), 14 deletions(-)
+
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 8956be4884..521feaf558 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -780,8 +780,8 @@ bool RetailGxFrontend::handle_copy_trigger(std::uint32_t value) {
+                                   state_.copy.format,
+                                   &state_.copy.byte_size))
+     return false;
+-  state_.copy.width = width;
+-  state_.copy.height = height;
++  state_.copy.destination_width = width;
++  state_.copy.destination_height = height;
+   if (!dol_gx_recomp_resolve_copy_destination(
+           &state_, state_.copy.physical_base, state_.copy.byte_size,
+           &state_.copy.range))
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 14b4475daa..89e09b9860 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -635,6 +635,12 @@ int main() {
+   push_bp(display_list, DOL_GX_BP_REG_EFB_WH, (7u << 10u) | 7u);
+   push_bp(display_list, DOL_GX_BP_REG_EFB_ADDR, copy_base >> 5u);
+   push_bp(display_list, DOL_GX_BP_REG_TRIGGER_EFB_COPY, 2u << 3u);
++  // Repeating a half-scale copy without rewriting BP 0x4A must halve the
++  // persistent source dimensions once per trigger, not recursively.
++  push_bp(display_list, DOL_GX_BP_REG_TRIGGER_EFB_COPY,
++          (2u << 3u) | (1u << 9u));
++  push_bp(display_list, DOL_GX_BP_REG_TRIGGER_EFB_COPY,
++          (2u << 3u) | (1u << 9u));
+   // Faithful copy-format reconstruction (PROGRAM 64/A): target 14 is the
+   // GX_CTF_A8 channel-select grab (Strikers glx_ShadowTextureGrab), and the
+   // same trigger with PE_CONTROL pixel format Z24 becomes a depth-source copy.
+@@ -699,13 +705,22 @@ int main() {
+     // GX_CTF_R8 (0x28), target 14 -> GX_CTF_A8 (0x27, EFB alpha channel),
+     // target 12 under PE_CONTROL Z24 -> GX_TF_Z24X8 (0x16, depth source).
+     std::vector<std::uint32_t> copy_formats;
+-    for (const auto& ev : trace)
+-      if (ev.kind == DOL_GX_RECOMP_EVENT_COPY_DESTINATION)
++    std::vector<std::uint32_t> copy_dimensions;
++    for (const auto& ev : trace) {
++      if (ev.kind == DOL_GX_RECOMP_EVENT_COPY_DESTINATION) {
+         copy_formats.push_back(ev.c);
+-    assert(copy_formats.size() == 3u);
++        copy_dimensions.push_back(ev.g);
++      }
++    }
++    assert(copy_formats.size() == 5u);
+     assert(copy_formats[0] == 0x28u);
+-    assert(copy_formats[1] == 0x27u);
+-    assert(copy_formats[2] == 0x16u);
++    assert(copy_formats[1] == 0x28u);
++    assert(copy_formats[2] == 0x28u);
++    assert(copy_formats[3] == 0x27u);
++    assert(copy_formats[4] == 0x16u);
++    assert(copy_dimensions[0] == ((8u << 16u) | 8u));
++    assert(copy_dimensions[1] == ((4u << 16u) | 4u));
++    assert(copy_dimensions[2] == ((4u << 16u) | 4u));
+     assert(state.copy.is_depth);
+   }
+   assert(sink.packets().size() == trace.size());
+@@ -774,7 +789,7 @@ int main() {
+     assert(consume_sink.bound_texture().size == 128u);
+ 
+     assert(consume_sink.texture_count() == 1u);
+-    assert(consume_sink.copy_count() == 3u); // R8 + A8 + Z24X8 triggers
++    assert(consume_sink.copy_count() == 5u); // R8 x3 + A8 + Z24X8 triggers
+     assert(consume_sink.indexed_span_count() == 1u);
+     assert(consume_sink.tlut_count() >= 1u);
+ 
+diff --git a/GXRuntime/include/gxruntime/gx_recomp.h b/GXRuntime/include/gxruntime/gx_recomp.h
+index b84dfd8257..add1fa57f7 100644
+--- a/GXRuntime/include/gxruntime/gx_recomp.h
++++ b/GXRuntime/include/gxruntime/gx_recomp.h
+@@ -170,8 +170,12 @@ typedef struct DolGxRecompVertexLayout {
+ typedef struct DolGxRecompCopyState {
+     u32 src_x;
+     u32 src_y;
++    /* Persistent BP 0x4A source rectangle dimensions. */
+     u32 width;
+     u32 height;
++    /* Per-trigger texture destination dimensions after half-scale. */
++    u32 destination_width;
++    u32 destination_height;
+     u32 physical_base;
+     bool physical_base_valid;
+     u32 format;
+diff --git a/GXRuntime/src/gx_recomp.c b/GXRuntime/src/gx_recomp.c
+index 57e131b3a4..c30a5cb581 100644
+--- a/GXRuntime/src/gx_recomp.c
++++ b/GXRuntime/src/gx_recomp.c
+@@ -800,7 +800,13 @@ bool dol_gx_recomp_resolve_copy_destination(DolGxRecompState* gx,
+         DolGxRecompTraceEvent* ev = &gx->trace[gx->trace_count - 1u];
+         ev->e = gx->copy.src_x;
+         ev->f = gx->copy.src_y;
+-        ev->g = (gx->copy.width << 16u) | (gx->copy.height & 0xFFFFu);
++        const u32 width = gx->copy.destination_width != 0u
++                              ? gx->copy.destination_width
++                              : gx->copy.width;
++        const u32 height = gx->copy.destination_height != 0u
++                               ? gx->copy.destination_height
++                               : gx->copy.height;
++        ev->g = (width << 16u) | (height & 0xFFFFu);
+     }
+     return true;
+ }
+@@ -1011,4 +1017,3 @@ bool dol_gx_recomp_derive_vertex_layout(DolGxRecompState* gx, u8 vtx_fmt) {
+                 layout.vertex_size, layout.indexed_attr_count, 0u);
+     return true;
+ }
+-
+diff --git a/GXRuntime/src/gx_recomp_parser.c b/GXRuntime/src/gx_recomp_parser.c
+index 72b5646b88..8d97ad8f45 100644
+--- a/GXRuntime/src/gx_recomp_parser.c
++++ b/GXRuntime/src/gx_recomp_parser.c
+@@ -60,8 +60,8 @@ static bool replay_handle_copy_trigger(DolGxRecompState* gx, u32 value) {
+     if (!dol_gx_recomp_texture_size((u16)width, (u16)height,
+                                     gx->copy.format, &gx->copy.byte_size))
+         return false;
+-    gx->copy.width = width;
+-    gx->copy.height = height;
++    gx->copy.destination_width = width;
++    gx->copy.destination_height = height;
+     if (!dol_gx_recomp_resolve_copy_destination(
+             gx, gx->copy.physical_base, gx->copy.byte_size, &gx->copy.range))
+         return false;
+diff --git a/GXRuntime/tests/runtime_tests.c b/GXRuntime/tests/runtime_tests.c
+index d1c075b0db..81a74543bc 100644
+--- a/GXRuntime/tests/runtime_tests.c
++++ b/GXRuntime/tests/runtime_tests.c
+@@ -703,6 +703,10 @@ static void test_gx_recomp_all_module_replay(void) {
+             (7u << 10) | 7u);
+     fifo_bp(dl, &dl_pos, DOL_GX_BP_REG_EFB_ADDR, copy_base >> 5);
+     fifo_bp(dl, &dl_pos, DOL_GX_BP_REG_TRIGGER_EFB_COPY, 2u << 3);
++    fifo_bp(dl, &dl_pos, DOL_GX_BP_REG_TRIGGER_EFB_COPY,
++            (2u << 3) | (1u << 9));
++    fifo_bp(dl, &dl_pos, DOL_GX_BP_REG_TRIGGER_EFB_COPY,
++            (2u << 3) | (1u << 9));
+     const u32 xf_value = 0x12345678u;
+     fifo_xf(dl, &dl_pos, 0x1008u, &xf_value, 1u);
+     fifo_indexed_xf(dl, &dl_pos, 0x20u, 1u, 0x0000u, 12u);
+@@ -739,7 +743,7 @@ static void test_gx_recomp_all_module_replay(void) {
+     assert(gx.tmem_tluts[0x20u].range.data == cpu.ram + tlut_base);
+     assert(gx.copy.range_valid);
+     assert(gx.copy.physical_base == copy_base);
+-    assert(gx.copy.byte_size == 64u);
++    assert(gx.copy.byte_size == 32u);
+     assert(gx.copy.range.data == cpu.ram + copy_base);
+     assert(gx.last_xf_base == 0x0000u);
+     assert(gx.last_xf_count == 12u);
+@@ -758,6 +762,7 @@ static void test_gx_recomp_all_module_replay(void) {
+     bool saw_draw = false;
+     bool saw_indexed_span = false;
+     bool saw_indexed_xf = false;
++    u32 copy_count = 0;
+     for (u32 i = 0; i < trace_count; ++i) {
+         saw_display_list |=
+             trace[i].kind == DOL_GX_RECOMP_EVENT_DISPLAY_LIST;
+@@ -765,7 +770,14 @@ static void test_gx_recomp_all_module_replay(void) {
+         saw_array |= trace[i].kind == DOL_GX_RECOMP_EVENT_CP_ARRAY_BASE;
+         saw_texture |= trace[i].kind == DOL_GX_RECOMP_EVENT_TEXTURE;
+         saw_tlut |= trace[i].kind == DOL_GX_RECOMP_EVENT_TLUT;
+-        saw_copy |= trace[i].kind == DOL_GX_RECOMP_EVENT_COPY_DESTINATION;
++        if (trace[i].kind == DOL_GX_RECOMP_EVENT_COPY_DESTINATION) {
++            saw_copy = true;
++            if (copy_count == 0u)
++                assert(trace[i].g == ((8u << 16u) | 8u));
++            else
++                assert(trace[i].g == ((4u << 16u) | 4u));
++            ++copy_count;
++        }
+         saw_cull |= trace[i].kind == DOL_GX_RECOMP_EVENT_CULL_ALL;
+         saw_xf |= trace[i].kind == DOL_GX_RECOMP_EVENT_XF_LOAD;
+         saw_draw |= trace[i].kind == DOL_GX_RECOMP_EVENT_DRAW;
+@@ -783,6 +795,7 @@ static void test_gx_recomp_all_module_replay(void) {
+     assert(saw_texture);
+     assert(saw_tlut);
+     assert(saw_copy);
++    assert(copy_count == 3u);
+     assert(saw_cull);
+     assert(saw_xf);
+     assert(saw_draw);
+-- 
+2.41.0
+

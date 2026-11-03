@@ -1,0 +1,263 @@
+From 8bac2ba56873b33db8ba29618b2a61bb8c595230 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 05:29:12 -0500
+Subject: [PATCH] graphics: select per-vertex normal matrices
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  5 +-
+ .../include/gxruntime/gxcore/gxcore.hpp       |  1 +
+ .../include/gxruntime/gxcore/shader.hpp       |  7 ++-
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 18 ++++++
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 55 ++++++++++++++-----
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 23 ++++++++
+ 6 files changed, 93 insertions(+), 16 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 20fd0bdf92..131036b3bf 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -417,7 +417,7 @@ void dol_aurora_shutdown(void) {
+                      "texgen_source_normal_default=%llu "
+                      "texgen_source_colors=%llu texgen_source_binormal=%llu "
+                      "texgen_source_tex47=%llu texgen_source_unknown=%llu "
+-                     "per_vertex_tex_mtx=%llu "
++                     "per_vertex_tex_mtx=%llu per_vertex_normal_matrix=%llu "
+                      "unresolved_tex_matrix=%llu normals_ignored=%llu "
+                      "lighting_ignored=%llu tlut_texture=%llu "
+                      "alpha_compare_ignored=%llu tev_stages_over=%llu "
+@@ -460,7 +460,8 @@ void dol_aurora_shutdown(void) {
+                      gaps.texgen_source_binormal,
+                      gaps.texgen_source_tex47,
+                      gaps.texgen_source_unknown,
+-                     gaps.per_vertex_tex_mtx, gaps.unresolved_tex_matrix,
++                     gaps.per_vertex_tex_mtx, gaps.per_vertex_normal_matrix,
++                     gaps.unresolved_tex_matrix,
+                      gaps.normals_ignored, gaps.lighting_ignored,
+                      gaps.tlut_texture, gaps.alpha_compare_ignored,
+                      gaps.tev_stages_over, gaps.tev_multi_texmap,
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index a46f1ea49e..2584ea5555 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -48,6 +48,7 @@ struct GapCounters {
+   unsigned long long texgen_count_7 = 0;
+   unsigned long long texgen_count_8plus = 0;
+   unsigned long long texgen_emboss_cached_nbt = 0; // supported cached N/B/T fallback
++  unsigned long long per_vertex_normal_matrix = 0; // PNMTXIDX selects normal bank
+   unsigned long long texgen_source_normal = 0;  // supported regular normal source
+   unsigned long long texgen_source_normal_default = 0; // no normal attribute
+   unsigned long long texgen_source_colors = 0;  // regular source row not emitted
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 1c7cae0e55..9547f97ff3 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -315,9 +315,14 @@ struct VertexShaderConstants {
+   float cached_normal[4]{0.f, 0.f, 0.f, 0.f};
+   float cached_tangent[4]{0.f, 0.f, 0.f, 0.f};
+   float cached_binormal[4]{0.f, 0.f, 0.f, 0.f};
++  // Dolphin I_NORMALMATRICES: 32 vec4-aligned rows containing the packed XF
++  // 3x3 normal-matrix bank. Per-vertex PNMTXIDX addresses this with
++  // (posidx & 31), independently of the draw-wide current matrix above.
++  float normalmatrices[32][4]{};
+ };
+ static_assert(sizeof(VertexShaderConstants) ==
+-              (6 + 4 + 24 + 64) * 16 + 8 * (5 * 16) + 4 * 16 + 3 * 16);
++              (6 + 4 + 24 + 64) * 16 + 8 * (5 * 16) + 4 * 16 + 3 * 16 +
++                  32 * 16);
+ 
+ // Pixel-shader uniforms (Dolphin PixelShaderConstants subset): the four TEV
+ // color registers (I_COLORS: [0] prev seed, [1..3] c0/c1/c2), the four konst
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 1479641cde..86e6c6e77b 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -620,6 +620,8 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+                     key.litchan[2].enablelighting || key.litchan[3].enablelighting)
+                       ? 1u
+                       : 0u;
++  if (key.has_pos_mtx_idx != 0u && key.lit_valid != 0u)
++    ++counters.per_vertex_normal_matrix;
+   // Only count normals/lighting as ignored when we fall back to passthrough.
+   if (walk.has_normal && key.lit_valid == 0u)
+     ++counters.normals_ignored;
+@@ -1046,6 +1048,22 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+       }
+     }
+   }
++  // Dolphin uploads the complete packed normal-matrix row bank for vertex
++  // formats carrying PNMTXIDX. XF stores 96 floats as 32 rows of three; the
++  // C/WGSL uniform pads each row to vec4 alignment.
++  for (std::uint32_t row = 0; row < 32u; ++row) {
++    const std::uint32_t matrix = row / 3u;
++    const std::uint32_t matrix_row = row % 3u;
++    if (matrix >= DOL_GX_RECOMP_NORMAL_MATRIX_COUNT)
++      continue;
++    const std::uint16_t row_mask =
++        static_cast<std::uint16_t>(0x7u << (3u * matrix_row));
++    if ((draw.normal_matrix_word_mask[matrix] & row_mask) != row_mask)
++      continue;
++    for (std::uint32_t col = 0; col < 3u; ++col)
++      c.normalmatrices[row][col] =
++          draw.normal_matrices[matrix][3u * matrix_row + col];
++  }
+ 
+   // Lighting uniforms (S15): 8 XF lights + 4 material/ambient registers. Light
+   // words (gx_recomp.h): [3]=RGBA8 color, [4..6]=cosatt, [7..9]=distatt,
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 81298b9e30..365c142b44 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -722,11 +722,14 @@ std::string generate_wgsl(const ShaderKey& key) {
+   // passthrough). Channel 1 only matters when its varying is emitted.
+   const bool chan0_lit = channel_lit_path(key, 0u);
+   const bool chan1_lit = emit_color1 && channel_lit_path(key, 1u);
++  const bool needs_normal_bank =
++      key.has_pos_mtx_idx != 0 && (lit || has_emboss);
+   // The lit path reads vsc.materials (register material/ambient) and, when a
+   // light is enabled, vsc.lights. Whenever either the light path or a
+   // register-material channel is active we must expose the full uniform view
+   // (both fields, in the fixed C struct order) so offsets line up.
+-  const bool needs_uniform_full = emit_lights || chan0_lit || chan1_lit;
++  const bool needs_uniform_full =
++      emit_lights || chan0_lit || chan1_lit || needs_normal_bank;
+   // Vertex-format N/B/T presence. A lit/emboss draw whose format omits an
+   // attribute substitutes the cross-draw cached value from the uniform
+   // (Dolphin I_CACHED_NORMAL fallback, VertexShaderGen.cpp:607-632) instead of
+@@ -749,6 +752,9 @@ std::string generate_wgsl(const ShaderKey& key) {
+   // attribute keep byte-identical goldens.
+   const bool uses_cached =
+       uses_cached_normal || uses_cached_tangent || uses_cached_binormal;
++  // normalmatrices is the final C-uniform field. A shader that declares it
++  // must also retain every preceding field so its WGSL offset stays identical.
++  const bool declare_cached_fields = uses_cached || needs_normal_bank;
+ 
+   emit(out, "// gxcore generated shader (Dolphin VertexShaderGen shape)\n");
+   if (needs_uniform_full)
+@@ -771,10 +777,12 @@ std::string generate_wgsl(const ShaderKey& key) {
+   if (needs_uniform_full)
+     emit(out, "    lights: array<Light, 8>,\n"
+               "    materials: array<vec4i, 4>,\n");
+-  if (uses_cached)
++  if (declare_cached_fields)
+     emit(out, "    cached_normal: vec4f,\n"
+               "    cached_tangent: vec4f,\n"
+               "    cached_binormal: vec4f,\n");
++  if (needs_normal_bank)
++    emit(out, "    normalmatrices: array<vec4f, 32>,\n");
+   emit(out, "};\n"
+             "@group(1) @binding(0) var<uniform> vsc: VertexShaderConstants;\n");
+   if (tev) {
+@@ -863,6 +871,8 @@ std::string generate_wgsl(const ShaderKey& key) {
+               "    let p0 = vsc.transformmatrices[posidx];\n"
+               "    let p1 = vsc.transformmatrices[posidx + 1];\n"
+               "    let p2 = vsc.transformmatrices[posidx + 2];\n");
++    if (needs_normal_bank)
++      emit(out, "    let normidx = posidx & 31;\n");
+   } else {
+     emit(out, "    let p0 = vsc.posnormalmatrix[0];\n"
+               "    let p1 = vsc.posnormalmatrix[1];\n"
+@@ -896,7 +906,13 @@ std::string generate_wgsl(const ShaderKey& key) {
+     // light the input carries no normal (register-material-only path), so seed a
+     // constant — dolphin_calculate_lighting_chn only reads it inside a light and
+     // there are none, leaving the material term intact.
+-    if (lit)
++    if (lit && needs_normal_bank)
++      emitf(out, "    let _normal = normalize(vec3f("
++                 "dot(vsc.normalmatrices[normidx].xyz, %s), "
++                 "dot(vsc.normalmatrices[normidx + 1].xyz, %s), "
++                 "dot(vsc.normalmatrices[normidx + 2].xyz, %s)));\n",
++            normal_in, normal_in, normal_in);
++    else if (lit)
+       emitf(out, "    let _normal = normalize(vec3f("
+                  "dot(vsc.posnormalmatrix[3].xyz, %s), "
+                  "dot(vsc.posnormalmatrix[4].xyz, %s), "
+@@ -1008,16 +1024,29 @@ std::string generate_wgsl(const ShaderKey& key) {
+       // Dolphin VertexShaderGen: add the light dir (view space) projected onto
+       // the view-space tangent/binormal to the emboss-source texgen's coords.
+       // Tangent/binormal go to view space via the normal matrix (rows 3-5).
+-      emitf(out, "        let tn%u = vec3f("
+-                 "dot(vsc.posnormalmatrix[3].xyz, %s), "
+-                 "dot(vsc.posnormalmatrix[4].xyz, %s), "
+-                 "dot(vsc.posnormalmatrix[5].xyz, %s));\n",
+-            i, tangent_in, tangent_in, tangent_in);
+-      emitf(out, "        let bn%u = vec3f("
+-                 "dot(vsc.posnormalmatrix[3].xyz, %s), "
+-                 "dot(vsc.posnormalmatrix[4].xyz, %s), "
+-                 "dot(vsc.posnormalmatrix[5].xyz, %s));\n",
+-            i, binormal_in, binormal_in, binormal_in);
++      if (needs_normal_bank) {
++        emitf(out, "        let tn%u = vec3f("
++                   "dot(vsc.normalmatrices[normidx].xyz, %s), "
++                   "dot(vsc.normalmatrices[normidx + 1].xyz, %s), "
++                   "dot(vsc.normalmatrices[normidx + 2].xyz, %s));\n",
++              i, tangent_in, tangent_in, tangent_in);
++        emitf(out, "        let bn%u = vec3f("
++                   "dot(vsc.normalmatrices[normidx].xyz, %s), "
++                   "dot(vsc.normalmatrices[normidx + 1].xyz, %s), "
++                   "dot(vsc.normalmatrices[normidx + 2].xyz, %s));\n",
++              i, binormal_in, binormal_in, binormal_in);
++      } else {
++        emitf(out, "        let tn%u = vec3f("
++                   "dot(vsc.posnormalmatrix[3].xyz, %s), "
++                   "dot(vsc.posnormalmatrix[4].xyz, %s), "
++                   "dot(vsc.posnormalmatrix[5].xyz, %s));\n",
++              i, tangent_in, tangent_in, tangent_in);
++        emitf(out, "        let bn%u = vec3f("
++                   "dot(vsc.posnormalmatrix[3].xyz, %s), "
++                   "dot(vsc.posnormalmatrix[4].xyz, %s), "
++                   "dot(vsc.posnormalmatrix[5].xyz, %s));\n",
++              i, binormal_in, binormal_in, binormal_in);
++      }
+       emitf(out, "        let ld%u = normalize(vsc.lights[%uu].pos.xyz - "
+                  "viewpos.xyz);\n",
+             i, static_cast<unsigned>(tg.embosslightshift));
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 71d6a702d6..d48d9bdd5b 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -1147,6 +1147,11 @@ void test_lighting() {
+   for (int i = 0; i < 9; ++i)
+     draw.normal_matrices[0][i] = nm[i];
+   draw.normal_matrix_word_mask[0] = (1u << 9) - 1u;
++  const float nm2[9] = {20.f, 21.f, 22.f, 23.f, 24.f,
++                        25.f, 26.f, 27.f, 28.f};
++  for (int i = 0; i < 9; ++i)
++    draw.normal_matrices[2][i] = nm2[i];
++  draw.normal_matrix_word_mask[2] = (1u << 9) - 1u;
+ 
+   gxc::GapCounters counters;
+   const gxc::DrawPlan plan = state.build_draw_plan(draw, counters);
+@@ -1192,6 +1197,12 @@ void test_lighting() {
+   CHECK(plan.constants.posnormalmatrix[3][3] == 0.f);
+   CHECK(plan.constants.posnormalmatrix[4][1] == 3.f);
+   CHECK(plan.constants.posnormalmatrix[5][2] == 4.f);
++  // Full normal bank preserves XF row addressing: matrix 2 occupies rows 6-8.
++  CHECK(plan.constants.normalmatrices[6][0] == 20.f);
++  CHECK(plan.constants.normalmatrices[6][2] == 22.f);
++  CHECK(plan.constants.normalmatrices[7][1] == 24.f);
++  CHECK(plan.constants.normalmatrices[8][2] == 28.f);
++  CHECK(plan.constants.normalmatrices[8][3] == 0.f);
+ 
+   const std::string wgsl = gxc::generate_wgsl(key);
+   if (std::getenv("GXCORE_PRINT_WGSL") != nullptr)
+@@ -1347,6 +1358,18 @@ void test_cached_normal() {
+     CHECK(wgsl2.find("cached_normal: vec4f,") == std::string::npos);
+     CHECK(wgsl2.find("dot(vsc.posnormalmatrix[3].xyz, in.rawnormal)") !=
+           std::string::npos);
++
++    // A per-vertex PNMTXIDX selects both position and normal matrices. Dolphin
++    // uses (posidx & 31) to address I_NORMALMATRICES; the draw-wide current
++    // normal matrix is only valid when PNMTXIDX is absent.
++    key2.has_pos_mtx_idx = 1;
++    const std::string per_vertex_wgsl = gxc::generate_wgsl(key2);
++    CHECK(per_vertex_wgsl.find("normalmatrices: array<vec4f, 32>,") !=
++          std::string::npos);
++    CHECK(per_vertex_wgsl.find("let normidx = posidx & 31;") !=
++          std::string::npos);
++    CHECK(per_vertex_wgsl.find("dot(vsc.normalmatrices[normidx].xyz, in.rawnormal)") !=
++          std::string::npos);
+   }
+ 
+   // --- (B) Decode: a draw carrying a normal advances the cross-draw cache to
+-- 
+2.41.0

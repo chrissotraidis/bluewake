@@ -1,0 +1,48 @@
+--- a/src/backend/emitter.c
++++ b/src/backend/emitter.c
+@@ -2149,6 +2149,7 @@
+     }
+ 
+     for (u32 i = 0; i < count; i++) {
++        bool charged_with_leader = false;
+         fprintf(out, "label_%08X:\n", insts[i].address);
+         if (cfg.loop_ends[i] != UINT32_MAX) {
+             u32 continuation = insts[cfg.loop_ends[i]].address + 4u;
+@@ -2167,19 +2168,29 @@
+                          "dolrecomp_block_can_precharge(ctx, %uu);\n",
+                     cfg.block_cycles[i]);
+             if (cfg.block_cycles[i] != 0) {
+-                fprintf(out, "    if (cycle_block_prepaid) {\n");
+-                fprintf(out, "        if (ctx->downcount <= "
++                /* One guard, not two. The precharged arm and this
++                 * instruction's own charge test the same budget against the
++                 * same resume pc and differ only in the cycles subtracted -
++                 * the block's total, or this instruction's own when the block
++                 * was not precharged. Emitting both costs a second compare, a
++                 * second branch, a second pc store and a second return path at
++                 * every block leader, which is a large fraction of all
++                 * instructions and roughly a million leaders per retrace. */
++                fprintf(out, "    if (ctx->downcount <= "
+                              "-(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) {\n");
+-                fprintf(out, "            ctx->pc = 0x%08Xu;\n",
++                fprintf(out, "        ctx->pc = 0x%08Xu;\n",
+                         insts[i].address);
+-                fprintf(out, "            return;\n");
+-                fprintf(out, "        }\n");
+-                fprintf(out, "        ctx->downcount -= %u;\n",
+-                        cfg.block_cycles[i]);
++                fprintf(out, "        return;\n");
+                 fprintf(out, "    }\n");
++                fprintf(out, "    ctx->downcount -= cycle_block_prepaid ? "
++                             "%uu : %uu;\n",
++                        cfg.block_cycles[i],
++                        c_function_cfg_instruction_cycles(&insts[i]));
++                charged_with_leader = true;
+             }
+         }
+-        emit_precise_instruction_charge(out, &insts[i]);
++        if (!charged_with_leader)
++            emit_precise_instruction_charge(out, &insts[i]);
+         emit_cycle_observation_suffix(out, insts, &cfg, i);
+         emit_instruction_with_range(
+             out, &insts[i], func_addr, func_end,

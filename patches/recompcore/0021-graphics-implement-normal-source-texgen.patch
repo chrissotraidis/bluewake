@@ -1,0 +1,184 @@
+From 84ce67a57e88dacb1adb043a2142ad0e065ba802 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 04:01:25 -0500
+Subject: [PATCH] graphics: implement normal-source texgen
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  8 +++++++
+ .../frontend/tools/dolgx_replay_core.cpp      |  5 ++++
+ .../include/gxruntime/gxcore/gxcore.hpp       |  7 +++++-
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 11 +++++++++
+ .../graphics/gxcore/src/gxcore_shader.cpp     |  6 +++++
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 24 ++++++++++++++++++-
+ 6 files changed, 59 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 732e2da325..4fbdf138a7 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -411,7 +411,10 @@ void dol_aurora_shutdown(void) {
+                      "topology_zero_points=%llu topology_zero_unknown=%llu "
+                      "array_unresolved=%llu array_out_of_bounds=%llu "
+                      "unsupported_texgen=%llu texgen_count_overflow=%llu "
++                     "texgen_count_5=%llu texgen_count_6=%llu "
++                     "texgen_count_7=%llu texgen_count_8plus=%llu "
+                      "texgen_emboss_cached_nbt=%llu texgen_source_normal=%llu "
++                     "texgen_source_normal_default=%llu "
+                      "texgen_source_colors=%llu texgen_source_binormal=%llu "
+                      "texgen_source_tex47=%llu texgen_source_unknown=%llu "
+                      "per_vertex_tex_mtx=%llu "
+@@ -446,8 +449,13 @@ void dol_aurora_shutdown(void) {
+                      gaps.vertex_array_out_of_bounds,
+                      gaps.unsupported_texgen,
+                      gaps.texgen_count_overflow,
++                     gaps.texgen_count_5,
++                     gaps.texgen_count_6,
++                     gaps.texgen_count_7,
++                     gaps.texgen_count_8plus,
+                      gaps.texgen_emboss_cached_nbt,
+                      gaps.texgen_source_normal,
++                     gaps.texgen_source_normal_default,
+                      gaps.texgen_source_colors,
+                      gaps.texgen_source_binormal,
+                      gaps.texgen_source_tex47,
+diff --git a/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp b/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
+index f4ac6d1b38..ffb7336171 100644
+--- a/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
++++ b/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
+@@ -110,7 +110,12 @@ void print_gap_counters(const gxc::GapCounters& c) {
+       {"vertex_decode_failures", c.vertex_decode_failures},
+       {"unsupported_texgen", c.unsupported_texgen},
+       {"texgen_count_overflow", c.texgen_count_overflow},
++      {"texgen_count_5", c.texgen_count_5},
++      {"texgen_count_6", c.texgen_count_6},
++      {"texgen_count_7", c.texgen_count_7},
++      {"texgen_count_8plus", c.texgen_count_8plus},
+       {"texgen_source_normal", c.texgen_source_normal},
++      {"texgen_source_normal_default", c.texgen_source_normal_default},
+       {"texgen_source_colors", c.texgen_source_colors},
+       {"texgen_source_binormal", c.texgen_source_binormal},
+       {"texgen_source_tex47", c.texgen_source_tex47},
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 8f5c6f07ac..db4c662446 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -43,8 +43,13 @@ struct GapCounters {
+   unsigned long long vertex_array_out_of_bounds = 0;
+   unsigned long long unsupported_texgen = 0;    // sum of actual texgen gaps below
+   unsigned long long texgen_count_overflow = 0; // XF count > captured shader cap
++  unsigned long long texgen_count_5 = 0;
++  unsigned long long texgen_count_6 = 0;
++  unsigned long long texgen_count_7 = 0;
++  unsigned long long texgen_count_8plus = 0;
+   unsigned long long texgen_emboss_cached_nbt = 0; // supported cached N/B/T fallback
+-  unsigned long long texgen_source_normal = 0;  // regular source row not emitted
++  unsigned long long texgen_source_normal = 0;  // supported regular normal source
++  unsigned long long texgen_source_normal_default = 0; // no normal attribute
+   unsigned long long texgen_source_colors = 0;  // regular source row not emitted
+   unsigned long long texgen_source_binormal = 0; // regular T/B source not emitted
+   unsigned long long texgen_source_tex47 = 0;   // regular Tex4..Tex7 not captured
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 02513cc8e4..22aca9c794 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -551,6 +551,14 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   if (num_tex_gens > kMaxTexGens) {
+     ++counters.unsupported_texgen;
+     ++counters.texgen_count_overflow;
++    if (num_tex_gens == 5u)
++      ++counters.texgen_count_5;
++    else if (num_tex_gens == 6u)
++      ++counters.texgen_count_6;
++    else if (num_tex_gens == 7u)
++      ++counters.texgen_count_7;
++    else
++      ++counters.texgen_count_8plus;
+     num_tex_gens = kMaxTexGens;
+   }
+   key.num_tex_gens = static_cast<std::uint8_t>(num_tex_gens);
+@@ -656,6 +664,9 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+         unsupported_source = false;
+       } else if (source == TexSourceRow::Normal) {
+         ++counters.texgen_source_normal;
++        if (!walk.has_normal)
++          ++counters.texgen_source_normal_default;
++        unsupported_source = false;
+       } else if (source == TexSourceRow::Colors) {
+         ++counters.texgen_source_colors;
+       } else if (source == TexSourceRow::BinormalT ||
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index bcc1d99d65..6564908063 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -900,6 +900,12 @@ std::string generate_wgsl(const ShaderKey& key) {
+     const auto row = static_cast<TexSourceRow>(tg.sourcerow);
+     if (row == TexSourceRow::Geom) {
+       emit(out, "        coord = vec4f(in.rawpos, 1.0);\n");
++    } else if (row == TexSourceRow::Normal) {
++      // Dolphin VertexShaderGen: a regular normal-source texgen consumes the
++      // raw vertex normal when present; without that component coord remains
++      // at the hardware-compatible default initialized above.
++      if (has_normal)
++        emit(out, "        coord = vec4f(in.rawnormal, 1.0);\n");
+     } else if (tg.sourcerow >= static_cast<std::uint8_t>(TexSourceRow::Tex0) &&
+                tg.sourcerow <
+                    static_cast<std::uint8_t>(TexSourceRow::Tex0) + 4u) {
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 5400910d79..b171a9ec8a 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -213,8 +213,9 @@ void test_state_to_plan_and_wgsl() {
+   {
+     gxc::GapCounters gaps;
+     CHECK(classify_texgen(1u << 7u, gaps).ok); // Normal
+-    CHECK(gaps.unsupported_texgen == 1u);
++    CHECK(gaps.unsupported_texgen == 0u);
+     CHECK(gaps.texgen_source_normal == 1u);
++    CHECK(gaps.texgen_source_normal_default == 1u);
+   }
+   {
+     gxc::GapCounters gaps;
+@@ -254,6 +255,7 @@ void test_state_to_plan_and_wgsl() {
+     CHECK(state.build_draw_plan(overflow, gaps).ok);
+     CHECK(gaps.unsupported_texgen == 1u);
+     CHECK(gaps.texgen_count_overflow == 1u);
++    CHECK(gaps.texgen_count_5 == 1u);
+   }
+ 
+   // Topology admission is distinct from the shared zero-index exit: valid
+@@ -478,6 +480,25 @@ void test_texgen_color() {
+   CHECK(w.find("@location(3) uv1: vec3f,") != std::string::npos);
+ }
+ 
++// Dolphin VertexShaderGen SourceRow::Normal: use the raw normal only when the
++// vertex format provides one; otherwise preserve the initialized coordinate.
++void test_texgen_normal_source() {
++  gxc::ShaderKey key{};
++  key.num_tex_gens = 1;
++  key.tex_gens[0].enabled = 1;
++  key.tex_gens[0].texgentype = static_cast<std::uint8_t>(gxc::TexGenType::Regular);
++  key.tex_gens[0].sourcerow = static_cast<std::uint8_t>(gxc::TexSourceRow::Normal);
++  key.has_vertex_normal = 1;
++  const std::string with_normal = gxc::generate_wgsl(key);
++  CHECK(with_normal.find("coord = vec4f(in.rawnormal, 1.0);") !=
++        std::string::npos);
++
++  key.has_vertex_normal = 0;
++  const std::string without_normal = gxc::generate_wgsl(key);
++  CHECK(without_normal.find("coord = vec4f(in.rawnormal, 1.0);") ==
++        std::string::npos);
++}
++
+ // Item 5: Emboss texgen (Dolphin VertexShaderGen) adds the view-space light dir
+ // projected onto tangent/binormal to the emboss-source texgen's coords. Needs
+ // the lights uniform + NBT vertex inputs even on an unlit draw.
+@@ -1516,6 +1537,7 @@ int main() {
+   test_state_to_plan_and_wgsl();
+   test_untextured_defaults();
+   test_texgen_color();
++  test_texgen_normal_source();
+   test_texgen_emboss();
+   test_texgen_per_vertex_mtx();
+   test_tev_indirect_matrix();
+-- 
+2.41.0

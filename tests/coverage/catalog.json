@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BlueWake public-safe generated content/test catalog",
+  "version": 1,
+  "note": "Populated from verified input manifests starting at P1/P2. Contains no game bytes or private paths.",
+  "coverage_records": [
+    {
+      "id": "topology/GZLE01",
+      "type": "static_topology",
+      "evidence": "local-research/manifests/GZLE01_manifest.json (private)",
+      "summary": {
+        "schema": "bluewake/topology/v1",
+        "disc_revision": "GZLE01 USA rev 0",
+        "dol_count": 1,
+        "loose_rel_count": 235,
+        "rels_arc_rel_count": 180,
+        "total_executables": 416,
+        "count_discrepancy_resolution": "One main.dol executable plus 235 loose REL binaries under rels/ and 180 additional REL binaries stored inside the RELS.arc RARC archive. Zero filename overlap between loose and archived sets. Total: 415 REL modules plus one DOL = 416 executables.",
+        "rel_stats": {
+          "total_rel_entries": 415,
+          "valid_module_id_parses": 415,
+          "invalid_or_null_module_ids": 0,
+          "archived_module_id_range": [
+            1,
+            180
+          ],
+          "loose_module_id_range": [
+            181,
+            415
+          ]
+        },
+        "section_stats": {
+          "min_sections": 17,
+          "max_sections": 22,
+          "mean_sections": 19.5
+        },
+        "import_stats": {
+          "max_imported_modules": 1,
+          "max_total_relocations_in_one_module": 4122476544
+        }
+      }
+    },
+    {
+      "id": "translation/GZLE01-full",
+      "type": "static_translation_audit",
+      "tool": "DolRecomp",
+      "tool_sha": "528a204fbf68fccf7353bff9202714fa6a009dcf",
+      "evidence": "scripts/audit_translation.py PASS",
+      "summary": {
+        "dol_translated": true,
+        "rel_modules_translated": 415,
+        "total_executables": 416,
+        "unknown_instructions": 0,
+        "smc_warnings_dol": 138,
+        "dol_labels": 841800,
+        "rel_labels": 1112152,
+        "rel_base": "0x80400000"
+      }
+    },
+    {
+      "id": "source-census/tww-03d27aa",
+      "type": "source_census",
+      "ref_sha": "03d27aa14389e648f51df2bc055ee3d53a3b67f2",
+      "summary": {
+        "dol_functions_declared": 13758,
+        "rel_functions_declared": 25561,
+        "total_functions_declared": 39319,
+        "actor_rel_modules_with_source": 414,
+        "total_game_rel_modules": 415,
+        "approx_source_defined_functions": 20600,
+        "note": "Approximate heuristic count; exact match status requires full build."
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "prepare/determinism",
+      "description": "Two independent runs of scripts/prepare.py produce identical manifests",
+      "verified": true
+    },
+    {
+      "id": "rarc/synthetic_tests",
+      "description": "Synthetic RARC/REL/Yaz0 parser edge-case tests (8 cases)",
+      "test_file": "tests/test_prepare.py",
+      "verified": true
+    },
+    {
+      "id": "aram/alloc_back_synthetic",
+      "description": "Public 32-bit JKRExpHeap allocBack arithmetic and used-list invariants",
+      "test_file": "tests/test_aram_allocator.py",
+      "verified": true,
+      "note": "Models the retail contract; does not claim to reproduce the authentic translated corruption."
+    },
+    {
+      "id": "cpu_runtime/guest_clock_synthetic",
+      "description": "Public monotonic timebase and SPR-22 decrementer expiry/rearm contract",
+      "test_file": "tests/test_guest_clock.py",
+      "verified": true,
+      "note": "The promoted default-on service converts Gekko cycles to 40.5 MHz timebase ticks with a remainder accumulator; authentic route verification remains separate."
+    },
+    {
+      "id": "cpu_runtime/translated_charge_abi",
+      "description": "Full composite cycle-charge emission and CPUState ABI tail contract",
+      "test_file": "tests/test_cpu_abi_contract.py",
+      "verified": true,
+      "note": "Guards the shared translator/runtime clock input without using private game data."
+    },
+    {
+      "id": "cpu_runtime/module_abi_startup",
+      "description": "Host rejects static-recomp modules with mismatched module ABI, CPU ABI version, or CPUState size",
+      "test_file": "tests/test_cpu_abi_contract.py",
+      "verified": true,
+      "note": "The authentic GZLE01 module passes the promoted startup validation."
+    },
+    {
+      "id": "cpu_runtime/dispatch_budget_resume",
+      "description": "Composite cycle-budget exhaustion resumes through the generated PC/address dispatch contract",
+      "test_file": "tests/test_cpu_abi_contract.py",
+      "verified": true,
+      "note": "Guards generated budget returns, target PC preservation, and physical-address alias fallback."
+    },
+    {
+      "id": "cpu_runtime/multi_block_store_order",
+      "description": "Translated-style multi-block CPUState charge and guest-memory commit ordering",
+      "test_file": "tests/cpu_boundary_test.c",
+      "verified": true,
+      "note": "Public synthetic boundary test using the real GXRuntime memory helpers and write journal."
+    },
+    {
+      "id": "cpu_runtime/memory_alias",
+      "description": "Cached and uncached GameCube guest-address aliases resolve to the same MEM1 bytes",
+      "test_file": "tests/cpu_boundary_test.c",
+      "verified": true,
+      "note": "Public GXRuntime memory contract; no heap or ARAM ownership is involved."
+    },
+    {
+      "id": "cpu_runtime/callback_context_handoff",
+      "description": "Nested exception callback context isolation and interrupted-context restoration through PPC RFI",
+      "test_file": "tests/cpu_boundary_test.c",
+      "verified": true,
+      "note": "Public synthetic contract for the retail DecrementerExceptionCallback handoff; no private game data."
+    },
+    {
+      "id": "cpu_runtime/context_shadow_state",
+      "description": "Runtime-only CPU context shadow preservation across host exception entry and translated OSLoadContext",
+      "test_file": "tests/cpu_boundary_test.c",
+      "verified": true,
+      "note": "Covers paired-single, special-register, exception-latch, and reservation shadows; the authentic replay did not change the active failure signature."
+    },
+    {
+      "id": "cpu_runtime/scheduler_context_coherence",
+      "description": "Host exception materialization preserves committed OSSaveContext coroutine state for arbitrary guest threads and defers delivery across context handoff boundaries",
+      "test_file": "tests/scheduler_contract_test.c",
+      "verified": true,
+      "note": "Default-on generic policy replaces the audio-thread-only save rule; the authentic 476-retrace replay was byte-identical, so this correction is retained runtime debt reduction rather than a claimed boot fix."
+    },
+    {
+      "id": "cpu_runtime/generated_message_block_wake_resume",
+      "description": "Retail translated OSReceiveMessage block and OSSendMessage wake perform priority selection, context resume, and message consumption",
+      "test_file": "tests/generated_scheduler_contract_test.c",
+      "verified": true,
+      "note": "Composite-backed behavioral coverage closes generic OS message scheduling as the current JAS/DVD boot-stall owner."
+    },
+    {
+      "id": "cpu_runtime/generated_aram_stream_write_completion",
+      "description": "Retail translated JKRAramStream write loop exhausts a finite stream request, advances DMA destinations, and publishes its completion message",
+      "test_file": "tests/generated_aram_stream_contract_test.c",
+      "verified": true,
+      "note": "Composite-backed synthetic contract with file reads and synchronous ARAM DMA explicitly bounded by the harness; it does not claim authentic asynchronous hardware behavior."
+    },
+    {
+      "id": "cpu_runtime/aram_dma_register_completion",
+      "description": "Guest-programmed DSP/ARAM DMA registers reconstruct aligned transfers in both directions and expose one acknowledgement-owned completion interrupt",
+      "test_file": "tests/aram_dma_contract_test.c",
+      "verified": true,
+      "note": "Default-on host device contract replacing dispatch-PC and fixed-thread ARQ interception; translated guest ARQ remains responsible for chunking and callbacks."
+    }
+  ]
+}

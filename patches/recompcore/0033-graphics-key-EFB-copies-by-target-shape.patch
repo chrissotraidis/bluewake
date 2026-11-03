@@ -1,0 +1,79 @@
+From 66fb61257f31168638c76be71a0ce68c50c008d1 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 10:22:34 -0500
+Subject: [PATCH] graphics: key EFB copies by target shape
+
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 31 ++++++++++++++-----
+ 1 file changed, 23 insertions(+), 8 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 0314d1d819..3a70630dde 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -228,11 +228,23 @@ absl::flat_hash_map<TextureKey, TextureHandle> g_textureCache;
+ absl::flat_hash_map<uint32_t, TextureKey> g_textureAddrKey;
+ TextureCacheStats g_textureCacheStats;
+ 
+-// EFB copy-to-texture destinations (63/S16): dest guest address -> resolved EFB
+-// texture. A draw binding a texture at one of these addresses samples the copied
+-// EFB content instead of the (stale, never-written-by-us) guest memory there.
+-// Mirrors aurora lib/gx GXState::copyTextures. Copies key by dest address only
+-// (a re-copy to the same address updates in place, matching the live path).
++// EFB copy allocations mirror GXState::copyTextureCache: one guest destination
++// may be reused with different dimensions or formats, which require distinct GPU
++// textures. g_efbCopyTextures mirrors GXState::copyTextures and selects the most
++// recent allocation when that guest destination is sampled.
++struct EfbCopyKey {
++  uint32_t address;
++  uint32_t width;
++  uint32_t height;
++  uint32_t format;
++  bool operator==(const EfbCopyKey&) const = default;
++  template <typename H>
++  friend H AbslHashValue(H h, const EfbCopyKey& key) {
++    return H::combine(std::move(h), key.address, key.width, key.height,
++                      key.format);
++  }
++};
++absl::flat_hash_map<EfbCopyKey, TextureHandle> g_efbCopyCache;
+ absl::flat_hash_map<uint32_t, TextureHandle> g_efbCopyTextures;
+ 
+ } // namespace
+@@ -592,6 +604,7 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+ void reset_texture_cache() {
+   g_textureCache.clear();
+   g_textureAddrKey.clear();
++  g_efbCopyCache.clear();
+   g_efbCopyTextures.clear();
+   g_textureCacheStats = {};
+ }
+@@ -637,8 +650,9 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   const uint32_t dstHeight =
+       std::max(cmd.destination_height, static_cast<uint32_t>(1));
+ 
+-  auto it = g_efbCopyTextures.find(cmd.dest_address);
+-  if (it == g_efbCopyTextures.end() || !it->second) {
++  const EfbCopyKey key{cmd.dest_address, dstWidth, dstHeight, cmd.format};
++  auto it = g_efbCopyCache.find(key);
++  if (it == g_efbCopyCache.end() || !it->second) {
+     TextureHandle handle;
+     if (gfx::tex_copy_conv::needs_conversion(fmt)) {
+       handle = gfx::new_conv_texture(dstWidth, dstHeight, fmt, "GXCore Copy Conv");
+@@ -646,11 +660,12 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+       handle = gfx::new_render_texture(dstWidth, dstHeight, GX_TF_RGBA8,
+                                        "GXCore Copy");
+     }
+-    it = g_efbCopyTextures.insert_or_assign(cmd.dest_address, handle).first;
++    it = g_efbCopyCache.insert_or_assign(key, handle).first;
+   }
+   if (!it->second) {
+     return;
+   }
++  g_efbCopyTextures.insert_or_assign(cmd.dest_address, it->second);
+   float clearDepthValue = static_cast<float>(cmd.clear_z) / 16777215.f;
+   if (gx::UseReversedZ) {
+     clearDepthValue = 1.f - clearDepthValue;
+-- 
+2.41.0
+

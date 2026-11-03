@@ -1,0 +1,18 @@
+diff --git a/lib/dolphin/gx/GXCpu2Efb.cpp b/lib/dolphin/gx/GXCpu2Efb.cpp
+index 9f3f87d..41567bc 100644
+--- a/lib/dolphin/gx/GXCpu2Efb.cpp
++++ b/lib/dolphin/gx/GXCpu2Efb.cpp
+@@ -18,3 +18,13 @@ void GXPeekZ(u16 x, u16 y, u32* z) {
+ 
+   GX_WRITE_AURORA(GX_AURORA_REQUEST_DEPTH_SNAPSHOT);
+ }
++
++// The PE alpha-read register selects how a later CPU read of the EFB interprets alpha. This layer
++// implements exactly one CPU read of the EFB - GXPeekZ above, through the depth snapshot - and no
++// colour read at all, so on this host there is no path for the mode to alter and no state for it to
++// live in. It is written here, in its own file, because that is where it will have to be recorded
++// when a colour readback exists; until then a no-op is the whole of its behaviour rather than a
++// stand-in for one.
++void GXPokeAlphaRead(GXAlphaReadMode mode) {
++  (void)mode;
++}

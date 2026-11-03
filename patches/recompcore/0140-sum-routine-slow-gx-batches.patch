@@ -1,0 +1,86 @@
+From d55ee014e4670337aa05fefa3209e444cc7a63f0 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 18:00:50 +0900
+Subject: [PATCH] Sum routine slow GX batches; keep single lines for hitches
+
+A heavy scene on a slower CPU passes the 20 ms bar on most batches: a player log had 33,712 [gx-slow] lines in 104 minutes, written from the worker the game was waiting on. Batches of DOL_GX_SLOW_BATCH_LOG_MS (50 ms) or more keep their own line; the rest are summed into one [gx-slow-sum] line every ten seconds with their count, total and longest time, pipelines made and textures uploaded.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 37 +++++++++++++++++--
+ 1 file changed, 34 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 52f995d4ac..c872fed09a 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -11,6 +11,7 @@
+ #include <gx/recomp.hpp>
+ #include <gxruntime/guest_memory_dirty.h>
+ #include <SDL3/SDL_timer.h>
++#include <algorithm>
+ #include <atomic>
+ #include <chrono>
+ #include <cstdio>
+@@ -595,10 +596,25 @@ void g_fifo_worker_main() {
+         // A slow batch holds the game thread at its next draw-done; say what
+         // the worker made in it (pipelines, decoded textures) so the cause
+         // is in the session log. DOL_GX_SLOW_BATCH_MS sets the bar (20).
++        // On a slower CPU most batches of a heavy scene pass 20 ms, so those
++        // are summed into one line every ten seconds; a batch of
++        // DOL_GX_SLOW_BATCH_LOG_MS (50) or more, a real hitch, keeps its own.
+         static const long slow_ms = [] {
+             const char* env = std::getenv("DOL_GX_SLOW_BATCH_MS");
+             return env != nullptr ? std::strtol(env, nullptr, 10) : 20L;
+         }();
++        static const long hitch_ms = [] {
++            const char* env = std::getenv("DOL_GX_SLOW_BATCH_LOG_MS");
++            return env != nullptr ? std::strtol(env, nullptr, 10) : 50L;
++        }();
++        struct SlowSum {
++            std::chrono::steady_clock::time_point since;
++            unsigned batches = 0;
++            long total_ms = 0, max_ms = 0;
++            unsigned pipelines = 0;
++            unsigned long long textures = 0;
++        };
++        static SlowSum slow_sum; // this worker's only (one batch at a time)
+         const auto t0 = std::chrono::steady_clock::now();
+         const uint32_t pipelines0 = aurora_get_stats()->createdPipelines;
+         const unsigned long long uploads0 = aurora::gfx::gxcore::texture_upload_count();
+@@ -609,9 +625,18 @@ void g_fifo_worker_main() {
+                                               std::chrono::steady_clock::now() - t0)
+                                               .count());
+         if (slow_ms > 0 && ms >= slow_ms) {
+-            std::fprintf(stderr, "[gx-slow] batch_ms=%ld bytes=%zu pipelines=%u textures=%llu\n", ms,
+-                         batch.size(), aurora_get_stats()->createdPipelines - pipelines0,
+-                         aurora::gfx::gxcore::texture_upload_count() - uploads0);
++            const uint32_t made = aurora_get_stats()->createdPipelines - pipelines0;
++            const unsigned long long uploaded = aurora::gfx::gxcore::texture_upload_count() - uploads0;
++            if (ms >= hitch_ms)
++                std::fprintf(stderr, "[gx-slow] batch_ms=%ld bytes=%zu pipelines=%u textures=%llu\n", ms,
++                             batch.size(), made, uploaded);
++            if (slow_sum.batches == 0)
++                slow_sum.since = t0;
++            ++slow_sum.batches;
++            slow_sum.total_ms += ms;
++            slow_sum.max_ms = std::max(slow_sum.max_ms, ms);
++            slow_sum.pipelines += made;
++            slow_sum.textures += uploaded;
+             // A batch that held the game for a tenth of a second or more: its
+             // first bytes (the GX commands), so what it waited on can be told.
+             if (ms >= 100) {
+@@ -623,6 +648,12 @@ void g_fifo_worker_main() {
+                 std::fprintf(stderr, "[gx-slow-bytes] %s\n", hex);
+             }
+         }
++        if (slow_sum.batches != 0 && std::chrono::steady_clock::now() - slow_sum.since >= std::chrono::seconds(10)) {
++            std::fprintf(stderr,
++                         "[gx-slow-sum] seconds=10 batches=%u total_ms=%ld max_ms=%ld pipelines=%u textures=%llu\n",
++                         slow_sum.batches, slow_sum.total_ms, slow_sum.max_ms, slow_sum.pipelines, slow_sum.textures);
++            slow_sum = SlowSum{};
++        }
+         {
+             std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+             g_fifo_parsed = parsed;
+-- 
+2.46.0
+

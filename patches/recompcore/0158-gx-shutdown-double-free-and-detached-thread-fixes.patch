@@ -1,0 +1,306 @@
+From 52629986b742e97ebdf2f6d928fdb2af4fc75c8e Mon Sep 17 00:00:00 2001
+From: James Koehler-Killeen <kohlykohl@gmail.com>
+Date: Tue, 6 Oct 2026 02:33:21 +0000
+Subject: [PATCH 1/2] gx: release gxcore device caches before the device is
+ destroyed
+
+The gxcore draw module held three device-bound statics as function
+locals: a bind-group-layout cache and its owner device, and the
+ubershader's empty-texmap texture/view plus their owner device. As
+function-local statics their destructors ran at exit(), after
+webgpu::shutdown()/window::shutdown() had already destroyed the Vulkan
+instance and XCB connection. The last wgpu::Device reference then walked
+the freed XCB connection to destroy a fence
+(xcb_send_request -> realloc) and glibc aborted with
+"double free or corruption (!prev)".
+
+Hoist those statics to file scope and add gxcore::shutdown(), which
+gfx::shutdown() calls while the device is still alive, so the last
+device reference is released in the correct order.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  7 ++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 69 +++++++++++++------
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  7 ++
+ 3 files changed, 62 insertions(+), 21 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index c9aebcd2d6..bc2396513b 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1314,6 +1314,13 @@ void shutdown() {
+   tex_palette_conv::shutdown();
+   texture_replacement::shutdown();
+   gx::shutdown();
++#ifdef AURORA_ENABLE_GXCORE
++  // After the last gxcore draws/waits above and while the device is still
++  // alive: drop the gxcore module's device, bind-group-layout cache and
++  // empty-texmap texture/view before webgpu::shutdown() destroys the device and
++  // its Vulkan instance/XCB connection (see gxcore_draw.cpp shutdown()).
++  gxcore::shutdown();
++#endif
+ #ifdef AURORA_ENABLE_RMLUI
+   rmlui::shutdown_pipeline();
+ #endif
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index c6e46cb08e..6d62174470 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -40,6 +40,20 @@ static Module Log("aurora::gfx::gxcore");
+ 
+ namespace {
+ 
++// Device-retaining caches, hoisted out of their functions so shutdown() can
++// release them BEFORE webgpu::shutdown()/window::shutdown() destroy the Vulkan
++// instance and XCB connection. As function-local statics they were destroyed at
++// exit(), when the last wgpu::Device ref's destructor walked a freed XCB
++// connection to destroy fences -> "double free or corruption (!prev)".
++std::mutex g_texBindLayoutMutex;
++absl::flat_hash_map<uint32_t, wgpu::BindGroupLayout> g_texBindLayoutCache;
++wgpu::Device g_texBindLayoutOwner;
++
++std::mutex g_emptyTexmapMutex;
++wgpu::Device g_emptyTexmapOwner;
++wgpu::Texture g_emptyTexmapTexture;
++wgpu::TextureView g_emptyTexmapView;
++
+ wgpu::CompareFunction to_compare(gxc::CompareMode func) {
+   // GC compare flipped for the substrate's reversed-Z (gx/gx.cpp:526 shape).
+   switch (func) {
+@@ -204,18 +218,15 @@ wgpu::SamplerDescriptor sampler_descriptor(const gxc::PlanSampler& sampler, uint
+ wgpu::BindGroupLayout texture_bind_group_layout(uint32_t used_mask = 1u) {
+   // Both the pipeline compiler and FIFO submission use this cache. A lookup
+   // concurrent with flat_hash_map growth can read an invalid layout handle.
+-  static std::mutex mutex;
+-  std::lock_guard lock{mutex};
+-  static absl::flat_hash_map<uint32_t, wgpu::BindGroupLayout> cache;
++  std::lock_guard lock{g_texBindLayoutMutex};
+   // Retaining the owner also prevents pointer reuse from matching a dead
+   // device after renderer reinitialization.
+-  static wgpu::Device owner;
+-  if (owner.Get() != g_device.Get()) {
+-    cache.clear();
+-    owner = g_device;
++  if (g_texBindLayoutOwner.Get() != g_device.Get()) {
++    g_texBindLayoutCache.clear();
++    g_texBindLayoutOwner = g_device;
+   }
+-  auto it = cache.find(used_mask);
+-  if (it != cache.end())
++  auto it = g_texBindLayoutCache.find(used_mask);
++  if (it != g_texBindLayoutCache.end())
+     return it->second;
+   std::vector<wgpu::BindGroupLayoutEntry> entries;
+   for (uint32_t t = 0; t < 8u; ++t) {
+@@ -245,7 +256,7 @@ wgpu::BindGroupLayout texture_bind_group_layout(uint32_t used_mask = 1u) {
+       .entries = entries.data(),
+   };
+   auto layout = g_device.CreateBindGroupLayout(&descriptor);
+-  cache.emplace(used_mask, layout);
++  g_texBindLayoutCache.emplace(used_mask, layout);
+   return layout;
+ }
+ 
+@@ -919,6 +930,26 @@ void reset_texture_cache() {
+   g_textureCacheStats = {};
+ }
+ 
++void shutdown() {
++  // Release every wgpu object we still hold before webgpu::shutdown() destroys
++  // the device, the Vulkan instance and the XCB connection. The flat_hash_map
++  // and the device/texture/view statics hold the last references; destroying
++  // them at exit() (after the connection was freed) aborted in
++  // xcb_send_request -> realloc with "double free or corruption (!prev)".
++  {
++    std::lock_guard lock{g_texBindLayoutMutex};
++    g_texBindLayoutCache.clear();
++    g_texBindLayoutOwner = {};
++  }
++  {
++    std::lock_guard lock{g_emptyTexmapMutex};
++    g_emptyTexmapView = {};
++    g_emptyTexmapTexture = {};
++    g_emptyTexmapOwner = {};
++  }
++  reset_texture_cache();
++}
++
+ void set_texture_dirty_epoch_observer(TextureDirtyEpochObserver observer) {
+   g_textureDirtyEpochObserver = observer;
+ }
+@@ -1076,13 +1107,9 @@ static UniformCache g_uberPixelUniformCache;
+ // The ubershader's texture for a texmap slot no TEV stage samples: one white
+ // texel, made once per device (the ubershader's bind group has all eight).
+ static const wgpu::TextureView& empty_texmap_view() {
+-  static std::mutex mutex;
+-  std::lock_guard lock{mutex};
+-  static wgpu::Device owner;
+-  static wgpu::Texture texture;
+-  static wgpu::TextureView view;
+-  if (owner.Get() != g_device.Get()) {
+-    owner = g_device;
++  std::lock_guard lock{g_emptyTexmapMutex};
++  if (g_emptyTexmapOwner.Get() != g_device.Get()) {
++    g_emptyTexmapOwner = g_device;
+     const wgpu::TextureDescriptor descriptor{
+         .label = "GXCore ubershader empty texmap",
+         .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
+@@ -1092,15 +1119,15 @@ static const wgpu::TextureView& empty_texmap_view() {
+         .mipLevelCount = 1,
+         .sampleCount = 1,
+     };
+-    texture = g_device.CreateTexture(&descriptor);
+-    view = texture.CreateView();
++    g_emptyTexmapTexture = g_device.CreateTexture(&descriptor);
++    g_emptyTexmapView = g_emptyTexmapTexture.CreateView();
+     static constexpr uint8_t kWhite[4] = {255, 255, 255, 255};
+-    const wgpu::TexelCopyTextureInfo dst{.texture = texture};
++    const wgpu::TexelCopyTextureInfo dst{.texture = g_emptyTexmapTexture};
+     const wgpu::TexelCopyBufferLayout layout{.bytesPerRow = 4, .rowsPerImage = 1};
+     const wgpu::Extent3D size{1, 1, 1};
+     webgpu::g_queue.WriteTexture(&dst, kWhite, sizeof kWhite, &layout, &size);
+   }
+-  return view;
++  return g_emptyTexmapView;
+ }
+ 
+ // The block the cache last took: `staged` where it was staged, or the copy.
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index a226a00b3d..5b44449209 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -120,6 +120,13 @@ bool submit_draw_plan(const gxruntime::gxcore::DrawPlan& plan);
+ void wait_interp_jobs();
+ // Drop the texture cache + reset its stats (start of a replay run).
+ void reset_texture_cache();
++// Release every wgpu object this module holds, before the device and its
++// backing Vulkan instance/XCB connection are torn down. Called from
++// gfx::shutdown() (ahead of webgpu::shutdown()). Without this the device,
++// bind-group-layout cache and empty-texmap texture/view statics are destroyed
++// at exit(), after the connection is gone, aborting with
++// "double free or corruption (!prev)" in the last device ref's destructor.
++void shutdown();
+ // Once per presented frame: small textures are re-hashed at most once a frame.
+ void note_frame_presented();
+ 
+-- 
+2.47.3
+
+
+From 13e81b9ab02de07777bec74a5b239a30b15745c1 Mon Sep 17 00:00:00 2001
+From: James Koehler-Killeen <kohlykohl@gmail.com>
+Date: Tue, 6 Oct 2026 03:28:13 +0000
+Subject: [PATCH 2/2] gx: stop the detached decoder and interpolation helper
+ threads on shutdown
+
+Two detached background threads never terminated and hung the process
+at exit():
+
+- texture_replacement.cpp's decoder_main() waited on s_decodeCv forever,
+  with no stop signal.
+- gxcore_draw.cpp's interp_helper_main() waited on the helper's work
+  condition variable forever (the helper was intentionally never
+  destroyed).
+
+glibc's exit() teardown then hung waiting on the still-live detached
+threads. Add a stop flag to each, check it in the wait predicate, and
+signal it from texture_replacement::shutdown() and gxcore::shutdown() so
+both threads exit before process teardown.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 20 ++++++++++++++++++-
+ .../aurora/lib/gfx/texture_replacement.cpp    | 10 +++++++++-
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 6d62174470..accfc66df0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -930,7 +930,13 @@ void reset_texture_cache() {
+   g_textureCacheStats = {};
+ }
+ 
++void stop_interp_helper();
++
+ void shutdown() {
++  // Stop the detached interpolation helper before it outlives the process:
++  // it waits on `work` forever, so without a stop flag glibc's exit() teardown
++  // hangs on the still-live detached thread. (Defined with InterpHelper.)
++  stop_interp_helper();
+   // Release every wgpu object we still hold before webgpu::shutdown() destroys
+   // the device, the Vulkan instance and the XCB connection. The flat_hash_map
+   // and the device/texture/view statics hold the last references; destroying
+@@ -1241,6 +1247,7 @@ struct InterpHelper {
+   std::atomic<uint64_t> produced{0};
+   std::atomic<uint64_t> consumed{0};
+   std::atomic<bool> sleeping{false};
++  std::atomic<bool> stop{false};
+   std::mutex mutex;
+   std::condition_variable work;
+   std::condition_variable idle;
+@@ -1284,11 +1291,14 @@ void interp_helper_main(InterpHelper* h) {
+       }
+       if (arrived)
+         continue;
++      if (h->stop.load(std::memory_order_acquire))
++        return;
+       std::unique_lock lock{h->mutex};
+       h->sleeping.store(true, std::memory_order_seq_cst);
+       h->idle.notify_all();
+       h->work.wait(lock, [h] {
+-        return h->produced.load(std::memory_order_seq_cst) != h->consumed.load(std::memory_order_relaxed);
++        return h->stop.load(std::memory_order_acquire) ||
++               h->produced.load(std::memory_order_seq_cst) != h->consumed.load(std::memory_order_relaxed);
+       });
+       h->sleeping.store(false, std::memory_order_relaxed);
+       continue;
+@@ -1462,6 +1472,14 @@ uint32_t next_interp_job() {
+ }
+ } // namespace
+ 
++void stop_interp_helper() {
++  if (InterpHelper* h = g_interpHelper.load(std::memory_order_acquire)) {
++    h->stop.store(true, std::memory_order_release);
++    h->work.notify_all();
++    g_interpHelper.store(nullptr, std::memory_order_release);
++  }
++}
++
+ void wait_interp_jobs() {
+   InterpHelper* h = g_interpHelper.load(std::memory_order_acquire);
+   if (h == nullptr ||
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+index 1d123c8e37..40d939344f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+@@ -853,13 +853,16 @@ absl::flat_hash_set<aurora::texture::ReplacementKey, ReplacementKeyHash> s_decod
+ absl::flat_hash_map<aurora::texture::ReplacementKey, std::optional<aurora::gfx::ConvertedTexture>, ReplacementKeyHash>
+     s_decoded;
+ bool s_decoderStarted = false;
++bool s_decoderStop = false;
+ 
+ void decoder_main() noexcept {
+   for (;;) {
+     DecodeJob job;
+     {
+       std::unique_lock lk(s_decodeMutex);
+-      s_decodeCv.wait(lk, [] { return !s_decodeQueue.empty(); });
++      s_decodeCv.wait(lk, [] { return s_decoderStop || !s_decodeQueue.empty(); });
++      if (s_decoderStop && s_decodeQueue.empty())
++        return;
+       job = std::move(s_decodeQueue.front());
+       s_decodeQueue.pop_front();
+     }
+@@ -1193,6 +1196,11 @@ namespace aurora::gfx::texture_replacement {
+ void initialize() noexcept {}
+ 
+ void shutdown() noexcept {
++  {
++    std::lock_guard lk(s_decodeMutex);
++    s_decoderStop = true;
++  }
++  s_decodeCv.notify_all();
+   texture::clear_replacements();
+   s_pendingTluts.clear();
+   for (auto& tlut : s_loadedTluts) {
+-- 
+2.47.3
+

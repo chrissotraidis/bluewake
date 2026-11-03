@@ -1,0 +1,176 @@
+From 410d0733858e5a6c5c9edff73f65a2a2a821407d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sun, 30 Aug 2026 11:44:06 -0500
+Subject: [PATCH 41/41] graphics: preserve packet sequence beyond 32-bit wrap
+
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp   |  9 +++++----
+ .../gxruntime/aurora_recomp/render_sink.hpp     |  8 ++++----
+ .../aurora_recomp/retail_gx_frontend.hpp        |  2 +-
+ .../aurora_recomp/retail_gx_frontend_c.h        |  2 +-
+ GXRuntime/graphics/frontend/src/render_sink.cpp |  2 +-
+ .../frontend/src/retail_gx_frontend.cpp         |  2 +-
+ .../frontend/tests/frontend_replay_test.cpp     | 17 +++++++++++++++++
+ 7 files changed, 30 insertions(+), 12 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 8f7f181161..1216fb28c6 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -402,7 +402,7 @@ void shadow_frontend_write(u64 value, u8 size) {
+                      "parse_error=%s parse_opcode=0x%02X "
+                      "parse_offset=%llu pending=%llu "
+                      "detail=(%u,%u,%u,%u); "
+-                     "reason=%s seq=%u event=%s(%u) "
++                     "reason=%s seq=%llu event=%s(%u) "
+                      "a=%u b=%u c=%u d=%u; "
+                      "live Aurora path remains active\n",
+                      g_fifo_bytes, g_shadow_packet_sink.packets(),
+@@ -428,7 +428,7 @@ void shadow_frontend_write(u64 value, u8 size) {
+                      g_shadow_packet_sink.failure_reason() != nullptr
+                          ? g_shadow_packet_sink.failure_reason()
+                          : "frontend-parse",
+-                     failed.sequence,
++                     static_cast<unsigned long long>(failed.sequence),
+                      gxruntime::aurora_recomp::trace_event_name(
+                          failed.event.kind),
+                      static_cast<unsigned>(failed.event.kind), failed.event.a,
+@@ -497,12 +497,13 @@ void shadow_transform_observer(
+     const std::uint32_t pn_valid_used =
+         pn_used_mask & draw.position_matrix_valid_mask;
+     std::fprintf(stderr,
+-                 "[gfx] draw-transform frame=%llu draw=%zu seq=%u "
++                 "[gfx] draw-transform frame=%llu draw=%zu seq=%llu "
+                  "total=%llu prim=0x%02X fmt=%u count=%u vsize=%u "
+                  "payload=%zu cull=%d tex=%u:0x%08X flags=0x%X "
+                  "current_pn=%u payload_pn_mask=0x%03X pn_used=0x%03X "
+                  "pn_valid=0x%03X pos_valid=0x%03X arrays=%u active=0x%04X\n",
+-                 frame, frame_draw, draw.sequence, cumulative_draw,
++                 frame, frame_draw,
++                 static_cast<unsigned long long>(draw.sequence), cumulative_draw,
+                  draw.primitive, draw.vtx_fmt, draw.vertex_count,
+                  draw.vertex_size, draw.vertex_payload.size(),
+                  draw.cull_all ? 1 : 0, draw.texture.slot,
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+index e915293905..80d5d0ea40 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/render_sink.hpp
+@@ -146,7 +146,7 @@ struct RenderDrawPacket {
+ 
+ struct RenderPacket {
+   RenderPacketKind kind = RenderPacketKind::TraceEvent;
+-  std::uint32_t sequence = 0;
++  std::uint64_t sequence = 0;
+   DolGxRecompTraceEvent event{};
+   RenderStreamPacket stream{};
+   RenderStatePacket state{};
+@@ -234,7 +234,7 @@ struct ConsumedArrayInput {
+ struct ConsumedDraw {
+   static constexpr std::uint32_t kMaxArrays = 16u;
+ 
+-  std::uint32_t sequence = 0;
++  std::uint64_t sequence = 0;
+   std::uint32_t primitive = 0;
+   std::uint32_t vtx_fmt = 0;
+   std::uint32_t vertex_count = 0;
+@@ -429,7 +429,7 @@ private:
+   unsigned long long topology_index_bytes_ = 0;
+   unsigned long long storage_bytes_ = 0;
+   bool back_assembled_ = false;
+-  std::uint32_t last_sequence_ = 0;
++  std::uint64_t last_sequence_ = 0;
+   bool has_last_sequence_ = false;
+   const char* failure_reason_ = nullptr;
+   RenderPacket failed_packet_{};
+@@ -507,7 +507,7 @@ std::uint32_t build_topology_indices(GxPrimitive primitive,
+ std::uint32_t build_array_sizes(const ConsumedDraw& draw, std::uint32_t* out,
+                                 std::size_t count);
+ 
+-RenderPacket make_render_packet(std::uint32_t sequence,
++RenderPacket make_render_packet(std::uint64_t sequence,
+                                 const DolGxRecompTraceEvent& event);
+ const char* trace_event_name(DolGxRecompEventKind kind);
+ 
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+index dddfbb3001..5cf4e0ee41 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend.hpp
+@@ -138,7 +138,7 @@ private:
+   TraceEventObserver event_observer_ = nullptr;
+   void* event_observer_user_ = nullptr;
+   std::uint32_t emitted_trace_count_ = 0;
+-  std::uint32_t next_packet_sequence_ = 0;
++  std::uint64_t next_packet_sequence_ = 0;
+   const char* last_error_ = nullptr;
+   std::size_t last_error_offset_ = 0;
+   std::uint8_t last_error_opcode_ = 0;
+diff --git a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend_c.h b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend_c.h
+index f3dad526d2..a95ee5d8db 100644
+--- a/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend_c.h
++++ b/GXRuntime/graphics/frontend/include/gxruntime/aurora_recomp/retail_gx_frontend_c.h
+@@ -103,7 +103,7 @@ typedef struct DolAuroraRecompRenderDrawPacket {
+ 
+ typedef struct DolAuroraRecompRenderPacket {
+     u32 kind;
+-    u32 sequence;
++    u64 sequence;
+     DolGxRecompTraceEvent event;
+     DolAuroraRecompRenderStreamPacket stream;
+     DolAuroraRecompRenderStatePacket state;
+diff --git a/GXRuntime/graphics/frontend/src/render_sink.cpp b/GXRuntime/graphics/frontend/src/render_sink.cpp
+index c8ea655b5e..d37ad79c00 100644
+--- a/GXRuntime/graphics/frontend/src/render_sink.cpp
++++ b/GXRuntime/graphics/frontend/src/render_sink.cpp
+@@ -529,7 +529,7 @@ std::uint32_t build_array_sizes(const ConsumedDraw& draw, std::uint32_t* out,
+   return non_zero;
+ }
+ 
+-RenderPacket make_render_packet(std::uint32_t sequence,
++RenderPacket make_render_packet(std::uint64_t sequence,
+                                 const DolGxRecompTraceEvent& event) {
+   RenderPacket packet{
+       .kind = RenderPacketKind::TraceEvent,
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index adda4a7627..77a5ac8cff 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -864,7 +864,7 @@ bool RetailGxFrontend::emit_new_packets(AuroraRenderSink& sink,
+     return false;
+ 
+   for (std::uint32_t i = first_event; i < events.size(); ++i) {
+-    const std::uint32_t sequence =
++    const std::uint64_t sequence =
+         packet_drain_enabled_ ? next_packet_sequence_++ : i;
+     RenderPacket packet = make_render_packet(sequence, events[i]);
+     // Draw events are emitted exactly once, in order, so the retained payloads
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index ec1207c5d0..67efb4ffa5 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -591,6 +591,23 @@ void test_xf_projection_capture() {
+ } // namespace
+ 
+ int main() {
++  {
++    using gxruntime::aurora_recomp::ConsumingAuroraRenderSink;
++    using gxruntime::aurora_recomp::RenderPacket;
++
++    ConsumingAuroraRenderSink sink;
++    RenderPacket before_wrap{};
++    before_wrap.kind = RenderPacketKind::State;
++    before_wrap.sequence = UINT32_MAX;
++    assert(sink.submit_packet(before_wrap));
++
++    RenderPacket after_wrap{};
++    after_wrap.kind = RenderPacketKind::State;
++    after_wrap.sequence = static_cast<std::uint64_t>(UINT32_MAX) + 1u;
++    assert(sink.submit_packet(after_wrap));
++    assert(sink.failure_reason() == nullptr);
++  }
++
+   test_c_frontend_abi_byte_fragmentation();
+   test_c_frontend_guest_array_bridge();
+   test_fragmented_fifo_display_list_frontend();
+-- 
+2.41.0
+

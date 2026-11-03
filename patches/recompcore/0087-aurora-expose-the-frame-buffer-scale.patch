@@ -1,0 +1,27 @@
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 9d22cc6..defa390 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -136,6 +136,10 @@ void aurora_set_log_level(AuroraLogLevel level);
+ void aurora_set_pause_on_focus_lost(bool value);
+ void aurora_set_background_input(bool value);
+ void aurora_set_resampler(AuroraSampler sampler);
++/* Internal render resolution as a multiple of the game's 640x480 frame
++   buffer (3 renders 1920x1440 and scales the result to the window); 0 renders
++   at the window's native pixel size. Takes effect at the next frame. */
++void aurora_set_frame_buffer_scale(float scale);
+ 
+ AuroraBackend aurora_get_backend();
+ const AuroraBackend* aurora_get_available_backends(size_t* count);
+diff --git a/GXRuntime/graphics/aurora/lib/aurora.cpp b/GXRuntime/graphics/aurora/lib/aurora.cpp
+index 8843b7b..5020103 100644
+--- a/GXRuntime/graphics/aurora/lib/aurora.cpp
++++ b/GXRuntime/graphics/aurora/lib/aurora.cpp
+@@ -442,6 +442,7 @@ void aurora_set_background_input(bool value) {
+   aurora::g_config.allowJoystickBackgroundEvents = value;
+   aurora::window::set_background_input(value);
+ }
++void aurora_set_frame_buffer_scale(float scale) { aurora::window::set_frame_buffer_scale(scale); }
+ void aurora_set_resampler(AuroraSampler sampler) {
+ #ifdef AURORA_ENABLE_GX
+   aurora::webgpu::set_resampler(sampler);

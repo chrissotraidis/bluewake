@@ -1,0 +1,160 @@
+From 77d4717d868cec8b4014932bb22978c284a535a7 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 23:46:32 -0500
+Subject: [PATCH] Aurora: aurora_set_copy_crop, for pictures taken through a
+ widened camera
+
+Under a widescreen mod a game that copies part of the frame as a picture
+(Wind Waker's Picto Box) copies the wider camera's view into a texture of
+its 4:3 size, so the picture comes out squeezed: to 75% of its width at 16:9
+and 57% at 21:9. aurora_set_copy_crop(width, height, fraction) makes a copy
+of that size take `fraction` of its source's width, mapped about the frame's
+middle as the wider camera maps it, and scales it back to its full size: the
+picture a 4:3 camera would have taken. Both copy paths (GXCopyTex and the
+gxcore FIFO's EFB copies) use it. Off until it is set.
+
+Checked on Windows (i5-12600KF, RTX 5070 Ti, Direct3D 12) with BlueWake
+calling it for Wind Waker's photo copy (152x104 from 304x208): Picto Box and
+Deluxe Picto Box photos keep their shape at 16:9, 16:10 and 21:9.
+---
+ .../graphics/aurora/include/aurora/gfx.h      |  9 +++++
+ .../aurora/lib/dolphin/gx/GXFrameBuffer.cpp   | 39 ++++++++++++++++++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 14 ++++---
+ GXRuntime/graphics/aurora/lib/gx/gx.hpp       |  3 ++
+ 4 files changed, 58 insertions(+), 7 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/gfx.h b/GXRuntime/graphics/aurora/include/aurora/gfx.h
+index b4b25592..88eccb5d 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/gfx.h
++++ b/GXRuntime/graphics/aurora/include/aurora/gfx.h
+@@ -68,6 +68,15 @@ bool aurora_peek_argb(uint16_t x, uint16_t y, uint32_t* color);
+    (window.cpp, follow_window_size). Call it on the thread that polls events. */
+ void aurora_follow_window_size(void);
+ 
++/* A texture copy width x height (the game's own sizes) takes `fraction` of
++   its source's width, mapped about the frame's middle, and is scaled back to
++   its full size: what a camera widened by 1 / fraction shows, kept in the
++   shape a 4:3 camera would have taken. For pictures a game takes through its
++   camera (Wind Waker's Picto Box) under a widescreen mod; fraction is
++   (4/3) / aspect. 0 for any argument (the default) turns it off. Takes
++   effect at the next copy. */
++void aurora_set_copy_crop(uint32_t width, uint32_t height, float fraction);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/GXRuntime/graphics/aurora/lib/dolphin/gx/GXFrameBuffer.cpp b/GXRuntime/graphics/aurora/lib/dolphin/gx/GXFrameBuffer.cpp
+index ad36cc44..d4719d92 100644
+--- a/GXRuntime/graphics/aurora/lib/dolphin/gx/GXFrameBuffer.cpp
++++ b/GXRuntime/graphics/aurora/lib/dolphin/gx/GXFrameBuffer.cpp
+@@ -1,6 +1,8 @@
+ #include "gx.hpp"
+ #include "__gx.h"
+ 
++#include <aurora/gfx.h>
++
+ #include "../../gfx/tex_copy_conv.hpp"
+ #include "../../gfx/texture.hpp"
+ #include "../../window.hpp"
+@@ -9,7 +11,9 @@
+ #include "../vi/vi_internal.hpp"
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cmath>
++#include <cstring>
+ 
+ namespace {
+ aurora::Vec2<uint32_t> scale_copy_dst(u32 logicalWidth, u32 logicalHeight) {
+@@ -32,8 +36,31 @@ aurora::Vec2<uint32_t> scale_copy_dst(u32 logicalWidth, u32 logicalHeight) {
+ } // namespace
+ 
+ namespace aurora::gx {
++namespace {
++// aurora_set_copy_crop: the copy size (width << 16 | height) and the fraction's
++// bits, in one word so a copy never reads one without the other. 0: off.
++std::atomic<uint64_t> g_copyCrop{0};
++} // namespace
++
++gfx::ClipRect copy_source(gfx::ClipRect src, u32 dstWidth, u32 dstHeight) noexcept {
++  const uint64_t crop = g_copyCrop.load(std::memory_order_relaxed);
++  if (crop == 0 || dstWidth != (crop >> 48) || dstHeight != ((crop >> 32) & 0xFFFF)) {
++    return src;
++  }
++  float fraction;
++  const auto bits = static_cast<uint32_t>(crop);
++  std::memcpy(&fraction, &bits, sizeof fraction);
++  // A camera widened by 1 / fraction puts what a 4:3 one shows at x on
++  // middle + (x - middle) * fraction: the source is that span of the EFB.
++  const float middle = static_cast<float>(logical_fb_size().x) * 0.5f;
++  src.x = static_cast<int32_t>(std::lround(middle + (static_cast<float>(src.x) - middle) * fraction));
++  src.width = std::max<int32_t>(static_cast<int32_t>(std::lround(static_cast<float>(src.width) * fraction)), 1);
++  return src;
++}
++
+ void copy_tex(const void* dest, GXBool clear) noexcept {
+-  const auto rect = map_logical_scissor(g_gxState.texCopySrc);
++  const auto rect = map_logical_scissor(
++      copy_source(g_gxState.texCopySrc, g_gxState.texCopyDstWidth, g_gxState.texCopyDstHeight));
+   const auto [dstWidth, dstHeight] = scale_copy_dst(g_gxState.texCopyDstWidth, g_gxState.texCopyDstHeight);
+   const auto texCopyFmt = g_gxState.texCopyFmt;
+ 
+@@ -85,6 +112,16 @@ void copy_tex(const void* dest, GXBool clear) noexcept {
+ }
+ } // namespace aurora::gx
+ 
++void aurora_set_copy_crop(uint32_t width, uint32_t height, float fraction) {
++  uint64_t crop = 0;
++  if (width != 0 && height != 0 && width <= 0xFFFF && height <= 0xFFFF && fraction > 0.f && fraction < 1.f) {
++    uint32_t bits;
++    std::memcpy(&bits, &fraction, sizeof bits);
++    crop = static_cast<uint64_t>(width) << 48 | static_cast<uint64_t>(height) << 32 | bits;
++  }
++  aurora::gx::g_copyCrop.store(crop, std::memory_order_relaxed);
++}
++
+ extern "C" {
+ GXRenderModeObj GXNtsc480IntDf = {
+     VI_TVMODE_NTSC_INT,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index e4440bb8..80534455 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -1019,12 +1019,14 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+     return;
+   }
+   const auto fmt = static_cast<GXTexFmt>(cmd.format);
+-  const gfx::ClipRect srcRect = gx::map_logical_scissor(gfx::ClipRect{
+-      .x = static_cast<int32_t>(cmd.src_x),
+-      .y = static_cast<int32_t>(cmd.src_y),
+-      .width = static_cast<int32_t>(cmd.width),
+-      .height = static_cast<int32_t>(cmd.height),
+-  });
++  const gfx::ClipRect srcRect = gx::map_logical_scissor(gx::copy_source(
++      gfx::ClipRect{
++          .x = static_cast<int32_t>(cmd.src_x),
++          .y = static_cast<int32_t>(cmd.src_y),
++          .width = static_cast<int32_t>(cmd.width),
++          .height = static_cast<int32_t>(cmd.height),
++      },
++      cmd.destination_width, cmd.destination_height));
+   // The copy is made at the render target's scale, as Aurora's own
+   // GXCopyTex does (dolphin/gx/GXFrameBuffer.cpp scale_copy_dst) and as
+   // Dolphin's scaled EFB copies do. Allocated at the guest's size, a game
+diff --git a/GXRuntime/graphics/aurora/lib/gx/gx.hpp b/GXRuntime/graphics/aurora/lib/gx/gx.hpp
+index 5e5d4586..769edacc 100644
+--- a/GXRuntime/graphics/aurora/lib/gx/gx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gx/gx.hpp
+@@ -415,6 +415,9 @@ void set_render_viewport(const gfx::Viewport& viewport) noexcept;
+ void set_logical_scissor(const gfx::ClipRect& scissor) noexcept;
+ void set_render_scissor(const gfx::ClipRect& scissor) noexcept;
+ void copy_tex(const void* dest, GXBool clear) noexcept;
++// A texture copy's logical source, after aurora_set_copy_crop (GXFrameBuffer.cpp);
++// both copy paths (GXCopyTex and gxcore) take it.
++gfx::ClipRect copy_source(gfx::ClipRect src, u32 dstWidth, u32 dstHeight) noexcept;
+ const gfx::TextureBind& get_texture(GXTexMapID id) noexcept;
+ void resolve_sampled_textures(const ShaderInfo& info) noexcept;
+ 
+-- 
+2.49.0.windows.1
+

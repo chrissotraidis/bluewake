@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+// Player 1 for a connected controller while no controller is player 1 (#61).
+//
+// BlueWake reads player 1 only, and Aurora reads a port from SDL's player
+// slot. SDL gives a controller a slot when it detects it, and only if it
+// recognizes it then. One it recognizes later, through gamecontrollerdb.txt
+// (loaded once SDL is already running), is opened but never placed, so it did
+// nothing; so did a sole controller left in slot 2 after the first one was
+// unplugged. Call this whenever a controller is added, removed or remapped:
+// with player 1 free, the first connected controller takes it.
+//
+// The choice is not saved. PADSetPortForIndex would save it, and a saved port
+// then keeps every other controller off player 1 until that one returns.
+#include <stdbool.h>
+#include <stdio.h>
+#include <dolphin/pad.h>
+#include <SDL3/SDL_gamepad.h>
+
+// The mapping SDL chose for a controller, in the session log: with a mapping
+// from gamecontrollerdb.txt, SDL uses a line with a crc: field only when the
+// controller's CRC matches, and otherwise one without, so the line a player
+// added may not be the one in use (#61).
+static inline void bw_log_gamepad_mapping(SDL_JoystickID id) {
+    char* mapping = SDL_GetGamepadMappingForID(id);
+    if (mapping != NULL) {
+        fprintf(stderr, "[pad] mapping in use: %s\n", mapping);
+        SDL_free(mapping);
+    }
+}
+
+static inline bool bw_claim_player_one(void) {
+    if (PADGetIndexForPort(0) >= 0)
+        return false;
+    const u32 count = PADCount();
+    for (u32 i = 0; i < count; i++) {
+        SDL_Gamepad* pad = PADGetSDLGamepadForIndex(i);
+        if (pad == NULL)
+            continue;
+        const int previous = SDL_GetGamepadPlayerIndex(pad);
+        if (!SDL_SetGamepadPlayerIndex(pad, 0))
+            continue;
+        const char* name = SDL_GetGamepadName(pad);
+        if (previous < 0)
+            fprintf(stderr, "[pad] '%s' is player 1 (it had no player slot)\n", name ? name : "controller");
+        else
+            fprintf(stderr, "[pad] '%s' is player 1 (it was player %d)\n", name ? name : "controller",
+                    previous + 1);
+        return true;
+    }
+    return false;
+}
+
+// The game's own stick clamp as the only dead zone (#138). Aurora cut each axis
+// below 8000 of 32767 (24%) and did not rescale what was left, and the game's
+// GameCube clamp subtracted its dead zone after that: the first value the game
+// saw was 22% of its range, and it reached full tilt by two thirds of the
+// stick's travel. With the cutoff off, the runtime scales the stick's full
+// travel to a GameCube stick's (RecompCore pad.cpp, gamecube_axis), so the
+// game's clamp works as on the console. Loads the controller's saved mapping
+// first: loading it later would put the cutoff back.
+static inline void bw_game_dead_zone(unsigned port) {
+    u32 count = 0;
+    (void)PADGetButtonMappings(port, &count);
+    PADDeadZones* zones = PADGetDeadZones(port);
+    if (zones != NULL && zones->useDeadzones) {
+        zones->useDeadzones = false;
+        fprintf(stderr, "[pad] player %u: the game's own stick dead zone\n", port + 1u);
+    }
+}
+
+// Player 1 to the controller you press a button on, while player 1 has never
+// been pressed (#155). An adapter such as Mayflash's reports all four of its
+// ports as controllers, and the first, which takes player 1, may be empty. A
+// player 1 that has been pressed keeps it, so a second controller never takes
+// over by accident. Call on every SDL_EVENT_GAMEPAD_BUTTON_DOWN.
+static inline void bw_player_one_button(SDL_JoystickID which) {
+    static SDL_JoystickID pressed; // the player 1 that has had a press
+    SDL_Gamepad* one = SDL_GetGamepadFromPlayerIndex(0);
+    const SDL_JoystickID one_id = one != NULL ? SDL_GetGamepadID(one) : 0;
+    if (which == one_id) {
+        pressed = which;
+        return;
+    }
+    if (one_id != 0 && pressed == one_id)
+        return;
+    SDL_Gamepad* pad = SDL_GetGamepadFromID(which);
+    if (pad == NULL || !SDL_SetGamepadPlayerIndex(pad, 0))
+        return;
+    pressed = which;
+    const char* name = SDL_GetGamepadName(pad);
+    fprintf(stderr, "[pad] '%s' is player 1 (pressed while player 1 was idle)\n", name ? name : "controller");
+}
+
+// The same handoff for controllers connected at launch (#138): Aurora adds them
+// while it starts, before the event observer is installed, so the observer never
+// sees them arrive and player 1 kept Aurora's dead zone. Call once it is installed.
+static inline void bw_handoff_connected_controllers(void) {
+    int connected = 0;
+    SDL_JoystickID* pads = SDL_GetGamepads(&connected);
+    for (int i = 0; i < connected; i++)
+        bw_log_gamepad_mapping(pads[i]);
+    SDL_free(pads);
+    bw_claim_player_one();
+    bw_game_dead_zone(0);
+}

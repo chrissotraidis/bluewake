@@ -1,0 +1,350 @@
+--- a/include/dolphin/gx/GXAurora.h
++++ b/include/dolphin/gx/GXAurora.h
+@@ -78,6 +78,9 @@
+ #define GX_AURORA_BEGIN_OFFSCREEN 0x0039
+ 
+ #define GX_AURORA_END_OFFSCREEN 0x003A
++
++// u64 destination, s32 source x/y/w/h, u32 output width/height, u8 clear.
++#define GX_AURORA_COPY_DISPLAY 0x003B
+ 
+ /**
+  * Draw primitives with the vertex count derived from a byte length, as written by
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -12,6 +12,8 @@
+ #include "gx/texture.hpp"
+ #include "imgui.hpp"
+ #include "webgpu/gpu.hpp"
++#include "dolphin/vi/vi_internal.hpp"
++#include <dolphin/vi.h>
+ #include "webgpu/gpu_prof.hpp"
+ #include <webgpu/webgpu_cpp.h>
+ #endif
+@@ -270,7 +272,20 @@
+   gfx::finish();
+   auto imguiDrawData = imgui::freeze();
+ 
+-  const auto& presentSource = webgpu::present_source();
++  std::optional<webgpu::TextureWithSampler> xfbSource;
++  bool nativeBlack = false;
++  if (vi::initialized()) {
++    nativeBlack = vi::output_black();
++    const auto found = gx::g_gxState.displayCopies.find(VIGetCurrentFrameBuffer());
++    if (found != gx::g_gxState.displayCopies.end()) {
++      const auto& tex = found->second;
++      xfbSource = webgpu::TextureWithSampler{tex->texture, tex->sampleTextureView, tex->size,
++                                           tex->format, webgpu::present_source().sampler};
++    } else {
++      nativeBlack = true;
++    }
++  }
++  const auto& presentSource = xfbSource ? *xfbSource : webgpu::present_source();
+   const auto viewport = webgpu::calculate_present_viewport(webgpu::g_graphicsConfig.surfaceConfiguration.width,
+                                                            webgpu::g_graphicsConfig.surfaceConfiguration.height,
+                                                            presentSource.size.width, presentSource.size.height);
+@@ -285,7 +300,7 @@
+   }
+ #endif
+ 
+-  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
++  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport, nativeBlack, xfbSource,
+                   imguiDrawData = std::move(imguiDrawData)](
+                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
+     wgpu::Texture currentTexture;
+@@ -310,8 +325,9 @@
+       wgpu::BindGroup presentBindGroup;
+       if (rmlBindGroup && !rmlOverlay) {
+         presentBindGroup = rmlBindGroup;
+-      } else {
+-        const auto& resampledSource = webgpu::resample_present_source(encoder, viewport);
++      } else if (!nativeBlack) {
++        const auto& resampledSource = webgpu::resample_present_source(encoder, viewport,
++                                                                    xfbSource ? &*xfbSource : nullptr);
+         presentBindGroup = webgpu::create_copy_bind_group(resampledSource);
+       }
+       {
+@@ -330,12 +346,14 @@
+         };
+         const auto pass = encoder.BeginRenderPass(&renderPassDescriptor);
+         // Copy EFB -> XFB (swapchain)
+-        pass.SetPipeline(webgpu::g_CopyPipeline);
+-        pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
++        if (presentBindGroup) {
++          pass.SetPipeline(webgpu::g_CopyPipeline);
++          pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
++        }
+         set_present_viewport(pass, viewport, webgpu::g_graphicsConfig.surfaceConfiguration.width,
+                              webgpu::g_graphicsConfig.surfaceConfiguration.height);
+ 
+-        pass.Draw(3);
++        if (presentBindGroup) pass.Draw(3);
+         if (rmlBindGroup && rmlOverlay) {
+           pass.SetPipeline(webgpu::g_CopyPremultipliedAlphaPipeline);
+           pass.SetBindGroup(0, rmlBindGroup, 0, nullptr);
+--- a/lib/dolphin/gx/GXFrameBuffer.cpp
++++ b/lib/dolphin/gx/GXFrameBuffer.cpp
+@@ -14,6 +14,21 @@
+ #include <cmath>
+ 
+ namespace {
++struct DisplayCopyState {
++  aurora::gfx::ClipRect source{0, 0, 640, 480};
++  u32 width = 640;
++  u32 scale = 256;
++};
++DisplayCopyState displayCopy;
++u32 xfb_lines(u32 height, u32 scale) {
++  AURORA_ASSERT(height > 0 && scale > 0, "Invalid display copy size/scale");
++  u32 lines = (height - 1) * 256 / scale + 1;
++  if (scale > 128 && scale < 256) {
++    while (scale % 2 == 0) scale /= 2;
++    if (height % scale == 0) ++lines;
++  }
++  return std::min(lines, 1024u);
++}
+ aurora::Vec2<uint32_t> scale_copy_dst(u32 logicalWidth, u32 logicalHeight) {
+   if (g_gxState.viewportPolicy == AURORA_VIEWPORT_NATIVE) {
+     return {logicalWidth, logicalHeight};
+@@ -83,6 +98,19 @@
+   g_gxState.copyTextures[dest] = handle;
+   texture::invalidate_bindings();
+ }
++void copy_display(const void* dest, gfx::ClipRect source, u32 width, u32 height, GXBool clear) noexcept {
++  AURORA_ASSERT(dest && width && height && source.width > 0 && source.height > 0,
++                "Invalid display copy request");
++  const auto rect = map_logical_scissor(source);
++  const auto [scaledWidth, scaledHeight] = scale_copy_dst(width, height);
++  auto& texture = g_gxState.displayCopies[dest];
++  if (!texture || texture->size.width != scaledWidth || texture->size.height != scaledHeight) {
++    texture = gfx::new_render_texture(scaledWidth, scaledHeight, GX_TF_RGBA8, "Native XFB snapshot");
++  }
++  gfx::resolve_pass_into(texture, rect, clear && g_gxState.colorUpdate,
++                        clear && g_gxState.alphaUpdate, clear && g_gxState.depthUpdate,
++                        g_gxState.clearColor, clear_depth_value(), GX_TF_RGBA8);
++}
+ } // namespace aurora::gx
+ 
+ extern "C" {
+@@ -155,7 +183,10 @@
+   rmout->xfbHeight = size.fb_height;
+ }
+ 
+-void GXSetDispCopySrc(u16 left, u16 top, u16 wd, u16 ht) {}
++void GXSetDispCopySrc(u16 left, u16 top, u16 wd, u16 ht) {
++  AURORA_ASSERT(wd > 0 && ht > 0 && wd <= 1024 && ht <= 1024, "Invalid display copy source");
++  displayCopy.source = {left, top, wd, ht};
++}
+ 
+ void GXSetTexCopySrc(u16 left, u16 top, u16 wd, u16 ht) {
+   GX_WRITE_AURORA(GX_AURORA_LOAD_COPY_SRC);
+@@ -165,7 +196,11 @@
+   GX_WRITE_U32(ht);
+ }
+ 
+-void GXSetDispCopyDst(u16 wd, u16 ht) {}
++void GXSetDispCopyDst(u16 wd, u16 ht) {
++  AURORA_ASSERT(wd > 0 && ht > 0, "Invalid display copy destination");
++  // SDK stores width/stride here; copied height is derived from source/yscale.
++  displayCopy.width = wd;
++}
+ 
+ void GXSetTexCopyDst(u16 wd, u16 ht, GXTexFmt fmt, GXBool mipmap) {
+   GX_WRITE_AURORA(GX_AURORA_LOAD_COPY_DST);
+@@ -178,7 +213,12 @@
+ // TODO GXSetDispCopyFrame2Field
+ // TODO GXSetCopyClamp
+ 
+-u32 GXSetDispCopyYScale(f32 vscale) { return 0; }
++u32 GXSetDispCopyYScale(f32 vscale) {
++  AURORA_ASSERT(std::isfinite(vscale) && vscale > 0.0f && 256.0f / vscale < 4294967296.0f,
++                "Invalid display copy Y scale");
++  displayCopy.scale = static_cast<u32>(256.0f / vscale) & 0x1ff;
++  return xfb_lines(displayCopy.source.height, displayCopy.scale);
++}
+ 
+ void GXSetCopyClear(GXColor color, u32 depth) {
+   // BP 0x4F: clear color R + A
+@@ -207,7 +247,20 @@
+ 
+ void GXSetDispCopyGamma(GXGamma gamma) {}
+ 
+-void GXCopyDisp(void* dest, GXBool clear) {}
++void GXCopyDisp(void* dest, GXBool clear) {
++  AURORA_ASSERT(dest && reinterpret_cast<uintptr_t>(dest) % 32 == 0, "Unaligned XFB destination");
++  GXFlush();
++  GX_WRITE_AURORA(GX_AURORA_COPY_DISPLAY);
++  GX_WRITE_U64(reinterpret_cast<u64>(dest));
++  GX_WRITE_U32(displayCopy.source.x);
++  GX_WRITE_U32(displayCopy.source.y);
++  GX_WRITE_U32(displayCopy.source.width);
++  GX_WRITE_U32(displayCopy.source.height);
++  GX_WRITE_U32(displayCopy.width);
++  GX_WRITE_U32(xfb_lines(displayCopy.source.height, displayCopy.scale));
++  GX_WRITE_U8(clear != GX_FALSE);
++  aurora::gx::fifo::publish();
++}
+ 
+ void GXCopyTex(void* dest, GXBool clear) {
+   GX_WRITE_AURORA(GX_AURORA_LOAD_COPY_DEST);
+--- a/lib/dolphin/vi/vi.cpp
++++ b/lib/dolphin/vi/vi.cpp
+@@ -37,6 +37,12 @@
+ }
+ } // namespace
+ 
++bool initialized() noexcept {
++  auto& state = retrace_state();
++  std::lock_guard lock(state.mutex);
++  return state.owner != std::thread::id{};
++}
++
+ bool output_black() noexcept {
+   auto& state = retrace_state();
+   std::lock_guard lock(state.mutex);
+--- a/lib/dolphin/vi/vi_internal.hpp
++++ b/lib/dolphin/vi/vi_internal.hpp
+@@ -9,6 +9,7 @@
+ namespace aurora::vi {
+ bool service_retrace();
+ bool output_black() noexcept;
++bool initialized() noexcept;
+ void configure(const GXRenderModeObj* rm) noexcept;
+ Vec2<uint32_t> configured_fb_size() noexcept;
+ } // namespace aurora::vi
+--- a/lib/gfx/recording.cpp
++++ b/lib/gfx/recording.cpp
+@@ -17,6 +17,7 @@
+ #include "../rmlui/pipeline.hpp"
+ #endif
+ #include "../window.hpp"
++#include "../dolphin/vi/vi_internal.hpp"
+ 
+ #include <array>
+ #include <cstring>
+@@ -40,6 +41,8 @@
+ 
+ struct FrameRecorder {
+   FramePacket* packet = nullptr;
++  wgpu::Texture lastEfb;
++  wgpu::Texture lastDepth;
+   size_t frameSlot = 0;
+   uint32_t currentRenderPass = UINT32_MAX;
+   uint32_t drawCallCount = 0;
+@@ -543,6 +546,16 @@
+   auto& pass = current_render_passes()[0];
+   pass.label = pass_label("EFB");
+   set_efb_targets(pass);
++  // Original JFW double buffering copies the prior EFB on a later beginRender.
++  // Preserve it only for native VI users, and only while the targets survive.
++  if (vi::initialized() && webgpu::g_frameBuffer.texture && webgpu::g_depthBuffer.texture &&
++      g_recorder.lastEfb.Get() == webgpu::g_frameBuffer.texture.Get() &&
++      g_recorder.lastDepth.Get() == webgpu::g_depthBuffer.texture.Get()) {
++    pass.colorAttachments[SceneColorAttachmentIndex].clear = false;
++    pass.clearDepth = false;
++  }
++  g_recorder.lastEfb = webgpu::g_frameBuffer.texture;
++  g_recorder.lastDepth = webgpu::g_depthBuffer.texture;
+   pass.colorAttachments[SceneColorAttachmentIndex].clearValue = gx::g_gxState.clearColor;
+   pass.clearDepthValue = gx::clear_depth_value();
+   g_recorder.currentRenderPass = 0;
+@@ -584,6 +597,8 @@
+ }
+ 
+ void shutdown_recording() {
++  g_recorder.lastEfb = {};
++  g_recorder.lastDepth = {};
+   for (auto& pool : g_passSnapshotPools) {
+     pool = {};
+   }
+--- a/lib/gfx/texture.cpp
++++ b/lib/gfx/texture.cpp
+@@ -201,7 +201,7 @@
+   };
+   const wgpu::TextureDescriptor textureDescriptor{
+       .label = label,
+-      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::RenderAttachment,
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::RenderAttachment,
+       .dimension = wgpu::TextureDimension::e2D,
+       .size = size,
+       .format = wgpuFormat,
+--- a/lib/gx/command_processor.cpp
++++ b/lib/gx/command_processor.cpp
+@@ -713,6 +713,16 @@
+       g_gxState.clamp = clamp;
+       g_gxState.dirty |= DirtyPipeline;
+     }
++  } else if (subCmd == GX_AURORA_COPY_DISPLAY) {
++    const void* dest = reinterpret_cast<const void*>(reader.read<u64>());
++    const s32 x = reader.read<s32>();
++    const s32 y = reader.read<s32>();
++    const s32 width = reader.read<s32>();
++    const s32 height = reader.read<s32>();
++    const u32 outputWidth = reader.read<u32>();
++    const u32 outputHeight = reader.read<u32>();
++    const GXBool clear = reader.read<u8>() != 0;
++    copy_display(dest, {x, y, width, height}, outputWidth, outputHeight, clear);
+   } else if (subCmd == GX_AURORA_LOAD_COPY_SRC) {
+     const s32 left = reader.read<s32>();
+     const s32 top = reader.read<s32>();
+--- a/lib/gx/gx.hpp
++++ b/lib/gx/gx.hpp
+@@ -408,6 +408,7 @@
+   const void* texCopyDest = nullptr;
+   absl::flat_hash_map<const void*, CopyTextureRef> copyTextures;
+   absl::flat_hash_map<CopyTextureKey, CopyTextureRef> copyTextureCache;
++  absl::flat_hash_map<const void*, gfx::TextureHandle> displayCopies;
+ 
+   // Cache state
+   std::array<gfx::TextureBind, MaxTextures> textures;
+@@ -449,6 +450,7 @@
+ void set_logical_scissor(const gfx::ClipRect& scissor) noexcept;
+ void set_render_scissor(const gfx::ClipRect& scissor) noexcept;
+ void copy_tex(const void* dest, GXBool clear) noexcept;
++void copy_display(const void* dest, gfx::ClipRect source, u32 width, u32 height, GXBool clear) noexcept;
+ const gfx::TextureBind& get_texture(GXTexMapID id) noexcept;
+ void resolve_sampled_textures(const ShaderInfo& info) noexcept;
+ 
+--- a/lib/gx/texture.cpp
++++ b/lib/gx/texture.cpp
+@@ -790,6 +790,7 @@
+ }
+ 
+ void clear_copy_texture_cache() noexcept {
++  g_gxState.displayCopies.clear();
+   g_gxState.copyTextures.clear();
+   g_gxState.copyTextureCache.clear();
+   for (auto& [_, cache] : s_tlutObjectCaches) {
+@@ -801,6 +802,7 @@
+ void clear_static_texture_cache() noexcept { s_pendingCacheClears.fetch_add(1, std::memory_order_release); }
+ 
+ void evict_copy_texture(const void* dest) noexcept {
++  g_gxState.displayCopies.erase(dest);
+   absl::flat_hash_set<const void*> sourceIdentities;
+   if (const auto it = g_gxState.copyTextures.find(dest); it != g_gxState.copyTextures.end()) {
+     if (it->second.handle) {
+--- a/lib/webgpu/gpu.cpp
++++ b/lib/webgpu/gpu.cpp
+@@ -642,8 +642,9 @@
+   return g_device.CreateBindGroup(&bindGroupDescriptor);
+ }
+ 
+-const TextureWithSampler& resample_present_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport) {
+-  const auto& source = present_source();
++const TextureWithSampler& resample_present_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport,
++                                                 const TextureWithSampler* sourceOverride) {
++  const auto& source = sourceOverride ? *sourceOverride : present_source();
+   const uint32_t width = viewport_extent(viewport.width);
+   const uint32_t height = viewport_extent(viewport.height);
+   if (!g_resampledFrameBuffer.view || g_resampledFrameBuffer.size.width != width ||
+--- a/lib/webgpu/gpu.hpp
++++ b/lib/webgpu/gpu.hpp
+@@ -69,6 +69,7 @@
+ AuroraSampler get_resampler() noexcept;
+ Viewport calculate_present_viewport(uint32_t surface_width, uint32_t surface_height, uint32_t content_width,
+                                     uint32_t content_height) noexcept;
+-const TextureWithSampler& resample_present_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport);
++const TextureWithSampler& resample_present_source(const wgpu::CommandEncoder& encoder, const Viewport& viewport,
++                                                       const TextureWithSampler* sourceOverride = nullptr);
+ void draw_clear(const wgpu::RenderPassEncoder& pass, bool clearColor, bool clearAlpha, bool clearDepth,
+                 const Vec4<float>& clearColorValue, float clearDepthValue);

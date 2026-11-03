@@ -1,0 +1,87 @@
+From e9ac149c0ecd58ef75e122fff0783a18d143e82e Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 12:42:19 -0500
+Subject: [PATCH] gxcore: count toon texgens by channel state and lit channels
+ with unloaded lights
+
+Wind Waker's toon shading samples a ramp with texcoords generated from a lit
+color channel. Three shutdown counters say whether that path is live:
+texgen_color_lit / texgen_color_unlit and lit_light_missing. Outset to control:
+4,014,801 lit, 0 unlit, 188 draws naming an unloaded light.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  5 +++++
+ .../include/gxruntime/gxcore/gxcore.hpp       |  4 ++++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 19 +++++++++++++++++++
+ 3 files changed, 28 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 2032b9e499..4e19c874dc 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -548,6 +548,11 @@ void dol_aurora_shutdown(void) {
+                      gaps.logic_op_ignored, gaps.dst_alpha_active,
+                      gaps.early_depth_active, gaps.ztexture_active,
+                      gaps.ztexture_ignored);
++        std::fprintf(stderr,
++                     "[gx-core] toon: texgen_color_lit=%llu texgen_color_unlit=%llu "
++                     "lit_light_missing=%llu\n",
++                     gaps.texgen_color_lit, gaps.texgen_color_unlit,
++                     gaps.lit_light_missing);
+         const auto& texture_stats =
+             aurora::gfx::gxcore::texture_cache_stats();
+         std::fprintf(stderr,
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 5cdd8becca..571770b43d 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -52,6 +52,10 @@ struct GapCounters {
+   unsigned long long texgen_source_normal = 0;  // supported regular normal source
+   unsigned long long texgen_source_normal_default = 0; // no normal attribute
+   unsigned long long texgen_source_colors = 0;  // regular source row not emitted
++  // Toon/ramp diagnostics: color texgens and the channel they read.
++  unsigned long long texgen_color_lit = 0;      // Color0/1 texgen, channel lit
++  unsigned long long texgen_color_unlit = 0;    // Color0/1 texgen, channel unlit
++  unsigned long long lit_light_missing = 0;     // lit channel names a light never loaded
+   unsigned long long texgen_source_binormal = 0; // regular T/B source not emitted
+   unsigned long long texgen_source_tex47 = 0;   // regular Tex4..Tex7 not captured
+   unsigned long long texgen_source_unknown = 0; // regular source row > Tex7
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index d311c00c30..4ec1f4eda8 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -710,6 +710,15 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+                       : 0u;
+   if (key.has_pos_mtx_idx != 0u && key.lit_valid != 0u)
+     ++counters.per_vertex_normal_matrix;
++  for (std::uint32_t c = 0; c < 4u; ++c) {
++    const std::uint8_t mask = key.litchan[c].light_mask;
++    for (std::uint32_t l = 0; l < 8u; ++l)
++      if ((mask & (1u << l)) && draw.light_word_mask[l] == 0u) {
++        ++counters.lit_light_missing;
++        c = 4u;
++        break;
++      }
++  }
+   // Only count normals/lighting as ignored when we fall back to passthrough.
+   if (walk.has_normal && key.lit_valid == 0u)
+     ++counters.normals_ignored;
+@@ -741,6 +750,16 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     if (static_cast<TexGenType>(tg.texgentype) == TexGenType::EmbossMap &&
+         !walk.has_nbt)
+       ++counters.texgen_emboss_cached_nbt;
++    {
++      const auto t = static_cast<TexGenType>(tg.texgentype);
++      if (t == TexGenType::Color0 || t == TexGenType::Color1) {
++        const std::uint32_t ch = t == TexGenType::Color0 ? 0u : 1u;
++        if (key.litchan[ch].enablelighting)
++          ++counters.texgen_color_lit;
++        else
++          ++counters.texgen_color_unlit;
++      }
++    }
+ 
+     // The current vertex layout emits position and Tex0..Tex3 source rows for
+     // regular matrix texgens. Classify every other legal source instead of
+-- 
+2.41.0
+

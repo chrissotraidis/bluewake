@@ -1,0 +1,280 @@
+From 2f470cd8cff3c60d7062c0dc248f1e07dd08de55 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 11:38:10 -0500
+Subject: [PATCH 80/81] aurora: re-hash small textures once a frame; texture
+ diagnostics
+
+Wind Waker rewrites some small textures in place with plain CPU stores that
+no dirty mark sees. The pause menu's A/B action labels (80x24 IA4 at
+0x01673420 and 0x01674C60) kept showing "Charts" where Dolphin shows
+"Choose" and "Return" (DOL_GXCORE_TEX_VERIFY reported 441 stale generation
+hits on each). A texture of 4 KB or less is now re-hashed, texels plus
+palette, the first time it is used in each presented frame; a changed hash
+takes the decode path. Rendered save view, two A/B pairs: 482/482 M
+instructions per 100 retraces before and after (a per-draw re-hash cost
++1.2 percent), cycles within noise.
+
+Env-gated diagnostics: DOL_GXCORE_TEX_VERIFY (stale-hit report),
+DOL_GXCORE_DUMP_TEX=<hex> (decoded RGBA as /tmp/gxcore-tex-*.pam) and
+DOL_GXCORE_PLAN_TEX=<hex> (TEV, palette, texel, channel and vertex report of
+draws sampling that texture).
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 68 ++++++++++++++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 79 ++++++++++++++++++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  2 +
+ 3 files changed, 146 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 3090ffef55..d642ed8d92 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -29,6 +29,7 @@ namespace aurora::gfx::gxcore {
+ bool submit_draw_plan(const gxruntime::gxcore::DrawPlan& plan);
+ void copy_efb_to_texture(const gxruntime::gxcore::EfbCopyCommand& cmd);
+ void reset_texture_cache();
++void note_frame_presented();
+ void set_texture_dirty_epoch_observer(
+     bool (*observer)(uint32_t, uint32_t, uint64_t*));
+ } // namespace aurora::gfx::gxcore
+@@ -50,6 +51,70 @@ bool core_texture_dirty_epoch(uint32_t address, uint32_t size,
+ void core_plan_observer(const gxruntime::gxcore::DrawPlan& plan, void*) {
+     if (!plan.ok)
+         return; // skip reasons are tallied in the sink gap counters
++    // DOL_GXCORE_PLAN_TEX=<hex guest address>: print the TEV setup of draws
++    // that sample that texture (first 12), for comparing a draw with Dolphin.
++    static const long long s_plan_tex = [] {
++        const char* env = std::getenv("DOL_GXCORE_PLAN_TEX");
++        return env != nullptr ? std::strtoll(env, nullptr, 16) : -1ll;
++    }();
++    static int s_plan_tex_reports = 0;
++    if (s_plan_tex >= 0 && s_plan_tex_reports < 12 && plan.has_texture &&
++        (plan.tex_address & 0x3FFFFFFFu) == (static_cast<u32>(s_plan_tex) & 0x3FFFFFFFu)) {
++        ++s_plan_tex_reports;
++        const auto& k = plan.pipeline.shader;
++        std::fprintf(stderr, "[plan-tex] present=%llu fmt=%u %ux%u tlut=%08X tlutfmt=%u stages=%u tev_valid=%u chans=%u lit=%u blend=%u src=%u dst=%u alpha=%u/%u/%u\n",
++                     g_present_count, plan.tex_format, plan.tex_width, plan.tex_height,
++                     plan.tlut_address, plan.tlut_format, k.num_tev_stages, k.tev_valid,
++                     k.num_color_chans, k.lit_valid, plan.pipeline.blend_enable,
++                     plan.pipeline.src_factor, plan.pipeline.dst_factor,
++                     k.alpha_comp0, k.alpha_comp1, k.alpha_logic);
++        for (unsigned n = 0; n < k.num_tev_stages && n < 16u; ++n) {
++            const auto& t = k.tev_stages[n];
++            std::fprintf(stderr, "[plan-tex]   stage%u cc a=%u b=%u c=%u d=%u bias=%u op=%u scale=%u dest=%u | ac a=%u b=%u c=%u d=%u dest=%u | ksel kc=%u ka=%u order tc=%u map=%u chan=%u en=%u swap tex=%u%u%u%u ras=%u%u%u%u\n",
++                         n, t.cc_a, t.cc_b, t.cc_c, t.cc_d, t.cc_bias, t.cc_op, t.cc_scale, t.cc_dest,
++                         t.ac_a, t.ac_b, t.ac_c, t.ac_d, t.ac_dest, t.ksel_kc, t.ksel_ka,
++                         t.tevorders_texcoord, t.tevorders_texmap, t.tevorders_colorchan, t.tevorders_enable,
++                         t.tex_swap[0], t.tex_swap[1], t.tex_swap[2], t.tex_swap[3],
++                         t.ras_swap[0], t.ras_swap[1], t.ras_swap[2], t.ras_swap[3]);
++        }
++        if (plan.tlut_data != nullptr && plan.tlut_entries != 0u) {
++            const auto* t = static_cast<const std::uint8_t*>(plan.tlut_data);
++            std::fprintf(stderr, "[plan-tex]   tlut entries=%u:", plan.tlut_entries);
++            for (unsigned e = 0; e < plan.tlut_entries && e < 16u; ++e)
++                std::fprintf(stderr, " %02X%02X", t[e * 2u], t[e * 2u + 1u]);
++            std::fprintf(stderr, "\n");
++        }
++        if (plan.tex_data != nullptr) {
++            const auto* t = static_cast<const std::uint8_t*>(plan.tex_data);
++            std::fprintf(stderr, "[plan-tex]   texels:");
++            for (unsigned b = 0; b < 2048u && b < plan.tex_size; ++b)
++                std::fprintf(stderr, " %02X", t[b]);
++            std::fprintf(stderr, "\n");
++        }
++        std::fprintf(stderr, "[plan-tex]   chans captured=%02X has_color0=%u has_color1=%u litchan(mat/amb/en)=",
++                     k.chan_captured_mask, k.has_color0, k.has_color1);
++        for (unsigned j = 0; j < 4u; ++j)
++            std::fprintf(stderr, " %u/%u/%u", k.litchan[j].matsource, k.litchan[j].ambsource, k.litchan[j].enablelighting);
++        {
++            const unsigned stride = gxruntime::gxcore::kVertexFloats;
++            for (unsigned v = 0; v < plan.vertex_count && v < 4u; ++v) {
++                const float* p = plan.vertices.data() + v * stride;
++                std::fprintf(stderr, "[plan-tex]   v%u pos=%.1f,%.1f,%.1f col0=%.3f,%.3f,%.3f,%.3f\n", v, p[0], p[1], p[2], p[4], p[5], p[6], p[7]);
++            }
++        }
++        const auto& vc = plan.constants;
++        std::fprintf(stderr, " mat0=%d,%d,%d,%d amb0=%d,%d,%d,%d\n",
++                     vc.materials[2][0], vc.materials[2][1], vc.materials[2][2], vc.materials[2][3],
++                     vc.materials[0][0], vc.materials[0][1], vc.materials[0][2], vc.materials[0][3]);
++        const auto& c = plan.pixel_constants;
++        std::fprintf(stderr, "[plan-tex]   c0=%d,%d,%d,%d c1=%d,%d,%d,%d c2=%d,%d,%d,%d prev=%d,%d,%d,%d k0=%d,%d,%d,%d k1=%d,%d,%d,%d\n",
++                     c.colors[1][0], c.colors[1][1], c.colors[1][2], c.colors[1][3],
++                     c.colors[2][0], c.colors[2][1], c.colors[2][2], c.colors[2][3],
++                     c.colors[3][0], c.colors[3][1], c.colors[3][2], c.colors[3][3],
++                     c.colors[0][0], c.colors[0][1], c.colors[0][2], c.colors[0][3],
++                     c.kcolors[0][0], c.kcolors[0][1], c.kcolors[0][2], c.kcolors[0][3],
++                     c.kcolors[1][0], c.kcolors[1][1], c.kcolors[1][2], c.kcolors[1][3]);
++    }
+     if (aurora::gfx::gxcore::submit_draw_plan(plan))
+         ++g_core_submitted;
+     else
+@@ -1096,6 +1161,9 @@ void aurora_backend_present(void) {
+         gx_aurora::g_frame_open = false;
+     }
+     ++gx_aurora::g_present_count;
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    aurora::gfx::gxcore::note_frame_presented();
++#endif
+     if (gx_aurora::g_frame_pacing_log &&
+         (gx_aurora::g_present_count <= 10 || (gx_aurora::g_present_count % 60) == 0)) {
+         const AuroraStats* stats = aurora_get_stats();
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 84f7d61caf..32da245991 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -11,6 +11,7 @@
+ #include <absl/container/flat_hash_map.h>
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cmath>
+ #include <cstdlib>
+ #include <cstring>
+@@ -233,8 +234,28 @@ struct TextureAddressState {
+   uint64_t tlut_epoch = 0;
+   bool texel_epoch_valid = false;
+   bool tlut_epoch_valid = false;
++  // Small textures only (see kAlwaysRehashBytes): hash of the texels and
++  // palette as last decoded, and the frame in which they were last compared.
++  uint64_t small_hash = 0;
++  uint64_t verified_frame = ~0ull;
+ };
+ absl::flat_hash_map<uint32_t, TextureAddressState> g_textureAddrKey;
++// Counts presented frames; a small texture is re-hashed at most once in each.
++std::atomic<uint64_t> g_textureVerifyFrame{0};
++// A small texture is re-hashed even when its dirty epoch has not moved: the
++// game rewrites some in place with plain CPU stores that no dirty mark sees
++// (Wind Waker's A/B action labels, 80x24 IA4 at 0x01673420 and 0x01674C60,
++// showed "Charts" for "Choose"/"Return" in the pause menu). Dolphin reads
++// memory coherently, so the reference shows the new text. Once a frame per
++// texture, up to 4 KB of texels plus the palette.
++constexpr uint32_t kAlwaysRehashBytes = 4096u;
++uint64_t small_texture_hash(const uint8_t* bytes, uint32_t size,
++                            const void* tlut, uint32_t tlut_size) {
++  uint64_t h = XXH3_64bits(bytes, size);
++  if (tlut != nullptr && tlut_size != 0u)
++    h ^= XXH3_64bits(tlut, tlut_size) * 0x9E3779B97F4A7C15ull;
++  return h;
++}
+ TextureCacheStats g_textureCacheStats;
+ TextureDirtyEpochObserver g_textureDirtyEpochObserver = nullptr;
+ 
+@@ -618,6 +639,10 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+   pass.DrawIndexed(data.indexCount);
+ }
+ 
++void note_frame_presented() {
++  g_textureVerifyFrame.fetch_add(1u, std::memory_order_relaxed);
++}
++
+ void reset_texture_cache() {
+   g_textureCache.clear();
+   g_textureAddrKey.clear();
+@@ -865,11 +890,33 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+           priorKey.height == height && priorKey.tlut_address == tlut_address &&
+           priorKey.tlut_format == tlut_format &&
+           priorKey.tlut_entries == tlut_entries;
+-      if (sameIdentity && previous.texel_epoch_valid &&
++      const uint64_t frame = g_textureVerifyFrame.load(std::memory_order_relaxed);
++      bool small_changed = false;
++      if (sameIdentity && size <= kAlwaysRehashBytes && previous.verified_frame != frame) {
++        const uint64_t h = small_texture_hash(bytes, size, tlut_data, tlutSize);
++        if (h != previous.small_hash)
++          small_changed = true;
++        else
++          addrIt->second.verified_frame = frame;
++      }
++      if (sameIdentity && !small_changed && previous.texel_epoch_valid &&
+           previous.tlut_epoch_valid && previous.texel_epoch == texelEpoch &&
+           previous.tlut_epoch == tlutEpoch) {
+         auto cached = g_textureCache.find(priorKey);
+         if (cached != g_textureCache.end()) {
++          // DOL_GXCORE_TEX_VERIFY=1: re-hash every generation hit and report the
++          // ones whose texels changed without a dirty mark (a write path the
++          // dirty tracking does not see).
++          static const bool s_verify = std::getenv("DOL_GXCORE_TEX_VERIFY") != nullptr;
++          if (s_verify) {
++            const auto* vbytes = static_cast<const uint8_t*>(data);
++            if (vbytes != nullptr &&
++                XXH3_64bits(vbytes, std::min(tsize, available)) != priorKey.content_hash &&
++                !gxc::is_ci_format(format))
++              std::fprintf(stderr, "[tex-stale] addr=%08X fmt=%u %ux%u size=%u epoch=%llu\n",
++                           address, format, width, height, tsize,
++                           (unsigned long long)texelEpoch);
++          }
+           ++g_textureCacheStats.hits;
+           ++g_textureCacheStats.generation_hits;
+           return cached->second;
+@@ -886,6 +933,11 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       // the declared GX palette belongs to this texture cache identity.
+       content_hash = XXH3_64bits_withSeed(tlut_data, tlutSize, content_hash);
+     }
++    const uint64_t small_hash =
++        size <= kAlwaysRehashBytes ? small_texture_hash(bytes, size, tlut_data, tlutSize) : 0u;
++    const uint64_t verify_frame = size <= kAlwaysRehashBytes
++                                      ? g_textureVerifyFrame.load(std::memory_order_relaxed)
++                                      : ~0ull;
+     const TextureKey key{address,     tsize,        format,      width,
+                          height,      tlut_address, tlut_format, tlut_entries,
+                          content_hash};
+@@ -893,7 +945,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     if (it != g_textureCache.end()) {
+       ++g_textureCacheStats.hits;
+       g_textureAddrKey[address] = TextureAddressState{
+-          key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid};
++          key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid,
++          small_hash, verify_frame};
+       return it->second;
+     }
+     // New content for this identity: evict any prior entry cached at the same
+@@ -926,6 +979,25 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                      addrIt != g_textureAddrKey.end() ? addrIt->second.key.height : 0u,
+                      addrIt != g_textureAddrKey.end() ? addrIt->second.key.size : 0u);
+     }
++    {
++      // DOL_GXCORE_DUMP_TEX=<hex address>: write the decoded RGBA of that
++      // texture as /tmp/gxcore-tex-<address>-<n>.pam (diagnostics).
++      static const long long s_dump = [] {
++        const char* env = std::getenv("DOL_GXCORE_DUMP_TEX");
++        return env != nullptr ? std::strtoll(env, nullptr, 16) : -1ll;
++      }();
++      static int s_dumped = 0;
++      if (s_dump >= 0 && (address & 0x3FFFFFFFu) == (static_cast<uint32_t>(s_dump) & 0x3FFFFFFFu) &&
++          !decoded.empty() && s_dumped < 4) {
++        char path[128];
++        std::snprintf(path, sizeof(path), "/tmp/gxcore-tex-%08X-%d.pam", address, s_dumped++);
++        if (FILE* f = std::fopen(path, "wb")) {
++          std::fprintf(f, "P7\nWIDTH %u\nHEIGHT %u\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n", width, height);
++          std::fwrite(decoded.data(), 1, decoded.size(), f);
++          std::fclose(f);
++        }
++      }
++    }
+     TextureHandle handle;
+     if (!decoded.empty()) {
+       handle = new_static_texture_2d(
+@@ -946,7 +1018,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     }
+     g_textureCache.emplace(key, handle);
+     g_textureAddrKey[address] = TextureAddressState{
+-        key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid};
++        key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid,
++        small_hash, verify_frame};
+     return handle;
+   };
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 8b1914e720..43fabdd3a2 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -67,6 +67,8 @@ void copy_efb_to_texture(const gxruntime::gxcore::EfbCopyCommand& cmd);
+ bool submit_draw_plan(const gxruntime::gxcore::DrawPlan& plan);
+ // Drop the texture cache + reset its stats (start of a replay run).
+ void reset_texture_cache();
++// Once per presented frame: small textures are re-hashed at most once a frame.
++void note_frame_presented();
+ 
+ using TextureDirtyEpochObserver =
+     bool (*)(uint32_t address, uint32_t size, uint64_t* epoch);
+-- 
+2.41.0
+

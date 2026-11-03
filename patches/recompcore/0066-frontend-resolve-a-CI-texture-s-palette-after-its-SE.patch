@@ -1,0 +1,103 @@
+From b73fd7505d44eb570a7cdea8531c3606f3625288 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 22:21:14 -0500
+Subject: [PATCH] frontend: resolve a CI texture's palette after its SETTLUT
+ write
+
+GXLoadTexObj writes SETIMAGE0-3 and then, for C4/C8/C14X2 textures, the
+slot's SETTLUT register (the SDK's GXLoadTexObjPreLoaded). The frontend
+resolved the texture, palette included, at SETIMAGE3, so every palette
+texture was drawn with the palette the slot held for the previous texture.
+The Wind Waker title logo showed it plainly: an opaque maroon box with tan
+and green lettering over the subtitle, where Dolphin draws red lettering on
+a transparent background. Resolving the slot again at SETTLUT makes the
+event a draw binds carry the current palette.
+---
+ .../frontend/src/retail_gx_frontend.cpp       |  7 ++-
+ .../frontend/tests/frontend_replay_test.cpp   | 45 +++++++++++++++++++
+ 2 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 77a5ac8cff..fa4183927d 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -703,7 +703,12 @@ bool RetailGxFrontend::handle_bp(std::uint32_t raw) {
+     state_.texture_tlut_tmem_offset[slot] =
+         static_cast<std::uint16_t>(bp_get(value, 10u, 0u));
+     state_.texture_tlut_format[slot] = bp_get(value, 2u, 10u);
+-    return true;
++    // GXLoadTexObj writes SETTLUT after SETIMAGE0-3 (the SDK's
++    // GXLoadTexObjPreLoaded), so the texture event emitted at SETIMAGE3
++    // carried the palette this slot had for the previous texture. Resolve
++    // the slot again now that its palette register is current; the later
++    // event is the one a draw binds.
++    return maybe_resolve_texture(slot);
+   }
+ 
+   switch (reg) {
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 67efb4ffa5..c2df257ea1 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -503,6 +503,50 @@ void test_unresolved_tlut_load_is_noop() {
+   assert(!saw_packet(unresolved_source_sink, DOL_GX_RECOMP_EVENT_TLUT));
+ }
+ 
++// GXLoadTexObj writes SETIMAGE0-3 and then SETTLUT for a CI texture. The
++// texture a draw binds must carry the palette named by that later SETTLUT,
++// not the one the slot held for the previous texture (the Wind Waker title
++// logo drew with a stale palette before this was fixed).
++void test_tlut_written_after_image_selects_palette() {
++  CPUState cpu;
++  assert(cpu_init(&cpu));
++  DolGuestMemory memory;
++  assert(dol_guest_memory_init(&memory, nullptr));
++  DolGuestAddressResolver resolver;
++  dol_guest_address_resolver_init(&resolver, &memory, &cpu);
++
++  constexpr std::uint32_t texture_base = 0x800u;
++  constexpr std::uint32_t first_tlut = 0x1000u;
++  constexpr std::uint32_t second_tlut = 0x1400u;
++  std::vector<std::uint8_t> fifo;
++  push_bp(fifo, DOL_GX_BP_REG_LOAD_TLUT0, first_tlut >> 5u);
++  push_bp(fifo, DOL_GX_BP_REG_LOAD_TLUT1, 0x20u | (1u << 10u));
++  push_bp(fifo, DOL_GX_BP_REG_LOAD_TLUT0, second_tlut >> 5u);
++  push_bp(fifo, DOL_GX_BP_REG_LOAD_TLUT1, 0x30u | (1u << 10u));
++  for (const std::uint32_t tmem : {0x20u, 0x30u}) {
++    push_bp(fifo, DOL_GX_BP_REG_TX_SETIMAGE0 + 1u, tex_image0(16u, 8u, 9u));
++    push_bp(fifo, DOL_GX_BP_REG_TX_SETIMAGE3 + 1u, texture_base >> 5u);
++    push_bp(fifo, DOL_GX_BP_REG_TX_SETTLUT + 1u, tmem | (2u << 10u));
++  }
++
++  RetailGxFrontend frontend(resolver);
++  RecordingAuroraRenderSink sink;
++  assert(frontend.replay_fifo(fifo, &sink));
++  assert(frontend.last_error() == nullptr);
++  std::uint32_t bound_tlut = 0u;
++  std::uint32_t bound_format = 0xFFu;
++  for (const auto& packet : sink.packets()) {
++    if (packet.kind == RenderPacketKind::Resource &&
++        packet.resource.kind == RenderResourceKind::Texture &&
++        packet.resource.index == 1u) {
++      bound_tlut = packet.resource.tlut_address;
++      bound_format = packet.resource.tlut_format;
++    }
++  }
++  assert(bound_tlut == second_tlut);
++  assert(bound_format == 2u);
++}
++
+ // The XF projection register (XF 0x1020) is decoded from a direct XF_LOAD that
+ // covers it, so the recomp's projection transform is inspectable for the
+ // Dolphin-vs-recomp transform diff. A wrong/degenerate projection puts geometry
+@@ -613,6 +657,7 @@ int main() {
+   test_fragmented_fifo_display_list_frontend();
+   test_fragmented_zero_vertex_draw_is_noop();
+   test_unresolved_tlut_load_is_noop();
++  test_tlut_written_after_image_selects_palette();
+   test_xf_projection_capture();
+ 
+   CPUState cpu;
+-- 
+2.41.0
+

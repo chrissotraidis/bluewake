@@ -1,0 +1,431 @@
+From 2ec338fd27b8edd4d3a82fc35c25274ceaac208d Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 18:08:03 +0900
+Subject: [PATCH 172/175] Aurora: cloud shadows from the game's camera and the
+ scene's depth (post_fx, off by default)
+
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  10 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 264 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  12 +-
+ 3 files changed, 284 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 8e5d89d..202a169 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -174,6 +174,16 @@ void aurora_set_far_blur(bool enabled);
+    depth, before the far blur and bloom. Takes effect at the next frame.
+    DOL_AURORA_AO=1 sets the starting value. */
+ void aurora_set_ambient_occlusion(bool enabled);
++/* Cloud shadows on the sea and the land, from the camera last passed to
++   aurora_set_world_view. Takes effect at the next frame. */
++void aurora_set_cloud_shadows(bool enabled);
++/* The game's camera, for effects that need each pixel's place in the world:
++   inv_view, the inverse view matrix (view to world) as three rows of four;
++   tan_half_fovy, the tangent of half the vertical field of view; aspect;
++   near_plane, the projection's near distance; sea_level, the height of the
++   world's sea; seconds, the game's time. */
++void aurora_set_world_view(const float inv_view[12], float tan_half_fovy, float aspect, float near_plane,
++                           float sea_level, float seconds);
+ /* A frames-a-second counter at the top of the window (with the game's own
+    rate beside it when in-between frames are on). DOL_AURORA_SHOW_FPS=1 sets
+    the starting value. */
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index b151e0d..bb646cc 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -8,7 +8,10 @@
+ 
+ #include <array>
+ #include <atomic>
++#include <cmath>
+ #include <cstdlib>
++#include <cstring>
++#include <mutex>
+ 
+ namespace aurora::gfx::post_fx {
+ using webgpu::g_device;
+@@ -17,6 +20,16 @@ namespace {
+ std::atomic_bool g_bloom{false};
+ std::atomic_bool g_farBlur{false};
+ std::atomic_bool g_ao{false};
++std::atomic_bool g_clouds{false};
++float g_cloudStrength = 0.28f;  // how dark a cloud's shadow is
++float g_cloudScale = 7000.f;    // world units across one cloud
++bool g_cloudDebug = false;
++// The camera, for the cloud shadows (aurora_set_world_view): the inverse view
++// matrix's three rows, then tan(fovy / 2), aspect, near, the sea's height, and
++// the time in seconds. Written by the game thread, read when a frame is encoded.
++std::mutex g_cameraMutex;
++std::array<float, 20> g_camera{};
++bool g_cameraValid = false;
+ float g_aoRadius = 30.f;    // the occlusion radius, in near-plane units
+ float g_aoStrength = 0.6f;  // how dark a fully occluded spot gets
+ bool g_aoDebug = false;
+@@ -253,6 +266,103 @@ fn fs_ao(in: VertexOutput) -> @location(0) vec4<f32> {
+ )""";
+ wgpu::ShaderModule g_aoModule;
+ 
++// Cloud shadows on the sea and the islands: each pixel's place in the world
++// (from depth, or where the view ray meets the sea where there is no depth),
++// darkened by soft drifting noise in world X/Z that fades with distance.
++constexpr const char* kCloudShader = R"""(
++override strength: f32 = 0.28;
++override scale: f32 = 7000.0;
++override debug_view: bool = false;
++
++struct View {
++    rows: array<vec4<f32>, 3>,  // the inverse view matrix (view to world), by rows
++    lens: vec4<f32>,            // tan(fovy / 2), aspect, near, the sea's height
++    time: vec4<f32>,            // seconds
++};
++
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var unused: texture_2d<f32>;
++@group(0) @binding(2) var depth: texture_depth_2d;
++@group(0) @binding(3) var<uniform> view: View;
++
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++
++fn hash(p: vec2<f32>) -> f32 {
++    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
++}
++
++fn value_noise(p: vec2<f32>) -> f32 {
++    let i = floor(p);
++    let f = fract(p);
++    let u = f * f * (3.0 - 2.0 * f);
++    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
++}
++
++fn fbm(p0: vec2<f32>) -> f32 {
++    var p = p0;
++    var v = 0.0;
++    var a = 0.5;
++    for (var i = 0; i < 4; i++) {
++        v += a * value_noise(p);
++        p = p * 2.03 + vec2(17.0, 9.0);
++        a *= 0.5;
++    }
++    return v;
++}
++
++@fragment
++fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
++    let d = textureLoad(depth, vec2<i32>(in.pos.xy), 0);
++    let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
++    let ray = vec3(ndc.x * view.lens.x * view.lens.y, ndc.y * view.lens.x, -1.0);
++    let dir = vec3(dot(view.rows[0].xyz, ray), dot(view.rows[1].xyz, ray), dot(view.rows[2].xyz, ray));
++    let eye = vec3(view.rows[0].w, view.rows[1].w, view.rows[2].w);
++    var world = eye;
++    if (d > 0.0) {
++        world = eye + dir * (view.lens.z / d);
++    } else {
++        // No depth: the sky, or the sea toward the horizon.
++        if (dir.y > -1e-4) {
++            return vec4(1.0);
++        }
++        let t = (view.lens.w - eye.y) / dir.y;
++        if (t <= 0.0) {
++            return vec4(1.0);
++        }
++        world = eye + dir * t;
++    }
++    let distance = length(world - eye);
++    if (debug_view) {
++        // A 1,000-unit world grid in red and green, height in blue (every 500 units).
++        let g = fract(world.xz / 1000.0);
++        return vec4(g.x, g.y, fract(world.y / 500.0), 1.0);
++    }
++    let drift = vec2(0.6, 0.25) * view.time.x * 0.02;
++    let n = fbm(world.xz / scale + drift);
++    let shade = smoothstep(0.42, 0.6, n) * strength * (1.0 - smoothstep(60000.0, 160000.0, distance));
++    return vec4(vec3(1.0 - shade), 1.0);
++}
++)""";
++wgpu::ShaderModule g_cloudModule;
++wgpu::BindGroupLayout g_cloudLayout;
++wgpu::PipelineLayout g_cloudPipelineLayout;
++wgpu::RenderPipeline g_cloudPass;
++uint32_t g_cloudSamples = 0;
++
+ float env_float(const char* name, float fallback, float lo, float hi) {
+   const char* value = std::getenv(name);
+   if (value == nullptr || value[0] == '\0') {
+@@ -339,6 +449,40 @@ wgpu::RenderPipeline make_ao_pipeline(wgpu::TextureFormat format) {
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
++wgpu::RenderPipeline make_cloud_pipeline(wgpu::TextureFormat format, uint32_t samples) {
++  const std::array constants{
++      wgpu::ConstantEntry{.key = "strength", .value = g_cloudStrength},
++      wgpu::ConstantEntry{.key = "scale", .value = g_cloudScale},
++      wgpu::ConstantEntry{.key = "debug_view", .value = g_cloudDebug ? 1.0 : 0.0},
++  };
++  const wgpu::BlendState multiply{
++      .color = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::Src},
++      .alpha = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::One},
++  };
++  const std::array targets{wgpu::ColorTargetState{.format = format, .blend = &multiply, .writeMask = wgpu::ColorWriteMask::All}};
++  const wgpu::FragmentState fragment{
++      .module = g_cloudModule,
++      .entryPoint = "fs_clouds",
++      .constantCount = constants.size(),
++      .constants = constants.data(),
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = "Cloud shadows",
++      .layout = g_cloudPipelineLayout,
++      .vertex = {.module = g_cloudModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = samples, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
+ wgpu::RenderPipeline make_far_pipeline(wgpu::TextureFormat format, uint32_t samples) {
+   const std::array constants{
+       wgpu::ConstantEntry{.key = "far_start", .value = g_farStart},
+@@ -383,6 +527,7 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_blurV = make_pipeline("Bloom blur (vertical)", "fs_blur_v", format, 1, kReplace);
+     g_down = make_pipeline("Far blur downsample", "fs_down", format, 1, kReplace);
+     g_aoPass = make_ao_pipeline(format);
++    g_cloudPass = {};
+     g_composite = {};
+     g_farComposite = {};
+     g_aoApply = {};
+@@ -392,6 +537,10 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_composite = make_pipeline("Bloom composite", "fs_composite", format, samples, kAdd);
+     g_compositeSamples = samples;
+   }
++  if (!g_cloudPass || samples != g_cloudSamples) {
++    g_cloudPass = make_cloud_pipeline(format, samples);
++    g_cloudSamples = samples;
++  }
+   if (!g_aoApply || samples != g_aoSamples) {
+     g_aoApply = make_pipeline("Ambient occlusion apply", "fs_ao_apply", format, samples,
+                               g_aoDebug ? kReplace : kMultiply);
+@@ -490,6 +639,48 @@ void draw_depth(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::
+   pass.Draw(3);
+   pass.End();
+ }
++void draw_clouds(const wgpu::CommandEncoder& cmd, const std::array<float, 20>& view, const wgpu::TextureView& depthView,
++                 const wgpu::TextureView& target, const wgpu::TextureView& resolve) {
++  // A small buffer for each frame, so a frame still in flight keeps its camera.
++  const wgpu::BufferDescriptor bufferDescriptor{
++      .label = "Cloud shadows view",
++      .usage = wgpu::BufferUsage::Uniform,
++      .size = sizeof(view),
++      .mappedAtCreation = true,
++  };
++  const auto buffer = g_device.CreateBuffer(&bufferDescriptor);
++  std::memcpy(buffer.GetMappedRange(0, sizeof(view)), view.data(), sizeof(view));
++  buffer.Unmap();
++  const std::array entries{
++      wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = g_farView[0]},
++      wgpu::BindGroupEntry{.binding = 2, .textureView = depthView},
++      wgpu::BindGroupEntry{.binding = 3, .buffer = buffer, .offset = 0, .size = sizeof(view)},
++  };
++  const wgpu::BindGroupDescriptor bindGroupDescriptor{
++      .layout = g_cloudLayout,
++      .entryCount = entries.size(),
++      .entries = entries.data(),
++  };
++  const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
++  const std::array attachments{wgpu::RenderPassColorAttachment{
++      .view = target,
++      .resolveTarget = resolve,
++      .loadOp = wgpu::LoadOp::Load,
++      .storeOp = wgpu::StoreOp::Store,
++  }};
++  const wgpu::RenderPassDescriptor descriptor{
++      .label = "Cloud shadows",
++      .colorAttachmentCount = attachments.size(),
++      .colorAttachments = attachments.data(),
++      .timestampWrites = webgpu::gpu_prof::pass_writes("Cloud shadows"),
++  };
++  const auto pass = cmd.BeginRenderPass(&descriptor);
++  pass.SetPipeline(g_cloudPass);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.Draw(3);
++  pass.End();
++}
+ } // namespace
+ 
+ void initialize() {
+@@ -507,6 +698,10 @@ void initialize() {
+   g_ao.store(ao != nullptr && ao[0] == '1', std::memory_order_relaxed);
+   g_aoRadius = env_float("DOL_AURORA_AO_RADIUS", g_aoRadius, 0.1f, 1e6f);
+   g_aoStrength = env_float("DOL_AURORA_AO_STRENGTH", g_aoStrength, 0.f, 1.f);
++  g_cloudStrength = env_float("DOL_AURORA_CLOUD_SHADOWS_STRENGTH", g_cloudStrength, 0.f, 1.f);
++  g_cloudScale = env_float("DOL_AURORA_CLOUD_SHADOWS_SCALE", g_cloudScale, 1.f, 1e7f);
++  const char* cloudDebug = std::getenv("DOL_AURORA_CLOUD_SHADOWS_DEBUG");
++  g_cloudDebug = cloudDebug != nullptr && cloudDebug[0] == '1';
+   const char* aoDebug = std::getenv("DOL_AURORA_AO_DEBUG");
+   g_aoDebug = aoDebug != nullptr && aoDebug[0] == '1';
+   const char* farDebug = std::getenv("DOL_AURORA_FAR_BLUR_DEBUG");
+@@ -553,6 +748,10 @@ void initialize() {
+   aoSource.code = kAoShader;
+   const wgpu::ShaderModuleDescriptor aoModuleDescriptor{.nextInChain = &aoSource, .label = "Ambient occlusion"};
+   g_aoModule = g_device.CreateShaderModule(&aoModuleDescriptor);
++  wgpu::ShaderSourceWGSL cloudSource{};
++  cloudSource.code = kCloudShader;
++  const wgpu::ShaderModuleDescriptor cloudModuleDescriptor{.nextInChain = &cloudSource, .label = "Cloud shadows"};
++  g_cloudModule = g_device.CreateShaderModule(&cloudModuleDescriptor);
+   const std::array depthEntries{
+       layoutEntries[0],
+       layoutEntries[1],
+@@ -571,6 +770,25 @@ void initialize() {
+   const wgpu::PipelineLayoutDescriptor depthPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                      .bindGroupLayouts = &g_depthLayout};
+   g_depthPipelineLayout = g_device.CreatePipelineLayout(&depthPipelineLayoutDescriptor);
++  const std::array cloudEntries{
++      depthEntries[0],
++      depthEntries[1],
++      depthEntries[2],
++      wgpu::BindGroupLayoutEntry{
++          .binding = 3,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = sizeof(g_camera)},
++      },
++  };
++  const wgpu::BindGroupLayoutDescriptor cloudLayoutDescriptor{
++      .label = "Cloud shadows",
++      .entryCount = cloudEntries.size(),
++      .entries = cloudEntries.data(),
++  };
++  g_cloudLayout = g_device.CreateBindGroupLayout(&cloudLayoutDescriptor);
++  const wgpu::PipelineLayoutDescriptor cloudPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
++                                                                     .bindGroupLayouts = &g_cloudLayout};
++  g_cloudPipelineLayout = g_device.CreatePipelineLayout(&cloudPipelineLayoutDescriptor);
+ }
+ 
+ void shutdown() {
+@@ -579,6 +797,11 @@ void shutdown() {
+   g_aoView = {};
+   g_aoSamples = 0;
+   g_aoModule = {};
++  g_cloudPass = {};
++  g_cloudSamples = 0;
++  g_cloudPipelineLayout = {};
++  g_cloudLayout = {};
++  g_cloudModule = {};
+   g_tex = {};
+   g_view = {};
+   g_farTex = {};
+@@ -608,7 +831,25 @@ bool ambient_occlusion_enabled() noexcept { return g_ao.load(std::memory_order_r
+ 
+ void set_ambient_occlusion(bool enabled) noexcept { g_ao.store(enabled, std::memory_order_relaxed); }
+ 
+-bool any_enabled() noexcept { return bloom_enabled() || far_blur_enabled() || ambient_occlusion_enabled(); }
++bool cloud_shadows_enabled() noexcept { return g_clouds.load(std::memory_order_relaxed) && webgpu::g_hasCoreFeatures; }
++
++void set_cloud_shadows(bool enabled) noexcept { g_clouds.store(enabled, std::memory_order_relaxed); }
++
++void set_world_view(const float invView[12], float tanHalfFovy, float aspect, float nearPlane, float seaLevel,
++                    float seconds) noexcept {
++  std::lock_guard lock{g_cameraMutex};
++  std::memcpy(g_camera.data(), invView, 12 * sizeof(float));
++  g_camera[12] = tanHalfFovy;
++  g_camera[13] = aspect;
++  g_camera[14] = nearPlane;
++  g_camera[15] = seaLevel;
++  g_camera[16] = seconds;
++  g_cameraValid = nearPlane > 0.f && tanHalfFovy > 0.f && aspect > 0.f;
++}
++
++bool any_enabled() noexcept {
++  return bloom_enabled() || far_blur_enabled() || ambient_occlusion_enabled() || cloud_shadows_enabled();
++}
+ 
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+@@ -624,6 +865,20 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+     // With DOL_AURORA_AO_DEBUG=1 the occlusion replaces the scene.
+     draw(cmd, "Ambient occlusion apply", g_aoApply, g_aoView[0], dst, true, resolve);
+   }
++  if (cloud_shadows_enabled() && g_module && depthView && msaaSamples == 1) {
++    std::array<float, 20> view;
++    bool valid;
++    {
++      std::lock_guard lock{g_cameraMutex};
++      view = g_camera;
++      valid = g_cameraValid;
++    }
++    if (valid) {
++      const webgpu::gpu_prof::Zone zone{cmd, "Cloud shadows"};
++      ensure_targets(size, format, msaaSamples);
++      draw_clouds(cmd, view, depthView, dst, resolve);
++    }
++  }
+   if (far_blur_enabled() && g_module && depthView && msaaSamples == 1 && size.width >= 4 && size.height >= 4) {
+     const webgpu::gpu_prof::Zone zone{cmd, "Far blur"};
+     ensure_targets(size, format, msaaSamples);
+@@ -660,3 +915,10 @@ void aurora_set_bloom(bool enabled) { aurora::gfx::post_fx::set_bloom(enabled);
+ void aurora_set_far_blur(bool enabled) { aurora::gfx::post_fx::set_far_blur(enabled); }
+ 
+ void aurora_set_ambient_occlusion(bool enabled) { aurora::gfx::post_fx::set_ambient_occlusion(enabled); }
++
++void aurora_set_cloud_shadows(bool enabled) { aurora::gfx::post_fx::set_cloud_shadows(enabled); }
++
++void aurora_set_world_view(const float inv_view[12], float tan_half_fovy, float aspect, float near_plane,
++                           float sea_level, float seconds) {
++  aurora::gfx::post_fx::set_world_view(inv_view, tan_half_fovy, aspect, near_plane, sea_level, seconds);
++}
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 7fb28b8..8241566 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -24,6 +24,11 @@
+ // depth alone, at a quarter of the size, blurred and multiplied into the
+ // scene. DOL_AURORA_AO_RADIUS (near-plane units, default 30) and _STRENGTH
+ // (default 0.6). Off unless DOL_AURORA_AO=1 or aurora_set_ambient_occlusion(true).
++//
++// Cloud shadows: soft drifting shadows on the sea and the land, from the
++// camera the game passes in (aurora_set_world_view) and the scene's depth.
++// DOL_AURORA_CLOUD_SHADOWS_STRENGTH (default 0.28) and _SCALE (world units
++// across a cloud, default 7000). Off unless aurora_set_cloud_shadows(true).
+ namespace aurora::gfx::post_fx {
+ void initialize();
+ void shutdown();
+@@ -33,8 +38,13 @@ bool far_blur_enabled() noexcept;
+ void set_far_blur(bool enabled) noexcept;
+ bool ambient_occlusion_enabled() noexcept;
+ void set_ambient_occlusion(bool enabled) noexcept;
++bool cloud_shadows_enabled() noexcept;
++void set_cloud_shadows(bool enabled) noexcept;
++void set_world_view(const float invView[12], float tanHalfFovy, float aspect, float nearPlane, float seaLevel,
++                    float seconds) noexcept;
+ bool any_enabled() noexcept;
+-// Every effect that is on, in order (ambient occlusion, far blur, bloom);
++// Every effect that is on, in order (ambient occlusion, cloud shadows, far
++// blur, bloom);
+ // depthView: the EFB's depth.
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+-- 
+2.46.0
+

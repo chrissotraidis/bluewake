@@ -1,0 +1,25 @@
+From d613dc579ec744f3fbc0b0b1f994502258b54c19 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 13:23:27 -0500
+Subject: [PATCH] llvm: invalidate narrowed retry object cache
+
+---
+ src/app/pipeline.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index 32e57a6..75a05c7 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v22"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v23"
+ 
+ typedef struct {
+     const PPCInst* insts;
+-- 
+2.41.0
+

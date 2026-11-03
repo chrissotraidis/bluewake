@@ -1,0 +1,49 @@
+diff --git a/lib/dolphin/gx/GXTexture.cpp b/lib/dolphin/gx/GXTexture.cpp
+--- a/lib/dolphin/gx/GXTexture.cpp
++++ b/lib/dolphin/gx/GXTexture.cpp
+@@ -342,2 +342,20 @@
+-// TODO GXInitTexCacheRegion
++void GXInitTexCacheRegion(GXTexRegion* region, GXBool is_32b_mipmap, u32 tmem_even,
++                          GXTexCacheSize size_even, u32 tmem_odd, GXTexCacheSize size_odd) {
++  // Original SDK register packing; cache addresses are TMEM offsets, not host pointers.
++  CHECK(region != nullptr, "GXInitTexCacheRegion: null region");
++  CHECK(static_cast<u32>(size_even) <= 2 && static_cast<u32>(size_odd) <= 3,
++        "GXInitTexCacheRegion: invalid cache size");
++  const u32 even = static_cast<u32>(size_even) + 3;
++  const u32 odd = size_odd == GX_TEXCACHE_NONE ? 0 : static_cast<u32>(size_odd) + 3;
++  const u32 image1 = ((tmem_even >> 5) & 0x7fff) | (even << 15) | (even << 18);
++  const u32 image2 = ((tmem_odd >> 5) & 0x7fff) | (odd << 15) | (odd << 18);
++  // Preserve the SDK's untouched preload-size and trailing bytes. memcpy also
++  // avoids inventing an aliased internal structure for the public opaque object.
++  std::memcpy(reinterpret_cast<u8*>(region), &image1, sizeof(image1));
++  std::memcpy(reinterpret_cast<u8*>(region) + 4, &image2, sizeof(image2));
++  auto* bytes = reinterpret_cast<u8*>(region);
++  bytes[12] = is_32b_mipmap;
++  bytes[13] = 1;
++}
++
+ // TODO GXInitTexPreLoadRegion
+diff --git a/lib/dolphin/gx/GXManage.cpp b/lib/dolphin/gx/GXManage.cpp
+--- a/lib/dolphin/gx/GXManage.cpp
++++ b/lib/dolphin/gx/GXManage.cpp
+@@ -15,2 +15,20 @@
+ extern "C" {
++void GXSetMisc(GXMiscToken token, u32 val) {
++  switch (token) {
++  case GX_MT_NULL:
++    break;
++  case GX_MT_XF_FLUSH:
++    __gx->vNum = static_cast<u16>(val);
++    // Aurora derives the zero-count condition from vNum rather than storing
++    // the SDK's redundant vNumNot byte; its flush service owns bpSent.
++    __gx->bpSent = 1;
++    if (__gx->vNum != 0)
++      __gx->dirtyState |= 1u << 3;
++    break;
++  case GX_MT_DL_SAVE_CONTEXT:
++    __gx->dlSaveContext = val != 0;
++    break;
++  }
++}
++
+ GXFifoObj* GXInit(void* base, u32 size) {

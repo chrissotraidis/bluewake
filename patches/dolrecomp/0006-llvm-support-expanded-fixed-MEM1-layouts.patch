@@ -1,0 +1,201 @@
+From dbaea4166198ea9e688aeb8d9dad70f7ac3a5a28 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 11:45:51 -0500
+Subject: [PATCH] llvm: support expanded fixed MEM1 layouts
+
+---
+ CMakeLists.txt              |  6 +++++-
+ src/app/cli.c               | 22 ++++++++++++++++++++++
+ src/app/cli.h               |  1 +
+ src/app/pipeline.c          |  6 ++++--
+ tests/llvm_fixture.cpp      |  8 ++++++++
+ tests/llvm_semantics_test.c | 15 +++++++++++++++
+ tests/test_cli.c            |  3 ++-
+ 7 files changed, 57 insertions(+), 4 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0383575..27f98fe 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -360,17 +360,21 @@ if(DOLRECOMP_ENABLE_LLVM)
+             ${DOLRECOMP_TEST_IR}.pgo
+             ${DOLRECOMP_TEST_OBJECT}.fast
+             ${DOLRECOMP_TEST_IR}.fast
++            ${DOLRECOMP_TEST_OBJECT}.expanded
+         COMMAND llvm_fixture ${DOLRECOMP_TEST_OBJECT} ${DOLRECOMP_TEST_IR}
+         DEPENDS llvm_fixture
+         VERBATIM
+     )
+     set_source_files_properties(${DOLRECOMP_TEST_OBJECT}
+         PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
++    set_source_files_properties(${DOLRECOMP_TEST_OBJECT}.expanded
++        PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+     add_executable(llvm_smoke_test tests/llvm_smoke_test.c ${DOLRECOMP_TEST_OBJECT})
+     target_link_libraries(llvm_smoke_test PRIVATE dr_cpu)
+     add_test(NAME llvm_smoke COMMAND llvm_smoke_test)
+     add_executable(llvm_semantics_test
+-        tests/llvm_semantics_test.c ${DOLRECOMP_TEST_OBJECT})
++        tests/llvm_semantics_test.c ${DOLRECOMP_TEST_OBJECT}
++        ${DOLRECOMP_TEST_OBJECT}.expanded)
+     target_link_libraries(llvm_semantics_test PRIVATE dr_cpu)
+     add_test(NAME llvm_semantics COMMAND llvm_semantics_test)
+     add_executable(native_interception_test
+diff --git a/src/app/cli.c b/src/app/cli.c
+index 7b24c32..0806e1e 100644
+--- a/src/app/cli.c
++++ b/src/app/cli.c
+@@ -24,6 +24,7 @@ void print_usage(const char* argv0) {
+     fprintf(stderr, "  --partition-instructions <n>   Reproducible object partition size\n");
+     fprintf(stderr, "  --partition-seed <n>           Stable partition naming seed\n");
+     fprintf(stderr, "  --llvm-dispatch-cross-range    Return cross-partition control to the dispatcher\n");
++    fprintf(stderr, "  --llvm-ram-size <bytes>        Fix generated MEM1 layout to this byte size\n");
+     fprintf(stderr, "  --gamecube                     GameCube mode (no title ID required)\n");
+     fprintf(stderr, "  --rel-base <addr>              Override first virtual load address for REL codegen\n");
+     fprintf(stderr, "  --map <path>                   Load optional function names from a linker MAP\n");
+@@ -340,6 +341,27 @@ int parse_cli(int argc, char** argv, CliOptions* opts) {
+             continue;
+         }
+ 
++        if (strcmp(arg, "--llvm-ram-size") == 0) {
++            if (i + 1 >= argc ||
++                !parse_u32_arg(argv[++i], "--llvm-ram-size",
++                               &opts->llvm_ram_size) ||
++                opts->llvm_ram_size == 0u) {
++                fprintf(stderr, "error: LLVM RAM size must be nonzero\n");
++                return 0;
++            }
++            continue;
++        }
++
++        if (strncmp(arg, "--llvm-ram-size=", 16) == 0) {
++            if (!parse_u32_arg(arg + 16, "--llvm-ram-size",
++                               &opts->llvm_ram_size) ||
++                opts->llvm_ram_size == 0u) {
++                fprintf(stderr, "error: LLVM RAM size must be nonzero\n");
++                return 0;
++            }
++            continue;
++        }
++
+         if (strcmp(arg, "--cpu") == 0) {
+             if (i + 1 >= argc) {
+                 fprintf(stderr, "error: --cpu needs gekko, broadway, or espresso\n");
+diff --git a/src/app/cli.h b/src/app/cli.h
+index 83ad152..47fd50b 100644
+--- a/src/app/cli.h
++++ b/src/app/cli.h
+@@ -23,6 +23,7 @@ typedef struct {
+     u32 jobs;
+     u32 rel_base;
+     u32 partition_instructions;
++    u32 llvm_ram_size;
+     u64 partition_seed;
+     int gamecube_mode;
+     int cpu_explicit;
+diff --git a/src/app/pipeline.c b/src/app/pipeline.c
+index e884cfc..f6cadf4 100644
+--- a/src/app/pipeline.c
++++ b/src/app/pipeline.c
+@@ -55,7 +55,7 @@ static u32 c_chunk_instructions(void) {
+ #define DOLLLVM_DEFAULT_CHUNK_INSTRUCTIONS 128u
+ #define DOLLLVM_DEFAULT_WORKER_BATCH 4u
+ // SSA regions, ABI v4 variants and ThinLTO summaries.
+-#define DOLLLVM_CACHE_VERSION "dolllvm-v20"
++#define DOLLLVM_CACHE_VERSION "dolllvm-v21"
+ 
+ typedef struct {
+     const PPCInst* insts;
+@@ -886,7 +886,9 @@ static int emit_code_sections_llvm(const LoadedCodeSection* sections,
+                     options->profile_generate_path;
+                 target_job->profile_use_path = options->profile_use_path;
+                 target_job->partition_seed = options->partition_seed;
+-                target_job->ram_size = GC_MAIN_RAM_SIZE;
++                target_job->ram_size = options->llvm_ram_size
++                                           ? options->llvm_ram_size
++                                           : GC_MAIN_RAM_SIZE;
+                 target_job->mem2_size = cpu == DOLRECOMP_CPU_GEKKO
+                                              ? 0u
+                                              : WII_MEM2_SIZE;
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index b6ff0f5..e546917 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -378,6 +378,14 @@ int main(int argc, char **argv) {
+   options.dispatch_cross_range = 0;
+   options.ir_path = argv[2];
+ 
++  const std::string expanded_path = std::string(argv[1]) + ".expanded";
++  options.emit_ir = 0;
++  options.symbol_suffix = "__expanded";
++  options.ram_size = 0x02000000u;
++  CHECK(dolllvm_emit_object(&module, expanded_path.c_str(), &options, stderr));
++  options.symbol_suffix = nullptr;
++  options.ram_size = GC_MAIN_RAM_SIZE;
++
+   const std::string v2_path = std::string(argv[1]) + ".v2";
+   const std::string v2_copy = std::string(argv[1]) + ".v2.copy";
+   options.emit_ir = 0;
+diff --git a/tests/llvm_semantics_test.c b/tests/llvm_semantics_test.c
+index aec3396..ab61424 100644
+--- a/tests/llvm_semantics_test.c
++++ b/tests/llvm_semantics_test.c
+@@ -1,6 +1,7 @@
+ #include "cpu/cpu.h"
+ 
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ 
+ void func_80001000(CPUState* cpu);
+@@ -18,6 +19,7 @@ void func_80003740(CPUState* cpu);
+ void func_80003750(CPUState* cpu);
+ void func_80003760(CPUState* cpu);
+ void func_80003800(CPUState* cpu);
++void func_80003100__expanded(CPUState* cpu);
+ 
+ #define CHECK(x) do { if (!(x)) { fprintf(stderr, "check failed: %s:%d: %s\n", \
+     __FILE__, __LINE__, #x); return 1; } } while (0)
+@@ -132,6 +134,19 @@ int main(void) {
+     CHECK(cpu_init(&reference));
+     CHECK(integer_properties(&cpu, &reference));
+ 
++    u8* expanded = (u8*)realloc(cpu.ram, 0x02000000u);
++    CHECK(expanded != NULL);
++    memset(expanded + cpu.ram_size, 0, 0x02000000u - cpu.ram_size);
++    cpu.ram = expanded;
++    cpu.ram_size = 0x02000000u;
++    prepare(&cpu, 0x80003100u);
++    cpu.gpr[4] = 0x81E0001Cu;
++    cpu.gpr[5] = 7u;
++    mem_write32(&cpu, cpu.gpr[4], 3u);
++    func_80003100__expanded(&cpu);
++    CHECK(cpu.gpr[3] == 3u && cpu.gpr[5] == 8u);
++    CHECK(mem_read32(&cpu, cpu.gpr[4] + 4u) == 3u);
++
+     prepare(&cpu, 0x80001004u);
+     cpu.gpr[3] = 0;
+     cpu.gpr[1] = GC_RAM_BASE;
+diff --git a/tests/test_cli.c b/tests/test_cli.c
+index af314fd..40c181b 100644
+--- a/tests/test_cli.c
++++ b/tests/test_cli.c
+@@ -11,7 +11,7 @@ int main(void) {
+         "dolrecomp", "--gamecube", "--backend=llvm",
+         "--targets=x86-64-v2,x86-64-v3", "--semantics=fast",
+         "--instrumentation=lockstep", "--profile-use=profile.profdata",
+-        "--llvm-dispatch-cross-range",
++        "--llvm-dispatch-cross-range", "--llvm-ram-size=0x02000000",
+         "--partition-instructions", "512", "--partition-seed", "42",
+         "input.dol", "output",
+     };
+@@ -22,6 +22,7 @@ int main(void) {
+     CHECK(strcmp(options.llvm_targets, "x86-64-v2,x86-64-v3") == 0);
+     CHECK(options.fast_semantics && options.lockstep_instrumentation);
+     CHECK(options.llvm_dispatch_cross_range);
++    CHECK(options.llvm_ram_size == 0x02000000u);
+     CHECK(strcmp(options.profile_use_path, "profile.profdata") == 0);
+     CHECK(options.partition_instructions == 512u);
+     CHECK(options.partition_seed == 42u);
+-- 
+2.41.0
+

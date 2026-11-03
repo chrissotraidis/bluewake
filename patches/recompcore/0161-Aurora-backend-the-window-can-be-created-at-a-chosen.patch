@@ -1,0 +1,45 @@
+From de9d15d2a5104b891236b6c85533197d3d431588 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 09:09:40 +0900
+Subject: [PATCH] Aurora backend: the window can be created at a chosen
+ position
+
+AuroraBackendConfig gains window_pos_x and window_pos_y, passed to Aurora's windowPosX/windowPosY, so a host can open the window in place instead of moving it after it appears (BlueWake #89). Zero-initialized, they keep the old 0,0.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp | 2 ++
+ GXRuntime/include/gxruntime/aurora_backend.h | 6 ++++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 2260573132..f8c5b88db3 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -290,6 +290,8 @@ bool dol_aurora_initialize(int argc, char** argv,
+     if (const char* user_dir = std::getenv("DOL_AURORA_USER_DIR"); user_dir != nullptr && user_dir[0] != '\0')
+         config.userPath = strdup(user_dir);
+     config.vsync = backend_config->vsync;
++    config.windowPosX = backend_config->window_pos_x;
++    config.windowPosY = backend_config->window_pos_y;
+     config.windowWidth = backend_config->window_width != 0
+                              ? backend_config->window_width
+                              : defaults.window_width;
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index db22ea8f74..cc07f023b5 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -20,6 +20,12 @@ typedef struct AuroraBackendConfig {
+     bool info_logging;
+     bool graphics_logging;
+     bool force_untextured;
++    // Where the window is created, so it opens in place instead of moving
++    // after it is shown. Passed to Aurora's windowPosX/windowPosY: 0,0 (the
++    // default) is the screen's corner as before, a negative value lets the
++    // system choose, and SDL_WINDOWPOS_CENTERED centres it.
++    int window_pos_x;
++    int window_pos_y;
+ } AuroraBackendConfig;
+ 
+ bool dol_aurora_initialize(int argc, char** argv,
+-- 
+2.46.0
+

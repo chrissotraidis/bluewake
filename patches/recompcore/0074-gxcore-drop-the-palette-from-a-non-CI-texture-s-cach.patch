@@ -1,0 +1,67 @@
+From b5248b9bf885cf4fd4d6ad3d320af24488406c55 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 08:08:36 -0500
+Subject: [PATCH 74/74] gxcore: drop the palette from a non-CI texture's cache
+ identity
+
+The frontend reports the last bound TLUT with every texture, and the texture
+cache keyed on it for all formats. Wind Waker's HUD draws the same I4/IA4
+images under alternating palettes, so each alternation looked like new content
+at the same address: the entry was evicted, decoded and uploaded again, about
+23 times a frame. Only CI formats read a palette, so the palette fields are now
+cleared for the rest before lookup; the decoded texels are unchanged.
+
+Uploads in 1,800 retraces of the save's Outset view: 28,144 -> 194. On the iOS
+simulator each upload is a synchronous Metal XPC round trip (5 percent of the
+worker). DOL_GXCORE_TEX_UPLOAD_LOG=1 logs each upload with its identity.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 26 +++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index a7f1142790..84f7d61caf 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -810,6 +810,19 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+           uint32_t height, const void* data, uint32_t available, bool has_tlut,
+           uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
+           const void* tlut_data, uint32_t tlut_available) -> TextureHandle {
++    // Only CI formats read a palette. The frontend reports whatever TLUT was
++    // last bound for every texture, so without this a non-CI image drawn under
++    // two different palettes had two cache identities at one address, evicted
++    // itself and was decoded and uploaded again on every alternation: Wind
++    // Waker's HUD did that about 23 times a frame (I4/IA4 images, same texels).
++    if (!gxc::is_ci_format(format)) {
++      has_tlut = false;
++      tlut_address = 0u;
++      tlut_format = 0u;
++      tlut_entries = 0u;
++      tlut_data = nullptr;
++      tlut_available = 0u;
++    }
+     auto efbIt = g_efbCopyTextures.find(address);
+     if (efbIt != g_efbCopyTextures.end() && efbIt->second.handle) {
+       uint64_t memoryEpoch = 0;
+@@ -900,6 +913,19 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     } else {
+       decoded = gxc::decode_texture(format, width, height, bytes, size);
+     }
++    {
++      static const bool s_upload_log = std::getenv("DOL_GXCORE_TEX_UPLOAD_LOG") != nullptr;
++      if (s_upload_log)
++        std::fprintf(stderr, "[tex-upload] addr=%08X fmt=%u %ux%u size=%u efb=%d prior=%d tlut=%08X hash=%016llX pfmt=%u p%ux%u psize=%u\n",
++                     address, format, width, height, tsize,
++                     g_efbCopyTextures.find(address) != g_efbCopyTextures.end() ? 1 : 0,
++                     addrIt != g_textureAddrKey.end() ? 1 : 0, tlut_address,
++                     (unsigned long long)content_hash,
++                     addrIt != g_textureAddrKey.end() ? addrIt->second.key.format : 0u,
++                     addrIt != g_textureAddrKey.end() ? addrIt->second.key.width : 0u,
++                     addrIt != g_textureAddrKey.end() ? addrIt->second.key.height : 0u,
++                     addrIt != g_textureAddrKey.end() ? addrIt->second.key.size : 0u);
++    }
+     TextureHandle handle;
+     if (!decoded.empty()) {
+       handle = new_static_texture_2d(
+-- 
+2.41.0
+

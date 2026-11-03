@@ -1,0 +1,31 @@
+From 132a8d7a33444c29044c7f1e5cd23c5a1f36471c Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 8 Oct 2026 12:01:35 +0900
+Subject: [PATCH] Aurora: DOL_AURORA_USER_DIR sets where imgui.ini and
+ controller files go
+
+A host with a portable data folder points Aurora there, so imgui.ini, controller remaps, keyboard bindings and the controller port choice stop going to the per-user folder (BlueWake #64). Unset, nothing changes.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index b343576bb8..2260573132 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -283,6 +283,12 @@ bool dol_aurora_initialize(int argc, char** argv,
+     // once never write one SQLite file together.
+     if (const char* cache_dir = std::getenv("DOL_AURORA_CACHE_DIR"); cache_dir != nullptr && cache_dir[0] != '\0')
+         config.cachePath = strdup(cache_dir);
++    // DOL_AURORA_USER_DIR: where Aurora keeps its own settings, imgui.ini
++    // (default: SDL's preference folder for the app name). A host with a
++    // portable data folder points it there, so nothing is written to the
++    // per-user folder (BlueWake #64).
++    if (const char* user_dir = std::getenv("DOL_AURORA_USER_DIR"); user_dir != nullptr && user_dir[0] != '\0')
++        config.userPath = strdup(user_dir);
+     config.vsync = backend_config->vsync;
+     config.windowWidth = backend_config->window_width != 0
+                              ? backend_config->window_width
+-- 
+2.46.0
+

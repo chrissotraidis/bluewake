@@ -1,0 +1,216 @@
+From 8caa98be1903bb21efeff5348243a3ee8ae429ef Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 03:47:01 -0500
+Subject: [PATCH] graphics: classify texgen residuals
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 13 ++++-
+ .../frontend/tools/dolgx_replay_core.cpp      |  6 +++
+ .../include/gxruntime/gxcore/gxcore.hpp       |  9 +++-
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 35 ++++++++++--
+ .../graphics/gxcore/src/gxcore_shader.cpp     |  2 +-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 53 +++++++++++++++++++
+ 6 files changed, 112 insertions(+), 6 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 4e6e5f7e76..732e2da325 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -410,7 +410,11 @@ void dol_aurora_shutdown(void) {
+                      "topology_zero_lines=%llu topology_zero_line_strip=%llu "
+                      "topology_zero_points=%llu topology_zero_unknown=%llu "
+                      "array_unresolved=%llu array_out_of_bounds=%llu "
+-                     "unsupported_texgen=%llu per_vertex_tex_mtx=%llu "
++                     "unsupported_texgen=%llu texgen_count_overflow=%llu "
++                     "texgen_emboss_cached_nbt=%llu texgen_source_normal=%llu "
++                     "texgen_source_colors=%llu texgen_source_binormal=%llu "
++                     "texgen_source_tex47=%llu texgen_source_unknown=%llu "
++                     "per_vertex_tex_mtx=%llu "
+                      "unresolved_tex_matrix=%llu normals_ignored=%llu "
+                      "lighting_ignored=%llu tlut_texture=%llu "
+                      "alpha_compare_ignored=%llu tev_stages_over=%llu "
+@@ -441,6 +445,13 @@ void dol_aurora_shutdown(void) {
+                      gaps.vertex_array_unresolved,
+                      gaps.vertex_array_out_of_bounds,
+                      gaps.unsupported_texgen,
++                     gaps.texgen_count_overflow,
++                     gaps.texgen_emboss_cached_nbt,
++                     gaps.texgen_source_normal,
++                     gaps.texgen_source_colors,
++                     gaps.texgen_source_binormal,
++                     gaps.texgen_source_tex47,
++                     gaps.texgen_source_unknown,
+                      gaps.per_vertex_tex_mtx, gaps.unresolved_tex_matrix,
+                      gaps.normals_ignored, gaps.lighting_ignored,
+                      gaps.tlut_texture, gaps.alpha_compare_ignored,
+diff --git a/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp b/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
+index 3fa3df7155..f4ac6d1b38 100644
+--- a/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
++++ b/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
+@@ -109,6 +109,12 @@ void print_gap_counters(const gxc::GapCounters& c) {
+       {"missing_vcd", c.missing_vcd},
+       {"vertex_decode_failures", c.vertex_decode_failures},
+       {"unsupported_texgen", c.unsupported_texgen},
++      {"texgen_count_overflow", c.texgen_count_overflow},
++      {"texgen_source_normal", c.texgen_source_normal},
++      {"texgen_source_colors", c.texgen_source_colors},
++      {"texgen_source_binormal", c.texgen_source_binormal},
++      {"texgen_source_tex47", c.texgen_source_tex47},
++      {"texgen_source_unknown", c.texgen_source_unknown},
+       {"per_vertex_tex_mtx", c.per_vertex_tex_mtx},
+       {"unresolved_tex_matrix", c.unresolved_tex_matrix},
+       {"normals_ignored", c.normals_ignored},
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 07355bde7f..8f5c6f07ac 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -41,7 +41,14 @@ struct GapCounters {
+   unsigned long long vertex_payload_overrun = 0;
+   unsigned long long vertex_array_unresolved = 0;
+   unsigned long long vertex_array_out_of_bounds = 0;
+-  unsigned long long unsupported_texgen = 0;    // emboss/SRTG or >kMaxTexGens
++  unsigned long long unsupported_texgen = 0;    // sum of actual texgen gaps below
++  unsigned long long texgen_count_overflow = 0; // XF count > captured shader cap
++  unsigned long long texgen_emboss_cached_nbt = 0; // supported cached N/B/T fallback
++  unsigned long long texgen_source_normal = 0;  // regular source row not emitted
++  unsigned long long texgen_source_colors = 0;  // regular source row not emitted
++  unsigned long long texgen_source_binormal = 0; // regular T/B source not emitted
++  unsigned long long texgen_source_tex47 = 0;   // regular Tex4..Tex7 not captured
++  unsigned long long texgen_source_unknown = 0; // regular source row > Tex7
+   unsigned long long per_vertex_tex_mtx = 0;    // TEXMTXIDX attrs (stubbed)
+   unsigned long long unresolved_tex_matrix = 0; // matrix rows never written
+   unsigned long long normals_ignored = 0;       // decoded past, not lit (S15)
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 7bfecd260a..02513cc8e4 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -550,6 +550,7 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+     num_tex_gens = bits(gen_mode, 4, 0);
+   if (num_tex_gens > kMaxTexGens) {
+     ++counters.unsupported_texgen;
++    ++counters.texgen_count_overflow;
+     num_tex_gens = kMaxTexGens;
+   }
+   key.num_tex_gens = static_cast<std::uint8_t>(num_tex_gens);
+@@ -636,11 +637,39 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+           static_cast<std::uint8_t>(i);
+     }
+     // Regular / Color0 / Color1 / Emboss are all generated (item 5). Emboss
+-    // needs the NBT binormal/tangent vertex inputs; without them in the layout
+-    // the offset can't be computed, so count that residual case as a gap.
++    // without per-vertex NBT uses the cross-draw cached tangent/binormal, so it
++    // is an exercised fallback rather than an unsupported path.
+     if (static_cast<TexGenType>(tg.texgentype) == TexGenType::EmbossMap &&
+         !walk.has_nbt)
+-      ++counters.unsupported_texgen;
++      ++counters.texgen_emboss_cached_nbt;
++
++    // The current vertex layout emits position and Tex0..Tex3 source rows for
++    // regular matrix texgens. Classify every other legal source instead of
++    // silently leaving its coordinate at the shader default.
++    if (static_cast<TexGenType>(tg.texgentype) == TexGenType::Regular) {
++      const auto source = static_cast<TexSourceRow>(tg.sourcerow);
++      bool unsupported_source = true;
++      if (source == TexSourceRow::Geom ||
++          (tg.sourcerow >= static_cast<std::uint8_t>(TexSourceRow::Tex0) &&
++           tg.sourcerow <
++               static_cast<std::uint8_t>(TexSourceRow::Tex0) + 4u)) {
++        unsupported_source = false;
++      } else if (source == TexSourceRow::Normal) {
++        ++counters.texgen_source_normal;
++      } else if (source == TexSourceRow::Colors) {
++        ++counters.texgen_source_colors;
++      } else if (source == TexSourceRow::BinormalT ||
++                 source == TexSourceRow::BinormalB) {
++        ++counters.texgen_source_binormal;
++      } else if (tg.sourcerow <
++                 static_cast<std::uint8_t>(TexSourceRow::Tex0) + 8u) {
++        ++counters.texgen_source_tex47;
++      } else {
++        ++counters.texgen_source_unknown;
++      }
++      if (unsupported_source)
++        ++counters.unsupported_texgen;
++    }
+   }
+   std::uint32_t num_ind_stages = bits(gen_mode, 3, 16);
+   if (num_ind_stages > kMaxIndirectStages) {
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 39120746fe..bcc1d99d65 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -913,7 +913,7 @@ std::string generate_wgsl(const ShaderKey& key) {
+       }
+     }
+     // Other source rows (normal/colors/binormals, tex4-7) are outside the
+-    // slice; the plan builder counted them and coord stays the default.
++    // slice; the plan builder classifies each residual and coord stays default.
+     if (tg.inputform == 0u) // AB11
+       emit(out, "        coord.z = 1.0;\n");
+     const auto tgtype = static_cast<TexGenType>(tg.texgentype);
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 0237e9ee7b..5400910d79 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -203,6 +203,59 @@ void test_state_to_plan_and_wgsl() {
+   CHECK(counters.draws_skipped == 0);
+   CHECK(counters.unresolved_tex_matrix == 0);
+ 
++  // Texgen residuals are classified by the unsupported source row. Emboss
++  // without per-vertex NBT is not a gap: it uses the cached N/B/T uniform.
++  auto classify_texgen = [&](std::uint32_t info, gxc::GapCounters& gaps) {
++    ar::ConsumedDraw classified = draw;
++    classified.xf_regs[0x28] = info;
++    return state.build_draw_plan(classified, gaps);
++  };
++  {
++    gxc::GapCounters gaps;
++    CHECK(classify_texgen(1u << 7u, gaps).ok); // Normal
++    CHECK(gaps.unsupported_texgen == 1u);
++    CHECK(gaps.texgen_source_normal == 1u);
++  }
++  {
++    gxc::GapCounters gaps;
++    CHECK(classify_texgen(2u << 7u, gaps).ok); // Colors
++    CHECK(gaps.unsupported_texgen == 1u);
++    CHECK(gaps.texgen_source_colors == 1u);
++  }
++  {
++    gxc::GapCounters gaps;
++    CHECK(classify_texgen(3u << 7u, gaps).ok); // BinormalT
++    CHECK(classify_texgen(4u << 7u, gaps).ok); // BinormalB
++    CHECK(gaps.unsupported_texgen == 2u);
++    CHECK(gaps.texgen_source_binormal == 2u);
++  }
++  {
++    gxc::GapCounters gaps;
++    CHECK(classify_texgen(9u << 7u, gaps).ok); // Tex4
++    CHECK(gaps.unsupported_texgen == 1u);
++    CHECK(gaps.texgen_source_tex47 == 1u);
++  }
++  {
++    gxc::GapCounters gaps;
++    CHECK(classify_texgen(13u << 7u, gaps).ok);
++    CHECK(gaps.unsupported_texgen == 1u);
++    CHECK(gaps.texgen_source_unknown == 1u);
++  }
++  {
++    gxc::GapCounters gaps;
++    CHECK(classify_texgen((1u << 4u) | (5u << 7u), gaps).ok); // Emboss
++    CHECK(gaps.unsupported_texgen == 0u);
++    CHECK(gaps.texgen_emboss_cached_nbt == 1u);
++  }
++  {
++    gxc::GapCounters gaps;
++    ar::ConsumedDraw overflow = draw;
++    overflow.xf_regs[0x27] = 5u;
++    CHECK(state.build_draw_plan(overflow, gaps).ok);
++    CHECK(gaps.unsupported_texgen == 1u);
++    CHECK(gaps.texgen_count_overflow == 1u);
++  }
++
+   // Topology admission is distinct from the shared zero-index exit: valid
+   // lines/points build plans, while an incomplete quad is rejected.
+   {
+-- 
+2.41.0

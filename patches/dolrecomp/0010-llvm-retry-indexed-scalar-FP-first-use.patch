@@ -1,0 +1,93 @@
+From a0bd6d0ffcb3084f913c176fb7645524df49e578 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 14:29:01 -0500
+Subject: [PATCH] llvm: retry indexed scalar FP first use
+
+---
+ src/backend/llvm/register_state.cpp |  7 ++++++-
+ tests/llvm_fixture.cpp              |  7 +++++++
+ tests/llvm_smoke_test.c             | 20 ++++++++++++++++++++
+ 3 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/src/backend/llvm/register_state.cpp b/src/backend/llvm/register_state.cpp
+index ea0721a..66a7edf 100644
+--- a/src/backend/llvm/register_state.cpp
++++ b/src/backend/llvm/register_state.cpp
+@@ -158,12 +158,17 @@ void FunctionEmitter::scanRegionLeaders() {
+       const u32 primary = raw >> 26;
+       const u32 xo = (raw >> 1) & 0x3FFu;
+       const bool scalar_memory = primary >= 48u && primary <= 55u;
++      const bool indexed_scalar_memory =
++          primary == 31u &&
++          (xo == 535u || xo == 567u || xo == 599u || xo == 631u ||
++           xo == 663u || xo == 695u || xo == 727u || xo == 759u);
+       const bool direct_psq = primary == 56u || primary == 57u ||
+                               primary == 60u || primary == 61u;
+       const bool indexed_psq = primary == 4u &&
+                                (xo == 6u || xo == 7u || xo == 38u ||
+                                 xo == 39u);
+-      if (!scalar_memory && !direct_psq && !indexed_psq)
++      if (!scalar_memory && !indexed_scalar_memory && !direct_psq &&
++          !indexed_psq)
+         continue;
+       if (!region_leaders_[i])
+         retry_leaders_[i] = true;
+diff --git a/tests/llvm_fixture.cpp b/tests/llvm_fixture.cpp
+index a6e8223..2b7995d 100644
+--- a/tests/llvm_fixture.cpp
++++ b/tests/llvm_fixture.cpp
+@@ -354,6 +354,13 @@ int main(int argc, char **argv) {
+   };
+   CHECK(add_chunk(&module, psq_resume_words, 4, 0x80003E00u));
+ 
++  const u32 indexed_fp_resume_words[] = {
++      0x38A50001u,
++      xform(535, 0, 2, 3),
++      0x4E800020u,
++  };
++  CHECK(add_chunk(&module, indexed_fp_resume_words, 3, 0x80003F00u));
++
+   CHECK(dolir_verify(&module, stderr));
+   DolLLVMOptions options{};
+   options.optimization_level = 2;
+diff --git a/tests/llvm_smoke_test.c b/tests/llvm_smoke_test.c
+index 5f9f055..c9395b9 100644
+--- a/tests/llvm_smoke_test.c
++++ b/tests/llvm_smoke_test.c
+@@ -20,6 +20,7 @@ void func_80002C00(CPUState* cpu);
+ void func_80002D00(CPUState* cpu);
+ void func_80003D00(CPUState* cpu);
+ void func_80003E00(CPUState* cpu);
++void func_80003F00(CPUState* cpu);
+ 
+ static u32 fallback_count;
+ static int fallback_bad;
+@@ -136,6 +137,25 @@ int main(void) {
+     CHECK(cpu.pc == 0x81234564u);
+     CHECK(fallback_count == fallback_before_psq_retry);
+ 
++    prepare_call(&cpu, 0x80003F00u);
++    cpu.msr = 0;
++    cpu.gpr[2] = GC_RAM_BASE + 0x340u;
++    cpu.gpr[3] = 8u;
++    cpu.gpr[5] = 41;
++    mem_write32(&cpu, cpu.gpr[2] + cpu.gpr[3], 0x3FC00000u);
++    u32 fallback_before_indexed_fp_retry = fallback_count;
++    func_80003F00(&cpu);
++    CHECK(cpu.gpr[5] == 42);
++    CHECK(cpu.exception == PPC_EXC_FP_UNAVAILABLE);
++    CHECK(cpu.srr0 == 0x80003F04u);
++    cpu.exception = 0;
++    cpu.msr |= 1u << 13;
++    cpu.pc = cpu.srr0;
++    func_80003F00(&cpu);
++    CHECK(cpu.fpr[0] == 1.5 && cpu.ps1[0] == 1.5);
++    CHECK(cpu.pc == 0x81234564u);
++    CHECK(fallback_count == fallback_before_indexed_fp_retry);
++
+     prepare_call(&cpu, 0x80002000u);
+     cpu.gpr[3] = 0xA5A55A5Au;
+     func_80002000(&cpu);
+-- 
+2.41.0
+

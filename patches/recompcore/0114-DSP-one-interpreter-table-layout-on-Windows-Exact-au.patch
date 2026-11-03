@@ -1,0 +1,60 @@
+From 6c29ad806fdcdc881d095a79e80d4139d51844ac Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 09:43:28 +0000
+Subject: [PATCH 114/114] DSP: one interpreter table layout on Windows (Exact
+ audio crashed at boot)
+
+DSPIntTables.h forward-declared Interpreter before using it in a
+member-function pointer type. Under the Microsoft ABI that pointer's size
+depends on whether the class is complete where the type is first used: 24
+bytes when incomplete, 8 for a complete class with single inheritance.
+DSPIntTables.cpp included this header first and laid out s_decoded_ops in
+56-byte entries; DSPInterpreter.cpp saw the complete class and indexed the
+table in 24-byte ones. Most opcodes then read a zero handler, and the first
+DSP instruction after the IPL's audio init called address 0
+(0xC0000005 at 0, reported against Wind Waker Recomp 0.2.1 on Windows 11
+with "Exact" audio saved in settings.ini, so every launch crashed).
+Itanium ABI builds (macOS, iOS, Linux) are unaffected: 40 bytes both ways.
+
+The header now includes DSPInterpreter.h (which does not include this one),
+and an MSVC-ABI static_assert keeps the pointer at one word. Checked with
+clang -target x86_64-pc-windows-msvc: entry size 56/24 before, 24/24 after.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_011xJTcbD9uA7D2f6akfqVLC
+---
+ Source/Core/Core/DSP/Interpreter/DSPIntTables.h | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/Source/Core/Core/DSP/Interpreter/DSPIntTables.h b/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
+index a375bf7..6bd7740 100644
+--- a/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
++++ b/Source/Core/Core/DSP/Interpreter/DSPIntTables.h
+@@ -6,12 +6,22 @@
+ #include <array>
+ 
+ #include "Core/DSP/DSPCommon.h"
++#include "Core/DSP/Interpreter/DSPInterpreter.h"
+ 
+ namespace DSP::Interpreter
+ {
+-class Interpreter;
+-
++// Interpreter must be complete here, not forward-declared. The Microsoft ABI
++// picks a member-function pointer's size from what it knows of the class where
++// the pointer type is first used: 24 bytes for an incomplete class, 8 for a
++// complete one with single inheritance. With only a forward declaration,
++// DSPIntTables.cpp built s_decoded_ops with 56-byte entries while
++// DSPInterpreter.cpp indexed it in 24-byte ones, so the first DSP instruction
++// on Windows called address 0 (Exact/LLE audio).
+ using InterpreterFunction = void (Interpreter::*)(UDSPInstruction);
++#ifdef _MSC_VER
++static_assert(sizeof(InterpreterFunction) == sizeof(void*),
++              "DSP Interpreter must be a complete single-inheritance class here");
++#endif
+ 
+ struct DecodedInterpreterOp
+ {
+-- 
+2.43.0
+

@@ -1,0 +1,381 @@
+From 1e2f5b603130f0b44242a59998995254abc79f49 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 05:06:21 -0500
+Subject: [PATCH] graphics: implement destination alpha
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  |  4 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 42 ++++++++++++++-----
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  5 ++-
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp  |  7 +++-
+ GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp  |  1 +
+ .../include/gxruntime/gxcore/gxcore.hpp       |  1 +
+ .../include/gxruntime/gxcore/shader.hpp       |  5 ++-
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  9 ++++
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 38 +++++++++++++++--
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 25 +++++++++++
+ 10 files changed, 117 insertions(+), 20 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 4fbdf138a7..20fd0bdf92 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -425,7 +425,7 @@ void dol_aurora_shutdown(void) {
+                      "efb_copies=%llu efb_copy_depth=%llu "
+                      "efb_display_copies=%llu fog_ignored=%llu "
+                      "indirect_active=%llu indirect_ignored=%llu "
+-                     "logic_op_ignored=%llu\n",
++                     "logic_op_ignored=%llu dst_alpha_active=%llu\n",
+                      gx_aurora::g_core_submitted, gx_aurora::g_core_rejected,
+                      gx_aurora::g_shadow_frontend_failed ? 1 : 0,
+                      gaps.draws_planned, gaps.draws_skipped,
+@@ -468,7 +468,7 @@ void dol_aurora_shutdown(void) {
+                      gaps.efb_copy_depth, gaps.efb_display_copies,
+                      gaps.fog_ignored, gaps.indirect_active,
+                      gaps.indirect_ignored,
+-                     gaps.logic_op_ignored);
++                     gaps.logic_op_ignored, gaps.dst_alpha_active);
+     }
+ #endif
+     if (gx_aurora::g_audio_stream != nullptr) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index efc1a336cc..01a6a47a69 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -52,7 +52,8 @@ wgpu::CompareFunction to_compare(gxc::CompareMode func) {
+   }
+ }
+ 
+-wgpu::BlendFactor to_blend_factor_src(gxc::SrcBlendFactor factor) {
++wgpu::BlendFactor to_blend_factor_src(gxc::SrcBlendFactor factor,
++                                      bool dual_source) {
+   switch (factor) {
+   case gxc::SrcBlendFactor::Zero:
+     return wgpu::BlendFactor::Zero;
+@@ -63,9 +64,11 @@ wgpu::BlendFactor to_blend_factor_src(gxc::SrcBlendFactor factor) {
+   case gxc::SrcBlendFactor::InvDstClr:
+     return wgpu::BlendFactor::OneMinusDst;
+   case gxc::SrcBlendFactor::SrcAlpha:
+-    return wgpu::BlendFactor::SrcAlpha;
++    return dual_source ? wgpu::BlendFactor::Src1Alpha
++                       : wgpu::BlendFactor::SrcAlpha;
+   case gxc::SrcBlendFactor::InvSrcAlpha:
+-    return wgpu::BlendFactor::OneMinusSrcAlpha;
++    return dual_source ? wgpu::BlendFactor::OneMinusSrc1Alpha
++                       : wgpu::BlendFactor::OneMinusSrcAlpha;
+   case gxc::SrcBlendFactor::DstAlpha:
+     return wgpu::BlendFactor::DstAlpha;
+   case gxc::SrcBlendFactor::InvDstAlpha:
+@@ -74,7 +77,8 @@ wgpu::BlendFactor to_blend_factor_src(gxc::SrcBlendFactor factor) {
+   }
+ }
+ 
+-wgpu::BlendFactor to_blend_factor_dst(gxc::DstBlendFactor factor) {
++wgpu::BlendFactor to_blend_factor_dst(gxc::DstBlendFactor factor,
++                                      bool dual_source) {
+   switch (factor) {
+   case gxc::DstBlendFactor::Zero:
+     return wgpu::BlendFactor::Zero;
+@@ -85,9 +89,11 @@ wgpu::BlendFactor to_blend_factor_dst(gxc::DstBlendFactor factor) {
+   case gxc::DstBlendFactor::InvSrcClr:
+     return wgpu::BlendFactor::OneMinusSrc;
+   case gxc::DstBlendFactor::SrcAlpha:
+-    return wgpu::BlendFactor::SrcAlpha;
++    return dual_source ? wgpu::BlendFactor::Src1Alpha
++                       : wgpu::BlendFactor::SrcAlpha;
+   case gxc::DstBlendFactor::InvSrcAlpha:
+-    return wgpu::BlendFactor::OneMinusSrcAlpha;
++    return dual_source ? wgpu::BlendFactor::OneMinusSrc1Alpha
++                       : wgpu::BlendFactor::OneMinusSrcAlpha;
+   case gxc::DstBlendFactor::DstAlpha:
+     return wgpu::BlendFactor::DstAlpha;
+   case gxc::DstBlendFactor::InvDstAlpha:
+@@ -184,6 +190,9 @@ absl::flat_hash_map<uint32_t, TextureHandle> g_efbCopyTextures;
+ 
+ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+   const gxc::PipelineKey& key = config.key;
++  CHECK(key.shader.use_dst_alpha == 0 ||
++            webgpu::g_dualSourceBlendingSupported,
++        "GX destination alpha requires WebGPU dual-source blending");
+   const std::string wgsl = gxc::generate_wgsl(key.shader);
+   wgpu::ShaderSourceWGSL sourceDescriptor{};
+   sourceDescriptor.code = wgsl.c_str();
+@@ -344,6 +353,7 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+   };
+ 
+   // GC subtract mode forces ONE/ONE with dst - src (Dolphin RenderState).
++  const bool dual_source = key.shader.use_dst_alpha != 0;
+   wgpu::BlendState blendState{};
+   if (key.blend_subtract != 0) {
+     blendState.color = {
+@@ -351,16 +361,28 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+         .srcFactor = wgpu::BlendFactor::One,
+         .dstFactor = wgpu::BlendFactor::One,
+     };
+-    blendState.alpha = blendState.color;
++    blendState.alpha = dual_source
++                           ? wgpu::BlendComponent{
++                                 .operation = wgpu::BlendOperation::Add,
++                                 .srcFactor = wgpu::BlendFactor::One,
++                                 .dstFactor = wgpu::BlendFactor::Zero,
++                             }
++                           : blendState.color;
+   } else {
+     blendState.color = {
+         .operation = wgpu::BlendOperation::Add,
+         .srcFactor = to_blend_factor_src(
+-            static_cast<gxc::SrcBlendFactor>(key.src_factor)),
++            static_cast<gxc::SrcBlendFactor>(key.src_factor), dual_source),
+         .dstFactor = to_blend_factor_dst(
+-            static_cast<gxc::DstBlendFactor>(key.dst_factor)),
++            static_cast<gxc::DstBlendFactor>(key.dst_factor), dual_source),
+     };
+-    blendState.alpha = blendState.color;
++    blendState.alpha = dual_source
++                           ? wgpu::BlendComponent{
++                                 .operation = wgpu::BlendOperation::Add,
++                                 .srcFactor = wgpu::BlendFactor::One,
++                                 .dstFactor = wgpu::BlendFactor::Zero,
++                             }
++                           : blendState.color;
+   }
+   auto writeMask = wgpu::ColorWriteMask::None;
+   if (key.color_update != 0) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index c96445c049..c90b594730 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -33,8 +33,9 @@ struct DrawData {
+ // now emits per-texmap samplers + a wider texture bind group under an unchanged
+ // key, so a persisted v4 pipeline for such a draw is stale). v6: indirect TEV
+ // stages add shader structure, pixel constants, and indirect texmap bindings.
+-// v7: fifth texgen adds UV4 and a high per-vertex matrix-index word.
+-constexpr uint32_t GXCorePipelineConfigVersion = 7;
++// v7: fifth texgen adds UV4 and a high per-vertex matrix-index word. v8:
++// destination-alpha override adds a dual-source fragment output/blend state.
++constexpr uint32_t GXCorePipelineConfigVersion = 8;
+ 
+ struct PipelineConfig {
+   uint32_t version = GXCorePipelineConfigVersion;
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+index 37fb564725..e388696c2b 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.cpp
+@@ -64,6 +64,7 @@ bool g_hasCoreFeatures = false;
+ bool g_bcTexturesSupported = false;
+ bool g_astcTexturesSupported = false;
+ bool g_textureComponentSwizzleSupported = false;
++bool g_dualSourceBlendingSupported = false;
+ static std::atomic_bool g_initialized = false;
+ 
+ namespace {
+@@ -893,13 +894,15 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+     g_bcTexturesSupported = false;
+     g_astcTexturesSupported = false;
+     g_textureComponentSwizzleSupported = false;
++    g_dualSourceBlendingSupported = false;
+     wgpu::SupportedFeatures supportedFeatures;
+     g_adapter.GetFeatures(&supportedFeatures);
+     for (size_t i = 0; i < supportedFeatures.featureCount; ++i) {
+       const auto feature = supportedFeatures.features[i];
+       if (feature == wgpu::FeatureName::CoreFeaturesAndLimits || feature == wgpu::FeatureName::TextureCompressionBC ||
+           feature == wgpu::FeatureName::TextureCompressionASTC ||
+-          feature == wgpu::FeatureName::TextureComponentSwizzle) {
++          feature == wgpu::FeatureName::TextureComponentSwizzle ||
++          feature == wgpu::FeatureName::DualSourceBlending) {
+         if (feature == wgpu::FeatureName::CoreFeaturesAndLimits) {
+           g_hasCoreFeatures = true;
+         } else if (feature == wgpu::FeatureName::TextureCompressionBC) {
+@@ -908,6 +911,8 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+           g_astcTexturesSupported = true;
+         } else if (feature == wgpu::FeatureName::TextureComponentSwizzle) {
+           g_textureComponentSwizzleSupported = true;
++        } else if (feature == wgpu::FeatureName::DualSourceBlending) {
++          g_dualSourceBlendingSupported = true;
+         }
+         requiredFeatures.push_back(feature);
+       }
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
+index 3943da0943..1375e11bfc 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu.hpp
+@@ -56,6 +56,7 @@ extern bool g_hasCoreFeatures;
+ extern bool g_bcTexturesSupported;
+ extern bool g_astcTexturesSupported;
+ extern bool g_textureComponentSwizzleSupported;
++extern bool g_dualSourceBlendingSupported;
+ 
+ bool initialize(AuroraBackend backend, bool allowCpu);
+ void shutdown();
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index db4c662446..a46f1ea49e 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -70,6 +70,7 @@ struct GapCounters {
+   unsigned long long indirect_active = 0;       // plans using an indirect stage
+   unsigned long long indirect_ignored = 0;      // invalid/undefined indirect state
+   unsigned long long logic_op_ignored = 0;      // cmode0 logic-op enable
++  unsigned long long dst_alpha_active = 0;      // BP 0x42 forced EFB alpha
+ };
+ 
+ // Cross-draw cached vertex attributes (Dolphin VertexLoaderManager::
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 95d3c49f1d..1c7cae0e55 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -247,9 +247,12 @@ struct ShaderKey {
+   std::uint8_t has_vertex_normal = 0;
+   std::uint8_t has_vertex_binormal = 0;
+   std::uint8_t has_vertex_tangent = 0;
++  // BP 0x42 constant destination alpha, admitted only for RGBA6 + alpha write.
++  std::uint8_t use_dst_alpha = 0;
++  std::uint8_t dst_alpha = 0;
+   // Re-pad the scalar block to a multiple of 4, keeping ShaderKey a
+   // unique-object-representation (memcmp identity) type.
+-  std::uint8_t pad2 = 0;
++  std::uint8_t pad2[3]{};
+   LightChanKey litchan[4]{}; // color0, color1, alpha0, alpha1
+   TexGenKey tex_gens[kMaxTexGens]{};
+   IndirectStageKey ind_stages[kMaxIndirectStages]{};
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 9a85e38ed2..1479641cde 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -815,6 +815,15 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   pipe.src_factor = static_cast<std::uint8_t>(bits(cmode0, 3, 8));
+   pipe.color_update = static_cast<std::uint8_t>(bits(cmode0, 1, 3));
+   pipe.alpha_update = static_cast<std::uint8_t>(bits(cmode0, 1, 4));
++  const std::uint32_t dst_alpha = bp_valid_[0x42] ? bp_regs_[0x42] : 0u;
++  const std::uint32_t pe_control = bp_valid_[0x43] ? bp_regs_[0x43] : 0u;
++  const bool use_dst_alpha = bits(dst_alpha, 1, 8) != 0u &&
++                             pipe.alpha_update != 0u &&
++                             bits(pe_control, 3, 0) == 1u;
++  key.use_dst_alpha = use_dst_alpha ? 1u : 0u;
++  key.dst_alpha = static_cast<std::uint8_t>(bits(dst_alpha, 8, 0));
++  if (use_dst_alpha)
++    ++counters.dst_alpha_active;
+   if (bits(cmode0, 1, 1) != 0u)
+     ++counters.logic_op_ignored;
+ 
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 3d5585856a..81298b9e30 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -39,6 +39,20 @@ void emitf(std::string& out, const char* fmt, ...) {
+   out += buffer;
+ }
+ 
++void emit_fragment_entry(std::string& out, const ShaderKey& key) {
++  if (key.use_dst_alpha != 0) {
++    emit(out,
++         "struct FragmentOut {\n"
++         "    @location(0) @blend_src(0) color: vec4f,\n"
++         "    @location(0) @blend_src(1) blend: vec4f,\n"
++         "};\n"
++         "@fragment\nfn fs_main(in: VertexOut) -> FragmentOut {\n");
++  } else {
++    emit(out,
++         "@fragment\nfn fs_main(in: VertexOut) -> @location(0) vec4f {\n");
++  }
++}
++
+ } // namespace
+ 
+ namespace {
+@@ -251,7 +265,7 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+   // multi-texmap TEV (e.g. THP YUV Y/U/V on texmap 0/1/2) samples tex{texmap}.
+   const bool multi_texmap = texmap_popcount(used_texmap_mask(key)) > 1u;
+   const bool indirect_enabled = key.num_ind_stages != 0u;
+-  emit(out, "@fragment\nfn fs_main(in: VertexOut) -> @location(0) vec4f {\n");
++  emit_fragment_entry(out, key);
+   emit(out, "    var prev = psc.colors[0];\n"
+             "    var c0 = psc.colors[1];\n"
+             "    var c1 = psc.colors[2];\n"
+@@ -514,7 +528,14 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key) {
+   // Fog runs after the alpha test (Dolphin order), modifying prev.rgb only.
+   emit_fog(out, key);
+ 
+-  emit(out, "    return vec4f(prev) / 255.0;\n}\n");
++  if (key.use_dst_alpha != 0) {
++    emitf(out,
++          "    return FragmentOut(vec4f(vec3f(prev.rgb), %u.0) / 255.0, "
++          "vec4f(0.0, 0.0, 0.0, f32(prev.a) / 255.0));\n}\n",
++          static_cast<unsigned>(key.dst_alpha));
++  } else {
++    emit(out, "    return vec4f(prev) / 255.0;\n}\n");
++  }
+ }
+ 
+ // --- Integer lighting (Dolphin LightingShaderGen port) -----------------------
+@@ -668,6 +689,8 @@ std::string generate_wgsl(const ShaderKey& key) {
+ 
+   std::string out;
+   out.reserve(4096);
++  if (key.use_dst_alpha != 0)
++    emit(out, "enable dual_source_blending;\n\n");
+   const bool tev = key.tev_valid != 0;
+   const bool lit = key.lit_valid != 0;
+   // Color texgens (Dolphin VertexShaderGen texgentype switch, TexGenType::Color0/
+@@ -1012,7 +1035,7 @@ std::string generate_wgsl(const ShaderKey& key) {
+     emit_tev_fragment(out, key);
+     return out;
+   }
+-  emit(out, "@fragment\nfn fs_main(in: VertexOut) -> @location(0) vec4f {\n");
++  emit_fragment_entry(out, key);
+   emit(out, "    var prev = in.color0;\n");
+   if (key.textured != 0) {
+     if (key.num_tex_gens > 0 && key.tex_gens[0].projection != 0u) {
+@@ -1022,7 +1045,14 @@ std::string generate_wgsl(const ShaderKey& key) {
+     }
+     emit(out, "    prev = textureSample(tex0, samp0, uv);\n");
+   }
+-  emit(out, "    return prev;\n}\n");
++  if (key.use_dst_alpha != 0) {
++    emitf(out,
++          "    return FragmentOut(vec4f(prev.rgb, %u.0 / 255.0), "
++          "vec4f(0.0, 0.0, 0.0, prev.a));\n}\n",
++          static_cast<unsigned>(key.dst_alpha));
++  } else {
++    emit(out, "    return prev;\n}\n");
++  }
+   return out;
+ }
+ 
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 1fd1371543..71d6a702d6 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -203,6 +203,31 @@ void test_state_to_plan_and_wgsl() {
+   CHECK(counters.draws_skipped == 0);
+   CHECK(counters.unresolved_tex_matrix == 0);
+ 
++  // BP 0x42 only overrides stored alpha for an alpha-writing RGBA6 target.
++  // The fragment keeps TEV alpha in blend source 1 so color blending still
++  // observes the unmodified source alpha, matching Dolphin's dual-source path.
++  {
++    gxc::GxCoreState dst_state = state;
++    dst_state.apply(bp(0x41u, 1u << 4u));
++    dst_state.apply(bp(0x42u, 0x100u | 0x5Au));
++    dst_state.apply(bp(0x43u, 1u));
++    gxc::GapCounters gaps;
++    const gxc::DrawPlan dst_plan = dst_state.build_draw_plan(draw, gaps);
++    CHECK(dst_plan.ok);
++    CHECK(dst_plan.pipeline.shader.use_dst_alpha == 1u);
++    CHECK(dst_plan.pipeline.shader.dst_alpha == 0x5Au);
++    CHECK(gaps.dst_alpha_active == 1u);
++    const std::string dst_wgsl =
++        gxc::generate_wgsl(dst_plan.pipeline.shader);
++    CHECK(dst_wgsl.find("@location(0) @blend_src(0) color") !=
++          std::string::npos);
++    CHECK(dst_wgsl.find("@location(0) @blend_src(1) blend") !=
++          std::string::npos);
++    CHECK(dst_wgsl.find("90.0 / 255.0") != std::string::npos);
++    CHECK(dst_wgsl.find("vec4f(0.0, 0.0, 0.0, prev.a)") !=
++          std::string::npos);
++  }
++
+   // Texgen residuals are classified by the unsupported source row. Emboss
+   // without per-vertex NBT is not a gap: it uses the cached N/B/T uniform.
+   auto classify_texgen = [&](std::uint32_t info, gxc::GapCounters& gaps) {
+-- 
+2.41.0

@@ -1,0 +1,618 @@
+From dccbb66e697534ea7dcb20203c37dc38dcf4f2d2 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 16:29:38 +0900
+Subject: [PATCH 169/175] Aurora: bloom after the scene and before the HUD
+ (post_fx, off by default)
+
+---
+ .../graphics/aurora/cmake/aurora_gx.cmake     |   1 +
+ .../graphics/aurora/include/aurora/aurora.h   |   4 +
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 130 +++++++-
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |   4 +
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |   1 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 293 ++++++++++++++++++
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  25 ++
+ 7 files changed, 454 insertions(+), 4 deletions(-)
+ create mode 100644 GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+ create mode 100644 GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+
+diff --git a/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake b/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
+index 835ed0c..9c7499d 100644
+--- a/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
++++ b/GXRuntime/graphics/aurora/cmake/aurora_gx.cmake
+@@ -4,6 +4,7 @@ add_library(aurora_gx STATIC
+         lib/gfx/depth_peek.cpp
+         lib/gfx/efb_readback.cpp
+         lib/gfx/pipeline_cache.cpp
++        lib/gfx/post_fx.cpp
+         lib/gfx/render_worker.cpp
+         lib/gfx/thread_cpu.cpp
+         lib/gfx/dds_io.cpp
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 0962219..9d71c15 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -162,6 +162,10 @@ void aurora_set_forced_anisotropy(unsigned samples);
+    unchanged (one extra half frame of display latency). Takes effect at the
+    next frame. DOL_AURORA_FRAME_INTERP=1 sets the starting value. */
+ void aurora_set_frame_interpolation(bool enabled);
++/* Bloom (the Wind Waker HD look): what is brighter than a threshold glows,
++   after the scene and before the HUD. Takes effect at the next frame.
++   DOL_AURORA_BLOOM=1 sets the starting value. */
++void aurora_set_bloom(bool enabled);
+ /* A frames-a-second counter at the top of the window (with the game's own
+    rate beside it when in-between frames are on). DOL_AURORA_SHOW_FPS=1 sets
+    the starting value. */
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index fe51297..08b8a07 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -15,6 +15,7 @@
+ #include "../rmlui/pipeline.hpp"
+ #endif
+ #include "pipeline_cache.hpp"
++#include "post_fx.hpp"
+ #include "render_worker.hpp"
+ #include "staging_budget.hpp"
+ #include "tex_copy_conv.hpp"
+@@ -94,6 +95,8 @@ enum class CommandType {
+ };
+ struct Command {
+   CommandType type;
++  // A draw with an orthographic projection (the HUD, menus, screen effects).
++  bool flat = false;
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+   std::vector<std::string> debugGroupStack;
+ #endif
+@@ -623,7 +626,8 @@ static void seal_pass(FramePacket& frame, uint32_t passIndex) {
+ 
+ static void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const FrameOp& op);
+ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo, uint32_t passIndex);
+-static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, const RenderPass& passInfo);
++static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, const RenderPass& passInfo,
++                        size_t first = 0, size_t last = SIZE_MAX);
+ static void expire_cached_bind_groups();
+ static void push_command(CommandType type, const Command::Data& data);
+ 
+@@ -769,6 +773,10 @@ void end_color_pass() {
+   g_currentRenderPass = UINT32_MAX;
+ }
+ 
++static int g_nextDrawFlat = -1; // -1: from the legacy GX state
++
++void set_next_draw_flat(bool flat) noexcept { g_nextDrawFlat = flat ? 1 : 0; }
++
+ static inline void push_command(CommandType type, const Command::Data& data) {
+   if (g_currentRenderPass == UINT32_MAX)
+     UNLIKELY {
+@@ -780,11 +788,15 @@ static inline void push_command(CommandType type, const Command::Data& data) {
+          g_currentRenderPass);
+   renderPass.commands.push_back({
+       .type = type,
++      .flat = type == CommandType::Draw &&
++              (g_nextDrawFlat >= 0 ? g_nextDrawFlat == 1 : gx::g_gxState.projType == GX_ORTHOGRAPHIC),
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+       .debugGroupStack = g_debugGroupStack,
+ #endif
+       .data = data,
+   });
++  if (type == CommandType::Draw)
++    g_nextDrawFlat = -1;
+ }
+ 
+ template <>
+@@ -1146,6 +1158,7 @@ void initialize() {
+   // });
+   depth_peek::initialize();
+   tex_copy_conv::initialize();
++  post_fx::initialize();
+   tex_palette_conv::initialize();
+   texture_replacement::initialize();
+ 
+@@ -1311,6 +1324,7 @@ void shutdown() {
+   shutdown_pipeline_cache();
+   depth_peek::shutdown();
+   tex_copy_conv::shutdown();
++  post_fx::shutdown();
+   tex_palette_conv::shutdown();
+   texture_replacement::shutdown();
+   gx::shutdown();
+@@ -1949,10 +1963,87 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+       .timestampWrites = webgpu::gpu_prof::pass_writes(label),
+   };
+ 
++  // DOL_AURORA_PASS_TRACE=1: the passes of one frame (the 300th) and their draws.
++  static const bool passTrace = std::getenv("DOL_AURORA_PASS_TRACE") != nullptr;
++  if (passTrace) {
++    static uint32_t frames = 0;
++    if (passIndex == 0)
++      frames++;
++    if (frames == 300) {
++      size_t draws = 0, flat = 0;
++      for (const auto& command : passInfo.commands)
++        if (command.type == CommandType::Draw && command.data.draw.type != ShaderType::Clear) {
++          draws++;
++          flat += command.flat;
++        }
++      std::fprintf(stderr, "[pass] %u: %zu draws (%zu flat), efb=%d observable=%d offscreen=%d resolve=%s %dx%d at %d,%d fmt=%d\n",
++                   passIndex, draws, flat, passInfo.colorView.Get() == webgpu::g_frameBuffer.view.Get(),
++                   passInfo.observable, passInfo.offscreen, passInfo.resolveTarget ? "yes" : "no",
++                   passInfo.resolveRect.width, passInfo.resolveRect.height, passInfo.resolveRect.x, passInfo.resolveRect.y,
++                   static_cast<int>(passInfo.resolveFormat));
++    }
++  }
++  // Bloom (post_fx), once a frame, on the EFB before the HUD. The game copies
++  // the finished scene out at full size before it draws the HUD (Wind Waker
++  // does, every frame): bloom goes in just before that copy. Without such a
++  // copy, in the on-screen pass after the scene's last perspective draw; what
++  // follows (the HUD, drawn flat) is drawn after it.
++  static uint64_t bloomedFrame = UINT64_MAX;
++  const uint64_t frameKey = frame.frameId * 2 + (frame_interp::encoding_interpolated() ? 1 : 0);
++  const bool efbPass = !passInfo.offscreen && passInfo.colorView.Get() == webgpu::g_frameBuffer.view.Get();
++  const bool bloomBeforeCopy = post_fx::bloom_enabled() && efbPass && bloomedFrame != frameKey &&
++                               passInfo.resolveTarget && !gx::is_depth_format(passInfo.resolveFormat) &&
++                               passInfo.resolveRect.x == 0 && passInfo.resolveRect.y == 0 &&
++                               static_cast<uint32_t>(passInfo.resolveRect.width) == passInfo.targetSize.width &&
++                               static_cast<uint32_t>(passInfo.resolveRect.height) == passInfo.targetSize.height;
++  size_t split = SIZE_MAX;
++  if (post_fx::bloom_enabled() && efbPass && passInfo.observable && bloomedFrame != frameKey && !bloomBeforeCopy) {
++    for (size_t i = passInfo.commands.size(); i-- > 0;) {
++      const auto& command = passInfo.commands[i];
++      if (command.type == CommandType::Draw && command.data.draw.type != ShaderType::Clear && !command.flat) {
++        split = i + 1;
++        break;
++      }
++    }
++  }
++
+   auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
+-  render_pass(pass, frame, passInfo);
++  render_pass(pass, frame, passInfo, 0, split);
+   pass.End();
+ 
++  if (bloomBeforeCopy) {
++    post_fx::encode_bloom(cmd, passInfo.copySourceView, passInfo.targetSize, webgpu::g_frameBuffer.texture.GetFormat(),
++                          passInfo.colorView, passInfo.resolveView, passInfo.msaaSamples);
++    bloomedFrame = frameKey;
++  }
++  if (split != SIZE_MAX) {
++    post_fx::encode_bloom(cmd, passInfo.copySourceView, passInfo.targetSize, webgpu::g_frameBuffer.texture.GetFormat(),
++                          passInfo.colorView, passInfo.resolveView, passInfo.msaaSamples);
++    bloomedFrame = frameKey;
++    if (split < passInfo.commands.size()) {
++      auto attachmentsAfter = attachments;
++      attachmentsAfter[0].loadOp = wgpu::LoadOp::Load;
++      auto depthStencilAfter = depthStencilAttachment;
++      if (depthStencilAttachmentPtr != nullptr) {
++        if (passInfo.hasDepth)
++          depthStencilAfter.depthLoadOp = wgpu::LoadOp::Load;
++        if (passInfo.hasStencil)
++          depthStencilAfter.stencilLoadOp = wgpu::LoadOp::Load;
++      }
++      const auto labelAfter = label + " (after the scene)";
++      const wgpu::RenderPassDescriptor afterDescriptor{
++          .label = labelAfter.c_str(),
++          .colorAttachmentCount = attachmentsAfter.size(),
++          .colorAttachments = attachmentsAfter.data(),
++          .depthStencilAttachment = depthStencilAttachmentPtr != nullptr ? &depthStencilAfter : nullptr,
++          .timestampWrites = webgpu::gpu_prof::pass_writes(labelAfter),
++      };
++      auto after = cmd.BeginRenderPass(&afterDescriptor);
++      render_pass(after, frame, passInfo, split, SIZE_MAX);
++      after.End();
++    }
++  }
++
+   if (passInfo.captureDepthSnapshot && !frame_interp::encoding_interpolated()) {
+     depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, passInfo.targetSize, passInfo.msaaSamples);
+   }
+@@ -2483,7 +2574,8 @@ float calculate_fps() noexcept {
+   return static_cast<float>(g_presentTimes.size() - 1) / elapsed;
+ }
+ 
+-static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, const RenderPass& passInfo) {
++static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, const RenderPass& passInfo,
++                        size_t first, size_t last) {
+   ZoneScoped;
+   g_currentPipeline = UINTPTR_MAX;
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+@@ -2497,8 +2589,38 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+   gxcore::reset_pass_state();
+ #endif
+ 
++  // A pass drawn in two parts (post_fx: the scene, then the HUD) starts its
++  // second part with the viewport and scissor the first part left.
++  last = std::min(last, passInfo.commands.size());
++  if (first > 0) {
++    const Command* viewport = nullptr;
++    const Command* scissor = nullptr;
++    for (size_t i = 0; i < first && i < passInfo.commands.size(); ++i) {
++      if (passInfo.commands[i].type == CommandType::SetViewport)
++        viewport = &passInfo.commands[i];
++      else if (passInfo.commands[i].type == CommandType::SetScissor)
++        scissor = &passInfo.commands[i];
++    }
++    if (viewport != nullptr) {
++      const auto& vp = viewport->data.setViewport;
++      const float minDepth = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
++      const float maxDepth = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
++      pass.SetViewport(vp.left, vp.top, vp.width, vp.height, minDepth, maxDepth);
++    }
++    if (scissor != nullptr) {
++      const auto& sc = scissor->data.setScissor;
++      const auto& size = passInfo.targetSize;
++      const auto x = std::clamp(static_cast<uint32_t>(sc.x), 0u, size.width);
++      const auto y = std::clamp(static_cast<uint32_t>(sc.y), 0u, size.height);
++      const auto w = std::clamp(static_cast<uint32_t>(sc.width), 0u, size.width - x);
++      const auto h = std::clamp(static_cast<uint32_t>(sc.height), 0u, size.height - y);
++      pass.SetScissorRect(x, y, w, h);
++    }
++  }
++
+   size_t encoded = 0;
+-  for (const auto& cmd : passInfo.commands) {
++  for (size_t index = first; index < last; ++index) {
++    const auto& cmd = passInfo.commands[index];
+     // A busy pass takes milliseconds to encode: a present that falls due
+     // meanwhile (at 120 Hz, the frame before's real frame) goes out on time,
+     // from its own encoder.
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index ec856ca..06244a3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -375,6 +375,10 @@ Range push_texture_data(const uint8_t* data, uint32_t bytesPerRow, uint32_t rows
+ 
+ template <typename State>
+ const State& get_state();
++// Whether the next draw has an orthographic projection (the HUD, menus), for
++// a draw whose projection is not in the legacy GX state (post_fx).
++void set_next_draw_flat(bool flat) noexcept;
++
+ template <typename DrawData>
+ void push_draw_command(DrawData data);
+ template <typename DrawData>
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 52a4bf3..1faf316 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -2221,6 +2221,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     ++g_mergedDrawCallCount;
+     return true;
+   }
++  set_next_draw_flat(plan.constants.projection[3][3] == 1.f);
+   push_draw_command(DrawData{
+       .pipeline = pipeline,
+       .depthPipeline = depthPipeline,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+new file mode 100644
+index 0000000..e1da4db
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -0,0 +1,293 @@
++#include "post_fx.hpp"
++
++#include <aurora/aurora.h>
++
++#include "../internal.hpp"
++#include "../webgpu/gpu.hpp"
++#include "../webgpu/gpu_prof.hpp"
++
++#include <array>
++#include <atomic>
++#include <cstdlib>
++
++namespace aurora::gfx::post_fx {
++using webgpu::g_device;
++
++namespace {
++std::atomic_bool g_bloom{false};
++float g_threshold = 0.72f;
++float g_strength = 0.35f;
++
++wgpu::ShaderModule g_module;
++wgpu::BindGroupLayout g_layout;
++wgpu::PipelineLayout g_pipelineLayout;
++wgpu::Sampler g_sampler;
++wgpu::TextureFormat g_format = wgpu::TextureFormat::Undefined;
++wgpu::RenderPipeline g_bright, g_blurH, g_blurV;
++wgpu::RenderPipeline g_composite;
++uint32_t g_compositeSamples = 0;
++std::array<wgpu::Texture, 2> g_tex;
++std::array<wgpu::TextureView, 2> g_view;
++wgpu::Extent3D g_size{};
++
++constexpr const char* kShader = R"""(
++override threshold: f32 = 0.72;
++override strength: f32 = 0.35;
++
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var src: texture_2d<f32>;
++
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++var<private> weights: array<f32, 5> = array<f32, 5>(0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++
++fn texel() -> vec2<f32> {
++    return 1.0 / vec2<f32>(textureDimensions(src));
++}
++
++// A quarter of the size: four bilinear taps cover a 4x4 block of the scene.
++// Only what is brighter than the threshold passes, with a soft knee.
++@fragment
++fn fs_bright(in: VertexOutput) -> @location(0) vec4<f32> {
++    let t = texel();
++    let c = 0.25 * (textureSample(src, samp, in.uv + t * vec2(-1.0, -1.0)).rgb +
++                    textureSample(src, samp, in.uv + t * vec2(1.0, -1.0)).rgb +
++                    textureSample(src, samp, in.uv + t * vec2(-1.0, 1.0)).rgb +
++                    textureSample(src, samp, in.uv + t * vec2(1.0, 1.0)).rgb);
++    let luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
++    return vec4(c * smoothstep(threshold, 1.0, luma), 1.0);
++}
++
++fn blur(uv: vec2<f32>, dir: vec2<f32>) -> vec4<f32> {
++    let step = texel() * dir * 1.5;
++    var c = textureSample(src, samp, uv).rgb * weights[0];
++    for (var i = 1; i < 5; i++) {
++        let o = step * f32(i);
++        c += (textureSample(src, samp, uv + o).rgb + textureSample(src, samp, uv - o).rgb) * weights[i];
++    }
++    return vec4(c, 1.0);
++}
++
++@fragment
++fn fs_blur_h(in: VertexOutput) -> @location(0) vec4<f32> {
++    return blur(in.uv, vec2(1.0, 0.0));
++}
++
++@fragment
++fn fs_blur_v(in: VertexOutput) -> @location(0) vec4<f32> {
++    return blur(in.uv, vec2(0.0, 1.0));
++}
++
++// Added onto the scene; the EFB's alpha is kept.
++@fragment
++fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
++    return vec4(textureSample(src, samp, in.uv).rgb * strength, 0.0);
++}
++)""";
++
++float env_float(const char* name, float fallback, float lo, float hi) {
++  const char* value = std::getenv(name);
++  if (value == nullptr || value[0] == '\0') {
++    return fallback;
++  }
++  char* end = nullptr;
++  const float parsed = std::strtof(value, &end);
++  if (end == value || parsed < lo || parsed > hi) {
++    return fallback;
++  }
++  return parsed;
++}
++
++wgpu::RenderPipeline make_pipeline(const char* label, const char* entry, wgpu::TextureFormat format,
++                                   uint32_t samples, bool additive) {
++  const std::array constants{
++      wgpu::ConstantEntry{.key = "threshold", .value = g_threshold},
++      wgpu::ConstantEntry{.key = "strength", .value = g_strength},
++  };
++  const wgpu::BlendState add{
++      .color = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::One,
++                .dstFactor = wgpu::BlendFactor::One},
++      .alpha = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::One},
++  };
++  const std::array targets{wgpu::ColorTargetState{
++      .format = format,
++      .blend = additive ? &add : nullptr,
++      .writeMask = wgpu::ColorWriteMask::All,
++  }};
++  const wgpu::FragmentState fragment{
++      .module = g_module,
++      .entryPoint = entry,
++      .constantCount = constants.size(),
++      .constants = constants.data(),
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = label,
++      .layout = g_pipelineLayout,
++      .vertex = {.module = g_module, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = samples, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
++void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format, uint32_t samples) {
++  if (format != g_format) {
++    g_format = format;
++    g_bright = make_pipeline("Bloom bright pass", "fs_bright", format, 1, false);
++    g_blurH = make_pipeline("Bloom blur (horizontal)", "fs_blur_h", format, 1, false);
++    g_blurV = make_pipeline("Bloom blur (vertical)", "fs_blur_v", format, 1, false);
++    g_composite = {};
++    g_size = {};
++  }
++  if (!g_composite || samples != g_compositeSamples) {
++    g_composite = make_pipeline("Bloom composite", "fs_composite", format, samples, true);
++    g_compositeSamples = samples;
++  }
++  const wgpu::Extent3D size{std::max(1u, sceneSize.width / 4), std::max(1u, sceneSize.height / 4), 1};
++  if (size.width == g_size.width && size.height == g_size.height && g_tex[0]) {
++    return;
++  }
++  g_size = size;
++  for (size_t i = 0; i < g_tex.size(); ++i) {
++    const wgpu::TextureDescriptor descriptor{
++        .label = "Bloom texture",
++        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++        .dimension = wgpu::TextureDimension::e2D,
++        .size = size,
++        .format = format,
++        .mipLevelCount = 1,
++        .sampleCount = 1,
++    };
++    g_tex[i] = g_device.CreateTexture(&descriptor);
++    g_view[i] = g_tex[i].CreateView();
++  }
++}
++
++void draw(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
++          const wgpu::TextureView& source, const wgpu::TextureView& target, bool load,
++          const wgpu::TextureView& resolve = nullptr) {
++  const std::array entries{
++      wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = source},
++  };
++  const wgpu::BindGroupDescriptor bindGroupDescriptor{
++      .layout = g_layout,
++      .entryCount = entries.size(),
++      .entries = entries.data(),
++  };
++  const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
++  const std::array attachments{wgpu::RenderPassColorAttachment{
++      .view = target,
++      .resolveTarget = resolve,
++      .loadOp = load ? wgpu::LoadOp::Load : wgpu::LoadOp::Clear,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  }};
++  const wgpu::RenderPassDescriptor descriptor{
++      .label = label,
++      .colorAttachmentCount = attachments.size(),
++      .colorAttachments = attachments.data(),
++      .timestampWrites = webgpu::gpu_prof::pass_writes(label),
++  };
++  const auto pass = cmd.BeginRenderPass(&descriptor);
++  pass.SetPipeline(pipeline);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.Draw(3);
++  pass.End();
++}
++} // namespace
++
++void initialize() {
++  const char* bloom = std::getenv("DOL_AURORA_BLOOM");
++  g_bloom.store(bloom != nullptr && bloom[0] == '1', std::memory_order_relaxed);
++  g_threshold = env_float("DOL_AURORA_BLOOM_THRESHOLD", g_threshold, 0.f, 1.f);
++  g_strength = env_float("DOL_AURORA_BLOOM_STRENGTH", g_strength, 0.f, 4.f);
++
++  wgpu::ShaderSourceWGSL source{};
++  source.code = kShader;
++  const wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &source, .label = "Post effects"};
++  g_module = g_device.CreateShaderModule(&moduleDescriptor);
++  const std::array layoutEntries{
++      wgpu::BindGroupLayoutEntry{
++          .binding = 0,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .sampler = {.type = wgpu::SamplerBindingType::Filtering},
++      },
++      wgpu::BindGroupLayoutEntry{
++          .binding = 1,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = {.sampleType = wgpu::TextureSampleType::Float, .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
++  };
++  const wgpu::BindGroupLayoutDescriptor layoutDescriptor{
++      .label = "Post effects",
++      .entryCount = layoutEntries.size(),
++      .entries = layoutEntries.data(),
++  };
++  g_layout = g_device.CreateBindGroupLayout(&layoutDescriptor);
++  const wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1, .bindGroupLayouts = &g_layout};
++  g_pipelineLayout = g_device.CreatePipelineLayout(&pipelineLayoutDescriptor);
++  const wgpu::SamplerDescriptor samplerDescriptor{
++      .label = "Post effects",
++      .addressModeU = wgpu::AddressMode::ClampToEdge,
++      .addressModeV = wgpu::AddressMode::ClampToEdge,
++      .magFilter = wgpu::FilterMode::Linear,
++      .minFilter = wgpu::FilterMode::Linear,
++  };
++  g_sampler = g_device.CreateSampler(&samplerDescriptor);
++}
++
++void shutdown() {
++  g_bright = g_blurH = g_blurV = g_composite = {};
++  g_tex = {};
++  g_view = {};
++  g_size = {};
++  g_format = wgpu::TextureFormat::Undefined;
++  g_compositeSamples = 0;
++  g_sampler = {};
++  g_pipelineLayout = {};
++  g_layout = {};
++  g_module = {};
++}
++
++bool bloom_enabled() noexcept { return g_bloom.load(std::memory_order_relaxed); }
++
++void set_bloom(bool enabled) noexcept { g_bloom.store(enabled, std::memory_order_relaxed); }
++
++void encode_bloom(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::Extent3D& size,
++                  wgpu::TextureFormat format, const wgpu::TextureView& dst, const wgpu::TextureView& resolve,
++                  uint32_t msaaSamples) {
++  if (!g_module || !scene || !dst || size.width < 4 || size.height < 4) {
++    return;
++  }
++  const webgpu::gpu_prof::Zone zone{cmd, "Bloom"};
++  ensure_targets(size, format, msaaSamples);
++  draw(cmd, "Bloom bright pass", g_bright, scene, g_view[0], false);
++  for (int i = 0; i < 2; ++i) {
++    draw(cmd, "Bloom blur (horizontal)", g_blurH, g_view[0], g_view[1], false);
++    draw(cmd, "Bloom blur (vertical)", g_blurV, g_view[1], g_view[0], false);
++  }
++  draw(cmd, "Bloom composite", g_composite, g_view[0], dst, true, resolve);
++}
++} // namespace aurora::gfx::post_fx
++
++void aurora_set_bloom(bool enabled) { aurora::gfx::post_fx::set_bloom(enabled); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+new file mode 100644
+index 0000000..0c30d1f
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -0,0 +1,25 @@
++#pragma once
++
++#include <webgpu/webgpu_cpp.h>
++
++#include <cstdint>
++
++// Effects drawn after the game's own frame (the Wind Waker HD look).
++//
++// Bloom: once a frame, on the finished scene before the HUD (common.cpp's
++// render), what is brighter than a threshold is blurred at a quarter of the
++// size and added back. Off unless DOL_AURORA_BLOOM=1 or aurora_set_bloom(true);
++// DOL_AURORA_BLOOM_THRESHOLD (0 to 1, of the brightness, default 0.72) and
++// DOL_AURORA_BLOOM_STRENGTH (default 0.35) are read at startup.
++namespace aurora::gfx::post_fx {
++void initialize();
++void shutdown();
++bool bloom_enabled() noexcept;
++void set_bloom(bool enabled) noexcept;
++// scene: the EFB as a texture (resolved when multisampled), size: its size;
++// dst: the EFB's color attachment, with msaaSamples samples, and resolve its
++// single-sample copy when multisampled (null otherwise).
++void encode_bloom(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::Extent3D& size,
++                  wgpu::TextureFormat format, const wgpu::TextureView& dst, const wgpu::TextureView& resolve,
++                  uint32_t msaaSamples);
++} // namespace aurora::gfx::post_fx
+-- 
+2.46.0
+

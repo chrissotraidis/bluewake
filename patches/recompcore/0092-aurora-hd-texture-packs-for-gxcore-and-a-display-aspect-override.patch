@@ -1,0 +1,248 @@
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 5a6e146..cb7ccb8 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -3,6 +3,7 @@
+ #include <aurora/aurora.h>
+ #include <aurora/event.h>
+ #include <aurora/gfx.h>
++#include <aurora/texture.hpp>
+ #include <gxruntime/guest_memory_dirty.h>
+ #if GXRUNTIME_HAS_AURORA_RECOMP
+ #include <gfx/gxcore_draw.hpp>
+@@ -267,8 +268,26 @@ bool dol_aurora_initialize(int argc, char** argv,
+         const char* fit_env = std::getenv("DOL_AURORA_ASPECT_FIT");
+         if (fit_env != nullptr && fit_env[0] != '\0')
+             aspect_fit = fit_env[0] != '0';
++        // DOL_AURORA_ASPECT_RATIO: a display aspect to letterbox to, such as
++        // 1.7778 for a game patched to render anamorphic 16:9 (the
++        // widescreen mod). It implies fitting.
++        const char* ratio_env = std::getenv("DOL_AURORA_ASPECT_RATIO");
++        const float ratio = ratio_env != nullptr ? std::strtof(ratio_env, nullptr) : 0.f;
++        if (ratio > 0.f) {
++            aspect_fit = true;
++            aurora::window::set_frame_buffer_aspect_override(ratio);
++        }
+         aurora::window::set_frame_buffer_aspect_fit(aspect_fit);
+     }
++    // DOL_AURORA_TEXTURE_PACK: a folder of Dolphin-format replacement
++    // textures (tex1_WxH_hash[_tlut]_fmt.png or .dds, searched recursively,
++    // with _mipN sidecars), such as an HD texture pack's GZL folder.
++    if (const char* pack = std::getenv("DOL_AURORA_TEXTURE_PACK"); pack != nullptr && pack[0] != '\0') {
++        static aurora::texture::ReplacementGroup s_texture_pack;
++        s_texture_pack = aurora::texture::load_replacement_directory(pack);
++        std::fprintf(stderr, "[mods] texture-pack=%s replacements=%zu\n", pack,
++                     s_texture_pack.registrations.size());
++    }
+ 
+     gx_aurora::g_graphics_log = backend_config->graphics_logging;
+     gx_aurora::g_force_untextured = backend_config->force_untextured;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index ecb9020..c498236 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -4,6 +4,7 @@
+ #include "../gx/gx.hpp" // UseReversedZ + set_logical_viewport (substrate glue)
+ #include "texture.hpp"
+ #include "tex_copy_conv.hpp" // EFB-copy format conversion (63/S16)
++#include "texture_replacement.hpp" // Dolphin-format HD texture packs
+ 
+ #include <gxruntime/gxcore/gxcore.hpp> // EfbCopyCommand
+ #include <gxruntime/gxcore/texture_decode.hpp>
+@@ -954,6 +955,34 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+     addrIt = g_textureAddrKey.find(address);
+     if (addrIt != g_textureAddrKey.end())
+       g_textureCache.erase(addrIt->second.key);
++    // HD texture packs (Dolphin's tex1_WxH_hash[_tlut]_fmt names): the first
++    // time these guest bytes are seen, look for a replacement before decoding.
++    // The handle is cached under the same content key as a decode would be,
++    // so later draws of the same texture never repeat the lookup.
++    if (texture_replacement::has_source_replacements()) {
++      static unsigned long long s_lookups;
++      static const bool s_log_misses = std::getenv("DOL_TEXREP_LOG_MISSES") != nullptr;
++      ++s_lookups;
++      const auto replacement = texture_replacement::find_replacement_for_guest(
++          width, height, format, bytes, size, static_cast<const uint8_t*>(tlut_data),
++          tlut_data != nullptr ? std::min(tlut_available, tlut_entries * 2u) : 0u);
++      if (s_log_misses && !(replacement.has_value() && *replacement))
++        std::fprintf(stderr, "[mods] texture miss #%llu addr=%08X fmt=%u %ux%u size=%u tlut=%u\n", s_lookups,
++                     address, format, width, height, size, tlut_entries);
++      if (replacement.has_value() && *replacement) {
++        ++g_textureCacheStats.uploads;
++        static unsigned long long s_replaced;
++        if (++s_replaced <= 3u || (s_replaced % 200u) == 0u)
++          std::fprintf(stderr, "[mods] texture replaced #%llu addr=%08X fmt=%u %ux%u -> %ux%u\n",
++                       s_replaced, address, format, width, height, (*replacement)->size.width,
++                       (*replacement)->size.height);
++        g_textureCache.emplace(key, *replacement);
++        g_textureAddrKey[address] = TextureAddressState{
++            key, texelEpoch, tlutEpoch, texelEpochValid, tlutEpochValid,
++            small_hash, verify_frame};
++        return *replacement;
++      }
++    }
+     // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
+     // upload it as a pre-decoded PC texture (no substrate re-conversion).
+     std::vector<uint8_t> decoded;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+index 31e04c6..8595d74 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+@@ -17,6 +17,9 @@
+ #include <absl/hash/hash.h>
+ 
+ #include <algorithm>
++#if defined(__APPLE__)
++#include <TargetConditionals.h>
++#endif
+ #include <array>
+ #include <charconv>
+ #include <cstring>
+@@ -35,7 +38,13 @@ using aurora::webgpu::g_device;
+ namespace {
+ aurora::Module Log("aurora::texture");
+ 
++#if defined(__APPLE__) && defined(TARGET_OS_IOS) && TARGET_OS_IOS
++// iPad and iPhone apps share far less memory; the decoded HD textures of a
++// scene stay well under this.
++constexpr uint64_t kReplacementCacheBudgetBytes = 1073741824; // 1GB
++#else
+ constexpr uint64_t kReplacementCacheBudgetBytes = 4294967296; // 4GB
++#endif
+ constexpr uint64_t kReplacementWildcardTextureHash = 0xFFFFFFFFFFFFFFFFull;
+ constexpr uint64_t kReplacementWildcardTlutHash = 0xFFFFFFFFFFFFFFFEull;
+ 
+@@ -1250,4 +1259,66 @@ std::string build_texture_replacement_name(const GXTexObj_& obj) noexcept {
+   const auto key = build_source_key(obj);
+   return format_replacement_filename(key);
+ }
++
++bool has_source_replacements() noexcept {
++  std::lock_guard lk(s_registryMutex);
++  return s_sourceEntryCount != 0;
++}
++
++std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t height, uint32_t format,
++                                                        const uint8_t* data, uint32_t data_size,
++                                                        const uint8_t* tlut, uint32_t tlut_bytes) noexcept {
++  ZoneScoped;
++  if (data == nullptr || width == 0 || height == 0) {
++    return std::nullopt;
++  }
++  const uint32_t base_size =
++      GXGetTexBufferSize(static_cast<u16>(width), static_cast<u16>(height), format, false, 0);
++  if (base_size == 0 || base_size > data_size) {
++    return std::nullopt;
++  }
++  texture::TextureSourceKey key{
++      .textureHash = XXH64(data, base_size, 0),
++      .width = width,
++      .height = height,
++      .format = format,
++      .hasTlut = format == GX_TF_C4 || format == GX_TF_C8 || format == GX_TF_C14X2,
++  };
++  if (key.hasTlut) {
++    // Dolphin hashes only the palette entries the texture references.
++    uint32_t lo = 0xffff, hi = 0;
++    if (format == GX_TF_C4) {
++      for (uint32_t i = 0; i < base_size; ++i) {
++        lo = std::min({lo, uint32_t(data[i] & 0xf), uint32_t(data[i] >> 4)});
++        hi = std::max({hi, uint32_t(data[i] & 0xf), uint32_t(data[i] >> 4)});
++      }
++    } else if (format == GX_TF_C8) {
++      for (uint32_t i = 0; i < base_size; ++i) {
++        lo = std::min(lo, uint32_t(data[i]));
++        hi = std::max(hi, uint32_t(data[i]));
++      }
++    } else {
++      for (uint32_t i = 0; i + 1 < base_size; i += 2) {
++        const uint32_t v = ((uint32_t(data[i]) << 8) | data[i + 1]) & 0x3fff;
++        lo = std::min(lo, v);
++        hi = std::max(hi, v);
++      }
++    }
++    const size_t offset = 2 * size_t(lo);
++    const size_t size = 2 * (size_t(hi) + 1 - lo);
++    if (tlut == nullptr || lo > hi || offset + size > tlut_bytes) {
++      return std::nullopt;
++    }
++    key.tlutHash = XXH64(tlut + offset, size, 0);
++  }
++  std::lock_guard lk(s_registryMutex);
++  if (s_sourceEntryCount == 0) {
++    return std::nullopt;
++  }
++  const auto replacementKey = find_source_replacement_key_locked(key);
++  if (!replacementKey.has_value()) {
++    return std::nullopt;
++  }
++  return find_replacement_for_key_locked(*replacementKey);
++}
+ } // namespace aurora::gfx::texture_replacement
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+index a3b02bf..6e506b5 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+@@ -11,4 +11,12 @@ void load_tlut(const GXTlutObj* obj, uint32_t idx) noexcept;
+ std::optional<TextureHandle> find_replacement(const GXTexObj_& obj) noexcept;
+ std::optional<TextureHandle> find_replacement(const GXTexObj_& obj, const GXTlutObj_& tlut) noexcept;
+ std::string build_texture_replacement_name(const GXTexObj_& obj) noexcept;
++// For renderers that decode guest textures themselves (GXRuntime's gxcore
++// path): the Dolphin-named replacement for these guest bytes, if one is
++// registered. data holds the texture (at least its base level); tlut the
++// palette bytes for C4/C8/C14X2 (tlut_bytes = entries * 2).
++std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t height, uint32_t format,
++                                                        const uint8_t* data, uint32_t data_size,
++                                                        const uint8_t* tlut, uint32_t tlut_bytes) noexcept;
++bool has_source_replacements() noexcept;
+ } // namespace aurora::gfx::texture_replacement
+diff --git a/GXRuntime/graphics/aurora/lib/window.cpp b/GXRuntime/graphics/aurora/lib/window.cpp
+index 9d095ad..d882dad 100644
+--- a/GXRuntime/graphics/aurora/lib/window.cpp
++++ b/GXRuntime/graphics/aurora/lib/window.cpp
+@@ -42,6 +42,9 @@ SDL_Window* g_window;
+ SDL_Renderer* g_renderer;
+ float g_frameBufferScale = 0.f;
+ bool g_frameBufferAspectFit = false;
++// A display aspect (width / height) to fit instead of the configured frame's,
++// for games patched to render anamorphic 16:9 (0 keeps the frame's aspect).
++float g_frameBufferAspectOverride = 0.f;
+ AuroraWindowSize g_windowSize;
+ std::vector<AuroraEvent> g_events;
+ std::atomic_bool g_backgrounded = false;
+@@ -431,8 +434,11 @@ AuroraWindowSize get_window_size() {
+   if (g_frameBufferAspectFit) {
+     const auto [baseW, baseH] = vi::configured_fb_size();
+     if (baseW > 0 && baseH > 0) {
++      const float aspect = g_frameBufferAspectOverride > 0.f
++                               ? g_frameBufferAspectOverride
++                               : static_cast<float>(baseW) / static_cast<float>(baseH);
+       const auto [fitW, fitH] =
+-          fit_frame_buffer_to_aspect(fb_w, fb_h, static_cast<float>(baseW) / static_cast<float>(baseH));
++          fit_frame_buffer_to_aspect(fb_w, fb_h, aspect);
+       fb_w = fitW;
+       fb_h = fitH;
+     }
+@@ -550,6 +556,11 @@ void set_frame_buffer_aspect_fit(bool fit) {
+   request_frame_buffer_resize();
+ }
+ 
++void set_frame_buffer_aspect_override(float aspect) {
++  g_frameBufferAspectOverride = aspect > 0.f ? aspect : 0.f;
++  request_frame_buffer_resize();
++}
++
+ void set_background_input(bool value) { SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, value ? "1" : "0"); }
+ 
+ } // namespace aurora::window
+diff --git a/GXRuntime/graphics/aurora/lib/window.hpp b/GXRuntime/graphics/aurora/lib/window.hpp
+index 51257ea..114a6e3 100644
+--- a/GXRuntime/graphics/aurora/lib/window.hpp
++++ b/GXRuntime/graphics/aurora/lib/window.hpp
+@@ -50,5 +50,6 @@ void center_window();
+ void request_frame_buffer_resize();
+ void set_frame_buffer_scale(float scale);
+ void set_frame_buffer_aspect_fit(bool fit);
++void set_frame_buffer_aspect_override(float aspect);
+ void set_background_input(bool value);
+ }; // namespace aurora::window

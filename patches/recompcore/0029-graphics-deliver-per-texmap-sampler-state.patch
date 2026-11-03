@@ -1,0 +1,239 @@
+From 449aa9ac694b63b07499f72b48397cc874c62b86 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 08:14:49 -0500
+Subject: [PATCH] graphics: deliver per-texmap sampler state
+
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 65 ++++++++++++++++---
+ .../include/gxruntime/gxcore/shader.hpp       | 13 ++++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      | 28 ++++++++
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 27 ++++++++
+ 4 files changed, 123 insertions(+), 10 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 12aa457702..4d2bda531a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -102,6 +102,55 @@ wgpu::BlendFactor to_blend_factor_dst(gxc::DstBlendFactor factor,
+   }
+ }
+ 
++wgpu::AddressMode to_address_mode(std::uint8_t wrap) {
++  switch (wrap) {
++  case 1:
++    return wgpu::AddressMode::Repeat;
++  case 2:
++    return wgpu::AddressMode::MirrorRepeat;
++  case 0:
++  default:
++    return wgpu::AddressMode::ClampToEdge;
++  }
++}
++
++wgpu::SamplerDescriptor sampler_descriptor(const gxc::PlanSampler& sampler) {
++  const bool mipmaps = sampler.mipmap_filter != 0u;
++  std::uint16_t maxAnisotropy = 1;
++  if (mipmaps && (sampler.max_aniso == 1u || sampler.max_aniso == 2u)) {
++    maxAnisotropy = sampler.max_aniso == 1u
++                        ? std::max<std::uint16_t>(
++                              webgpu::g_graphicsConfig.textureAnisotropy / 2u,
++                              1u)
++                        : std::max<std::uint16_t>(
++                              webgpu::g_graphicsConfig.textureAnisotropy, 1u);
++  }
++  auto magFilter = sampler.mag_filter != 0u ? wgpu::FilterMode::Linear
++                                             : wgpu::FilterMode::Nearest;
++  auto minFilter = sampler.min_filter != 0u ? wgpu::FilterMode::Linear
++                                             : wgpu::FilterMode::Nearest;
++  auto mipFilter = sampler.mipmap_filter == 2u
++                       ? wgpu::MipmapFilterMode::Linear
++                       : wgpu::MipmapFilterMode::Nearest;
++  if (maxAnisotropy > 1u) {
++    magFilter = wgpu::FilterMode::Linear;
++    minFilter = wgpu::FilterMode::Linear;
++    mipFilter = wgpu::MipmapFilterMode::Linear;
++  }
++  return {
++      .label = "GXCore Sampler",
++      .addressModeU = to_address_mode(sampler.wrap_s),
++      .addressModeV = to_address_mode(sampler.wrap_t),
++      .addressModeW = wgpu::AddressMode::Repeat,
++      .magFilter = magFilter,
++      .minFilter = minFilter,
++      .mipmapFilter = mipFilter,
++      .lodMinClamp = mipmaps ? static_cast<float>(sampler.min_lod) / 16.f : 0.f,
++      .lodMaxClamp = mipmaps ? static_cast<float>(sampler.max_lod) / 16.f : 0.f,
++      .maxAnisotropy = maxAnisotropy,
++  };
++}
++
+ // Texture bind group layout for a used-texmap set (63/Mfin multi-texmap): texmap
+ // t occupies binding 2t (texture) + 2t+1 (sampler), matching the WGSL. Cached per
+ // mask; used_mask=1 (texmap 0 only) reproduces the pre-Mfin single-texmap layout.
+@@ -721,15 +770,6 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+ 
+   BindGroupRef textureBindGroup = 0;
+   if (plan.pipeline.shader.textured != 0) {
+-    const wgpu::SamplerDescriptor samplerDescriptor{
+-        .label = "GXCore Sampler",
+-        .addressModeU = wgpu::AddressMode::Repeat,
+-        .addressModeV = wgpu::AddressMode::Repeat,
+-        .magFilter = wgpu::FilterMode::Linear,
+-        .minFilter = wgpu::FilterMode::Linear,
+-        .mipmapFilter = wgpu::MipmapFilterMode::Nearest,
+-    };
+-    const auto sampler = sampler_ref(samplerDescriptor);
+     if (plan.texmap_mask == 0u) {
+       // Single-texmap fast path: primary texture at binding 0/1 (unchanged).
+       if (plan.has_texture) {
+@@ -739,6 +779,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+             plan.tlut_address, plan.tlut_format, plan.tlut_entries,
+             plan.tlut_data, plan.tlut_available);
+         if (bound) {
++          const auto sampler =
++              sampler_ref(sampler_descriptor(plan.samplers[plan.tex_slot & 7u]));
+           const std::array entries{
+               WGPUBindGroupEntry{.binding = 0,
+                                  .textureView =
+@@ -759,6 +801,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       // matching the WGSL declarations. If any referenced texmap fails to
+       // resolve the draw is not drawable (avoids a missing-bind-group error).
+       std::vector<TextureHandle> held;
++      std::vector<wgpu::Sampler> heldSamplers;
+       std::vector<WGPUBindGroupEntry> entries;
+       bool complete = true;
+       for (uint32_t t = 0; t < 8u; ++t) {
+@@ -776,10 +819,12 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+           break;
+         }
+         held.push_back(bound);
++        heldSamplers.push_back(
++            sampler_ref(sampler_descriptor(plan.samplers[t])));
+         entries.push_back(WGPUBindGroupEntry{
+             .binding = 2u * t, .textureView = bound->sampleTextureView.Get()});
+         entries.push_back(WGPUBindGroupEntry{.binding = 2u * t + 1u,
+-                                             .sampler = sampler.Get()});
++                                             .sampler = heldSamplers.back().Get()});
+       }
+       if (!complete)
+         return false;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 66ff268516..9e5f2a8506 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -416,6 +416,17 @@ inline std::uint32_t used_texmap_mask(const ShaderKey& key) {
+ // than one distinct texmap is sampled (e.g. a THP YUV movie draws Y/U/V on
+ // texmap 0/1/2 and a TEV combines them to RGB) the per-texmap set is carried in
+ // DrawPlan::textures and texmap_mask marks which slots are live.
++struct PlanSampler {
++  std::uint8_t wrap_s = 1; // BP TexMode0: clamp=0, repeat=1, mirror=2
++  std::uint8_t wrap_t = 1;
++  std::uint8_t mag_filter = 1;    // nearest=0, linear=1
++  std::uint8_t min_filter = 1;
++  std::uint8_t mipmap_filter = 1; // none=0, point=1, linear=2
++  std::uint8_t min_lod = 0;       // BP TexMode1 unsigned 4.4
++  std::uint8_t max_lod = 0xFF;
++  std::uint8_t max_aniso = 0;     // 1x=0, 2x=1, 4x=2
++};
++
+ struct PlanTexture {
+   bool valid = false;
+   std::uint32_t address = 0;
+@@ -456,6 +467,7 @@ struct DrawPlan {
+   std::int32_t scissor_width = 0;
+   std::int32_t scissor_height = 0;
+   bool has_texture = false;
++  std::uint32_t tex_slot = 0;
+   std::uint32_t tex_address = 0;
+   std::uint32_t tex_size = 0;
+   std::uint32_t tex_format = 0;
+@@ -476,6 +488,7 @@ struct DrawPlan {
+   // by an enabled TEV stage. 0 or a single bit keeps the single-texmap fast path
+   // (the flat tex_* fields above); >1 bit makes the per-texmap set authoritative.
+   std::uint32_t texmap_mask = 0;
++  PlanSampler samplers[8]{};
+   PlanTexture textures[8]{};
+ };
+ 
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 7c8e65d514..3f2115dc2d 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -1287,8 +1287,36 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+         bp_valid_[0x59u] ? bp_regs_[0x59u] : (171u | (171u << 10u));
+     decode_scissor(plan, bp_regs_[0x20u], bp_regs_[0x21u], offset);
+   }
++  for (std::uint32_t t = 0; t < 8u; ++t) {
++    const std::uint32_t mode0_reg =
++        0x80u | ((t & 3u) | ((t & 4u) << 3u));
++    const std::uint32_t mode1_reg = mode0_reg + 4u;
++    PlanSampler& sampler = plan.samplers[t];
++    if (bp_valid_[mode0_reg]) {
++      const std::uint32_t mode0 = bp_regs_[mode0_reg];
++      const std::uint32_t min_filter = bits(mode0, 3, 5);
++      static constexpr std::uint8_t kMinFilter[8] = {
++          0, 0, 1, 0, 1, 0, 1, 0,
++      };
++      static constexpr std::uint8_t kMipmapFilter[8] = {
++          0, 1, 1, 0, 0, 2, 2, 0,
++      };
++      sampler.wrap_s = static_cast<std::uint8_t>(bits(mode0, 2, 0));
++      sampler.wrap_t = static_cast<std::uint8_t>(bits(mode0, 2, 2));
++      sampler.mag_filter = static_cast<std::uint8_t>(bits(mode0, 1, 4));
++      sampler.min_filter = kMinFilter[min_filter];
++      sampler.mipmap_filter = kMipmapFilter[min_filter];
++      sampler.max_aniso = static_cast<std::uint8_t>(bits(mode0, 2, 19));
++    }
++    if (bp_valid_[mode1_reg]) {
++      const std::uint32_t mode1 = bp_regs_[mode1_reg];
++      sampler.min_lod = static_cast<std::uint8_t>(bits(mode1, 8, 0));
++      sampler.max_lod = static_cast<std::uint8_t>(bits(mode1, 8, 8));
++    }
++  }
+   if (key.textured != 0u) {
+     plan.has_texture = true;
++    plan.tex_slot = draw.texture.slot & 7u;
+     plan.tex_address = draw.texture.address;
+     plan.tex_size = draw.texture.size;
+     plan.tex_format = draw.texture.format;
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index d1a91c03f5..6b4ae4f9e2 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -203,6 +203,33 @@ void test_state_to_plan_and_wgsl() {
+   CHECK(counters.draws_skipped == 0);
+   CHECK(counters.unresolved_tex_matrix == 0);
+ 
++  // TexMode0 unit 0: clamp S, mirror T, nearest mag, linear min, no mips.
++  // Sampler state is per texmap and must survive into the draw plan.
++  {
++    gxc::GxCoreState sampler_state = state;
++    sampler_state.apply(bp(0x80u, (2u << 2u) | (4u << 5u)));
++    gxc::GapCounters gaps;
++    const gxc::DrawPlan sampler_plan =
++        sampler_state.build_draw_plan(draw, gaps);
++    CHECK(sampler_plan.ok);
++    CHECK(sampler_plan.samplers[0].wrap_s == 0u);
++    CHECK(sampler_plan.samplers[0].wrap_t == 2u);
++    CHECK(sampler_plan.samplers[0].mag_filter == 0u);
++    CHECK(sampler_plan.samplers[0].min_filter == 1u);
++    CHECK(sampler_plan.samplers[0].mipmap_filter == 0u);
++  }
++
++  // Hardware filter 6 is linear minification with linear mip interpolation.
++  {
++    gxc::GxCoreState sampler_state = state;
++    sampler_state.apply(bp(0x80u, 6u << 5u));
++    gxc::GapCounters gaps;
++    const gxc::DrawPlan sampler_plan =
++        sampler_state.build_draw_plan(draw, gaps);
++    CHECK(sampler_plan.samplers[0].min_filter == 1u);
++    CHECK(sampler_plan.samplers[0].mipmap_filter == 2u);
++  }
++
+   // BP 0x42 only overrides stored alpha for an alpha-writing RGBA6 target.
+   // The fragment keeps TEV alpha in blend source 1 so color blending still
+   // observes the unmodified source alpha, matching Dolphin's dual-source path.
+-- 
+2.41.0
+

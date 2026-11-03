@@ -1,0 +1,54 @@
+From 34dee04950e950ab5c84b38428a8276d2a99e713 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 00:24:33 +0900
+Subject: [PATCH] Resume queued audio before overflow can block recovery
+
+---
+ GXRuntime/backends/aurora/aurora_audio.cpp          | 13 +++++++++++++
+ GXRuntime/graphics/aurora/tests/audio_sink_test.cpp |  6 ++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_audio.cpp b/GXRuntime/backends/aurora/aurora_audio.cpp
+index c7d16068..c6ee259b 100644
+--- a/GXRuntime/backends/aurora/aurora_audio.cpp
++++ b/GXRuntime/backends/aurora/aurora_audio.cpp
+@@ -77,6 +77,19 @@ void recover_audio_output() {
+         } else if (SDL_AudioDevicePaused(device)) g_audio_playing = false;
+     }
+     if (requested) retry_audio_open(true);
++    // A paused device can already hold a full prebuffer. Resume it before
++    // the push path drops overflow/discard samples and returns without
++    // reaching its ordinary start-playback check.
++    if (g_audio_stream && !g_audio_playing) {
++        const int queued = SDL_GetAudioStreamQueued(g_audio_stream);
++        const int prebuffer = static_cast<int>(g_audio_sample_rate) * 2 * sizeof(s16) * g_audio_prebuffer_ms / 1000;
++        if (queued >= prebuffer) {
++            if (SDL_ResumeAudioStreamDevice(g_audio_stream))
++                g_audio_playing = true;
++            else
++                std::fprintf(stderr, "[audio] failed to resume queued playback: %s\n", SDL_GetError());
++        }
++    }
+ }
+ bool retry_audio_open(bool force) {
+     if (g_audio_stream != nullptr) return true;
+diff --git a/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+index d643b19a..d4022449 100644
+--- a/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/audio_sink_test.cpp
+@@ -55,6 +55,12 @@ int main() {
+     dol_aurora_audio_resume();
+     gx_aurora::recover_audio_output();
+     assert(!gx_aurora::g_audio_playing);
++    gx_aurora::g_audio_prebuffer_ms = 1;
++    assert(SDL_GetAudioStreamQueued(stream) > static_cast<int>(gx_aurora::g_audio_sample_rate) * 4 * gx_aurora::g_audio_max_queue_ms / 1000);
++    dol_aurora_audio_resume();
++    aurora_backend_audio_push(samples, 256);
++    assert(gx_aurora::g_audio_playing && !SDL_AudioDevicePaused(SDL_GetAudioStreamDevice(stream)));
++    assert(SDL_PauseAudioStreamDevice(stream));
+     assert(SDL_ClearAudioStream(stream));
+     gx_aurora::g_audio_prebuffer_ms = 1;
+     dol_aurora_audio_resume();
+-- 
+2.46.0
+

@@ -1,0 +1,43 @@
+From 5d33661d0286c26cfddc12d634d8cc1316f5009f Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Thu, 24 Sep 2026 10:04:49 -0500
+Subject: [PATCH] aurora: load before exchanging the display-copy request at
+ every FIFO write
+
+aurora_backend_gx_write did an atomic exchange of g_display_copy_pending at
+every gather-pipe write, a read-modify-write the core pays for even though the
+flag is almost always clear. A relaxed load now guards it; only the exchange
+claims a request, so a present is still taken exactly once. Rendered save
+view, two A/B pairs: 11.00/11.01 -> 10.88/10.88 G cycles per 100 retraces
+(-1.1 percent), instructions unchanged (496/497 vs 498/497 M).
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 2ed95d336d..3090ffef55 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -1395,10 +1395,15 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+         gx_aurora::g_trace_writer.gx_write(size, value);
+     if (gx_aurora::g_gx_core_enabled && !gx_aurora::g_frame_open)
+         gx_aurora::reopen_frame_if_unframed();
+-    if (gx_aurora::g_gx_core_enabled)
+-        if (gx_aurora::g_display_copy_pending.exchange(false)) {
+-            aurora_backend_present();
+-        }
++    // A relaxed load first: the flag is almost always clear, and an atomic
++    // exchange at every gather-pipe write is a read-modify-write the core
++    // pays for even when there is nothing to take. Only the exchange claims
++    // the request, so a present is still taken exactly once.
++    if (gx_aurora::g_gx_core_enabled &&
++        gx_aurora::g_display_copy_pending.load(std::memory_order_relaxed) &&
++        gx_aurora::g_display_copy_pending.exchange(false)) {
++        aurora_backend_present();
++    }
+     if (gx_aurora::g_gx_core_enabled)
+         return;
+ #endif
+-- 
+2.41.0
+

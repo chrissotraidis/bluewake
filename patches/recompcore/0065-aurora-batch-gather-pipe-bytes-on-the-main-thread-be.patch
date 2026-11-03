@@ -1,0 +1,81 @@
+From 993df27f380c93a0b1496d4e5f74fa37a3bff1c0 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Wed, 23 Sep 2026 15:32:20 -0500
+Subject: [PATCH] aurora: batch gather-pipe bytes on the main thread before
+ handing them to the worker
+
+Every 1-4 byte guest write to the GX gather pipe took the FIFO worker's mutex to
+append to the handoff buffer (6.2% of the game thread inclusive, iOS simulator).
+Writes now collect in a main-thread buffer published in 1 KiB batches, and every
+barrier that needs the worker to have seen them (drain, shutdown) publishes first.
+Frame captures at six retraces from logo to prologue are identical to the
+unbatched reference.
+---
+ GXRuntime/backends/aurora/aurora_graphics.cpp | 28 +++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_graphics.cpp b/GXRuntime/backends/aurora/aurora_graphics.cpp
+index 1abb9649d3..8403893420 100644
+--- a/GXRuntime/backends/aurora/aurora_graphics.cpp
++++ b/GXRuntime/backends/aurora/aurora_graphics.cpp
+@@ -432,7 +432,10 @@ void g_fifo_worker_start() {
+ // destroys it calls std::terminate: every rendered run of this worker before
+ // this existed ended in SIGABRT after a normal guest stop (measured 2026-09-22),
+ // and a batch in flight during device teardown is a use-after-free on top of it.
++void g_fifo_publish_local();
++
+ void g_fifo_worker_stop_and_join() {
++    g_fifo_publish_local();
+     std::thread worker;
+     {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+@@ -454,23 +457,44 @@ void g_fifo_worker_stop_and_join() {
+     g_fifo_worker_idle = true;
+ }
+ 
+-void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
++// Gather-pipe bytes collect on the main thread and reach the worker in batches:
++// taking the worker mutex once per 1-4 byte guest write cost several percent of
++// the game thread. Every barrier that needs the worker to have seen the bytes
++// (g_fifo_drain, shutdown) publishes the local batch first.
++std::vector<std::uint8_t> g_fifo_local;
++constexpr std::size_t kFifoLocalBatch = 1024u;
++
++void g_fifo_publish_local() {
++    if (g_fifo_local.empty())
++        return;
+     bool wake;
+     {
+         std::lock_guard<std::mutex> lock(g_fifo_worker_mutex);
+-        g_fifo_handoff.insert(g_fifo_handoff.end(), bytes, bytes + size);
++        if (g_fifo_handoff.empty())
++            g_fifo_handoff.swap(g_fifo_local);
++        else
++            g_fifo_handoff.insert(g_fifo_handoff.end(), g_fifo_local.begin(),
++                                  g_fifo_local.end());
+         ++g_fifo_appended;
+         g_fifo_work_pending = true;
+         g_fifo_worker_idle = false;
+         wake = g_fifo_worker_sleeping;
+     }
++    g_fifo_local.clear();
+     if (wake)
+         g_fifo_worker_cv.notify_one();
+ }
+ 
++void g_fifo_enqueue(const std::uint8_t* bytes, u8 size) {
++    g_fifo_local.insert(g_fifo_local.end(), bytes, bytes + size);
++    if (g_fifo_local.size() >= kFifoLocalBatch)
++        g_fifo_publish_local();
++}
++
+ // Waits until the worker has translated everything appended so far. Called at
+ // the barriers and only there.
+ static void g_fifo_drain() {
++    g_fifo_publish_local();
+     std::unique_lock<std::mutex> lock(g_fifo_worker_mutex);
+     // Called from the guest's synchronization points, which never run inside
+     // the present transition; if one ever does, waiting here would deadlock
+-- 
+2.41.0
+

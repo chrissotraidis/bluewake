@@ -1,0 +1,410 @@
+From 815deef978b4023ca8b1f53434384e3a4097bdca Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 16:59:32 +0900
+Subject: [PATCH 170/175] Aurora: HD's far-distance blur, before bloom
+ (post_fx, off by default)
+
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   4 +
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  14 +-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 213 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  14 ++
+ 4 files changed, 238 insertions(+), 7 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 9d71c15..400f8e8 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -166,6 +166,10 @@ void aurora_set_frame_interpolation(bool enabled);
+    after the scene and before the HUD. Takes effect at the next frame.
+    DOL_AURORA_BLOOM=1 sets the starting value. */
+ void aurora_set_bloom(bool enabled);
++/* HD's far-distance blur: the distance blurred, the near scene and the sky
++   sharp, before bloom. Takes effect at the next frame. DOL_AURORA_FAR_BLUR=1
++   sets the starting value. */
++void aurora_set_far_blur(bool enabled);
+ /* A frames-a-second counter at the top of the window (with the game's own
+    rate beside it when in-between frames are on). DOL_AURORA_SHOW_FPS=1 sets
+    the starting value. */
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 08b8a07..cdd3f1b 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1991,13 +1991,13 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+   static uint64_t bloomedFrame = UINT64_MAX;
+   const uint64_t frameKey = frame.frameId * 2 + (frame_interp::encoding_interpolated() ? 1 : 0);
+   const bool efbPass = !passInfo.offscreen && passInfo.colorView.Get() == webgpu::g_frameBuffer.view.Get();
+-  const bool bloomBeforeCopy = post_fx::bloom_enabled() && efbPass && bloomedFrame != frameKey &&
++  const bool bloomBeforeCopy = post_fx::any_enabled() && efbPass && bloomedFrame != frameKey &&
+                                passInfo.resolveTarget && !gx::is_depth_format(passInfo.resolveFormat) &&
+                                passInfo.resolveRect.x == 0 && passInfo.resolveRect.y == 0 &&
+                                static_cast<uint32_t>(passInfo.resolveRect.width) == passInfo.targetSize.width &&
+                                static_cast<uint32_t>(passInfo.resolveRect.height) == passInfo.targetSize.height;
+   size_t split = SIZE_MAX;
+-  if (post_fx::bloom_enabled() && efbPass && passInfo.observable && bloomedFrame != frameKey && !bloomBeforeCopy) {
++  if (post_fx::any_enabled() && efbPass && passInfo.observable && bloomedFrame != frameKey && !bloomBeforeCopy) {
+     for (size_t i = passInfo.commands.size(); i-- > 0;) {
+       const auto& command = passInfo.commands[i];
+       if (command.type == CommandType::Draw && command.data.draw.type != ShaderType::Clear && !command.flat) {
+@@ -2012,13 +2012,15 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+   pass.End();
+ 
+   if (bloomBeforeCopy) {
+-    post_fx::encode_bloom(cmd, passInfo.copySourceView, passInfo.targetSize, webgpu::g_frameBuffer.texture.GetFormat(),
+-                          passInfo.colorView, passInfo.resolveView, passInfo.msaaSamples);
++    post_fx::encode(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
++                    webgpu::g_frameBuffer.texture.GetFormat(), passInfo.colorView, passInfo.resolveView,
++                    passInfo.msaaSamples);
+     bloomedFrame = frameKey;
+   }
+   if (split != SIZE_MAX) {
+-    post_fx::encode_bloom(cmd, passInfo.copySourceView, passInfo.targetSize, webgpu::g_frameBuffer.texture.GetFormat(),
+-                          passInfo.colorView, passInfo.resolveView, passInfo.msaaSamples);
++    post_fx::encode(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
++                    webgpu::g_frameBuffer.texture.GetFormat(), passInfo.colorView, passInfo.resolveView,
++                    passInfo.msaaSamples);
+     bloomedFrame = frameKey;
+     if (split < passInfo.commands.size()) {
+       auto attachmentsAfter = attachments;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index e1da4db..c91a8b0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -15,6 +15,12 @@ using webgpu::g_device;
+ 
+ namespace {
+ std::atomic_bool g_bloom{false};
++std::atomic_bool g_farBlur{false};
++float g_farStart = 8000.f;  // distance in near-plane units where the far blur starts
++float g_farEnd = 30000.f;   // and where it is full
++float g_farAmount = 0.8f;  // how much of the blurred scene at full
++float g_farBackground = 0.35f;  // and where there is no depth (the sky, the horizon)
++bool g_farDebug = false;
+ float g_threshold = 0.72f;
+ float g_strength = 0.35f;
+ 
+@@ -25,6 +31,13 @@ wgpu::Sampler g_sampler;
+ wgpu::TextureFormat g_format = wgpu::TextureFormat::Undefined;
+ wgpu::RenderPipeline g_bright, g_blurH, g_blurV;
+ wgpu::RenderPipeline g_composite;
++wgpu::RenderPipeline g_down;           // the scene at a quarter of the size, unfiltered
++wgpu::RenderPipeline g_farComposite;   // blended into the EFB by distance
++uint32_t g_farSamples = 0;
++wgpu::BindGroupLayout g_depthLayout;
++wgpu::PipelineLayout g_depthPipelineLayout;
++std::array<wgpu::Texture, 2> g_farTex;
++std::array<wgpu::TextureView, 2> g_farView;
+ uint32_t g_compositeSamples = 0;
+ std::array<wgpu::Texture, 2> g_tex;
+ std::array<wgpu::TextureView, 2> g_view;
+@@ -91,6 +104,16 @@ fn fs_blur_v(in: VertexOutput) -> @location(0) vec4<f32> {
+     return blur(in.uv, vec2(0.0, 1.0));
+ }
+ 
++@fragment
++fn fs_down(in: VertexOutput) -> @location(0) vec4<f32> {
++    let t = texel();
++    let c = 0.25 * (textureSample(src, samp, in.uv + t * vec2(-1.0, -1.0)).rgb +
++                    textureSample(src, samp, in.uv + t * vec2(1.0, -1.0)).rgb +
++                    textureSample(src, samp, in.uv + t * vec2(-1.0, 1.0)).rgb +
++                    textureSample(src, samp, in.uv + t * vec2(1.0, 1.0)).rgb);
++    return vec4(c, 1.0);
++}
++
+ // Added onto the scene; the EFB's alpha is kept.
+ @fragment
+ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
+@@ -98,6 +121,56 @@ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
+ }
+ )""";
+ 
++// HD's far-distance blur: the scene blurred at a quarter of the size, blended
++// back by distance. Aurora's depth is reversed (1 near, 0 far) and, for a
++// perspective view, near / distance: 1 / depth is the distance in near-plane
++// units. Wind Waker draws the sky, the sea toward the horizon and the islands'
++// far models without depth (0): those get the background amount.
++constexpr const char* kFarShader = R"""(
++override far_start: f32 = 8000.0;
++override far_end: f32 = 30000.0;
++override amount: f32 = 0.8;
++override background: f32 = 0.35;
++override debug_view: bool = false;
++
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var blurred: texture_2d<f32>;
++@group(0) @binding(2) var depth: texture_depth_2d;
++
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++
++@fragment
++fn fs_far(in: VertexOutput) -> @location(0) vec4<f32> {
++    let d = textureLoad(depth, vec2<i32>(in.pos.xy), 0);
++    // No depth: what the game draws behind the scene without it (the sky, the
++    // sea toward the horizon, the islands' far models).
++    let f = select(smoothstep(far_start, far_end, 1.0 / max(d, 1e-9)) * amount, background, d <= 0.0);
++    if (debug_view) {
++        // log2 of the distance as brightness (0 at 1, 1 at 2^24), the sky blue.
++        if (d <= 0.0) {
++            return vec4(0.0, 0.0, 1.0, 1.0);
++        }
++        return vec4(vec3(log2(1.0 / d) / 24.0), 1.0);
++    }
++    return vec4(textureSampleLevel(blurred, samp, in.uv, 0.0).rgb, f);
++}
++)""";
++wgpu::ShaderModule g_farModule;
++
+ float env_float(const char* name, float fallback, float lo, float hi) {
+   const char* value = std::getenv(name);
+   if (value == nullptr || value[0] == '\0') {
+@@ -149,19 +222,61 @@ wgpu::RenderPipeline make_pipeline(const char* label, const char* entry, wgpu::T
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
++wgpu::RenderPipeline make_far_pipeline(wgpu::TextureFormat format, uint32_t samples) {
++  const std::array constants{
++      wgpu::ConstantEntry{.key = "far_start", .value = g_farStart},
++      wgpu::ConstantEntry{.key = "far_end", .value = g_farEnd},
++      wgpu::ConstantEntry{.key = "amount", .value = g_farAmount},
++      wgpu::ConstantEntry{.key = "background", .value = g_farBackground},
++      wgpu::ConstantEntry{.key = "debug_view", .value = g_farDebug ? 1.0 : 0.0},
++  };
++  const wgpu::BlendState over{
++      .color = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::SrcAlpha,
++                .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
++      .alpha = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::One},
++  };
++  const std::array targets{wgpu::ColorTargetState{.format = format, .blend = &over, .writeMask = wgpu::ColorWriteMask::All}};
++  const wgpu::FragmentState fragment{
++      .module = g_farModule,
++      .entryPoint = "fs_far",
++      .constantCount = constants.size(),
++      .constants = constants.data(),
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = "Far blur composite",
++      .layout = g_depthPipelineLayout,
++      .vertex = {.module = g_farModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = samples, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
+ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format, uint32_t samples) {
+   if (format != g_format) {
+     g_format = format;
+     g_bright = make_pipeline("Bloom bright pass", "fs_bright", format, 1, false);
+     g_blurH = make_pipeline("Bloom blur (horizontal)", "fs_blur_h", format, 1, false);
+     g_blurV = make_pipeline("Bloom blur (vertical)", "fs_blur_v", format, 1, false);
++    g_down = make_pipeline("Far blur downsample", "fs_down", format, 1, false);
+     g_composite = {};
++    g_farComposite = {};
+     g_size = {};
+   }
+   if (!g_composite || samples != g_compositeSamples) {
+     g_composite = make_pipeline("Bloom composite", "fs_composite", format, samples, true);
+     g_compositeSamples = samples;
+   }
++  if (!g_farComposite || samples != g_farSamples) {
++    g_farComposite = make_far_pipeline(format, samples);
++    g_farSamples = samples;
++  }
+   const wgpu::Extent3D size{std::max(1u, sceneSize.width / 4), std::max(1u, sceneSize.height / 4), 1};
+   if (size.width == g_size.width && size.height == g_size.height && g_tex[0]) {
+     return;
+@@ -179,6 +294,8 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     };
+     g_tex[i] = g_device.CreateTexture(&descriptor);
+     g_view[i] = g_tex[i].CreateView();
++    g_farTex[i] = g_device.CreateTexture(&descriptor);
++    g_farView[i] = g_farTex[i].CreateView();
+   }
+ }
+ 
+@@ -214,6 +331,37 @@ void draw(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::Render
+   pass.Draw(3);
+   pass.End();
+ }
++void draw_far(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView, const wgpu::TextureView& target,
++              const wgpu::TextureView& resolve) {
++  const std::array entries{
++      wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = g_farView[0]},
++      wgpu::BindGroupEntry{.binding = 2, .textureView = depthView},
++  };
++  const wgpu::BindGroupDescriptor bindGroupDescriptor{
++      .layout = g_depthLayout,
++      .entryCount = entries.size(),
++      .entries = entries.data(),
++  };
++  const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
++  const std::array attachments{wgpu::RenderPassColorAttachment{
++      .view = target,
++      .resolveTarget = resolve,
++      .loadOp = wgpu::LoadOp::Load,
++      .storeOp = wgpu::StoreOp::Store,
++  }};
++  const wgpu::RenderPassDescriptor descriptor{
++      .label = "Far blur composite",
++      .colorAttachmentCount = attachments.size(),
++      .colorAttachments = attachments.data(),
++      .timestampWrites = webgpu::gpu_prof::pass_writes("Far blur composite"),
++  };
++  const auto pass = cmd.BeginRenderPass(&descriptor);
++  pass.SetPipeline(g_farComposite);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.Draw(3);
++  pass.End();
++}
+ } // namespace
+ 
+ void initialize() {
+@@ -221,6 +369,14 @@ void initialize() {
+   g_bloom.store(bloom != nullptr && bloom[0] == '1', std::memory_order_relaxed);
+   g_threshold = env_float("DOL_AURORA_BLOOM_THRESHOLD", g_threshold, 0.f, 1.f);
+   g_strength = env_float("DOL_AURORA_BLOOM_STRENGTH", g_strength, 0.f, 4.f);
++  const char* far = std::getenv("DOL_AURORA_FAR_BLUR");
++  g_farBlur.store(far != nullptr && far[0] == '1', std::memory_order_relaxed);
++  g_farStart = env_float("DOL_AURORA_FAR_BLUR_START", g_farStart, 1.f, 1e9f);
++  g_farEnd = env_float("DOL_AURORA_FAR_BLUR_END", g_farEnd, g_farStart + 1.f, 1e9f);
++  g_farAmount = env_float("DOL_AURORA_FAR_BLUR_AMOUNT", g_farAmount, 0.f, 1.f);
++  g_farBackground = env_float("DOL_AURORA_FAR_BLUR_BACKGROUND", g_farBackground, 0.f, 1.f);
++  const char* farDebug = std::getenv("DOL_AURORA_FAR_BLUR_DEBUG");
++  g_farDebug = farDebug != nullptr && farDebug[0] == '1';
+ 
+   wgpu::ShaderSourceWGSL source{};
+   source.code = kShader;
+@@ -254,12 +410,41 @@ void initialize() {
+       .minFilter = wgpu::FilterMode::Linear,
+   };
+   g_sampler = g_device.CreateSampler(&samplerDescriptor);
++
++  wgpu::ShaderSourceWGSL farSource{};
++  farSource.code = kFarShader;
++  const wgpu::ShaderModuleDescriptor farModuleDescriptor{.nextInChain = &farSource, .label = "Far blur"};
++  g_farModule = g_device.CreateShaderModule(&farModuleDescriptor);
++  const std::array depthEntries{
++      layoutEntries[0],
++      layoutEntries[1],
++      wgpu::BindGroupLayoutEntry{
++          .binding = 2,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = {.sampleType = wgpu::TextureSampleType::Depth, .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
++  };
++  const wgpu::BindGroupLayoutDescriptor depthLayoutDescriptor{
++      .label = "Far blur",
++      .entryCount = depthEntries.size(),
++      .entries = depthEntries.data(),
++  };
++  g_depthLayout = g_device.CreateBindGroupLayout(&depthLayoutDescriptor);
++  const wgpu::PipelineLayoutDescriptor depthPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
++                                                                     .bindGroupLayouts = &g_depthLayout};
++  g_depthPipelineLayout = g_device.CreatePipelineLayout(&depthPipelineLayoutDescriptor);
+ }
+ 
+ void shutdown() {
+-  g_bright = g_blurH = g_blurV = g_composite = {};
++  g_bright = g_blurH = g_blurV = g_composite = g_down = g_farComposite = {};
+   g_tex = {};
+   g_view = {};
++  g_farTex = {};
++  g_farView = {};
++  g_farSamples = 0;
++  g_depthPipelineLayout = {};
++  g_depthLayout = {};
++  g_farModule = {};
+   g_size = {};
+   g_format = wgpu::TextureFormat::Undefined;
+   g_compositeSamples = 0;
+@@ -273,6 +458,30 @@ bool bloom_enabled() noexcept { return g_bloom.load(std::memory_order_relaxed);
+ 
+ void set_bloom(bool enabled) noexcept { g_bloom.store(enabled, std::memory_order_relaxed); }
+ 
++bool far_blur_enabled() noexcept { return g_farBlur.load(std::memory_order_relaxed) && webgpu::g_hasCoreFeatures; }
++
++void set_far_blur(bool enabled) noexcept { g_farBlur.store(enabled, std::memory_order_relaxed); }
++
++bool any_enabled() noexcept { return bloom_enabled() || far_blur_enabled(); }
++
++void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
++            const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
++            const wgpu::TextureView& resolve, uint32_t msaaSamples) {
++  // The far blur needs single-sample depth (the depth buffer is multisampled with MSAA).
++  if (far_blur_enabled() && g_module && depthView && msaaSamples == 1 && size.width >= 4 && size.height >= 4) {
++    const webgpu::gpu_prof::Zone zone{cmd, "Far blur"};
++    ensure_targets(size, format, msaaSamples);
++    draw(cmd, "Far blur downsample", g_down, scene, g_farView[0], false);
++    for (int i = 0; i < 2; ++i) {
++      draw(cmd, "Far blur (horizontal)", g_blurH, g_farView[0], g_farView[1], false);
++      draw(cmd, "Far blur (vertical)", g_blurV, g_farView[1], g_farView[0], false);
++    }
++    draw_far(cmd, depthView, dst, resolve);
++  }
++  if (bloom_enabled())
++    encode_bloom(cmd, scene, size, format, dst, resolve, msaaSamples);
++}
++
+ void encode_bloom(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::Extent3D& size,
+                   wgpu::TextureFormat format, const wgpu::TextureView& dst, const wgpu::TextureView& resolve,
+                   uint32_t msaaSamples) {
+@@ -291,3 +500,5 @@ void encode_bloom(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scen
+ } // namespace aurora::gfx::post_fx
+ 
+ void aurora_set_bloom(bool enabled) { aurora::gfx::post_fx::set_bloom(enabled); }
++
++void aurora_set_far_blur(bool enabled) { aurora::gfx::post_fx::set_far_blur(enabled); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 0c30d1f..e99e477 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -11,11 +11,25 @@
+ // size and added back. Off unless DOL_AURORA_BLOOM=1 or aurora_set_bloom(true);
+ // DOL_AURORA_BLOOM_THRESHOLD (0 to 1, of the brightness, default 0.72) and
+ // DOL_AURORA_BLOOM_STRENGTH (default 0.35) are read at startup.
++//
++// Far blur (HD's depth of field): before bloom, the scene blurred at a quarter
++// of the size and blended back by distance, from DOL_AURORA_FAR_BLUR_START to
++// _END (distances in near-plane units, default 8000 and 30000) up to
++// DOL_AURORA_FAR_BLUR_AMOUNT (default 0.8); where the game drew without depth
++// (the sky, the horizon, the islands' far models), _BACKGROUND (default 0.35). Off unless
++// DOL_AURORA_FAR_BLUR=1 or aurora_set_far_blur(true); _DEBUG=1 shows it in red.
+ namespace aurora::gfx::post_fx {
+ void initialize();
+ void shutdown();
+ bool bloom_enabled() noexcept;
+ void set_bloom(bool enabled) noexcept;
++bool far_blur_enabled() noexcept;
++void set_far_blur(bool enabled) noexcept;
++bool any_enabled() noexcept;
++// Every effect that is on, in order (far blur, then bloom); depthView: the EFB's depth.
++void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
++            const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
++            const wgpu::TextureView& resolve, uint32_t msaaSamples);
+ // scene: the EFB as a texture (resolved when multisampled), size: its size;
+ // dst: the EFB's color attachment, with msaaSamples samples, and resolve its
+ // single-sample copy when multisampled (null otherwise).
+-- 
+2.46.0
+

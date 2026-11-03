@@ -1,0 +1,128 @@
+From c8b50f35d986fd028521e8b8dd2341760b56d840 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 00:26:33 -0500
+Subject: [PATCH] graphics: classify vertex decode failures
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp      | 15 ++++++++++++++-
+ .../gxcore/include/gxruntime/gxcore/gxcore.hpp    |  8 ++++++++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp          |  8 ++++++++
+ 3 files changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index c16364d727..ab2e3cb9ef 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -401,6 +401,10 @@ void dol_aurora_shutdown(void) {
+                      "[gx-core] shutdown: submitted=%llu rejected=%llu "
+                      "failed=%d planned=%llu skipped=%llu cull_all=%llu "
+                      "missing_vcd=%llu vertex_decode_failures=%llu "
++                     "projection_missing=%llu payload_empty=%llu "
++                     "walk_underivable=%llu stride_mismatch=%llu "
++                     "topology_unsupported=%llu payload_overrun=%llu "
++                     "array_unresolved=%llu array_out_of_bounds=%llu "
+                      "unsupported_texgen=%llu per_vertex_tex_mtx=%llu "
+                      "unresolved_tex_matrix=%llu normals_ignored=%llu "
+                      "lighting_ignored=%llu tlut_texture=%llu "
+@@ -413,7 +417,16 @@ void dol_aurora_shutdown(void) {
+                      gx_aurora::g_shadow_frontend_failed ? 1 : 0,
+                      gaps.draws_planned, gaps.draws_skipped,
+                      gaps.cull_all_draws, gaps.missing_vcd,
+-                     gaps.vertex_decode_failures, gaps.unsupported_texgen,
++                     gaps.vertex_decode_failures,
++                     gaps.vertex_projection_missing,
++                     gaps.vertex_payload_empty,
++                     gaps.vertex_walk_underivable,
++                     gaps.vertex_stride_mismatch,
++                     gaps.vertex_topology_unsupported,
++                     gaps.vertex_payload_overrun,
++                     gaps.vertex_array_unresolved,
++                     gaps.vertex_array_out_of_bounds,
++                     gaps.unsupported_texgen,
+                      gaps.per_vertex_tex_mtx, gaps.unresolved_tex_matrix,
+                      gaps.normals_ignored, gaps.lighting_ignored,
+                      gaps.tlut_texture, gaps.alpha_compare_ignored,
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 136119a184..b9d70db48d 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -24,6 +24,14 @@ struct GapCounters {
+   unsigned long long cull_all_draws = 0;        // culled by state, not a gap
+   unsigned long long missing_vcd = 0;           // draw before VCD/VAT seen
+   unsigned long long vertex_decode_failures = 0;
++  unsigned long long vertex_projection_missing = 0;
++  unsigned long long vertex_payload_empty = 0;
++  unsigned long long vertex_walk_underivable = 0;
++  unsigned long long vertex_stride_mismatch = 0;
++  unsigned long long vertex_topology_unsupported = 0;
++  unsigned long long vertex_payload_overrun = 0;
++  unsigned long long vertex_array_unresolved = 0;
++  unsigned long long vertex_array_out_of_bounds = 0;
+   unsigned long long unsupported_texgen = 0;    // emboss/SRTG or >kMaxTexGens
+   unsigned long long per_vertex_tex_mtx = 0;    // TEXMTXIDX attrs (stubbed)
+   unsigned long long unresolved_tex_matrix = 0; // matrix rows never written
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index 339e1792e6..ec6c04c7f2 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -493,10 +493,12 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   if ((draw.transform_flags &
+        ar::kDrawTransformProjectionValid) == 0u) {
+     ++counters.vertex_decode_failures;
++    ++counters.vertex_projection_missing;
+     return skip("projection never captured");
+   }
+   if (draw.vertex_payload.empty()) {
+     ++counters.vertex_decode_failures;
++    ++counters.vertex_payload_empty;
+     return skip("draw carried no payload");
+   }
+ 
+@@ -521,11 +523,13 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+   WalkLayout walk;
+   if (!derive_walk(vcd_lo_, vcd_hi_, vat_[draw.vtx_fmt], walk)) {
+     ++counters.vertex_decode_failures;
++    ++counters.vertex_walk_underivable;
+     return skip("VCD/VAT walk underivable");
+   }
+   if (walk.vertex_size != draw.vertex_size) {
+     // Layout disagreement with the frontend is a correctness bug, not data.
+     ++counters.vertex_decode_failures;
++    ++counters.vertex_stride_mismatch;
+     return skip("walk stride != frontend stride");
+   }
+   // Shader key.
+@@ -735,6 +739,7 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+       &plan.indices);
+   if (index_count == 0u) {
+     ++counters.vertex_decode_failures;
++    ++counters.vertex_topology_unsupported;
+     return skip("line/point primitive (outside slice)");
+   }
+ 
+@@ -761,6 +766,7 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+       const WalkEntry& entry = walk.entries[e];
+       if (offset >= payload_size) {
+         ++counters.vertex_decode_failures;
++        ++counters.vertex_payload_overrun;
+         return skip("payload overrun");
+       }
+       const std::uint8_t* p = payload + offset;
+@@ -792,12 +798,14 @@ DrawPlan GxCoreState::build_draw_plan(const ar::ConsumedDraw& draw,
+         if (array == nullptr || !array->resolved ||
+             array->host_data == nullptr) {
+           ++counters.vertex_decode_failures;
++          ++counters.vertex_array_unresolved;
+           return skip("indexed attr has no resolved array");
+         }
+         const std::uint64_t element_offset =
+             static_cast<std::uint64_t>(index) * array->stride;
+         if (element_offset + entry.element_size > array->host_available) {
+           ++counters.vertex_decode_failures;
++          ++counters.vertex_array_out_of_bounds;
+           return skip("indexed element outside resolved array");
+         }
+         element =
+-- 
+2.41.0
+

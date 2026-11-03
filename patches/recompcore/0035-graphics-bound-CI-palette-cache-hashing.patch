@@ -1,0 +1,109 @@
+From 4c8949a0bc918046b725acb92eb1b3a63735354e Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Fri, 28 Aug 2026 20:04:20 -0500
+Subject: [PATCH] graphics: bound CI palette cache hashing
+
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp       | 13 +++++++++++++
+ GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp  | 14 +++++++++-----
+ GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp  |  5 ++++-
+ .../graphics/frontend/tools/dolgx_replay_core.cpp  |  6 ++++--
+ 4 files changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index c236c0755e..a6860ca2f7 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -3,6 +3,9 @@
+ #include <aurora/aurora.h>
+ #include <aurora/event.h>
+ #include <aurora/gfx.h>
++#if GXRUNTIME_HAS_AURORA_RECOMP
++#include <gfx/gxcore_draw.hpp>
++#endif
+ #include <SDL3/SDL_init.h>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -477,6 +480,16 @@ void dol_aurora_shutdown(void) {
+                      gaps.logic_op_ignored, gaps.dst_alpha_active,
+                      gaps.early_depth_active, gaps.ztexture_active,
+                      gaps.ztexture_ignored);
++        const auto& texture_stats =
++            aurora::gfx::gxcore::texture_cache_stats();
++        std::fprintf(stderr,
++                     "[gx-core] texture-cache: uploads=%llu hits=%llu "
++                     "ci_uploads=%llu raw_fallback=%llu hashed=%llu "
++                     "palette_hashed=%llu\n",
++                     texture_stats.uploads, texture_stats.hits,
++                     texture_stats.ci_uploads, texture_stats.raw_fallback,
++                     texture_stats.hashed_lookups,
++                     texture_stats.palette_hashes);
+     }
+ #endif
+     if (gx_aurora::g_audio_stream != nullptr) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 3a70630dde..d8baca635c 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -731,12 +731,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       return TextureHandle{};
+     const auto* bytes = static_cast<const uint8_t*>(data);
+     const uint32_t size = std::min(tsize, available);
+-    // Hash the actual source texels (+ TLUT for CI) so a content change under an
+-    // unchanged guest identity is a distinct cache entry — see TextureKey.
++    ++g_textureCacheStats.hashed_lookups;
+     uint64_t content_hash = XXH3_64bits(bytes, size);
+-    if (gxc::is_ci_format(format) && has_tlut && tlut_data != nullptr)
+-      content_hash =
+-          XXH3_64bits_withSeed(tlut_data, tlut_available, content_hash);
++    if (gxc::is_ci_format(format) && has_tlut && tlut_data != nullptr) {
++      ++g_textureCacheStats.palette_hashes;
++      // Resolvers report bytes available to the end of their mapped range. Only
++      // the declared GX palette belongs to this texture cache identity.
++      const uint32_t tlut_size =
++          std::min(tlut_available, tlut_entries * 2u);
++      content_hash = XXH3_64bits_withSeed(tlut_data, tlut_size, content_hash);
++    }
+     const TextureKey key{address,     tsize,        format,      width,
+                          height,      tlut_address, tlut_format, tlut_entries,
+                          content_hash};
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 7eaf47de1b..bf6df73307 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -73,12 +73,15 @@ void reset_texture_cache();
+ // re-decode) — on a static replay scene `uploads` must go to 0 after warm-up.
+ // `ci_uploads` = CI textures decoded through a TLUT; `raw_fallback` = decode
+ // produced nothing (CI without a resolved palette / unsupported) so the raw GX
+-// bytes were uploaded under the original format instead.
++// bytes were uploaded under the original format instead. Hash counters expose
++// live cache-key work separately from decode/upload work.
+ struct TextureCacheStats {
+   unsigned long long uploads = 0;
+   unsigned long long hits = 0;
+   unsigned long long ci_uploads = 0;
+   unsigned long long raw_fallback = 0;
++  unsigned long long hashed_lookups = 0;
++  unsigned long long palette_hashes = 0;
+ };
+ const TextureCacheStats& texture_cache_stats();
+ 
+diff --git a/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp b/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
+index ffb7336171..2f94fbb178 100644
+--- a/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
++++ b/GXRuntime/graphics/frontend/tools/dolgx_replay_core.cpp
+@@ -371,8 +371,10 @@ int dolgx_replay_core_main(const char* trace_path,
+   const auto& tex = aurora::gfx::gxcore::texture_cache_stats();
+   std::fprintf(stderr,
+                "dolgx_replay: gxcore texture uploads=%llu hits=%llu "
+-               "ci_uploads=%llu raw_fallback=%llu\n",
+-               tex.uploads, tex.hits, tex.ci_uploads, tex.raw_fallback);
++               "ci_uploads=%llu raw_fallback=%llu hashed=%llu "
++               "palette_hashed=%llu\n",
++               tex.uploads, tex.hits, tex.ci_uploads, tex.raw_fallback,
++               tex.hashed_lookups, tex.palette_hashes);
+   if (sink.failure_reason() != nullptr) {
+     std::fprintf(stderr, "dolgx_replay: consumer failure: %s\n",
+                  sink.failure_reason());
+-- 
+2.41.0

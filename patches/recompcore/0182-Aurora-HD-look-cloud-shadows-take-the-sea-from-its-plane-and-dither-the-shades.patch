@@ -1,0 +1,149 @@
+From 369b7b7e0de46de4bae944a49646b246762759d5 Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 12:02:44 +0900
+Subject: [PATCH] Aurora: the HD look's cloud shadows take the sea's place from
+ its plane, and dither the shades
+
+Square-looking shadows came from depth-based positions far out on the sea; banding from smooth shades multiplied into the 8-bit scene.
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 75 ++++++++++++++-----
+ 1 file changed, 56 insertions(+), 19 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index d172ebfc02..4429d4cfc0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -150,16 +150,24 @@ fn fs_down(in: VertexOutput) -> @location(0) vec4<f32> {
+     return vec4(c, 1.0);
+ }
+ 
+-// Multiplied into the scene (ambient occlusion); the EFB's alpha is kept.
++// Half an 8-bit step of noise (interleaved gradient noise): a smooth shade
++// multiplied or added into the 8-bit scene otherwise shows as bands.
++fn dither(pos: vec2<f32>) -> f32 {
++    return (fract(52.9829189 * fract(dot(pos, vec2(0.06711056, 0.00583715)))) - 0.5) * (1.5 / 255.0);
++}
++
++// Multiplied into the scene (ambient occlusion, sun shadows); the EFB's alpha is kept.
+ @fragment
+ fn fs_ao_apply(in: VertexOutput) -> @location(0) vec4<f32> {
+-    return vec4(textureSample(src, samp, in.uv).rgb, 1.0);
++    let shade = textureSample(src, samp, in.uv).rgb;
++    return vec4(shade + select(0.0, dither(in.pos.xy), shade.g < 0.999), 1.0);
+ }
+ 
+ // Added onto the scene; the EFB's alpha is kept.
+ @fragment
+ fn fs_composite(in: VertexOutput) -> @location(0) vec4<f32> {
+-    return vec4(textureSample(src, samp, in.uv).rgb * strength, 0.0);
++    let glow = textureSample(src, samp, in.uv).rgb * strength;
++    return vec4(max(glow + select(0.0, dither(in.pos.xy), max(glow.r, max(glow.g, glow.b)) > 0.002), vec3(0.0)), 0.0);
+ }
+ )""";
+ 
+@@ -315,29 +323,54 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
+     return out;
+ }
+ 
+-fn hash(p: vec2<f32>) -> f32 {
+-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
++// A gradient for each lattice point, from its integer coordinates: no sin(), so
++// every GPU gets the same values whatever its precision.
++fn gradient(p: vec2<f32>) -> vec2<f32> {
++    var q = bitcast<vec2<u32>>(vec2<i32>(p));
++    q = q * 1664525u + 1013904223u;
++    q.x += q.y * 1664525u;
++    q.y += q.x * 1664525u;
++    q = q ^ (q >> vec2(16u));
++    q.x += q.y * 1664525u;
++    q.y += q.x * 1664525u;
++    q = q ^ (q >> vec2(16u));
++    let a = f32(q.x) * (6.2831853 / 4294967296.0);
++    return vec2(cos(a), sin(a));
+ }
+ 
+-fn value_noise(p: vec2<f32>) -> f32 {
++// Gradient noise, about 0 to 1. Value noise put the clouds' edges along the
++// world's X and Z (square-looking shadows); gradient noise has no such rows.
++fn gradient_noise(p: vec2<f32>) -> f32 {
+     let i = floor(p);
+     let f = fract(p);
+-    let u = f * f * (3.0 - 2.0 * f);
+-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
++    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
++    let a = dot(gradient(i), f);
++    let b = dot(gradient(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0));
++    let c = dot(gradient(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0));
++    let e = dot(gradient(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0));
++    return 0.5 + 0.9 * mix(mix(a, b, u.x), mix(c, e, u.x), u.y);
+ }
+ 
+ fn fbm(p0: vec2<f32>) -> f32 {
++    // Each octave turned by about 37 degrees, so no two line up.
++    let turn = mat2x2<f32>(0.8, 0.6, -0.6, 0.8);
+     var p = p0;
+     var v = 0.0;
+     var a = 0.5;
+     for (var i = 0; i < 4; i++) {
+-        v += a * value_noise(p);
+-        p = p * 2.03 + vec2(17.0, 9.0);
++        v += a * gradient_noise(p);
++        p = turn * p * 2.03 + vec2(17.0, 9.0);
+         a *= 0.5;
+     }
+     return v;
+ }
+ 
++// Half an 8-bit step of noise (interleaved gradient noise), so a smooth shade
++// multiplied into the 8-bit scene doesn't come out as bands on the sea.
++fn dither(pos: vec2<f32>) -> f32 {
++    return (fract(52.9829189 * fract(dot(pos, vec2(0.06711056, 0.00583715)))) - 0.5) * (1.5 / 255.0);
++}
++
+ @fragment
+ fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
+     let d = textureLoad(depth, vec2<i32>(in.pos.xy), 0);
+@@ -345,19 +378,23 @@ fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
+     let ray = vec3(ndc.x * view.lens.x * view.lens.y, ndc.y * view.lens.x, -1.0);
+     let dir = vec3(dot(view.rows[0].xyz, ray), dot(view.rows[1].xyz, ray), dot(view.rows[2].xyz, ray));
+     let eye = vec3(view.rows[0].w, view.rows[1].w, view.rows[2].w);
++    // Where the view ray meets the sea, if it does.
++    var sea = -1.0;
++    if (dir.y < -1e-4) {
++        sea = (view.lens.w - eye.y) / dir.y;
++    }
+     var world = eye;
+-    if (d > 0.0) {
++    if (d > 0.0 && (sea <= 0.0 || view.lens.z / d < 0.9 * sea)) {
++        // Something in front of the sea (an island, a boat): its place from depth.
+         world = eye + dir * (view.lens.z / d);
+     } else {
+-        // No depth: the sky, or the sea toward the horizon.
+-        if (dir.y > -1e-4) {
+-            return vec4(1.0);
+-        }
+-        let t = (view.lens.w - eye.y) / dir.y;
+-        if (t <= 0.0) {
++        // The sea, also where it has no depth: its place from its plane. Taking
++        // the sea's distance from depth too gave straight-edged steps far out
++        // wherever depth is less precise (seen on Vulkan).
++        if (sea <= 0.0) {
+             return vec4(1.0);
+         }
+-        world = eye + dir * t;
++        world = eye + dir * sea;
+     }
+     let distance = length(world - eye);
+     if (debug_view) {
+@@ -368,7 +405,7 @@ fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
+     let drift = vec2(0.6, 0.25) * view.time.x * 0.02;
+     let n = fbm(world.xz / scale + drift);
+     let shade = smoothstep(0.42, 0.6, n) * strength * (1.0 - smoothstep(60000.0, 160000.0, distance));
+-    return vec4(vec3(1.0 - shade), 1.0);
++    return vec4(vec3(1.0 - shade + select(0.0, dither(in.pos.xy), shade > 0.0)), 1.0);
+ }
+ )""";
+ wgpu::ShaderModule g_cloudModule;
+-- 
+2.46.0
+
