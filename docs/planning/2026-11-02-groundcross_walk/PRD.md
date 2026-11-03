@@ -52,4 +52,5 @@ Gains under 1% are kept when they are consistent, exact and tested. Private modu
 
 - **Measure before writing the native:** the M0 census and speed test decide whether there is anything to gain.
 - **Hand over instead of declining:** whatever the native does not cover, the translation continues from that exact point.
-- **No copy of the CPU state:** check first, then commit once.
+- **No copy of the CPU state:** check as it walks, then commit once.
+- **Opt-in until qualified (2026-11-03):** the native walk is off unless `BLUEWAKE_NATIVE_GROUND_WALK=1`, until the Deck A/B and checkpoints qualify it.

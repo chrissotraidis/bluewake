@@ -13,7 +13,8 @@ Status: M0 done: go (prototype walk 8.1× faster; ≈ +1% expected); M1 (exact n
 
 ### M1: Exact native walk with hand-over (depends: M0 go)
 
-- [ ] M1-T01: Native walk; hand-over at what it does not cover.
+- [ ] M1-T00: Census: the share of top-level calls whose subtree reaches a polygon tree (sizes the native-to-return vs hand-over paths).
+- [ ] M1-T01: Native walk, opt-in (`BLUEWAKE_NATIVE_GROUND_WALK=1`); certify-and-hook script; hand-over at the first polygon tree.
 - [ ] M1-T02: Differential test at every hand-over, short turns included.
 
 ### M2: Qualify (depends: M1)
