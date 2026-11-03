@@ -729,8 +729,9 @@ static void hd_sun_rule(CPUState* cpu, float out[3]) {
     aurora_set_sun_hd_light(1, night ? 1 : 0, fade);
 }
 
-// Wind Waker HD's own normals for the stage in play, for the sun shadows' facing term: the HD pack's
-// optional/hd-normals/<stage>.bin (made by the importer), handed to the renderer as the stage changes.
+// Wind Waker HD's own normals for the stage in play, for the sun shadows' facing term, and its rooms' vertex
+// colours for HD's light: the HD pack's optional/hd-normals/<stage>.bin and optional/hd-colours/<stage>.bin (made
+// by the importer), handed to the renderer as the stage changes.
 static void hd_normals_stage(CPUState* cpu) {
     static char s_stage[9];
     char stage[9] = {0};
@@ -743,6 +744,7 @@ static void hd_normals_stage(CPUState* cpu) {
     char path[4096];
     if (stage[0] == '\0' || pack == NULL || pack[0] == '\0') {
         aurora_set_hd_normals(NULL);
+        aurora_set_hd_stage_colours(NULL);
         return;
     }
     snprintf(path, sizeof path, "%s/optional/hd-normals/%s.bin", pack, stage);
@@ -752,6 +754,12 @@ static void hd_normals_stage(CPUState* cpu) {
     aurora_set_hd_normals(f != NULL ? path : NULL);
     if (g_trace)
         fprintf(stderr, "[hd-look] HD normals for %s: %s\n", stage, f != NULL ? path : "none");
+    // And its rooms' own vertex colours (HD remade them), optional/hd-colours/<stage>.bin.
+    snprintf(path, sizeof path, "%s/optional/hd-colours/%s.bin", pack, stage);
+    f = fopen(path, "rb");
+    if (f != NULL)
+        fclose(f);
+    aurora_set_hd_stage_colours(f != NULL ? path : NULL);
 }
 
 // Wind Waker HD's cloud shadow texture for the cloud shadows on HD's rule: the HD pack's
@@ -816,6 +824,90 @@ static void cloud_floor(CPUState* cpu, bool on) {
     }
 }
 
+// Wind Waker HD's room lights (the HD pack's optional/hd-sky/room-lights.bin, made by the importer from each
+// stage's baseLight.bin): for each stage, 64 pitches then 64 yaws (big-endian s16), one a room. HD's
+// setLightPosHD (kankyo3_roomLight, d_kankyo_3.cpp) lights the room Link is in from (cos p sin y, sin p,
+// cos p cos y) when its angles are set, and from the sun by the clock when they aren't; never in M2tower.
+// Golden values: Dragon Roost Cavern's room 0 (-0.477, 0.811, 0.338), its shadow pass's light in Cemu.
+typedef struct RoomLights {
+    char name[16];
+    u8 angles[256];
+} RoomLights;
+static RoomLights* g_room_lights;
+static u32 g_room_light_count;
+
+static void room_lights_load(void) {
+    static bool s_tried;
+    if (s_tried)
+        return;
+    s_tried = true;
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (pack == NULL || pack[0] == '\0')
+        return;
+    char path[4096];
+    snprintf(path, sizeof path, "%s/optional/hd-sky/room-lights.bin", pack);
+    FILE* f = fopen(path, "rb");
+    if (f == NULL)
+        return;
+    u8 head[8];
+    if (fread(head, 1, 8, f) == 8 && memcmp(head, "BWRL", 4) == 0) {
+        const u32 count = (u32)head[4] << 24 | (u32)head[5] << 16 | (u32)head[6] << 8 | head[7];
+        if (count > 0u && count <= 1024u && (g_room_lights = calloc(count, sizeof *g_room_lights)) != NULL) {
+            for (; g_room_light_count < count; ++g_room_light_count) {
+                RoomLights* r = &g_room_lights[g_room_light_count];
+                if (fread(r->name, 1, 16, f) != 16 || fread(r->angles, 1, 256, f) != 256)
+                    break;
+                r->name[15] = '\0';
+            }
+        }
+    }
+    fclose(f);
+    if (g_trace)
+        fprintf(stderr, "[hd-look] HD room lights: %u stages from %s\n", g_room_light_count, path);
+}
+
+// The light HD lights the room Link is in from (the direction toward it), or false for HD's sun by the clock.
+static bool room_light(CPUState* cpu, float out[3]) {
+    room_lights_load();
+    char stage[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+    const int room = (s8)mem_read8(cpu, 0x803F6A78u);       // dStage_roomControl_c::mStayNo
+    if (room < 0 || room >= 64 || strcmp(stage, "M2tower") == 0)
+        return false;
+    for (u32 i = 0; i < g_room_light_count; ++i) {
+        const RoomLights* r = &g_room_lights[i];
+        if (strncmp(r->name, stage, 16) != 0)
+            continue;
+        const int pitch = (s16)((u32)r->angles[room * 2] << 8 | r->angles[room * 2 + 1]);
+        const int yaw = (s16)((u32)r->angles[128 + room * 2] << 8 | r->angles[128 + room * 2 + 1]);
+        if (pitch == 0 && yaw == 0)
+            return false;
+        const float p = (float)(u16)pitch * (6.28318531f / 65536.0f), y = (float)(u16)yaw * (6.28318531f / 65536.0f);
+        out[0] = cosf(p) * sinf(y);
+        out[1] = fabsf(sinf(p));  // getShadowDirection turns a light from below up
+        out[2] = cosf(p) * cosf(y);
+        return true;
+    }
+    return false;
+}
+
+// HD lights its dungeons' rooms as its outdoor scenery, without the clouds and the edge light (its room shader,
+// captures-nov3 s01/s02: hemisphere ambient, N.L to the room's light, the room light's shadow map and SSAO): the
+// stage types HD's setLightPosHD takes for dungeons (1 dungeon, 3 boss, 4 subdungeon, 6 miniboss), while HD's
+// palettes are in (its colours for the room). The casters are culled as HD culls them there
+// (aurora_set_sun_caster_cull), so a closed room's ceiling doesn't shade its floor, and HD's torches come from its
+// light buffer. BLUEWAKE_HD_ROOM_SHADOWS=0 keeps the rooms as before (the sun shadows outdoors only).
+static bool sky_palettes_shown(void);
+static bool hd_room(u32 type) {
+    static int s_on = -1;
+    if (s_on < 0) {
+        const char* value = getenv("BLUEWAKE_HD_ROOM_SHADOWS");
+        s_on = value == NULL || value[0] != '0';
+    }
+    return s_on && (type == 1u || type == 3u || type == 4u || type == 6u) && sky_palettes_shown();
+}
+
 // The game's glow around torches, lanterns and Bokoblins' sticks: spheres into the frame's alpha, then its colour
 // over them (dDlst_alphaModel_c, at most 64 a frame). HD draws none (d_a_ep, d_a_kantera, d_a_boko, d_a_bpw: no
 // alpha model); its light buffer lights the walls instead, so with HD's rule for it the game gets no room for them,
@@ -835,16 +927,21 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
     hd_normals_stage(cpu);
     hd_cloud_texture();
     hd_object_tables();
-    bool show = false;
+    bool show = false, sun_show = false;
     bool torch_view = false;
     if (g_clouds == 1 || g_sun == 1 || g_edge == 1 || g_torch == 1) {
         const u32 info = mem_read32(cpu, kStagInfo);
         const u32 type = guest_pointer(info) ? (mem_read32(cpu, info + 0x0Cu) >> 16) & 7u : 2u;
         const u32 view = mem_read32(cpu, kCurrentView);
         const bool outdoors = type == 0u || type == 7u;
+        const bool room = !outdoors && hd_room(type);
+        // HD's casters culled as their materials are (its map in Dragon Roost Cavern): in its lit rooms, so a
+        // closed room's ceiling casts nothing on the floor. Outdoors keeps both sides for now (not checked there).
+        aurora_set_sun_caster_cull(room ? 1 : 0);
         if (g_trace && retrace % 300u == 0u)
-            fprintf(stderr, "[hd-look] stage type %u (%s)\n", type, outdoors ? "outdoors" : "indoors");
-        if ((outdoors || g_torch == 1) && guest_pointer(view)) {
+            fprintf(stderr, "[hd-look] stage type %u (%s)\n", type,
+                    outdoors ? "outdoors" : room ? "indoors, HD's lit room" : "indoors");
+        if ((outdoors || room || g_torch == 1) && guest_pointer(view)) {
             float inv[12];
             for (u32 i = 0; i < 12; ++i)
                 inv[i] = read_float(cpu, view + kViewInvMtx + i * 4u);
@@ -879,20 +976,30 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                     s_hd_rule = rule != NULL && rule[0] == '1';
                 }
                 // HD's rule is for its sun shadows; with them off the edge light keeps the game's sun.
+                float light[3];
+                bool room_lit = false;
                 if (s_hd_rule && g_sun == 1) {
-                    float light[3];
-                    hd_sun_rule(cpu, light);
-                    aurora_set_sun_direction(light[0], light[1], light[2]);
+                    room_lit = room && room_light(cpu, light);
+                    if (room_lit) {
+                        aurora_set_sun_direction(light[0], light[1], light[2]);
+                        aurora_set_sun_hd_light(1, 0, 0.0f);  // a room's light: no night side, no day/night fade
+                        if (g_trace && retrace % 300u == 0u)
+                            fprintf(stderr, "[hd-look] HD's room light %.3f %.3f %.3f\n", light[0], light[1], light[2]);
+                    } else {
+                        hd_sun_rule(cpu, light);
+                        aurora_set_sun_direction(light[0], light[1], light[2]);
+                    }
                 } else {
                     aurora_set_sun_direction(sx, sy, sz);
                 }
                 // The same in the camera's space (its axes are inv's columns),
-                // for the room culling below.
-                const float sl = sqrtf(sx * sx + sy * sy + sz * sz);
+                // for the room culling below; in a room lit by its own light, that light.
+                const float lx = room_lit ? light[0] : sx, ly = room_lit ? light[1] : sy, lz = room_lit ? light[2] : sz;
+                const float sl = sqrtf(lx * lx + ly * ly + lz * lz);
                 if (sl > 0.0f) {
                     for (int a = 0; a < 3; ++a)
-                        g_sun_view[a] = (inv[a] * sx + inv[4 + a] * sy + inv[8 + a] * sz) / sl;
-                    g_sun_up = sy / sl;
+                        g_sun_view[a] = (inv[a] * lx + inv[4 + a] * ly + inv[8 + a] * lz) / sl;
+                    g_sun_up = ly / sl;
                 }
                 if (g_torch == 1) {
                     const float eye[3] = {inv[3], inv[7], inv[11]};
@@ -903,10 +1010,11 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                     fprintf(stderr, "[hd-look] sun from the eye %.0f %.0f %.0f, HD's cascade splits %.0f %.0f\n", sx,
                             sy, sz, split_middle, split_far);
                 show = outdoors;
+                sun_show = outdoors || room;
             }
         }
     }
-    const bool clouds_on = show && g_clouds == 1, sun_on = show && g_sun == 1, edge_on = show && g_edge == 1;
+    const bool clouds_on = show && g_clouds == 1, sun_on = sun_show && g_sun == 1, edge_on = show && g_edge == 1;
     const bool torch_on = torch_view && g_torch == 1;
     if (torch_on != g_torch_shown && g_torch >= 0) {
         aurora_set_torch_light(torch_on);
@@ -1150,6 +1258,7 @@ static u8* g_sky_data;  // the stage in play's, or NULL
 static u32 g_sky_pale, g_sky_virt;
 static u32 g_sky_extra = 24u;  // the stage in play's (SkyStage.extra)
 static bool g_sky_shown;  // the tables hold HD's (as last seen)
+static bool sky_palettes_shown(void) { return g_sky_shown; }
 static float g_sky_exposure;  // what aurora_set_exposure was last given
 
 // A new choice of HD sunlight, at once: the brightness is otherwise worked out

@@ -378,3 +378,11 @@ intensities (Link's). The host gives the GameCube's global actor C0 and K0 (`aur
 character draw whose toon registers (C0, the ramp stage's KONST) differ takes HD's c0 and k times those ratios in
 linear light (clamped 0-4), the shadow colour global. Link's own draws have ratio 1.
 `DOL_AURORA_ACTOR_LIGHT_HD_OWN=0` turns it off.
+
+Patch 0224 adds `aurora_set_sun_caster_cull`: the scenery's casters take their draw's own cull mode, as Wind Waker
+HD draws its shadow map's casters, so a closed room's ceiling no longer shades the whole floor from a room light
+above. Characters keep their own. The host turns it on in HD's lit rooms; `DOL_AURORA_SUN_SHADOW_CASTER_CULL`
+overrides it for tests. In HD's lava and fire rooms (GanonB, Cave01, MiniKaz, Ganon's Tower's lava
+parts) a lit room draw in the GameCube's two-stage form adds HD's lava glow, albedo x lava K x 4 x the vertex red
+squared, outside the shade, with lava K the material's konst2 animation at the game frame, from a version 2
+stage colour table (`aurora_set_hd_stage_colours`).
