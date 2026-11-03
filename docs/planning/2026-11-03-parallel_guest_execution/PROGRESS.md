@@ -18,7 +18,9 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 - [ ] M1-T02: Rank reasons by translated time they leave behind
 
 ### M2: Native widening (depends: M1)
-- [ ] M2-T01: Widen the top decline reasons with differential oracles
+- [x] M2-T00: Found existing natives for multi-key transforms (`native_anim.c`), mtx-calc (`native_mtxcalc.c`) and audio channels (`native_jas.c`); blockers: behaviour-timing leaders, `_ato` accesses, hashes (TECH_PLAN)
+- [ ] M2-T01: Port `native_gx_gen.py`/`native_leaf_gen.py` to the behaviour-timing block shape and `_ato` accesses; generator runs on the current composite
+- [ ] M2-T01b: Re-run the sets' differential tests, record hashes; Deck A/B
 - [ ] M2-T02: Deck A/B, checkpoints and pictures identical
 
 ### M3: Overlap window (parallel with M1)

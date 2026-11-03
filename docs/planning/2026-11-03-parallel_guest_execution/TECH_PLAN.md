@@ -44,6 +44,24 @@ draw-list flush: join all → publish matrices + scale flags → set j3dSys as t
 
 Guest cycles for the serial calc are charged at submit. A job never writes live guest memory; publication happens on the game thread.
 
+## Existing native sets: port, don't write (2026-11-03)
+
+The natives this plan needs already exist, certified on an older pipeline, and are off:
+
+| File (set) | Covers | Recorded cost |
+| --- | --- | --- |
+| `native_anim.c` (set 4) | Multi-key `J3DAnmTransformKey::calcTransform`, `J3DGetKeyFrameInterpolation<f32>`/`S`, Hermite | 2.2–2.5 % at Forest Haven, Dragon Roost |
+| `native_mtxcalc.c` (entries) | Maya/Basic/Softimage `calcTransform` with callees | 0.46 + 0.14 % on Outset |
+| `native_jas.c` (entries, seventh round) | `TOscillator`, `TChannel::updateEffectorParam`/`updateMixer`/`updateAutoMixer`, `Calc::sinfT` | 2.6 % at Forest Haven, 0.9 % at sea |
+
+Why they don't run (generator run against the `m437-a` composite, and #541):
+
+1. **Behaviour timing is on by default** (`build.py`, `--no-behaviour-timing` turns it off). Blocks now start `if (downcount <= -LOOP_BUDGET) return; cycle_block_prepaid = true; downcount -= N; goto bwfast_K;` with budget checks only at loop heads (`behaviour_timing.py --loop-checks`). `native_gx_gen.py`'s `LEADER` expects `cycle_block_prepaid = dolrecomp_block_can_precharge(ctx, N);`, so `native_leaf_gen.py` stops at the first entry (`__ieee754_fmod: 8032EC1C is not a block leader`).
+2. **`lean_deadlines.py`'s access form** (`{ bool bw_ool = false; … bw_write32_ato(&bw_ool, ctx, …); if (__builtin_expect(bw_ool, 0) && …) }`) is unknown to the generator (#541's `unhandled ctx` failure).
+3. **Hashes.** `native_entries.py` hooks a native only where the translation hashes to the body its differential test ran against; set 4 builds but is never hooked on this tree.
+
+Port: teach `native_gx_gen.py` the behaviour-timing leader and the `_ato` form (the new block shape is simpler: one charge per block, budget at loop heads), re-run `tests/native_leaf_test.c` and the set-4 tests against the current translation, record the hashes. This replaces "write new natives" in M2 and is the serial half of M6-T02.
+
 ## Decline reasons (from source, M1-T00)
 
 | Path | Guards | Likely dominant reason | Widening |
