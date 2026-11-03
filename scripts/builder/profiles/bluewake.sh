@@ -49,8 +49,11 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), merged into bluewake-next as f9e3f4e.
 # The HD look's effects use the camera the frame was drawn with (RecompCore #58, on top of f9e3f4e): pin #58's head, fetched from upstream, until it merges.
 # Smooth Motion's opt-in stepped pacing at 120 Hz and up (RecompCore #59, carried on top of #58 in #51's branch until it merges).
+# The HD look's sun shadows, occlusion and cloud shadows leave the effects drawn over the scene alone (the spin attack's rings, the Master Sword's glow), as Wind Waker HD does: patches/recompcore/0206 (pdale-boop).
+# Effects that write depth left out of the HD look's shading too: the game's particles and glow models (Dragon Roost Cavern's lava geysers, a door's dust): patches/recompcore/0206 (pdale-boop).
+# The lava geysers' core and a door's dust left unshaded too: glow models may take the rasterized colour when their textures only cut the shape, effects at their own depth keep their share near or far, and a blended effect's share by its opacity: patches/recompcore/0206 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=ef5a9acc3768ac344d872f91f9f8844e9df7fe31
+RECOMPCORE_SHA=22ddca24e11acf57900122e0d7212cecdbb0e588
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

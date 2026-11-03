@@ -266,3 +266,27 @@ swell's height unlit and lit the swells' crests. Pools, rivers and falls count a
 from 10,000 to 25,000 units away (`DOL_AURORA_EXPOSURE_FAR`), where islands are the haze's colour, and tapers off on what is already bright
 (`DOL_AURORA_EXPOSURE_HIGHLIGHTS`, ice and white rock). `DOL_AURORA_SEA_MASK_DEBUG=1`
 shows the mask.
+
+Patch 0206 keeps the HD look's shading off the effects drawn over the scene. The sun shadows, the occlusion and the
+cloud shadows are worked out after the scene from its depth buffer, and an effect drawn blended without writing depth
+(the spin attack's rings and burst, the Master Sword's glow, sparks) leaves the depth there the scenery's behind it:
+Link's cast shadow was drawn across the glowing rings. Wind Waker HD draws such effects after its lighting. The scene's
+effects are drawn again with their own pipelines into a mask, over black and against the finished depth, and the
+shading takes away as much of its shade as they make up (their brightest channel times 2,
+`DOL_AURORA_EFFECT_MASK_GAIN`), within 3,000 units. Left out of the mask: the sea's surf, the GameCube's own shadows,
+what has no depth test (the sky's clouds) and a character's eyes and mouth; the effects are drawn 5% of their distance
+further back (`DOL_AURORA_EFFECT_MASK_PUSH`), so what lies on a surface keeps its shade.
+`DOL_AURORA_EFFECT_MASK_DEBUG=1` shows in red what the sun shadows leave.
+
+Patch 0206 also treats a blended draw that writes depth as an effect when it is one of the game's particles (the host's
+tag) or a glow model (its colour from neither a texture nor the rasterized colour). A particle's colour draw over
+its own depth draw, and an effect that writes depth, go into the effects' mask at their own depth, against a copy
+of the sea mask's depth. Where such an effect covers a pixel, the occlusion, sun shadows and cloud shadows shade
+from the sea mask's depth, the scenery under it, as Wind Waker HD lights before it draws its effects. A small pass
+makes that depth only in frames with such effects.
+
+Patch 0206 also finishes Dragon Roost Cavern's effects. A glow model may take the rasterized colour when its textures
+only cut its shape (the geysers' middle layer, C1 + 0.5 x RASC, was shaded as scenery); an effect drawn at its own
+depth keeps its share near or far (the cover's fade from 3,000 units went by the far wall's depth behind it). The
+effects are drawn into the mask a second time over white, so a blended effect's share is its opacity: a dark
+dust no longer lets the floor's shadows show through. `DOL_AURORA_EFFECT_MASK_OPACITY=0` keeps the colour alone.
