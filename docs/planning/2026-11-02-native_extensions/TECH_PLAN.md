@@ -35,7 +35,7 @@ if (cpu->cycle_deadline_budget > 0 &&
 | M0 | Why does skinning decline? | Count declines by reason and model size; one Outset minute in Game Mode | **Done.** All timing declines are the turn budget; calls of 8k+ cycles refused 91–100% |
 | M1 | Do the two native sets help? | Full builds with `--native-entries` / `--native-set4`, own training, A/B | **Blocked.** Both need porting first (generator write forms; entry hashes for this tree) |
 | M2 | Can big models run natively? | Native runs the envelopes that fit the turn, then hands over to the translation | **Done.** Exact in the differential test ([how it works](#how-the-resumable-native-works-m2)) |
-| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | First build +0.8%; empty-model fix re-measuring |
+| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | **+1.2%** with partial runs on (5 of 6 rounds ahead); hand-over alone level with the control |
 
 ## How the resumable native works (M2)
 
