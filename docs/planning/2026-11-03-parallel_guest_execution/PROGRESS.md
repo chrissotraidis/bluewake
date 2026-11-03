@@ -1,6 +1,6 @@
 # PROGRESS — Parallel guest execution
 
-Status: In progress (audit done, Track A chosen; `entry()` narrows the async window to opaque, non-envmap materials; next: idle-machine re-profile and decline counts)
+Status: In progress (audit done, Track A chosen; `entry()` narrows the async window to opaque, non-envmap materials; pose job ≈ 1–3 % after #541's Deck counts; next: audio lead)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -14,7 +14,7 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 
 ### M1: Decline census (depends: M0)
 - [x] M1-T00: Decline reasons from source (see TECH_PLAN, *Decline reasons*)
-- [ ] M1-T01: Reason codes for skinning, `key-s`, `transform-simple` declines
+- [ ] M1-T01: Reason codes for `key-s`, `transform-simple` declines (skinning: done in #541)
 - [ ] M1-T02: Rank reasons by translated time they leave behind
 
 ### M2: Native widening (depends: M1)
@@ -46,5 +46,6 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 | Date | Decision |
 | --- | --- |
 | 2026-11-03 | Track A (native async jobs) first; Track B kept as second choice, reopened only by the PRD criterion |
+| 2026-11-03 | Skinning dropped from this plan: #541 measured it (≈ 1.5 % of the Deck game thread, threading ≈ +0.5–1 %). Estimates lowered to Deck cycle counts: serial widening ≈ 1–2 %, async pose job ≈ 1–3 %. Next lead: audio |
 | 2026-11-03 | Native widening comes before any async job. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms and large-model skinning. |
 | 2026-11-03 | Async pose job eligibility adds: every material in a material-sorted or non-sorted buffer, no env/proj-map texture matrix |

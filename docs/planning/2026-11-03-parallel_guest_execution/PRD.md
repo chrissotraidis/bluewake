@@ -29,25 +29,29 @@ flowchart LR
 | Outset, guest-PC sampler, 521,370 samples: J3D **21.9 %**, collision 14.1 %, matrix/vector 11.3 %, audio (`JASystem`) 9.3 %, GX/GD 7.6 %, particles 3.9 %; the top 45 functions cover 43 % | `BLUEWAKE_PC_SAMPLE`, retraces 2700–4200, headless; **taken during a concurrent build, shares indicative only** |
 | Top J3D functions: `calcWeightEnvelopeMtx` 2.75 %, `J3DUClipper::clip` 2.7 % (two overloads), `J3DAnmTransformKey::calcTransform` 1.4 %, `J3DModel::calc` 1.2 %, `recursiveCalc` 0.9 % | Same run |
 | Native paths decline often: `key-s` 435 k native / 1.43 M declined; `transform-simple` 321 k / 1.02 M; skinning 250 k / 25.7 k, yet 2.75 % of samples sit in the translated skinning body, so the declines are the large models | `[native-*]` counters in the same run |
+| **Skinning is already settled by [#541](https://github.com/chrissotraidis/bluewake/pull/541):** the turn budget refuses the big models (8k+ cycle calls decline 91–100 %); partial native runs were exact but within noise (+0.05 % to +0.55 %); skinning is ≈ 1.5 % of the Deck game thread, and threading it is worth ≈ +0.5–1 % | #541 census and Deck A/B |
+| **Deck cycle counts are smaller than the sampler's shares.** Translated Maya `calcTransform` 0.59, key-frame 0.46 + 0.44, `JMAEulerToQuat` 0.40 M cycles per frame (each ≈ 0.35–0.8 % of a frame, assuming ≈ 115 M cycles per frame); their natives are in `--native-entries`/`--native-set4`, which are off and need porting | #541 tracker (#503 Outset session) |
 | `J3DModel::calc` is called from actor `draw()` in about 286 of ~550 call sites, right before `entry`/`viewCalc`: no overlap window inside the caller | tww `J3DModel.cpp:690`, `m_Do_ext.cpp:531`; heuristic grep |
 | `calc` uses the `j3dSys` singleton and static recursion state (`J3DSys::mCurrentMtx`, `mCurrentS`, `mParentS`) and calls arbitrary code: joint callbacks (90 of 476 actor sources), `mCalcCallBack`, deformers | tww `J3DMtxCalc`/`J3DJoint.cpp:42,50` |
 
 ## Decisions
 
 - **Track A (asynchronous native jobs) first.** Track B (concurrent translated regions) stays second choice. It needs a second, reentrant code-generation mode (`ctx_param`, `cpu->ram`, no direct calls or gather pipe) plus a real memory snapshot, and gives up the fixed-address speed. Reopen it only if a single region worth ≥ 15–20 % of the game thread has a long window before its first consumer, is too complex to rewrite natively, and traces as self-contained.
-- **Widen native coverage before parallelizing.** An async pose job needs a native implementation that accepts the common models anyway, and that alone shortens the thread. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms and large-model skinning.
+- **Widen native coverage before parallelizing.** An async pose job needs a native implementation that accepts the common models anyway, and that alone shortens the thread. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms (large-model skinning is out of scope after #541).
 - 30 game updates per second is fixed. No change to guest cadence.
 
 ## Goals
 
 | Goal | Target |
 | --- | --- |
-| Serial widening (skinning, `key-s`, `transform-simple`) | ≈ 3–5 % off game-thread time in Outset, identical checkpoints |
-| Async pose job (if the window exists) | further ≈ 3–8 %; 0 % if other actors read matrices before the flush |
+| Serial widening (`key-s`, `transform-simple`; start by porting `--native-entries`/`--native-set4`) | ≈ 1–2 % off game-thread time in Outset, identical checkpoints |
+| Async pose job (if the window exists) | further ≈ 1–3 % against a 13 % gap to 30 FPS; 0 % if other actors read matrices before the flush |
 | Correctness | identical checkpoints and pictures against the serial build; serial path stays the default and the oracle |
 | Gate for any async code | the memory-read trace (M3) shows no consumer between submit and flush for eligible models |
 
-Estimates come from one contended profile and source reading. Past native rewrites delivered less than their sample share (`__save_gpr`/`__restore_gpr`, 2026-09-24), so plan on the low end.
+Estimates come from one contended profile and source reading. Past native rewrites delivered less than their sample share (`__save_gpr`/`__restore_gpr`, 2026-09-24), so plan on the low end. The ranges were lowered on 2026-11-03 after the Deck cycle counts from #541; the sampler overweights short dispatched functions, so its 21.9 % J3D share overstates what a pose job can move.
+
+**Consequence:** the J3D pose job is at best a few percent. The next multithreading lead is audio (`JASystem`, 9.3 % on the sampler), pending a Deck cycle count.
 
 ## Non-goals
 

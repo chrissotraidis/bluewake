@@ -47,7 +47,7 @@ Guest cycles for the serial calc are charged at submit. A job never writes live 
 
 | Path | Guards | Likely dominant reason | Widening |
 | --- | --- | --- | --- |
-| Skinning (`native_skin.c`) | FP/PS state, no write journal, plain RAM, stores apart from reads, finite floats < 2^31, **the whole function's cycles (58 + 23 per envelope + 60 per joint) inside the turn budget and before the next deadline** | The cycle guard: it scales with model size, matching "declines are the big models" | Resume or split at a block boundary with exact cycle accounting; needs care |
+| Skinning (`native_skin.c`) | FP/PS state, no write journal, plain RAM, stores apart from reads, finite floats < 2^31, **the whole function's cycles (58 + 23 per envelope + 60 per joint) inside the turn budget and before the next deadline** | The turn-budget guard, **confirmed by [#541](https://github.com/chrissotraidis/bluewake/pull/541)** (8k+ cycle calls decline 91–100 %) | Done and dropped: #541's partial runs were exact but within noise; out of scope here |
 | `transform-simple` (`J3DAnmTransformKey::calcTransform`) | **zero- or one-key channels only**; `ready(256)` | By design: any animated channel (> 1 key) declines | Native multi-key transform calling the native `key-s`/`key-f` interpolation; the largest M2 item |
 | `key-s` (`J3DGetKeyFrameInterpolationS`) | `ready(512)` (no positive `downcount`, budget and deadline ≥ 512 cycles), GQR5 must be signed short with scale 0, ≤ 256 keys, strictly increasing times, time in range | Unknown: GQR5 scale, key count and the cycle bound are all plausible | Count reasons first (M1-T01) |
 
