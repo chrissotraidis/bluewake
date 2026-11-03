@@ -125,7 +125,10 @@ ownership`"]
 [`bench_tour.py`](../../scripts/bench_tour.py) controls **what the game does**.
 It launches a BlueWake executable with an isolated card and settings, loads one
 state, visits fixed scenes, reads BlueWake's shared session instrumentation, and
-compares guest checkpoints. It answers questions such as “did this build make
+compares guest checkpoints. It loads the state with `BLUEWAKE_STATE_REAPPLY=0`,
+so the state's game stays as it was saved whatever the run's settings, and the
+checkpoints of two builds can agree (`BLUEWAKE_STATE_REAPPLY=1` in the
+environment loads it as a player would). It answers questions such as “did this build make
 Outset faster?” and “did the sampled guest state remain the same?” It does not
 sample native call stacks, so it cannot name the function responsible for a
 change.

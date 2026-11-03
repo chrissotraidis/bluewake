@@ -517,6 +517,12 @@ image for the agent to look at.
   captures) counts on from the state's retrace. A limit below it ends the run at once.
 - Make the state just before the thing you want to see happen. A state "at the trees" saved after the walk's last
   swing had a tree already falling.
+- A loaded state follows this run's settings: the mods' and Better Wind Waker's values in the game (a 21:9 state
+  loaded at 16:9 gets 16:9's), the sprint speed, instant text and HD's sky are put to what this run has set. So
+  two runs from one state with different settings no longer have the same guest memory. `BLUEWAKE_STATE_REAPPLY=0`
+  leaves the state's game as it was saved; `render_bench` and `bench_tour.py` set it, so their guest checkpoints
+  agree between builds (set `BLUEWAKE_STATE_REAPPLY=1` before running them to measure as a player loads a state).
+  Whether a file is going, the stage select's way back and saving being off follow the state either way.
 
 ## Input
 

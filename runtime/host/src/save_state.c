@@ -112,6 +112,29 @@ bool bw_state_writer_close(BwStateWriter* writer) {
     return bw_state_writer_finish(writer, true);
 }
 
+// Whether the file ends with the gzip trailer of `data`: its CRC-32 and its
+// length mod 2^32, little-endian. Checked here, not left to gzread: zlib 1.3.2
+// (Arch, November 2026) reads a stream cut short of its trailer without an
+// error, where 1.3 and the Windows build's report it, so a truncated state
+// loaded there with nothing to say it was incomplete.
+static bool gzip_trailer_matches(const char* path, const uint8_t* data, size_t size) {
+    FILE* file = fopen(path, "rb");
+    if (file == NULL)
+        return false;
+    uint8_t trailer[8];
+    const bool read = fseek(file, -8L, SEEK_END) == 0 && fread(trailer, 1u, sizeof trailer, file) == sizeof trailer;
+    fclose(file);
+    if (!read)
+        return false;
+    uLong crc = crc32(0uL, Z_NULL, 0u);
+    for (size_t done = 0u; done < size;) {
+        const size_t part = size - done > (1u << 30) ? (1u << 30) : size - done;
+        crc = crc32(crc, data + done, (uInt)part);
+        done += part;
+    }
+    return get_le32(trailer) == (uint32_t)crc && get_le32(trailer + 4u) == (uint32_t)size;
+}
+
 bool bw_state_reader_open(BwStateReader* reader, const char* path) {
     if (reader == NULL || path == NULL || path[0] == '\0')
         return false;
@@ -167,6 +190,11 @@ bool bw_state_reader_open(BwStateReader* reader, const char* path) {
         return false;
     }
     gzclose(file);
+    if (!gzip_trailer_matches(path, buffer, size)) {
+        fprintf(stderr, "[state] %s: incomplete compressed stream\n", path);
+        free(buffer);
+        return false;
+    }
     if (size < 12u || memcmp(buffer, BW_STATE_MAGIC, 8u) != 0) {
         fprintf(stderr, "[state] %s is not a BlueWake state\n", path);
         free(buffer);

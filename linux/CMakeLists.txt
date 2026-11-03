@@ -190,6 +190,13 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     add_executable(bluewake_edge_intercepts_test
         ${BLUEWAKE_REPO_ROOT}/tests/edge_intercepts_test.c
         ${BLUEWAKE_HOST_SRC}/edge_intercepts.c ${BLUEWAKE_HOST_SRC}/game_options.c ${BLUEWAKE_HOST_SRC}/card_runtime.c)
+    add_executable(bluewake_card_state_loaded_test ${BLUEWAKE_REPO_ROOT}/tests/card_state_loaded_test.c)
+    target_include_directories(bluewake_card_state_loaded_test PRIVATE ${BLUEWAKE_HOST_SRC})
+    target_link_libraries(bluewake_card_state_loaded_test PRIVATE gxruntime)
+    set_target_properties(bluewake_card_state_loaded_test PROPERTIES LINKER_LANGUAGE CXX)
+    foreach(_case marker saved kept)
+        add_test(NAME bluewake_card_state_loaded_${_case}_test COMMAND bluewake_card_state_loaded_test ${_case})
+    endforeach()
     foreach(TEST_NAME cycle_domain interrupt_sources delivery_digest composite_dispatch_loop edge_intercepts)
         set(TEST_TARGET bluewake_${TEST_NAME}_test)
         target_include_directories(${TEST_TARGET} PRIVATE

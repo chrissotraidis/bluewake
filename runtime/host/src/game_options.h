@@ -19,6 +19,9 @@
 void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled);
 // Once per retrace.
 void bluewake_game_options_retrace(CPUState* cpu);
+// A save state was loaded: instant text looks for the messages again
+// (`reapply`; without it the state's messages are left as they are).
+void bluewake_game_options_state_loaded(bool reapply);
 // The options the game module offers, for a settings menu: the name at a
 // position (the setting's key), its title, whether it is on by default and
 // whether it is on now; NULL past the last, or before the game has started.

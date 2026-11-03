@@ -186,6 +186,9 @@ def measurement_environment(base, *, mode, load_state, scratch, card, warp, max_
     env = _child_base(base)
     _phase1(env, max_retraces)
     env["BLUEWAKE_LOAD_STATE"] = str(load_state)
+    # The state's game as it was saved, whatever this run's settings, so guest checkpoints agree between runs
+    # and builds. BLUEWAKE_STATE_REAPPLY=1 in the caller's environment measures as a player loads it.
+    env["BLUEWAKE_STATE_REAPPLY"] = base.get("BLUEWAKE_STATE_REAPPLY", "0")
     if warp is not None:
         env["BLUEWAKE_TEST_WARP"] = warp
     if mode == "headless":

@@ -53,6 +53,8 @@ void bluewake_mouse_camera_install(void);
 void bluewake_mouse_camera_attach(CPUState* cpu);
 // Once per retrace.
 void bluewake_mouse_camera_retrace(void);
+// A save state was loaded: the angles and motion held from before it are dropped.
+void bluewake_mouse_camera_state_loaded(void);
 // At every dispatch boundary (the chassis edge service): at bumpCheck's entry
 // (the camera's wall, ground and water check) the mouse's and the stick's
 // view angles are applied, so the game keeps the eye out of the ground; at
