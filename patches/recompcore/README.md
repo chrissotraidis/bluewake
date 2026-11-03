@@ -340,3 +340,8 @@ cloud), the cloud read from the same texture, drift and floor as the scenery's c
 is HD's from the clock, 1 - max(0.25, -0.9 cos(time - 15 degrees)), which the host gives
 (`aurora_set_cloud_hd_floor`); unset, it comes from the light's height. `DOL_AURORA_ACTOR_LIGHT_DEBUG=6` shows the
 characters' cloud term.
+
+Patch 0218 makes the HD shadow quality's cascades follow the camera, as Wind Waker HD's: light space turns with
+the camera, each cascade is fitted to its slice of the view between the splits (held in steps, its centre snapped
+to whole texels), a far fade to lit from 12,000 to 14,000, and the facing term no longer fades with distance.
+`DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0` keeps the cascades fixed to the sun, to compare.

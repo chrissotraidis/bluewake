@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "7a159f88521cb78f940a3de6fca640c0912ad556",
+      "sha": "9175e774cdd26e118026d75ef2adde0df56c2cf9",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -789,6 +789,13 @@
             "patches/recompcore/0217-Characters-Wind-Waker-HD-s-clouds-on-the-characters-light-and-its-cloud-floor-from-the-clock.patch"
           ],
           "evidence": "pdale-boop's: the characters take HD's cloud term (cloud = 1 reproduces the traced HD pixels, gxcore tests); the cloud floor from the host's clock matches HD's 0.75 at 07:30, 18:30 and 20:00, where the light's height gave 0.596."
+        },
+        "hd_cascades_follow": {
+          "runtime": "9175e774cdd26e118026d75ef2adde0df56c2cf9",
+          "tracked_patches": [
+            "patches/recompcore/0218-Sun-shadows-cascades-that-follow-the-camera-as-Wind-Waker-HD-s.patch"
+          ],
+          "evidence": "pdale-boop's: the title screen's far island is shaded from its first frames; the sword state is bit-identical; Link on the pier within 0.3/255; GPU time the same with three cascades, about 0.1 ms for the fourth (Linux, Vulkan)."
         }
       }
     },

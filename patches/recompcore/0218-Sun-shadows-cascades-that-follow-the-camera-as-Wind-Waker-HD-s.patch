@@ -1,0 +1,517 @@
+From 9175e774cdd26e118026d75ef2adde0df56c2cf9 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Mon, 2 Nov 2026 21:27:27 -0600
+Subject: [PATCH] Sun shadows: cascades that follow the camera, as Wind Waker
+ HD's
+
+The cascades were fixed to the sun and resized from HD's live splits every frame, and the facing term faded out from
+12,000 units, so a far island (the title screen's) showed flat until the camera came near. Now, with the "hd" shadow
+quality: light space turns with the camera (its right made flat to the sun, as HD's), each cascade is fitted to its
+slice of the view (near to split 0, split 0 to 1, split 1 to 4,500, 4,500 to 14,000), its size held in steps of
+2^(1/4) with a margin before it shrinks and its centre snapped to whole texels; the terrain mix's fades follow the
+live splits by HD's rule; a far fade to lit from 12,000 to 14,000; and the facing term no longer fades with distance
+(HD's per-vertex N.L doesn't). DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0 keeps the old cascades, to compare.
+
+On Linux: the title's island is shaded from its first frames; the sword state is bit-identical; Link on the pier
+within 0.3/255; GPU time the same with three cascades, about 0.1 ms for the fourth.
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 304 +++++++++++++++---
+ 1 file changed, 265 insertions(+), 39 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 7cc851708f..2576a12e7c 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -174,6 +174,11 @@ bool g_sunSmoothAmbient = false;
+ bool g_sunPrepassFar = false;
+ float g_sunFacingFarStart = 12000.f; // DOL_AURORA_SUN_SHADOW_FACING_FAR_START / _END: where it fades out
+ float g_sunFacingFarEnd = 14000.f;
++// Where the facing term fades out (end: its end, else its start). With the cascades following the camera (g_follow,
++// HD's pass) it doesn't, unless DOL_AURORA_SUN_SHADOW_FACING_FAR_START is set: it is HD's light amount (its per-vertex
++// N.L, R2.w), which HD doesn't fade with distance; only HD's pre-pass shadow fades out at 12000 to 14000. Faded, the
++// title's island, beyond 14000 for its first seconds, stood flat and lit and grew its shade as the camera came in.
++float facing_far(bool end) noexcept;
+ // With the facing term, HD's terrain curve for its shadow (its terrain shaders' 0.5 x pow(2 x shadow, e), e
+ // 4 near and 2 farther: full light from half shadow up, almost none below a quarter); the distance of that
+ // change isn't read yet (its uniform was out of the probe's range), so 300 to 500 is a guess.
+@@ -222,6 +227,39 @@ float g_sunHdSplits[2] = {420.f, 1395.f};
+ // slices they make: with fixed ones, BlueWake's camera zoomed out (the mouse wheel's 2x) left the island in the far
+ // cascade's 18-unit texels and its grass's shadows crawled as the sun turned (Star Island, Nov 1).
+ std::atomic<float> g_sunHdLiveSplits[2]{0.f, 0.f};
++// Cascades that follow the camera (DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW; on by default with HD's pass, =0 for the
++// cascades fixed to the sun and fitted around the camera's place). As Wind Waker HD's (two Windfall captures: its
++// shadow casters' x axis is the camera's right turned flat to the sun, its first cascade a box fitted to the slice
++// its first split makes): each cascade is fitted to the slice of the view between two splits, so all that is on
++// screen is in one (the title's island far off was outside them all and grew its shade as the camera came near),
++// turned with the camera. Unlike HD's, each one's size is held in steps (a quarter of a power of two, rounded up,
++// shrinking only two steps down) and its centre moved by whole texels in its own turned frame, so its texels stay
++// where they were on the ground while the camera moves and doesn't turn: resized every frame with the live splits
++// (since 9031051), every shadow near the camera was drawn on a new grid each frame and small ones flashed.
++// _FAR: where the last ends (HD's 14000, the camera's far plane if nearer), its last seventh fading to lit as HD's
++// pre-pass far fade does (12000 to 14000). _SPLIT3: where a fourth cascade starts (0: three; a third reaching
++// 14000 across the whole view would have texels of 30 units): at least 1.5 times HD's far split.
++// _TURN_STEP: degrees the frame turns in (0: with every turn of the camera, as HD's).
++bool g_follow = false;
++float g_followFar = 14000.f;
++float g_followSplit3 = 4500.f;
++float g_followTurnStep = 0.f;
++struct FollowCascades {
++  float held[kSunMapCascades][2]{}; // each cascade's half sizes across (x, y), held between steps
++  float turn = 0.f;                 // the frame's turn about the sun (radians) as held
++  bool turnHeld = false;
++  // This frame's, for the uniform: each cascade's larger half size and its depth's reach.
++  float range[kSunMapCascades]{};
++  float depth[kSunMapCascades]{};
++  float split3 = 0.f, fadeStart = 0.f, fadeEnd = 0.f;
++  bool on = false; // this frame's map was fitted so
++};
++FollowCascades g_followState;
++float facing_far(bool end) noexcept {
++  if (g_follow && std::getenv("DOL_AURORA_SUN_SHADOW_FACING_FAR_START") == nullptr)
++    return end ? 1e7f : 1e7f - 1.f;
++  return end ? g_sunFacingFarEnd : g_sunFacingFarStart;
++}
+ 
+ // HD's split k (0: its second cascade's start, 1: its third's) this frame.
+ float hd_split(int k) noexcept {
+@@ -316,6 +354,8 @@ float g_sunMapNormalOffset = 2.f; // DOL_AURORA_SUN_SHADOW_MAP_NORMAL_OFFSET: a
+ // A cascade's range (world units from its centre to its edge), and the depth
+ // toward and away from the sun it holds: enough for what stands in it.
+ float cascade_range(uint32_t cascade) noexcept {
++  if (g_followState.on && cascade < kSunMapCascades && g_followState.range[cascade] > 0.f)
++    return g_followState.range[cascade];
+   if (cascade < kSunMapCascades && g_sunMapRanges[cascade] > 0.f) {
+     // HD's first two are fitted to the slices its splits make this frame (the ranges are for its splits at Outset's
+     // bridge, g_sunHdSplits); its far one already reaches past the haze.
+@@ -325,8 +365,14 @@ float cascade_range(uint32_t cascade) noexcept {
+   return g_sunMapRange * std::pow(g_sunMapSpread, static_cast<float>(cascade));
+ }
+ float cascade_depth(float range) noexcept { return std::max(g_sunMapDepth, 2.f * range); }
++// Cascade k's depth's reach toward and away from the sun from its centre.
++float cascade_depth_of(uint32_t cascade) noexcept {
++  if (g_followState.on && cascade < kSunMapCascades && g_followState.depth[cascade] > 0.f)
++    return g_followState.depth[cascade];
++  return cascade_depth(cascade_range(cascade));
++}
+ // The sun shadow pass's uniform (kSunMapShader's View).
+-constexpr size_t kSunMapUniformFloats = 96;
++constexpr size_t kSunMapUniformFloats = 100;
+ float g_cloudStrength = 0.28f;  // how dark a cloud's shadow is
+ float g_cloudScale = 7000.f;    // world units across one cloud
+ bool g_cloudDebug = false;
+@@ -1289,6 +1335,9 @@ struct View {
+     hd: vec4<f32>,              // HD's pass: x, y the distances from the camera where it moves to the second and third
+                                 // cascade (HD's 420 and 1395, times the camera's zoom); z: 1 when the characters took
+                                 // Wind Waker HD's light in their own draws (post_fx::actor_light_applied())
++    fit: vec4<f32>,             // x: 1 when the cascades follow the camera (each fitted to a slice of the view
++                                // between splits); y: where the fourth starts (0: three); z, w: the far fade's start
++                                // and end (lit from there, HD's pre-pass's far fade)
+ };
+ 
+ @group(0) @binding(0) var samp: sampler;
+@@ -1433,7 +1482,9 @@ fn to_cascade(k: i32, w: vec4<f32>) -> vec3<f32> {
+ // (where the platform's shadow falls) was in the sharpest cascade, a square of
+ // other terms amid the coarser cascades' water.
+ fn reach(k: i32, m: vec3<f32>) -> f32 {
+-    let along = abs(m.z - 0.5) * length(view.light[k * 3].xyz) / length(view.light[k * 3 + 2].xyz);
++    // Fitted to the view's slices (view.fit.x), a cascade holds all of its slice along the sun.
++    let along = select(abs(m.z - 0.5) * length(view.light[k * 3].xyz) / length(view.light[k * 3 + 2].xyz), 0.0,
++                       view.fit.x > 0.5);
+     return max(max(abs(m.x), abs(m.y)), along);
+ }
+ 
+@@ -1446,7 +1497,7 @@ fn inside(k: i32, m: vec3<f32>) -> bool {
+ // surface it was drawn from: on a beach under a low sun the ground's own depth
+ // from the sun changes more across a texel than the depth bias allows.
+ fn offset_world(k: i32, w: vec4<f32>, normal: vec3<f32>) -> vec4<f32> {
+-    let texel = 2.0 / (length(view.light[k * 3].xyz) * f32(textureDimensions(sun_map).x));
++    let texel = 2.0 / (min(length(view.light[k * 3].xyz), length(view.light[k * 3 + 1].xyz)) * f32(textureDimensions(sun_map).x));
+     return vec4(w.xyz + normal * texel, 1.0);
+ }
+ 
+@@ -1478,7 +1529,11 @@ fn grow_at(k: i32, w: vec4<f32>) -> f32 {
+ // HD's cascade for a place z units from the camera: the first past each split (no blending), or a later one if it
+ // doesn't hold the place; -1 when none does.
+ fn hd_cascade(z: f32, w: vec4<f32>) -> i32 {
+-    var k = select(0, 1, z > view.hd.x) + select(0, 1, z > view.hd.y);
++    var k = select(0, 1, z > view.hd.x) + select(0, 1, z > view.hd.y)
++        + select(0, 1, view.fit.x > 0.5 && view.fit.y > 0.0 && z > view.fit.y);
++    if (view.fit.x > 0.5 && z >= view.fit.w) {
++        return -1;
++    }
+     for (; k < i32(view.params.y); k++) {
+         if (inside(k, to_cascade(k, w))) {
+             return k;
+@@ -1509,7 +1564,7 @@ fn lit_in(k: i32, m: vec3<f32>, rot: mat2x2<f32>, slope: f32, world_y: f32, grow
+     // With the sun low over flat ground (20 degrees at Outset in the evening)
+     // the ground shaded itself, and the sea in rings, without it.
+     let size = vec2<f32>(textureDimensions(sun_map));
+-    let texel = 2.0 / (length(view.light[k * 3].xyz) * size.x);
++    let texel = 2.0 / (min(length(view.light[k * 3].xyz), length(view.light[k * 3 + 1].xyz)) * size.x);
+     let per_unit = length(view.light[k * 3 + 2].xyz);  // the map's depth per world unit along the sun
+     let reach_bias = texel * slope * per_unit * grow;  // the slope term, which grows with the filter's reach
+     let base_reference = m.z - view.bias[k] * grow - reach_bias;
+@@ -1691,8 +1746,9 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+     let far = smoothstep(far_start, far_end, z);
+     // In HD's pass the main pass reads the pre-pass instead of the map (below), and the pre-pass picks HD's cascade.
+     var k = first_cascade(world);
++    // 6 (the cascades tinted) looks them up in the main pass too.
+     if (hd_prepass > 0.5) {
+-        k = select(-1, hd_cascade(z, world), low_pass > 0.5);
++        k = select(-1, hd_cascade(z, world), low_pass > 0.5 || (debug_view > 5.5 && debug_view < 6.5));
+     }
+     if (k >= 0) {
+         let turn = 6.2831853 * fract(52.9829189 * fract(dot(in.pos.xy, vec2(0.06711056, 0.00583715))));
+@@ -1841,6 +1897,10 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         let graze = 10.0 * pow(clamp(1.0 - abs(dot(normal, sun)), 0.0, 1.0), 9.0);
+         // HD's SSAO in blue, blurred with the rest (HD's shadow pre-pass keeps it beside its shadow).
+         let ao = select(1.0, hd_ao(in.uv, z, in.pos.xy), view.facing.w > 0.5);
++        // Fitted cascades: lit toward their far end, as HD's pre-pass's far fade (it adds, its target clamps).
++        if (hd_prepass > 0.5 && view.fit.x > 0.5) {
++            lit = min(lit + clamp((z - view.fit.z) / max(view.fit.w - view.fit.z, 1.0), 0.0, 1.0), 1.0);
++        }
+         return vec4(lit, graze, ao, 1.0);
+     }
+     // What is the sea's surface for the light's terms below: the sea mask's red where the frame has it; else what
+@@ -1852,12 +1912,23 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+         let wp = clamp(vec2<i32>(in.uv * wsize), vec2<i32>(0), vec2<i32>(wsize) - vec2<i32>(1));
+         water = textureLoad(mask, wp, 0).r;
+     }
++    // HD's terrain mix's fades: with the cascades fitted to its live splits, HD's own rule (its terrain constants
++    // at Outset's bridge at 10:00 and 16:00): the curve from the first split over 200 units, the blur over the 0.4
++    // of the way between the splits ending at the second, so the far switch is always under the blur.
++    var e_start = mix_e_start;
++    var blur_start = mix_blur_start;
++    var blur_end = mix_blur_end;
++    if (view.fit.x > 0.5) {
++        e_start = view.hd.x;
++        blur_end = view.hd.y;
++        blur_start = view.hd.y - 0.4 * (view.hd.y - view.hd.x);
++    }
+     // HD's pass: every pixel's shadow from the blurred pre-pass (bilinear, as HD's materials read it). The sea
+     // takes its mip 1 by distance as the terrain does (below): far off, a palm's shadow on the water is soft.
+     if (hd_prepass > 0.5) {
+         lit = textureSampleLevel(shadow_blur, samp, in.uv, 0.0).r;
+         if (water > 0.5) {
+-            let fsea = clamp((z - mix_blur_start) / max(mix_blur_end - mix_blur_start, 1.0), 0.0, 1.0);
++            let fsea = clamp((z - blur_start) / max(blur_end - blur_start, 1.0), 0.0, 1.0);
+             lit = mix(lit, textureSampleLevel(shadow_blur, samp, in.uv, 1.0).r, fsea);
+         }
+     }
+@@ -1877,10 +1948,10 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+                 b.r = textureSampleLevel(shadow_blur, samp, in.uv, 1.0).r;
+             }
+             let near = 1.0 - clamp((z - 60.0) * 0.1, 0.0, 1.0);
+-            let fblur = clamp((z - mix_blur_start) / max(mix_blur_end - mix_blur_start, 1.0), 0.0, 1.0);
++            let fblur = clamp((z - blur_start) / max(blur_end - blur_start, 1.0), 0.0, 1.0);
+             let w = clamp(fblur + b.g + near, 0.0, 1.0);
+             let s = mix(lit, b.r, w);
+-            let e = mix(mix(mix_e_near, 2.0, clamp((z - mix_e_start) * 0.005, 0.0, 1.0)), 1.0, w);
++            let e = mix(mix(mix_e_near, 2.0, clamp((z - e_start) * 0.005, 0.0, 1.0)), 1.0, w);
+             lit = clamp(0.5 * pow(2.0 * s, e), 0.0, 1.0);
+             if (view.facing.w > 0.5) {
+                 let nz = clamp(depth_normal(in.uv, p, tx, ty).z, 0.0, 1.0);
+@@ -1943,6 +2014,11 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+             }
+         }
+     }
++    // 12: with DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=1, how much the pre-pass's shadow changed since the last
++    // frame at the same place in the world (black: from lit to full shadow or back).
++    if (debug_view > 11.5) {
++        return vec4(vec3(textureSampleLevel(shadow_blur, samp, in.uv, 0.0).g), 1.0);
++    }
+     // 10: the facing term alone (white facing the sun, black turned away; green where it came from the
+     // scenery's smooth normals). 11: the shadow map alone, before the facing term.
+     if (debug_view > 10.5) {
+@@ -2571,8 +2647,8 @@ wgpu::RenderPipeline make_sun_map_pipeline(wgpu::TextureFormat format, bool dire
+       wgpu::ConstantEntry{.key = "facing_depth_blur", .value = g_sunFacingDepthBlur},
+       wgpu::ConstantEntry{.key = "smooth_ambient", .value = g_sunSmoothAmbient ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "prepass_far", .value = g_sunPrepassFar ? 1.0 : 0.0},
+-      wgpu::ConstantEntry{.key = "facing_far_start", .value = g_sunFacingFarStart},
+-      wgpu::ConstantEntry{.key = "facing_far_end", .value = g_sunFacingFarEnd},
++      wgpu::ConstantEntry{.key = "facing_far_start", .value = facing_far(false)},
++      wgpu::ConstantEntry{.key = "facing_far_end", .value = facing_far(true)},
+       wgpu::ConstantEntry{.key = "shape_on", .value = g_sunShape ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "shape_near", .value = g_sunShapeNear},
+       wgpu::ConstantEntry{.key = "shape_far", .value = g_sunShapeFar},
+@@ -2786,6 +2862,14 @@ void apply_sun_quality(int level) {
+       for (int i = 0; i < 3; ++i)
+         g_sunMapRanges[i] = std::max(r[i], 1.f);
+   }
++  {
++    const char* follow = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW");
++    g_follow = follow != nullptr && follow[0] != '\0' ? follow[0] == '1' && g_sunHdPrepass : g_sunHdPrepass;
++    g_followFar = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_FAR", g_followFar, 1000.f, 100000.f);
++    g_followSplit3 = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_SPLIT3", g_followSplit3, 0.f, 100000.f);
++    g_followTurnStep = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_TURN_STEP", g_followTurnStep, 0.f, 90.f);
++    g_followState = {};
++  }
+   if (const char* splits = std::getenv("DOL_AURORA_SUN_SHADOW_HD_SPLITS")) {
+     float s[2] = {};
+     if (std::sscanf(splits, "%f,%f", &s[0], &s[1]) == 2 && s[0] > 0.f && s[1] > s[0])
+@@ -3109,6 +3193,10 @@ void make_sun_blur_pipelines() {
+ // doesn't leave a trail, by `range.z` from `range.y` units away and none nearer than `range.x`. Red (the shadow)
+ // and blue (HD's SSAO) are blended; green (the grazing term) is this frame's. Alpha keeps the depth for the next.
+ constexpr const char* kSunTemporalShader = R"""(
++// DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=1 (local test): no blend; green is 1 - |this frame's shadow - the last frame's
++// at the same place in the world| (1 where there was no last frame there), for the main pass's debug view 12: a
++// shadow that changed with the camera's motion taken out (cascades redrawn on a new grid, a split moving).
++override debug_diff: f32 = 0.0;
+ struct Temporal {
+     rows: array<vec4<f32>, 3>,  // this frame's view to world, by rows
+     lens: vec4<f32>,            // tan(fovy / 2), aspect, near, near / (far - near)
+@@ -3141,7 +3229,7 @@ fn fs_temporal(in: VertexOutput) -> @location(0) vec4<f32> {
+     let d = textureLoad(depth, clamp(vec2<i32>(in.uv * dsize), vec2<i32>(0), vec2<i32>(dsize) - vec2<i32>(1)), 0);
+     let z = select(t.lens.z / (d + t.lens.w), 0.0, d <= 0.0);
+     if (z <= 0.0 || t.prev_lens.z < 0.5) {
+-        return vec4(cur.rgb, z);
++        return vec4(cur.r, select(cur.g, 1.0, debug_diff > 0.5), cur.b, z);
+     }
+     let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+     let p = vec4(vec3(ndc.x * t.lens.x * t.lens.y, ndc.y * t.lens.x, -1.0) * z, 1.0);
+@@ -3149,17 +3237,20 @@ fn fs_temporal(in: VertexOutput) -> @location(0) vec4<f32> {
+     let q = vec3(dot(t.prev[0], w), dot(t.prev[1], w), dot(t.prev[2], w));
+     let pz = -q.z;
+     if (pz <= 0.0) {
+-        return vec4(cur.rgb, z);
++        return vec4(cur.r, select(cur.g, 1.0, debug_diff > 0.5), cur.b, z);
+     }
+     let pn = vec2(q.x / (pz * t.prev_lens.x * t.prev_lens.y), q.y / (pz * t.prev_lens.x));
+     let puv = vec2(pn.x * 0.5 + 0.5, 0.5 - pn.y * 0.5);
+     if (any(puv < vec2(0.0)) || any(puv > vec2(1.0))) {
+-        return vec4(cur.rgb, z);
++        return vec4(cur.r, select(cur.g, 1.0, debug_diff > 0.5), cur.b, z);
+     }
+     let hist = textureSampleLevel(history, samp, puv, 0.0);
+     // Hidden last frame: something else was there (its depth differs).
+     if (abs(hist.a - pz) > 0.03 * pz + 2.0) {
+-        return vec4(cur.rgb, z);
++        return vec4(cur.r, select(cur.g, 1.0, debug_diff > 0.5), cur.b, z);
++    }
++    if (debug_diff > 0.5) {
++        return vec4(cur.r, 1.0 - abs(cur.r - hist.r), cur.b, z);
+     }
+     let size = vec2<i32>(textureDimensions(current));
+     let c = vec2<i32>(in.uv * vec2<f32>(size));
+@@ -3205,8 +3296,17 @@ void make_sun_temporal_pipeline() {
+                                                                 .bindGroupLayouts = &g_sunTemporalLayout};
+   g_sunTemporalPipelineLayout = g_device.CreatePipelineLayout(&pipelineLayoutDescriptor);
+   const wgpu::ColorTargetState target{.format = kSunLowFormat, .writeMask = wgpu::ColorWriteMask::All};
+-  const wgpu::FragmentState fragment{
+-      .module = g_sunTemporalModule, .entryPoint = "fs_temporal", .targetCount = 1, .targets = &target};
++  static const bool debugDiff = [] {
++    const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG");
++    return env != nullptr && env[0] == '1';
++  }();
++  const wgpu::ConstantEntry constant{.key = "debug_diff", .value = debugDiff ? 1.0 : 0.0};
++  const wgpu::FragmentState fragment{.module = g_sunTemporalModule,
++                                     .entryPoint = "fs_temporal",
++                                     .constantCount = 1,
++                                     .constants = &constant,
++                                     .targetCount = 1,
++                                     .targets = &target};
+   const wgpu::RenderPipelineDescriptor descriptor{
+       .label = "Sun shadows' blend",
+       .layout = g_sunTemporalPipelineLayout,
+@@ -3397,8 +3497,13 @@ SunMapInputs sun_map_inputs(const Camera& camera, const SunMap& sunMap, bool act
+     // cascade's texels: 3 near Link's feet, 12, 48 and 192 further out, in
+     // each one's own depth's units.
+     const float range = cascade_range(cascade);
+-    uniform[72 + cascade] = g_sunMapBias * (range / 5000.f) / (2.f * cascade_depth(range));
++    uniform[72 + cascade] = g_sunMapBias * (range / 5000.f) / (2.f * cascade_depth_of(cascade));
+   }
++  // The cascades that follow the camera: on, where the fourth starts (0: none), the far fade.
++  uniform[96] = g_followState.on ? 1.f : 0.f;
++  uniform[97] = g_followState.on ? g_followState.split3 : 0.f;
++  uniform[98] = g_followState.fadeStart;
++  uniform[99] = g_followState.fadeEnd;
+   // The sea mask is drawn when it is wanted (common.cpp encode_sea_mask, sea_mask_wanted()): the facing
+   // term needs it to leave characters and the sea out, and is skipped without it.
+   const bool mask = g_seaMaskView && sea_mask_wanted();
+@@ -4465,6 +4570,120 @@ void set_actor_light_applied(bool applied) noexcept { g_actorLightApplied.store(
+ 
+ bool actor_light_applied() noexcept { return g_actorLightApplied.load(std::memory_order_relaxed); }
+ 
++// A cascade's half size held in steps of a quarter of a power of two, rounded up: it grows as soon as the slice
++// needs more and shrinks only once the slice fits in two steps less, so a camera that sways keeps its texels.
++float held_size(float want, float& held) noexcept {
++  constexpr float kStep = 0.25f;
++  if (held > 0.f && want <= held && want >= held * 0.70710678f)
++    return held;
++  held = std::exp2(std::ceil(std::log2(std::max(want, 1.f)) / kStep) * kStep);
++  return held;
++}
++
++// The cascades fitted to the view's slices, turned with the camera (g_follow, sun_map()): x0, y0 the frame fixed to
++// the sun, from which the camera's is turned.
++void follow_cascades(SunMap& map, const Camera& camera, const float sun[3], const float x0[3], const float y0[3]) {
++  const float* v = camera.view.data();
++  FollowCascades& f = g_followState;
++  const auto dot3 = [](const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
++  // The camera's right and its forward turned a quarter about the sun, both flat to the sun: their sum points
++  // along the camera's right on the map whichever of them lines up with the sun (the inverse view's columns).
++  const float right[3] = {v[0], v[4], v[8]}, forward[3] = {-v[2], -v[6], -v[10]};
++  float rs = dot3(right, sun), fs = dot3(forward, sun);
++  const float rp[3] = {right[0] - rs * sun[0], right[1] - rs * sun[1], right[2] - rs * sun[2]};
++  const float fp[3] = {forward[0] - fs * sun[0], forward[1] - fs * sun[1], forward[2] - fs * sun[2]};
++  const float fx[3] = {fp[1] * sun[2] - fp[2] * sun[1], fp[2] * sun[0] - fp[0] * sun[2], fp[0] * sun[1] - fp[1] * sun[0]};
++  const float along[3] = {rp[0] + fx[0], rp[1] + fx[1], rp[2] + fx[2]};
++  float turn = std::atan2(dot3(along, y0), dot3(along, x0));
++  if (!std::isfinite(turn))
++    turn = 0.f;
++  // In steps (g_followTurnStep), held until the camera has turned three quarters of a step past one.
++  if (g_followTurnStep > 0.f) {
++    const float step = g_followTurnStep * 0.017453293f;
++    float off = turn - f.turn;
++    off -= 6.2831853f * std::round(off / 6.2831853f);
++    if (!f.turnHeld || std::fabs(off) > 0.75f * step)
++      f.turn = std::round(turn / step) * step;
++    f.turnHeld = true;
++    turn = f.turn;
++  } else {
++    f.turn = turn;
++    f.turnHeld = true;
++  }
++  const float c = std::cos(turn), s = std::sin(turn);
++  const float x[3] = {c * x0[0] + s * y0[0], c * x0[1] + s * y0[1], c * x0[2] + s * y0[2]};
++  const float y[3] = {sun[1] * x[2] - sun[2] * x[1], sun[2] * x[0] - sun[0] * x[2], sun[0] * x[1] - sun[1] * x[0]};
++  // The slices: from the near plane to HD's first split, to its second, (to the fourth's start,) to the far end.
++  const float nearPlane = std::max(v[14], 1.f);
++  float far = g_followFar;
++  if (camera.farPlane > nearPlane)
++    far = std::min(far, camera.farPlane);
++  const float s0 = hd_split(0), s1 = hd_split(1);
++  float bounds[kSunMapCascades + 1] = {nearPlane, s0, s1, far, far};
++  uint32_t cascades = 3;
++  f.split3 = 0.f;
++  if (g_followSplit3 > 0.f) {
++    const float s2 = std::max(g_followSplit3, 1.5f * s1);
++    if (s2 < far * 0.9f) {
++      bounds[3] = s2;
++      cascades = 4;
++      f.split3 = s2;
++    }
++  }
++  for (uint32_t k = 1; k <= cascades; ++k)
++    bounds[k] = std::max(bounds[k], bounds[k - 1] + 1.f);
++  f.fadeEnd = bounds[cascades];
++  f.fadeStart = f.fadeEnd * (12000.f / 14000.f);
++  const float tx = v[12] * v[13], ty = v[12];
++  const float size = static_cast<float>(g_sunMapSize);
++  // DOL_AURORA_SUN_SHADOW_CASCADES_TRACE=1: a line whenever a cascade's size steps, and every 300th map.
++  static const bool trace = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_TRACE") != nullptr;
++  static uint32_t traces = 0;
++  const bool every = trace && traces++ % 300 == 0;
++  for (uint32_t k = 0; k < cascades; ++k) {
++    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
++    for (int corner = 0; corner < 8; ++corner) {
++      const float d = bounds[k + ((corner >> 2) & 1)];
++      const float p[3] = {((corner & 1) ? 1.f : -1.f) * tx * d, ((corner & 2) ? 1.f : -1.f) * ty * d, -d};
++      float w[3];
++      for (int row = 0; row < 3; ++row)
++        w[row] = v[row * 4] * p[0] + v[row * 4 + 1] * p[1] + v[row * 4 + 2] * p[2] + v[row * 4 + 3];
++      const float m[3] = {dot3(x, w), dot3(y, w), dot3(sun, w)};
++      for (int i = 0; i < 3; ++i) {
++        lo[i] = std::min(lo[i], m[i]);
++        hi[i] = std::max(hi[i], m[i]);
++      }
++    }
++    // Room for HD's lookup moved out along the normal (20 units) and the centre's snap and the filter (2 texels).
++    const float pad = 1.f / (1.f - 4.f / size);
++    const float before[2] = {f.held[k][0], f.held[k][1]};
++    const float rx = held_size((0.5f * (hi[0] - lo[0]) + 24.f) * pad, f.held[k][0]);
++    const float ry = held_size((0.5f * (hi[1] - lo[1]) + 24.f) * pad, f.held[k][1]);
++    if (trace && (before[0] != rx || before[1] != ry))
++      std::fprintf(stderr, "[cascades] %u resized %.0f x %.0f -> %.0f x %.0f (slice %.0f-%.0f)\n", k, 2.f * before[0],
++                   2.f * before[1], 2.f * rx, 2.f * ry, bounds[k], bounds[k + 1]);
++    // The centre moved by whole texels in this frame's turned frame.
++    const float texelX = 2.f * rx / size, texelY = 2.f * ry / size;
++    const float cx = std::round(0.5f * (lo[0] + hi[0]) / texelX) * texelX;
++    const float cy = std::round(0.5f * (lo[1] + hi[1]) / texelY) * texelY;
++    const float cz = 0.5f * (lo[2] + hi[2]);
++    const float range = std::max(rx, ry);
++    const float depth = std::max(cascade_depth(range), 0.5f * (hi[2] - lo[2]) + 0.5f * g_sunMapDepth);
++    f.range[k] = range;
++    f.depth[k] = depth;
++    const float ix = 1.f / rx, iy = 1.f / ry, d = 1.f / (2.f * depth);
++    map.world[k] = {x[0] * ix,   x[1] * ix,   x[2] * ix,   -cx * ix,  //
++                    y[0] * iy,   y[1] * iy,   y[2] * iy,   -cy * iy,  //
++                    -sun[0] * d, -sun[1] * d, -sun[2] * d, 0.5f + cz * d};
++    if (every)
++      std::fprintf(stderr, "[cascades] %u slice %.0f-%.0f box %.0f x %.0f (texel %.2f x %.2f) depth %.0f turn %.1f\n", k,
++                   bounds[k], bounds[k + 1], 2.f * rx, 2.f * ry, texelX, texelY, depth, turn * 57.29578f);
++  }
++  for (uint32_t k = cascades; k < kSunMapCascades; ++k)
++    f.range[k] = f.depth[k] = 0.f;
++  map.cascades = cascades;
++}
++
+ SunMap sun_map(const Camera& camera) noexcept {
+   SunMap map;
+   const float* v = camera.view.data();
+@@ -4529,26 +4748,34 @@ SunMap sun_map(const Camera& camera) noexcept {
+   const float xl = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+   for (float& c : x)
+     c /= xl;
+-  const float y[3] = {sun[1] * x[2] - sun[2] * x[1], sun[2] * x[0] - sun[0] * x[2], sun[0] * x[1] - sun[1] * x[0]};
+-  // Each cascade's centre: half its range ahead of the camera, level (the view
+-  // looks down its -z, the inverse view's third column in the world).
+-  float ahead[3] = {-v[2], 0.f, -v[10]};
+-  const float al = std::sqrt(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
+-  for (uint32_t cascade = 0; cascade < g_sunMapCascades; ++cascade) {
+-    const float range = cascade_range(cascade), depth = cascade_depth(range);
+-    const float centre[3] = {v[3] + (al > 1e-4f ? ahead[0] / al : 0.f) * range * 0.5f, v[7],
+-                             v[11] + (al > 1e-4f ? ahead[2] / al : 0.f) * range * 0.5f};
+-    // Moved by whole texels across the map, so its texels stay where they are on
+-    // the ground while the camera moves and the shadows' edges don't crawl.
+-    const float texel = 2.f * range / static_cast<float>(g_sunMapSize);
+-    const float cx = std::floor((x[0] * centre[0] + x[1] * centre[1] + x[2] * centre[2]) / texel) * texel;
+-    const float cy = std::floor((y[0] * centre[0] + y[1] * centre[1] + y[2] * centre[2]) / texel) * texel;
+-    const float cz = sun[0] * centre[0] + sun[1] * centre[1] + sun[2] * centre[2];
+-    const float r = 1.f / range, d = 1.f / (2.f * depth);
+-    auto& world = map.world[cascade];
+-    world = {x[0] * r,    x[1] * r,    x[2] * r,    -cx * r,  //
+-             y[0] * r,    y[1] * r,    y[2] * r,    -cy * r,  //
+-             -sun[0] * d, -sun[1] * d, -sun[2] * d, 0.5f + cz * d};
++  float y[3] = {sun[1] * x[2] - sun[2] * x[1], sun[2] * x[0] - sun[0] * x[2], sun[0] * x[1] - sun[1] * x[0]};
++  g_followState.on = g_follow && g_sunHdPrepass;
++  if (g_followState.on) {
++    follow_cascades(map, camera, sun, x, y);
++  } else {
++    // Each cascade's centre: half its range ahead of the camera, level (the view
++    // looks down its -z, the inverse view's third column in the world).
++    float ahead[3] = {-v[2], 0.f, -v[10]};
++    const float al = std::sqrt(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
++    for (uint32_t cascade = 0; cascade < g_sunMapCascades; ++cascade) {
++      const float range = cascade_range(cascade), depth = cascade_depth(range);
++      const float centre[3] = {v[3] + (al > 1e-4f ? ahead[0] / al : 0.f) * range * 0.5f, v[7],
++                               v[11] + (al > 1e-4f ? ahead[2] / al : 0.f) * range * 0.5f};
++      // Moved by whole texels across the map, so its texels stay where they are on
++      // the ground while the camera moves and the shadows' edges don't crawl.
++      const float texel = 2.f * range / static_cast<float>(g_sunMapSize);
++      const float cx = std::floor((x[0] * centre[0] + x[1] * centre[1] + x[2] * centre[2]) / texel) * texel;
++      const float cy = std::floor((y[0] * centre[0] + y[1] * centre[1] + y[2] * centre[2]) / texel) * texel;
++      const float cz = sun[0] * centre[0] + sun[1] * centre[1] + sun[2] * centre[2];
++      const float r = 1.f / range, d = 1.f / (2.f * depth);
++      map.world[cascade] = {x[0] * r,    x[1] * r,    x[2] * r,    -cx * r,  //
++                            y[0] * r,    y[1] * r,    y[2] * r,    -cy * r,  //
++                            -sun[0] * d, -sun[1] * d, -sun[2] * d, 0.5f + cz * d};
++    }
++    map.cascades = g_sunMapCascades;
++  }
++  for (uint32_t cascade = 0; cascade < map.cascades; ++cascade) {
++    const auto& world = map.world[cascade];
+     // The camera's view space there: world = A view + t, the inverse view.
+     for (int row = 0; row < 3; ++row) {
+       const float* w = &world[row * 4];
+@@ -4560,7 +4787,6 @@ SunMap sun_map(const Camera& camera) noexcept {
+       }
+     }
+   }
+-  map.cascades = g_sunMapCascades;
+   // DOL_AURORA_SUN_SHADOW_MAP_TRACE: the sun and the camera, every 300th map.
+   static const bool s_trace = std::getenv("DOL_AURORA_SUN_SHADOW_MAP_TRACE") != nullptr;
+   static uint32_t s_maps = 0;
+-- 
+2.56.0
+
