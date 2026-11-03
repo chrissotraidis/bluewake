@@ -26,13 +26,16 @@ Status: M0 done; M2 implemented and exact in the differential test, trained buil
 
 ### M3: Qualify (depends: M2)
 
-- [ ] M3-T01: Game Mode A/B (≥ 6 interleaved launches) against the control `a64af0e`, with `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`; the same build with it off shows the hand-over alone.
+- [x] M3-T01 (first build): +0.8% with partial runs on, ahead in 6/6; but the build declines empty models, and with partial runs off it is 0.5% behind the control. Fix and re-measure: M3-T03.
+- [ ] M3-T03: Empty models handed over natively (prologue, then the epilogue at 0x802EE834); differential test; rebuild; A/B again. Expected: up to ≈ +1.3% (the +0.8% plus the −0.5% gap, part of which may be the hand-back itself).
+- [ ] M3-T01 (fixed build): Game Mode A/B (≥ 6 interleaved launches) against the control `a64af0e`, with `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`; the same build with it off shows the hand-over alone.
 - [ ] M3-T02: Checkpoints (render_bench, run by the user); retain or record no-go.
 
 ## Evidence ledger
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
+| M3-T01 (first build) | Control `a64af0e` (AppImage `d4e36d76…`) and M2 `412c76c` (`bench/541-m2`, own training, `bf0bb021…`); local `measure-541/m2/` (private) | 6 rounds, rotating order: control, M2 partial on, M2 partial off; 3 × 15 s windows per launch; native counters at exit | Steam Deck LCD, Game Mode, worst-angle Outset state, 16:9, widescreen | Game FPS: **control 26.09, M2 on 26.29 (+0.8%, ahead 6/6), M2 off 25.95 (−0.5%, behind 5/6)**; on vs off +1.3% (6/6). Counters per launch: control ≈ 255k native / 25k declined, 1.40 M joints; M2 on 30k full + 22k partial / 235k declined, **2.77 M joints**; M2 off 27k / 255k declined, 1.40 M joints. **Fault found:** the M2 native declines models with no envelopes (≈ 230k calls per launch, which the control's native ran), the likely cause of the −0.5% |
 | M2-T02 | `9645667`; `bluewake_native_skin_test` against the control module `a64af0e` | `native_skin_test gGZLE01_recomp.so 20000`; a partial or full native run is followed by the translation from 0x802EE6F0 or 0x802EE834 and compared with the translation from the entry: every CPU byte (the cycle suffix too) and all of MEM1 | Linux workstation; synthetic models, 1–24 envelopes, budgets 100–3,100 cycles on one case in five | **15,355 identical (2,112 partial), 4,645 declined unchanged.** Also found: the M0 native's epilogue left the cycle suffix at 2, but on the #503 stack the inline `_restgpr` leaves 0, so the committed M0 code failed this test against that module (case 0). Handing over before the epilogue removes that dependence on the build's transforms |
 | M1 | Local `bench/541-ctl` (#503 stack, `a64af0e`); full builds with `--native-entries` and `--native-set4` | `build_script` with each option, own training | Linux workstation | **Neither set can be measured as it stands.** `--native-entries`: build fails in `native-leaf-gen` on `__ieee754_fmod` (`unhandled ctx: bw_write32_ato(&bw_ool, ctx, 0x8032EC1Cu, …)`). `--native-set4`: builds (`t541-set4`), but its hooks are not inserted until hashes are recorded for this tree, so its natives are never called |
 | M0 | Control `a64af0e` (AppImage `t541-ctl/a64af0e941c4`, own training) and the census build `78a3382` (`--reuse` over it, `BLUEWAKE_SKIN_CENSUS` on locally) | Census symbols confirmed in the module | Linux workstation | Ready for the one-minute Outset run on the Deck |
