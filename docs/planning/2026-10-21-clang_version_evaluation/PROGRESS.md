@@ -41,8 +41,8 @@ Frozen foundation: [`14c558d62`](https://github.com/irregularthanis/bluewake/com
 
 ### M4: Produce and validate the four cells (depends: M3)
 
-- [ ] M4-T01: Build A/B with Clang 18 and C/D with Clang 22 using identical frozen inputs.
-- [ ] M4-T02: Verify A/B share one module hash, C/D share one module hash, and all cells share the Dawn identity.
+- [x] M4-T01: Build A/B with Clang 18 and C/D with Clang 22 using identical frozen inputs (2026-11-03: `build_script` full builds A and C; B and D `--reuse` host-only over them).
+- [x] M4-T02: Verify A/B share one module hash, C/D share one module hash, and all cells share the Dawn identity (published provenance: A/B module `9a1839c6…`, C/D `7618ce31…`; all `vendor` Dawn, commit `14c558d`).
 - [ ] M4-T03: Run source tests, ABI audit, launch smoke and checkpoint preflight for every AppImage.
 
 ### M5: Measure and decide (depends: M4)
@@ -64,6 +64,7 @@ Frozen foundation: [`14c558d62`](https://github.com/irregularthanis/bluewake/com
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
+| M4-T01/T02 | `perf/clang-runtime-matrix@14c558d`; private AppImages `m437-a` `badc7d5e…`, `m437-b` `93278766…`, `m437-c` `7a1a05ca…`, `m437-d` `422aa922…` | `build_script m437-{a,c} … [--clang22] --appimage-stdlib libc++`; `m437-{b,d} … --appimage-stdlib static-libstdc++ --reuse` the A/C folder | Linux workstation, CI container, same private disc | **Four cells, one source and Dawn (`vendor`).** A: Clang 18.1.3, libc++; B: Clang 18.1.3, static libstdc++; module `9a1839c6…` and profile `2ca56453…` shared. C: Clang 22.1.8, libc++; D: Clang 22.1.8, static libstdc++; module `7618ce31…` and profile `d1f39ead…` shared. B and D are host-only rebuilds; their AppImages differ from their partners'. Full builds ≈ 50 min each, host-only ≈ 11 min |
 | M0-T01 | #446 `48a5872`; private Clang 18/22 AppImages | Container builds, ABI audit, extraction/help smoke | Same private disc; `x86-64-v3`; separate clean outputs | Both builds and checks passed; source is not upstream main. |
 | M0-T02 | Same private AppImages | Record compiler-specific PGO and artifact hashes | Same frozen #446 inputs | Recipe identity recorded; compiler-specific PGO is part of each recipe. |
 | M0-T03 | Same private AppImages | Repeat private container builds in separate outputs | Same disc and frozen inputs | Both recipes reproduced. |
