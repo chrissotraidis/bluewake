@@ -351,13 +351,193 @@ static void report_cpu(const CPUState* got, const CPUState* want) {
 }
 
 
+/* --walk-bench (#542 M0-T03): cBgW::GroundCrossGrpRp (0x802491F4) on a
+ * synthetic ground check shaped like the Outset census: 26 groups at depth 1,
+ * 4 of them with 4 children, each of those with 3 (90 visits). Every group
+ * passes the filter and the bounds and has no polygon tree, so this times the
+ * walk itself, the part a native would take. Rows: the translation; a
+ * prototype native walk (the same result, through the ChkGrpThrough leaf
+ * native, without cycle accounting); and a decline (the reads a native would
+ * check first, then the translation). Best of 7 rounds. */
+#define WALK_ENTRY 0x802491F4u
+#define WALK_SELF (AREA + 0x0000u)
+#define WALK_VTABLE (AREA + 0x0100u)
+#define WALK_BGD (AREA + 0x0200u)
+#define WALK_TABLE (AREA + 0x0400u)
+#define WALK_BOUNDS (AREA + 0x1800u)
+#define WALK_STACK (AREA + 0x3700u)
+#define WALK_CHECK (AREA + 0x3800u)
+#define WALK_PASS (AREA + 0x3900u)
+#define WALK_ROOTS 26u
+#define WALK_GROUPS 90u
+
+static u16 get16(const u8* ram, u32 a) { return read_be16(ram + (a - GC_RAM_BASE)); }
+static u32 get32(const u8* ram, u32 a) { return read_be32(ram + (a - GC_RAM_BASE)); }
+static float getf(const u8* ram, u32 a) { const u32 bits = get32(ram, a); float f; memcpy(&f, &bits, 4); return f; }
+static void putf(u8* ram, u32 a, float f) { u32 bits; memcpy(&bits, &f, 4); put(ram, a, bits); }
+static void put16(u8* ram, u32 a, u16 v) { write_be16(ram + (a - GC_RAM_BASE), v); }
+
+static void walk_build(u8* ram) {
+    memset(ram + (AREA - GC_RAM_BASE), 0, AREA_BYTES);
+    put(ram, WALK_SELF + 4u, WALK_VTABLE);
+    put(ram, WALK_VTABLE + 32u, BLUEWAKE_BG_CHK_GRP_THROUGH);
+    put(ram, WALK_SELF + 148u, WALK_BGD);
+    put(ram, WALK_BGD + 36u, WALK_TABLE);
+    put(ram, WALK_SELF + 156u, WALK_BOUNDS);
+    put(ram, WALK_CHECK + 4u, WALK_PASS);
+    put(ram, WALK_PASS + 4u, 0x1u);  /* the pass check's flags: every group passes the filter */
+    putf(ram, WALK_CHECK + 36u, 0.0f);     /* the point: x, y, z */
+    putf(ram, WALK_CHECK + 40u, 100.0f);
+    putf(ram, WALK_CHECK + 44u, 0.0f);
+    putf(ram, WALK_CHECK + 52u, -1.0e9f);  /* the best hit so far */
+    for (u32 g = 0; g < WALK_GROUPS; ++g) {
+        const u32 entry = WALK_TABLE + 52u * g, b = WALK_BOUNDS + 32u * g;
+        put16(ram, entry + 38u, 0xFFFFu);  /* sibling */
+        put16(ram, entry + 40u, 0xFFFFu);  /* first child */
+        put16(ram, entry + 46u, 0xFFFFu);  /* no polygon tree */
+        put(ram, entry + 48u, 0u);         /* group info: a plain ground group */
+        putf(ram, b + 4u, -1000.0f); putf(ram, b + 8u, -1000.0f); putf(ram, b + 12u, -1000.0f);
+        putf(ram, b + 16u, 1000.0f); putf(ram, b + 20u, 1000.0f); putf(ram, b + 24u, 1000.0f);
+    }
+    /* Roots 0-3: 4 children each (26-41); those: 3 children each (42-89). */
+    u32 next_group = WALK_ROOTS;
+    for (u32 r = 0; r < 4u; ++r) {
+        put16(ram, WALK_TABLE + 52u * r + 40u, (u16)next_group);
+        for (u32 c = 0; c < 4u; ++c) {
+            const u32 child = next_group++;
+            if (c + 1u < 4u) put16(ram, WALK_TABLE + 52u * child + 38u, (u16)(child + 1u));
+        }
+    }
+    for (u32 parent = WALK_ROOTS; parent < WALK_ROOTS + 16u; ++parent) {
+        put16(ram, WALK_TABLE + 52u * parent + 40u, (u16)next_group);
+        for (u32 c = 0; c < 3u; ++c) {
+            const u32 child = next_group++;
+            if (c + 1u < 3u) put16(ram, WALK_TABLE + 52u * child + 38u, (u16)(child + 1u));
+        }
+    }
+}
+
+/* The walk in C: the same result as the translation. */
+static int walk_native(CPUState* leaf, const u8* ram, u32 group, u32 depth, unsigned* visits) {
+    ++*visits;
+    leaf->gpr[3] = WALK_SELF; leaf->gpr[4] = group; leaf->gpr[5] = get32(ram, WALK_CHECK + 4u); leaf->gpr[6] = depth;
+    leaf->lr = RETURN_ADDRESS; leaf->downcount = 0;
+    if (!bluewake_native_bg(leaf, BLUEWAKE_BG_CHK_GRP_THROUGH))
+        return -1;
+    if ((leaf->gpr[3] & 0xFFu) != 0u)
+        return 0;
+    const u32 b = get32(ram, WALK_SELF + 156u) + 32u * group;
+    const float x = getf(ram, WALK_CHECK + 36u), y = getf(ram, WALK_CHECK + 40u), z = getf(ram, WALK_CHECK + 44u);
+    if (getf(ram, b + 4u) > x || getf(ram, b + 16u) < x || getf(ram, b + 12u) > z || !(getf(ram, b + 24u) >= z))
+        return 0;
+    if (!(getf(ram, b + 8u) < y) || getf(ram, b + 20u) < getf(ram, WALK_CHECK + 52u))
+        return 0;
+    const u32 table = get32(ram, get32(ram, WALK_SELF + 148u) + 36u);
+    int hit = 0;
+    for (u32 c = get16(ram, table + 52u * group + 40u); c != 0xFFFFu; c = get16(ram, table + 52u * c + 38u)) {
+        const int r = walk_native(leaf, ram, c, depth + 1u, visits);
+        if (r < 0) return -1;
+        hit |= r;
+    }
+    return hit;
+}
+
+/* What a native must read and check before it may commit: every group's
+ * table entry and bounds, as plain stable RAM. */
+static bool walk_checks(CPUState* cpu, const u8* ram, u32 group) {
+    const u32 table = get32(ram, get32(ram, WALK_SELF + 148u) + 36u);
+    const u32 entry = table + 52u * group, b = get32(ram, WALK_SELF + 156u) + 32u * group;
+    if (!ppc_dispatch_poll_read_stable(cpu, entry, 52u) || !ppc_dispatch_poll_read_stable(cpu, b, 32u))
+        return false;
+    for (u32 c = get16(ram, entry + 40u); c != 0xFFFFu; c = get16(ram, table + 52u * c + 38u))
+        if (!walk_checks(cpu, ram, c))
+            return false;
+    return true;
+}
+
+static int walk_bench(const StaticRecompModuleDesc* mod, CPUState* g, u8* reference_ram) {
+    walk_build(reference_ram);
+    reset_host();
+    CPUState base;
+    memset(&base, 0, sizeof base);
+    base.ram = reference_ram;
+    base.ram_size = GC_MAIN_RAM_SIZE;
+    base.msr = PPC_MSR_FP;
+    base.cycle_budget = (s64)1 << 40;
+    base.gpr[1] = WALK_STACK;
+    base.gpr[4] = WALK_CHECK;
+    *g = base;
+    mod->on_state_loaded(g);
+    base = *g;
+    const unsigned checks = 20000u;
+    double best[3] = {1e30, 1e30, 1e30};
+    unsigned visits_seen = 0;
+    s64 cycles_per_check = 0;
+    for (unsigned round = 0; round < 7u; ++round) {
+        /* 1: the translation. */
+        double t0 = now_ns();
+        for (unsigned i = 0; i < checks; ++i) {
+            const s64 before = g->downcount;
+            for (u32 root = 0; root < WALK_ROOTS; ++root) {
+                g->gpr[1] = WALK_STACK; g->gpr[3] = WALK_SELF; g->gpr[4] = WALK_CHECK; g->gpr[5] = root; g->gpr[6] = 1u;
+                g->lr = RETURN_ADDRESS; g->pc = WALK_ENTRY;
+                if (!mod->dispatch(g, WALK_ENTRY) || (g->pc & ~3u) != RETURN_ADDRESS) {
+                    fprintf(stderr, "walk bench: the translation did not return (pc %08X)\n", g->pc);
+                    return 1;
+                }
+            }
+            if (i == 0u) cycles_per_check = before - g->downcount;
+            if (g->downcount < -((s64)1 << 39)) g->downcount = 0;
+        }
+        const double translated = (now_ns() - t0) / checks;
+        /* 2: the prototype. */
+        CPUState leaf = base;
+        int hits = 0;
+        t0 = now_ns();
+        for (unsigned i = 0; i < checks; ++i) {
+            unsigned visits = 0;
+            for (u32 root = 0; root < WALK_ROOTS; ++root) {
+                const int r = walk_native(&leaf, reference_ram, root, 1u, &visits);
+                if (r < 0) { fprintf(stderr, "walk bench: the leaf native declined\n"); return 1; }
+                hits |= r;
+            }
+            visits_seen = visits;
+        }
+        const double native = (now_ns() - t0) / checks;
+        /* 3: a decline: the checks, then the translation. */
+        t0 = now_ns();
+        for (unsigned i = 0; i < checks; ++i) {
+            for (u32 root = 0; root < WALK_ROOTS; ++root) {
+                if (!walk_checks(g, reference_ram, root)) return 1;
+                g->gpr[1] = WALK_STACK; g->gpr[3] = WALK_SELF; g->gpr[4] = WALK_CHECK; g->gpr[5] = root; g->gpr[6] = 1u;
+                g->lr = RETURN_ADDRESS; g->pc = WALK_ENTRY;
+                if (!mod->dispatch(g, WALK_ENTRY)) return 1;
+            }
+            if (g->downcount < -((s64)1 << 39)) g->downcount = 0;
+        }
+        const double declined = (now_ns() - t0) / checks;
+        if (translated < best[0]) best[0] = translated;
+        if (native < best[1]) best[1] = native;
+        if (declined < best[2]) best[2] = declined;
+        (void)hits;
+    }
+    printf("walk bench: %u group visits per ground check (%lld guest cycles translated)\n", visits_seen,
+           (long long)cycles_per_check);
+    printf("  translated  %9.0f ns per check  %6.1f ns per visit\n", best[0], best[0] / visits_seen);
+    printf("  prototype   %9.0f ns per check  %6.1f ns per visit  %.2fx\n", best[1], best[1] / visits_seen,
+           best[0] / best[1]);
+    printf("  declined    %9.0f ns per check  %+5.1f%% vs translated\n", best[2], 100.0 * (best[2] / best[0] - 1.0));
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: native_bg_test MODULE [CASES_PER_FUNCTION] [BENCH_CALLS]\n");
+        fprintf(stderr, "usage: native_bg_test MODULE [CASES_PER_FUNCTION] [BENCH_CALLS]\n"
+                        "       native_bg_test MODULE --walk-bench\n");
         return 2;
     }
     bg_setenv("BLUEWAKE_NATIVE_MATH", "0");
-    const unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 60000u;
+    const unsigned cases = argc > 2 && argv[2][0] != '-' ? (unsigned)strtoul(argv[2], NULL, 10) : 60000u;
     const unsigned bench_calls = argc > 3 ? (unsigned)strtoul(argv[3], NULL, 10) : 2000000u;
     BgLib lib = bg_open(argv[1]);
     if (lib == NULL) {
@@ -395,6 +575,8 @@ int main(int argc, char** argv) {
     u8* before = malloc(AREA_BYTES);
     if (reference_ram == NULL || native_ram == NULL || before == NULL)
         return 1;
+    if (argc > 2 && strcmp(argv[2], "--walk-bench") == 0)
+        return walk_bench(mod, guest_cpu(), reference_ram);
 
     unsigned ran[2] = {0}, declined[2] = {0}, true_results[2] = {0}, through_boundary = 0, boundary_declined = 0;
     for (unsigned which = 0; which < 2; ++which) {
