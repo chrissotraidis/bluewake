@@ -1,6 +1,6 @@
 # TECH_PLAN — Native extensions for Outset's character work
 
-Status: M2 hand-over exact in play; partial runs not exact in play yet (M3-T04); M1 blocked on porting  
+Status: M2 hand-over exact in play; partial runs fixed after a wrapper bug, re-measuring; M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -35,7 +35,7 @@ if (cpu->cycle_deadline_budget > 0 &&
 | M0 | Why does skinning decline? | Count declines by reason and model size; one Outset minute in Game Mode | **Done.** All timing declines are the turn budget; calls of 8k+ cycles refused 91–100% |
 | M1 | Do the two native sets help? | Full builds with `--native-entries` / `--native-set4`, own training, A/B | **Blocked.** Both need porting first (generator write forms; entry hashes for this tree) |
 | M2 | Can big models run natively? | Native runs the envelopes that fit the turn, then hands over to the translation | **Done.** Exact in the differential test ([how it works](#how-the-resumable-native-works-m2)) |
-| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | Partial runs +1.2% (Game Mode), +1.0% (render_bench), **but checkpoints differ in Outset**: under investigation. The hand-over alone is exact and level with the control |
+| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | Hand-over alone exact and level with the control. Partial runs: a wrapper bug skipped work in play (fixed in `028f1f0`); re-measuring |
 
 ## How the resumable native works (M2)
 
@@ -79,6 +79,7 @@ Details of the hand-over:
 - **Why stopping early is still exact:** the translation does the remaining envelopes itself, with its own budget checks.
 - **Why the epilogue stays translated:** builds reshape it (the #503 stack inlines `_restgpr`, which leaves a different cycle suffix), and the translation's own epilogue is right for each.
 - **Empty models:** the prologue and set-up run natively, then the hand-over at the epilogue with the set-up's registers (r0 the return address, r11 frame + 32, f28–f30 the caller's). The first M2 build declined them, which cost about 0.5% on the Deck.
+- **The wrapper passes the code through:** `bluewake_native_skin_try` returns the native's 0, 1 or 2. A first version returned `ready && native`, which turned 2 into 1 and skipped the rest of the loop in play; the tests now call the native through the wrapper.
 - **Opt-in:** partial runs need `BLUEWAKE_NATIVE_SKIN_PARTIAL=1` until M3 qualifies them.
 
 ### Is the native faster than the translation?
