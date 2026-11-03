@@ -1,0 +1,242 @@
+From ca95d65134ee9f7db54e7cd010c8eece0cb77384 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 14:29:05 -0600
+Subject: [PATCH] Characters: each character's own palettes on Wind Waker HD's
+ actor light (aurora_set_actor_light_hd_own)
+
+Each character's own palettes on HD's character light, as HD's setLightTevColorType: a character's colours are its
+own tevstr's (the floor under it) times the global intensities (Link's). aurora_set_actor_light_hd_own gives the
+GameCube's global actor C0 and K0; a character draw whose toon registers (C0, the ramp stage's KONST) differ takes
+HD's c0 and k times those ratios in linear light (clamped 0-4), the shadow colour stays global. Link's own draws
+have ratio 1. HdActorLightConstants gains own_c0 and own_k (13 x 16 bytes); pipeline config v18.
+DOL_AURORA_ACTOR_LIGHT_HD_OWN=0 turns it off to compare.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  7 ++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  1 +
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  4 ++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 34 +++++++++++++++++++
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  4 +++
+ .../include/gxruntime/gxcore/shader.hpp       |  9 ++++-
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 23 +++++++++++--
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 10 ++++--
+ 8 files changed, 85 insertions(+), 7 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 8705f18bf5..a94c74f327 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -222,6 +222,13 @@ void aurora_set_sun_palette(int on, const float sky[3], const float ground[3], c
+    renderer's switch DOL_AURORA_ACTOR_LIGHT_HD=1 is on (read at startup). `on` 0 goes back to the GameCube shading.
+    Takes effect at the next frame. */
+ void aurora_set_actor_light_hd(int on, const float c0[3], const float shadow[3], const float k[3]);
++/* Each character's own palettes on Wind Waker HD's light (its setLightTevColorType: a character's colours are its
++   own tevstr's, from the floor under it, times the intensities of the global light, Link's): `c0` and `k0`, the
++   GameCube's global actor C0 and K0 (g_env_light's, linear: bytes / 255 to the 2.2). A character draw whose own toon
++   registers (C0 and KONST) differ from them takes HD's colours from aurora_set_actor_light_hd times the ratio, in
++   linear light: an islander in the sun keeps the sun's light while Link stands under a roof whose floor names a
++   darker palette. `on` 0: every character on the global colours. */
++void aurora_set_actor_light_hd_own(int on, const float c0[3], const float k0[3]);
+ /* Wind Waker HD's light rule for the sun shadow map (its setLightPosHD): with `on`, the direction given by
+    aurora_set_sun_direction is HD's light already (the sun by day, the moon's side by night, its height held as
+    HD holds it), `night` says which, and `fade` (0 to 1) is HD's day/night switch fade, which takes the lit side
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 9b7625ebca..90ad08ecfb 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -1246,6 +1246,7 @@ bool begin_actor_light_pass(const post_fx::Camera* camera, const post_fx::SunMap
+   gxc::HdActorLightConstants c{};
+   if (!post_fx::actor_light_palette(c.c0, c.shadow, c.k))
+     return false;
++  c.own_k[3] = post_fx::actor_light_own(c.own_c0, c.own_k) ? 1.f : 0.f;
+   // The shadow: this frame's pre-pass of the characters' own where common.cpp made it for this pass
+   // (post_fx::draw_actor_shadow(), HD's mip 1), else last frame's blurred pre-pass where the post pass made one; how
+   // strongly the shadow map's light shows; none: lit (1).
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index cc43dfeaec..9dbe9c7b92 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -149,7 +149,9 @@ DrawData* last_recorded_draw() noexcept;
+ // v16: its cloud term (HD's cloud shadow texture and sampler at group 0 bindings 5 and 6, a longer uniform).
+ // v17: HD's light buffer on the characters (its point and effect lights at group 0 binding 7).
+ // v18: and on the lit scenery (ShaderKey::hd_point_light: a key byte, its WGSL and group 0).
+-constexpr uint32_t GXCorePipelineConfigVersion = 18;
++// v19: each character's own palettes on HD's character light (HdActorLightConstants::own_c0, own_k: a longer
++// uniform, and the flagged WGSL).
++constexpr uint32_t GXCorePipelineConfigVersion = 19;
+ 
+ struct PipelineConfig {
+   uint32_t version = GXCorePipelineConfigVersion;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index e007f4aed0..37d4aabd4d 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -100,6 +100,13 @@ struct ActorLightPalette {
+   float c0[3]{}, shadow[3]{}, k[3]{};
+ };
+ ActorLightPalette g_actorLight;
++// The GameCube's global actor C0 and K0 (Link's, linear) each character's own toon registers are set against
++// (aurora_set_actor_light_hd_own), under g_cameraMutex.
++struct ActorLightOwn {
++  bool on = false;
++  float c0[3]{}, k[3]{};
++};
++ActorLightOwn g_actorLightOwn;
+ // The scene pass drew the characters with it this frame (set_actor_light_applied), render thread.
+ std::atomic_bool g_actorLightApplied{false};
+ // Post passes encoded so far, and the one that last made the shadow pre-pass (g_sunLow), render thread: the
+@@ -4628,6 +4635,29 @@ void set_actor_light_hd(bool on, const float c0[3], const float shadow[3], const
+   }
+ }
+ 
++void set_actor_light_hd_own(bool on, const float c0[3], const float k[3]) noexcept {
++  std::lock_guard lock{g_cameraMutex};
++  g_actorLightOwn.on = on && c0 != nullptr && k != nullptr;
++  for (int i = 0; g_actorLightOwn.on && i < 3; ++i) {
++    g_actorLightOwn.c0[i] = std::max(c0[i], 0.f);
++    g_actorLightOwn.k[i] = std::max(k[i], 0.f);
++  }
++}
++
++// DOL_AURORA_ACTOR_LIGHT_HD_OWN=0 (to compare): every character on the host's colours (Link's floor's).
++bool actor_light_own(float c0[3], float k[3]) noexcept {
++  static const bool allowed = [] {
++    const char* env = std::getenv("DOL_AURORA_ACTOR_LIGHT_HD_OWN");
++    return env == nullptr || env[0] != '0';
++  }();
++  std::lock_guard lock{g_cameraMutex};
++  for (int i = 0; i < 3; ++i) {
++    c0[i] = g_actorLightOwn.c0[i];
++    k[i] = g_actorLightOwn.k[i];
++  }
++  return allowed && g_actorLightOwn.on;
++}
++
+ bool actor_light_palette(float c0[3], float shadow[3], float k[3]) noexcept {
+   std::lock_guard lock{g_cameraMutex};
+   for (int i = 0; i < 3; ++i) {
+@@ -5340,6 +5370,10 @@ void aurora_set_actor_light_hd(int on, const float c0[3], const float shadow[3],
+   aurora::gfx::post_fx::set_actor_light_hd(on != 0, c0, shadow, k);
+ }
+ 
++void aurora_set_actor_light_hd_own(int on, const float c0[3], const float k0[3]) {
++  aurora::gfx::post_fx::set_actor_light_hd_own(on != 0, c0, k0);
++}
++
+ void aurora_set_hd_cloud_texture(const char* path) {
+   aurora::gfx::post_fx::set_hd_cloud_texture(path);
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index f2aa133d29..b282db17d0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -86,6 +86,10 @@ bool point_lights_hd_switch() noexcept;
+ bool point_lights_hd_active() noexcept;
+ void set_actor_light_hd(bool on, const float c0[3], const float shadow[3], const float k[3]) noexcept;
+ bool actor_light_palette(float c0[3], float shadow[3], float k[3]) noexcept;
++// The GameCube's global actor C0 and K0 (linear) the characters' own registers are set against
++// (aurora_set_actor_light_hd_own); false while none are given or with DOL_AURORA_ACTOR_LIGHT_HD_OWN=0.
++void set_actor_light_hd_own(bool on, const float c0[3], const float k[3]) noexcept;
++bool actor_light_own(float c0[3], float k[3]) noexcept;
+ // The switch is on and the host has given colours: the characters may take HD's light this frame.
+ bool actor_light_wanted() noexcept;
+ // The shadow the characters' light reads: the last post pass's blurred shadow pre-pass (HD's terrain mix or its
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 8e3109cd52..9b723c038e 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -770,8 +770,15 @@ struct HdActorLightConstants {
+   // uv = (-X, -Z) * cloud.z + cloud.xy. x u0 (drifting with the wind), y v0
+   // (0.5), z 1 / the repeat (1 / 15000), w the floor: cloud = clamp(texel + w).
+   float cloud[4]{};
++  // Each character's own colours (Wind Waker HD's setLightTevColorType: a character's tevstr colours, from the
++  // palettes of the floor under it, times the global intensities, mActorC0/K0Intensity from Link's): the GameCube's
++  // global actor C0 and K0 (g_env_light, Link's), linear (bytes / 255 to the 2.2), that the draw's own toon registers
++  // (register C0: its C0, KONST: its K0) are set against; HD's c0 and k above are taken by those ratios. w: 1 on
++  // (aurora_set_actor_light_hd_own), 0 every character on c0 and k as given.
++  float own_c0[4]{};
++  float own_k[4]{};
+ };
+-static_assert(sizeof(HdActorLightConstants) == 11 * 16);
++static_assert(sizeof(HdActorLightConstants) == 13 * 16);
+ 
+ // Wind Waker HD's light buffer, the point and effect lights (its light pass, PS 1472 in the Cemu captures:
+ // drafts/hd-look-remaining/CAPTURES-NOV3-READ-lights.md), for the draws with HD's light, at group(0) binding(7):
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 27b53c003d..031ffc5a54 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -368,15 +368,30 @@ void emit_hd_actor_light(std::string& out, const ShaderKey& key, const ToonLight
+   emit(out,
+        "        let hd_n = normalize(in.hd_nv);\n"
+        "        let hd_e = normalize(in.hd_pv);\n"
+-       "        let hd_up = dot(hdl.rows[1].xyz, hd_n);\n"
+-       "        let hd_hemi = mix(hdl.c0.rgb, hdl.shadow.rgb, 0.5 + 0.5 * hd_up);\n"
++       "        let hd_up = dot(hdl.rows[1].xyz, hd_n);\n");
++  emitf(out,
++       // Each character's own palettes (HD's per-tevstr colours times the global intensities): the draw's toon
++       // registers (register C0 its C0, KONST its K0: dKy_tevstr setLightTevColorType) against the
++       // GameCube's global ones (Link's), in linear light, scale HD's colours; Link's own draws keep them.
++       "        var hd_c0 = hdl.c0.rgb;\n"
++       "        var hd_k = hdl.k.rgb;\n"
++       "        if (hdl.own_k.w > 0.5) {\n"
++       "            let hd_own_k = pow(clamp(vec3f(%s) / 255.0, vec3f(0.0), vec3f(1.0)), vec3f(2.2));\n"
++       "            let hd_own_c0 = pow(clamp(vec3f(psc.colors[1].rgb) / 255.0, vec3f(0.0), vec3f(1.0)), vec3f(2.2));\n",
++       kKselC[rs.ksel_kc]);
++  emit(out,
++       "            hd_k = hd_k * select(vec3f(1.0), clamp(hd_own_k / max(hdl.own_k.rgb, vec3f(1e-4)), vec3f(0.0), vec3f(4.0)), hdl.own_k.rgb > vec3f(1e-3));\n"
++       "            hd_c0 = hd_c0 * select(vec3f(1.0), clamp(hd_own_c0 / max(hdl.own_c0.rgb, vec3f(1e-4)), vec3f(0.0), vec3f(4.0)), hdl.own_c0.rgb > vec3f(1e-3));\n"
++       "        }\n");
++  emit(out,
++       "        let hd_hemi = mix(hd_c0, hdl.shadow.rgb, 0.5 + 0.5 * hd_up);\n"
+        "        var hd_cloud = 1.0;\n"
+        "        if (hdl.rim.w > 0.5) {\n"
+        "            hd_cloud = clamp(textureSampleLevel(hdl_cloud, hdl_cloud_samp, hd_cloud_uv, hd_cloud_lod).r + "
+        "hdl.cloud.w, 0.0, 1.0);\n"
+        "        }\n"
+        // HD's light buffer (the point and effect lights) on the light, x 1.75, with no shadow, cloud or ramp.
+-       "        let hd_l = mix(hd_hemi, hdl.k.rgb, hd_ramp * hd_cloud) + hdp.count.y * hd_point_sum(in.hd_pv, hd_n);\n"
++       "        let hd_l = mix(hd_hemi, hd_k, hd_ramp * hd_cloud) + hdp.count.y * hd_point_sum(in.hd_pv, hd_n);\n"
+        "        let hd_rev = mix(1.0, clamp(dot(hdl.light.xyz, hd_e), 0.0, 1.0), hdl.rim.z);\n"
+        "        let hd_rim = pow(clamp(1.0 + dot(hd_n, hd_e), 0.0, 1.0), hdl.rim.y) * hd_rev;\n"
+        "        let hd_alb = pow(vec3f(hd_albedo) / 255.0, vec3f(2.2));\n");
+@@ -1261,6 +1276,8 @@ std::string generate_wgsl(const ShaderKey& key) {
+               "    rim: vec4f,\n"
+               "    screen: vec4f,\n"
+               "    cloud: vec4f,\n"
++              "    own_c0: vec4f,\n"
++              "    own_k: vec4f,\n"
+               "};\n"
+               "@group(0) @binding(2) var<uniform> hdl: HdActorLight;\n"
+               "@group(0) @binding(3) var hdl_shadow: texture_2d<f32>;\n"
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index d6e8abff45..0e027a6a49 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -1124,7 +1124,7 @@ void test_toon_light_wgsl() {
+   // The cloud term: HD's cloud shadow texture and its sampler at bindings 5 and 6, the uniform's last vec4.
+   CHECK(w.find("@group(0) @binding(5) var hdl_cloud: texture_2d<f32>;") != std::string::npos);
+   CHECK(w.find("@group(0) @binding(6) var hdl_cloud_samp: sampler;") != std::string::npos);
+-  CHECK(w.find("    screen: vec4f,\n    cloud: vec4f,\n};") != std::string::npos);
++  CHECK(w.find("    screen: vec4f,\n    cloud: vec4f,\n    own_c0: vec4f,\n    own_k: vec4f,\n};") != std::string::npos);
+   // Its uv is the world position from above (the inverse view's x and z rows), its mip from the uv's derivatives,
+   // worked out at the top of fs_main, before any branch or discard (uniform control flow).
+   const auto main_at = w.find("fn fs_main(");
+@@ -1143,8 +1143,14 @@ void test_toon_light_wgsl() {
+   CHECK(w.find("        if (hdl.rim.w > 0.5) {\n"
+                "            hd_cloud = clamp(textureSampleLevel(hdl_cloud, hdl_cloud_samp, hd_cloud_uv, hd_cloud_lod).r "
+                "+ hdl.cloud.w, 0.0, 1.0);\n") != std::string::npos);
+-  CHECK(w.find("let hd_l = mix(hd_hemi, hdl.k.rgb, hd_ramp * hd_cloud) + hdp.count.y * hd_point_sum(in.hd_pv, hd_n);") !=
++  CHECK(w.find("let hd_l = mix(hd_hemi, hd_k, hd_ramp * hd_cloud) + hdp.count.y * hd_point_sum(in.hd_pv, hd_n);") !=
+         std::string::npos);
++  // Each character's own palettes: its toon registers (C0, the ramp stage's KONST) against the global ones, in linear.
++  CHECK(w.find("let hd_own_k = pow(clamp(vec3f(psc.kcolors[0].rgb) / 255.0, vec3f(0.0), vec3f(1.0)), vec3f(2.2));") !=
++        std::string::npos);
++  CHECK(w.find("hd_c0 = hd_c0 * select(vec3f(1.0), clamp(hd_own_c0 / max(hdl.own_c0.rgb, vec3f(1e-4)), vec3f(0.0), "
++               "vec3f(4.0)), hdl.own_c0.rgb > vec3f(1e-3));") != std::string::npos);
++  CHECK(w.find("let hd_hemi = mix(hd_c0, hdl.shadow.rgb, 0.5 + 0.5 * hd_up);") != std::string::npos);
+   // HD's light buffer: its lights at binding 7, summed per pixel with HD's falloff (exponent 1.5).
+   CHECK(w.find("@group(0) @binding(7) var<uniform> hdp: HdPointLights;") != std::string::npos);
+   CHECK(w.find("    pos_r: array<vec4f, 32>,\n    colour: array<vec4f, 32>,") != std::string::npos);
+-- 
+2.56.0
+

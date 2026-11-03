@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "ecfa8a2d891f1ffd5c93268e6c35409898e6e8c3",
+      "sha": "ca95d65134ee9f7db54e7cd010c8eece0cb77384",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -824,6 +824,13 @@
             "patches/recompcore/0222-Characters-and-scenery-Wind-Waker-HD-s-light-buffer-its-point-and-effect-lights-on-their-light.patch"
           ],
           "evidence": "pdale-boop's: at Windfall at 21:00 a lamp takes Link's hair in the shade from 0.02 to 0.41 in red, as in Cemu; Dragon Roost Cavern's first room and the Tower of the Gods' rooms take their torches (Linux, Vulkan); gxcore tests."
+        },
+        "hd_actor_own": {
+          "runtime": "ca95d65134ee9f7db54e7cd010c8eece0cb77384",
+          "tracked_patches": [
+            "patches/recompcore/0223-Characters-each-character-s-own-palettes-on-Wind-Waker-HD-s-actor-light-aurora_set_actor_light_hd_own.patch"
+          ],
+          "evidence": "pdale-boop's: at Windfall (T09a) a kid's shirt goes from (132, 81, 66) to (218, 140, 109) against Cemu's (232, 160, 127); Link's own colours identical; gxcore tests 13/13."
         }
       }
     },
