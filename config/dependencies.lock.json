@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "3f9b36233ee8e6fbf555ed4f6ad779fb41a4e432",
+      "sha": "4f280d14843c3a0b51761c7f781fc9602968fa00",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -874,6 +874,13 @@
             "patches/recompcore/0221-Far-blur-Wind-Waker-HD-s-linear-ramp-and-its-level-for-the-hour.patch"
           ],
           "evidence": "pdale-boop's: HD's DOF composite (PS 786) blends by clamp(level x (z / 25,000 - 1)); wwHD_basic and wwHD_night's levels 1.2 and 0.65 over 06:00-08:00 and 18:00-20:00."
+        },
+        "hd_light_buffer": {
+          "runtime": "4f280d14843c3a0b51761c7f781fc9602968fa00",
+          "tracked_patches": [
+            "patches/recompcore/0222-Characters-and-scenery-Wind-Waker-HD-s-light-buffer-its-point-and-effect-lights-on-their-light.patch"
+          ],
+          "evidence": "pdale-boop's: at Windfall at 21:00 a lamp takes Link's hair in the shade from 0.02 to 0.41 in red, as in Cemu; Dragon Roost Cavern's first room and the Tower of the Gods' rooms take their torches (Linux, Vulkan); gxcore tests."
         }
       }
     },
