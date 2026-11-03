@@ -1243,7 +1243,8 @@ enum {
 };
 // Every stage HD retuned (optional/hd-sky/stages.bin, else sea.bin alone): a
 // stage's GC Pale, HD Pale, GC Virt, HD Virt, HD's Pale factors (version 3:
-// each Pale entry's shadow colour, then its factors; 2: the factors). The stage in
+// each Pale entry's shadow colour, then its factors; 2: the factors), and in
+// version 4 HD's five floats for each Virt entry. The stage in
 // play is known by its tables holding one stage's GameCube colours; its data
 // is then g_sky_data (Virt can be none: an interior has no sky).
 typedef struct SkyStage {
@@ -1251,12 +1252,14 @@ typedef struct SkyStage {
     u8* data;
     u32 pale, virt;
     u32 extra;  // bytes a Pale entry's factors take: 28 with the shadow colour first (version 3), else 24
+    const u8* floats;  // HD's Virt floats, 20 bytes an entry (version 4), or NULL
 } SkyStage;
 static SkyStage* g_skies;
 static u32 g_sky_count;
 static u8* g_sky_data;  // the stage in play's, or NULL
 static u32 g_sky_pale, g_sky_virt;
 static u32 g_sky_extra = 24u;  // the stage in play's (SkyStage.extra)
+static const u8* g_sky_floats;  // the stage in play's (SkyStage.floats)
 static bool g_sky_shown;  // the tables hold HD's (as last seen)
 static bool sky_palettes_shown(void) { return g_sky_shown; }
 static float g_sky_exposure;  // what aurora_set_exposure was last given
@@ -1310,14 +1313,16 @@ static void sky_load(void) {
         } else {
             memcpy(stage->name, "sea", 4);
         }
-        if (fread(head, 1, 16, f) != 16 || memcmp(head, "BWSK", 4) != 0 || (head[7] != 2u && head[7] != 3u))
+        if (fread(head, 1, 16, f) != 16 || memcmp(head, "BWSK", 4) != 0 || head[7] < 2u || head[7] > 4u)
             break;
         stage->pale = (u32)head[8] << 24 | (u32)head[9] << 16 | (u32)head[10] << 8 | head[11];
         stage->virt = (u32)head[12] << 24 | (u32)head[13] << 16 | (u32)head[14] << 8 | head[15];
-        stage->extra = head[7] == 3u ? 28u : 24u;
-        const size_t size = 2u * (stage->pale * 0x2Cu + stage->virt * 0x24u) + stage->pale * stage->extra;
+        stage->extra = head[7] >= 3u ? 28u : 24u;
+        const size_t floats = 2u * (stage->pale * 0x2Cu + stage->virt * 0x24u) + stage->pale * stage->extra;
+        const size_t size = floats + (head[7] >= 4u ? stage->virt * 20u : 0u);
         if (stage->pale == 0u || stage->pale >= 256u || stage->virt >= 256u || (stage->data = malloc(size)) == NULL)
             break;
+        stage->floats = head[7] >= 4u ? stage->data + floats : NULL;
         if (fread(stage->data, 1, size, f) != size) {
             free(stage->data);
             break;
@@ -1325,7 +1330,9 @@ static void sky_load(void) {
         ++g_sky_count;
     }
     fclose(f);
-    fprintf(stderr, "[hd-look] HD sky palettes: %u stages from %s\n", g_sky_count, path);
+    // A pack imported before version 4 works without HD's haze brightness at dusk; importing it again adds it.
+    fprintf(stderr, "[hd-look] HD sky palettes: %u stages from %s%s\n", g_sky_count, path,
+            g_sky_count != 0u && g_skies[0].floats == NULL ? " (no haze brightness: import the pack again for it)" : "");
 }
 
 static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size);
@@ -1408,6 +1415,7 @@ static bool sky_pick(CPUState* cpu, u32 table) {
     g_sky_pale = stage->pale;
     g_sky_virt = stage->virt;
     g_sky_extra = stage->extra;
+    g_sky_floats = stage->floats;
     return true;
 }
 
@@ -2147,6 +2155,18 @@ static void sky_actor_palette(CPUState* cpu, bool on) {
 
 static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
 
+// HD's float `index` for a Virt entry (0 cloud, 1 cloud centre, 2 sky, 3 haze, 4 false sea's alpha), from stages.bin
+// version 4; 1 without them.
+static float sky_float_at(int virt, u32 index) {
+    if (g_sky_floats == NULL || virt < 0)
+        return 1.0f;
+    const u8* f = g_sky_floats + (u32)virt * 20u + index * 4u;
+    const u32 bits = (u32)f[0] << 24 | (u32)f[1] << 16 | (u32)f[2] << 8 | f[3];
+    float value;
+    memcpy(&value, &bits, 4);
+    return value >= 0.0f && value < 10.0f ? value : 1.0f;
+}
+
 // The Pale entries written last (the game's light's four, then the scenery's)
 // and the Virt entries.
 static int s_written_pale[8] = {-1, -1, -1, -1, -1, -1, -1, -1}, s_written_virt[4] = {-1, -1, -1, -1};
@@ -2287,12 +2307,21 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on, f
         virt[i] = virt_table != 0u && hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] < g_sky_virt ? hd_pale[(u32)pale[i] * 0x2Cu + 0x21u] : -1;
     if (virt[0] < 0 || virt[1] < 0 || virt[2] < 0 || virt[3] < 0)
         return;
+    // HD's haze (kasumi-mae, kVirtColours 12-14) is its colour times Virt float 3 (1.636 at dusk on the sea),
+    // blended as the colours are and times mAllColRatio (float_kankyo_color_ratio_set), in linear light. HD's
+    // target clamps it at 1 before the blend, as the bytes clamp at 255. A pack from before version 4 has no floats.
+    float haze[4] = {1.0f, 1.0f, 1.0f, 1.0f}, haze_blend = 0.0f;
+    for (int i = 0; i < 4; ++i) {
+        if (g_sky_floats != NULL)
+            haze[i] = sky_float_at(virt[i], 3u) * g_tint.all;
+        haze_blend += w[i] * haze[i];
+    }
     u8 virt_out[sizeof kVirtColours];
     for (u32 c = 0; c < sizeof kVirtColours; ++c) {
         float v = 0.0f;
         for (int i = 0; i < 4; ++i)
             v += w[i] * sky_lin(hd_virt[(u32)virt[i] * 0x24u + kVirtColours[c]]);
-        virt_out[c] = sky_gam(v);
+        virt_out[c] = sky_gam(c >= 12u ? v * haze_blend : v);
     }
     for (int i = 0; i < 4; ++i) {
         // The blend, or without it each entry's own colours (the game's blend
@@ -2300,11 +2329,19 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on, f
         // kVirtColours 6-8) times the gain.
         for (u32 c = 0; c < sizeof kVirtColours; ++c) {
             float v = linear_on ? virt_out[c] : hd_virt[(u32)virt[i] * 0x24u + kVirtColours[c]];
+            if (!linear_on && c >= 12u && haze[i] != 1.0f)
+                v = sky_gam(sky_lin((u8)v) * haze[i]);
             if (c >= 6u && c <= 8u)
                 v = v * gain + 0.5f > 255.0f ? 255.0f : v * gain + 0.5f;
             mem_write8(cpu, virt_table + (u32)virt[i] * 0x24u + kVirtColours[c], (u8)v);
         }
         s_written_virt[i] = virt[i];
+    }
+    static unsigned s_haze_traced;
+    if (g_trace && s_haze_traced++ % 60u == 0u) {
+        const u32 at = virt_table + (u32)virt[0] * 0x24u + 0x1Eu;
+        fprintf(stderr, "[hd-look] haze at %.1f: x%.3f, entry %d holds %u %u %u\n", read_float(cpu, kEnvTime), haze_blend,
+                virt[0], mem_read8(cpu, at), mem_read8(cpu, at + 1u), mem_read8(cpu, at + 2u));
     }
 }
 
