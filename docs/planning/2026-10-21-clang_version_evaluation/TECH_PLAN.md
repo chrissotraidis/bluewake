@@ -1,8 +1,10 @@
 # TECH_PLAN — Clang version evaluation
 
-Status: Partial evaluation; default selection open
+Status: Historical compiler result recorded; current 2×2 grid planned
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
+Current matrix baseline: upstream `main` at `ee991d312d97`; packaging candidate
+[#472](https://github.com/chrissotraidis/bluewake/pull/472)
 
 [Product brief](PRD.md) · [Tracker](PROGRESS.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -24,6 +26,9 @@ at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 - [#451](https://github.com/chrissotraidis/bluewake/issues/451) blocks native
   generation for a certified current control; #446 remains a separately labeled
   pre-merge experiment.
+- Current `main` builds AppImages with libc++ and source-built Dawn. #472
+  changes both the runtime and Dawn provider, so its existing comparison is a
+  practical recipe result, not a runtime-only factorial comparison.
 
 ## Proposed changes
 
@@ -33,6 +38,20 @@ at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 | Modify | `scripts/linux/build.py` provenance | Record compiler executable/version, effective CPU/compiler flags and generated profile hash | M0 |
 | Modify | `tests/test_linux_ci_container.py` | Cover default/opt-in compiler selection and provenance | M0 |
 | Conditional | Dockerfile, docs and toolchain tests | Make Clang 22 the default only after M2 qualifies it; keep explicit Clang 18 selection for CI unless separately approved | M2 |
+| Proposed | `scripts/linux/build.py` AppImage host configuration | Select libc++ or static libstdc++ independently of the Dawn provider for measurement builds | M3 |
+| Proposed | Builder provenance and tests | Record runtime and Dawn identity; verify all four recipes select their intended compiler/runtime | M3 |
+| Measurement | Private AppImages and reports | Build and measure the current-source 2×2 grid without uploading game artifacts | M4–M5 |
+
+Proposed measurement-only builder surface, exact spelling to be settled during
+M3 without changing either default:
+
+```text
+--appimage-stdlib=libc++|static-libstdc++
+--appimage-dawn-provider=vendor|package
+```
+
+The first selector creates the factorial column. The second keeps `vendor`
+fixed for A–D, then selects `package` only for #472's shipping confirmation.
 
 The existing interfaces select the recipes:
 
@@ -67,6 +86,44 @@ flowchart LR
     Checks --> Deck --> Decision
 ```
 
+## Current 2×2 contract
+
+Use one frozen source/dependency/options snapshot and one Dawn provider/revision
+for all four cells:
+
+| Cell | Compiler | AppImage C++ runtime | Game module |
+|---|---|---|---|
+| A | Clang 18 | libc++ | Clang 18 module/profile |
+| B | Clang 18 | static libstdc++ | Exact module from A |
+| C | Clang 22 | libc++ | Clang 22 module/profile |
+| D | Clang 22 | static libstdc++ | Exact module from C |
+
+This isolates the runtime delta within A/B and C/D. The Clang comparison still
+evaluates complete compiler recipes, including compiler-specific PGO, as #437
+originally intended. The report calculates `B−A`, `D−C`, `C−A`, `D−B`, and the
+interaction `(D−C)−(B−A)`.
+
+```mermaid
+flowchart LR
+    Frozen["Frozen source,<br/>options and Dawn"]
+    C18["Clang 18<br/>module + PGO"]
+    C22["Clang 22<br/>module + PGO"]
+    A["A: Clang 18<br/>libc++"]
+    B["B: Clang 18<br/>static libstdc++"]
+    C["C: Clang 22<br/>libc++"]
+    D["D: Clang 22<br/>static libstdc++"]
+    Results["Headless, rendered<br/>and Game Mode grid"]
+
+    Frozen --> C18 --> A --> Results
+    C18 --> B --> Results
+    Frozen --> C22 --> C --> Results
+    C22 --> D --> Results
+```
+
+#472's packaged-Dawn recipe receives a separate final confirmation after the
+factor-isolated grid. It must not be substituted into only B/D, because that
+would make the runtime column also a Dawn-provider comparison.
+
 ## Verification
 
 | Layer | Method | Required evidence | Failure / skip |
@@ -78,6 +135,8 @@ flowchart LR
 | CPU profiles | Capture headless, rendered, and Game Mode profiles after A/A is stable | Flat and per-thread evidence used only to explain a result | Missing profile leaves selection incomplete |
 | Controlled A/B | Five interleaved pairs with the same states/scenes in headless and rendered modes | Per-scene medians, dispersion, game FPS and game-thread busy | Incomplete grid is inconclusive |
 | Game Mode | Launch each matched AppImage locally, then collect over SSH and repeat the scene | Correct process/artifact, settled window, FPS/busy/waits and thermal/power context | Not a qualification without both variants |
+| Grid identity | Provenance plus module hashes | A/B share a module; C/D share a module; all four share source, options and Dawn | Any mismatch invalidates the grid |
+| 2×2 analysis | Per-scene and overall contrasts | Four main-effect deltas and interaction, with dispersion and A/A noise | Missing cell or unmatched run is inconclusive |
 
 Use [`bench_tour.py`](../../../scripts/bench_tour.py) to control the workload and
 [`profile_deck.sh`](../../../scripts/linux/profile_deck.sh) only when a profile
@@ -91,8 +150,11 @@ is needed to explain a result. Follow the comparison rules in the
 | M0 | — | Parent runtime track | Frozen #446 experiment contract and provenance |
 | M1 | M0 | Parent runtime track | Two validated artifacts with compiler-specific PGO provenance |
 | M2 | M1 | Parent runtime track | Qualified headless comparison complete; rendered/Game Mode decision gates remain open |
+| M3 | — | #472 rebase work | Freeze current source/Dawn and expose independent compiler/runtime selectors with provenance/tests |
+| M4 | M3 | — | Build and validate A–D; enforce shared module identities within compiler pairs |
+| M5 | M4 | — | Qualified headless, rendered and Game Mode 2×2 measurements; recipe decision or inconclusive result |
 
-Critical path: M0 → M1 → M2. Building the variants may run in
+Historical path: M0 → M1 → M2. Current critical path: M3 → M4 → M5. Building the variants may run in
 parallel after the immutable inputs are frozen; Deck runs are interleaved, not
 parallel, so they share the same hardware conditions.
 
@@ -120,19 +182,19 @@ default. Keep raw states, session logs, and `perf.data` private.
 
 ## Remaining measurement order
 
-Use the existing private `48a5872` Clang 18 and Clang 22 artifacts only. Do
-not rebuild, retrain, change settings, or substitute a state during this
-sequence: it qualifies the existing recipe comparison, not a new candidate.
+Do not reuse the private `48a5872` artifacts for the current grid. Build A–D
+from the frozen current baseline, then use one workload/state set across all
+four cells. Within each compiler pair, verify the module SHA is identical.
 
 | Order | Run | What to record | Advance only when |
 |---:|---|---|---|
-| 1 | Rendered preflight: one tour per artifact | Artifact hash, state, all five requested stops, and summary `loaded` status | Every stop is confirmed loaded and checkpoints match |
-| 2 | Rendered A/A: at least three runs of one artifact | Per-scene game FPS, dispersion, checkpoint result, busy/wait cause | Noise band is recorded |
-| 3 | Rendered A/B: five interleaved Clang 18/22 pairs | Per-scene medians, dispersion, game FPS, busy/waits, and checkpoints | One recipe exceeds rendered noise without a correctness mismatch |
-| 4 | Game Mode preflight: launch each artifact locally at the fixed route | Process ID, artifact hash, settled state/location, session log | Both runs identify the intended artifact and route |
-| 5 | Game Mode A/A and A/B | At least three matched controls, then five interleaved pairs; game FPS, dips, busy/waits, temperature/power, and checkpoints | Direction and magnitude agree with the qualified comparison or explain a conflict |
-| 6 | Diagnose only if needed | One `profile_deck.sh` capture per relevant artifact | Profile explains a measured difference; it is not the primary FPS comparison |
-| 7 | Decision | Headless, rendered, and Game Mode summaries | Retain Clang 18, retain Clang 22, or record inconclusive with no default change |
+| 1 | Artifact validation | Source/options/Dawn identity; compiler/runtime; PGO and module SHA; ABI/smoke | Four valid cells; A/B and C/D module hashes match |
+| 2 | Headless grid | Full five-scene interleaved runs and checkpoints | All cells complete; checkpoints match |
+| 3 | Rendered preflight and A/A | Every scene loads; at least three matched controls | Loading is confirmed and noise recorded |
+| 4 | Rendered grid | At least five interleaved four-cell rounds | Per-scene medians/dispersion and checkpoints recorded |
+| 5 | Game Mode grid | Fixed route; at least three controls then five interleaved rounds | FPS, dips, busy/waits, temperature/power and artifact identity recorded |
+| 6 | #472 shipping check | Winning runtime with #472's packaged Dawn versus its factor-grid counterpart | Quantifies provider effect separately |
+| 7 | Decision | Main effects, interaction and shipping check | Select a complete recipe or record inconclusive; no silent default change |
 
 The Game Mode launch is player-facing and starts locally on the Deck. SSH may
 attach `perf`, retrieve redacted summaries, and collect logs after the running
@@ -144,3 +206,4 @@ process and artifact identity are confirmed.
 - [Linux build instructions](../../LINUX.md#container-build-recommended)
 - [Steam Deck profiling](../../PROFILING.md)
 - [Steam Deck performance issue #215](https://github.com/chrissotraidis/bluewake/issues/215)
+- [#472 static-libstdc++ AppImage candidate](https://github.com/chrissotraidis/bluewake/pull/472)

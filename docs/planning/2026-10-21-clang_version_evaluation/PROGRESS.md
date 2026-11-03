@@ -1,9 +1,8 @@
 # PROGRESS — Clang version evaluation
 
-Status: The qualified headless grid favors Clang 18 by 3.2%; no default changes.
-Rendered scene loading and repeated Game Mode comparison remain open. A
-certified current native-entry control is blocked by
-[#451](https://github.com/chrissotraidis/bluewake/issues/451).
+Status: The historical headless grid favors Clang 18 by 3.2%; no default
+changes. A current 2×2 Clang/runtime grid, cross-referenced with
+[#472](https://github.com/chrissotraidis/bluewake/pull/472), is planned.
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -30,6 +29,24 @@ certified current native-entry control is blocked by
 - [ ] M2-T03: Run five interleaved rendered and Game Mode pairs, then retain a winner or record an inconclusive result.
 
 See the [ordered remaining measurement sequence](TECH_PLAN.md#remaining-measurement-order).
+
+### M3: Freeze the current 2×2 contract
+
+- [ ] M3-T01: Pin current source, dependencies, options, Dawn provider/revision, workloads and Deck settings.
+- [ ] M3-T02: Select libc++ or static libstdc++ independently of compiler and Dawn; record all identities in provenance.
+- [ ] M3-T03: Add builder tests proving the four compiler/runtime selections and unchanged defaults.
+
+### M4: Produce and validate the four cells (depends: M3)
+
+- [ ] M4-T01: Build A/B with Clang 18 and C/D with Clang 22 using identical frozen inputs.
+- [ ] M4-T02: Verify A/B share one module hash, C/D share one module hash, and all cells share the Dawn identity.
+- [ ] M4-T03: Run source tests, ABI audit, launch smoke and checkpoint preflight for every AppImage.
+
+### M5: Measure and decide (depends: M4)
+
+- [ ] M5-T01: Run the full interleaved five-scene headless grid with matching checkpoints.
+- [ ] M5-T02: Establish rendered A/A noise, then run at least five interleaved four-cell rendered rounds.
+- [ ] M5-T03: Run the matched Game Mode grid and #472 packaged-Dawn confirmation; report main effects, interaction and decision.
 
 ## Evidence ledger
 
