@@ -53,10 +53,10 @@ building A–D; that SHA—not an individual PR head—is the matrix source.
 
 The working branch is
 [`perf/clang-runtime-matrix`](https://github.com/irregularthanis/bluewake/tree/perf/clang-runtime-matrix)
-at [`cb7089c15`](https://github.com/irregularthanis/bluewake/commit/cb7089c15).
+at [`202419403`](https://github.com/irregularthanis/bluewake/commit/202419403).
 Its only merge conflict was Linux CI target registration; the resolution keeps
 both #503's direct-call test and #531's gather-host test. Builder contracts
-(21/21), direct-call source tests (6/6), diff checks and repository audit pass.
+(26/26), direct-call source tests (6/6), diff checks and repository audit pass.
 The snapshot is not frozen until compiled #503/#504/#531 tests pass and the
 runtime/provider selectors are added.
 
@@ -68,8 +68,8 @@ runtime/provider selectors are added.
 | Modify | `scripts/linux/build.py` provenance | Record compiler executable/version, effective CPU/compiler flags and generated profile hash | M0 |
 | Modify | `tests/test_linux_ci_container.py` | Cover default/opt-in compiler selection and provenance | M0 |
 | Conditional | Dockerfile, docs and toolchain tests | Make Clang 22 the default only after M2 qualifies it; keep explicit Clang 18 selection for CI unless separately approved | M2 |
-| Proposed | `scripts/linux/build.py` AppImage host configuration | Select libc++ or static libstdc++ independently of the Dawn provider for measurement builds | M3 |
-| Proposed | Builder provenance and tests | Record runtime and Dawn identity; verify all four recipes select their intended compiler/runtime | M3 |
+| Implemented | `scripts/linux/build.py` AppImage host configuration | Select libc++ or static libstdc++ independently of the Dawn provider for measurement builds; defaults unchanged | M3 |
+| Implemented | Builder provenance and tests | Record runtime and Dawn identity; verify valid runtime/provider selections and unchanged defaults | M3 |
 | Measurement | Private AppImages and reports | Build and measure the current-source 2×2 grid without uploading game artifacts | M4–M5 |
 
 Proposed measurement-only builder surface, exact spelling to be settled during

@@ -6,7 +6,7 @@ at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
 performance work through [#531](https://github.com/chrissotraidis/bluewake/pull/531);
 packaging candidate [#472](https://github.com/chrissotraidis/bluewake/pull/472)
-Working combined snapshot: [`cb7089c15`](https://github.com/irregularthanis/bluewake/commit/cb7089c15)
+Working combined snapshot: [`202419403`](https://github.com/irregularthanis/bluewake/commit/202419403)
 on `perf/clang-runtime-matrix`; final matrix SHA remains open until M3 passes.
 Parent milestone: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
 Parent status: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
