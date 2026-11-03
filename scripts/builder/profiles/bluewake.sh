@@ -77,8 +77,11 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The Tower of the Gods' water floor summed in linear light, as Wind Waker HD's shader for it (ShaderKey::hd_water): patches/recompcore/0224 (pdale-boop).
 # Wind Waker HD's monotone at the game's grey composite (Frozen Hyrule's sepia; aurora_set_monotone_hd): patches/recompcore/0225 (pdale-boop).
 # The heat haze in a monotone frame (Xboss0's sepia replays) samples the frame with Wind Waker HD's monotone in: patches/recompcore/0225 (pdale-boop).
+# Wind Waker HD's fog curve, the square of the GameCube's linear fog while the host has HD's distances in place (aurora_set_fog_hd), and HD's fog after the shade, from HD's start where the game clamps it at 0 (aurora_set_fog_hd_starts): patches/recompcore/0226 (pdale-boop).
+# Wind Waker HD's fog start before the camera on the draws' own fog too (characters, plants, objects): patches/recompcore/0226 (pdale-boop).
+# Wind Waker HD's fog mixed in linear light, on the draws and in the sun pass, from a copy of the scene taken just before it: patches/recompcore/0226 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=497e360b0614c8eb0536a65f6ba263f479852d93
+RECOMPCORE_SHA=40da45c8f3c20299028755966ccfeb75c74a9d86
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "497e360b0614c8eb0536a65f6ba263f479852d93",
+      "sha": "40da45c8f3c20299028755966ccfeb75c74a9d86",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -923,6 +923,27 @@
             "patches/recompcore/0225-Aurora-Wind-Waker-HD-s-monotone-at-the-game-s-grey-composite-aurora_set_monotone_hd.patch"
           ],
           "evidence": "pdale-boop's: in Xboss0's sepia replay the heat haze over the lava shows no coloured squares."
+        },
+        "hd_fog": {
+          "runtime": "40da45c8f3c20299028755966ccfeb75c74a9d86",
+          "tracked_patches": [
+            "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
+          ],
+          "evidence": "pdale-boop's: at noon an island 18,000 out takes 0.25 of the fog colour as in HD, not 0.50; Earth Temple's teal and Hyrule Castle's haze stay on the far walls in shade; gxcore tests: the flagged module differs by the square alone; Wind Temple R0f from 0.76 to 0.97 of HD's brightness with HD's fog start."
+        },
+        "hd_fog_start_draws": {
+          "runtime": "40da45c8f3c20299028755966ccfeb75c74a9d86",
+          "tracked_patches": [
+            "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
+          ],
+          "evidence": "pdale-boop's: Ganon's Tower's far wall half from 0.100 to 0.111 in linear luminance (HD 0.123); gxcore test of the match against GXSetFog's terms and five rejects."
+        },
+        "hd_fog_linear": {
+          "runtime": "40da45c8f3c20299028755966ccfeb75c74a9d86",
+          "tracked_patches": [
+            "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
+          ],
+          "evidence": "pdale-boop's: far half of the dungeon stops in linear luminance against Cemu: Forbidden Woods R05 0.056 to 0.065 (0.064), its hue back from orange; Earth Temple R00 0.027 to 0.039 (0.037); Wind Temple R02 0.059 to 0.074 (0.073); Ganon's Tower 0.110 to 0.118 (0.123)."
         }
       }
     },

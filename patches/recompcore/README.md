@@ -452,3 +452,21 @@ Patch 0225 also makes the copy the heat haze samples again after Wind Waker HD's
 the frame's later draws sample, so the haze over the lava in a sepia boss replay (Xboss0) is sepia too; it showed
 square quads of the colours before the monotone. The copy goes back in place at the frame's end, so the next
 frame's motion blur takes the colour as before.
+
+Patch 0226 adds `aurora_set_fog_hd`: while the host has Wind Waker HD's fog distances in the game's palettes, linear
+fog is squared, as HD's shaders fog (`ShaderKey::hd_fog`). The sun shadows' pass then takes the draws' fog out
+and puts HD's back in after the shade, as HD fogs after its light, so a room's far walls in shade keep their fog
+(`DOL_AURORA_SUN_FOG_HD=0` keeps it as drawn). Where HD's fog starts before the camera and the game's
+palette blend clamps the start at 0, the host gives HD's start with the game's end
+(`aurora_set_fog_hd_starts`) and the sun pass fogs the lit scenery from it.
+
+Patch 0226 also fogs every draw with linear perspective fog from Wind Waker HD's start, not only the lit scenery: a
+draw fogged from the game's clamped start (C 0) to the end of the host's pair (`aurora_set_fog_hd_starts`; its end
+is the projection's near x B / A) takes GXSetFog's A and C for HD's start to that end. The characters, plants and
+objects now fog as HD's own shaders fog them; the sun pass's fog after the shade reads the same constants.
+
+Patch 0226 also mixes the fog in linear light while HD's fog curve is on, as Wind Waker HD's scenery shader ends with
+mix(lit, fog colour, f) on linear values: the draws' fog (`emit_fog` and the ubershader) is that mix by the sRGB
+curve, in place of the integer blend in the game's gamma. The sun pass reads the scene from a copy taken just
+before it (single-sampled), takes the draws' fog out in linear light, shades, and puts HD's radial fog back in
+linear light. Without the copy it works as before.
