@@ -138,6 +138,10 @@ void bluewake_hd_look_defaults(void) {
             // HD's palettes blended in linear light, as HD blends them (its dawn and dusk: the cirrus at 07:30,
             // the lavender at 17:30), with HD's sky and light on (it acts only under them).
             {"BLUEWAKE_HD_SKY_LINEAR", "1"},
+            // HD's light buffer: the game's point and effect lights on HD's rule (point_lights()), added to the
+            // characters' light (x 1.75) and the lit scenery's (x 1.25) in their own draws, in place of the torch
+            // glow and of the GameCube's effect-light stage on the characters. It rides on HD's character light.
+            {"DOL_AURORA_POINT_LIGHTS_HD", "1"},
         };
         const bool edge_light = setting("BLUEWAKE_HD_EDGE_LIGHT") != 0;
         const bool hd_sky = setting("BLUEWAKE_HD_SKY") != 0;
@@ -496,50 +500,152 @@ static bool hd_cascade_splits(CPUState* cpu, u32 view, float* middle, float* far
     return true;
 }
 
-// The game's point lights nearest the camera (torches, fires, lanterns, bombs):
-// up to 16 of x, y, z, radius, r, g, b, flicker for the renderer.
+// Wind Waker HD's light buffer (DOL_AURORA_POINT_LIGHTS_HD=1, which the look sets with a pack imported from the HD
+// disc; read once). HD sends every light to its light buffer each frame (dKy_setLight, its d_kankyo_5.cpp:564-607):
+// the 200 point lights (mpPLights) with r = 2.3 x power (1.25 x in Obshop, the Bomb Shop), and the 10 effect lights
+// (mpEfLights: bombs, chests, the sword-hit flash, the thunder) with r = power; colour the S10 colour / 255 without a
+// clamp (a lamp's 600 is 2.35), exponent 1.5. Off, the lights go as before to Aurora's torch glow.
+static bool point_lights_hd(void) {
+    static int s_on = -1;
+    if (s_on < 0)
+        s_on = setting("DOL_AURORA_POINT_LIGHTS_HD") == 1;
+    return s_on == 1;
+}
+
+enum {
+    kEfLights = 0x803E51CCu,        // g_env_light.mpEfLights[10] (g_env_light 0x803E4AB4 + 0x718)
+    kSwordProc = 0x803E5218u,       // mEfLightProc (+0x764): mSwordState u8, mSwordFrame u8, mSwordLightType int at +4
+    kSwordLight = kSwordProc + 8u,  // its LIGHT_INFLUENCE mSwordLight
+    kThunderTimer = 0x803E54ECu,    // mThunderEff (+0xA30).mFlashTimer (+0x08)
+    kThunderLight = 0x803E54FCu,    // mThunderEff.mLightInfluence (+0x18)
+    kMaxPointLights = 32u,
+};
+
+// Wind Waker HD's sword-hit flash colours, one a frame from the start (its frameFlushColors and frameFlushColors2,
+// read from Cemu: drafts/hd-look-remaining/CAPTURES-NOV3.md, shots 4 and 4b); after the last, black. Type 0 is
+// blue from the first frame (the GameCube's flush_col starts white), type 1 orange; HD's power is 700 (the
+// GameCube's 1000).
+static const unsigned char kSwordFlush[2][12][3] = {
+    {{21, 197, 255}, {11, 174, 255}, {0, 150, 255}, {0, 114, 207}, {0, 77, 158}, {0, 40, 109}, {0, 34, 91},
+     {0, 27, 73}, {0, 20, 55}, {0, 14, 37}, {0, 7, 19}, {0, 0, 0}},
+    {{255, 197, 67}, {255, 174, 34}, {255, 150, 0}, {211, 114, 0}, {166, 77, 0}, {120, 40, 0}, {100, 34, 0},
+     {81, 27, 0}, {60, 20, 0}, {41, 14, 0}, {20, 7, 0}, {0, 0, 0}},
+};
+
+// Wind Waker HD's own powers for three of the game's flames (its actors set them; the light buffer then takes
+// HD's 2.3 x power): a torch (d_a_ep) and a Bokoblin's torch stick (d_a_boko) at 15/23 of the GameCube's in stage
+// types 1 and 4 (the dungeons: Dragon Roost Cavern's wall torches 690 -> 450, as HD's capture has them), and a
+// lantern's flame (d_a_kantera) at 225 for the GameCube's 375. The light's owner is the actor it sits in (its
+// mLight at 0x510, 0x300 and 0x2F0), told by the actor's process name. HD's torches also flicker (x 0.9 to 1.1),
+// which is left out. 1 for any other light.
+static float hd_light_power_scale(CPUState* cpu, u32 light, u32 stage_type) {
+    static const struct {
+        u32 offset;
+        u16 proc;
+        bool dungeon_only;
+        float scale;
+    } kOwners[] = {
+        {0x510u, 0x00BAu, true, 15.f / 23.f},   // ep_class::mLight, fpcNm_EP_e
+        {0x300u, 0x01D5u, true, 15.f / 23.f},   // daBoko_c::mLight, fpcNm_BOKO_e
+        {0x2F0u, 0x00C2u, false, 225.f / 375.f}, // kantera_class::mPlight, fpcNm_KANTERA_e
+    };
+    const bool dungeon = stage_type == 1u || stage_type == 4u;
+    for (size_t i = 0; i < sizeof kOwners / sizeof kOwners[0]; ++i) {
+        if (kOwners[i].dungeon_only && !dungeon)
+            continue;
+        const u32 actor = light - kOwners[i].offset;
+        if (light < kOwners[i].offset || !guest_pointer(actor))
+            continue;
+        if (mem_read16(cpu, actor + kProcName) == kOwners[i].proc)
+            return kOwners[i].scale;
+    }
+    return 1.f;
+}
+
+// The game's lights nearest the camera for the renderer: x, y, z, radius, r, g, b, flicker each (up to 16, or 32 on
+// HD's rule), nearest by the distance to the eye less the radius.
 static void point_lights(CPUState* cpu, const float eye[3]) {
-    float found[16 * 8];
-    float distance[16];
+    float found[kMaxPointLights * 8];
+    float distance[kMaxPointLights];
+    const bool hd = point_lights_hd();
+    const unsigned cap = hd ? kMaxPointLights : 16u;
+    float scale = 1.f;  // point lights' radius per unit of power
+    u32 stage_type = 2u;
+    if (hd) {
+        char stage[8];
+        for (u32 i = 0; i < 8u; ++i)
+            stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+        scale = strncmp(stage, "Obshop", 7) == 0 ? 1.25f : 2.3f;
+        const u32 info = mem_read32(cpu, kStagInfo);
+        stage_type = guest_pointer(info) ? (mem_read32(cpu, info + 0x0Cu) >> 16) & 7u : 2u;
+    }
     unsigned count = 0;
-    for (u32 i = 0; i < 200u; ++i) {
-        const u32 light = mem_read32(cpu, kPointLights + i * 4u);
-        if (!guest_pointer(light))
-            continue;
-        const float x = read_float(cpu, light), y = read_float(cpu, light + 4u), z = read_float(cpu, light + 8u);
-        const float radius = read_float(cpu, light + 0x14u);
-        if (!(radius > 1.f && radius < 10000.f))  // the global light is 99,999
-            continue;
-        const float dx = x - eye[0], dy = y - eye[1], dz = z - eye[2];
-        const float d = sqrtf(dx * dx + dy * dy + dz * dz) - radius;
-        if (d > 6000.f)
-            continue;
-        unsigned slot = count < 16u ? count++ : 16u;
-        if (slot == 16u) {  // full: replace the farthest if this one is nearer
-            unsigned far = 0;
-            for (unsigned k = 1; k < 16u; ++k)
-                if (distance[k] > distance[far])
-                    far = k;
-            if (d >= distance[far])
+    const u32 lists = hd ? 2u : 1u;
+    for (u32 list = 0; list < lists; ++list) {
+        const bool effect = list == 1u;
+        const u32 entries = effect ? 10u : 200u;
+        for (u32 i = 0; i < entries; ++i) {
+            const u32 light = mem_read32(cpu, (effect ? kEfLights : kPointLights) + i * 4u);
+            if (!guest_pointer(light))
                 continue;
-            slot = far;
+            const float x = read_float(cpu, light), y = read_float(cpu, light + 4u), z = read_float(cpu, light + 8u);
+            float power = read_float(cpu, light + 0x14u);
+            // The global light is 99,999 among the point lights; the thunder's 90,000 is an effect light.
+            if (!(power > (hd ? 0.01f : 1.f) && power < (effect ? 1.0e6f : 10000.f)))
+                continue;
+            float colour[3];
+            for (u32 c = 0; c < 3u; ++c)
+                colour[c] = (float)(s16)mem_read16(cpu, light + 0x0Cu + c * 2u) / 255.f;
+            if (effect && light == kSwordLight) {
+                // The sword-hit flash on HD's table and power (from the GameCube's frame count; its state 2 counts).
+                const u32 type = mem_read32(cpu, kSwordProc + 4u) != 0u ? 1u : 0u;
+                const u32 frame = mem_read8(cpu, kSwordProc + 1u);
+                const unsigned char* rgb = kSwordFlush[type][frame < 11u ? frame : 11u];
+                for (u32 c = 0; c < 3u; ++c)
+                    colour[c] = rgb[c] / 255.f;
+                power = 700.f;
+            } else if (effect && light == kThunderLight) {
+                // The thunder flash: HD's colour (0.1, 0.4, 0.7) x 190 x the flash timer, (19, 77, 134) at the peak
+                // (Cemu, shot 9); the GameCube's is about (36, 47, 51).
+                float t = read_float(cpu, kThunderTimer);
+                t = t > 0.f ? (t < 1.f ? t : 1.f) : 0.f;
+                colour[0] = 0.1f * 190.f * t / 255.f;
+                colour[1] = 0.4f * 190.f * t / 255.f;
+                colour[2] = 0.7f * 190.f * t / 255.f;
+            }
+            const float radius = hd && !effect ? power * scale * hd_light_power_scale(cpu, light, stage_type) : power;
+            if (colour[0] <= 0.f && colour[1] <= 0.f && colour[2] <= 0.f)
+                continue;
+            const float dx = x - eye[0], dy = y - eye[1], dz = z - eye[2];
+            const float d = sqrtf(dx * dx + dy * dy + dz * dz) - radius;
+            if (d > (hd ? 20000.f : 6000.f))
+                continue;
+            unsigned slot = count < cap ? count++ : cap;
+            if (slot == cap) {  // full: replace the farthest if this one is nearer
+                unsigned far = 0;
+                for (unsigned k = 1; k < cap; ++k)
+                    if (distance[k] > distance[far])
+                        far = k;
+                if (d >= distance[far])
+                    continue;
+                slot = far;
+            }
+            distance[slot] = d;
+            float* out = found + slot * 8u;
+            out[0] = x;
+            out[1] = y;
+            out[2] = z;
+            out[3] = radius;
+            for (u32 c = 0; c < 3u; ++c)
+                out[4 + c] = hd ? (colour[c] < 0.f ? 0.f : colour[c])
+                                : (colour[c] < 0.f ? 0.f : colour[c] > 1.f ? 1.f : colour[c]);
+            out[7] = read_float(cpu, light + 0x18u) != 0.f ? 1.f : 0.f;
         }
-        distance[slot] = d;
-        float* out = found + slot * 8u;
-        out[0] = x;
-        out[1] = y;
-        out[2] = z;
-        out[3] = radius;
-        for (u32 c = 0; c < 3u; ++c) {
-            const float v = (float)(s16)mem_read16(cpu, light + 0x0Cu + c * 2u) / 255.f;
-            out[4 + c] = v < 0.f ? 0.f : v > 1.f ? 1.f : v;
-        }
-        out[7] = read_float(cpu, light + 0x18u) != 0.f ? 1.f : 0.f;
     }
     aurora_set_point_lights(found, count);
     static unsigned traced;
     if (g_trace && traced++ % 300u == 0u) {
-        fprintf(stderr, "[hd-look] point lights near the camera: %u", count);
+        fprintf(stderr, "[hd-look] point lights near the camera%s: %u", hd ? " (HD's rule)" : "", count);
         for (unsigned k = 0; k < count && k < 4u; ++k)
             fprintf(stderr, " (%.0f %.0f %.0f r%.0f c%.2f,%.2f,%.2f)", found[k * 8], found[k * 8 + 1], found[k * 8 + 2],
                     found[k * 8 + 3], found[k * 8 + 4], found[k * 8 + 5], found[k * 8 + 6]);
@@ -710,6 +816,21 @@ static void cloud_floor(CPUState* cpu, bool on) {
     }
 }
 
+// The game's glow around torches, lanterns and Bokoblins' sticks: spheres into the frame's alpha, then its colour
+// over them (dDlst_alphaModel_c, at most 64 a frame). HD draws none (d_a_ep, d_a_kantera, d_a_boko, d_a_bpw: no
+// alpha model); its light buffer lights the walls instead, so with HD's rule for it the game gets no room for them,
+// and the walls aren't lit twice. Its room back (64) when the light buffer is off.
+static void alpha_model_glows(CPUState* cpu, bool on) {
+    const u32 model = mem_read32(cpu, 0x803CAB68u);  // g_dComIfG_gameInfo.drawlist (+0x5D1C).mpAlphaModel (+0x244)
+    if (!guest_pointer(model))
+        return;
+    const u16 capacity = on ? 0x40u : 0u;
+    if (mem_read16(cpu, model + 4u) != capacity) {  // mCapacity
+        mem_write16(cpu, model + 4u, capacity);
+        mem_write16(cpu, model + 6u, 0u);  // mNum
+    }
+}
+
 static void clouds(CPUState* cpu, unsigned long long retrace) {
     hd_normals_stage(cpu);
     hd_cloud_texture();
@@ -791,6 +912,7 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
         aurora_set_torch_light(torch_on);
         g_torch_shown = torch_on;
     }
+    alpha_model_glows(cpu, !(torch_on && point_lights_hd()));
     if (clouds_on != g_clouds_shown && g_clouds >= 0) {
         aurora_set_cloud_shadows(clouds_on);
         g_clouds_shown = clouds_on;
