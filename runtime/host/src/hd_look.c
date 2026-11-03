@@ -645,6 +645,27 @@ static void hd_object_tables(void) {
         fprintf(stderr, "[hd-look] HD object normals and colours from %s/optional\n", pack);
 }
 
+// Wind Waker HD's cloud shadow floor for the hour (cCloudShadowPower, its setSunpos in d_kankyo_3.cpp): from the
+// game's clock, 1 - max(0.25, -0.9 cos(time - 15 degrees)), 0.75 at 07:30 and 18:30 and through the night, 0.364 at
+// 10:00, 0.131 at noon. The renderer's own is worked out from the shadow light's height, which HD's light rule holds
+// at 40,000 high before 09:00 and after 17:00 (0.596 at dawn and dusk: a cloud took 1.6 times HD's light from Link
+// and the scenery there). Sent while the cloud shadows show, else the renderer's own again.
+static void cloud_floor(CPUState* cpu, bool on) {
+    static float s_sent = -1.0f;
+    float floor = -1.0f;
+    if (on) {
+        const float t = read_float(cpu, 0x803E56ECu);  // g_env_light.mCurTime
+        if (t >= 0.0f && t <= 360.0f) {
+            const float sun = -0.9f * cosf((t - 15.0f) * 3.14159265f / 180.0f);
+            floor = 1.0f - (sun > 0.25f ? sun : 0.25f);
+        }
+    }
+    if (fabsf(floor - s_sent) > 0.0005f) {
+        aurora_set_cloud_hd_floor(floor);
+        s_sent = floor;
+    }
+}
+
 static void clouds(CPUState* cpu, unsigned long long retrace) {
     hd_normals_stage(cpu);
     hd_cloud_texture();
@@ -730,6 +751,7 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
         aurora_set_cloud_shadows(clouds_on);
         g_clouds_shown = clouds_on;
     }
+    cloud_floor(cpu, clouds_on);
     // The room model's widened culling goes with the sun shadows on the high
     // shadow quality (DOL_AURORA_SUN_SHADOW_QUALITY unset or high).
     const char* quality = getenv("DOL_AURORA_SUN_SHADOW_QUALITY");
