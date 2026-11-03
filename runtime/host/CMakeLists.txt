@@ -371,6 +371,8 @@ target_compile_options(bluewake_native_game_math_test PRIVATE -ffp-contract=off)
 add_executable(bluewake_native_bg_test EXCLUDE_FROM_ALL
     ${BLUEWAKE_REPO_ROOT}/tests/native_bg_test.c
     ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_bg.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_ground_walk.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c
     ${BLUEWAKE_REPO_ROOT}/cmake/composite/direct_calls.c)
 target_include_directories(bluewake_native_bg_test PRIVATE
     ${BLUEWAKE_REPO_ROOT}/cmake/composite
