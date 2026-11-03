@@ -1,6 +1,6 @@
 # TECH_PLAN — Native extensions for Outset's character work
 
-Status: M2 hand-over exact in play; partial runs fixed after a wrapper bug, re-measuring; M1 blocked on porting  
+Status: M2 exact; with the wrapper fix, partial runs show no measurable gain on the Deck (+0.05%); decision after render_bench; M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -35,7 +35,7 @@ if (cpu->cycle_deadline_budget > 0 &&
 | M0 | Why does skinning decline? | Count declines by reason and model size; one Outset minute in Game Mode | **Done.** All timing declines are the turn budget; calls of 8k+ cycles refused 91–100% |
 | M1 | Do the two native sets help? | Full builds with `--native-entries` / `--native-set4`, own training, A/B | **Blocked.** Both need porting first (generator write forms; entry hashes for this tree) |
 | M2 | Can big models run natively? | Native runs the envelopes that fit the turn, then hands over to the translation | **Done.** Exact in the differential test ([how it works](#how-the-resumable-native-works-m2)) |
-| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | Hand-over alone exact and level with the control. Partial runs: a wrapper bug skipped work in play (fixed in `028f1f0`); re-measuring |
+| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | **No measurable gain:** partial runs +0.05% (3 of 6 rounds), the hand-over alone level. Earlier gains came from a wrapper bug that skipped work (fixed) |
 
 ## How the resumable native works (M2)
 
