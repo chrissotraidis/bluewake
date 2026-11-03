@@ -77,7 +77,6 @@ static bool skin_partial_enabled(void) {
     }
     return s_enabled != 0;
 }
-#define SKIN_SAVE_RETURN 0x802EE6B8u
 
 /* BLUEWAKE_SKIN_CENSUS (compile time, diagnostic builds only, #541): each
  * decline by its reason, and the accepted and timing-declined calls by the
@@ -118,6 +117,12 @@ BW_SKIN_EXPORT void bluewake_native_skin_report(void) {
 #define SKIN_FRAME 112u
 #define SKIN_UNIT_OFFSET (-31288)   /* J3DUnit01, from r13 */
 #define SKIN_SAVE_RETURN 0x802EE6B8u  /* the bl to _savegpr_29 */
+#ifndef SKIN_EMPTY_SUFFIX
+#define SKIN_EMPTY_SUFFIX 0u
+#endif
+#ifndef SKIN_EMPTY_PC
+#define SKIN_EMPTY_PC 0x802EE6ECu
+#endif
 #define SKIN_REST_RETURN 0x802EE864u  /* the bl to _restgpr_29 */
 
 typedef struct SkinPair { f64 p0, p1; } SkinPair;
@@ -246,9 +251,7 @@ int bluewake_native_skin(CPUState* cpu) {
     /* Every joint the function reads, checked before anything is written. */
     u64 joints = 0;
     u64 cycles = SKIN_LOOP_HEAD_CYCLES;
-    if (count == 0u)
-        SKIN_DECLINE(4); /* nothing for the native to do */
-    {
+    if (count != 0u) {
         const u8* counts = skin_ram(cpu, mix_counts, count);
         if (counts == NULL || !skin_untouched(&stores, mix_counts, count))
             SKIN_DECLINE(4);
@@ -331,14 +334,17 @@ int bluewake_native_skin(CPUState* cpu) {
     SkinPair f[14];
     for (unsigned r = 0; r < 14; ++r)
         f[r] = (SkinPair){cpu->fpr[r], cpu->ps1[r]};
-    SkinPair f28 = {0, 0}, f29 = {0, 0}, f30 = {0, 0}, f31 = zero;
+    /* f28-f30 keep the caller's values until the first joint (an empty model). */
+    SkinPair f28 = {cpu->fpr[28], cpu->ps1[28]}, f29 = {cpu->fpr[29], cpu->ps1[29]},
+             f30 = {cpu->fpr[30], cpu->ps1[30]}, f31 = zero;
     f[10] = zero;
     f[12] = zero;
     u32 fprf = (cpu->fpscr >> 12) & 0x1Fu;
     bool any_fp = false;
 
     u32 r5 = weights, r6 = model, r7 = unit, r9 = cpu->gpr[9], r10 = cpu->gpr[10], r12 = cpu->gpr[12];
-    u32 index_at = indices, weight_at = weights, r0 = 0, r11 = 0;
+    /* r0 from mflr and r11 from the save helper's set-up, until the first joint. */
+    u32 index_at = indices, weight_at = weights, r0 = return_address, r11 = frame + 32u;
     for (u32 i = 0; i < limit; ++i) {
         r7 = envelope_flags;
         cpu->ram[envelope_flags + i - GC_RAM_BASE] = 1u;
@@ -447,8 +453,13 @@ int bluewake_native_skin(CPUState* cpu) {
     cpu->cr = (cpu->cr & 0x0FFFFFFFu) | (((limit < count ? 0x8u : 0x2u) | (cpu->xer >> 31)) << 28);
     cpu->lr = SKIN_SAVE_RETURN;
     cpu->downcount -= (s64)cycles;
-    cpu->cycle_observation_suffix = 1u; /* the last write, at 0x802EE81C */
-    cpu->pc = 0x802EE820u;
+    if (count != 0u) {
+        cpu->cycle_observation_suffix = 1u; /* the last write, at 0x802EE81C */
+        cpu->pc = 0x802EE820u;
+    } else {
+        cpu->cycle_observation_suffix = SKIN_EMPTY_SUFFIX;
+        cpu->pc = SKIN_EMPTY_PC;
+    }
     s_skin_joints += (weight_at - weights) / 4u;
 #if defined(BLUEWAKE_SKIN_CENSUS)
     s_skin_accepted_bins[skin_bin(cycles)]++;
