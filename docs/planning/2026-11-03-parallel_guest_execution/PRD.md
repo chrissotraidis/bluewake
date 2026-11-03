@@ -46,6 +46,8 @@ flowchart LR
 
 Options: concurrent translated audio (Track B; structurally the cleanest candidate, but 8.6 % is under the reopen bar); a native async `JASystem` driver (large, bit-exact DSP command output); or serial: port the `--native-entries` `JASChannel` natives (#541 found that set needs porting). Any overlap ends at the game thread's first touch of audio state after the wake, likely within a frame.
 
+**Async audio is opt-in.** Any asynchronous audio path ships behind `BLUEWAKE_ASYNC_AUDIO=1`, off by default on every platform. With the flag unset, audio runs exactly as today (the translated `JASystem` thread, serial), which stays the correctness oracle. The flag only selects the path where the module and host both support it; unsupported cases keep the serial path, as the native-routine switches do.
+
 **Next:** measure the audio thread's share by guest thread (M6-T01). If it is ≥ 8 %, port the `JASChannel` natives and measure the overlap window; if well below, close the multithreading research in favour of #503's serial runtime costs.
 
 ## Decisions

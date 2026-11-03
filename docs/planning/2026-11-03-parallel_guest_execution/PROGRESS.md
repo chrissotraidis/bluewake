@@ -37,6 +37,7 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 - [x] M6-T00: Source and sampler survey (PRD, *Audio lead*)
 - [x] M6-T01a: Sampler counts per guest thread (`PATH.threads`); standalone check of the sampler block
 - [ ] M6-T01: Idle-machine run: audio thread share on Outset and the other tour stops
+- [ ] M6-T03: Any async audio path: opt-in behind `BLUEWAKE_ASYNC_AUDIO=1`, off by default; serial audio is the default and the oracle
 - [ ] M6-T02: If ≥ 8 %: port the `JASChannel` natives from `--native-entries`; measure the game thread's first audio-state access after each wake
 
 ## Evidence ledger
@@ -52,6 +53,7 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 | Date | Decision |
 | --- | --- |
 | 2026-11-03 | Track A (native async jobs) first; Track B kept as second choice, reopened only by the PRD criterion |
+| 2026-11-03 | Async audio, if built, is opt-in (`BLUEWAKE_ASYNC_AUDIO=1`), off by default; serial audio stays the default and the oracle |
 | 2026-11-03 | Host DSP excluded (HLE by default, ≈ 1 %). Audio lead is the guest `JASystem` thread; gated on a per-thread measurement |
 | 2026-11-03 | Skinning dropped from this plan: #541 measured it (≈ 1.5 % of the Deck game thread, threading ≈ +0.5–1 %). Estimates lowered to Deck cycle counts: serial widening ≈ 1–2 %, async pose job ≈ 1–3 %. Next lead: audio |
 | 2026-11-03 | Native widening comes before any async job. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms and large-model skinning. |
