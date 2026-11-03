@@ -441,3 +441,14 @@ Waker HD does: KONST + C0 x texel, plus KONST x the second layer's texel x (1 - 
 the colours made linear, then back to gamma for the GX fog. `gxc::hd_water_floor_stage()` matches its three
 stages, and `ShaderKey::hd_water` flags it while HD's palettes are in place. On the GameCube's gamma colours the
 caustics came out twice HD's brightness.
+
+Patch 0225 adds `aurora_set_monotone_hd`: while the host's monotone is on (Frozen Hyrule), the game's grey quad is
+left out and at that point Wind Waker HD's pass runs instead: the scene's grey by HD's weights at half size,
+`saturate` of the way, times HD's multiply, over the scene by distance. What the game draws after it (Link and
+his things) stays in colour, and bloom goes over all of it, as in HD. Single-sampled only
+(`aurora_monotone_hd_supported`); `DOL_AURORA_MONOTONE_HD=0` turns it off.
+
+Patch 0225 also makes the copy the heat haze samples again after Wind Waker HD's monotone, into a second texture that
+the frame's later draws sample, so the haze over the lava in a sepia boss replay (Xboss0) is sepia too; it showed
+square quads of the colours before the monotone. The copy goes back in place at the frame's end, so the next
+frame's motion blur takes the colour as before.

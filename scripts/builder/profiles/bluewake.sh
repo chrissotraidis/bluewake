@@ -75,8 +75,10 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Wind Waker HD's caster culling in its lit rooms (aurora_set_sun_caster_cull), and its lava glow there from the pack's version 2 room colours: patches/recompcore/0224 (pdale-boop).
 # Dragon Roost Cavern's lava glow, HD's albedo x lava K x 4 x (1 - the vertex alpha) squared, on the GameCube's three-stage lava materials: patches/recompcore/0224 (pdale-boop).
 # The Tower of the Gods' water floor summed in linear light, as Wind Waker HD's shader for it (ShaderKey::hd_water): patches/recompcore/0224 (pdale-boop).
+# Wind Waker HD's monotone at the game's grey composite (Frozen Hyrule's sepia; aurora_set_monotone_hd): patches/recompcore/0225 (pdale-boop).
+# The heat haze in a monotone frame (Xboss0's sepia replays) samples the frame with Wind Waker HD's monotone in: patches/recompcore/0225 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=dca1d7a8efa655d1796cc998eb81573817716c1e
+RECOMPCORE_SHA=497e360b0614c8eb0536a65f6ba263f479852d93
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
