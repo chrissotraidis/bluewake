@@ -367,6 +367,17 @@ target_link_libraries(bluewake_native_game_math_test PRIVATE gxruntime ${CMAKE_D
 target_compile_options(bluewake_native_game_math_test PRIVATE -ffp-contract=off)
 
 # Requires a local player-owned module; built explicitly, never run by public CI.
+add_executable(bluewake_native_bg_test EXCLUDE_FROM_ALL
+    ${BLUEWAKE_REPO_ROOT}/tests/native_bg_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_bg.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/direct_calls.c)
+target_include_directories(bluewake_native_bg_test PRIVATE
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite
+    ${BLUEWAKE_REPO_ROOT}/ref/recompcore/Source/Core/Core/PowerPC/StaticRecomp)
+target_link_libraries(bluewake_native_bg_test PRIVATE gxruntime ${CMAKE_DL_LIBS})
+target_compile_options(bluewake_native_bg_test PRIVATE -ffp-contract=off)
+
+# Requires a local player-owned module; built explicitly, never run by public CI.
 add_executable(bluewake_native_skin_test EXCLUDE_FROM_ALL
     ${BLUEWAKE_REPO_ROOT}/tests/native_skin_test.c
     ${BLUEWAKE_REPO_ROOT}/cmake/composite/native_skin.c)

@@ -1,15 +1,18 @@
 /* cmake/composite/native_bg.c against the translations it stands in for.
  *
- * Build and run from the worktree root (x64; the Visual Studio environment):
+ * Build: the bluewake_native_bg_test target (runtime/host/CMakeLists.txt,
+ * explicit, never run by public CI; build it with the module's -march), or on
+ * Windows from the worktree root (x64; the Visual Studio environment):
  *
  *   clang -O2 -march=x86-64-v3 -ffp-contract=off -Icmake/composite
- *     -IE:\Github\Wind-Waker-Recomp\ref\recompcore\GXRuntime\include
- *     -IE:\Github\Wind-Waker-Recomp\ref\recompcore\Source\Core\Core\PowerPC\StaticRecomp
+ *     -I<recompcore>\GXRuntime\include
+ *     -I<recompcore>\Source\Core\Core\PowerPC\StaticRecomp
  *     tests/native_bg_test.c cmake/composite/native_bg.c cmake/composite/direct_calls.c
- *     E:\Github\Wind-Waker-Recomp\build\windows\app\gxruntime_build\gxruntime.lib -o native_bg_test.exe
- *   native_bg_test MODULE.dll [CASES_PER_FUNCTION=60000] [BENCH_CALLS=2000000]
+ *     <build>\gxruntime_build\gxruntime.lib -o native_bg_test.exe
  *
- * MODULE.dll is a Windows game module (gGZLE01_recomp.dll) without these
+ *   native_bg_test MODULE [CASES_PER_FUNCTION=60000] [BENCH_CALLS=2000000]
+ *
+ * MODULE is a game module (gGZLE01_recomp.dll or .so) without these
  * natives; the test reads it and writes nothing but its own memory. The
  * module runs as in play: direct calls and its edge filter on, the host's
  * flags quiet, an edge service that ends the run at the return address (and
@@ -37,7 +40,56 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32)
 #include <windows.h>
+typedef HMODULE BgLib;
+#define BG_SYMBOL(lib, name) ((void*)GetProcAddress((lib), (name)))
+static BgLib bg_open(const char* path) { return LoadLibraryA(path); }
+static u8* bg_alloc(size_t size) { return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE); }
+static bool bg_protect(u8* p, size_t size, bool writable) {
+    DWORD old;
+    return VirtualProtect(p, size, writable ? PAGE_READWRITE : PAGE_READONLY, &old) != 0;
+}
+static void bg_setenv(const char* name, const char* value) { _putenv_s(name, value); }
+static double now_ns(void) {
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER t;
+    if (freq.QuadPart == 0)
+        QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t);
+    return (double)t.QuadPart * 1e9 / (double)freq.QuadPart;
+}
+#else
+#include <dlfcn.h>
+#include <stdint.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <unistd.h>
+typedef void* BgLib;
+#define BG_SYMBOL(lib, name) dlsym((lib), (name))
+static BgLib bg_open(const char* path) {
+    void* lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (lib == NULL)
+        fprintf(stderr, "%s\n", dlerror());
+    return lib;
+}
+static u8* bg_alloc(size_t size) {
+    void* p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+static bool bg_protect(u8* p, size_t size, bool writable) {
+    const uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    if (((uintptr_t)p & (page - 1u)) != 0u || (size & (page - 1u)) != 0u)
+        return false; /* would change a neighbour's protection */
+    return mprotect(p, size, writable ? PROT_READ | PROT_WRITE : PROT_READ) == 0;
+}
+static void bg_setenv(const char* name, const char* value) { setenv(name, value, 1); }
+static double now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1e9 + (double)ts.tv_nsec;
+}
+#endif
 
 /* direct_calls.c, linked in for the edge filter's state, names these. */
 BwChunkFn bw_find_chunk(u32 address) {
@@ -77,20 +129,22 @@ static int edge_service(void* user, CPUState* cpu, u32 address) {
     return 1;
 }
 
+/* RAM outside the test area read-only, so a stray write faults. */
 static u8* protect_image(u8* p) {
-    DWORD old;
-    if (p == NULL || !VirtualProtect(p, GC_MAIN_RAM_SIZE, PAGE_READONLY, &old) ||
-        !VirtualProtect(p + (AREA - GC_RAM_BASE), AREA_BYTES, PAGE_READWRITE, &old))
+    if (p == NULL || !bg_protect(p, GC_MAIN_RAM_SIZE, false) ||
+        !bg_protect(p + (AREA - GC_RAM_BASE), AREA_BYTES, true)) {
+        fprintf(stderr, "cannot protect the RAM image\n");
         return NULL;
+    }
     return p;
 }
 
-static u8* module_image(HMODULE lib) {
-    u8* (*mem1)(u32*) = (u8* (*)(u32*))(void*)GetProcAddress(lib, "bluewake_composite_guest_mem1");
+static u8* module_image(BgLib lib) {
+    u8* (*mem1)(u32*) = (u8* (*)(u32*))BG_SYMBOL(lib, "bluewake_composite_guest_mem1");
     u32 size = 0;
     u8* ram = mem1 != NULL ? mem1(&size) : NULL;
     if (ram == NULL)
-        ram = VirtualAlloc(NULL, GC_MAIN_RAM_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        ram = bg_alloc(GC_MAIN_RAM_SIZE);
     else if (size < GC_MAIN_RAM_SIZE)
         return NULL;
     else
@@ -110,6 +164,13 @@ static void watch(u32 address) {
     bw_edge_watch_table[slot] = canonical;
 }
 
+/* The host's answer when no feature observes the address (main.c's
+ * host_can_skip_observation with nothing watched). */
+static bool skip_ok(void* user, const CPUState* cpu, u32 address) {
+    (void)user; (void)cpu; (void)address;
+    return true;
+}
+
 static void reset_host(void) {
     memset(bw_edge_watch_table, 0, sizeof bw_edge_watch_table);
     /* Some watched addresses, as the builder's list has. */
@@ -125,6 +186,8 @@ static void reset_host(void) {
     bw_host_decrementer_pending = &s_decrementer_pending;
     bw_host_pi_cause = &s_pi_cause;
     bw_host_pi_mask = &s_pi_mask;
+    bw_host_can_skip = skip_ok;
+    bw_host_can_skip_user = NULL;
 }
 
 static const u32 FUNCTIONS[] = {BLUEWAKE_BG_CHK_SAME_ACTOR_PID, BLUEWAKE_BG_CHK_GRP_THROUGH};
@@ -287,38 +350,31 @@ static void report_cpu(const CPUState* got, const CPUState* want) {
             fprintf(stderr, "  CPU byte %u: got %02X want %02X\n", b, ((const u8*)got)[b], ((const u8*)want)[b]);
 }
 
-static double now_ns(void) {
-    static LARGE_INTEGER freq;
-    LARGE_INTEGER t;
-    if (freq.QuadPart == 0)
-        QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&t);
-    return (double)t.QuadPart * 1e9 / (double)freq.QuadPart;
-}
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: native_bg_test MODULE.dll [CASES_PER_FUNCTION] [BENCH_CALLS]\n");
+        fprintf(stderr, "usage: native_bg_test MODULE [CASES_PER_FUNCTION] [BENCH_CALLS]\n");
         return 2;
     }
-    _putenv_s("BLUEWAKE_NATIVE_MATH", "0");
+    bg_setenv("BLUEWAKE_NATIVE_MATH", "0");
     const unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 60000u;
     const unsigned bench_calls = argc > 3 ? (unsigned)strtoul(argv[3], NULL, 10) : 2000000u;
-    HMODULE lib = LoadLibraryA(argv[1]);
+    BgLib lib = bg_open(argv[1]);
     if (lib == NULL) {
-        fprintf(stderr, "cannot load %s (%lu)\n", argv[1], GetLastError());
+        fprintf(stderr, "cannot load %s\n", argv[1]);
         return 1;
     }
-    StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)(void*)GetProcAddress(lib, STATICRECOMP_GET_MODULE_SYMBOL);
-    CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))(void*)GetProcAddress(lib, "bluewake_composite_guest_cpu");
+    StaticRecompGetModuleFn get = (StaticRecompGetModuleFn)BG_SYMBOL(lib, STATICRECOMP_GET_MODULE_SYMBOL);
+    CPUState* (*guest_cpu)(void) = (CPUState * (*)(void))BG_SYMBOL(lib, "bluewake_composite_guest_cpu");
     void (*set_edge)(int (*)(void*, CPUState*, u32), void*) =
-        (void (*)(int (*)(void*, CPUState*, u32), void*))(void*)GetProcAddress(lib, "bluewake_set_edge_service");
-    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*) =
-        (int (*)(bool, const bool*, const bool*, const u32*, const u32*))(void*)GetProcAddress(
-            lib, "bluewake_composite_direct_calls");
-    int (*filter)(bool) = (int (*)(bool))(void*)GetProcAddress(lib, "bluewake_composite_edge_filter");
+        (void (*)(int (*)(void*, CPUState*, u32), void*))BG_SYMBOL(lib, "bluewake_set_edge_service");
+    /* v2: the host's skip query; v1 (the donor's handshake) is refused. */
+    int (*direct)(bool, const bool*, const bool*, const u32*, const u32*, BwHostCanSkipFn, void*) =
+        (int (*)(bool, const bool*, const bool*, const u32*, const u32*, BwHostCanSkipFn, void*))BG_SYMBOL(
+            lib, "bluewake_composite_direct_calls_v2");
+    int (*filter)(bool) = (int (*)(bool))BG_SYMBOL(lib, "bluewake_composite_edge_filter");
     if (get == NULL || guest_cpu == NULL || set_edge == NULL || direct == NULL || filter == NULL) {
-        fprintf(stderr, "not a BlueWake Windows module\n");
+        fprintf(stderr, "not a BlueWake game module\n");
         return 1;
     }
     const StaticRecompModuleDesc* mod = get();
@@ -329,13 +385,13 @@ int main(int argc, char** argv) {
     /* The module as in play: quiet host flags, direct calls, its edge filter. */
     static const bool clear = false;
     static const u32 zero = 0u;
-    if (!direct(true, &clear, &clear, &zero, &zero) || !filter(true)) {
+    if (!direct(true, &clear, &clear, &zero, &zero, skip_ok, NULL) || !filter(true)) {
         fprintf(stderr, "the module's direct calls or edge filter are unavailable\n");
         return 1;
     }
     set_edge(edge_service, NULL);
     u8* reference_ram = module_image(lib);
-    u8* native_ram = protect_image(VirtualAlloc(NULL, GC_MAIN_RAM_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    u8* native_ram = protect_image(bg_alloc(GC_MAIN_RAM_SIZE));
     u8* before = malloc(AREA_BYTES);
     if (reference_ram == NULL || native_ram == NULL || before == NULL)
         return 1;
