@@ -1,6 +1,6 @@
 # PROGRESS — Native extensions for Outset's character work
 
-Status: M0 done; M2 implemented and exact in the differential test, trained build in progress; M3 (Deck A/B) next; M1 blocked on porting  
+Status: M0 done; M2 exact; first Deck A/B +0.8% (partial runs on); empty-model fix rebuilt for a second A/B; M1 blocked on porting  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -27,7 +27,7 @@ Status: M0 done; M2 implemented and exact in the differential test, trained buil
 ### M3: Qualify (depends: M2)
 
 - [x] M3-T01 (first build): +0.8% with partial runs on, ahead in 6/6; but the build declines empty models, and with partial runs off it is 0.5% behind the control. Fix and re-measure: M3-T03.
-- [ ] M3-T03: Empty models handed over natively (prologue, then the epilogue at 0x802EE834); differential test; rebuild; A/B again. Expected: up to ≈ +1.3% (the +0.8% plus the −0.5% gap, part of which may be the hand-back itself).
+- [ ] M3-T03: Empty models handed over natively (prologue, then the epilogue at 0x802EE834). **Done in code** (`ce42138f3`): differential test 17,021 identical (2,112 partial), declines down from 4,645 to 2,979. Rebuild `t541-m2b` (own training) in progress; then the same A/B. Expected: up to ≈ +1.3% (the +0.8% plus the −0.5% gap, part of which may be the hand-back itself).
 - [ ] M3-T01 (fixed build): Game Mode A/B (≥ 6 interleaved launches) against the control `a64af0e`, with `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`; the same build with it off shows the hand-over alone.
 - [ ] M3-T02: Checkpoints (render_bench, run by the user); retain or record no-go.
 
