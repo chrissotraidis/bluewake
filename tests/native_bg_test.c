@@ -33,7 +33,6 @@
  * (a one-instruction function's dispatch is measured for scale) against the
  * native, ns per call, on the common paths. */
 #include "native_bg.h"
-#include "native_ground_walk.h"
 #include "direct_calls.h"
 #include "StaticRecompABI.h"
 
@@ -359,7 +358,10 @@ static void report_cpu(const CPUState* got, const CPUState* want) {
  * walk itself, the part a native would take. Rows: the translation; a
  * prototype native walk (the same result, through the ChkGrpThrough leaf
  * native, without cycle accounting); and a decline (the reads a native would
- * check first, then the translation). Best of 7 rounds. */
+ * check first, then the translation). Best of 7 rounds. The prototype skips
+ * the guest-visible work an exact native must keep (frames, saved registers,
+ * FPSCR, cycles, readiness checks): an exact native measured 1.03x here
+ * (#542, f102f0788), so read the prototype as an upper bound, not a forecast. */
 #define WALK_ENTRY 0x802491F4u
 #define WALK_SELF (AREA + 0x0000u)
 #define WALK_VTABLE (AREA + 0x0100u)
@@ -471,7 +473,7 @@ static int walk_bench(const StaticRecompModuleDesc* mod, CPUState* g, u8* refere
     mod->on_state_loaded(g);
     base = *g;
     const unsigned checks = 20000u;
-    double best[4] = {1e30, 1e30, 1e30, 1e30};
+    double best[3] = {1e30, 1e30, 1e30};
     unsigned visits_seen = 0;
     s64 cycles_per_check = 0;
     for (unsigned round = 0; round < 7u; ++round) {
@@ -517,21 +519,6 @@ static int walk_bench(const StaticRecompModuleDesc* mod, CPUState* g, u8* refere
             if (g->downcount < -((s64)1 << 39)) g->downcount = 0;
         }
         const double declined = (now_ns() - t0) / checks;
-        /* 4: the exact native (native_ground_walk.c), from each walk's entry. */
-        t0 = now_ns();
-        for (unsigned i = 0; i < checks; ++i) {
-            for (u32 root = 0; root < WALK_ROOTS; ++root) {
-                g->gpr[1] = WALK_STACK; g->gpr[3] = WALK_SELF; g->gpr[4] = WALK_CHECK; g->gpr[5] = root; g->gpr[6] = 1u;
-                g->lr = RETURN_ADDRESS; g->pc = WALK_ENTRY;
-                if (bluewake_ground_walk(g) != 1) {
-                    fprintf(stderr, "walk bench: the exact native did not return\n");
-                    return 1;
-                }
-            }
-            if (g->downcount < -((s64)1 << 39)) g->downcount = 0;
-        }
-        const double exact = (now_ns() - t0) / checks;
-        if (exact < best[3]) best[3] = exact;
         if (translated < best[0]) best[0] = translated;
         if (native < best[1]) best[1] = native;
         if (declined < best[2]) best[2] = declined;
@@ -543,166 +530,6 @@ static int walk_bench(const StaticRecompModuleDesc* mod, CPUState* g, u8* refere
     printf("  prototype   %9.0f ns per check  %6.1f ns per visit  %.2fx\n", best[1], best[1] / visits_seen,
            best[0] / best[1]);
     printf("  declined    %9.0f ns per check  %+5.1f%% vs translated\n", best[2], 100.0 * (best[2] / best[0] - 1.0));
-    printf("  exact       %9.0f ns per check  %6.1f ns per visit  %.2fx\n", best[3], best[3] / visits_seen,
-           best[0] / best[3]);
-    return 0;
-}
-
-/* --walk [CASES] (#542 M1): the native ground walk (native_ground_walk.c)
- * against the translation of cBgW::GroundCrossGrpRp. Random group forests
- * up to depth 3 (random filter info and pass flags, bounds that pass or fail,
- * bad pointers), random registers, budgets that end the turn inside the walk,
- * deadlines; no polygon trees (the native stops before one, and the
- * translation's GroundCrossRp would read random data). The translation alone
- * is compared with the native followed by the translation from wherever the
- * native stopped, to the return or the end of the turn: every CPU byte and the
- * test area. A decline must change nothing. */
-static int run_translation(const StaticRecompModuleDesc* mod, CPUState* g) {
-    unsigned turns = 0;
-    while ((g->pc & ~3u) != RETURN_ADDRESS && g->downcount > -g->cycle_budget && g->exception == 0u) {
-        if (getenv("BLUEWAKE_WALK_TRACE"))
-            fprintf(stderr, "  turn %u: pc %08X lr %08X r1 %08X r3 %08X downcount %lld\n", turns, g->pc, g->lr,
-                    g->gpr[1], g->gpr[3], (long long)g->downcount);
-        if (++turns > 100000u || !mod->dispatch(g, g->pc)) {
-            fprintf(stderr, "walk: the translation did not run (pc %08X, %u turns)\n", g->pc, turns);
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static void walk_random(u8* ram, CPUState* c, unsigned scenario) {
-    memset(ram + (AREA - GC_RAM_BASE), 0, AREA_BYTES);
-    for (u32 i = 0; i < 0x400u; i += 4u)
-        put(ram, AREA + 0x3C00u + i, next()); /* the stack area's old contents */
-    walk_build(ram);
-    const u32 groups = 4u + next() % 40u;
-    /* A random forest: each group's first child and next sibling. */
-    for (u32 g = 0; g < WALK_GROUPS; ++g) {
-        const u32 entry = WALK_TABLE + 52u * g;
-        put16(ram, entry + 38u, 0xFFFFu);
-        put16(ram, entry + 40u, 0xFFFFu);
-        put(ram, entry + 48u, next() % 4u == 0u ? group_info() : 0u);
-        const u32 b = WALK_BOUNDS + 32u * g;
-        const bool inside = next() % 5u != 0u;
-        putf(ram, b + 4u, inside ? -1000.0f : 10.0f);
-        putf(ram, b + 16u, inside ? 1000.0f : 5.0f);
-        putf(ram, b + 8u, next() % 6u == 0u ? 200.0f : -1000.0f);
-        putf(ram, b + 20u, next() % 6u == 0u ? -2.0e9f : 1000.0f);
-        putf(ram, b + 12u, -1000.0f);
-        putf(ram, b + 24u, next() % 9u == 0u ? -5000.0f : 1000.0f);
-    }
-    u32 level[3][16], counts[3] = {1u, 0u, 0u}, used = 1u;
-    level[0][0] = 0u;
-    for (unsigned d = 0; d + 1u < 3u; ++d)
-        for (u32 i = 0; i < counts[d]; ++i) {
-            const u32 n = next() % 4u;
-            u32 previous = 0xFFFFu;
-            for (u32 k = 0; k < n && used < groups && counts[d + 1u] < 16u; ++k) {
-                const u32 child = used++;
-                level[d + 1u][counts[d + 1u]++] = child;
-                if (previous == 0xFFFFu)
-                    put16(ram, WALK_TABLE + 52u * level[d][i] + 40u, (u16)child);
-                else
-                    put16(ram, WALK_TABLE + 52u * previous + 38u, (u16)child);
-                previous = child;
-            }
-        }
-    put(ram, WALK_PASS + 4u, next() % 3u == 0u ? next() & 0x1Fu : 0x1u);
-    putf(ram, WALK_CHECK + 52u, next() % 4u == 0u ? 50.0f : -1.0e9f);
-    memset(c, 0, sizeof *c);
-    c->ram = ram;
-    c->ram_size = GC_MAIN_RAM_SIZE;
-    for (unsigned r = 0; r < 32; ++r) {
-        c->gpr[r] = next();
-        c->fpr[r] = f64_value(((u64)next() << 32) | next());
-        c->ps1[r] = f64_value(((u64)next() << 32) | next());
-    }
-    c->gpr[1] = WALK_STACK;
-    c->gpr[3] = WALK_SELF;
-    c->gpr[4] = WALK_CHECK;
-    c->gpr[5] = 0u;
-    c->gpr[6] = 1u + next() % 2u;
-    c->lr = RETURN_ADDRESS;
-    c->pc = WALK_ENTRY;
-    c->ctr = next();
-    c->cr = next();
-    c->xer = next();
-    c->msr = PPC_MSR_FP;
-    c->hid2 = next();
-    c->fpscr = next() & ~3u & ~0xF8u; /* no FP exception enables */
-    c->cycle_observation_suffix = next() % 8u;
-    c->cycle_budget = (scenario % 5u == 1u) ? 40 + (s64)(next() % 900u) : 1 << 20;
-    c->downcount = -(s64)(next() % 64u);
-    c->cycle_deadline_budget = scenario % 3u == 0u ? 0 : scenario % 7u == 2u ? 1 + (s64)(next() % 600u) : 100000;
-    switch (scenario % 37u) {
-    /* The same data through the uncached mirror: the translation reads it on
-     * its slow path; the native must not take it as plain RAM. */
-    case 1: put(ram, WALK_SELF + 156u, WALK_BOUNDS | 0x40000000u); break;
-    case 2: put(ram, WALK_SELF + 148u, WALK_BGD | 0x40000000u); break;
-    case 3: c->reserve_valid = true; c->reserve_addr = WALK_STACK - 32u; break;
-    case 4: c->msr = 0u; break;
-    case 5: put(ram, WALK_VTABLE + 32u, EMPTY_FUNCTION); break;       /* another virtual target (a bare blr) */
-    default: break;
-    }
-}
-
-static int walk_test(const StaticRecompModuleDesc* mod, CPUState* g, u8* ram, unsigned cases) {
-    u8* before = malloc(AREA_BYTES);
-    u8* want = malloc(AREA_BYTES);
-    if (before == NULL || want == NULL)
-        return 1;
-    unsigned returned = 0, stopped = 0, declined = 0;
-    for (unsigned i = 0; i < cases; ++i) {
-        CPUState start;
-        walk_random(ram, &start, i);
-        reset_host();
-        memcpy(before, ram + (AREA - GC_RAM_BASE), AREA_BYTES);
-        *g = start;
-        mod->on_state_loaded(g);
-        start = *g; /* as on_state_loaded leaves it (FPSCR's summary bits) */
-        if (!run_translation(mod, g)) {
-            fprintf(stderr, "walk case %u: the reference translation failed\n", i);
-            return 1;
-        }
-        CPUState reference = *g;
-        memcpy(want, ram + (AREA - GC_RAM_BASE), AREA_BYTES);
-
-        memcpy(ram + (AREA - GC_RAM_BASE), before, AREA_BYTES);
-        *g = start;
-        const int result = bluewake_ground_walk(g);
-        if (result == 0) {
-            declined++;
-            if (memcmp(g, &start, sizeof start) || memcmp(ram + (AREA - GC_RAM_BASE), before, AREA_BYTES)) {
-                fprintf(stderr, "walk case %u: declined but changed state\n", i);
-                return 1;
-            }
-        } else if (result == 1) {
-            returned++;
-        } else {
-            stopped++;
-        }
-        if (result != 1 && !run_translation(mod, g)) {
-            fprintf(stderr, "walk case %u: the translation after the native (result %d) failed\n", i, result);
-            return 1;
-        }
-        CPUState actual = *g;
-        if (memcmp(&actual, &reference, sizeof reference) || memcmp(ram + (AREA - GC_RAM_BASE), want, AREA_BYTES)) {
-            fprintf(stderr, "walk case %u (result %d, seed %08X): mismatch; pc %08X vs %08X, downcount %lld vs %lld\n",
-                    i, result, seed, actual.pc, reference.pc, (long long)actual.downcount,
-                    (long long)reference.downcount);
-            report_cpu(&actual, &reference);
-            unsigned shown = 0;
-            for (u32 a = 0; a < AREA_BYTES && shown < 16u; ++a)
-                if (ram[AREA - GC_RAM_BASE + a] != want[a]) {
-                    fprintf(stderr, "  RAM %08X: got %02X want %02X\n", AREA + a, ram[AREA - GC_RAM_BASE + a], want[a]);
-                    shown++;
-                }
-            return 1;
-        }
-    }
-    printf("walk: %u cases identical to the translation: %u returned natively, %u stopped and finished translated, "
-           "%u declined unchanged\n", cases, returned, stopped, declined);
     return 0;
 }
 
@@ -751,8 +578,6 @@ int main(int argc, char** argv) {
     u8* before = malloc(AREA_BYTES);
     if (reference_ram == NULL || native_ram == NULL || before == NULL)
         return 1;
-    if (argc > 2 && strcmp(argv[2], "--walk") == 0)
-        return walk_test(mod, guest_cpu(), reference_ram, argc > 3 ? (unsigned)strtoul(argv[3], NULL, 10) : 20000u);
     if (argc > 2 && strcmp(argv[2], "--walk-bench") == 0)
         return walk_bench(mod, guest_cpu(), reference_ram);
 
