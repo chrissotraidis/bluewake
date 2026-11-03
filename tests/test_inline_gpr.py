@@ -27,8 +27,81 @@ label_80004004:
 
 class InlineGprTests(unittest.TestCase):
     def test_watched_target_cannot_bypass_a_host_observation(self):
-        for watched in ({0x80328F84}, {0x80004000}, {0x80004004}):
-            self.assertEqual(gpr.transform(CALL, watched), (CALL, 0))
+        entry = CALL.replace('0x80328F84', '0x80328F88').replace('0x80328F84u', '0x80328F88u')
+        for source, watched in ((entry, {0x80328F88}), (CALL, {0x80004000}), (CALL, {0x80004004})):
+            self.assertEqual(gpr.transform(source, watched), (source, 0))
+
+    def test_host_names_a_return_keyed_entry_only_with_its_return(self):
+        # RETURN_KEYED inlines every caller of these entries except where the
+        # return is watched. That holds only while every host hook on the entry
+        # also checks that return: a hook on the entry alone (any lr) would be
+        # skipped by the inline form. The intercept table and its case list
+        # name addresses without hooking them.
+        listing = {'edge_intercept_table.h', 'edge_intercepts.c'}
+        watched = gpr.watched_addresses()
+        for entry, returns in gpr.RETURN_KEYED.items():
+            for ret in returns:
+                self.assertIn(ret, watched)
+            forms = (f'0X{entry:08X}', f'0X{entry | 0x40000000:08X}')
+            for folder in ('runtime/host/src', 'windows/src'):
+                for path in sorted((ROOT / folder).rglob('*')):
+                    if path.suffix not in ('.c', '.h', '.cpp', '.mm', '.m') or path.name in listing:
+                        continue
+                    lines = [l.split('//')[0].upper() for l in path.read_text(errors='replace').splitlines()]
+                    for number, code in enumerate(lines):
+                        # The condition may run on over the next two lines.
+                        near = ' '.join(lines[number:number + 3])
+                        if any(f in code for f in forms) and \
+                                not any(f'0X{ret:08X}' in near for ret in returns):
+                            self.fail(f'{path.relative_to(ROOT)}:{number + 1} names 0x{entry:08X} '
+                                      'without one of its returns; recheck RETURN_KEYED')
+
+    def test_return_keyed_entry_stays_out_only_where_its_return_is_watched(self):
+        # The GroundCross check at _restgpr_27 is keyed on its one return: that
+        # call site stays out, and any other caller of the entry is inlined.
+        self.assertEqual(gpr.transform(CALL, {0x80328F84, 0x80004004}), (CALL, 0))
+        result, count = gpr.transform(CALL, {0x80328F84})
+        self.assertEqual(count, 1)
+        self.assertIn('bw_direct_call_ready(ctx, 0x80328F84u)', result)
+
+    def test_diagnostic_only_addresses_are_not_watched(self):
+        # The GX entry trace names four ranges between the markers, and every
+        # build with a trace on refuses the chassis skip anyway. direct_calls.py
+        # leaves them out of the watch list; the inliner has to as well, or the
+        # two preparations disagree about which calls may be made inline
+        # (issue #184, where the disagreement showed up as inlining counts that
+        # did not match between the two prepare steps).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'runtime/host/src').mkdir(parents=True)
+            (root / 'windows/src').mkdir(parents=True)
+            (root / 'runtime/host/src/main.c').write_text(
+                '// bluewake-unwatched-begin\n'
+                'static const u32 g_gx_entry_trace_ranges[][2] = {\n'
+                '    {0x803230C4u, 0x803231B4u},\n'
+                '};\n'
+                '// bluewake-unwatched-end\n'
+                'if (pc == 0x80311111u)\n'
+                '    return;\n')
+            with patch.object(gpr, 'ROOT', root):
+                watched = gpr.watched_addresses()
+        self.assertNotIn(0x803230C4, watched)
+        self.assertNotIn(0x803230C4 | 0x40000000, watched)
+        self.assertNotIn(0x803231B4, watched)
+        self.assertIn(0x80311111, watched)
+        self.assertIn(0x80311111 | 0x40000000, watched)
+
+    def test_rel_call_through_the_mirror_is_inlined_by_its_canonical_entry(self):
+        rel = (CALL.replace('80004000', 'C0DA0254').replace('80004004', 'C0DA0258')
+               .replace('0x80328F84', '0xC0328F84'))
+        result, count = gpr.transform(rel, set())
+        self.assertEqual(count, 1)
+        self.assertIn('bw_direct_call_ready(ctx, 0x80328F84u)', result)
+        self.assertIn('bw_inline_gpr_memory_ready(ctx, 27u)', result)
+        self.assertIn('bw_direct_call_ready(ctx, 0xC0DA0258u)', result)
+        self.assertIn('goto label_C0DA0258;', result)
+        # Declined, it still goes out through the mirror address it called.
+        self.assertIn('ctx->pc = 0xC0328F84u;\n            return;', result)
 
     def test_plain_and_fixed_cpu_rewrites_keep_memory_and_host_guards(self):
         for source in (CALL, CALL.replace('CPUState* ctx)', 'CPUState* ctx_param)')):
