@@ -327,3 +327,10 @@ then the characters): for scene passes with HD's actor light, the sea mask and i
 a characters' pre-pass is built from that depth with HD's blur, and the characters sample it. Before, they took the
 last frame's pre-pass, whose edge lagged a frame on a moving camera. `DOL_AURORA_ACTOR_LIGHT_SAME_FRAME=0` keeps the
 last frame's, to compare.
+
+Patch 0216 finishes the sea for the HD look. The sea rooms' untextured square of sea counts as the sea at the size
+it is drawn (`sea_shape()` scales its extent by the position matrix), so the sea mask takes the open sea and the
+HD look's brightness no longer turns it pale cyan with a seam. Blended draws that write depth (a bush faded near
+the camera) are drawn into the mask by their cut-out and clear the character, bloom and actor-light marks behind
+them. On Wind Waker HD's light the sea takes HD's own term, 0.5 + 0.5 x clamp(cloud + floor) x the sun shadow in
+linear light (its sea quad and wave grid), in place of the scenery's shade.
