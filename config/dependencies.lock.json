@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "53449c57d0591db7e837e834546b45e94eccbe23",
+      "sha": "d6960b2c0b5b1d6f14d416476db706c502e90381",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -818,6 +818,13 @@
             "patches/recompcore/0216-Sun-shadows-the-sea-as-Wind-Waker-HD-s-all-of-it-in-the-sea-mask-foliage-in-front-clearing-the-marks-and-HD-s-sea-term.patch"
           ],
           "evidence": "pdale-boop's: sea_shape() scales the sea square by its position matrix's columns (the mask takes the open sea); blended depth-writing draws clear the marks behind them in the sea mask by their cut-out; on HD's light the sea's shade is HD's sea term in linear light. Without HD's palette the sea is as before."
+        },
+        "hd_actor_clouds": {
+          "runtime": "d6960b2c0b5b1d6f14d416476db706c502e90381",
+          "tracked_patches": [
+            "patches/recompcore/0217-Characters-Wind-Waker-HD-s-clouds-on-the-characters-light-and-its-cloud-floor-from-the-clock.patch"
+          ],
+          "evidence": "pdale-boop's: the characters take HD's cloud term (cloud = 1 reproduces the traced HD pixels, gxcore tests); the cloud floor from the host's clock matches HD's 0.75 at 07:30, 18:30 and 20:00, where the light's height gave 0.596."
         }
       }
     },

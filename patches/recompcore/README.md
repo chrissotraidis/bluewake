@@ -365,3 +365,9 @@ HD look's brightness no longer turns it pale cyan with a seam. Blended draws tha
 the camera) are drawn into the mask by their cut-out and clear the character, bloom and actor-light marks behind
 them. On Wind Waker HD's light the sea takes HD's own term, 0.5 + 0.5 x clamp(cloud + floor) x the sun shadow in
 linear light (its sea quad and wave grid), in place of the scenery's shade.
+
+Patch 0217 dims the characters' sunlight under Wind Waker HD's cloud shadows, as HD does: mix(shade, lit, ramp x
+cloud), the cloud read from the same texture, drift and floor as the scenery's cloud shadows on HD's rule. The floor
+is HD's from the clock, 1 - max(0.25, -0.9 cos(time - 15 degrees)), which the host gives
+(`aurora_set_cloud_hd_floor`); unset, it comes from the light's height. `DOL_AURORA_ACTOR_LIGHT_DEBUG=6` shows the
+characters' cloud term.
