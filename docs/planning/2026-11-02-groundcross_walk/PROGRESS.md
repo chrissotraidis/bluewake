@@ -1,31 +1,26 @@
 # PROGRESS — Ground collision walk, revisited
 
-Status: M0 done (go); M1 designed: an exact, opt-in native walk that hands over at each polygon tree and resumes after it  
+Status: Done, no-go for speed (an exact native walk measured 1.03×); tools and findings kept  
 [PRD](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
 
-### M0: Is there anything to gain? (local, no native in the game)
+| Milestone | Outcome | Commits |
+|---|---|---|
+| M0-T01: the collision test on Linux | [x] Runs against the game module; both leaf natives exact | `2c49859` |
+| M0-T02: census of the walk | [x] ≈ 6,300 small group visits per Outset frame (host census partial; the module census sees all) | `08be56c`, `298e71a` |
+| M0-T03: local bench | [x] Prototype 8.1× faster; go to M1 | `a8b203b` |
+| M1-T00: big walks and polygon trees | [x] 96% of walks are one group; big walks always reach a tree | `3e94ca6` |
+| M1-T01: exact native walk | [x] Exact in 400,000 cases; **1.03×** the translation. **No-go**: removed from the PR, kept in history | `f102f07`, removed in `d1a0b6e` |
+| M2: Deck qualification | — not reached | — |
 
-- [x] M0-T01: `native_bg_test` runs on Linux (`bluewake_native_bg_test`), with the current direct-call handshake (v2); both leaf natives exact against the #503 control module.
-- [x] M0-T02: Census of the walk in Outset: ≈ 87 group visits and ≈ 10 tree tests per ground check, 72 checks per frame, three levels. The cost is the group visits' overhead; Option A (native walk, translated tree tests). The host census missed calls within a chunk; the module-side census (`--bg-census`) sees all.
-- [x] M0-T03: Local bench: prototype walk **8.1× faster** than the translation (8.6 vs 70 ns per group visit); a separate-check decline costs +3.1%, so M1 checks as it walks. **Go.**
-
-### M1: Exact native walk with hand-over (depends: M0 go)
-
-- [x] M1-T00: Census: 96% of top-level walks are one group, no tree; the 3% big walks (two thirds of visits) always reach a tree, first after ≈ 11 visits. **The native must resume after each tree test**, not only hand over at the first.
-- [x] M1-T01a: The translated walk mapped block by block (cycles, budget checks, suffix writes, exits) from the generated chunk; [technical plan](TECH_PLAN.md#the-translated-walk-block-by-block).
-- [ ] M1-T01: Native walk, opt-in (`BLUEWAKE_NATIVE_GROUND_WALK=1`); certify-and-hook script; hand-over at each polygon tree and resume after it (hooks at 0x802491F4 and 0x802492EC).
-- [ ] M1-T02: Differential test at every hand-over, short turns included.
-
-### M2: Qualify (depends: M1)
-
-- [ ] M2-T01: Trained build; Game Mode A/B (≥ 6 launches); checkpoints; retain or record no-go.
+The ledger below records each measurement, newest first.
 
 ## Evidence ledger
 
 | Task | Commit / artifact | Method | Environment | Result |
 |---|---|---|---|---|
+| M1-T01 | `f102f07` (exact native and `--walk`; removed in `d1a0b6e`); control module `a64af0e` | `native_bg_test MODULE --walk 400000`; `--walk-bench` with an exact row | Linux workstation, `-march=x86-64-v3` | **400,000 random cases identical to the translation** (312,685 returned natively, 44,172 stopped and finished translated, 43,143 declined unchanged). The first run found that a stop with the turn's budget spent moved the end of the turn; fixed with 256 cycles of headroom at every check. **Speed: 78.7 ns per visit (0.89×), then 68.5 ns (1.03×) with the float compare inlined, against the translation's 70.3.** The profile has no hotspot: the time is the guest-visible work (frame, saved registers, FPSCR, cycles, readiness, the exact filter), which the prototype skipped. **No-go** |
 | M1-T00 | `f9d307c` (`bench/542-census3`, `--bg-census`, `--reuse` over the census build); local `measure-542/census3.log` (private) | Per top-level walk (a `GroundCrossGrpRp` call at depth 1): subtree size, whether it reaches `GroundCrossRp`, visits before the first | Deck, Game Mode, worst-angle Outset, 90 s | **4.13 M top-level walks, 13.9 M visits. 96% are a single group with no tree (3.95 M visits). The 3% of 32–127 groups always reach a tree and hold ≈ 9.2 M visits (two thirds), first tree after ≈ 11 visits.** Handing over at the first tree would cover ≈ 40% of visits (≈ +0.4%); resuming after each tree test keeps nearly all (≈ +1%). Design changed accordingly |
 | M0-T03 | `native_bg_test MODULE --walk-bench` (this commit); control module `a64af0e` | Synthetic ground check shaped like the census: 26 / 16 / 48 groups at depths 1 / 2 / 3, 90 visits, all passing, no polygon trees; best of 7 rounds | Linux workstation, `-march=x86-64-v3`, three runs | **Translated 6,290 ns per check (70 ns per visit, 9,238 guest cycles); prototype native 777 ns (8.6 ns per visit): 8.1× faster. Declined (separate check pass, then the translation): +3.1%.** Speed gate passes widely; the decline gate (≤ 2%) misses with a separate check pass, so M1 checks as it walks. Value in play ≈ 6,300 visits × 70 ns ≈ 0.44 ms of a 37 ms frame: ≈ +1% if most is removed. **Go**, with the polygon-tree hand-over and cycle accounting still to design |
 | M0-T02 | `298e71a` (`bench/542-census2`, `--bg-census`, own training; AppImage in `artifacts/t542-census/298e71a683ed`); local `measure-542/census2.log` (private) | Module-side observers at the entry labels; one Game Mode launch, 90 s, direct calls on | Deck, Game Mode, worst-angle Outset; ≈ 2,200 game frames | **Per game frame: ≈ 72 ground checks, ≈ 6,300 group visits (≈ 87 per check; typically 64–127, max 121), ≈ 710 tree tests (≈ 10 per check; typically 8–15, max 36), ≈ 11,700 group filters (all walks).** Depth 1/2/3: 4.2 M / 2.6 M / 7.2 M visits, none deeper. With the profile's ≈ 1.9 M cycles/frame for `GroundCrossGrpRp`, that is ≈ 300 host cycles per group visit, mostly per-call and per-block overhead; tree tests ≈ 1,600 cycles each. Design: native group walk, translated tree tests (Option A). Rough ceiling ≈ +1–1.5% |

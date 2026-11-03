@@ -1,203 +1,77 @@
 # TECH_PLAN — Ground collision walk, revisited
 
-Status: M0 done (go); M1 designed: an exact, opt-in native walk that hands over at each polygon tree and resumes after it  
-[PRD](PRD.md) · [Tracker](PROGRESS.md) · #436's [contract map](https://github.com/irregularthanis/bluewake/blob/docs/groundcross-native-plan/docs/planning/2026-10-21-groundcross_native_reimplementation/GROUND_CROSS_CONTRACT.md)
+Status: Done, no-go for speed  
+[PRD](PRD.md) · [Tracker and evidence](PROGRESS.md) · #436's [contract map](https://github.com/irregularthanis/bluewake/blob/docs/groundcross-native-plan/docs/planning/2026-10-21-groundcross_native_reimplementation/GROUND_CROSS_CONTRACT.md)
 
-## What exists
+## What we tried
 
-- **#436 (closed, branch `docs/groundcross-native-plan`):**
-  - the native early exits for `GroundCrossGrpRp`, in `native_bg.c`;
-  - the contract map of the function;
-  - a differential test `tests/native_bg_test.c`, which already has a `BENCH_CALLS` argument but loads only Windows DLLs.
-- **On the #503 stack:** `native_bg.c` with the leaf natives `ChkSameActorPid` and `ChkGrpThrough`.
-- **#541:** the hand-over pattern (return codes that make the chunk hook `goto` a label inside the function), and a `--bench` mode in `native_skin_test.c`. That bench showed a trap: build with the module's `-march`, or the native's `fma` is a slow library call.
+`cBgW::GroundCrossGrpRp` (0x802491F4–0x80249368), from the disassembly:
 
-## Why #436 lost, in one picture
-
-```mermaid
-flowchart LR
-    C[440k calls] --> N[Native: copy CPU state,<br/>checks, ChkGrpThrough]
-    N -- "28%: early exit" --> A[Saved ≈ 50 guest cycles,<br/>but 226 vs 179 ns]
-    N -- "72%: needs the walk" --> D[Decline] --> T[Translation runs<br/>the whole call again]
+```
+GroundCrossGrpRp(this r3, check r4, group r5, depth r6):
+  if this->vtbl[8](this, group, check->pass (+4), depth)  -> return 0   (ChkGrpThrough, virtual)
+  b = this->bounds(+156) + 32*group
+  if not (x, z inside b's x/z range)                        -> return 0
+  if not (b.minY < check.y(+40)) or b.maxY < check.hitY(+52) -> return 0
+  hit = 0;  g = this->table(+148)->groups(+36) + 52*group
+  if g.tree(+46) != 0xFFFF and GroundCrossRp(this, check, g.tree) -> hit = 1
+  for c = g.child(+40); c != 0xFFFF; c = groups[c].sibling(+38):
+      if GroundCrossGrpRp(this, check, c, depth + 1)         -> hit = 1
+  return hit
 ```
 
-The native's cost landed on every call. The savings came only on the cheapest 28%.
-
-## The walk, and where a native can hand over
-
-```mermaid
-flowchart TD
-    E[Entry 0x802491F4] --> F{ChkGrpThrough}
-    F -- filtered --> R[Return]
-    F -- pass --> B{Y bounds relevant?}
-    B -- no --> R
-    B -- yes --> G[GroundCrossRp: polygon tree,<br/>may update the hit]
-    G --> K{Child?}
-    K -- yes --> S[Recurse: child, depth+1] --> K
-    K -- no --> R
-```
-
-The cost is in `GroundCrossRp` and the recursion. A native can cover them in two ways:
-- **Option A, walk only:** the filter, the bounds and the child loop run natively. The native hands over at each `GroundCrossRp` call, where the translation runs the call and returns into the native's loop. This needs re-entry after the call, which is harder.
-- **Option B, the whole group:** the native also runs `GroundCrossRp`. When something is not covered, it hands over at the start of the current group (as #541 hands over at the loop head), and the translation finishes the walk.
-
-M0 measures which part holds the cycles before either is chosen.
-
-## M0: the local test (no native code in the game)
-
-### M0-T01: port the bench to Linux
-
-`tests/native_bg_test.c` gets the same module loader as `native_skin_test.c`: `dlopen` on POSIX, `LoadLibrary` on Windows, and `bw_module_select_storage`. It also gets a CMake target like `bluewake_native_skin_test`, built with the module's `-march`.
-
-### M0-T02: census of the walk on Outset
-
-A diagnostic build (compile-time define, like `BLUEWAKE_SKIN_CENSUS`), one Game Mode minute in Outset, records per top-level call:
-- groups visited, filtered and rejected by bounds;
-- `GroundCrossRp` calls, and the polygon nodes those calls visit;
-- recursion depth;
-- guest cycles of the whole call, binned by size.
-
-This gives the ceiling (cycles per frame in the walk) and the typical tree shapes for the bench.
-
-### M0-T03: speed test, translated against a prototype
-
-`native_bg_test MODULE --bench` builds synthetic collision groups shaped like the census's typical calls: group table, bounds, polygon trees and the check object. It then times three things on the same module and memory:
-
-| Row | What runs | Why |
+| Step | What | How |
 |---|---|---|
-| Translated | the module's `GroundCrossGrpRp` from its entry | the baseline |
-| Prototype | a native walk (bounds, children, `GroundCrossRp`), not yet exact, compared only for the result | the best case; if this is not clearly faster, stop |
-| Declined | the native's checks, then a decline, then the translation | the cost added to calls the native refuses, which #436 never timed |
+| M0-T01 | The collision test on Linux | `native_bg_test`: a portable layer (module loading, page protection, timer); the current direct-call handshake (v2) |
+| M0-T02 | The walk's shape in Outset | A host census (`BLUEWAKE_BG_CENSUS=1`), then a module census (`--bg-census`: read-only observer calls at the entry labels) |
+| M0-T03 | Can a native win? | `native_bg_test --walk-bench`: a census-shaped check (90 visits) through the translation, a prototype and a decline |
+| M1-T00 | Where the big walks reach a polygon tree | The module census, per top-level walk |
+| M1-T01 | An exact native | The translated walk transcribed block by block (below); `--walk`, a differential test |
 
-The test repeats each case without resetting memory, as the skinning bench does: the function's only writes are to the check object's hit fields, which the bench restores. Each row is the best of 7 rounds.
+### The exact native, as built (`f102f07`, not merged)
 
-**Go/no-go:** go on only if the prototype is ≥ 1.2× faster on the census's typical shapes **and** the declined row is within 2% of the translation. Otherwise record the no-go on #436's line and close this plan.
+- **Same effects:** the same registers, CR0, FPSCR, stack stores, inline `_savegpr_27`/`_restgpr_27`, cycle charges and suffix writes as the translation's prepaid fast copies, in the same order, through the same memory helpers.
+- **Same exits:** it stops only where the translation itself can hand the dispatcher a `pc`:
+  - budget checks;
+  - helpers or calls that are not ready;
+  - a polygon tree (`GroundCrossRp` stays translated);
+  - a read that is not plain RAM.
+- **Silent boundaries:** stopping is exact only where the dispatcher passes the boundary silently, so the native requires the edge filter on, the host quiet and the walk's addresses unwatched. It keeps 256 cycles in hand at every budget check, so a stop never moves the end of a turn.
 
-## M0 result
+The test found that last point: a stop with the budget already spent ended the turn early.
+
+## What we found
 
 | Measurement | Result |
 |---|---|
-| Census (Deck, Outset) | ≈ 72 ground checks per frame; ≈ 87 group visits and ≈ 10 polygon-tree tests per check; three levels deep |
-| Local bench (synthetic census-shaped check, 90 visits) | Translated 70 ns per visit; prototype native 8.6 ns: **8.1×**. A decline with a separate check pass: +3.1% |
-| Expected in play | ≈ 6,300 visits × 70 ns ≈ 0.44 ms of a 37 ms frame: **≈ +1%** |
+| Module census (Deck, Outset, ≈ 2,200 frames) | ≈ 72 ground checks, ≈ 6,300 group visits and ≈ 710 tree tests per frame; three levels deep |
+| Per top-level walk | 96% one group, no tree; the 3% of 32–127 groups hold two thirds of the visits, always reach a tree, the first after ≈ 11 visits |
+| Bench: translated | 70 ns per group visit (9,238 guest cycles per 90-visit check) |
+| Bench: prototype (not exact) | 8.6 ns per visit: 8.1× |
+| Differential test, exact native | 400,000 random cases identical: 312,685 returned natively, 44,172 stopped and finished translated, 43,143 declined unchanged |
+| Bench: exact native | 78.7 ns per visit (0.89×); after inlining the float compare, **68.5 ns (1.03×)** |
 
-**Go to M1**, with the native opt-in until qualified.
+The exact native's profile has no hotspot. Its time goes on the effects the guest can observe, and the translation's fast copies spend about the same on them. The only machinery left to remove is the call dispatch around the filter, a few percent.
 
-## M1 design: an exact, opt-in native walk
+## Decision
 
-### Where it runs and how it is switched
+**No-go.** Drop the native, keep the tools and the findings. Its best case is about +0.1–0.2% of a frame, for intricate code that would need its own hook script, certification and Deck qualification.
 
-- **Hook:** at the entry label of `GroundCrossGrpRp` (0x802491F4). It is inserted by a dedicated certify-and-hook script, `scripts/windows/ground_walk.py`, modelled on `native_skin.py`. The script certifies the translated body (0x802491F4–0x80249368) by hash in every chunk variant, and inserts nothing if any variant differs. It does not go through `--native-entries`, which does not build on this tree (#541).
-- **Opt-in:** off unless `BLUEWAKE_NATIVE_GROUND_WALK=1`. The module exports a `bluewake_composite_ground_walk_v1(enabled, ready, user)` switch like the skinning native's. The host passes `enabled` only when the variable is exactly `1`, not with the "on unless set to 0" default the other natives use. With it off, the hook costs one predictable branch.
-- **Builds:** compiled into normal builds behind the switch, so testers can turn it on without a special build. No change to anyone's default.
+## Long-term impact
 
-### What one native call covers
+- **Price exactness first:** when the prototype skips guest-visible effects, it is an upper bound, not a forecast. The bench's comment now says so.
+- **Tools kept:**
+  - `native_bg_test MODULE [CASES] [BENCH_CALLS]`: the collision leaves, exact against the module, on Linux and Windows.
+  - `native_bg_test MODULE --walk-bench`: the walk translated, as a prototype and as a decline.
+  - `BLUEWAKE_BG_CENSUS=1` (host, with `BLUEWAKE_DIRECT_CALLS=0`) and `--bg-census` (module, Linux diagnostic builds): the ground check's call counts and shapes.
+- **The other collision walks** (wall correction, roof, water) have the same shape and the same exact effects per visit, so they are not candidates either.
 
-One call of `GroundCrossGrpRp`: a group and its whole subtree. The census puts the largest subtree at about 17 visits (≈ 1,750 guest cycles), so most calls fit a turn.
+## Changes
 
-| Path in the subtree | v1 |
+| File | Change |
 |---|---|
-| Filter (`ChkGrpThrough`, the certified virtual target) | native, through the existing leaf native's logic |
-| Bounds rejects | native |
-| Child loop and recursion | native |
-| A group with a polygon tree (`GroundCrossRp`) | **hand over** to the translation, **resume** after it (below) |
-
-### Polygon trees: hand over, then resume
-
-`GroundCrossRp` can change the ground check's hit and can stop at the end of a turn, so the native does not run it. The census (M1-T00) shows why handing over once is not enough. 96% of top-level walks are a single group with no tree. The 3% of big walks (32–127 groups) hold two thirds of all visits, always reach a tree, and reach the first after about 11 visits. Stopping at the first tree would leave the native about 40% of visits.
-
-So the native hands over at **each** tree test and **resumes** after it:
-
-```mermaid
-flowchart TD
-    E[Hook at 0x802491F4:<br/>a walk starts] --> W[Native: filter, bounds,<br/>children, recursion]
-    W -- "a group with a tree" --> H[Hand over: pc 0x80248C38,<br/>LR 0x802492EC, frames as translated]
-    H --> T[Translated GroundCrossRp]
-    T --> R[Hook at 0x802492EC:<br/>the tree test returns]
-    R --> W
-    W -- "the top level returns" --> X[Return to the caller]
-```
-
-- **No native state of its own.** The walk's state at any point is what the translation keeps: the current group (r27), the object (r28), the check (r29), the depth (r30) and the hit flag (r31) in registers. Each open level has a stack frame holding the saved LR and r27–r31.
-- **At a hand-over,** the native leaves exactly that state: `pc` = 0x80248C38, LR = 0x802492EC, the call's arguments, one frame per open level as the translation writes it, and the cycle charges and suffix of every block before the call.
-- **At the resume hook (0x802492EC),** the native reads the state back from registers and frames and continues that level's child loop. It returns up a level by reading the frame the translation's stack holds: a saved LR of 0x80249328 is a recursive call into the walk, anything else the original caller. The next tree hands over again.
-- **Both hooks are certified** by the same body hash, and either can decline. The translation then simply continues, because the state is the translation's own.
-
-### The translated walk, block by block
-
-From the generated chunk on the #503 stack (prepaid fast copies; private source, public facts):
-
-| Block | Cycles | Budget check at entry | What it does |
-|---|---:|---|---|
-| 0x802491F4 | 5 | yes | `stwu`, `mflr`, `stw` LR, `addi r11`; then the inline `_savegpr_27` |
-| inline `_savegpr_27` | 6 | its own (`downcount − 5`) and the direct-call readiness of the helper and of 0x80249208 | saves r27–r31; cycle suffix 0 |
-| 0x80249208 | 11 | no | copy the arguments to r27–r30; load the pass check and the virtual target; `bctrl` |
-| `ChkGrpThrough` (0x800A9684) | its own | — | through `bw_call_translated`; the existing leaf native reproduces it exactly |
-| 0x80249230, 0x80249238 | 2, 2 | no | filtered: return 0 |
-| 0x80249240 … 0x802492B8 | 7, 3, 4, 3, 2, 1, 2, 4, 4, 2 | no | the x/z bounds, then the y bounds; each float load writes the cycle suffix |
-| 0x802492C0, 0x802492E0 | 10, 3 | no | the polygon tree: if present, `bl GroundCrossRp` (exit: `pc` = 0x80248C38, LR = 0x802492EC) |
-| 0x802492EC, 0x802492F4 | 2, 1 | no | fold the tree's result into r31 |
-| 0x802492F8 | 4 | no | the first child; cycle suffix 0 |
-| 0x80249308, 0x80249314, 0x80249328, 0x80249330 | 3, 5, 2, 1 | **yes, and prepaid only if the deadline allows** | the child loop: `bl GroundCrossGrpRp` (LR = 0x80249328), fold its result |
-| 0x80249334 | 8 | no | the next sibling |
-| 0x8024934C, 0x80249350 | 1, 2 | no | the result to r3; then the inline `_restgpr_27` (6, suffix 0) |
-| 0x80249358 | 5 | no | `lwz` LR, `mtlr`, `addi r1`, `blr` |
-
-**Exits.** Every place the translation can hand the dispatcher a `pc` is an exit the native can take with exactly the translation's state:
-- **Budget checks:** the entry, the loop labels, and the helpers' checks.
-- **The helpers:** when the helper or its return isn't ready for a direct call.
-- **The filter call:** when its target isn't ready, or not the certified leaf.
-- **The tree call.**
-- **A child call, when the turn is over.**
-
-The native stops there with `pc` set when it cannot go on exactly:
-- a read that is not plain RAM;
-- a near deadline;
-- a loop label that cannot prepay;
-- a polygon tree.
-
-The dispatcher then resumes the translation. That is exact only when the dispatcher passes the boundary silently. So the native requires, at entry: the edge filter on, the host quiet, and the walk's labels unwatched. A pending reservation also makes the translation's stores take their slow path, so the native declines then too.
-
-### Exactness
-
-- **Cycles:** each translated block's charge is taken from the generated chunk, as #541 did for skinning, including the inline `_savegpr`/`_restgpr` of the #503 stack and the leaf's own block charges. The native checks the turn's budget and deadline at every block entry the translation checks, and hands over (or declines, at the entry) where the translation would stop.
-- **Checks as it walks:** every read is checked as plain stable RAM when it is made. Results stay in locals until the native commits, and the first failed check ends the call:
-  - before any work, it declines and changes nothing;
-  - after some work, it hands over at the last block boundary it reached, as at a polygon tree.
-  This keeps a decline's cost to the part already walked (the M0 bench's separate check pass cost +3.1%).
-- **Bounded depth:** the walk stops (declines) past a fixed depth and visit count, so a malformed or cyclic table cannot run away.
-- **Tests:** `native_bg_test` gains the walk:
-  - random trees, polygon trees at random groups, short turns and deadlines inside the walk;
-  - every CPU byte and all of MEM1 compared with the translation alone, through the hook's wrapper as the game calls it (the #541 lesson);
-  - the guard test covers the opt-in default and declines in CI.
-
-## Changes (planned)
-
-| File | Change | Milestone |
-|---|---|---|
-| `tests/native_bg_test.c` | POSIX loader; `--bench` with the three rows; synthetic trees | M0 |
-| `runtime/host/CMakeLists.txt` | `bluewake_native_bg_test` target (explicit, never run in public CI), module `-march` | M0 |
-| `cmake/composite/native_bg.c` | `BLUEWAKE_BG_CENSUS` counters (diagnostic builds only) | M0 |
-| `cmake/composite/native_bg.c`, the hook generator | The exact native walk with a hand-over (M0's chosen option) | M1, only on a go |
-
-## Verification
-
-| Layer | Evidence |
-|---|---|
-| M0 | Census on the Deck; bench on the workstation, three runs, matched `-march` |
-| M1 | Differential test: native plus the translation from each hand-over against the translation alone, every CPU byte and all of MEM1, including short turns |
-| M2 | Trained full build; ≥ 6 interleaved Game Mode launches against the control; render_bench checkpoints |
-
-## Implementation order
-
-| Milestone | Depends | Deliverable |
-|---|---|---|
-| M0 | — | Census + local speed test; go/no-go |
-| M1 | M0 go | Exact native walk with hand-over; differential test |
-| M2 | M1 | Deck A/B and checkpoints; retain or record no-go |
-
-## Gaps
-
-- The bench's synthetic trees must match the shapes Outset uses; M0-T02 sets them.
-- `GroundCrossRp` may stop at an execution boundary (contract map), so a hand-over point inside it may be needed.
-- The workstation is not the Deck: the bench screens a native out, and the Deck A/B decides.
+| `tests/native_bg_test.c` | Portable (Linux and Windows); direct-call handshake v2; `--walk-bench` |
+| `runtime/host/CMakeLists.txt` | `bluewake_native_bg_test` (explicit, never run by public CI) |
+| `runtime/host/src/bg_census.{c,h}`, `feature_dispatch.h`, `main.c`, the platforms' CMake lists | The host census, off by default; its addresses kept off the module's watch list |
+| `cmake/composite/bg_census_module.{c,h}`, `scripts/windows/bg_census.py`, `scripts/linux/build.py`, `cmake/composite/CMakeLists.txt` | The module census (`--bg-census`), off by default, part of the build's fingerprint |
+| `tests/feature_dispatch_test.c`, `tests/test_direct_calls.py` | The census's symbols in the dispatch tests |
