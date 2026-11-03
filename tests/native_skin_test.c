@@ -125,6 +125,9 @@ static CPUState build(u8* ram, unsigned scenario) {
     c.cycle_deadline_budget = scenario % 4u == 0u ? 0 : 100000;
     if (scenario % 17u == 2u) c.cycle_deadline_budget = 40;    /* too near: declines */
     if (scenario % 19u == 3u) c.cycle_budget = 200;            /* the turn would end inside: declines */
+    /* The turn ends inside the loop: the first envelopes run natively, the
+     * translation finishes from the loop head (#541 M2, opt-in). */
+    if (scenario % 5u == 2u) c.cycle_budget = 100 + (s64)(next() % 3000u);
     if (scenario % 6u == 4u) {
         c.reserve_valid = true;
         c.reserve_addr = WEIGHTED + 48u * (next() % (count ? count : 1u));
@@ -188,6 +191,11 @@ int main(int argc, char** argv) {
         fprintf(stderr, "usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]\n");
         return 2;
     }
+#if defined(_WIN32)
+    _putenv("BLUEWAKE_NATIVE_SKIN_PARTIAL=1");
+#else
+    setenv("BLUEWAKE_NATIVE_SKIN_PARTIAL", "1", 1);
+#endif
     const unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 4000u;
     Module original = {0}, candidate = {0};
     if (!load_module(argv[1], &original)) return 1;
@@ -197,8 +205,9 @@ int main(int argc, char** argv) {
     u8* reference_ram = original.storage.mem1;
     u8* native_ram = calloc(1, RAM_SIZE);
     u8* before_ram = calloc(1, RAM_SIZE);
-    if (!reference_ram || !native_ram || !before_ram) return 1;
-    unsigned ran = 0, declined = 0;
+    u8* want_ram = calloc(1, RAM_SIZE);
+    if (!reference_ram || !native_ram || !before_ram || !want_ram) return 1;
+    unsigned ran = 0, partial = 0, declined = 0;
     for (unsigned i = 0; i < cases; ++i) {
         CPUState c = build(native_ram, i);
         memcpy(reference_ram, native_ram, RAM_SIZE);
@@ -206,6 +215,7 @@ int main(int argc, char** argv) {
 
         if (!run_window(&original, c, reference_ram)) return 1;
         CPUState reference = *original.storage.cpu;
+        memcpy(want_ram, reference_ram, RAM_SIZE);
         if (candidate.desc) {
             const bool enabled = i % 31 != 0;
             if (candidate.native_skin(enabled, routed_ready, NULL) != enabled) return 1;
@@ -222,7 +232,20 @@ int main(int argc, char** argv) {
         CPUState native = c;
         ppc_fpscr_updated(&native);
         CPUState untouched = native;
-        if (!bluewake_native_skin(&native)) {
+        const int result = bluewake_native_skin(&native);
+        if (result != 0) {
+            /* The hook's goto: the epilogue, or the loop head, which records
+             * its PC when the turn stops there. The translation finishes. */
+            partial += result == 2;
+            native.pc = result == 2 ? 0x802EE6F0u : 0x802EE834u;
+            memcpy(reference_ram, native_ram, RAM_SIZE);
+            if (!run_window(&original, native, reference_ram)) return 1;
+            native = *original.storage.cpu;
+            native.ram = native_ram;
+            memcpy(native_ram, reference_ram, RAM_SIZE);
+        }
+        memcpy(reference_ram, want_ram, RAM_SIZE);
+        if (!result) {
             declined++;
             if (memcmp(&native, &untouched, sizeof native) != 0 || memcmp(native_ram, before_ram, RAM_SIZE) != 0) {
                 fprintf(stderr, "case %u: declined but changed state\n", i);
@@ -248,7 +271,8 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    printf("native skin: %u cases identical to the translation, %u declined unchanged\n", ran, declined);
+    printf("native skin: %u cases identical to the translation (%u partial), %u declined unchanged\n", ran,
+           partial, declined);
     if (candidate.desc) {
         if (candidate.report) candidate.report();
         printf("routed skin: %u readiness queries, %u complete CPU/MEM1 comparisons\n", routed_queries, cases);

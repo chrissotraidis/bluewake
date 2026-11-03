@@ -23,10 +23,17 @@ GENERATED_INCLUDE = '#include "../generated.h"\n'
 MARKER = '#define BLUEWAKE_NATIVE_SKIN_PREPARED 1\n'
 
 
+LOOP_HEAD = 0x802EE6F0  # the envelope loop's head, where a partial native run hands over
+LOOP_EXIT = 0x802EE834  # the epilogue, after the loop's last test
+
+
 def hook(start):
     return (f"    /* bluewake: J3D skinning leaf {start:08X} */\n"
-            "    if (bluewake_native_skin_try(ctx))\n"
-            "        goto return_dispatch_802ED6E0;\n")
+            "    switch (bluewake_native_skin_try(ctx)) {\n"
+            f"    case 1: goto label_{LOOP_EXIT:08X};\n"
+            f"    case 2: goto label_{LOOP_HEAD:08X};\n"
+            "    default: break;\n"
+            "    }\n")
 
 
 def prepare(root):
@@ -39,7 +46,7 @@ def prepare(root):
     prepared = {}
     for path in paths:
         text = path.read_text()
-        if GENERATED_INCLUDE not in text or 'return_dispatch_802ED6E0:' not in text:
+        if GENERATED_INCLUDE not in text:
             raise ValueError(f'unsupported skinning chunk {path}')
         if text.count(INCLUDE) > 1:
             raise ValueError(f'duplicate skinning include in {path}')
@@ -49,6 +56,9 @@ def prepare(root):
             if begin < 0 or finish <= begin:
                 raise ValueError(f'missing skinning function {start:08X} in {path}')
             body = text[begin:finish]
+            for label in (LOOP_HEAD, LOOP_EXIT):
+                if f'\nlabel_{label:08X}:' not in body:
+                    raise ValueError(f'missing skinning label {label:08X} in {path}')
             native = hook(start)
             if 'bluewake_native_skin_' in body:
                 if body.count(native) != 1:
