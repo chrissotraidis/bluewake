@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "50e3f85086953dc57a6ac21af4de0a6768b0e13c",
+      "sha": "3f9b36233ee8e6fbf555ed4f6ad779fb41a4e432",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -867,6 +867,13 @@
             "patches/recompcore/0220-Characters-Wind-Waker-HD-s-light-on-the-Mirror-Shield-the-sword-s-grip-ice-Chus-bombs-and-chests.patch"
           ],
           "evidence": "pdale-boop's: about 87% of the disc's toon materials take HD's light (1,328 of 1,812 before); the Mirror Shield's face matches HD's trace (PS 2960) for the glint; gxcore WGSL tests."
+        },
+        "hd_far_blur": {
+          "runtime": "3f9b36233ee8e6fbf555ed4f6ad779fb41a4e432",
+          "tracked_patches": [
+            "patches/recompcore/0221-Far-blur-Wind-Waker-HD-s-linear-ramp-and-its-level-for-the-hour.patch"
+          ],
+          "evidence": "pdale-boop's: HD's DOF composite (PS 786) blends by clamp(level x (z / 25,000 - 1)); wwHD_basic and wwHD_night's levels 1.2 and 0.65 over 06:00-08:00 and 18:00-20:00."
         }
       }
     },

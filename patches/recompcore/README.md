@@ -403,3 +403,8 @@ pattern then other stages (the chests' decal). The GameCube's effect-light stage
 sword-hit flash, the bombs' flash, the item-get light) runs on HD's colour too, until a light buffer takes it
 (`DOL_AURORA_ACTOR_LIGHT_HD_EFFECT=0` leaves it out, to compare). `DOL_AURORA_ACTOR_LIGHT_HD_EXT=0` keeps the main
 pattern only.
+
+Patch 0221 adds Wind Waker HD's far blur ramp (`DOL_AURORA_FAR_BLUR_HD=1`): clamp(level x (distance - start) /
+(end - start)) with HD's 25,000 and 50,000, in place of the smoothstep from 8,000 to 30,000, times
+`DOL_AURORA_FAR_BLUR_AMOUNT` as before. The level is HD's for the hour (1.2 by day, 0.65 at night, blended at
+dawn and dusk), from the host (`aurora_set_far_blur_level`).
