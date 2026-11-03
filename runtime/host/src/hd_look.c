@@ -29,7 +29,7 @@ static bool g_trace;
 static bool g_fixed_splits;
 static bool g_sky;  // HD's sky and light palettes (BLUEWAKE_HD_SKY)
 static bool g_sky_models;  // with them, HD's sky models (BLUEWAKE_HD_SKY_MODELS=1; off by default)
-static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; off by default)
+static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; on with an imported pack)
 static void sky_load(void);
 
 // HD's sunlight as the player chose it (BLUEWAKE_HD_SUNLIGHT, read at each
@@ -130,11 +130,17 @@ void bluewake_hd_look_defaults(void) {
             {"DOL_AURORA_RIM_HD", "1"},
             // HD's light on characters (its toon shader; needs HD's sky and light for the palette).
             {"DOL_AURORA_ACTOR_LIGHT_HD", "1"},
+            // HD's palettes blended in linear light, as HD blends them (its dawn and dusk: the cirrus at 07:30,
+            // the lavender at 17:30), with HD's sky and light on (it acts only under them).
+            {"BLUEWAKE_HD_SKY_LINEAR", "1"},
         };
         const bool edge_light = setting("BLUEWAKE_HD_EDGE_LIGHT") != 0;
+        const bool hd_sky = setting("BLUEWAKE_HD_SKY") != 0;
         for (size_t i = 0; i < sizeof kHdLight / sizeof kHdLight[0]; ++i) {
             const char* key = kHdLight[i][0];
             if (!edge_light && strcmp(key, "DOL_AURORA_RIM_HD") == 0)
+                continue;
+            if (!hd_sky && strcmp(key, "BLUEWAKE_HD_SKY_LINEAR") == 0)
                 continue;
             const char* value = getenv(key);
             if (value == NULL || value[0] == '\0')
@@ -542,30 +548,63 @@ static void point_lights(CPUState* cpu, const float eye[3]) {
 // opposite side, held at 40,000. Crossing 06:30 or 19:30, the light stays where it was while a fade rises
 // (0.01 a game frame), changes sides at the top and the fade falls: the renderer takes the lit side down to
 // the shade by it (aurora_set_sun_hd_light). Out: the direction toward the light.
-static void hd_sun_rule(CPUState* cpu, unsigned long long retrace, float out[3]) {
-    static bool started, night;
-    static float fade, target, light[3];
-    static unsigned long long last;
+// HD's day/night fade (mDayNightFade, EnvLight::setLightPosHD in its d_kankyo_3.cpp): crossing 06:30 or 19:30
+// it rises 0.01 a game frame (addCalc 0.05, 0.01, 0.01: 100 frames), switches sides at 1 and falls again. While
+// it is up HD takes every lit colour toward its shade (K0 to C0, the shadow colour to C0: fadeK0 and
+// d_kankyo_6.cpp's TEV structs), and its shadows out. Worked out once a retrace, from hd_sun_rule (the light's
+// freeze and side) and sky() (the colours), whichever comes first; a save state's load or a jump of the clock
+// starts it again (no fade: the side is the clock's).
+static struct {
+    bool started, night;
+    float fade, target, time;
+    unsigned long long last, done;
+} g_daynight;
+static unsigned long long g_retrace;
+
+static float hd_daynight_fade(CPUState* cpu) {
+    if (g_daynight.started && g_daynight.done == g_retrace)
+        return g_daynight.fade;
+    g_daynight.done = g_retrace;
     const float t = read_float(cpu, 0x803E56ECu);  // g_env_light.mCurTime
     const bool day = t > 97.5f && t < 292.5f;
-    unsigned long long frames = started && retrace > last ? (retrace - last) / 2u : 0u;
-    if (frames > 0u || !started)
-        last = retrace;
-    if (!started) {
-        started = true;
-        night = !day;
+    unsigned long long frames =
+        g_daynight.started && g_retrace > g_daynight.last ? (g_retrace - g_daynight.last) / 2u : 0u;
+    if (frames > 0u || !g_daynight.started)
+        g_daynight.last = g_retrace;
+    if (frames > 200u)  // a long time unseen: the fade is over either way
+        frames = 200u;
+    // The clock jumping (a stage or file loading, a warp, the Song of Passing) starts it again, as a load: the
+    // clock moves 0.01 degree a retrace, so a few degrees between two looks is no crossing HD would fade at.
+    float moved = fabsf(t - g_daynight.time);
+    moved = moved > 180.0f ? 360.0f - moved : moved;
+    g_daynight.time = t;
+    if (g_daynight.started && moved > 5.0f)
+        g_daynight.started = false;
+    if (!g_daynight.started) {
+        g_daynight.started = true;
+        g_daynight.night = !day;
+        g_daynight.fade = g_daynight.target = 0.0f;
     }
-    if (day == night) {  // crossed 06:30 or 19:30
-        night = !day;
-        target = 1.0f;
+    if (day == g_daynight.night) {  // crossed 06:30 or 19:30
+        g_daynight.night = !day;
+        g_daynight.target = 1.0f;
     }
     for (; frames > 0u; --frames) {
-        fade += target > fade ? 0.01f : -0.01f;
-        fade = fade < 0.0f ? 0.0f : fade > 1.0f ? 1.0f : fade;
-        if (fade >= 1.0f)
-            target = 0.0f;
+        float fade = g_daynight.fade + (g_daynight.target > g_daynight.fade ? 0.01f : -0.01f);
+        g_daynight.fade = fade < 0.0f ? 0.0f : fade > 1.0f ? 1.0f : fade;
+        if (g_daynight.fade >= 1.0f)
+            g_daynight.target = 0.0f;
     }
-    if (target <= 0.0f) {
+    return g_daynight.fade;
+}
+
+static void hd_sun_rule(CPUState* cpu, float out[3]) {
+    static float light[3];
+    const float fade = hd_daynight_fade(cpu);
+    const bool night = g_daynight.night;
+    const float t = read_float(cpu, 0x803E56ECu);  // g_env_light.mCurTime
+    const bool day = t > 97.5f && t < 292.5f;
+    if (g_daynight.target <= 0.0f) {
         const float a = (t > 15.0f ? t - 15.0f : t + 345.0f) * 3.14159265f / 180.0f;
         const float x = sinf(a) * 80000.0f, z = cosf(a) * -48000.0f;
         if (day) {
@@ -716,7 +755,7 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                 // HD's rule is for its sun shadows; with them off the edge light keeps the game's sun.
                 if (s_hd_rule && g_sun == 1) {
                     float light[3];
-                    hd_sun_rule(cpu, retrace, light);
+                    hd_sun_rule(cpu, light);
                     aurora_set_sun_direction(light[0], light[1], light[2]);
                 } else {
                     aurora_set_sun_direction(sx, sy, sz);
@@ -1210,6 +1249,13 @@ enum {
     kEnvColpatCurr = kEnvLight + 0xC85u,
     kEnvEnvrPrev = kEnvLight + 0xC88u,
     kEnvEnvrCurr = kEnvLight + 0xC89u,
+    // The event tints (sky_tint_read).
+    kEnvActorAddAmb = kEnvLight + 0xB70u,  // mActorAddColAmb, then mActorAddColDif, mBgAddColAmb, mBgAddColDif (s16 x3 in 8)
+    kEnvAllRatio = kEnvLight + 0xBFCu,     // mAllColRatio, then mActColRatio, mBgColRatio
+    kEnvColChgStrength = kEnvLight + 0xC34u,
+    kEnvColChgFlag = kEnvLight + 0xC93u,
+    kEnvColChgItem = kEnvLight + 0xC98u,
+    kEnvThunder = kEnvLight + 0xA30u,  // mThunderEff: mState (u8) at +1, mFlashTimer (f32) at +8
 };
 
 // HD's day ends sooner: its light schedule (dKyd_schejule_getp's table, found in
@@ -1557,8 +1603,6 @@ static float sky_factor_at(int pale, u32 index) {
     return value > 0.0f && value < 10.0f ? value : 1.0f;
 }
 
-static float sky_factor_of(int pale) { return sky_factor_at(pale, 3u); }
-
 // The power HD's factors are taken to: the menu's HD sunlight (0.4545, HD's), or
 // BLUEWAKE_HD_SKY_GAMMA over it for testing.
 static float sky_power(void) {
@@ -1570,15 +1614,91 @@ static float sky_power(void) {
     return s_override > 0.0f ? s_override : g_sunlight;
 }
 
+// The game's event tints this retrace (g_env_light's add colours and ratios, the copies exeKankyo made, read
+// after the game's frame), for the host's own HD colours: HD tints those as it tints its TEV colours,
+// clamp((blend + add) x mAllColRatio x ratio) on its linear bytes (kankyo_color_ratio_set; the characters' shade
+// x mActColRatio squared, the shadow colour with the scenery's ambient add and ratio) and its intensities x
+// mAllColRatio (its float_kankyo_color_ratio_set). Lightning, bombs, the chest's dim, staring at the sun and
+// the demos write them alike in both games. An item get and the arrows' colours are HD's own (its
+// d_kankyo_4.cpp): an item get dims the picture (the characters by 1 - s/2 and their shade toward black, the
+// rest by 1 - 3s/4) where the GameCube lights Link up, and an arrow takes each lit colour and shade toward
+// HD's fire, ice or light by s. The game's own TEV colours keep the GameCube's, from its gamma bytes.
+typedef struct SkyTint {
+    float act_amb[3], act_dif[3], bg_amb[3], bg_dif[3];  // adds, in bytes
+    float all, act, bg;                                  // ratios
+    float s;                                             // an item get's or an arrow's strength, else 0
+    bool item, arrow;
+    bool thunder;                      // a lightning flash is lighting the picture (mThunderEff)
+    float arrow_amb[3], arrow_dif[3];  // an arrow's colours (linear bytes)
+} SkyTint;
+static SkyTint g_tint = {.all = 1.0f, .act = 1.0f, .bg = 1.0f};
+static float g_sky_fade;  // HD's day/night fade this retrace while its sky is shown (hd_daynight_fade)
+
+static float tint_ratio(CPUState* cpu, u32 at) {
+    const float v = read_float(cpu, at);
+    return v >= 0.0f && v <= 4.0f ? v : 1.0f;
+}
+
+static void sky_tint_read(CPUState* cpu) {
+    SkyTint t = {.all = 1.0f, .act = 1.0f, .bg = 1.0f};
+    float* adds[4] = {t.act_amb, t.act_dif, t.bg_amb, t.bg_dif};
+    for (u32 k = 0; k < 4u; ++k)
+        for (u32 c = 0; c < 3u; ++c) {
+            const int v = (s16)mem_read16(cpu, kEnvActorAddAmb + k * 8u + c * 2u);
+            adds[k][c] = v >= -1024 && v <= 1024 ? (float)v : 0.0f;
+        }
+    t.all = tint_ratio(cpu, kEnvAllRatio);
+    t.act = tint_ratio(cpu, kEnvAllRatio + 4u);
+    t.bg = tint_ratio(cpu, kEnvAllRatio + 8u);
+    {
+        const u8 state = mem_read8(cpu, kEnvThunder + 1u);
+        const float timer = read_float(cpu, kEnvThunder + 8u);
+        t.thunder = state != 0u && timer > 0.0f && timer <= 1.0f;
+    }
+    const u8 flag = mem_read8(cpu, kEnvColChgFlag);
+    float strength = read_float(cpu, kEnvColChgStrength);
+    strength = !(strength > 0.0f) ? 0.0f : strength > 1.0f ? 1.0f : strength;
+    if ((flag & 7u) != 0u && mem_read8(cpu, kEnvColChgItem) != 0u) {
+        t.item = true;
+        t.s = strength;
+        t.act = 1.0f - 0.5f * strength;
+        t.bg = 1.0f - 0.75f * strength;
+        for (u32 c = 0; c < 3u; ++c)
+            t.act_amb[c] = t.act_dif[c] = 0.0f;  // the shade's add (toward black) is worked out from it
+    } else if (flag >= 0x10u && flag <= 0x60u && (flag & 0x0Fu) == 0u) {
+        static const float kArrow[3][3] = {{255.0f, 80.0f, 20.0f}, {30.0f, 160.0f, 255.0f}, {225.0f, 255.0f, 60.0f}};
+        const u32 kind = ((flag >> 4) - 1u) % 3u;  // fire, ice, light (0x10-0x30 in, 0x40-0x60 out)
+        char stage[8];
+        for (u32 i = 0; i < 8u; ++i)
+            stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+        const bool tower = kind == 2u && memcmp(stage, "GTower", 7) == 0;
+        static const float kTowerAmb[3] = {69.0f, 27.0f, 0.0f}, kTowerDif[3] = {116.0f, 101.0f, 16.0f};
+        t.arrow = true;
+        t.s = strength;
+        for (u32 c = 0; c < 3u; ++c) {
+            t.arrow_amb[c] = tower ? kTowerAmb[c] : kArrow[kind][c];
+            t.arrow_dif[c] = tower ? kTowerDif[c] : kArrow[kind][c];
+        }
+    }
+    g_tint = t;
+}
+
+// HD's factor for the hour, the scenery's lit intensity (BG0 K0's), taken toward its shade's (BG0 C0's) by the
+// day/night fade as HD's is. The event tints' mAllColRatio is not in it: the game's own TEV colours, which the
+// brightness scales, take it already, on their gamma bytes (x 0.4 there is about HD's 0.4 x 0.4 in linear light).
 static float sky_brightness(CPUState* cpu) {
     int pale[4];
     float ab, cb;
     if (!sky_blend_state(cpu, true, pale, &ab, &cb))
         return 0.0f;
-    const float a = sky_factor_of(pale[0]), b = sky_factor_of(pale[1]);
-    const float c = sky_factor_of(pale[2]), d = sky_factor_of(pale[3]);
-    const float prev = a + ab * (b - a), curr = c + ab * (d - c);
-    const float factor = prev + cb * (curr - prev);
+    float f[2];
+    for (u32 k = 0; k < 2u; ++k) {
+        const float a = sky_factor_at(pale[0], 3u - k), b = sky_factor_at(pale[1], 3u - k);
+        const float c = sky_factor_at(pale[2], 3u - k), d = sky_factor_at(pale[3], 3u - k);
+        const float prev = a + ab * (b - a), curr = c + ab * (d - c);
+        f[k] = prev + cb * (curr - prev);
+    }
+    const float factor = f[0] + g_sky_fade * (f[1] - f[0]);
     g_sky_factor = factor;
     return powf(factor, sky_power());
 }
@@ -1621,99 +1741,157 @@ static void sky_actor_scale(u8 out[6], float c0, float k0) {
 // host writes the linear blend of their colours into all four (their Pale
 // entries and the Virt entries those name): whatever the weights, the game's
 // blend is then HD's. Each retrace the entries written last time get HD's
-// own colours back first. Only with BLUEWAKE_HD_SKY_LINEAR=1.
+// own colours back first. Only with BLUEWAKE_HD_SKY_LINEAR=1 (the default with
+// a pack imported from the HD disc, bluewake_hd_look_defaults).
 static float sky_lin(u8 v) { return powf(v / 255.0f, 2.2f); }
 static u8 sky_gam(float v) {
     const float g = powf(v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v, 1.0f / 2.2f) * 255.0f + 0.5f;
     return (u8)(g > 255.0f ? 255.0f : g);
 }
 
-// HD's light for the sun shadows (aurora_set_sun_palette), from each palette
-// the game is blending, blended as the brightness is: the light from the sky
-// HD's shade takes from above (its Pale entry's shadow colour, kept linear),
-// the scenery's ambient, which its shade takes from the side (BG0 C0 times its
-// factor), and the sun's light on scenery (BG0 K0 times its factor). Read from
-// HD's terrain shaders in Cemu: a flat surface in shade takes the shadow colour,
-// a wall half of it and half BG0 C0, and a lit one BG0 K0 times its factor (3
-// at noon). Only with stages.bin version 3 (the shadow colour in it).
+// The four palettes' blend of a colour (3 bytes at `offset` in HD's Pale entries), in linear light, as bytes.
+static void sky_blend_bytes(const int pale[4], const float w[4], u32 offset, float out[3]) {
+    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    for (u32 c = 0; c < 3u; ++c) {
+        out[c] = 0.0f;
+        for (int i = 0; i < 4; ++i)
+            out[c] += w[i] * sky_lin(hd_pale[(u32)pale[i] * 0x2Cu + offset + c]) * 255.0f;
+    }
+}
+
+static float sky_blend_factor(const int pale[4], const float w[4], u32 index) {
+    float v = 0.0f;
+    for (int i = 0; i < 4; ++i)
+        v += w[i] * sky_factor_at(pale[i], index);
+    return v;
+}
+
+// A blended colour (linear bytes) with its add and ratio, HD's way (kankyo_color_ratio_set), 0-1.
+static float sky_tinted(float blend, float add, float ratio) {
+    const float v = (blend + add) * g_tint.all * ratio;
+    return (v < 0.0f ? 0.0f : v > 255.0f ? 255.0f : v) / 255.0f;
+}
+
+// One light's shade and lit colour (C0, K0: linear bytes) tinted, then faded (K0 toward C0) by the day/night
+// fade, with their intensities (x mAllColRatio, the lit one faded too), as 0-1 times the intensity. `amb` and
+// `dif` are the adds, `c0_ratio` and `k0_ratio` the ratios. Out: the shade's colour before its intensity.
+static void sky_light(const float c0[3], const float k0[3], const float amb[3], const float dif[3], float c0_ratio,
+                      float k0_ratio, float fc, float fk, float shade[3], float lit[3], float c0_bytes[3]) {
+    fk = (fk + g_sky_fade * (fc - fk)) * g_tint.all;
+    fc *= g_tint.all;
+    for (u32 c = 0; c < 3u; ++c) {
+        float add_c0 = amb[c], add_k0 = dif[c];
+        if (g_tint.arrow) {  // toward the arrow's colour from the light as it is (HD's mActorC0 and the rest)
+            add_c0 = (g_tint.arrow_amb[c] - sky_tinted(c0[c], 0.0f, c0_ratio) * 255.0f) * g_tint.s;
+            add_k0 = (g_tint.arrow_dif[c] - sky_tinted(k0[c], 0.0f, k0_ratio) * 255.0f) * g_tint.s;
+        }
+        const float s0 = sky_tinted(c0[c], add_c0, c0_ratio);
+        float k = sky_tinted(k0[c], add_k0, k0_ratio);
+        k += g_sky_fade * (s0 - k);
+        c0_bytes[c] = s0;
+        shade[c] = s0 * fc;
+        lit[c] = k * fk;
+    }
+}
+
+// HD's shadow colour (mBgAmbientColorHD, its Pale entry's twelfth colour): one for the whole picture, blended
+// from the palettes the floor under Link picks (its global setLight), with the scenery's ambient add and ratio.
+// Not a lightning flash's add: in Cemu the shadow colour stays as it is through a flash (27, 98, 181 at the peak
+// and plain alike) while the lit colours go white, so the flash's blue add would turn the whole shade blue.
+static void sky_shadow_colour(const int pale[4], const float w[4], float out[3]) {
+    float sh[3] = {0.0f, 0.0f, 0.0f}, bg0[3];
+    for (int i = 0; i < 4; ++i) {
+        const u8* extra = sky_extra_of(pale[i]);
+        for (u32 c = 0; c < 3u; ++c)
+            sh[c] += w[i] * extra[c];
+    }
+    sky_blend_bytes(pale, w, 0x06u, bg0);
+    for (u32 c = 0; c < 3u; ++c) {
+        const float add = g_tint.arrow ? (g_tint.arrow_amb[c] - sky_tinted(bg0[c], 0.0f, g_tint.bg) * 255.0f) * g_tint.s
+                                       : g_tint.thunder ? 0.0f : g_tint.bg_amb[c];
+        out[c] = sky_tinted(sh[c], add, g_tint.bg);
+    }
+}
+
+static bool sky_weights(CPUState* cpu, bool scenery, int pale[4], float w[4]);
+
+// HD's light for the sun shadows (aurora_set_sun_palette), as HD's terrain shaders take it (read in Cemu: a
+// flat surface in shade takes the shadow colour, a wall half of it and half BG0 C0, and a lit one BG0 K0 times
+// its factor, 3 at noon): the light from the sky HD's shade takes from above (the shadow colour, kept linear),
+// the scenery's ambient, which its shade takes from the side (BG0 C0 times its factor), and the sun's light on
+// scenery (BG0 K0 times its factor). BG0's from the room's palettes, the shadow colour from those under Link
+// (in HD it is one for the whole picture: under Windfall's arch the street's shade follows Link's floor). The
+// bytes and the factors are blended apart and multiplied after, as HD's are, tinted by the game's events
+// (sky_tint_read), and taken to the shade by the day/night fade (BG0 K0 and the shadow colour to BG0 C0, as HD's
+// scenery TEV structs). Only with stages.bin version 3 (the shadow colour in it).
 static void sky_sun_palette(CPUState* cpu, bool on) {
     static bool s_sent;
-    int pale[4];
-    float ab, cb;
-    bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_blend_state(cpu, true, pale, &ab, &cb);
-    for (int i = 0; ok && i < 4; ++i)
-        ok = pale[i] >= 0;
+    int pale[4], light_pale[4];
+    float w[4], light_w[4];
+    const bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_weights(cpu, true, pale, w);
     if (!ok) {
         if (s_sent)
             aurora_set_sun_palette(0, NULL, NULL, NULL);
         s_sent = false;
         return;
     }
-    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
-    float v[3][4][3];  // sky, ground, lit; for each of the four palettes
-    for (int i = 0; i < 4; ++i) {
-        const u8* entry = hd_pale + (u32)pale[i] * 0x2Cu;
-        const u8* extra = sky_extra_of(pale[i]);
-        const float ground = sky_factor_at(pale[i], 2u), lit = sky_factor_at(pale[i], 3u);
-        for (int c = 0; c < 3; ++c) {
-            v[0][i][c] = extra[c] / 255.0f;
-            v[1][i][c] = sky_lin(entry[0x06 + c]) * ground;
-            v[2][i][c] = sky_lin(entry[0x09 + c]) * lit;
-        }
+    if (!sky_weights(cpu, false, light_pale, light_w)) {
+        memcpy(light_pale, pale, sizeof pale);
+        memcpy(light_w, w, sizeof w);
     }
-    float out[3][3];
-    for (int k = 0; k < 3; ++k)
-        for (int c = 0; c < 3; ++c) {
-            const float prev = v[k][0][c] + ab * (v[k][1][c] - v[k][0][c]);
-            const float curr = v[k][2][c] + ab * (v[k][3][c] - v[k][2][c]);
-            out[k][c] = prev + cb * (curr - prev);
-        }
-    aurora_set_sun_palette(1, out[0], out[1], out[2]);
+    float c0[3], k0[3], sky[3], ground[3], lit[3], c0_bytes[3];
+    sky_blend_bytes(pale, w, 0x06u, c0);
+    sky_blend_bytes(pale, w, 0x09u, k0);
+    sky_light(c0, k0, g_tint.bg_amb, g_tint.bg_dif, g_tint.bg, g_tint.bg, sky_blend_factor(pale, w, 2u),
+              sky_blend_factor(pale, w, 3u), ground, lit, c0_bytes);
+    sky_shadow_colour(light_pale, light_w, sky);
+    for (u32 c = 0; c < 3u; ++c)
+        sky[c] += g_sky_fade * (c0_bytes[c] - sky[c]);
+    aurora_set_sun_palette(1, sky, ground, lit);
     s_sent = true;
 }
 
-// HD's light on characters (aurora_set_actor_light_hd), from the palettes the
-// game's own light is blending (the floor under Link picks them, as for actors
-// in the game, not each room's): the shade's ambient (actor C0 times its
-// factor), the sky HD's shade blends toward from above (the Pale entry's
-// shadow colour, kept linear) and the lit colour (actor K0 times its factor,
-// 2.75 at noon). Read from HD's toon shader in Cemu: a character's shade is a
-// hemisphere from actor C0 below to the shadow colour above, its lit side K.
-// Only with stages.bin version 3 (the shadow colour in it).
+// HD's light on characters (aurora_set_actor_light_hd), from the palettes the game's own light is blending
+// (the floor under Link picks them, as for actors in the game, not each room's): the shade's ambient (actor C0
+// times its factor), the sky HD's shade blends toward from above (the shadow colour, kept linear) and the lit
+// colour (actor K0 times its factor, 2.75 at noon). Read from HD's toon shader in Cemu: a character's shade is
+// a hemisphere from actor C0 below to the shadow colour above, its lit side K. Blended, tinted and faded as the
+// sun's palette above (the shade x mActColRatio squared, the lit colour x mActColRatio, as HD's actor TEV
+// structs; the shadow colour toward actor C0's bytes, its intensity kept). Only with stages.bin version 3.
 static void sky_actor_palette(CPUState* cpu, bool on) {
     static bool s_sent;
     int pale[4];
-    float ab, cb;
-    bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_blend_state(cpu, false, pale, &ab, &cb);
-    for (int i = 0; ok && i < 4; ++i)
-        ok = pale[i] >= 0;
+    float w[4];
+    const bool ok = on && g_sky_data != NULL && g_sky_extra == 28u && sky_weights(cpu, false, pale, w);
     if (!ok) {
         if (s_sent)
             aurora_set_actor_light_hd(0, NULL, NULL, NULL);
         s_sent = false;
         return;
     }
-    const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
-    float v[3][4][3];  // ambient (C0), shadow colour, lit (K); for each of the four palettes
-    for (int i = 0; i < 4; ++i) {
-        const u8* entry = hd_pale + (u32)pale[i] * 0x2Cu;
-        const u8* extra = sky_extra_of(pale[i]);
-        const float ambient = sky_factor_at(pale[i], 0u), lit = sky_factor_at(pale[i], 1u);
-        for (int c = 0; c < 3; ++c) {
-            v[0][i][c] = sky_lin(entry[0x00 + c]) * ambient;
-            v[1][i][c] = extra[c] / 255.0f;
-            v[2][i][c] = sky_lin(entry[0x03 + c]) * lit;
-        }
-    }
-    float out[3][3];
-    for (int k = 0; k < 3; ++k)
-        for (int c = 0; c < 3; ++c) {
-            const float prev = v[k][0][c] + ab * (v[k][1][c] - v[k][0][c]);
-            const float curr = v[k][2][c] + ab * (v[k][3][c] - v[k][2][c]);
-            out[k][c] = prev + cb * (curr - prev);
-        }
-    aurora_set_actor_light_hd(1, out[0], out[1], out[2]);
+    float c0[3], k0[3], amb[3], shade[3], lit[3], shadow[3], c0_bytes[3];
+    sky_blend_bytes(pale, w, 0x00u, c0);
+    sky_blend_bytes(pale, w, 0x03u, k0);
+    const float act2 = g_tint.act * g_tint.act;
+    for (u32 c = 0; c < 3u; ++c)  // an item get takes the characters' shade toward black (HD's add of -C0 x s)
+        amb[c] = g_tint.item ? -sky_tinted(c0[c], 0.0f, act2) * 255.0f * g_tint.s : g_tint.act_amb[c];
+    sky_light(c0, k0, amb, g_tint.act_dif, act2, g_tint.act, sky_blend_factor(pale, w, 0u),
+              sky_blend_factor(pale, w, 1u), shade, lit, c0_bytes);
+    sky_shadow_colour(pale, w, shadow);
+    for (u32 c = 0; c < 3u; ++c)
+        shadow[c] += g_sky_fade * (c0_bytes[c] - shadow[c]);
+    aurora_set_actor_light_hd(1, shade, shadow, lit);
     s_sent = true;
+    static unsigned s_traced;
+    if (g_trace && (s_traced++ % 60u == 0u || g_sky_fade > 0.0f || g_tint.s > 0.0f || g_tint.all != 1.0f ||
+                    g_tint.bg_amb[0] != 0.0f || g_tint.act_amb[0] != 0.0f))
+        fprintf(stderr,
+                "[hd-look] actor light (retrace %llu) at %.2f: C0 %.3f %.3f %.3f shadow %.3f %.3f %.3f K %.3f %.3f %.3f; fade %.2f, "
+                "all %.2f act %.2f bg %.2f, adds act %.0f/%.0f bg %.0f,%.0f,%.0f/%.0f%s%s s %.2f\n",
+                g_retrace, read_float(cpu, kEnvTime), shade[0], shade[1], shade[2], shadow[0], shadow[1], shadow[2], lit[0], lit[1],
+                lit[2], g_sky_fade, g_tint.all, g_tint.act, g_tint.bg, g_tint.act_amb[0], g_tint.act_dif[0],
+                g_tint.bg_amb[0], g_tint.bg_amb[1], g_tint.bg_amb[2], g_tint.bg_dif[0], g_tint.item ? " item" : "",
+                g_tint.arrow ? " arrow" : "", g_tint.s);
 }
 
 static const u8 kVirtColours[] = {0x10, 0x11, 0x12, 0x14, 0x15, 0x16, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20};
@@ -1750,18 +1928,26 @@ static float sky_gain(float brightness) {
 static void sky_linear_pale(CPUState* cpu, u32 pale_table, const int pale[4], const float w[4], int* written) {
     const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
     u8 pale_out[0x21];
+    float lin[0x21];
     for (u32 c = 0; c < 0x21u; ++c) {
         float v = 0.0f;
         for (int i = 0; i < 4; ++i)
             v += w[i] * sky_lin(hd_pale[(u32)pale[i] * 0x2Cu + c]);
+        lin[c] = v;
         pale_out[c] = sky_gam(v);
     }
+    // HD's day/night fade: the characters' and the scenery's lit colours (actor K0, BG0 K0) toward their shade.
+    if (g_sky_fade > 0.0f)
+        for (u32 c = 0; c < 3u; ++c) {
+            pale_out[0x03u + c] = sky_gam(lin[0x03u + c] + g_sky_fade * (lin[0x00u + c] - lin[0x03u + c]));
+            pale_out[0x09u + c] = sky_gam(lin[0x09u + c] + g_sky_fade * (lin[0x06u + c] - lin[0x09u + c]));
+        }
     float c0 = 0.0f, k0 = 0.0f;
     for (int i = 0; i < 4; ++i) {
         c0 += w[i] * sky_factor_at(pale[i], 0u);
         k0 += w[i] * sky_factor_at(pale[i], 1u);
     }
-    sky_actor_scale(pale_out, c0, k0);
+    sky_actor_scale(pale_out, c0, k0 + g_sky_fade * (c0 - k0));
     for (int i = 0; i < 4; ++i) {
         for (u32 c = 0; c < 0x21u; ++c)
             mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, pale_out[c]);
@@ -1769,17 +1955,27 @@ static void sky_linear_pale(CPUState* cpu, u32 pale_table, const int pale[4], co
     }
 }
 
-// Without the linear blend: each of the four Pale entries keeps its own colours,
-// its character colours scaled (sky_actor_scale), recorded from `written` on.
+// Without the linear blend: each of the four Pale entries keeps its own colours, its character colours scaled
+// (sky_actor_scale) and, while HD's day/night fade is up, its lit colours (actor K0, BG0 K0) taken toward its
+// shade (in linear light), recorded from `written` on.
 static void sky_actor_pale(CPUState* cpu, u32 pale_table, const int pale[4], int* written) {
-    if (!sky_actor_light())
+    if (!sky_actor_light() && g_sky_fade <= 0.0f)
         return;
     const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+    const u32 bytes = g_sky_fade > 0.0f ? 12u : 6u;
     for (int i = 0; i < 4; ++i) {
-        u8 out[6];
+        u8 out[12];
         memcpy(out, hd_pale + (u32)pale[i] * 0x2Cu, sizeof out);
-        sky_actor_scale(out, sky_factor_at(pale[i], 0u), sky_factor_at(pale[i], 1u));
-        for (u32 c = 0; c < 6u; ++c)
+        float c0 = sky_factor_at(pale[i], 0u), k0 = sky_factor_at(pale[i], 1u);
+        if (g_sky_fade > 0.0f) {
+            for (u32 c = 0; c < 3u; ++c) {
+                out[0x03u + c] = sky_gam(sky_lin(out[0x03u + c]) + g_sky_fade * (sky_lin(out[0x00u + c]) - sky_lin(out[0x03u + c])));
+                out[0x09u + c] = sky_gam(sky_lin(out[0x09u + c]) + g_sky_fade * (sky_lin(out[0x06u + c]) - sky_lin(out[0x09u + c])));
+            }
+            k0 += g_sky_fade * (c0 - k0);
+        }
+        sky_actor_scale(out, c0, k0);
+        for (u32 c = 0; c < bytes; ++c)
             mem_write8(cpu, pale_table + (u32)pale[i] * 0x2Cu + c, out[c]);
         written[i] = pale[i];
     }
@@ -1898,6 +2094,9 @@ static void sky(CPUState* cpu) {
             virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, SKY_VIRT_LOOSE, &s_virt);
     }
     g_sky_shown = g_sky && pale != 0u;
+    g_sky_fade = g_sky_shown ? hd_daynight_fade(cpu) : 0.0f;
+    if (g_sky_shown)
+        sky_tint_read(cpu);
     // HD's brightness goes with its palettes: only while they are in place.
     const float exposure = g_sky_shown ? sky_brightness(cpu) : 0.0f;
     sky_sun_palette(cpu, g_sky_shown);
@@ -1929,11 +2128,11 @@ void bluewake_hd_look_state_loaded(bool reapply) {
     s_pale = s_virt = 0u;
     sky_linear_forget();
     memset(s_shifted, 0, sizeof s_shifted);
+    g_daynight.started = false;
 }
 
 void bluewake_hd_look_retrace(CPUState* cpu) {
-    static unsigned long long retrace;
-    retrace++;
+    const unsigned long long retrace = ++g_retrace;
     if (cpu == NULL || cpu->ram == NULL)
         return;
     if (bluewake_hd_distant_islands || g_islands_were_on || g_trace)
