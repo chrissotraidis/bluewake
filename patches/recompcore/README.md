@@ -365,3 +365,9 @@ Patch 0221 adds Wind Waker HD's far blur ramp (`DOL_AURORA_FAR_BLUR_HD=1`): clam
 (end - start)) with HD's 25,000 and 50,000, in place of the smoothstep from 8,000 to 30,000, times
 `DOL_AURORA_FAR_BLUR_AMOUNT` as before. The level is HD's for the hour (1.2 by day, 0.65 at night, blended at
 dawn and dusk), from the host (`aurora_set_far_blur_level`).
+
+Patch 0222 adds Wind Waker HD's light buffer (`DOL_AURORA_POINT_LIGHTS_HD=1`): the point and effect lights the
+host sends on HD's rule (`aurora_set_point_lights`, up to 32) add colour x sat(N.L) x sat(1 - d / r)^1.5 to the
+characters' HD light (x 1.75) and to the lit scenery's stage-0 light (x 1.25) in their own draws, and the sun
+shadows' shade leaves that light as HD's does (1.25 x AO x the lights after its shade). With it on, the torch
+glow and the GameCube's effect-light stage are left out, so the lights aren't counted twice.
