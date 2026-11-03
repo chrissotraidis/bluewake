@@ -593,7 +593,21 @@ static bool g_live_takeover;  // see host_note_live_input
 // are always dispatched to are overweighted: __save_gpr/__restore_gpr read 9
 // percent here and a native dispatch of them saved nothing (CURRENT.md,
 // 2026-09-24). Use it to name candidates, and the instruction bench to judge.
+//
+// Each sample also reads the guest OS's current thread (the word at 0x800000E4
+// that OSGetCurrentThread loads) and counts samples per thread; the totals go
+// to PATH.threads as "thread count" lines. That splits time between guest
+// threads (the game, JASystem's audio thread, DVD) without matching names, and
+// counts callees with their thread. BLUEWAKE_PC_SAMPLE_THREAD=hex keeps only
+// that thread's pcs in PATH.
 static volatile const u32* g_pc_sample_source;
+static const volatile u8* g_pc_sample_ram;
+static u32 g_pc_sample_only_thread;
+#define PC_SAMPLE_THREADS 32u
+#define PC_SAMPLE_CURRENT_THREAD 0xE4u
+static u32 g_pc_sample_thread_ids[PC_SAMPLE_THREADS];
+static u64 g_pc_sample_thread_counts[PC_SAMPLE_THREADS];
+static u64 g_pc_sample_thread_other;
 static u32* g_pc_sample_counts;
 static const char* g_pc_sample_path;
 static u64 g_pc_sample_from, g_pc_sample_to;
@@ -609,8 +623,22 @@ static void* pc_sample_main(void* unused) {
         const u64 retrace = *(volatile u64*)&g_host_retrace_count;
         if (retrace >= g_pc_sample_from && retrace < g_pc_sample_to) {
             const u32 pc = *g_pc_sample_source;
+            const volatile u8* word = g_pc_sample_ram + PC_SAMPLE_CURRENT_THREAD;
+            const u32 thread = ((u32)word[0] << 24) | ((u32)word[1] << 16) |
+                               ((u32)word[2] << 8) | (u32)word[3];
+            u32 slot = 0;
+            while (slot < PC_SAMPLE_THREADS && g_pc_sample_thread_ids[slot] != thread &&
+                   g_pc_sample_thread_ids[slot] != 0u)
+                ++slot;
+            if (slot < PC_SAMPLE_THREADS) {
+                g_pc_sample_thread_ids[slot] = thread;
+                g_pc_sample_thread_counts[slot]++;
+            } else {
+                g_pc_sample_thread_other++;
+            }
             const u32 offset = (pc & 0x3FFFFFFFu) >> 2;
-            if (offset < PC_SAMPLE_WORDS)
+            if (offset < PC_SAMPLE_WORDS &&
+                (g_pc_sample_only_thread == 0u || thread == g_pc_sample_only_thread))
                 g_pc_sample_counts[offset]++;
         }
         nanosleep(&period, NULL);
@@ -631,6 +659,19 @@ static void pc_sample_finish(void) {
         if (g_pc_sample_counts[i] != 0u)
             fprintf(out, "%08X %u\n", 0x80000000u | (i << 2), g_pc_sample_counts[i]);
     fclose(out);
+    char threads_path[4096];
+    if (snprintf(threads_path, sizeof threads_path, "%s.threads", g_pc_sample_path) >=
+        (int)sizeof threads_path)
+        return;
+    out = fopen(threads_path, "w");
+    if (out == NULL)
+        return;
+    for (u32 i = 0; i < PC_SAMPLE_THREADS && g_pc_sample_thread_ids[i] != 0u; ++i)
+        fprintf(out, "%08X %llu\n", g_pc_sample_thread_ids[i],
+                (unsigned long long)g_pc_sample_thread_counts[i]);
+    if (g_pc_sample_thread_other != 0u)
+        fprintf(out, "other %llu\n", (unsigned long long)g_pc_sample_thread_other);
+    fclose(out);
 }
 
 static void pc_sample_start(const CPUState* cpu) {
@@ -641,9 +682,14 @@ static void pc_sample_start(const CPUState* cpu) {
     const char* to = getenv("BLUEWAKE_PC_SAMPLE_TO");
     g_pc_sample_from = from != NULL ? strtoull(from, NULL, 10) : 0u;
     g_pc_sample_to = to != NULL ? strtoull(to, NULL, 10) : UINT64_MAX;
+    if (cpu->ram == NULL || cpu->ram_size <= PC_SAMPLE_CURRENT_THREAD + 4u)
+        return;
+    const char* only = getenv("BLUEWAKE_PC_SAMPLE_THREAD");
+    g_pc_sample_only_thread = only != NULL ? (u32)strtoul(only, NULL, 16) : 0u;
     g_pc_sample_counts = calloc(PC_SAMPLE_WORDS, sizeof(u32));
     if (g_pc_sample_counts == NULL)
         return;
+    g_pc_sample_ram = cpu->ram;
     g_pc_sample_source = &cpu->pc;
     if (pthread_create(&g_pc_sample_thread, NULL, pc_sample_main, NULL) == 0) {
         g_pc_sample_started = true;

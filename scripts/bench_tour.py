@@ -198,7 +198,8 @@ def measurement_environment(base, *, mode, load_state, scratch, card, warp, max_
 # Opt-in diagnostics the measured runs keep (the setup run does not): the guest
 # PC sampler, its retrace window, and the module's census switches. The
 # sampler's file gets the mode as a suffix so "both" writes two files.
-DIAGNOSTIC_PASSTHROUGH = ("BLUEWAKE_PC_SAMPLE", "BLUEWAKE_PC_SAMPLE_FROM", "BLUEWAKE_PC_SAMPLE_TO")
+DIAGNOSTIC_PASSTHROUGH = ("BLUEWAKE_PC_SAMPLE", "BLUEWAKE_PC_SAMPLE_FROM", "BLUEWAKE_PC_SAMPLE_TO",
+                          "BLUEWAKE_PC_SAMPLE_THREAD")
 
 
 def _pass_diagnostics(env: dict[str, str], base, mode: str) -> None:

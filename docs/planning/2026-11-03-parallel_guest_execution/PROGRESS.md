@@ -33,6 +33,12 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 - [ ] M5-T01: Submit in `mDoExt_modelUpdateDL`, join at flush, behind a flag
 - [ ] M5-T02: Deck A/B; keep or reject
 
+### M6: Audio lead
+- [x] M6-T00: Source and sampler survey (PRD, *Audio lead*)
+- [x] M6-T01a: Sampler counts per guest thread (`PATH.threads`); standalone check of the sampler block
+- [ ] M6-T01: Idle-machine run: audio thread share on Outset and the other tour stops
+- [ ] M6-T02: If ≥ 8 %: port the `JASChannel` natives from `--native-entries`; measure the game thread's first audio-state access after each wake
+
 ## Evidence ledger
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
@@ -46,6 +52,7 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 | Date | Decision |
 | --- | --- |
 | 2026-11-03 | Track A (native async jobs) first; Track B kept as second choice, reopened only by the PRD criterion |
+| 2026-11-03 | Host DSP excluded (HLE by default, ≈ 1 %). Audio lead is the guest `JASystem` thread; gated on a per-thread measurement |
 | 2026-11-03 | Skinning dropped from this plan: #541 measured it (≈ 1.5 % of the Deck game thread, threading ≈ +0.5–1 %). Estimates lowered to Deck cycle counts: serial widening ≈ 1–2 %, async pose job ≈ 1–3 %. Next lead: audio |
 | 2026-11-03 | Native widening comes before any async job. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms and large-model skinning. |
 | 2026-11-03 | Async pose job eligibility adds: every material in a material-sorted or non-sorted buffer, no env/proj-map texture matrix |

@@ -34,6 +34,20 @@ flowchart LR
 | `J3DModel::calc` is called from actor `draw()` in about 286 of ~550 call sites, right before `entry`/`viewCalc`: no overlap window inside the caller | tww `J3DModel.cpp:690`, `m_Do_ext.cpp:531`; heuristic grep |
 | `calc` uses the `j3dSys` singleton and static recursion state (`J3DSys::mCurrentMtx`, `mCurrentS`, `mParentS`) and calls arbitrary code: joint callbacks (90 of 476 actor sources), `mCalcCallBack`, deformers | tww `J3DMtxCalc`/`J3DJoint.cpp:42,50` |
 
+## Audio lead (2026-11-03)
+
+| Finding | Evidence |
+| --- | --- |
+| **`JASystem` is 8.6 % of Outset guest samples**, flat (top function `TChannel::updateMixer` 0.79 %); the game-side `JAI` API is 0.6 %, the DSP/AI library 0.4 % | Same sampler run, strict name classes |
+| It runs on its own guest OS thread (`TAudioThread::audioproc`, priority above the game's), woken by the AI DMA callback (≈ every 17.5 ms) and DSP mail; it runs to completion while the game thread is suspended | tww `JASAudioThread.cpp` |
+| The game reaches it through `JAI` and ports/command queues under disabled interrupts: designed for preemption at any point | tww `JAudio` |
+| **The host DSP is not a lever:** Linux, Windows, Android and iOS default to HLE (`BLUEWAKE_DSP_MODE=hle`), ≈ 1 % of host samples in October profiles | `linux_entry.c`, `win_entry.c`; `profiling/desktop-cost-01` |
+| #503's Deck breakdown has no audio line, so the 8.6 % may be inflated by the sampler's bias | #503 M1-T02 |
+
+Options: concurrent translated audio (Track B; structurally the cleanest candidate, but 8.6 % is under the reopen bar); a native async `JASystem` driver (large, bit-exact DSP command output); or serial: port the `--native-entries` `JASChannel` natives (#541 found that set needs porting). Any overlap ends at the game thread's first touch of audio state after the wake, likely within a frame.
+
+**Next:** measure the audio thread's share by guest thread (M6-T01). If it is ≥ 8 %, port the `JASChannel` natives and measure the overlap window; if well below, close the multithreading research in favour of #503's serial runtime costs.
+
 ## Decisions
 
 - **Track A (asynchronous native jobs) first.** Track B (concurrent translated regions) stays second choice. It needs a second, reentrant code-generation mode (`ctx_param`, `cpu->ram`, no direct calls or gather pipe) plus a real memory snapshot, and gives up the fixed-address speed. Reopen it only if a single region worth ≥ 15–20 % of the game thread has a long window before its first consumer, is too complex to rewrite natively, and traces as self-contained.

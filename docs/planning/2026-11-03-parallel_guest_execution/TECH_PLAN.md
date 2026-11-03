@@ -20,6 +20,7 @@ Source: BlueWake `main` at `ee991d3`; RecompCore `0fe472a`; tww `9cbb155`
 | --- | --- | --- | --- | --- |
 | Proposed | `scripts/bench_tour.py` | Pass through an allowlist of diagnostic variables (`BLUEWAKE_PC_SAMPLE*`) | M0 | [Testing](../../architecture/Testing.md) |
 | Proposed | `scripts/pc_sample_attribute.py` | Attribute `BLUEWAKE_PC_SAMPLE` output to tww functions and subsystems | M0 | — |
+| Modify | `runtime/host/src/main.c`: guest PC sampler | Also count samples per guest thread (the word at `0x800000E4`, as `OSGetCurrentThread` loads it) into `PATH.threads`; `BLUEWAKE_PC_SAMPLE_THREAD=hex` keeps one thread's pcs | M6 | [Host](../../architecture/Host.md) |
 | Proposed | `cmake/composite/native_skin.c`, `native_game_math.c` | Count declines by reason (a reason code per guard) | M1 | [Native routines](../../architecture/NativeRoutines.md) |
 | Proposed | same, plus generators and oracle tests | Widen the certified domain for the dominant decline reasons | M2 | [Native routines](../../architecture/NativeRoutines.md) |
 | Proposed | host diagnostic (opt-in) | Trace reads of one model's `mpNodeMtx`/draw-matrix range between `mDoExt_modelUpdateDL` and the draw-list flush | M3 | [Guest state](../../architecture/GuestState.md) |

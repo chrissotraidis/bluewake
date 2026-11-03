@@ -5,6 +5,8 @@ The sampler (runtime/host/src/main.c) writes "PC COUNT" lines; zeldaret/tww's
 config/GZLE01/symbols.txt names the functions. REL code is bucketed by 64 KiB.
 Subsystems are grouped by name pattern, so callees are not credited to callers.
 
+Shares per guest thread come from SAMPLES.threads when the host wrote one.
+
 usage: pc_sample_attribute.py SYMBOLS.txt SAMPLES.pcs [top]
 """
 import bisect, re, sys
@@ -51,8 +53,29 @@ def group(name):
             return g
     return "other"
 
+def print_threads(samples_path, funcs):
+    """Shares per guest thread from SAMPLES.threads, named by its OSThread object."""
+    try:
+        lines = open(samples_path + ".threads").read().split("\n")
+    except OSError:
+        return
+    objects = {}
+    for line in open(sys.argv[1]):
+        m = re.match(r"^(\S+) = \.(?:s?bss|s?data):0x([0-9A-Fa-f]+); // type:object size:0x318 ", line)
+        if m:
+            objects[int(m.group(2), 16)] = m.group(1)
+    rows = [line.split() for line in lines if line.strip()]
+    total = sum(int(n) for _, n in rows)
+    print("== by guest thread ==")
+    for thread, n in sorted(rows, key=lambda r: -int(r[1])):
+        name = objects.get(int(thread, 16), "") if thread != "other" else "(table full)"
+        print(f"{100*int(n)/total:6.2f}%  {thread}  {name}")
+    print()
+
+
 def main():
     funcs = load(sys.argv[1])
+    print_threads(sys.argv[2], funcs)
     top = int(sys.argv[3]) if len(sys.argv) > 3 else 40
     starts = [f[0] for f in funcs]
     by_fn, by_group, rel = Counter(), Counter(), Counter()
