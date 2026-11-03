@@ -30,11 +30,12 @@ if (cpu->cycle_deadline_budget > 0 &&
 
 ## Approach
 
-1. **M0, decline reasons (counting build). Done:** all timing declines are the turn budget, none the deadline; calls of 8k cycles or more are refused 91–100% of the time. Originally: Count each decline by reason (data checks, turn budget, deadline) and by model size (envelopes, joints), plus the accepted calls by size. Outset, Game Mode, one minute. This confirms or rejects the timing explanation before any design work.
-2. **M1, the switches (found not to be switches).** Both need porting first: `--native-entries`' generator must handle the lean-memory write forms, and `--native-set4`'s entry points must be certified against this tree. Originally: Full builds with `--native-entries`, with `--native-set4`, and with both, each trained on its own code. Six-launch Game Mode A/B against #503's stack; checkpoints. Retain each set that is consistent and exact.
-3. **M2, resumable skinning (M0 confirmed timing; only the turn budget matters).** Let the native run envelope by envelope and stop at the same envelope-loop block boundary where the translation would stop for the budget or deadline. It hands back the translated loop's exact state there (loop counter, pointers, the FP registers in use, `pc` at the loop head), and the translation finishes the call. Big models then run mostly natively.
-   **As built (`9645667`):** the native stops at the loop's test (0x802EE824–830) in every case. With every envelope done it returns 1 and the chunk's hook jumps to the epilogue at 0x802EE834; with only the first *k* done it returns 2 and the hook jumps to the loop head 0x802EE6F0, where the translation's own budget check ends the turn as it would have. The native charges 37 + Σ(23 + 60·joints) cycles for what it ran and leaves the suffix the last store block writes (1). The epilogue is no longer replayed: on the #503 stack the inline `_restgpr` leaves a different cycle suffix than the plain translation, and the translation's own epilogue is right for either. *k* is the longest prefix whose cycles keep the downcount above the turn's limit and inside the deadline; with *k* = 0 it declines. Empty models (no envelopes) run the prologue and set-up natively and hand over at the epilogue with the set-up's registers (r0 the return address, r11 frame + 32, f28–f30 the caller's). The first M2 build declined them, which cost about 0.5% on the Deck (M3-T01). Partial runs are behind `BLUEWAKE_NATIVE_SKIN_PARTIAL=1` until M3 qualifies them.
-4. **M3, qualify.** The differential test (`native_skin_test.c`, every register and byte against the translation) extended to stops at every envelope; Game Mode A/B; checkpoints.
+| Milestone | Question | Method | Outcome |
+|---|---|---|---|
+| M0 | Why does skinning decline? | Count declines by reason and model size; one Outset minute in Game Mode | **Done.** All timing declines are the turn budget; calls of 8k+ cycles refused 91–100% |
+| M1 | Do the two native sets help? | Full builds with `--native-entries` / `--native-set4`, own training, A/B | **Blocked.** Both need porting first (generator write forms; entry hashes for this tree) |
+| M2 | Can big models run natively? | Native runs the envelopes that fit the turn, then hands over to the translation | **Done.** Exact in the differential test ([how it works](#how-the-resumable-native-works-m2)) |
+| M3 | Is it faster on the Deck? | Game Mode A/B (≥ 6 rounds), checkpoints | First build +0.8%; empty-model fix re-measuring |
 
 ## How the resumable native works (M2)
 
@@ -73,7 +74,12 @@ The hand-over is the state after the loop test with r31 = *k*:
 | Flags | CR0 = LT (envelopes remain) or EQ, with SO from XER |
 | Cycles | downcount less 37 + Σ(23 + 60·joints) for the envelopes run; suffix 1 (the last store block's) |
 
-The native takes *k* as the longest run of envelopes whose cycles keep the downcount above the turn's limit and inside the device deadline. Stopping earlier than the translation would is still exact, because the translation then does the remaining envelopes itself. The translation's epilogue runs in every case, so builds whose transforms reshape it (the #503 stack's inline `_restgpr`) stay exact without the native knowing about them.
+Details of the hand-over:
+- **How many envelopes (*k*):** the longest run whose cycles keep the downcount above the turn's limit and inside the device deadline; with *k* = 0 it declines.
+- **Why stopping early is still exact:** the translation does the remaining envelopes itself, with its own budget checks.
+- **Why the epilogue stays translated:** builds reshape it (the #503 stack inlines `_restgpr`, which leaves a different cycle suffix), and the translation's own epilogue is right for each.
+- **Empty models:** the prologue and set-up run natively, then the hand-over at the epilogue with the set-up's registers (r0 the return address, r11 frame + 32, f28–f30 the caller's). The first M2 build declined them, which cost about 0.5% on the Deck.
+- **Opt-in:** partial runs need `BLUEWAKE_NATIVE_SKIN_PARTIAL=1` until M3 qualifies them.
 
 ### Is the native faster than the translation?
 
