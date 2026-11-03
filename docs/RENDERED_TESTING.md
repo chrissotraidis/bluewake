@@ -59,11 +59,12 @@ busy and GPU time; `--unpaced` measures speed instead. The standard speed benchm
 
 ## Benchmarking builds rendered: `render_bench`
 
-[`scripts/render_bench`](../scripts/render_bench) benchmarks one build, or build A against build B, **rendered**,
+[`scripts/render_bench`](../scripts/render_bench) benchmarks one or more builds **rendered**. Builds are labeled
+in argument order (`A`, `B`, `C`, …), and the final build is the report's reference.
 on a Steam Deck (or any Linux machine) over SSH, or here:
 
 ```
-render_bench [user@host] BUILD_A [BUILD_B] [--states DIR] [--card PATH] [--pairs 2] [--runs 3] [--headless]
+render_bench [user@host] BUILD_A [BUILD_B ...] [--states DIR] [--card PATH] [--pairs 2] [--runs 3] [--headless]
              [--cpu-profile]
 ```
 
@@ -87,7 +88,9 @@ Cavern, Forest Haven and the sea by the Fortress, one every 1800 retraces (`BLUE
 at Outset. With `--states DIR`, each `*.bwstate` in `DIR`, in lexical order, is a scene named after its file
 (`states/1-outset.bwstate` is "1-outset"), played for `--retraces` (1800).
 
-**Runs.** One build: `--runs` (3). Two builds: `--pairs` (2) of A/B/B/A, so heat or battery drift hits both alike;
+**Runs.** One build: `--runs` (3). Multiple builds: `--pairs` (2) of forward/reverse rounds—for example,
+A/B/C/D/D/C/B/A—so heat or battery drift hits every build from both directions. The report contains each build's
+scene results, changes against the final reference, and a full pairwise overall-FPS matrix.
 `--warmup` runs of each first aren't measured. Every measured run is unpaced, with vsync off, the perf log, guest
 checkpoints every 300 retraces and Aurora's GPU profiler (the pictures runs, below, are paced). Rendered (the
 default) runs the real renderer under offscreen gamescope (nothing shows on the Deck's screen; `--display desktop`
@@ -148,6 +151,9 @@ own processes in user space; `render_bench` checks for `perf` before it starts.
    ```
    # Two builds, the tour, on the Deck: A is the candidate, B the reference
    scripts/render_bench deck@10.10.20.168 build/artifacts/gather-candidate/latest build/artifacts/main-090/latest
+
+   # Four-build matrix in one run; D is the reference and the report compares every pair
+   scripts/render_bench deck@10.10.20.168 clang18-libc clang22-libc clang18-libstdc clang22-libstdc --pairs 2
 
    # The same here (no SSH): the game windows open on your desktop if there's no gamescope
    scripts/render_bench build/artifacts/gather-candidate/latest build/artifacts/main-090/latest

@@ -3,9 +3,9 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: render_bench [user@host] BUILD_A [BUILD_B] [options]
+Usage: render_bench [user@host] BUILD_A [BUILD_B ...] [options]
 
-Benchmark one build, or build A against build B (the reference), rendered:
+Benchmark one or more builds (the final build is the reference), rendered:
 game frames a second, busy %, GPU time, slowdowns and guest checkpoints scene
 by scene, and with two builds the pictures. With user@host it runs there over
 SSH (a Steam Deck or any Linux machine); without it, here. Everything comes
@@ -40,7 +40,8 @@ Scenes:
                             stage:room:point (or copy F5's quick-*.bwstate)
 
 Runs:
-  --pairs N                 A/B/B/A pairs with two builds (default 2)
+  --pairs N                 forward/reverse rounds with multiple builds
+                            (A/B/C/C/B/A; default 2)
   --runs N                  runs with one build (default 3)
   --warmup N                runs of each build first, not measured (default 0)
   --headless                no renderer (BLUEWAKE_RENDERER=headless), as
@@ -78,7 +79,7 @@ Target:
 
 Results, in one folder: report.md (ready for a pull request), report.txt,
 report.html, summary.json and, for scenes whose pictures differ,
-worst-<scene>.png (A, B and their difference). raw/ holds what the analysis
+worst-<scene>-<build>-vs-<reference>.png. raw/ holds what the analysis
 read: collected.json, each run's logs and the differing scenes' frames. Analysis needs numpy and Pillow
 here (pip install --user numpy pillow); the target needs python3 and tar.
 On Windows the analysis runs under python (set PYTHON to choose another).
@@ -187,7 +188,7 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
-[[ ${#builds[@]} -ge 1 && ${#builds[@]} -le 2 ]] || { usage >&2; exit 2; }
+[[ ${#builds[@]} -ge 1 ]] || { usage >&2; exit 2; }
 [[ -z "$states" || -d "$states" ]] || die "no such folder: $states"
 [[ -z "$card" || -f "$card" ]] || die "no such card: $card"
 mac=0
@@ -214,13 +215,24 @@ for file in "${harness[@]}" frame_compare.py; do
 done
 "$python" -c 'import numpy, PIL' 2>/dev/null || die "the analysis here needs numpy and Pillow: pip install --user numpy pillow"
 
-names=(A B)
+build_label() {
+    local n=$(( $1 + 1 )) out= rem code char
+    while [[ $n -gt 0 ]]; do
+        rem=$(( (n - 1) % 26 )); code=$((65 + rem))
+        printf -v char "\\$(printf '%03o' "$code")"
+        out="$char$out"; n=$(( (n - 1) / 26 ))
+    done
+    printf '%s\n' "$out"
+}
+names=()
+for i in "${!builds[@]}"; do names+=("$(build_label "$i")"); done
 images=()
 for i in "${!builds[@]}"; do
     images+=("$(find_image "${builds[$i]}")")
     [[ -n "$target" && ${images[$i]} == */Contents/MacOS/BlueWake ]] && die "a Mac app runs here only, not on $target"
     [[ -n "$target" && ${images[$i]} == */BlueWake.exe ]] && die "a Windows build runs here only, not on $target"
-    printf '%s%s: %s\n' "${names[$i]}" "$([[ $i -eq 1 ]] && echo ' (reference)')" "${images[$i]}"
+    printf '%s%s: %s\n' "${names[$i]}" "$([[ $i -eq $((${#builds[@]} - 1)) && ${#builds[@]} -gt 1 ]] &&
+        echo ' (reference)')" "${images[$i]}"
 done
 # One folder for the run, here: YYYY_MM_DD-HHMMSS, the reports flat in it and the raw data in raw/.
 stamp=$(date +%Y_%m_%d-%H%M%S)
@@ -299,33 +311,25 @@ CHECK
     apps=()
     for i in "${!images[@]}"; do
         if [[ $(basename "${images[$i]}") == bluewake ]]; then
-            # A Linux folder build: the folder, without the player's user/ and the logs, as A/ or B/.
+            # A Linux folder build: the folder, without the player's user/ and logs, under its generated label.
             remote="$root/${names[$i]}/bluewake"
-            if [[ $i -eq 1 && "${images[1]}" == "${images[0]}" ]]; then
-                "${ssh_command[@]}" "$target" "cp -al $(quote "$root/A" "$root/B")"
-            else
-                folder=$(dirname "${images[$i]}")
-                hash=$(sha256 "${images[$i]}")
-                "${ssh_command[@]}" "$target" "mkdir -p $(quote "$root/${names[$i]}")"
-                tar czf - -C "$folder" --exclude=./user --exclude=./logs . </dev/null |
-                    "${ssh_command[@]}" "$target" "tar xzf - -C $(quote "$root/${names[$i]}")" ||
-                    die "could not copy $folder to $target"
-                "${ssh_command[@]}" "$target" "test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||
-                    die "the copy of $folder does not match"
-            fi
+            folder=$(dirname "${images[$i]}")
+            hash=$(sha256 "${images[$i]}")
+            "${ssh_command[@]}" "$target" "mkdir -p $(quote "$root/${names[$i]}")"
+            tar czf - -C "$folder" --exclude=./user --exclude=./logs . </dev/null |
+                "${ssh_command[@]}" "$target" "tar xzf - -C $(quote "$root/${names[$i]}")" ||
+                die "could not copy $folder to $target"
+            "${ssh_command[@]}" "$target" "test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||
+                die "the copy of $folder does not match"
             apps+=(--app "${names[$i]}=$remote")
             continue
         fi
         remote="$root/${names[$i]}.AppImage"
-        if [[ $i -eq 1 && "${images[1]}" == "${images[0]}" ]]; then
-            "${ssh_command[@]}" "$target" "ln $(quote "$root/A.AppImage" "$remote")"
-        else
-            hash=$(sha256 "${images[$i]}")
-            "${scp_command[@]}" -q "${images[$i]}" "$target:$remote"
-            "${ssh_command[@]}" "$target" "chmod 0755 $(quote "$remote") &&
-                test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||
-                die "the copy of ${images[$i]} does not match"
-        fi
+        hash=$(sha256 "${images[$i]}")
+        "${scp_command[@]}" -q "${images[$i]}" "$target:$remote"
+        "${ssh_command[@]}" "$target" "chmod 0755 $(quote "$remote") &&
+            test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||
+            die "the copy of ${images[$i]} does not match"
         apps+=(--app "${names[$i]}=$remote")
     done
     "${scp_command[@]}" -q "${harness[@]/#/$scripts/}" "$target:$root/harness/"
@@ -350,7 +354,7 @@ CHECK
     if [[ -s "$raw/collected.json" ]]; then
         while IFS= read -r scene; do
             [[ -n "$scene" ]] || continue
-            printf 'Copying back the frames of %s (A and B differ)...\n' "$scene"
+            printf 'Copying back the frames of %s (builds differ)...\n' "$scene"
             "${ssh_command[@]}" "$target" "cd $(quote "$root/out") && tar czf - $(quote "frames/$scene")" \
                 </dev/null | tar xzf - -C "$raw"
         done < <("$python" "$(native "$scripts/render_bench.py")" differing "$(native "$raw")")
