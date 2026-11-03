@@ -203,12 +203,14 @@ static inline SkinPair skin_madd(const CPUState* cpu, SkinPair a, SkinPair c, Sk
 
 #if defined(BLUEWAKE_SKIN_DUMP)
 /* BLUEWAKE_SKIN_DUMP (compile time, diagnostic builds only, #541): the CPU and
- * MEM1 at the entry of the first calls that will run partially, into the folder
- * the BLUEWAKE_SKIN_DUMP variable names, for tests/native_skin_test.c --replay. */
+ * MEM1 at the entry of up to 100 calls that will run partially (every Nth with
+ * BLUEWAKE_SKIN_DUMP_EVERY=N), into the folder the BLUEWAKE_SKIN_DUMP variable names, for tests/native_skin_test.c --replay. */
 static void skin_dump(const CPUState* cpu) {
-    static unsigned s_dumped;
+    static unsigned s_dumped, s_seen;
     const char* folder = getenv("BLUEWAKE_SKIN_DUMP");
-    if (folder == NULL || folder[0] == '\0' || s_dumped >= 20u || cpu->ram == NULL)
+    const char* every_text = getenv("BLUEWAKE_SKIN_DUMP_EVERY"); /* every Nth partial run (default 1) */
+    const unsigned every = every_text != NULL && atoi(every_text) > 0 ? (unsigned)atoi(every_text) : 1u;
+    if (folder == NULL || folder[0] == '\0' || s_dumped >= 100u || cpu->ram == NULL || s_seen++ % every != 0u)
         return;
     char path[1024];
     snprintf(path, sizeof path, "%s/skin-%02u.cpu", folder, s_dumped);
