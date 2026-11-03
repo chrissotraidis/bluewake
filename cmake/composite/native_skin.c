@@ -201,6 +201,32 @@ static inline SkinPair skin_madd(const CPUState* cpu, SkinPair a, SkinPair c, Sk
                      bw_fp_fma_single(a.p1, bw_fp_25bit(c.p1), b.p1), fprf);
 }
 
+#if defined(BLUEWAKE_SKIN_DUMP)
+/* BLUEWAKE_SKIN_DUMP (compile time, diagnostic builds only, #541): the CPU and
+ * MEM1 at the entry of the first calls that will run partially, into the folder
+ * the BLUEWAKE_SKIN_DUMP variable names, for tests/native_skin_test.c --replay. */
+static void skin_dump(const CPUState* cpu) {
+    static unsigned s_dumped;
+    const char* folder = getenv("BLUEWAKE_SKIN_DUMP");
+    if (folder == NULL || folder[0] == '\0' || s_dumped >= 20u || cpu->ram == NULL)
+        return;
+    char path[1024];
+    snprintf(path, sizeof path, "%s/skin-%02u.cpu", folder, s_dumped);
+    FILE* out = fopen(path, "wb");
+    if (out == NULL)
+        return;
+    fwrite(cpu, sizeof *cpu, 1, out);
+    fclose(out);
+    snprintf(path, sizeof path, "%s/skin-%02u.mem1", folder, s_dumped);
+    out = fopen(path, "wb");
+    if (out == NULL)
+        return;
+    fwrite(cpu->ram, 1, GC_MAIN_RAM_SIZE, out);
+    fclose(out);
+    s_dumped++;
+}
+#endif
+
 int bluewake_native_skin(CPUState* cpu) {
     if (cpu == NULL)
         return 0;
@@ -313,6 +339,10 @@ int bluewake_native_skin(CPUState* cpu) {
         cycles = prefix;
     }
 #undef SKIN_FITS
+#if defined(BLUEWAKE_SKIN_DUMP)
+    if (limit < count)
+        skin_dump(cpu);
+#endif
 
     /* The prologue: the frame, the return address, f27-f31 twice, r29-r31. */
     const u32 return_address = cpu->lr;

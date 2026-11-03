@@ -3,6 +3,7 @@
  * observation suffix, and every byte of MEM1. Personal modules remain local.
  * Usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]
  *        native_skin_test MODULE --bench   (host time, translated vs native)
+ *        native_skin_test MODULE --replay DIR   (cases captured in play)
  */
 #include "native_skin.h"
 #include "StaticRecompABI.h"
@@ -253,7 +254,79 @@ static int bench(Module* module, u8* ram) {
     return 0;
 }
 
+/* --replay DIR: CPU and MEM1 captured in play at the entry of calls that ran
+ * partially (native_skin.c, BLUEWAKE_SKIN_DUMP). Each is run by the translation
+ * alone, and by the native then the translation from its hand-over, to the
+ * function's return or the end of the turn; every CPU byte and MEM1 compared. */
+static int run_to(Module* module, CPUState start, u8* ram, u32 stop) {
+    CPUState* cpu = module->storage.cpu;
+    *cpu = start; cpu->ram = ram;
+    unsigned turns = 0;
+    while (cpu->pc != stop && cpu->downcount > -cpu->cycle_budget && !cpu->exception)
+        if (++turns > 100000 || !module->desc->dispatch(cpu, cpu->pc)) return 0;
+    return 1;
+}
+static int replay(Module* module, const char* folder) {
+    u8* ram = module->storage.mem1;
+    u8* saved = malloc(RAM_SIZE);
+    u8* want = malloc(RAM_SIZE);
+    if (!saved || !want) return 1;
+    unsigned cases = 0, bad = 0;
+    for (unsigned n = 0; n < 100u; ++n) {
+        char path[1024];
+        CPUState start;
+        snprintf(path, sizeof path, "%s/skin-%02u.cpu", folder, n);
+        FILE* in = fopen(path, "rb");
+        if (!in) break;
+        const size_t got = fread(&start, sizeof start, 1, in);
+        fclose(in);
+        snprintf(path, sizeof path, "%s/skin-%02u.mem1", folder, n);
+        in = fopen(path, "rb");
+        if (!in || got != 1 || fread(saved, 1, RAM_SIZE, in) != RAM_SIZE) { fprintf(stderr, "%s: bad dump\n", path); return 1; }
+        fclose(in);
+        const u32 stop = start.lr & ~3u;
+        start.pc = BLUEWAKE_NATIVE_SKIN_ENTRY;
+        memcpy(ram, saved, RAM_SIZE);
+        if (n == 0) { CPUState s = start; s.ram = ram; module->desc->on_state_loaded(&s); }
+        if (!run_to(module, start, ram, stop)) return 1;
+        CPUState reference = *module->storage.cpu;
+        memcpy(want, ram, RAM_SIZE);
+        memcpy(ram, saved, RAM_SIZE);
+        CPUState native = start; native.ram = ram;
+        const int result = bluewake_native_skin(&native);
+        if (result == 0) { printf("case %u: declined\n", n); continue; }
+        native.pc = result == 2 ? 0x802EE6F0u : 0x802EE834u;
+        if (!run_to(module, native, ram, stop)) return 1;
+        CPUState actual = *module->storage.cpu;
+        actual.ram = reference.ram;
+        cases++;
+        unsigned diffs = 0;
+        for (unsigned b = 0; b < sizeof actual; ++b)
+            if (((u8*)&actual)[b] != ((u8*)&reference)[b] && diffs++ < 16)
+                printf("case %u (result %d): CPU byte %u got %02X want %02X\n", n, result, b, ((u8*)&actual)[b], ((u8*)&reference)[b]);
+        for (u32 a = 0; a < RAM_SIZE; ++a)
+            if (ram[a] != want[a] && diffs++ < 32)
+                printf("case %u: RAM %08X got %02X want %02X\n", n, GC_RAM_BASE + a, ram[a], want[a]);
+        if (diffs) bad++;
+        printf("case %u: result %d, %s (pc %08X, downcount %lld, budget %lld, deadline %lld)\n", n, result,
+               diffs ? "DIFFERS" : "identical", reference.pc, (long long)reference.downcount,
+               (long long)start.cycle_budget, (long long)start.cycle_deadline_budget);
+    }
+    printf("replay: %u cases, %u differ\n", cases, bad);
+    return bad != 0u || cases == 0u;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 4 && strcmp(argv[2], "--replay") == 0) {
+#if defined(_WIN32)
+        _putenv("BLUEWAKE_NATIVE_SKIN_PARTIAL=1");
+#else
+        setenv("BLUEWAKE_NATIVE_SKIN_PARTIAL", "1", 1);
+#endif
+        Module module = {0};
+        if (!load_module(argv[1], &module)) return 1;
+        return replay(&module, argv[3]);
+    }
     if (argc == 3 && strcmp(argv[2], "--bench") == 0) {
         Module module = {0};
         if (!load_module(argv[1], &module)) return 1;
