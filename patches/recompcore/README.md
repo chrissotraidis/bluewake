@@ -394,3 +394,12 @@ their alpha is from (`gxc::cutout_alpha_texmap()`: a Windfall girl's body, colou
 from texmap 1, cast no shadow before), and still scenery the game draws blended and alpha-tested while writing
 depth (Outset's grass) casts through the same cut-out, as Wind Waker HD casts it. Additive glows and what the game
 writes each frame stay out.
+
+Patch 0220 gives three more toon patterns Wind Waker HD's actor light, right after the albedo stage, with the
+stages after it run on the lit colour as the GameCube ran them: the colour-register albedo (the Mirror Shield's
+face, the Master Sword's grip, ice, Chus; no rim, and the glint added in linear light as HD adds it), a register
+added to stage 1 (the bomb's flash; no rim, as HD's material table has for all 28 of those materials), and the main
+pattern then other stages (the chests' decal). The GameCube's effect-light stage (PREV + K1 x the ramp: the
+sword-hit flash, the bombs' flash, the item-get light) runs on HD's colour too, until a light buffer takes it
+(`DOL_AURORA_ACTOR_LIGHT_HD_EFFECT=0` leaves it out, to compare). `DOL_AURORA_ACTOR_LIGHT_HD_EXT=0` keeps the main
+pattern only.

@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "58a390eb1788ba50f2a7b1780379f95c158394ee",
+      "sha": "50e3f85086953dc57a6ac21af4de0a6768b0e13c",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -860,6 +860,13 @@
             "patches/recompcore/0219-Sun-shadows-alpha-tested-casters-cut-out-by-the-texture-their-alpha-is-from-the-game-s-blended-grass-too.patch"
           ],
           "evidence": "pdale-boop's: gxcore cutout tests; over ten states the cut-out path takes 0 to 7 more draws a frame, all characters' bodies of that material; Outset's grass tufts cast, as in HD's own sun map."
+        },
+        "hd_actor_classes": {
+          "runtime": "50e3f85086953dc57a6ac21af4de0a6768b0e13c",
+          "tracked_patches": [
+            "patches/recompcore/0220-Characters-Wind-Waker-HD-s-light-on-the-Mirror-Shield-the-sword-s-grip-ice-Chus-bombs-and-chests.patch"
+          ],
+          "evidence": "pdale-boop's: about 87% of the disc's toon materials take HD's light (1,328 of 1,812 before); the Mirror Shield's face matches HD's trace (PS 2960) for the glint; gxcore WGSL tests."
         }
       }
     },
