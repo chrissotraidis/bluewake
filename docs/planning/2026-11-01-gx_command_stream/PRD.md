@@ -70,3 +70,4 @@ Batching is on by default on every platform, so testers already run it; each pla
 - **Profile before changing:** the first deliverable is the breakdown.
 - **Make the attribution build public:** #495's attribution used a local-only build that keeps gather stages as profiler symbols. M0 adds that as a builder option, so others can repeat it.
 - **Acceptance** follows #503's rule: consistent, exact, tested; size is not a bar.
+- **One Performance section (2026-11-03):** the desktop menu's performance options sit together under Config → Performance: "Efficient soft effects" (#504, off by default) and the batching switch. This stacks #531 on #504, which merges first.

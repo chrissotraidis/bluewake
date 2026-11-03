@@ -35,6 +35,8 @@ Batching is on by default on every platform, so testers already run it. Each pla
 
 - [ ] The module's per-store check (`bw_gather_pipe`, ≈ 1.4 M cycles/frame in the profiling build, inflated by `noinline`; realistic ≈ 0.2–0.4%): bound it with a diagnostic build first ([technical plan](TECH_PLAN.md#possible-follow-up-the-modules-per-store-check)).
 
+- [x] Settings (2026-11-03): a Performance section on the Config tab, with efficient soft effects (#504) and the batching switch (`36e260b`); #504's branch merged in, so #504 merges first. Settings test passes for Linux, Windows and Mac rules.
+
 ## Evidence ledger
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
