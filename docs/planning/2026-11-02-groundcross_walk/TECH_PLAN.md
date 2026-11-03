@@ -1,6 +1,6 @@
 # TECH_PLAN — Ground collision walk, revisited
 
-Status: M0 done (go); M1 designed: an exact, opt-in native walk  
+Status: M0 done (go); M1 designed: an exact, opt-in native walk that hands over at each polygon tree and resumes after it  
 [PRD](PRD.md) · [Tracker](PROGRESS.md) · #436's [contract map](https://github.com/irregularthanis/bluewake/blob/docs/groundcross-native-plan/docs/planning/2026-10-21-groundcross_native_reimplementation/GROUND_CROSS_CONTRACT.md)
 
 ## What exists
@@ -100,16 +100,28 @@ One call of `GroundCrossGrpRp`: a group and its whole subtree. The census puts t
 | Filter (`ChkGrpThrough`, the certified virtual target) | native, through the existing leaf native's logic |
 | Bounds rejects | native |
 | Child loop and recursion | native |
-| A group with a polygon tree (`GroundCrossRp`) | **hand over** to the translation (below) |
+| A group with a polygon tree (`GroundCrossRp`) | **hand over** to the translation, **resume** after it (below) |
 
-### The hand-over at a polygon tree
+### Polygon trees: hand over, then resume
 
-`GroundCrossRp` can change the ground check's hit and can stop at the end of a turn, so the native does not call it. When the walk reaches a group with a tree, the native stops there and leaves exactly the state the translation has at its call:
-- **Registers:** `pc` = 0x80248C38, LR = 0x802492EC, r3/r4/r5 the call's arguments, r27–r31 as the translation holds them at that point.
-- **Memory:** one stack frame per open recursion level, with the saved LR and saved r27–r31 the translation would have written, so the translated code returns through those levels by itself.
-- **Cycles:** the charges of every block before the call, with the same cycle suffix.
+`GroundCrossRp` can change the ground check's hit and can stop at the end of a turn, so the native does not run it. The census (M1-T00) shows why handing over once is not enough. 96% of top-level walks are a single group with no tree. The 3% of big walks (32–127 groups) hold two thirds of all visits, always reach a tree, and reach the first after about 11 visits. Stopping at the first tree would leave the native about 40% of visits.
 
-The translation then finishes the call, tree test and remaining walk included. This is #541's hand-over, applied at a call instead of a loop head. Subtrees with no polygon tree, which a first M1 census will count, run natively to the return.
+So the native hands over at **each** tree test and **resumes** after it:
+
+```mermaid
+flowchart TD
+    E[Hook at 0x802491F4:<br/>a walk starts] --> W[Native: filter, bounds,<br/>children, recursion]
+    W -- "a group with a tree" --> H[Hand over: pc 0x80248C38,<br/>LR 0x802492EC, frames as translated]
+    H --> T[Translated GroundCrossRp]
+    T --> R[Hook at 0x802492EC:<br/>the tree test returns]
+    R --> W
+    W -- "the top level returns" --> X[Return to the caller]
+```
+
+- **No native state of its own.** The walk's state at any point is what the translation keeps: the current group (r27), the object (r28), the check (r29), the depth (r30) and the hit flag (r31) in registers. Each open level has a stack frame holding the saved LR and r27–r31.
+- **At a hand-over,** the native leaves exactly that state: `pc` = 0x80248C38, LR = 0x802492EC, the call's arguments, one frame per open level as the translation writes it, and the cycle charges and suffix of every block before the call.
+- **At the resume hook (0x802492EC),** the native reads the state back from registers and frames and continues that level's child loop. It returns up a level by reading the frame the translation's stack holds: a saved LR of 0x80249328 is a recursive call into the walk, anything else the original caller. The next tree hands over again.
+- **Both hooks are certified** by the same body hash, and either can decline. The translation then simply continues, because the state is the translation's own.
 
 ### Exactness
 
