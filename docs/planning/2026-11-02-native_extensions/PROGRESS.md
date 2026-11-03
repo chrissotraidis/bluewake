@@ -1,6 +1,6 @@
 # PROGRESS — Native extensions for Outset's character work
 
-Status: M0 done: the turn budget refuses the big models; M2 (resumable skinning) next; M1 blocked on porting  
+Status: M0 done; M2 implemented and exact in the differential test, trained build in progress; M3 (Deck A/B) next; M1 blocked on porting  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -18,17 +18,20 @@ Status: M0 done: the turn budget refuses the big models; M2 (resumable skinning)
 
 ### M2: Resumable skinning (depends: M0 confirms timing)
 
-- [ ] M2-T01: Envelope-by-envelope native that stops at the translation's boundary with its exact state.
-- [ ] M2-T02: Differential test at every stop point.
+- [x] M2-T01: The native runs the envelopes that fit the turn and hands over at the loop's test (`9645667`): code 1 → the translation's epilogue (0x802EE834), code 2 → the loop head (0x802EE6F0). Partial runs are opt-in, `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`.
+- [x] M2-T02: Differential test with turn budgets of 100–3,100 cycles: 15,355 cases identical to the translation (2,112 of them partial), 4,645 declined unchanged.
+- [ ] M2-T03: Full build trained on its own code (`t541-m2`, `bench/541-m2` = control + `9645667`, partial runs on during training).
 
 ### M3: Qualify (depends: M2)
 
-- [ ] M3-T01: Game Mode A/B and checkpoints; retain or record no-go.
+- [ ] M3-T01: Game Mode A/B (≥ 6 interleaved launches) against the control `a64af0e`, with `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`; the same build with it off shows the hand-over alone.
+- [ ] M3-T02: Checkpoints (render_bench, run by the user); retain or record no-go.
 
 ## Evidence ledger
 
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
+| M2-T02 | `9645667`; `bluewake_native_skin_test` against the control module `a64af0e` | `native_skin_test gGZLE01_recomp.so 20000`; a partial or full native run is followed by the translation from 0x802EE6F0 or 0x802EE834 and compared with the translation from the entry: every CPU byte (the cycle suffix too) and all of MEM1 | Linux workstation; synthetic models, 1–24 envelopes, budgets 100–3,100 cycles on one case in five | **15,355 identical (2,112 partial), 4,645 declined unchanged.** Also found: the M0 native's epilogue left the cycle suffix at 2, but on the #503 stack the inline `_restgpr` leaves 0, so the committed M0 code failed this test against that module (case 0). Handing over before the epilogue removes that dependence on the build's transforms |
 | M1 | Local `bench/541-ctl` (#503 stack, `a64af0e`); full builds with `--native-entries` and `--native-set4` | `build_script` with each option, own training | Linux workstation | **Neither set can be measured as it stands.** `--native-entries`: build fails in `native-leaf-gen` on `__ieee754_fmod` (`unhandled ctx: bw_write32_ato(&bw_ool, ctx, 0x8032EC1Cu, …)`). `--native-set4`: builds (`t541-set4`), but its hooks are not inserted until hashes are recorded for this tree, so its natives are never called |
 | M0 | Control `a64af0e` (AppImage `t541-ctl/a64af0e941c4`, own training) and the census build `78a3382` (`--reuse` over it, `BLUEWAKE_SKIN_CENSUS` on locally) | Census symbols confirmed in the module | Linux workstation | Ready for the one-minute Outset run on the Deck |
 | M0-T02 | Census build `78a3382` (#503 stack + `BLUEWAKE_SKIN_CENSUS` on, `--reuse` over the control); local `measure-541/census.log` (private) | One Game Mode launch, ≈ 90 s, then SIGTERM; the native's exit report | Worst-angle Outset state, 16:9, widescreen mod, 27 game FPS | native 282,718, declined 28,120 (9%). **Reasons: turn budget 28,118, CPU state 2, every data check 0, deadline 0.** By estimated cost (accepted / budget-declined): < 1k 258,829 / 1,660; 1–2k 7,827 / 929; 4–8k 15,445 / 15,201; 8–16k 617 / 5,950; ≥ 16k 0 / 4,378. Weighted by cost, the declined calls carry roughly half of the function's guest cycles: the big models, refused because what is left of a turn (≈ 8,600 cycles on average, set by the DSP step) is too short |

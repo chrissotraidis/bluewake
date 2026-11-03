@@ -1,6 +1,6 @@
 # TECH_PLAN — Native extensions for Outset's character work
 
-Status: M0 done (turn budget refuses the big models); M2 next; M1 blocked on porting  
+Status: M0 done (turn budget refuses the big models); M2 implemented (opt-in), exact in the differential test; M3 next; M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -33,6 +33,7 @@ if (cpu->cycle_deadline_budget > 0 &&
 1. **M0, decline reasons (counting build). Done:** all timing declines are the turn budget, none the deadline; calls of 8k cycles or more are refused 91–100% of the time. Originally: Count each decline by reason (data checks, turn budget, deadline) and by model size (envelopes, joints), plus the accepted calls by size. Outset, Game Mode, one minute. This confirms or rejects the timing explanation before any design work.
 2. **M1, the switches (found not to be switches).** Both need porting first: `--native-entries`' generator must handle the lean-memory write forms, and `--native-set4`'s entry points must be certified against this tree. Originally: Full builds with `--native-entries`, with `--native-set4`, and with both, each trained on its own code. Six-launch Game Mode A/B against #503's stack; checkpoints. Retain each set that is consistent and exact.
 3. **M2, resumable skinning (M0 confirmed timing; only the turn budget matters).** Let the native run envelope by envelope and stop at the same envelope-loop block boundary where the translation would stop for the budget or deadline. It hands back the translated loop's exact state there (loop counter, pointers, the FP registers in use, `pc` at the loop head), and the translation finishes the call. Big models then run mostly natively.
+   **As built (`9645667`):** the native stops at the loop's test (0x802EE824–830) in every case. With every envelope done it returns 1 and the chunk's hook jumps to the epilogue at 0x802EE834; with only the first *k* done it returns 2 and the hook jumps to the loop head 0x802EE6F0, where the translation's own budget check ends the turn as it would have. The native charges 37 + Σ(23 + 60·joints) cycles for what it ran and leaves the suffix the last store block writes (1). The epilogue is no longer replayed: on the #503 stack the inline `_restgpr` leaves a different cycle suffix than the plain translation, and the translation's own epilogue is right for either. *k* is the longest prefix whose cycles keep the downcount above the turn's limit and inside the deadline; with *k* = 0 it declines. Empty models (no envelopes) decline. Partial runs are behind `BLUEWAKE_NATIVE_SKIN_PARTIAL=1` until M3 qualifies them.
 4. **M3, qualify.** The differential test (`native_skin_test.c`, every register and byte against the translation) extended to stops at every envelope; Game Mode A/B; checkpoints.
 
 ## Changes (planned)
@@ -41,8 +42,11 @@ if (cpu->cycle_deadline_budget > 0 &&
 |---|---|---|
 | [`cmake/composite/native_skin.c`](../../../cmake/composite/native_skin.c) | `BLUEWAKE_SKIN_CENSUS`: decline counts by reason (the ten decline sites) and cycle bins for accepted, budget-declined and deadline-declined calls, in the exit report | M0: which model sizes the timing checks refuse |
 | `scripts/linux/build.py` (or the local build helper) | Builds with `--native-entries` / `--native-set4` for the A/B | M1; default unchanged unless retained |
-| `cmake/composite/native_skin.c` | Resumable envelope loop: stop at the translation's boundary with its exact state | M2 |
-| `tests/native_skin_test.c` | Partial runs compared with the translation at each possible stop | M2 exactness |
+| `cmake/composite/native_skin.c` | Hand-over at the loop's test; the first envelopes that fit the turn (opt-in `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`) | M2: big models mostly native |
+| `cmake/composite/native_skin.h` | Return codes 1 (epilogue) and 2 (loop head) documented | M2 |
+| `scripts/windows/native_skin.py` | Hook: `switch` on the result, `goto label_802EE834` / `label_802EE6F0`; both labels required in the certified body | M2 |
+| `tests/native_skin_test.c` | Short turn budgets; a native run is finished by the translation from the hand-over and compared with the translation alone | M2 exactness |
+| `tests/native_skin_source_test.py`, `tests/test_windows_prepared_cache.py` | Fixtures carry the hand-over labels; a missing label is rejected | M2 |
 
 ## Verification
 
