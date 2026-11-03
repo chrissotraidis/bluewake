@@ -7315,6 +7315,10 @@ static bool host_state_load(const char* path, CPUState* cpu,
 
     host_features_state_loaded(cpu);
     g_boot_writes_captured = true;  // the game in memory is the state's now
+    // Whether a person took the pad over is this session's, not the state's: a
+    // state saved while playing would otherwise turn a test run's pad script off
+    // (the field stays in the state's host variables for older builds).
+    const bool live_takeover = g_live_takeover;
     chunk = bw_state_find(&reader, "HOSTVARS");
     uint32_t restored = 0u, missing = 0u, mismatched = 0u;
     g_state_saving_off = false;
@@ -7337,6 +7341,7 @@ static bool host_state_load(const char* path, CPUState* cpu,
         (g_interrupts.pi_cause & DOL_PI_CAUSE_PE_FINISH) != 0u;
     if (pe != NULL)
         memcpy(&g_interrupts.pe_token, pe->data, (size_t)pe->size);
+    g_live_takeover = live_takeover;
     if (g_state_saving_off)
         bluewake_card_runtime_state_loaded(cpu, true);
     bluewake_stage_select_state_report();
