@@ -606,6 +606,7 @@ int main(void) {{
                        f"{int(self.args.gather_alias_cache)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
+                       f"{int(getattr(self.args, 'bg_census', False))}\n"
                        + ("lean_blocks\n" if getattr(self.args, "lean_blocks", False) else "")
                        + ("lean_deadlines\n" if getattr(self.args, "lean_deadlines", False) else "")
                        + ("behaviour_timing\n" if getattr(self.args, "behaviour_timing", False) else "")).encode())
@@ -622,6 +623,8 @@ int main(void) {{
                      ROOT / "scripts/windows/native_game_math.py", ROOT / "cmake/composite/native_game_math.c",
                      ROOT / "cmake/composite/native_game_math.h", ROOT / "scripts/windows/native_skin.py",
                      ROOT / "cmake/composite/native_skin.c", ROOT / "cmake/composite/native_skin.h",
+                     ROOT / "scripts/windows/bg_census.py", ROOT / "cmake/composite/bg_census_module.c",
+                     ROOT / "cmake/composite/bg_census_module.h",
                      ROOT / "cmake/composite/native_math.c", ROOT / "cmake/composite/native_math.h",
                      ROOT / "cmake/composite/native_work_pool.c", ROOT / "cmake/composite/native_work_pool.h",
                      ROOT / "scripts/windows/inline_save_restore_gpr.py",
@@ -755,6 +758,9 @@ int main(void) {{
             self.run("native-math", [sys.executable, ROOT / "scripts/mods/prepare_native_math.py", o / "composite-src"])
         if self.args.native_skin:
             self.run("native-skin", [sys.executable, ROOT / "scripts/windows/native_skin.py", o / "composite-src"])
+        if getattr(self.args, "bg_census", False):
+            # #542 M0 diagnostic: read-only observers at the ground walk's entries.
+            self.run("bg-census", [sys.executable, ROOT / "scripts/windows/bg_census.py", o / "composite-src"])
         if self.args.fixed_cpu:
             self.run("fixed-cpu", [sys.executable, cpu_script, o / "composite-src"])
         if self.args.inline_fp or self.args.gather_pipe:
@@ -942,6 +948,7 @@ int main(void) {{
             f"-DBLUEWAKE_NATIVE_VEC={'ON' if self.args.native_vec else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_GAME_MATH={'ON' if self.args.native_game_math else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_SKIN={'ON' if self.args.native_skin else 'OFF'}",
+            f"-DBLUEWAKE_BG_CENSUS={'ON' if getattr(self.args, 'bg_census', False) else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_MATH={'ON' if self.args.native_math else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_ENTRIES={'ON' if self.args.native_entries else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_GX={'ON' if getattr(self.args, 'native_gx', False) else 'OFF'}",
@@ -1279,6 +1286,7 @@ int main(void) {{
             "native_math": self.args.native_math,
             "native_skin": self.args.native_skin,
             "native_game_math": self.args.native_game_math,
+            **({"bg_census": True} if getattr(self.args, "bg_census", False) else {}),
             "local_training": self.profile is not None,
             "composite_profile_sha256": sha256_file(self.profile) if self.profile else "",
             "compiler": self.clang_version,
@@ -1497,6 +1505,8 @@ def main():
                         help="prepare certified native vector functions; off by default, compatible host opt-in required")
     parser.add_argument("--native-game-math", action="store_true",
                         help="certify optional native game-math entry hooks (off by default)")
+    parser.add_argument("--bg-census", action="store_true",
+                        help="diagnostic: count the ground collision walk's calls inside the module (#542; off by default)")
     parser.add_argument("--native-skin", action="store_true",
                         help="certify and enable optional native skinning preparation (off by default)")
     parser.add_argument("--native-math", action="store_true",

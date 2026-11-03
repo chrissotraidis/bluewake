@@ -16478,6 +16478,11 @@ int main(int argc, char** argv) {
             report_native_game_math();
     }
     {
+        void (*report_bg_census)(void) = (void (*)(void))dlsym(lib, "bluewake_bg_census_module_report");
+        if (report_bg_census != NULL)
+            report_bg_census();
+    }
+    {
         void (*report_native_skin)(void) = (void (*)(void))dlsym(lib, "bluewake_native_skin_report");
         if (report_native_skin != NULL)
             report_native_skin();
