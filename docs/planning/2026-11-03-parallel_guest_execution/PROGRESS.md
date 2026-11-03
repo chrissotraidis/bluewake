@@ -46,5 +46,5 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 | Date | Decision |
 | --- | --- |
 | 2026-11-03 | Track A (native async jobs) first; Track B kept as second choice, reopened only by the PRD criterion |
-| 2026-11-03 | Native widening comes before any async job |
+| 2026-11-03 | Native widening comes before any async job. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms and large-model skinning. |
 | 2026-11-03 | Async pose job eligibility adds: every material in a material-sorted or non-sorted buffer, no env/proj-map texture matrix |
