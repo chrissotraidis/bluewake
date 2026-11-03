@@ -59,8 +59,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The sea as Wind Waker HD's: the sea rooms' square of sea in the sea mask at the size it is drawn, foliage in front clearing the marks behind it, and HD's own sea term on its light: patches/recompcore/0216 (pdale-boop).
 # Wind Waker HD's clouds on the characters' light, and its cloud floor from the game's clock (aurora_set_cloud_hd_floor): patches/recompcore/0217 (pdale-boop).
 # Wind Waker HD's cascades that follow the camera, each fitted to its slice of the view (DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0 keeps the old ones): patches/recompcore/0218 (pdale-boop).
+# Alpha-tested casters of more than one texture cut out by the texture their alpha is from, and the game's blended, alpha-tested grass with them: patches/recompcore/0219 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=9175e774cdd26e118026d75ef2adde0df56c2cf9
+RECOMPCORE_SHA=a98e18522186483c9bb8b4972c64f3fa718f9a3c
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

@@ -345,3 +345,9 @@ Patch 0218 makes the HD shadow quality's cascades follow the camera, as Wind Wak
 the camera, each cascade is fitted to its slice of the view between the splits (held in steps, its centre snapped
 to whole texels), a far fade to lit from 12,000 to 14,000, and the facing term no longer fades with distance.
 `DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0` keeps the cascades fixed to the sun, to compare.
+
+Patch 0219 lets alpha-tested draws of more than one texture cast into the sun map with the cut-out of the texture
+their alpha is from (`gxc::cutout_alpha_texmap()`: a Windfall girl's body, colour from texmap 0 and its toon ramp
+from texmap 1, cast no shadow before), and still scenery the game draws blended and alpha-tested while writing
+depth (Outset's grass) casts through the same cut-out, as Wind Waker HD casts it. Additive glows and what the game
+writes each frame stay out.
