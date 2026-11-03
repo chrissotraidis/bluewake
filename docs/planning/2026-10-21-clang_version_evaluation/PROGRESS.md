@@ -32,12 +32,12 @@ See the [ordered remaining measurement sequence](TECH_PLAN.md#remaining-measurem
 
 ### M3: Freeze the current 2×2 contract
 
-Working foundation: [`202419403`](https://github.com/irregularthanis/bluewake/commit/202419403)
-(`main` + #503 + #531). Source-only checks pass; compiled gates remain open.
+Frozen foundation: [`14c558d62`](https://github.com/irregularthanis/bluewake/commit/14c558d62)
+(`main` + #503 + #531, with #504). Source/default contracts pass; playable compiled gates remain open.
 
-- [ ] M3-T01: Create one tested snapshot from current `main` + #503 + #531 (#531 already carries #504); pin its SHA, dependencies, options, Dawn and Deck settings.
+- [x] M3-T01: Create one tested snapshot from current `main` + #503 + #531 (#531 already carries #504); pin its SHA, dependencies, options, Dawn and Deck settings.
 - [x] M3-T02: Select libc++ or static libstdc++ independently of compiler and Dawn; record all identities in provenance.
-- [ ] M3-T03: Run #503/#504/#531 focused tests and add builder tests proving the four compiler/runtime selections and unchanged defaults.
+- [x] M3-T03: Run #503/#504/#531 focused tests and add builder tests proving recipe selection and cross-platform qualified defaults.
 
 ### M4: Produce and validate the four cells (depends: M3)
 
@@ -72,4 +72,6 @@ Working foundation: [`202419403`](https://github.com/irregularthanis/bluewake/co
 | M1-T03 | Same AppImages and fixed state | ABI audit, extraction/help smoke, and headless checkpoint validation | Steam Deck; private fixed setup state | ABI/smoke pass; checkpoints match. |
 | M2-T01 | private #446 AppImages; private fixed setup state | #450 `--setup-state`; discard warmup; five interleaved A/B/B/A pairs | Steam Deck on mains; five default scenes; 10 samples/recipe | All 31 checkpoints match. Clang 18 recipe median +3.2% overall. |
 | M2-T02 | — | Rendered scene loading was not confirmed; repeat qualified rendered and Game Mode comparison | — | Open; excluded from recipe selection. |
-| M3-T02 | [`202419403`](https://github.com/irregularthanis/bluewake/commit/202419403) | `python3 tests/test_linux_ci_container.py`; `git diff --check`; `scripts/audit_repo.sh` | Combined `main` + #503 + #531 branch; no game data | PASS: 26 builder contracts; defaults unchanged; runtime/Dawn selections and provenance covered |
+| M3-T01 | [`14c558d62`](https://github.com/irregularthanis/bluewake/commit/14c558d62) | Stack/merge-base, dependency-lock and effective-default audit | Current upstream `main` + #503 + #531 (#504 included) | PASS: upstream base `ee991d312d97`; RecompCore profile/lock both `a4dbaaa811c…`; qualified defaults aligned across supported builders |
+| M3-T02 | [`14c558d62`](https://github.com/irregularthanis/bluewake/commit/14c558d62) | Builder selectors/provenance plus `render_bench` synthetic suite | Same combined branch; no game data | PASS: independent compiler/runtime/Dawn selection; arbitrary-build balanced benchmark and pairwise report; defaults unchanged |
+| M3-T03 | [`14c558d62`](https://github.com/irregularthanis/bluewake/commit/14c558d62) | Linux 29, Windows 11, Android 6, PadMint 10, render benchmark 24 tests; syntax, audit and diff checks | No private disc or game artifact | PASS: #503/#504/#531 contracts and cross-platform default policy; Efficient Soft Effects remains deliberate opt-in |

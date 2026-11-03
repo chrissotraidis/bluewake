@@ -6,8 +6,8 @@ at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
 performance work through [#531](https://github.com/chrissotraidis/bluewake/pull/531);
 packaging candidate [#472](https://github.com/chrissotraidis/bluewake/pull/472)
-Working combined snapshot: [`202419403`](https://github.com/irregularthanis/bluewake/commit/202419403)
-on `perf/clang-runtime-matrix`; final matrix SHA remains open until M3 passes.
+Frozen combined snapshot: [`14c558d62`](https://github.com/irregularthanis/bluewake/commit/14c558d62)
+on `perf/clang-runtime-matrix`; M3 source/default contracts pass.
 Parent milestone: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
 Parent status: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
 
@@ -29,10 +29,15 @@ the fastest correct reproducible combination on Steam Deck.
   does not also compare two Dawn builds.
 - Reuse one exact game module within each compiler pair; each compiler's
   trained PGO profile remains part of that compiler recipe.
-- Enable #504's Efficient Soft Effects and retain #531's default GX batching
-  identically in every cell. Exclude the no-go, planning-only #529/#530 work.
+- Enable #504's opt-in Efficient Soft Effects explicitly in every measurement
+  cell and retain #531's default GX batching. Exclude planning-only #529/#530.
 - Compare correctness, artifact properties, build cost, and Steam Deck runtime.
 - Change no compiler default until the required qualified evidence is complete.
+
+The frozen source keeps qualified performance defaults aligned across Linux,
+Windows, Android, macOS and personal iOS builds. Efficient Soft Effects remains
+opt-in because it trades effect resolution for speed; experimental native sets
+remain off until separately qualified.
 
 Excluded: changing CI's host-test compiler, changing gameplay code, publishing
 private game artifacts, or treating a successful build as performance proof.

@@ -51,14 +51,15 @@ Create the combined branch in this order: current `main` → #503 → #531. Sinc
 behaviors and run their focused tests. Record the resulting commit SHA before
 building A–D; that SHA—not an individual PR head—is the matrix source.
 
-The working branch is
+The frozen branch is
 [`perf/clang-runtime-matrix`](https://github.com/irregularthanis/bluewake/tree/perf/clang-runtime-matrix)
-at [`202419403`](https://github.com/irregularthanis/bluewake/commit/202419403).
+at [`14c558d62`](https://github.com/irregularthanis/bluewake/commit/14c558d62).
 Its only merge conflict was Linux CI target registration; the resolution keeps
 both #503's direct-call test and #531's gather-host test. Builder contracts
-(26/26), direct-call source tests (6/6), diff checks and repository audit pass.
-The snapshot is not frozen until compiled #503/#504/#531 tests pass and the
-runtime/provider selectors are added.
+(29/29), Windows builder tests (11/11), Android tests (6/6), PadMint tests
+(10/10), direct-call source tests (6/6), syntax, diff and repository audit pass.
+The AppImage selectors, provenance, multi-build benchmark, and cross-platform
+default contracts are implemented. Compiled playable-artifact gates remain M4.
 
 ## Proposed changes
 
@@ -70,6 +71,7 @@ runtime/provider selectors are added.
 | Conditional | Dockerfile, docs and toolchain tests | Make Clang 22 the default only after M2 qualifies it; keep explicit Clang 18 selection for CI unless separately approved | M2 |
 | Implemented | `scripts/linux/build.py` AppImage host configuration | Select libc++ or static libstdc++ independently of the Dawn provider for measurement builds; defaults unchanged | M3 |
 | Implemented | Builder provenance and tests | Record runtime and Dawn identity; verify valid runtime/provider selections and unchanged defaults | M3 |
+| Implemented | `scripts/render_bench` | Run arbitrary build counts in balanced forward/reverse order; report reference and full pairwise FPS deltas | M3 |
 | Measurement | Private AppImages and reports | Build and measure the current-source 2×2 grid without uploading game artifacts | M4–M5 |
 
 Proposed measurement-only builder surface, exact spelling to be settled during
@@ -133,8 +135,9 @@ evaluates complete compiler recipes, including compiler-specific PGO, as #437
 originally intended. The report calculates `B−A`, `D−C`, `C−A`, `D−B`, and the
 interaction `(D−C)−(B−A)`.
 
-All cells enable Efficient Soft Effects and GX batching. Render scale, Smooth
-Motion, scene states and every other runtime setting remain identical.
+All cells explicitly enable opt-in Efficient Soft Effects and retain default-on
+GX batching. Render scale, Smooth Motion, scene states and every other runtime
+setting remain identical.
 
 ```mermaid
 flowchart LR
@@ -166,12 +169,15 @@ would make the runtime column also a Dawn-provider comparison.
 | Linux/AppImage | Existing Linux CTest plus ABI and launch smoke paths | Both variants pass; no private artifact uploaded | Candidate rejected |
 | A/A control | At least three repeated control runs | Checkpoints match and noise band is recorded | A/B deferred |
 | CPU profiles | Capture headless, rendered, and Game Mode profiles after A/A is stable | Flat and per-thread evidence used only to explain a result | Missing profile leaves selection incomplete |
-| Controlled A/B | Five interleaved pairs with the same states/scenes in headless and rendered modes | Per-scene medians, dispersion, game FPS and game-thread busy | Incomplete grid is inconclusive |
+| Controlled grid | Five forward/reverse rounds with A–D in one `render_bench` invocation | Per-scene medians, pairwise FPS matrix, dispersion, game FPS and busy | Incomplete grid is inconclusive |
 | Game Mode | Launch each matched AppImage locally, then collect over SSH and repeat the scene | Correct process/artifact, settled window, FPS/busy/waits and thermal/power context | Not a qualification without both variants |
 | Grid identity | Provenance plus module hashes | A/B share a module; C/D share a module; all four share source, options and Dawn | Any mismatch invalidates the grid |
 | 2×2 analysis | Per-scene and overall contrasts | Four main-effect deltas and interaction, with dispersion and A/A noise | Missing cell or unmatched run is inconclusive |
 
 Use [`bench_tour.py`](../../../scripts/bench_tour.py) to control the workload and
+[`render_bench.py`](https://github.com/irregularthanis/bluewake/blob/14c558d62/scripts/render_bench.py)
+(through the `scripts/render_bench` wrapper) to collect all four cells in one
+balanced `A/B/C/D/D/C/B/A` run and produce pairwise results. Use
 [`profile_deck.sh`](../../../scripts/linux/profile_deck.sh) only when a profile
 is needed to explain a result. Follow the comparison rules in the
 [performance guide](../../performance/Overview.md#worked-investigation).
