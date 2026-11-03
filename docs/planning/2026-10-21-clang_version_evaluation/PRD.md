@@ -3,8 +3,9 @@
 Status: Partial compiler result; current 2×2 recipe evaluation planned
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
-Current matrix baseline: upstream `main` at `ee991d312d97`; packaging candidate
-[#472](https://github.com/chrissotraidis/bluewake/pull/472)
+Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
+performance work through [#531](https://github.com/chrissotraidis/bluewake/pull/531);
+packaging candidate [#472](https://github.com/chrissotraidis/bluewake/pull/472)
 Parent milestone: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
 Parent status: [PR #421, M5](https://github.com/chrissotraidis/bluewake/pull/421)
 
@@ -19,11 +20,15 @@ the fastest correct reproducible combination on Steam Deck.
 ## Scope
 
 - Build a 2×2 grid: Clang 18/22 × libc++/static libstdc++, from one revision.
+- Create one combined source snapshot: current `main` (including merged
+  #480/#495/#501), then #503 and #531; #531 already carries #504.
 - Hold source, `-march=x86-64-v3`, options, dependencies, and packaging
   constant. Hold the Dawn source/provider constant so the runtime comparison
   does not also compare two Dawn builds.
 - Reuse one exact game module within each compiler pair; each compiler's
   trained PGO profile remains part of that compiler recipe.
+- Enable #504's Efficient Soft Effects and retain #531's default GX batching
+  identically in every cell. Exclude the no-go, planning-only #529/#530 work.
 - Compare correctness, artifact properties, build cost, and Steam Deck runtime.
 - Change no compiler default until the required qualified evidence is complete.
 

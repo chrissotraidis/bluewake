@@ -3,8 +3,9 @@
 Status: Historical compiler result recorded; current 2×2 grid planned
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
-Current matrix baseline: upstream `main` at `ee991d312d97`; packaging candidate
-[#472](https://github.com/chrissotraidis/bluewake/pull/472)
+Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
+performance work through [#531](https://github.com/chrissotraidis/bluewake/pull/531);
+packaging candidate [#472](https://github.com/chrissotraidis/bluewake/pull/472)
 
 [Product brief](PRD.md) · [Tracker](PROGRESS.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -29,6 +30,26 @@ Current matrix baseline: upstream `main` at `ee991d312d97`; packaging candidate
 - Current `main` builds AppImages with libc++ and source-built Dawn. #472
   changes both the runtime and Dawn provider, so its existing comparison is a
   practical recipe result, not a runtime-only factorial comparison.
+- Current `main` includes merged #480, #495 and #501. #531 is stacked on #504,
+  but only uses #503 as its measured baseline; it does not contain #503.
+  Therefore the matrix needs a dedicated combined snapshot rather than using
+  #531's head directly.
+
+## Performance foundation
+
+| Layer | Included work | Matrix treatment |
+|---|---|---|
+| Upstream `main` | [#480](https://github.com/chrissotraidis/bluewake/pull/480), [#495](https://github.com/chrissotraidis/bluewake/pull/495), [#501](https://github.com/chrissotraidis/bluewake/pull/501) | Starting point |
+| Outset CPU | [#503](https://github.com/chrissotraidis/bluewake/pull/503) | Merge onto current `main` |
+| Efficient effects | [#504](https://github.com/chrissotraidis/bluewake/pull/504) | Already carried by #531; enable in every runtime cell |
+| GX batching | [#531](https://github.com/chrissotraidis/bluewake/pull/531) | Merge after #503; keep batching enabled in every cell |
+| No-go records | [#529](https://github.com/chrissotraidis/bluewake/pull/529), [#530](https://github.com/chrissotraidis/bluewake/pull/530) | Excluded: planning-only, no retained candidate |
+| Packaging dimension | [#472](https://github.com/chrissotraidis/bluewake/pull/472) | Runtime selector only; packaged Dawn checked after the factorial grid |
+
+Create the combined branch in this order: current `main` → #503 → #531. Since
+#503 and #531 both reach host/runtime files, resolve conflicts by retaining both
+behaviors and run their focused tests. Record the resulting commit SHA before
+building A–D; that SHA—not an individual PR head—is the matrix source.
 
 ## Proposed changes
 
@@ -88,8 +109,8 @@ flowchart LR
 
 ## Current 2×2 contract
 
-Use one frozen source/dependency/options snapshot and one Dawn provider/revision
-for all four cells:
+Use the frozen combined performance snapshot, one settings set, and one Dawn
+provider/revision for all four cells:
 
 | Cell | Compiler | AppImage C++ runtime | Game module |
 |---|---|---|---|
@@ -102,6 +123,9 @@ This isolates the runtime delta within A/B and C/D. The Clang comparison still
 evaluates complete compiler recipes, including compiler-specific PGO, as #437
 originally intended. The report calculates `B−A`, `D−C`, `C−A`, `D−B`, and the
 interaction `(D−C)−(B−A)`.
+
+All cells enable Efficient Soft Effects and GX batching. Render scale, Smooth
+Motion, scene states and every other runtime setting remain identical.
 
 ```mermaid
 flowchart LR
@@ -150,7 +174,7 @@ is needed to explain a result. Follow the comparison rules in the
 | M0 | — | Parent runtime track | Frozen #446 experiment contract and provenance |
 | M1 | M0 | Parent runtime track | Two validated artifacts with compiler-specific PGO provenance |
 | M2 | M1 | Parent runtime track | Qualified headless comparison complete; rendered/Game Mode decision gates remain open |
-| M3 | — | #472 rebase work | Freeze current source/Dawn and expose independent compiler/runtime selectors with provenance/tests |
+| M3 | — | #472 rebase work | Create and test the combined #503/#531 foundation; freeze source/Dawn; expose independent compiler/runtime selectors |
 | M4 | M3 | — | Build and validate A–D; enforce shared module identities within compiler pairs |
 | M5 | M4 | — | Qualified headless, rendered and Game Mode 2×2 measurements; recipe decision or inconclusive result |
 
@@ -183,8 +207,9 @@ default. Keep raw states, session logs, and `perf.data` private.
 ## Remaining measurement order
 
 Do not reuse the private `48a5872` artifacts for the current grid. Build A–D
-from the frozen current baseline, then use one workload/state set across all
-four cells. Within each compiler pair, verify the module SHA is identical.
+from the frozen combined-performance SHA, then use one workload/state/settings
+set across all four cells. Within each compiler pair, verify the module SHA is
+identical.
 
 | Order | Run | What to record | Advance only when |
 |---:|---|---|---|
@@ -207,3 +232,4 @@ process and artifact identity are confirmed.
 - [Steam Deck profiling](../../PROFILING.md)
 - [Steam Deck performance issue #215](https://github.com/chrissotraidis/bluewake/issues/215)
 - [#472 static-libstdc++ AppImage candidate](https://github.com/chrissotraidis/bluewake/pull/472)
+- [#531 GX batching candidate and performance-stack relationships](https://github.com/chrissotraidis/bluewake/pull/531)

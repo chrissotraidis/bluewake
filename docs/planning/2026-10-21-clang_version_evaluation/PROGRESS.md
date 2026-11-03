@@ -32,9 +32,9 @@ See the [ordered remaining measurement sequence](TECH_PLAN.md#remaining-measurem
 
 ### M3: Freeze the current 2×2 contract
 
-- [ ] M3-T01: Pin current source, dependencies, options, Dawn provider/revision, workloads and Deck settings.
+- [ ] M3-T01: Create one tested snapshot from current `main` + #503 + #531 (#531 already carries #504); pin its SHA, dependencies, options, Dawn and Deck settings.
 - [ ] M3-T02: Select libc++ or static libstdc++ independently of compiler and Dawn; record all identities in provenance.
-- [ ] M3-T03: Add builder tests proving the four compiler/runtime selections and unchanged defaults.
+- [ ] M3-T03: Run #503/#504/#531 focused tests and add builder tests proving the four compiler/runtime selections and unchanged defaults.
 
 ### M4: Produce and validate the four cells (depends: M3)
 
