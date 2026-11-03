@@ -61,8 +61,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Wind Waker HD's cascades that follow the camera, each fitted to its slice of the view (DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0 keeps the old ones): patches/recompcore/0218 (pdale-boop).
 # Alpha-tested casters of more than one texture cut out by the texture their alpha is from, and the game's blended, alpha-tested grass with them: patches/recompcore/0219 (pdale-boop).
 # Wind Waker HD's light on the Mirror Shield, the sword's grip, ice, Chus, bombs and chests (three more toon patterns), with the GameCube's effect light on it: patches/recompcore/0220 (pdale-boop).
+# Wind Waker HD's far blur: its linear ramp from 25,000 to 50,000 and its level for the hour from the host (aurora_set_far_blur_level): patches/recompcore/0221 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=8761e921cf910b6a48dadbaea23e3ed379c185ef
+RECOMPCORE_SHA=a53447990a7a7a6a646f444d2bad9600df9d937e
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
