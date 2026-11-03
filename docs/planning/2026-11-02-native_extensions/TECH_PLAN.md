@@ -90,6 +90,18 @@ The native takes *k* as the longest run of envelopes whose cycles keep the downc
 
 Three runs on the workstation, control module `a64af0e` (trained). The gain grows slightly with size, so the big models M2 adds are the best case. Most of the native's time is its exact single-rounding arithmetic (`skin_madds`), which it shares in kind with the translation. The Deck's Zen 2 cores may scale differently, so the Game Mode A/B still decides.
 
+### Other hardware: the hardware-FMA caveat
+
+The native is portable C and exact on every platform. Its speed depends on one operation: the fused multiply-add (`fma`) behind its exact single rounding.
+
+| Module built for | `fma` | Native vs translation | Default |
+|---|---|---|---|
+| `x86-64-v3` (the Linux and Windows builders' default; Steam Deck; PCs from about 2013–2015 on) | one instruction | 1.33–1.43× faster (measured) | on |
+| ARM64 (Android, Apple Silicon) | one instruction | expected faster, not measured | on |
+| x86 below `v3` (e.g. a Pentium N5030 without FMA) | a slow library call | 0.84–1.01× (the bench built for baseline x86-64) | **off** |
+
+The native's checks decline for exactness and for the turn's budget, never for speed, so the build decides instead. `native_skin.h` sets `BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA` from `__FMA__`, `__aarch64__` or `__ARM_FEATURE_FMA`. Without hardware FMA, the module keeps the native off and prints why, and the translated path runs, unless `BLUEWAKE_NATIVE_SKIN=1` is set explicitly. On every build, `BLUEWAKE_NATIVE_SKIN=0` turns it off.
+
 ## Changes (planned)
 
 | File | Change | Why |
@@ -97,7 +109,7 @@ Three runs on the workstation, control module `a64af0e` (trained). The gain grow
 | [`cmake/composite/native_skin.c`](../../../cmake/composite/native_skin.c) | `BLUEWAKE_SKIN_CENSUS`: decline counts by reason (the ten decline sites) and cycle bins for accepted, budget-declined and deadline-declined calls, in the exit report | M0: which model sizes the timing checks refuse |
 | `scripts/linux/build.py` (or the local build helper) | Builds with `--native-entries` / `--native-set4` for the A/B | M1; default unchanged unless retained |
 | `cmake/composite/native_skin.c` | Hand-over at the loop's test; the first envelopes that fit the turn (opt-in `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`) | M2: big models mostly native |
-| `cmake/composite/native_skin.h` | Return codes 1 (epilogue) and 2 (loop head) documented | M2 |
+| `cmake/composite/native_skin.h` | Return codes 1 (epilogue) and 2 (loop head) documented; `BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA` | M2; off where `fma` is a library call |
 | `scripts/windows/native_skin.py` | Hook: `switch` on the result, `goto label_802EE834` / `label_802EE6F0`; both labels required in the certified body | M2 |
 | `tests/native_skin_test.c` | Short turn budgets; a native run is finished by the translation from the hand-over and compared with the translation alone. `--bench`: host time, translated vs native | M2 exactness and speed |
 | `tests/native_skin_source_test.py`, `tests/test_windows_prepared_cache.py` | Fixtures carry the hand-over labels; a missing label is rejected | M2 |

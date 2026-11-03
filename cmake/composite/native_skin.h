@@ -7,6 +7,16 @@
 
 #define BLUEWAKE_NATIVE_SKIN_ENTRY 0x802EE67Cu
 
+/* The native's exact single rounding leans on fma(). Where the module is built
+ * without a hardware fused multiply-add (x86 below x86-64-v3), fma() is a slow
+ * library call and the native measured no faster than the translation, so it
+ * stays off there unless BLUEWAKE_NATIVE_SKIN=1 asks for it. */
+#if defined(__FMA__) || defined(__aarch64__) || defined(__ARM_FEATURE_FMA)
+#define BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA 1
+#else
+#define BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA 0
+#endif
+
 typedef bool (*BluewakeNativeSkinReady)(void*, const CPUState*, u32);
 int bluewake_composite_native_skin_v1(bool enabled, BluewakeNativeSkinReady ready, void* user);
 /* 1: every envelope ran (go on at 0x802EE834); 2: the first ones (go on at 0x802EE6F0); 0: declined. */

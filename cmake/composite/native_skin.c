@@ -33,6 +33,7 @@
  * (tests/native_skin_test.c, every register and byte against the translation).
  * No identifier here may be `ctx`. */
 #include <stdlib.h>
+#include <string.h>
 #include "native_skin.h"
 #include "inline_fp.h"
 
@@ -47,6 +48,14 @@ static BluewakeNativeSkinReady s_ready;
 static void* s_ready_user;
 BW_SKIN_EXPORT int bluewake_composite_native_skin_v1(
     bool enabled, BluewakeNativeSkinReady ready, void* user) {
+#if !BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA
+    if (enabled) {
+        const char* value = getenv("BLUEWAKE_NATIVE_SKIN");
+        enabled = value != NULL && strcmp(value, "1") == 0;
+        if (!enabled)
+            fprintf(stderr, "[native-skin] off: this build has no hardware FMA (set BLUEWAKE_NATIVE_SKIN=1 to force)\n");
+    }
+#endif
     s_ready = enabled ? ready : NULL;
     s_ready_user = s_ready != NULL ? user : NULL;
     return s_ready != NULL;

@@ -21,6 +21,7 @@ Status: M0 done; M2 implemented and exact in the differential test, trained buil
 - [x] M2-T01: The native runs the envelopes that fit the turn and hands over at the loop's test (`9645667`): code 1 → the translation's epilogue (0x802EE834), code 2 → the loop head (0x802EE6F0). Partial runs are opt-in, `BLUEWAKE_NATIVE_SKIN_PARTIAL=1`.
 - [x] M2-T02: Differential test with turn budgets of 100–3,100 cycles: 15,355 cases identical to the translation (2,112 of them partial), 4,645 declined unchanged.
 - [x] M2-T04: Local speed check, `native_skin_test MODULE --bench` (x86-64-v3, control module): native + epilogue **1.33–1.43× faster** than the translated function at 4–200 envelopes, three runs ([numbers](TECH_PLAN.md#is-the-native-faster-than-the-translation)).
+- [x] M2-T05: Off by default on builds without hardware FMA (x86 below `x86-64-v3`), where the bench measured no gain; `BLUEWAKE_NATIVE_SKIN=1` forces it on. Differential test unchanged: 15,355 identical (2,112 partial).
 - [ ] M2-T03: Full build trained on its own code (`t541-m2`, `bench/541-m2` = control + `9645667`, partial runs on during training).
 
 ### M3: Qualify (depends: M2)

@@ -290,7 +290,9 @@ int main(int argc, char** argv) {
         CPUState reference = *original.storage.cpu;
         memcpy(want_ram, reference_ram, RAM_SIZE);
         if (candidate.desc) {
-            const bool enabled = i % 31 != 0;
+            /* Without hardware FMA the native stays off unless forced (native_skin.h). */
+            const bool enabled = i % 31 != 0 &&
+                (BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA || (getenv("BLUEWAKE_NATIVE_SKIN") && !strcmp(getenv("BLUEWAKE_NATIVE_SKIN"), "1")));
             if (candidate.native_skin(enabled, routed_ready, NULL) != enabled) return 1;
             u8* routed_ram = candidate.storage.mem1;
             memcpy(routed_ram, before_ram, RAM_SIZE);

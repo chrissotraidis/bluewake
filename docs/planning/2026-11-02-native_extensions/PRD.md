@@ -48,3 +48,4 @@ The natives cover the many cheap calls; the expensive ones stay translated.
 - **Measure first:** decline reasons and the switch flags' effect before any native change.
 - **Exact or nothing:** a native stops, declines or resumes exactly where the translation would; anything else is out.
 - **Acceptance** follows #503's rule: consistent across interleaved launches, exact, tested; size is not a bar.
+- **Other hardware (2026-11-02):** exact everywhere; fast where `fma` is one instruction (`x86-64-v3`, ARM64). Builds without hardware FMA keep the skinning native off by default, because there it measured no faster than the translation.
