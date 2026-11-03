@@ -1,0 +1,504 @@
+From d1cbff7b45b8f9f6c1f4b2a758392e3182bfdff8 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Mon, 2 Nov 2026 23:06:55 -0600
+Subject: [PATCH] Fog: Wind Waker HD's curve, the square of the GameCube's
+ linear fog, while the host has HD's distances in place
+
+Wind Waker HD fogs every lit shader with clamp((d - start) / (end - start))^2 (the sea quad's PS 949 in the noon
+capture at Windfall, the terrain's PS 1086 at night, Link's shader), and it retuned its palettes' fog distances for
+that curve (noon 0 to 36,000, dawn -10,000 to 32,000). The host copies those distances into the GameCube's palettes
+with HD's sky, where the game applies them on its linear GX fog: at noon an island 18,000 out took 0.50 of the fog
+colour against HD's 0.25, and at dawn the scenery at the camera took 0.24 against 0.06.
+
+aurora_set_fog_hd(1) sets a new shader key bit, ShaderKey::hd_fog (one of the pad bytes), on every draw with linear
+fog, which then squares the clamped factor before the integer blend; the ubershader reads the bit from the key it is
+given (now the draw's key with its per-draw bits, not the plan's). Off by default; unflagged modules are unchanged.
+
+gxcore tests: the flagged module differs from the unflagged one by that line alone, the other curves are untouched,
+and the ubershader reads the bit.
+
+HD fogs its scenery after its light, by the distance from the eye (its room and
+terrain shaders: mix(lit colour, fog, f), f the square of (distance - start) /
+(end - start)). The draws fog by GX before the shade, so the sun pass shaded the
+fog too: a dungeon room's far walls, in shade, lost most of HD's fog (Earth
+Temple's teal, Hyrule Castle's warm haze). With dual-source blending the pass now
+takes the draws' fog out (their GX fog, range adjust included, from
+note_scene_fog) and puts HD's in after the shade: scene x keep + F x (fh - fs x
+keep), in the scene's gamma as GX fogs. DOL_AURORA_SUN_FOG_HD=0 keeps it as drawn.
+
+HD's fog starts before the camera in many places (Ganon's Tower -5000, the Wind Temple -5000, the Tower of the Gods
+-1000, Cave01 -500), and the GameCube's palette blend (float_kankyo_color_ratio_set) clamps every blended value at
+0, so the game fogged from 0 there: far less than HD (Ganon's Tower at 1000 units 0.012 against HD's 0.18).
+aurora_set_fog_hd_starts: each frame the host gives HD's start for the palette blend in play (HD's entries' starts
+blended as the game blends them, unclamped) with the game's end, and where the lit scenery's fog starts at 0 and its
+end (the view depth over GX's ze) is that end, the sun pass fogs from HD's start. Wind Temple R0f goes from 0.76 to
+0.97 of HD's brightness, Ganon's Tower's red share (after the lava glow) from 0.87 of HD's to 0.91.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  11 +
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  15 +-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 188 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  11 +
+ .../include/gxruntime/gxcore/shader.hpp       |   9 +-
+ .../graphics/gxcore/src/gxcore_shader.cpp     |   6 +-
+ GXRuntime/graphics/gxcore/src/gxcore_uber.cpp |   2 +
+ .../gxcore/tests/gxcore_wgsl_test.cpp         |  29 +++
+ 8 files changed, 261 insertions(+), 10 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 3b3112ea1d..f14a8a0b6f 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -257,6 +257,17 @@ void aurora_set_sun_caster_cull(int on);
+ void aurora_set_monotone_hd(int on, float level, float start, float end, const float mul[3], float saturate,
+                             uint32_t frame_copy);
+ int aurora_monotone_hd_supported(void);
++/* Wind Waker HD's fog curve: with `on`, the game's linear fog is squared (clamp((d - start) / (end - start))^2, as
++   HD's shaders fog), for while the game's palettes hold HD's fog distances, which HD retuned for that curve (on the
++   GameCube's linear one they give about twice HD's fog at mid range). `on` 0, the default, keeps the GameCube's
++   curve. Takes effect at the next draw. */
++void aurora_set_fog_hd(int on);
++/* Wind Waker HD's fog starts before the camera in many places (Ganon's Tower -5000, the Tower of the Gods -1000), and
++   the GameCube's palette blend (float_kankyo_color_ratio_set) clamps every blended value at 0, so the game's fog
++   starts at 0 there and fogs far less than HD. The host gives the stage's HD palette entries with a start below 0
++   (count pairs of start, end; at most 8; 0 or NULL: none): where the lit scenery's fog starts at 0 and ends at one
++   of those ends, the sun pass fogs it from that start instead, as HD does. */
++void aurora_set_fog_hd_starts(const float* start_end, int count);
+ /* Wind Waker HD's own normals for the stage in play (the HD pack's optional/hd-normals/<stage>.bin, made by the
+    importer from the player's HD dump), for the sun shadows' facing term; NULL or a missing file: none, and
+    the facing term makes its own. Loaded at once; call it as the stage changes. */
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index d073903b4b..e9fd913c4f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -4120,6 +4120,19 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   t_hdLavaDraw = smoothNormal && key.shader.hd_point_light != 0u && hd_lava_draw(plan);
+   if (t_hdLavaDraw)
+     key.shader.hd_point_light |= 4u;
++  // Wind Waker HD's fog curve (aurora_set_fog_hd): while the host has HD's fog distances in the game's palettes,
++  // linear fog is squared, as HD's shaders fog; on the GameCube's linear curve HD's distances (retuned for the
++  // square) gave about twice HD's fog at mid range.
++  if (tev && key.shader.fog_fsel != static_cast<uint8_t>(gxc::FogType::Off) && post_fx::fog_hd())
++    key.shader.hd_fog = 1u;
++  // The lit scenery's fog (its linear perspective fog, with GX's range adjust if it has it), for the sun pass to put after
++  // its shade, as Wind Waker HD fogs its scenery (post_fx::note_scene_fog()).
++  if (tev && key.shader.fog_fsel == static_cast<uint8_t>(gxc::FogType::Linear) &&
++      key.shader.fog_proj == static_cast<uint8_t>(gxc::FogProjection::Perspective) && hd_light_draw(plan)) {
++    const auto& pc = plan.pixel_constants;
++    post_fx::note_scene_fog(pc.fogf[0], pc.fogi[1], pc.fogi[3], pc.fogf[1], pc.fogcolor, key.shader.hd_fog != 0u,
++                            key.shader.fog_range != 0u ? &pc.fogrange[0][0] : nullptr, pc.fogf[2], pc.fogf[3]);
++  }
+   const PipelineConfig colorConfig{
+       .version = GXCorePipelineConfigVersion,
+       .key = key,
+@@ -4221,7 +4234,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       static gxc::UberPixelConstants block; // one recording thread at a time
+       std::memcpy(&block.psc, &pixelConstants, sizeof block.psc);
+       std::memset(block.key, 0, sizeof block.key);
+-      std::memcpy(block.key, &plan.pipeline.shader, sizeof plan.pipeline.shader);
++      std::memcpy(block.key, &key.shader, sizeof key.shader); // with the per-draw bits (hd_fog)
+       block.extra[0] = gxc::texmap_popcount(gxc::used_texmap_mask(plan.pipeline.shader)) > 1u ? 1u : 0u;
+       uberPixelRange = push_uniform_dedup(g_uberPixelUniformCache, reinterpret_cast<const uint8_t*>(&block),
+                                           sizeof block);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 634b998540..eb54ed5d1b 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -24,6 +24,23 @@ using webgpu::g_device;
+ namespace {
+ std::atomic_bool g_bloom{false};
+ std::atomic_bool g_farBlur{false};
++std::atomic_bool g_fogHd{false};  // aurora_set_fog_hd
++// The lit scenery's fog this frame (note_scene_fog()), for the sun pass; stale counts the post passes since a draw
++// gave it (off after a few: a frame without such draws keeps its fog as drawn).
++struct SceneFog {
++  bool on = false;
++  int stale = 0;
++  float a = 0.f, b = 0.f, shift = 0.f, c = 0.f;
++  float colour[3]{};
++  bool square = false;
++  bool range = false;           // with GX's range adjust: its table (10 values), the centre and the width
++  float table[12]{};
++  float centre = 0.f, width = 0.f;
++};
++std::mutex g_sceneFogMutex;
++std::array<float, 16> g_fogHdStarts{};  // aurora_set_fog_hd_starts: start, end pairs (end 0: none)
++SceneFog g_sceneFog;
++bool g_sunFogHd = true;  // DOL_AURORA_SUN_FOG_HD=0: the scenery's fog as the draws left it, shaded with the rest
+ std::atomic_bool g_ao{false};
+ std::atomic_bool g_clouds{false};
+ std::atomic_bool g_sun{false};
+@@ -381,7 +398,8 @@ float cascade_depth_of(uint32_t cascade) noexcept {
+ }
+ // The sun shadow pass's uniform (kSunMapShader's View).
+ // 100 floats of the view, then Wind Waker HD's light buffer for the scenery's shade (points, pl: 4 + kMaxLights x 8).
+-constexpr size_t kSunMapUniformFloats = 104 + kMaxLights * 8;
++// Then the lit scenery's fog (fog, fog_colour, fog_x, fog_range: 24), and HD's fog starts below 0 (fog_starts: 16).
++constexpr size_t kSunMapUniformFloats = 104 + kMaxLights * 8 + 24 + 16;
+ float g_cloudStrength = 0.28f;  // how dark a cloud's shadow is
+ float g_cloudScale = 7000.f;    // world units across one cloud
+ bool g_cloudDebug = false;
+@@ -1368,6 +1386,11 @@ struct View {
+     points: vec4<f32>,          // Wind Waker HD's light buffer on the lit scenery: x how many lights, y the scenery's
+                                 // weight (HD's 1.25), z 1 when the scenery took them in its draws
+     pl: array<vec4<f32>, 64>,   // each light: its world position and radius, then its linear colour
++    fog: vec4<f32>,             // the lit scenery's fog as its draws took it (GX's): A, B's magnitude, B's shift, C
++    fog_colour: vec4<f32>,      // its colour (0-1); w: 0 none, 1 linear, 2 HD's curve (its square)
++    fog_x: vec4<f32>,           // GX's range adjust: x 1 with it, y the centre, z the width
++    fog_range: array<vec4<f32>, 3>, // and its table (10 values)
++    fog_starts: array<vec4<f32>, 4>, // HD's palette entries with a fog start below 0: start, end pairs (end 0: none)
+ };
+ 
+ @group(0) @binding(0) var samp: sampler;
+@@ -1750,8 +1773,7 @@ fn point_sum(p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+     return sum;
+ }
+ 
+-@fragment
+-fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
++fn sun_map_shade(in: VertexOutput) -> vec4<f32> {
+     let z = select(view_depth(in.uv), view_depth_far(in.uv), low_pass > 0.5 && hd_prepass > 0.5 && prepass_far > 0.5);
+     let sun = view.time.yzw;
+     let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+@@ -2252,6 +2274,87 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+     let noise = (fract(52.9829189 * fract(dot(in.pos.xy, vec2(0.06711056, 0.00583715)))) - 0.5) * (1.5 / 255.0);
+     return vec4(shade + select(0.0, noise, direct > 0.5 && shade.r < 0.999), 1.0);
+ }
++
++@fragment
++fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
++    return sun_map_shade(in);
++}
++)""";
++// With dual-source blending (the scene times the second output, plus the first): the shade, and the lit scenery's
++// fog after it, as Wind Waker HD fogs its scenery (its room and terrain shaders: mix(lit colour, fog, f), f the
++// square of (the distance from the eye - start) / (end - start)). The draws fogged it before the shade, by the
++// depth: the pass takes their fog out and puts HD's in, (scene - F fs) / (1 - fs) x shade x (1 - fh) + F fh, in the
++// scene's gamma, as GX fogs. Without it a shaded wall's fog was shaded too, and the far walls of a dungeon room
++// (most of them fog in HD) came out at under half HD's.
++constexpr const char* kSunMapFogEntry = R"""(
++struct SunFogOut {
++    @location(0) @blend_src(0) add: vec4<f32>,
++    @location(0) @blend_src(1) mul: vec4<f32>,
++};
++
++@fragment
++fn fs_sun_map_fog(in: VertexOutput) -> SunFogOut {
++    let m = sun_map_shade(in);
++    var out: SunFogOut;
++    out.add = vec4(0.0);
++    out.mul = m;
++    if (view.fog_colour.w < 0.5 || view.facing.y < 0.5 || debug_view > 0.5 || effect_debug > 0.5 || ao_debug > 0.5) {
++        return out;
++    }
++    let p = vec2<i32>(in.pos.xy);
++    let d = textureLoad(depth, p, 0);
++    if (d <= 0.0) {
++        return out;
++    }
++    // Not the sea (its own fog) or the characters (fogged in their own draws).
++    if (view.facing.x > 0.5) {
++        let msize = vec2<f32>(textureDimensions(mask));
++        let mp = clamp(vec2<i32>(in.uv * msize), vec2<i32>(0), vec2<i32>(msize) - vec2<i32>(1));
++        let mk = textureLoad(mask, mp, 0);
++        if (mk.r > 0.5 || mk.g > character_g) {
++            return out;
++        }
++    }
++    // The draws' fog (GX's perspective fog, as the scene's draws took it).
++    let zs = clamp(i32((1.0 - d) * 16777216.0), 0, 16777215);
++    let ze = view.fog.x * 16777216.0 / (view.fog.y - f32(zs >> u32(view.fog.z)));
++    // GX's range adjust, as the draws took it (across the screen only).
++    var adjust = 1.0;
++    if (view.fog_x.x > 0.5) {
++        let offset = (2.0 * (in.pos.x / view.fog_x.z)) - 1.0 - view.fog_x.y;
++        let index = clamp(9.0 - abs(offset) * 9.0, 0.0, 9.0);
++        let lower = u32(index);
++        let upper = min(lower + 1u, 9u);
++        let k = mix(view.fog_range[lower >> 2u][lower & 3u], view.fog_range[upper >> 2u][upper & 3u], fract(index));
++        adjust = sqrt(offset * offset + k * k) / max(k, 1e-6);
++    }
++    var fs = clamp(ze * adjust - view.fog.w, 0.0, 1.0);
++    // HD's: the same distances, from the eye rather than along the view.
++    let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
++    let ray = length(vec3(ndc.x * view.lens.x * view.lens.y, ndc.y * view.lens.x, 1.0));
++    var fh = clamp(ze * ray - view.fog.w, 0.0, 1.0);
++    // A start the game clamped at 0 (C 0): its end is the view depth over ze; where an HD entry has that end and a
++    // start below 0 (aurora_set_fog_hd_starts), HD's fog from that start.
++    if (abs(view.fog.w) < 1e-6 && ze > 1e-9) {
++        let vz = view_depth(in.uv);
++        let end = vz / ze;
++        for (var i = 0u; i < 8u; i++) {
++            let pair = select(view.fog_starts[i >> 1u].zw, view.fog_starts[i >> 1u].xy, (i & 1u) == 0u);
++            if (pair.y > 0.0 && abs(end - pair.y) < 0.01 * pair.y) {
++                fh = clamp((vz * ray - pair.x) / (pair.y - pair.x), 0.0, 1.0);
++                break;
++            }
++        }
++    }
++    if (view.fog_colour.w > 1.5) {
++        fs = fs * fs;
++        fh = fh * fh;
++    }
++    let keep = clamp(m.rgb * (1.0 - fh) / max(1.0 - fs, 1.0 / 256.0), vec3(0.0), vec3(1.0));
++    out.mul = vec4(keep, 1.0);
++    out.add = vec4(max(view.fog_colour.rgb * (fh - fs * keep), vec3(0.0)), 0.0);
++    return out;
++}
+ )""";
+ wgpu::ShaderModule g_sunMapModule;
+ wgpu::BindGroupLayout g_sunMapLayout;
+@@ -2765,12 +2868,22 @@ wgpu::RenderPipeline make_sun_map_pipeline(wgpu::TextureFormat format, bool dire
+                 .srcFactor = wgpu::BlendFactor::Zero,
+                 .dstFactor = wgpu::BlendFactor::One},
+   };
++  // With HD's fog after the shade (fs_sun_map_fog): the scene times the second output, plus the first.
++  const bool fog = direct && !low && g_sunFogHd && webgpu::g_dualSourceBlendingSupported;
++  const wgpu::BlendState multiplyAdd{
++      .color = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::One,
++                .dstFactor = wgpu::BlendFactor::Src1},
++      .alpha = {.operation = wgpu::BlendOperation::Add,
++                .srcFactor = wgpu::BlendFactor::Zero,
++                .dstFactor = wgpu::BlendFactor::One},
++  };
+   const std::array targets{wgpu::ColorTargetState{.format = low ? kSunLowFormat : format,
+-                                                  .blend = direct && !low ? &multiply : nullptr,
++                                                  .blend = fog ? &multiplyAdd : direct && !low ? &multiply : nullptr,
+                                                   .writeMask = wgpu::ColorWriteMask::All}};
+   const wgpu::FragmentState fragment{
+       .module = g_sunMapModule,
+-      .entryPoint = "fs_sun_map",
++      .entryPoint = fog ? "fs_sun_map_fog" : "fs_sun_map",
+       .constantCount = constants.size(),
+       .constants = constants.data(),
+       .targetCount = targets.size(),
+@@ -3647,6 +3760,27 @@ SunMapInputs sun_map_inputs(const Camera& camera, const SunMap& sunMap, bool act
+     uniform[102] = 1.f;
+     std::memcpy(uniform.data() + 104, camera.lights.data(), camera.lightCount * 8 * sizeof(float));
+   }
++  // The lit scenery's fog, for the shade to fog after itself (fs_sun_map_fog).
++  if (g_sunFogHd && !actor) {
++    std::lock_guard lock{g_sceneFogMutex};
++    if (g_sceneFog.on && g_sceneFog.stale++ < 8) {
++      constexpr size_t f = 104 + kMaxLights * 8;
++      uniform[f + 0] = g_sceneFog.a;
++      uniform[f + 1] = g_sceneFog.b;
++      uniform[f + 2] = g_sceneFog.shift;
++      uniform[f + 3] = g_sceneFog.c;
++      for (int i = 0; i < 3; ++i)
++        uniform[f + 4 + i] = g_sceneFog.colour[i];
++      uniform[f + 7] = g_sceneFog.square ? 2.f : 1.f;
++      uniform[f + 8] = g_sceneFog.range ? 1.f : 0.f;
++      uniform[f + 9] = g_sceneFog.centre;
++      uniform[f + 10] = g_sceneFog.width;
++      for (int i = 0; i < 12; ++i)
++        uniform[f + 12 + i] = g_sceneFog.table[i];
++      for (int i = 0; i < 16; ++i)
++        uniform[f + 24 + i] = g_fogHdStarts[i];
++    }
++  }
+   // The full shadow's colour, or Wind Waker HD's light for the hour when the host gives it.
+   {
+     std::lock_guard lock{g_cameraMutex};
+@@ -4519,6 +4653,8 @@ void initialize() {
+   g_sunMapDim = env_float("DOL_AURORA_SUN_SHADOW_MAP_DIM", g_sunMapDim, 0.f, 1.f);
+   if (const char* facing = std::getenv("DOL_AURORA_SUN_SHADOW_FACING"))
+     g_sunFacing = facing[0] == '1';
++  if (const char* fog = std::getenv("DOL_AURORA_SUN_FOG_HD"))
++    g_sunFogHd = fog[0] != '0';
+   g_sunFacingMul = env_float("DOL_AURORA_SUN_SHADOW_FACING_MUL", g_sunFacingMul, 0.5f, 1000.f);
+   g_sunFacingDepthMul = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL", g_sunFacingDepthMul, 0.f, 1000.f);
+   g_sunFacingDepthBlur = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR", g_sunFacingDepthBlur, 0.f, 200.f);
+@@ -4722,7 +4858,9 @@ void initialize() {
+   g_torchPipelineLayout = g_device.CreatePipelineLayout(&torchPipelineLayoutDescriptor);
+ 
+   wgpu::ShaderSourceWGSL sunMapSource{};
+-  const std::string sunMapCode = std::string(kCloudNoise) + kSunMapShader;
++  const bool sunFog = g_sunFogHd && webgpu::g_dualSourceBlendingSupported;
++  const std::string sunMapCode = std::string(sunFog ? "enable dual_source_blending;\n" : "") + kCloudNoise +
++                                 kSunMapShader + (sunFog ? kSunMapFogEntry : "");
+   sunMapSource.code = sunMapCode.c_str();
+   const wgpu::ShaderModuleDescriptor sunMapModuleDescriptor{.nextInChain = &sunMapSource,
+                                                             .label = "Sun shadows (shadow map)"};
+@@ -5001,6 +5139,38 @@ void set_sun_palette(bool on, const float sky[3], const float ground[3], const f
+   }
+ }
+ 
++bool fog_hd() noexcept { return g_fogHd.load(std::memory_order_relaxed); }
++
++void set_fog_hd(bool on) noexcept { g_fogHd.store(on, std::memory_order_relaxed); }
++
++void set_fog_hd_starts(const float* start_end, int count) noexcept {
++  std::lock_guard lock{g_sceneFogMutex};
++  g_fogHdStarts.fill(0.f);
++  for (int i = 0; start_end != nullptr && i < std::min(count, 8); ++i) {
++    g_fogHdStarts[size_t(2 * i)] = start_end[2 * i];
++    g_fogHdStarts[size_t(2 * i + 1)] = start_end[2 * i + 1];
++  }
++}
++
++void note_scene_fog(float a, int b_magnitude, int b_shift, float c, const int colour[3], bool hd_square,
++                    const float* range, float centre, float width) noexcept {
++  std::lock_guard lock{g_sceneFogMutex};
++  g_sceneFog.range = range != nullptr && width > 0.f;
++  for (int i = 0; i < 12; ++i)
++    g_sceneFog.table[i] = g_sceneFog.range ? range[i] : 0.f;
++  g_sceneFog.centre = centre;
++  g_sceneFog.width = width;
++  g_sceneFog.on = true;
++  g_sceneFog.stale = 0;
++  g_sceneFog.a = a;
++  g_sceneFog.b = static_cast<float>(b_magnitude);
++  g_sceneFog.shift = static_cast<float>(b_shift);
++  g_sceneFog.c = c;
++  for (int i = 0; i < 3; ++i)
++    g_sceneFog.colour[i] = static_cast<float>(std::clamp(colour[i], 0, 255)) / 255.f;
++  g_sceneFog.square = hd_square;
++}
++
+ bool actor_light_hd_switch() noexcept {
+   static const bool on = [] {
+     const char* env = std::getenv("DOL_AURORA_ACTOR_LIGHT_HD");
+@@ -5768,6 +5938,12 @@ void aurora_set_hd_cloud_texture(const char* path) {
+   aurora::gfx::post_fx::set_hd_cloud_texture(path);
+ }
+ 
++void aurora_set_fog_hd(int on) { aurora::gfx::post_fx::set_fog_hd(on != 0); }
++
++void aurora_set_fog_hd_starts(const float* start_end, int count) {
++  aurora::gfx::post_fx::set_fog_hd_starts(start_end, count);
++}
++
+ void aurora_set_sun_hd_light(int on, int night, float fade) {
+   aurora::gfx::post_fx::set_sun_hd_light(on != 0, night != 0, fade);
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 3e0cf4d635..e1e3272fc3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -84,6 +84,17 @@ bool actor_light_hd_switch() noexcept;
+ // (the host sends the lights) and the characters' light wanted this frame.
+ bool point_lights_hd_switch() noexcept;
+ bool point_lights_hd_active() noexcept;
++// Wind Waker HD's fog curve (aurora_set_fog_hd): linear fog squared (gxc::ShaderKey::hd_fog), set by the host while
++// HD's fog distances are in the game's palettes. Read per draw.
++bool fog_hd() noexcept;
++void set_fog_hd(bool on) noexcept;
++// Wind Waker HD's palette fog starts below 0, as start, end pairs (aurora_set_fog_hd_starts).
++void set_fog_hd_starts(const float* start_end, int count) noexcept;
++// The fog the lit scenery's draws took this frame (GX's: A, B's magnitude and shift, C, its colour 0-255, and HD's
++// square), for the sun pass to fog after the shade, by the distance from the eye, as Wind Waker HD's scenery
++// shaders do (DOL_AURORA_SUN_FOG_HD=0: as drawn). From the draw thread.
++void note_scene_fog(float a, int b_magnitude, int b_shift, float c, const int colour[3], bool hd_square,
++                    const float* range = nullptr, float centre = 0.f, float width = 0.f) noexcept;
+ void set_actor_light_hd(bool on, const float c0[3], const float shadow[3], const float k[3]) noexcept;
+ bool actor_light_palette(float c0[3], float shadow[3], float k[3]) noexcept;
+ // The GameCube's global actor C0 and K0 (linear) the characters' own registers are set against
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 0e71fe8a6e..91d935633c 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -269,6 +269,11 @@ struct ShaderKey {
+   // switch on): generate_wgsl adds HD's light beside the GX result, picked by
+   // HdActorLightConstants::params.x (group 0).
+   std::uint8_t hd_actor_light = 0;
++  // Wind Waker HD's fog curve (linear fog only): the GX factor, clamped, is
++  // squared before the blend, as HD's shaders fog (clamp((d - start) / (end -
++  // start))^2). Set per draw while the host has HD's fog distances in place
++  // (aurora_set_fog_hd). Two pad bytes keep the scalar block a multiple of 4.
++  std::uint8_t hd_fog = 0;
+   // Wind Waker HD's light buffer on the lit scenery (hd_point_light_stage()
+   // matched and the host's switch on): HD's point and effect lights, x 1.25,
+   // added to stage 0's light before the texture multiplies it (HdPointLights at
+@@ -276,9 +281,9 @@ struct ShaderKey {
+   // vertices' normal slot holds smooth normals made on the CPU for a draw that
+   // has none of its own (the sun shadows' scenery), turned by the position
+   // matrix. Bit 4 (with 2): Wind Waker HD's lava glow, the vertices' colour 1 x the last stage's texel added after
+-  // it (gxcore_shader.cpp hd_scenery_lava()). Two pad bytes keep the scalar block a multiple of 4.
++  // it (gxcore_shader.cpp hd_scenery_lava()). One pad byte keeps the scalar block a multiple of 4.
+   std::uint8_t hd_point_light = 0;
+-  std::uint8_t pad_hd[2]{};
++  std::uint8_t pad_hd[1]{};
+   LightChanKey litchan[4]{}; // color0, color1, alpha0, alpha1
+   TexGenKey tex_gens[kMaxTexGens]{};
+   IndirectStageKey ind_stages[kMaxIndirectStages]{};
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 8af93cda93..9ff5f5cb94 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -263,7 +263,11 @@ void emit_fog(std::string& out, const ShaderKey& key) {
+     break;
+   case FogType::Linear:
+   default:
+-    break; // linear: fogv unchanged
++    // linear: fogv unchanged, or Wind Waker HD's curve, its square (HD's own
++    // fog distances, retuned for it, are what the game then holds).
++    if (key.hd_fog != 0u)
++      emit(out, "    fogv = fogv * fogv; // Wind Waker HD's fog curve\n");
++    break;
+   }
+   // Integer blend: prev.rgb = (prev.rgb*(256-ifog) + fogcolor*ifog) >> 8.
+   emit(out, "    let ifog = i32(round(fogv * 256.0));\n"
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp b/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp
+index 37db4f2f29..c65d6bd12e 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp
+@@ -43,6 +43,7 @@ void emit_key_layout(std::string& out) {
+   K(fog_fsel);
+   K(fog_proj);
+   K(fog_range);
++  K(hd_fog);
+   K(tex_mtx_idx_mask);
+   K(chan_captured_mask);
+   K(has_vertex_normal);
+@@ -854,6 +855,7 @@ fn fog(prev: vec4i, in: VertexOut) -> vec4i {
+     else if (fsel == 5u) { fogv = 1.0 - exp2(-8.0 * fogv * fogv); }
+     else if (fsel == 6u) { fogv = exp2(-8.0 * (1.0 - fogv)); }
+     else if (fsel == 7u) { fogv = 1.0 - fogv; fogv = exp2(-8.0 * fogv * fogv); }
++    else if (kb(K_hd_fog) != 0u) { fogv = fogv * fogv; }
+     let ifog = i32(round(fogv * 256.0));
+     return vec4i((prev.rgb * (256 - ifog) + psc.fogcolor.rgb * ifog) >> vec3u(8u), prev.a);
+ }
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index cef2512a90..5a43ec07e6 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -2831,6 +2831,35 @@ void test_fog() {
+                                    gxc::FogProjection::Perspective, false))
+             .find("// Fog (Dolphin WriteFog)") == std::string::npos);
+ 
++  // Wind Waker HD's fog curve (hd_fog): linear fog squared after the clamp,
++  // before the integer blend; unflagged, the module is as it was; the other
++  // curves keep theirs.
++  {
++    auto key = fog_key(gxc::FogType::Linear, gxc::FogProjection::Perspective, true);
++    const std::string gc = gxc::generate_wgsl(key);
++    key.hd_fog = 1;
++    const std::string hd = gxc::generate_wgsl(key);
++    const char* square = "    fogv = fogv * fogv; // Wind Waker HD's fog curve\n";
++    CHECK(gc.find("fogv * fogv") == std::string::npos);
++    CHECK(hd != gc);
++    const auto clamp_at = hd.find("var fogv = clamp(ze - psc.fogf.y, 0.0, 1.0);");
++    const auto square_at = hd.find(square);
++    CHECK(clamp_at != std::string::npos && square_at != std::string::npos && clamp_at < square_at);
++    CHECK(square_at < hd.find("let ifog = i32(round(fogv * 256.0));"));
++    // Only that line differs.
++    std::string back = hd;
++    back.erase(square_at, std::strlen(square));
++    CHECK(back == gc);
++    auto exp = fog_key(gxc::FogType::Exp, gxc::FogProjection::Perspective, false);
++    const std::string exp_gc = gxc::generate_wgsl(exp);
++    exp.hd_fog = 1;
++    CHECK(gxc::generate_wgsl(exp) == exp_gc);
++    // The ubershader reads the bit from the key.
++    const std::string uber = gxc::generate_uber_wgsl(false);
++    CHECK(uber.find("const K_hd_fog: u32 = ") != std::string::npos);
++    CHECK(uber.find("else if (kb(K_hd_fog) != 0u) { fogv = fogv * fogv; }") != std::string::npos);
++  }
++
+   // --- Plan uniforms decoded from BP fog registers (state path) ------------
+   gxc::GxCoreState state;
+   state.reset();
+-- 
+2.56.0
+

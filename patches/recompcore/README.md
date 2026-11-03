@@ -392,3 +392,10 @@ left out and at that point Wind Waker HD's pass runs instead: the scene's grey b
 `saturate` of the way, times HD's multiply, over the scene by distance. What the game draws after it (Link and
 his things) stays in colour, and bloom goes over all of it, as in HD. Single-sampled only
 (`aurora_monotone_hd_supported`); `DOL_AURORA_MONOTONE_HD=0` turns it off.
+
+Patch 0226 adds `aurora_set_fog_hd`: while the host has Wind Waker HD's fog distances in the game's palettes, linear
+fog is squared, as HD's shaders fog (`ShaderKey::hd_fog`). The sun shadows' pass then takes the draws' fog out
+and puts HD's back in after the shade, as HD fogs after its light, so a room's far walls in shade keep their fog
+(`DOL_AURORA_SUN_FOG_HD=0` keeps it as drawn). Where HD's fog starts before the camera and the game's
+palette blend clamps the start at 0, the host gives HD's start with the game's end
+(`aurora_set_fog_hd_starts`) and the sun pass fogs the lit scenery from it.

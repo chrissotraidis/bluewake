@@ -31,6 +31,7 @@ static bool g_sky;  // HD's sky and light palettes (BLUEWAKE_HD_SKY)
 static bool g_monotone;  // HD's monotone in Frozen Hyrule (BLUEWAKE_HD_MONOTONE, on with the look; monotone())
 static bool g_sky_models;  // with them, HD's sky models (BLUEWAKE_HD_SKY_MODELS=1; off by default)
 static bool g_sky_linear;  // and HD's blend in linear light (BLUEWAKE_HD_SKY_LINEAR=1; on with an imported pack)
+static bool g_fog_curve = true;  // and HD's fog curve (BLUEWAKE_HD_FOG_CURVE=0: the GameCube's, to compare)
 static void sky_load(void);
 
 // HD's sunlight as the player chose it (BLUEWAKE_HD_SUNLIGHT, read at each
@@ -195,6 +196,7 @@ void bluewake_hd_look_reload(void) {
     // Off until turned on, the HD look on or not (they are new).
     g_sky_models = setting("BLUEWAKE_HD_SKY_MODELS") == 1;
     g_sky_linear = setting("BLUEWAKE_HD_SKY_LINEAR") == 1;
+    g_fog_curve = setting("BLUEWAKE_HD_FOG_CURVE") != 0;
     if (g_sky)
         sky_load();
     if (bloom >= 0)
@@ -1495,6 +1497,8 @@ enum {
     kEnvEnvr = kEnvLight + 0x00Cu,      // mpEnvrInfo (8 each: pselect ids)
     kEnvSchedule = kEnvLight + 0x014u,  // mpSchejule (11 of 0xC: end time, begin time, palette slots 0 and 1)
     kEnvColPatBlend = kEnvLight + 0xBE0u,
+    kEnvFogStart = kEnvLight + 0xBE8u,  // mFogStartZ, then mFogEndZ (after the palette blend, clamped at 0)
+    kEnvFogEnd = kEnvLight + 0xBECu,
     kEnvTime = kEnvLight + 0xC38u,
     kEnvColpatPrev = kEnvLight + 0xC84u,
     kEnvColpatCurr = kEnvLight + 0xC85u,
@@ -2400,6 +2404,56 @@ static void sky(CPUState* cpu) {
     // The schedule goes with the palettes (back to the GameCube's when they go).
     sky_schedule(cpu, g_sky_shown);
     sky_models(cpu, g_sky_shown);
+    // HD's fog curve goes with its fog distances (the Pale entries' bytes 0x21-0x2B, which HD retuned for the
+    // square of the linear factor: on the GameCube's linear curve they gave about twice HD's fog at middle distance).
+    static int s_fog = -1;
+    const int fog = g_sky_shown && g_fog_curve;
+    if (fog != s_fog) {
+        aurora_set_fog_hd(fog);
+        s_fog = fog;
+    }
+    // HD's fog starts below 0 (Ganon's Tower -5000, the Tower of the Gods -1000): the game's blend clamps them at 0
+    // (float_kankyo_color_ratio_set), so the sun pass takes HD's start from the host: HD's entries' starts blended as
+    // the game blends the palettes (its four entries and weights, the light's or the scenery's, whichever blend gives
+    // the game's own end), unclamped, with the game's end (aurora_set_fog_hd_starts).
+    {
+        float pair[2] = {0.0f, 0.0f};
+        const float game_start = read_float(cpu, kEnvFogStart), game_end = read_float(cpu, kEnvFogEnd);
+        if (fog && g_sky_data != NULL && game_start == 0.0f && game_end > 0.0f) {
+            const u8* hd_pale = g_sky_data + g_sky_pale * 0x2Cu;
+            for (int scenery = 1; scenery >= 0 && pair[1] == 0.0f; --scenery) {
+                int pale[4];
+                float w[4], start = 0.0f, end = 0.0f;
+                if (!sky_weights(cpu, scenery != 0, pale, w))
+                    continue;
+                for (int i = 0; i < 4; ++i) {
+                    if ((u32)pale[i] >= g_sky_pale)
+                        break;
+                    const u8* e = hd_pale + (u32)pale[i] * 0x2Cu;
+                    float v[2];
+                    for (int k = 0; k < 2; ++k) {
+                        const u32 bits = (u32)e[0x24 + 4 * k] << 24 | (u32)e[0x25 + 4 * k] << 16 |
+                                         (u32)e[0x26 + 4 * k] << 8 | e[0x27 + 4 * k];
+                        memcpy(&v[k], &bits, 4);
+                    }
+                    start += w[i] * v[0];
+                    end += w[i] * v[1];
+                }
+                if (start < 0.0f && fabsf(end - game_end) <= 0.01f * game_end) {
+                    pair[0] = start;
+                    pair[1] = game_end;
+                }
+            }
+        }
+        static float s_pair[2] = {1.0f, 1.0f};
+        if (pair[0] != s_pair[0] || pair[1] != s_pair[1]) {
+            aurora_set_fog_hd_starts(pair[1] > 0.0f ? pair : NULL, pair[1] > 0.0f ? 1 : 0);
+            if (g_trace)
+                fprintf(stderr, "[hd-look] fog: game %.0f-%.0f, HD start %.0f\n", game_start, game_end, pair[0]);
+            s_pair[0] = pair[0];
+            s_pair[1] = pair[1];
+        }
+    }
     static unsigned s_clock;
     if (g_trace && g_sky_shown && ++s_clock % 60u == 0u)
         fprintf(stderr, "[hd-look] clock %.1f, HD brightness %.3f\n", read_float(cpu, kEnvTime), exposure);

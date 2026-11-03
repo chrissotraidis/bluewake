@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "b4462d4391fbc0387303aef51ba89f0390e3e75f",
+      "sha": "d1cbff7b45b8f9f6c1f4b2a758392e3182bfdff8",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
@@ -845,6 +845,13 @@
             "patches/recompcore/0225-Aurora-Wind-Waker-HD-s-monotone-at-the-game-s-grey-composite-aurora_set_monotone_hd.patch"
           ],
           "evidence": "pdale-boop's: in Frozen Hyrule the castle is sepia, Link in colour with his sun shadow, the game's grey quad left out; the hue as HD's."
+        },
+        "hd_fog": {
+          "runtime": "d1cbff7b45b8f9f6c1f4b2a758392e3182bfdff8",
+          "tracked_patches": [
+            "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
+          ],
+          "evidence": "pdale-boop's: at noon an island 18,000 out takes 0.25 of the fog colour as in HD, not 0.50; Earth Temple's teal and Hyrule Castle's haze stay on the far walls in shade; gxcore tests: the flagged module differs by the square alone; Wind Temple R0f from 0.76 to 0.97 of HD's brightness with HD's fog start."
         }
       }
     },
