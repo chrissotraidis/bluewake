@@ -190,8 +190,23 @@ def measurement_environment(base, *, mode, load_state, scratch, card, warp, max_
         env["BLUEWAKE_TEST_WARP"] = warp
     if mode == "headless":
         env["BLUEWAKE_RENDERER"] = "headless"
+    _pass_diagnostics(env, base, mode)
     _isolate(env, scratch, card)
     return env
+
+
+# Opt-in diagnostics the measured runs keep (the setup run does not): the guest
+# PC sampler, its retrace window, and the module's census switches. The
+# sampler's file gets the mode as a suffix so "both" writes two files.
+DIAGNOSTIC_PASSTHROUGH = ("BLUEWAKE_PC_SAMPLE", "BLUEWAKE_PC_SAMPLE_FROM", "BLUEWAKE_PC_SAMPLE_TO")
+
+
+def _pass_diagnostics(env: dict[str, str], base, mode: str) -> None:
+    for key in DIAGNOSTIC_PASSTHROUGH:
+        if base.get(key):
+            env[key] = base[key]
+    if env.get("BLUEWAKE_PC_SAMPLE"):
+        env["BLUEWAKE_PC_SAMPLE"] = f"{env['BLUEWAKE_PC_SAMPLE']}.{mode}"
 
 
 def setup_environment(base, *, scratch, card, state_path) -> dict[str, str]:

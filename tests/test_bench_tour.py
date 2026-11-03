@@ -189,6 +189,21 @@ class BenchTourTests(unittest.TestCase):
         self.assertEqual(env['BLUEWAKE_RENDERER'], 'headless')
         self.assertNotIn('BLUEWAKE_PLAYER_PROBE', env)
 
+    def test_pc_sampler_passes_to_measured_runs_only(self):
+        base = {'BLUEWAKE_PC_SAMPLE': '/tmp/outset.pcs', 'BLUEWAKE_PC_SAMPLE_FROM': '2700',
+                'BLUEWAKE_PC_SAMPLE_TO': '4200'}
+        env = bench_tour.measurement_environment(
+            base, mode='headless', load_state='scene.bwstate',
+            scratch='/tmp/bluewake-bench-scratch',
+            card='/tmp/bluewake-bench-scratch/GZLE01.card', warp=None, max_retraces=11400)
+        self.assertEqual(env['BLUEWAKE_PC_SAMPLE'], '/tmp/outset.pcs.headless')
+        self.assertEqual(env['BLUEWAKE_PC_SAMPLE_FROM'], '2700')
+        self.assertEqual(env['BLUEWAKE_PC_SAMPLE_TO'], '4200')
+        setup = bench_tour.setup_environment(
+            base, scratch='/tmp/bluewake-bench-scratch',
+            card='/tmp/bluewake-bench-scratch/GZLE01.card', state_path='/tmp/s.bwstate')
+        self.assertNotIn('BLUEWAKE_PC_SAMPLE', setup)
+
     def test_card_command_is_an_argument_list(self):
         argv = bench_tour.card_restart_argv('in.card', 'out.card')
         script = Path(__file__).parents[1] / 'scripts' / 'card_set_restart.py'

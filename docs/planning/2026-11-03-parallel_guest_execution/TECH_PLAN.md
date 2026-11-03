@@ -29,6 +29,10 @@ Source: BlueWake `main` at `ee991d3`; RecompCore `0fe472a`; tww `9cbb155`
 
 **Eligibility** (decided before submission; anything else runs serially as today): no joint callback on any node, no `mCalcCallBack`, no `mpDeformData`/`mpSkinDeform`, no hooks at `0xc4`/`0xc8`, no visibility manager (or proven pure), key-frame or no animation with Basic/Maya/Softimage calc, not the locked `getModelDataType()==1` path, called from `draw()`.
 
+Added by M3-T01: every material's draw buffer is material-sorted or non-sorted (the main opaque list; `mpXluList`, `mpOpaListFilter`, `mpXluListMaskOff`, `mpXluListInvisible` are Z-sorted), and no texture matrix uses an env-map, proj-map or view-proj-map mode.
+
+**What `entry()` reads** (tww `J3DJoint.cpp:230`, `J3DDrawBuffer.cpp:126`, `J3DMatBlock.cpp:1782`, `d_drawlist.cpp:1906`): `entryIn` takes `getAnmMtx(jnt)` and stores it as the buffers' Z matrix (a pointer). `entryZSort` reads its translation to compute the sort key, at entry time. `J3DTexGenBlockPatched::calc` reads the matrix only for env-map, proj-map and view-proj-map texture matrices; other modes ignore it. Material sort (the default) and non-sort don't read it.
+
 **Async pose job** (proposed):
 
 ```
@@ -38,6 +42,14 @@ draw-list flush: join all → publish matrices + scale flags → set j3dSys as t
 ```
 
 Guest cycles for the serial calc are charged at submit. A job never writes live guest memory; publication happens on the game thread.
+
+## Decline reasons (from source, M1-T00)
+
+| Path | Guards | Likely dominant reason | Widening |
+| --- | --- | --- | --- |
+| Skinning (`native_skin.c`) | FP/PS state, no write journal, plain RAM, stores apart from reads, finite floats < 2^31, **the whole function's cycles (58 + 23 per envelope + 60 per joint) inside the turn budget and before the next deadline** | The cycle guard: it scales with model size, matching "declines are the big models" | Resume or split at a block boundary with exact cycle accounting; needs care |
+| `transform-simple` (`J3DAnmTransformKey::calcTransform`) | **zero- or one-key channels only**; `ready(256)` | By design: any animated channel (> 1 key) declines | Native multi-key transform calling the native `key-s`/`key-f` interpolation; the largest M2 item |
+| `key-s` (`J3DGetKeyFrameInterpolationS`) | `ready(512)` (no positive `downcount`, budget and deadline ≥ 512 cycles), GQR5 must be signed short with scale 0, ≤ 256 keys, strictly increasing times, time in range | Unknown: GQR5 scale, key count and the cycle bound are all plausible | Count reasons first (M1-T01) |
 
 ## Validation
 

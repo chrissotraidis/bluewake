@@ -1,6 +1,6 @@
 # PROGRESS — Parallel guest execution
 
-Status: In progress (audit done, Track A chosen; next: idle-machine re-profile, then decline reasons)
+Status: In progress (audit done, Track A chosen; `entry()` narrows the async window to opaque, non-envmap materials; next: idle-machine re-profile and decline counts)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -10,9 +10,10 @@ Status: In progress (audit done, Track A chosen; next: idle-machine re-profile, 
 - [x] M0-T02: Track decision: A first, B second choice with a reopen criterion
 - [x] M0-T03: Guest-PC profile of Outset with subsystem attribution (contended run)
 - [ ] M0-T04: Repeat on an idle machine; all five tour stops; real FPS
-- [ ] M0-T05: Pass sampler variables through `bench_tour.py`; commit the attribution script
+- [x] M0-T05: Pass sampler variables through `bench_tour.py`; commit the attribution script (`scripts/pc_sample_attribute.py`)
 
 ### M1: Decline census (depends: M0)
+- [x] M1-T00: Decline reasons from source (see TECH_PLAN, *Decline reasons*)
 - [ ] M1-T01: Reason codes for skinning, `key-s`, `transform-simple` declines
 - [ ] M1-T02: Rank reasons by translated time they leave behind
 
@@ -21,7 +22,7 @@ Status: In progress (audit done, Track A chosen; next: idle-machine re-profile, 
 - [ ] M2-T02: Deck A/B, checkpoints and pictures identical
 
 ### M3: Overlap window (parallel with M1)
-- [ ] M3-T01: Check `entry()`/`entryIn` for matrix reads
+- [x] M3-T01: Check `entry()`/`entryIn` for matrix reads: reads values only for Z-sorted buffers and env/proj-map texture matrices
 - [ ] M3-T02: Read trace of an eligible model's matrices between update and flush in Outset
 - [ ] M3-T03: Count eligible models per frame and joints per model; go/no-go for M4
 
@@ -46,3 +47,4 @@ Status: In progress (audit done, Track A chosen; next: idle-machine re-profile, 
 | --- | --- |
 | 2026-11-03 | Track A (native async jobs) first; Track B kept as second choice, reopened only by the PRD criterion |
 | 2026-11-03 | Native widening comes before any async job |
+| 2026-11-03 | Async pose job eligibility adds: every material in a material-sorted or non-sorted buffer, no env/proj-map texture matrix |
