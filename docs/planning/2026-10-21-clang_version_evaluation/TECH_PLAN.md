@@ -51,6 +51,15 @@ Create the combined branch in this order: current `main` → #503 → #531. Sinc
 behaviors and run their focused tests. Record the resulting commit SHA before
 building A–D; that SHA—not an individual PR head—is the matrix source.
 
+The working branch is
+[`perf/clang-runtime-matrix`](https://github.com/irregularthanis/bluewake/tree/perf/clang-runtime-matrix)
+at [`cb7089c15`](https://github.com/irregularthanis/bluewake/commit/cb7089c15).
+Its only merge conflict was Linux CI target registration; the resolution keeps
+both #503's direct-call test and #531's gather-host test. Builder contracts
+(21/21), direct-call source tests (6/6), diff checks and repository audit pass.
+The snapshot is not frozen until compiled #503/#504/#531 tests pass and the
+runtime/provider selectors are added.
+
 ## Proposed changes
 
 | Status | File / symbol | Practical edit | Milestone |
