@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "cb62dbc12a80b590be60fee4fc38322be647ee2c",
+      "sha": "53449c57d0591db7e837e834546b45e94eccbe23",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -811,6 +811,13 @@
             "patches/recompcore/0215-Characters-Wind-Waker-HD-s-actor-light.patch"
           ],
           "evidence": "pdale-boop's: Wind Waker HD's actor light, read pixel for pixel from Cemu captures of Link (Outset 10:00, Windfall 21:00) and his shield (Windfall 12:00): the ramp as a lit/dark switch times the blurred sun shadow, a hemisphere shade from actor C0 to the shadow colour, actor K0 times its factor lit, HD's rim; the effect-light stage left out as HD drops it. gxcore tests check the formula against the traced pixels; in game at Outset and Windfall (Linux, Vulkan), Dale: the day shade accurate. This frame's sun shadow: the characters' sun shadow from this frame (HD's order: depth, shadow pre-pass, characters) instead of the last frame's; from a state at Outset's pier only Link and the King of Red Lions change against the last frame's shadow, GPU busy 0.716 ms against 0.680 (1680x720, Linux, Vulkan); Dale: the shadows on Link look good."
+        },
+        "hd_sea": {
+          "runtime": "53449c57d0591db7e837e834546b45e94eccbe23",
+          "tracked_patches": [
+            "patches/recompcore/0216-Sun-shadows-the-sea-as-Wind-Waker-HD-s-all-of-it-in-the-sea-mask-foliage-in-front-clearing-the-marks-and-HD-s-sea-term.patch"
+          ],
+          "evidence": "pdale-boop's: sea_shape() scales the sea square by its position matrix's columns (the mask takes the open sea); blended depth-writing draws clear the marks behind them in the sea mask by their cut-out; on HD's light the sea's shade is HD's sea term in linear light. Without HD's palette the sea is as before."
         }
       }
     },

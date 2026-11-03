@@ -1,0 +1,257 @@
+From 53449c57d0591db7e837e834546b45e94eccbe23 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Mon, 2 Nov 2026 21:27:17 -0600
+Subject: [PATCH] Sun shadows: the sea as Wind Waker HD's: all of it in the sea
+ mask, foliage in front clearing the marks, and HD's sea term
+
+Characters: foliage in front clears the marks behind it in the sea mask
+
+A bush faded near the camera is drawn blended and writes depth, and the sea mask's pass drew no blended draw, so the
+mask kept what was behind it: Link's character and actor-light marks (his outline showed through the bush, unshaded
+by the sun pass and lit by the rim), the palms' leaf cards (blocks) and the sea's mark (the boat, Beedle's shop and
+the dock posts outlined on the bush). Blended draws that write depth are now drawn into the mask by their texture's
+cut-out: they clear the character, bloom and actor-light marks behind them, and the sea's mark too when the game
+lights them (the sea's own blended draws are unlit and keep it). Multi-texture cut-out cards and 2D draws stay out,
+so they can't wipe marks seen through their holes.
+
+From save states at Outset (the bush from the front and with the camera turned): the outlines and blocks are gone
+and the bush takes its own sun shade; Link on the pier and the sword's spin attack are unchanged.
+
+Sun shadows: the sea rooms' square of sea counts as the sea at the size it is drawn
+
+On a calm sea away from a room's edge d_a_sea draws no grid, and the sea is the room's untextured square: a 100-unit
+quad its position matrix scales 1,000 times. sea_shape() measured its vertices in model space (100 across, under its
+20,000), so the square was never the sea: the sea mask left it out and the HD look's brightness took the open sea to
+a pale cyan, and with highlights tapering from 0.99 the gain fell off in a hard straight line across it. Each axis's
+extent is now scaled by the length of the position matrix's column for it; the grid's strips and the world-space
+quads (unit columns) are as before. The square also leaves the sun map, as the sea does.
+
+From save states sailing at 13:55 and at Forest Haven: the sea is an even blue, no seam; the sea mask's debug view
+marks the whole sea.
+
+Sun shadows: the sea on Wind Waker HD's light takes HD's own sea term
+
+Wind Waker HD's sea quad and wave grid (PS 949 and 951) multiply the sea's colour by
+0.5 + 0.5 x clamp(cloud + floor) x the sun shadow, in linear light. Traced in
+An HD capture (Windfall, 10:00): under cloud 0.171 with no shadow x0.767, stored
+(0, 0.2600, 0.7674); in the dock's shadow x0.5, stored (0, 0.1691, 0.5005).
+
+With HD's palette on, the sea took the scenery's shade (the ambient over the sunlight,
+with SSAO) and then half of it in the scene's gamma, so a shadow or a cloud on the water
+came out lighter than HD's: with a shade ratio of 0.3, about x0.59 in linear in full
+shadow against HD's 0.5, and x0.83 under that cloud against 0.767. On HD's light the
+sea now takes HD's term, from the pass's own shadow and cloud term (lit holds their
+product) and the shadow strength, in linear and back to gamma. Without HD's palette the
+sea is as before.
+
+The sun map module compiles with Dawn (Vulkan, core and compatibility).
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  1 +
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 63 +++++++++++++++----
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  8 +++
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp |  9 ++-
+ 4 files changed, 69 insertions(+), 12 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 40b7dc35c0..49b60ee3b7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -2301,6 +2301,7 @@ static void encode_sea_mask(const wgpu::CommandEncoder& cmd, const RenderPass& p
+     // With Wind Waker HD's bloom mask, what is solid but writes no depth (the sky) too.
+     solidDraws += command.data.draw.gxcore.sunCaster || command.data.draw.gxcore.sunCasterAlpha ||
+                   (command.data.draw.gxcore.character && command.data.draw.gxcore.depthWrite) ||
++                  command.data.draw.gxcore.maskOccluder ||
+                   (command.data.draw.gxcore.maskCover && post_fx::bloom_mask_wanted());
+   }
+   if (seaDraws == 0 && solidDraws == 0 && !clear)
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index db25ad4c51..5b93f4e247 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -501,6 +501,10 @@ bool sun_caster_alpha(const gxc::PipelineKey& key) {
+ // HD it takes shadows but casts none: in the map a swell's crest shaded the
+ // trough behind it, and a tower standing there lost the foot of its shadow.
+ // DOL_AURORA_SUN_SHADOW_MAP_SEA_CASTS=1 puts it back in the map.
++// Measured at the size it is drawn: the sea rooms' square of sea past the
++// grid's edge is a 100-unit quad its position matrix scales 1,000 times, which
++// by its own vertices (100 across) wasn't the sea, so the HD look's brightness
++// took the open sea to a pale cyan.
+ bool sea_shape(const gxc::DrawPlan& plan) {
+   if (plan.constants.projection[3][3] == 1.f || plan.vertices.size() < 3)
+     return false;
+@@ -511,8 +515,13 @@ bool sea_shape(const gxc::DrawPlan& plan) {
+       lo[c] = std::min(lo[c], plan.vertices[v + c]);
+       hi[c] = std::max(hi[c], plan.vertices[v + c]);
+     }
+-  const float wide = std::max(hi[0] - lo[0], hi[2] - lo[2]);
+-  return wide >= 20000.f && hi[1] - lo[1] <= 0.02f * wide;
++  // Each model axis's scale: the length of the position matrix's column for it.
++  const auto& m = plan.constants.posnormalmatrix;
++  float scale[3];
++  for (int c = 0; c < 3; ++c)
++    scale[c] = std::sqrt(m[0][c] * m[0][c] + m[1][c] * m[1][c] + m[2][c] * m[2][c]);
++  const float wide = std::max((hi[0] - lo[0]) * scale[0], (hi[2] - lo[2]) * scale[2]);
++  return wide >= 20000.f && (hi[1] - lo[1]) * scale[1] <= 0.02f * wide;
+ }
+ 
+ bool sea_surface(const gxc::DrawPlan& plan) {
+@@ -2003,10 +2012,12 @@ wgpu::BindGroup g_seaMaskGroup;
+ // character (skinned: green in the mask), 5 a character's part with its texture's cutout, 6 scenery with smooth
+ // normals (as 0 without the normals' target), 7 what is solid but writes no depth (the sky, for HD's bloom mask),
+ // 8 a character with its own normals (as 4 without the normals' target), 9 a character's cut-out part with its own
+-// normals (a palm's leaves; as 5 without the normals' target); normals 1: the pass has the normals'
+-// second target; variant 1: blue 0.5 (HD's bloom mask: it may glow), or for a character green 0.6 (skinned, not
++// normals (a palm's leaves; as 5 without the normals' target), 10 blended scenery that writes depth
++// (DrawData::maskOccluder; as 0, but the sea's red under it is kept: a wave's crest stays the sea), 11 the same with
++// its texture's cutout (as 3), 12 and 13 as 10 and 11 but lit by the game (DrawData::maskOccluderLit: a bush's
++// leaves), which is not the sea, so the sea's red under it is cleared too; normals 1: the pass has the normals' second target; variant 1: blue 0.5 (HD's bloom mask: it may glow), or for a character green 0.6 (skinned, not
+ // toon-shaded). And [hd * the rest]: hd 1, a character drawn with Wind Waker HD's light (alpha 1 in the mask).
+-constexpr int kSeaMaskKinds = 10;
++constexpr int kSeaMaskKinds = 14;
+ constexpr int kSeaMaskVariants = 2 * 2 * kSeaMaskKinds * 2;
+ std::array<wgpu::RenderPipeline, 2 * kSeaMaskVariants> g_seaMaskPipelines;
+ wgpu::ShaderModule g_seaMaskModule;
+@@ -2077,10 +2088,17 @@ const wgpu::RenderPipeline& sea_mask_pipeline(int normals, int bloom, int kind,
+       .attributeCount = attributes.size(),
+       .attributes = attributes.data(),
+   };
++  // An unlit blended occluder (kinds 10 and 11: the waves' crest strips, the horizon's wave sheets) keeps the sea's
++  // red under it, so it stays the sea. A lit one (12 and 13: a bush's leaf cards) is not the sea and clears it:
++  // kept, the sea behind the bush marked the bush's pixels as the sea, with the shapes of what stood in front of
++  // the sea (the King of Red Lions, the dock, Beedle's shop) cut out of it.
++  const bool seaKept = kind == 10 || kind == 11;
+   const std::array targets{
+       wgpu::ColorTargetState{.format = post_fx::kSeaMaskFormat,
+                              // Alpha too: every draw writes 0 but a Wind Waker HD-lit character's 1 (actor_a).
+-                             .writeMask = wgpu::ColorWriteMask::All},
++                             .writeMask = seaKept ? wgpu::ColorWriteMask::Green | wgpu::ColorWriteMask::Blue |
++                                                        wgpu::ColorWriteMask::Alpha
++                                                  : wgpu::ColorWriteMask::All},
+       wgpu::ColorTargetState{.format = post_fx::kSunNormalFormat},
+   };
+   // Reversed Z: nearer is more; level surfaces drawn later win, as with the game's less-or-equal.
+@@ -2089,12 +2107,12 @@ const wgpu::RenderPipeline& sea_mask_pipeline(int normals, int bloom, int kind,
+       .depthWriteEnabled = kind != 2 && kind != 7,
+       .depthCompare = wgpu::CompareFunction::GreaterEqual,
+   };
+-  const bool alpha = kind == 3 || kind == 5 || kind == 9;
++  const bool alpha = kind == 3 || kind == 5 || kind == 9 || kind == 11 || kind == 13;
+   const bool smooth = (kind == 6 || kind == 8) && normals != 0;
+   const bool alphaSmooth = kind == 9 && normals != 0;
+   const char* entry = kind == 5 || kind == 9              ? "fs_actor_alpha"
+                       : alpha                               ? "fs_land_alpha"
+-                      : kind == 0 || kind == 6 || kind == 7 ? "fs_land"
++                      : kind == 0 || kind == 6 || kind == 7 || kind == 10 || kind == 12 ? "fs_land"
+                       : kind == 4 || kind == 8              ? "fs_actor"
+                                                             : "fs_sea";
+   const std::string entryN = alphaSmooth ? "fs_actor_alpha_smooth_n"
+@@ -2147,7 +2165,8 @@ void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass)
+   // What covers the sea is what the sun map takes as solid: a blended draw
+   // doesn't, and an alpha-tested one only where its texture is solid (a wave's
+   // crest whole covered a box of sea, which was then brightened).
+-  const bool cutout = !data.seaSurface && !data.sunCaster && data.sunCasterAlpha && data.textureBindGroup != 0;
++  const bool cutout = !data.seaSurface && !data.sunCaster && data.textureBindGroup != 0 &&
++                      (data.sunCasterAlpha || data.maskOccluderCutout);
+   // A skinned draw that writes depth is a character (Link, the islanders), whether or not it casts in the sun
+   // map (Link's own draws don't all): the sun shadows' facing term leaves it out.
+   const bool character = !data.seaSurface && data.character && data.depthWrite;
+@@ -2157,11 +2176,14 @@ void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass)
+   // the GameCube lights its sky's layers and draws its islands' terrain unlit, its light baked in the vertices.)
+   const bool bloomMask = post_fx::bloom_mask_wanted();
+   const bool cover = bloomMask && !data.seaSurface && data.maskCover;
+-  if (!data.seaSurface && !data.sunCaster && !cutout && !character && !cover)
++  // Blended scenery that writes depth (DrawData::maskOccluder) covers what is behind it, as solid scenery.
++  const bool occluder = !data.seaSurface && data.maskOccluder;
++  if (!data.seaSurface && !data.sunCaster && !cutout && !character && !cover && !occluder)
+     return;
+   const int kind = data.seaSurface ? (data.depthWrite ? 1 : 2)
+                    : character     ? (cutout ? (data.hasNormal && g_seaMaskNormals ? 9 : 5)
+                                              : data.hasNormal && g_seaMaskNormals ? 8 : 4)
++                   : occluder      ? (cutout ? 11 : 10) + (data.maskOccluderLit ? 2 : 0)
+                    : cutout        ? 3
+                    : cover         ? 7
+                    : data.smoothNormal && g_seaMaskNormals ? 6
+@@ -4078,7 +4100,13 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   set_next_draw_composite(plan.constants.projection[3][3] == 1.f && samplesCopy);
+   if (plan.constants.projection[3][3] != 1.f && plan.pipeline.depth_update != 0u && !character_draw(plan.pipeline))
+     log_terrain_normals(plan.pipeline, plan.has_texture ? plan.tex_address : plan.textures[0].address, plan.texmap_mask);
+-  // An effect that writes depth (effect_draw()).
++  // What writes depth in the frame but is in none of the sea mask's other kinds: blended scenery that writes depth
++  // (Outset's bushes: alpha-tested, and blended to fade as the camera nears). The sun map leaves it out (blended),
++  // but it hides what is behind it in the frame, so the sea mask's pass draws it too (render_sea_mask()). Without
++  // it, the marks of what stood behind (Link's character and HD light, a palm's green and normals) showed through
++  // the bush in the sun shadows. Only a shape the mask can draw: whole (no alpha test) or by its one texture's
++  // cutout. A card cut out by more textures, drawn whole, would hide the marks of what shows through its holes.
++  // An effect that writes depth (effect_draw()) is left out: the sea mask's depth keeps the scenery's under it.
+   const bool effectDepth = effect_depth_draw(plan);
+   // A particle drawn alpha-tested into the depth alone and then in colour over it (Dragon Roost Cavern's dust: the
+   // emitter's depth draws first, then their colour draws): its colour draw, an effect that writes no depth, is drawn
+@@ -4095,6 +4123,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   }
+   const bool effectOwnDepth = effectDepth || (plan.draw_tag != 0u && plan.pipeline.depth_test != 0u &&
+                                               s_depthParticles.contains(plan.draw_tag) && effect_draw(plan));
++  const bool maskOccluderShape =
++      alpha_test_always_passes(plan.pipeline.shader) ||
++      (plan.texmap_mask == 0u && textureBindGroup != 0 && plan.pipeline.shader.textured != 0u);
++  const bool maskOccluder = plan.pipeline.depth_test != 0u && plan.pipeline.depth_update != 0u &&
++                            plan.pipeline.color_update != 0u && plan.pipeline.primitive_topology == 0u &&
++                            plan.constants.projection[3][3] != 1.f && maskOccluderShape &&
++                            !alpha_test_always_fails(plan.pipeline.shader) &&
++                            !((sun_caster(plan.pipeline) || clothCaster || blendedCaster) ||
++                              (plan.texmap_mask == 0u && textureBindGroup != 0 && sun_caster_alpha(plan.pipeline)) ||
++                              character_draw(plan.pipeline) || seaSurface || effectDepth);
+   push_draw_command(DrawData{
+       .pipeline = pipeline,
+       .depthPipeline = depthPipeline,
+@@ -4138,6 +4176,9 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                    smoothNormal,
+       .toon = toon_draw(plan.pipeline),
+       .actorLight = key.shader.hd_actor_light != 0u,
++      .maskOccluder = maskOccluder,
++      .maskOccluderCutout = maskOccluder && !alpha_test_always_passes(plan.pipeline.shader),
++      .maskOccluderLit = maskOccluder && plan.pipeline.shader.lit_valid != 0u,
+   });
+   return true;
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index a953615208..7802438c47 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -104,6 +104,14 @@ struct DrawData {
+   // Solid and not blended but writing no depth (the sky's layers): with Wind Waker HD's bloom mask
+   // (post_fx::bloom_mask_wanted()) drawn into the sea mask, where it may glow.
+   bool maskCover = false;
++  // It writes depth and colour but is none of the above: blended scenery that writes depth (a bush fading as
++  // the camera nears, alpha-tested), which the sea mask's pass draws too so what it hides marks nothing. Only
++  // whole (no alpha test) or with one texture's cutout (maskOccluderCutout, as sunCasterAlpha).
++  bool maskOccluder = false;
++  bool maskOccluderCutout = false;
++  // Lit by the game (a bush): not the sea, so it clears the sea's mark under it as well. An unlit one (the
++  // waves' crests and the horizon's wave sheets over the sea) keeps it.
++  bool maskOccluderLit = false;
+   // Its vertices carry their own normals (the rim light takes a character's from the sea mask's pass).
+   bool hasNormal = false;
+   // Toon-shaded (a texgen from a lit colour): Wind Waker HD's rim light takes these characters, not a skinned
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 3aabf490f6..ab6e0bd94d 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -2122,7 +2122,14 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+     if (sea_shadow < 0.999 && view.facing.x > 0.5) {
+         let ssize = vec2<f32>(textureDimensions(mask));
+         let sp = clamp(vec2<i32>(in.uv * ssize), vec2<i32>(0), vec2<i32>(ssize) - vec2<i32>(1));
+-        shade = mix(shade, mix(vec3(1.0), shade, sea_shadow), textureLoad(mask, sp, 0).r);
++        // With HD's light (view.facing.y), HD's own sea: base x (1 - s + s x clamp(cloud + floor) x shadow) in
++        // linear light (its sea quad and wave grid, PS 949 and 951, s = 0.5): lit here already holds the shadow
++        // times the cloud term, and the sea takes neither the shade's ambient over the sunlight nor the AO.
++        var sea_shade = mix(vec3(1.0), shade, sea_shadow);
++        if (view.facing.y > 0.5) {
++            sea_shade = vec3(pow(max(1.0 - sea_shadow * (1.0 - lit) * fade, 0.0), 1.0 / 2.2));
++        }
++        shade = mix(shade, sea_shade, textureLoad(mask, sp, 0).r);
+     }
+     // Multiplied into the 8-bit scene: half a step of noise against bands (fs_ao_apply).
+     let noise = (fract(52.9829189 * fract(dot(in.pos.xy, vec2(0.06711056, 0.00583715)))) - 0.5) * (1.5 / 255.0);
+-- 
+2.49.0.windows.1
+

@@ -64,8 +64,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Wind Waker HD's hemisphere per vertex on all smooth scenery, from its own normals blended across each triangle, not renormalized: patches/recompcore/0214 (pdale-boop).
 # The sun shadows' smooth normals and HD colours kept per draw from frame to frame, compared in full (DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0 makes them every frame): patches/recompcore/0214 (pdale-boop).
 # Wind Waker HD's actor light (its toon shader for the characters: ramp switch times the sun shadow, hemisphere shade, rim; aurora_set_actor_light_hd; test switch): patches/recompcore/0215 (pdale-boop).
+# The sea as Wind Waker HD's: the sea rooms' square of sea in the sea mask at the size it is drawn, foliage in front clearing the marks behind it, and HD's own sea term on its light: patches/recompcore/0216 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=cb62dbc12a80b590be60fee4fc38322be647ee2c
+RECOMPCORE_SHA=53449c57d0591db7e837e834546b45e94eccbe23
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
