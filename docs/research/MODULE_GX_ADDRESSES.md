@@ -75,12 +75,18 @@ No lookup on the cut address alone can be safe, because it is a valid RAM addres
 
   It needs no RecompCore or DolRecomp source change.
 
+- **The same hooks as an opt-in option on the mod build.** Mods are added as variant chunks beside the base composite, and the base game is untouched when a mod is off (`docs/MODS.md`). So a fix option built that way should leave the base translation and `COMPOSITE_DIGEST` unchanged (not yet checked). It would be off by default, as AGENTS.md asks for rendering changes until each platform is tested. Costs:
+  - builds without the mod phase (`--no-mods`) don't get the low-module fix, and keep today's flags;
+  - where its chunks overlap Better Wind Waker's, a combined variant is needed, as for Better Wind Waker with widescreen;
+  - a bug fix sits among the options.
+
 ## Question for Chris
 
 Which way do you want the low modules fixed?
 1. Option-site hooks in the base translation, with a new composite digest.
 2. Relink the four modules' data above module 1, with DolRecomp and save-state version changes.
-3. Ship the high-module fix first as its own PR, then the low modules once a route is picked.
-4. Something else.
+3. The hooks as an opt-in option on the mod build (no-mod builds keep the bug).
+4. Ship the high-module fix first as its own PR, then the low modules once a route is picked.
+5. Something else.
 
 I'd like one PR to fix all of it if the route allows. I'm not sure which route is best.
