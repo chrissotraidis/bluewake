@@ -123,6 +123,41 @@ flowchart TD
 - **At the resume hook (0x802492EC),** the native reads the state back from registers and frames and continues that level's child loop. It returns up a level by reading the frame the translation's stack holds: a saved LR of 0x80249328 is a recursive call into the walk, anything else the original caller. The next tree hands over again.
 - **Both hooks are certified** by the same body hash, and either can decline. The translation then simply continues, because the state is the translation's own.
 
+### The translated walk, block by block
+
+From the generated chunk on the #503 stack (prepaid fast copies; private source, public facts):
+
+| Block | Cycles | Budget check at entry | What it does |
+|---|---:|---|---|
+| 0x802491F4 | 5 | yes | `stwu`, `mflr`, `stw` LR, `addi r11`; then the inline `_savegpr_27` |
+| inline `_savegpr_27` | 6 | its own (`downcount − 5`) and the direct-call readiness of the helper and of 0x80249208 | saves r27–r31; cycle suffix 0 |
+| 0x80249208 | 11 | no | copy the arguments to r27–r30; load the pass check and the virtual target; `bctrl` |
+| `ChkGrpThrough` (0x800A9684) | its own | — | through `bw_call_translated`; the existing leaf native reproduces it exactly |
+| 0x80249230, 0x80249238 | 2, 2 | no | filtered: return 0 |
+| 0x80249240 … 0x802492B8 | 7, 3, 4, 3, 2, 1, 2, 4, 4, 2 | no | the x/z bounds, then the y bounds; each float load writes the cycle suffix |
+| 0x802492C0, 0x802492E0 | 10, 3 | no | the polygon tree: if present, `bl GroundCrossRp` (exit: `pc` = 0x80248C38, LR = 0x802492EC) |
+| 0x802492EC, 0x802492F4 | 2, 1 | no | fold the tree's result into r31 |
+| 0x802492F8 | 4 | no | the first child; cycle suffix 0 |
+| 0x80249308, 0x80249314, 0x80249328, 0x80249330 | 3, 5, 2, 1 | **yes, and prepaid only if the deadline allows** | the child loop: `bl GroundCrossGrpRp` (LR = 0x80249328), fold its result |
+| 0x80249334 | 8 | no | the next sibling |
+| 0x8024934C, 0x80249350 | 1, 2 | no | the result to r3; then the inline `_restgpr_27` (6, suffix 0) |
+| 0x80249358 | 5 | no | `lwz` LR, `mtlr`, `addi r1`, `blr` |
+
+**Exits.** Every place the translation can hand the dispatcher a `pc` is an exit the native can take with exactly the translation's state:
+- **Budget checks:** the entry, the loop labels, and the helpers' checks.
+- **The helpers:** when the helper or its return isn't ready for a direct call.
+- **The filter call:** when its target isn't ready, or not the certified leaf.
+- **The tree call.**
+- **A child call, when the turn is over.**
+
+The native stops there with `pc` set when it cannot go on exactly:
+- a read that is not plain RAM;
+- a near deadline;
+- a loop label that cannot prepay;
+- a polygon tree.
+
+The dispatcher then resumes the translation. That is exact only when the dispatcher passes the boundary silently. So the native requires, at entry: the edge filter on, the host quiet, and the walk's labels unwatched. A pending reservation also makes the translation's stores take their slow path, so the native declines then too.
+
 ### Exactness
 
 - **Cycles:** each translated block's charge is taken from the generated chunk, as #541 did for skinning, including the inline `_savegpr`/`_restgpr` of the #503 stack and the leaf's own block charges. The native checks the turn's budget and deadline at every block entry the translation checks, and hands over (or declines, at the entry) where the translation would stop.

@@ -14,6 +14,7 @@ Status: M0 done (go); M1 designed: an exact, opt-in native walk that hands over 
 ### M1: Exact native walk with hand-over (depends: M0 go)
 
 - [x] M1-T00: Census: 96% of top-level walks are one group, no tree; the 3% big walks (two thirds of visits) always reach a tree, first after ≈ 11 visits. **The native must resume after each tree test**, not only hand over at the first.
+- [x] M1-T01a: The translated walk mapped block by block (cycles, budget checks, suffix writes, exits) from the generated chunk; [technical plan](TECH_PLAN.md#the-translated-walk-block-by-block).
 - [ ] M1-T01: Native walk, opt-in (`BLUEWAKE_NATIVE_GROUND_WALK=1`); certify-and-hook script; hand-over at each polygon tree and resume after it (hooks at 0x802491F4 and 0x802492EC).
 - [ ] M1-T02: Differential test at every hand-over, short turns included.
 
