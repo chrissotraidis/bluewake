@@ -4,6 +4,7 @@
  * Usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]
  *        native_skin_test MODULE --bench   (host time, translated vs native)
  *        native_skin_test MODULE --replay DIR   (cases captured in play)
+ *        native_skin_test MODULE --replay-module DIR   (the same, with the module's own native)
  */
 #include "native_skin.h"
 #include "StaticRecompABI.h"
@@ -175,6 +176,18 @@ static int load_module(const char* path, Module* module) {
 #undef SYMBOL
 }
 
+static bool always_ready(void* user, const CPUState* cpu, u32 entry) {
+    (void)user; (void)cpu;
+    return entry == BLUEWAKE_NATIVE_SKIN_ENTRY;
+}
+/* The native as the chunk's hook calls it (bluewake_native_skin_try), so its
+ * result codes reach the test as they reach the hook. */
+static void enable_try(void) {
+    if (!bluewake_composite_native_skin_v1(true, always_ready, NULL)) {
+        fprintf(stderr, "native skin unavailable in this build (no hardware FMA?)\n");
+        exit(1);
+    }
+}
 static unsigned routed_queries;
 static bool routed_ready(void* user, const CPUState* cpu, u32 entry) {
     (void)user;
@@ -262,11 +275,16 @@ static int run_to(Module* module, CPUState start, u8* ram, u32 stop) {
     CPUState* cpu = module->storage.cpu;
     *cpu = start; cpu->ram = ram;
     unsigned turns = 0;
-    while (cpu->pc != stop && cpu->downcount > -cpu->cycle_budget && !cpu->exception)
+    while (cpu->pc != stop && cpu->downcount > -cpu->cycle_budget && !cpu->exception) {
+        const u32 from = cpu->pc; const s64 before = cpu->downcount;
         if (++turns > 100000 || !module->desc->dispatch(cpu, cpu->pc)) return 0;
+        if (getenv("BLUEWAKE_SKIN_TEST_TRACE") && turns <= 12)
+            fprintf(stderr, "  dispatch %08X dc %lld -> pc %08X dc %lld budget %lld lr %08X r1 %08X\n", from,
+                    (long long)before, cpu->pc, (long long)cpu->downcount, (long long)cpu->cycle_budget, cpu->lr, cpu->gpr[1]);
+    }
     return 1;
 }
-static int replay(Module* module, const char* folder) {
+static int replay(Module* module, const char* folder, bool routed) {
     u8* ram = module->storage.mem1;
     u8* saved = malloc(RAM_SIZE);
     u8* want = malloc(RAM_SIZE);
@@ -292,11 +310,22 @@ static int replay(Module* module, const char* folder) {
         CPUState reference = *module->storage.cpu;
         memcpy(want, ram, RAM_SIZE);
         memcpy(ram, saved, RAM_SIZE);
-        CPUState native = start; native.ram = ram;
-        const int result = bluewake_native_skin(&native);
-        if (result == 0) { printf("case %u: declined\n", n); continue; }
-        native.pc = result == 2 ? 0x802EE6F0u : 0x802EE834u;
-        if (!run_to(module, native, ram, stop)) return 1;
+        int result;
+        if (routed) {
+            /* The module's own native, through its hook: the code the game runs. */
+            if (module->native_skin == NULL || !module->native_skin(true, routed_ready, NULL)) return 1;
+            const unsigned before = routed_queries;
+            if (!run_to(module, start, ram, stop)) return 1;
+            module->native_skin(false, NULL, NULL);
+            result = routed_queries != before ? 1 : 0;
+            if (module->report && n < 3) module->report();
+        } else {
+            CPUState native = start; native.ram = ram;
+            result = bluewake_native_skin_try(&native);
+            if (result == 0) { printf("case %u: declined\n", n); continue; }
+            native.pc = result == 2 ? 0x802EE6F0u : 0x802EE834u;
+            if (!run_to(module, native, ram, stop)) return 1;
+        }
         CPUState actual = *module->storage.cpu;
         actual.ram = reference.ram;
         cases++;
@@ -308,6 +337,7 @@ static int replay(Module* module, const char* folder) {
             if (ram[a] != want[a] && diffs++ < 32)
                 printf("case %u: RAM %08X got %02X want %02X\n", n, GC_RAM_BASE + a, ram[a], want[a]);
         if (diffs) bad++;
+        printf("case %u: got pc %08X downcount %lld r1 %08X\n", n, actual.pc, (long long)actual.downcount, actual.gpr[1]);
         printf("case %u: result %d, %s (pc %08X, downcount %lld, budget %lld, deadline %lld)\n", n, result,
                diffs ? "DIFFERS" : "identical", reference.pc, (long long)reference.downcount,
                (long long)start.cycle_budget, (long long)start.cycle_deadline_budget);
@@ -317,7 +347,7 @@ static int replay(Module* module, const char* folder) {
 }
 
 int main(int argc, char** argv) {
-    if (argc == 4 && strcmp(argv[2], "--replay") == 0) {
+    if (argc == 4 && (strcmp(argv[2], "--replay") == 0 || strcmp(argv[2], "--replay-module") == 0)) {
 #if defined(_WIN32)
         _putenv("BLUEWAKE_NATIVE_SKIN_PARTIAL=1");
 #else
@@ -325,7 +355,9 @@ int main(int argc, char** argv) {
 #endif
         Module module = {0};
         if (!load_module(argv[1], &module)) return 1;
-        return replay(&module, argv[3]);
+        enable_try();
+        if (module.native_skin) module.native_skin(false, NULL, NULL); /* the reference: translation only */
+        return replay(&module, argv[3], strcmp(argv[2], "--replay-module") == 0);
     }
     if (argc == 3 && strcmp(argv[2], "--bench") == 0) {
         Module module = {0};
@@ -343,6 +375,7 @@ int main(int argc, char** argv) {
     setenv("BLUEWAKE_NATIVE_SKIN_PARTIAL", "1", 1);
 #endif
     const unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 4000u;
+    enable_try();
     Module original = {0}, candidate = {0};
     if (!load_module(argv[1], &original)) return 1;
     const StaticRecompModuleDesc* mod = original.desc;
@@ -380,7 +413,7 @@ int main(int argc, char** argv) {
         CPUState native = c;
         ppc_fpscr_updated(&native);
         CPUState untouched = native;
-        const int result = bluewake_native_skin(&native);
+        const int result = bluewake_native_skin_try(&native);
         if (result != 0) {
             /* The hook's goto: the epilogue, or the loop head, which records
              * its PC when the turn stops there. The translation finishes. */

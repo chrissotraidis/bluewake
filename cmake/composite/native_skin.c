@@ -60,9 +60,12 @@ BW_SKIN_EXPORT int bluewake_composite_native_skin_v1(
     s_ready_user = s_ready != NULL ? user : NULL;
     return s_ready != NULL;
 }
+/* The native's own result (0, 1 or 2): a logical `&&` here would turn a partial
+ * run's 2 into 1, sending the hook to the epilogue with envelopes left (#541). */
 int bluewake_native_skin_try(CPUState* cpu) {
-    return cpu != NULL && s_ready != NULL &&
-           s_ready(s_ready_user, cpu, BLUEWAKE_NATIVE_SKIN_ENTRY) && bluewake_native_skin(cpu);
+    if (cpu == NULL || s_ready == NULL || !s_ready(s_ready_user, cpu, BLUEWAKE_NATIVE_SKIN_ENTRY))
+        return 0;
+    return bluewake_native_skin(cpu);
 }
 static unsigned long long s_skin_runs, s_skin_partial, s_skin_declined, s_skin_joints;
 /* Cycles from the entry to the loop's first head: the prologue blocks (15),
