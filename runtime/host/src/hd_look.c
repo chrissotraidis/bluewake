@@ -729,8 +729,9 @@ static void hd_sun_rule(CPUState* cpu, float out[3]) {
     aurora_set_sun_hd_light(1, night ? 1 : 0, fade);
 }
 
-// Wind Waker HD's own normals for the stage in play, for the sun shadows' facing term: the HD pack's
-// optional/hd-normals/<stage>.bin (made by the importer), handed to the renderer as the stage changes.
+// Wind Waker HD's own normals for the stage in play, for the sun shadows' facing term, and its rooms' vertex
+// colours for HD's light: the HD pack's optional/hd-normals/<stage>.bin and optional/hd-colours/<stage>.bin (made
+// by the importer), handed to the renderer as the stage changes.
 static void hd_normals_stage(CPUState* cpu) {
     static char s_stage[9];
     char stage[9] = {0};
@@ -743,6 +744,7 @@ static void hd_normals_stage(CPUState* cpu) {
     char path[4096];
     if (stage[0] == '\0' || pack == NULL || pack[0] == '\0') {
         aurora_set_hd_normals(NULL);
+        aurora_set_hd_stage_colours(NULL);
         return;
     }
     snprintf(path, sizeof path, "%s/optional/hd-normals/%s.bin", pack, stage);
@@ -752,6 +754,12 @@ static void hd_normals_stage(CPUState* cpu) {
     aurora_set_hd_normals(f != NULL ? path : NULL);
     if (g_trace)
         fprintf(stderr, "[hd-look] HD normals for %s: %s\n", stage, f != NULL ? path : "none");
+    // And its rooms' own vertex colours (HD remade them), optional/hd-colours/<stage>.bin.
+    snprintf(path, sizeof path, "%s/optional/hd-colours/%s.bin", pack, stage);
+    f = fopen(path, "rb");
+    if (f != NULL)
+        fclose(f);
+    aurora_set_hd_stage_colours(f != NULL ? path : NULL);
 }
 
 // Wind Waker HD's cloud shadow texture for the cloud shadows on HD's rule: the HD pack's
@@ -816,6 +824,90 @@ static void cloud_floor(CPUState* cpu, bool on) {
     }
 }
 
+// Wind Waker HD's room lights (the HD pack's optional/hd-sky/room-lights.bin, made by the importer from each
+// stage's baseLight.bin): for each stage, 64 pitches then 64 yaws (big-endian s16), one a room. HD's
+// setLightPosHD (kankyo3_roomLight, d_kankyo_3.cpp) lights the room Link is in from (cos p sin y, sin p,
+// cos p cos y) when its angles are set, and from the sun by the clock when they aren't; never in M2tower.
+// Golden values: Dragon Roost Cavern's room 0 (-0.477, 0.811, 0.338), its shadow pass's light in Cemu.
+typedef struct RoomLights {
+    char name[16];
+    u8 angles[256];
+} RoomLights;
+static RoomLights* g_room_lights;
+static u32 g_room_light_count;
+
+static void room_lights_load(void) {
+    static bool s_tried;
+    if (s_tried)
+        return;
+    s_tried = true;
+    const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+    if (pack == NULL || pack[0] == '\0')
+        return;
+    char path[4096];
+    snprintf(path, sizeof path, "%s/optional/hd-sky/room-lights.bin", pack);
+    FILE* f = fopen(path, "rb");
+    if (f == NULL)
+        return;
+    u8 head[8];
+    if (fread(head, 1, 8, f) == 8 && memcmp(head, "BWRL", 4) == 0) {
+        const u32 count = (u32)head[4] << 24 | (u32)head[5] << 16 | (u32)head[6] << 8 | head[7];
+        if (count > 0u && count <= 1024u && (g_room_lights = calloc(count, sizeof *g_room_lights)) != NULL) {
+            for (; g_room_light_count < count; ++g_room_light_count) {
+                RoomLights* r = &g_room_lights[g_room_light_count];
+                if (fread(r->name, 1, 16, f) != 16 || fread(r->angles, 1, 256, f) != 256)
+                    break;
+                r->name[15] = '\0';
+            }
+        }
+    }
+    fclose(f);
+    if (g_trace)
+        fprintf(stderr, "[hd-look] HD room lights: %u stages from %s\n", g_room_light_count, path);
+}
+
+// The light HD lights the room Link is in from (the direction toward it), or false for HD's sun by the clock.
+static bool room_light(CPUState* cpu, float out[3]) {
+    room_lights_load();
+    char stage[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+    const int room = (s8)mem_read8(cpu, 0x803F6A78u);       // dStage_roomControl_c::mStayNo
+    if (room < 0 || room >= 64 || strcmp(stage, "M2tower") == 0)
+        return false;
+    for (u32 i = 0; i < g_room_light_count; ++i) {
+        const RoomLights* r = &g_room_lights[i];
+        if (strncmp(r->name, stage, 16) != 0)
+            continue;
+        const int pitch = (s16)((u32)r->angles[room * 2] << 8 | r->angles[room * 2 + 1]);
+        const int yaw = (s16)((u32)r->angles[128 + room * 2] << 8 | r->angles[128 + room * 2 + 1]);
+        if (pitch == 0 && yaw == 0)
+            return false;
+        const float p = (float)(u16)pitch * (6.28318531f / 65536.0f), y = (float)(u16)yaw * (6.28318531f / 65536.0f);
+        out[0] = cosf(p) * sinf(y);
+        out[1] = fabsf(sinf(p));  // getShadowDirection turns a light from below up
+        out[2] = cosf(p) * cosf(y);
+        return true;
+    }
+    return false;
+}
+
+// HD lights its dungeons' rooms as its outdoor scenery, without the clouds and the edge light (its room shader,
+// captures-nov3 s01/s02: hemisphere ambient, N.L to the room's light, the room light's shadow map and SSAO): the
+// stage types HD's setLightPosHD takes for dungeons (1 dungeon, 3 boss, 4 subdungeon, 6 miniboss), while HD's
+// palettes are in (its colours for the room). The casters are culled as HD culls them there
+// (aurora_set_sun_caster_cull), so a closed room's ceiling doesn't shade its floor, and HD's torches come from its
+// light buffer. BLUEWAKE_HD_ROOM_SHADOWS=0 keeps the rooms as before (the sun shadows outdoors only).
+static bool sky_palettes_shown(void);
+static bool hd_room(u32 type) {
+    static int s_on = -1;
+    if (s_on < 0) {
+        const char* value = getenv("BLUEWAKE_HD_ROOM_SHADOWS");
+        s_on = value == NULL || value[0] != '0';
+    }
+    return s_on && (type == 1u || type == 3u || type == 4u || type == 6u) && sky_palettes_shown();
+}
+
 // The game's glow around torches, lanterns and Bokoblins' sticks: spheres into the frame's alpha, then its colour
 // over them (dDlst_alphaModel_c, at most 64 a frame). HD draws none (d_a_ep, d_a_kantera, d_a_boko, d_a_bpw: no
 // alpha model); its light buffer lights the walls instead, so with HD's rule for it the game gets no room for them,
@@ -835,16 +927,23 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
     hd_normals_stage(cpu);
     hd_cloud_texture();
     hd_object_tables();
-    bool show = false;
+    bool show = false, sun_show = false;
     bool torch_view = false;
     if (g_clouds == 1 || g_sun == 1 || g_edge == 1 || g_torch == 1) {
         const u32 info = mem_read32(cpu, kStagInfo);
         const u32 type = guest_pointer(info) ? (mem_read32(cpu, info + 0x0Cu) >> 16) & 7u : 2u;
         const u32 view = mem_read32(cpu, kCurrentView);
         const bool outdoors = type == 0u || type == 7u;
+        const bool room = !outdoors && hd_room(type);
+        // HD's casters culled as their materials are, wherever its sun shadows are (its maps in Dragon Roost
+        // Cavern, at Outset and in the Forest Haven: back faces culled but for a double-sided material), so what
+        // faces away from the light casts nothing: a closed room's ceiling, or the Forest Haven's (Omori, an
+        // outdoor stage type), which shaded all of its floor with both sides cast.
+        aurora_set_sun_caster_cull(outdoors || room ? 1 : 0);
         if (g_trace && retrace % 300u == 0u)
-            fprintf(stderr, "[hd-look] stage type %u (%s)\n", type, outdoors ? "outdoors" : "indoors");
-        if ((outdoors || g_torch == 1) && guest_pointer(view)) {
+            fprintf(stderr, "[hd-look] stage type %u (%s)\n", type,
+                    outdoors ? "outdoors" : room ? "indoors, HD's lit room" : "indoors");
+        if ((outdoors || room || g_torch == 1) && guest_pointer(view)) {
             float inv[12];
             for (u32 i = 0; i < 12; ++i)
                 inv[i] = read_float(cpu, view + kViewInvMtx + i * 4u);
@@ -879,20 +978,30 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                     s_hd_rule = rule != NULL && rule[0] == '1';
                 }
                 // HD's rule is for its sun shadows; with them off the edge light keeps the game's sun.
+                float light[3];
+                bool room_lit = false;
                 if (s_hd_rule && g_sun == 1) {
-                    float light[3];
-                    hd_sun_rule(cpu, light);
-                    aurora_set_sun_direction(light[0], light[1], light[2]);
+                    room_lit = room && room_light(cpu, light);
+                    if (room_lit) {
+                        aurora_set_sun_direction(light[0], light[1], light[2]);
+                        aurora_set_sun_hd_light(1, 0, 0.0f);  // a room's light: no night side, no day/night fade
+                        if (g_trace && retrace % 300u == 0u)
+                            fprintf(stderr, "[hd-look] HD's room light %.3f %.3f %.3f\n", light[0], light[1], light[2]);
+                    } else {
+                        hd_sun_rule(cpu, light);
+                        aurora_set_sun_direction(light[0], light[1], light[2]);
+                    }
                 } else {
                     aurora_set_sun_direction(sx, sy, sz);
                 }
                 // The same in the camera's space (its axes are inv's columns),
-                // for the room culling below.
-                const float sl = sqrtf(sx * sx + sy * sy + sz * sz);
+                // for the room culling below; in a room lit by its own light, that light.
+                const float lx = room_lit ? light[0] : sx, ly = room_lit ? light[1] : sy, lz = room_lit ? light[2] : sz;
+                const float sl = sqrtf(lx * lx + ly * ly + lz * lz);
                 if (sl > 0.0f) {
                     for (int a = 0; a < 3; ++a)
-                        g_sun_view[a] = (inv[a] * sx + inv[4 + a] * sy + inv[8 + a] * sz) / sl;
-                    g_sun_up = sy / sl;
+                        g_sun_view[a] = (inv[a] * lx + inv[4 + a] * ly + inv[8 + a] * lz) / sl;
+                    g_sun_up = ly / sl;
                 }
                 if (g_torch == 1) {
                     const float eye[3] = {inv[3], inv[7], inv[11]};
@@ -903,10 +1012,11 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
                     fprintf(stderr, "[hd-look] sun from the eye %.0f %.0f %.0f, HD's cascade splits %.0f %.0f\n", sx,
                             sy, sz, split_middle, split_far);
                 show = outdoors;
+                sun_show = outdoors || room;
             }
         }
     }
-    const bool clouds_on = show && g_clouds == 1, sun_on = show && g_sun == 1, edge_on = show && g_edge == 1;
+    const bool clouds_on = show && g_clouds == 1, sun_on = sun_show && g_sun == 1, edge_on = show && g_edge == 1;
     const bool torch_on = torch_view && g_torch == 1;
     if (torch_on != g_torch_shown && g_torch >= 0) {
         aurora_set_torch_light(torch_on);
@@ -1673,12 +1783,13 @@ static int sky_palette(CPUState* cpu, u32 envr_idx, u32 colpat, u32 slot) {
 enum { kStayRoom = 0x803F6A78u };
 
 // A room change (Link through a door): the scenery's light, which the host takes from the room Link is in
-// (mStayNo: the palettes of sky_blend_state's scenery side, HD's brightness for them), fades from the room he left
-// to the new one over kRoomFadeRetraces, as the game blends its own light from the floor's palettes when he crosses
-// (its mColPatBlend, 42 retraces in kindan). Changed at once, all of the picture jumped when Forbidden Woods' door
-// into its clearing (room 1 to 2) opened: HD's brightness 1.00 to 1.65, the shade's ground and lit colours. In HD
-// each room's scenery keeps its own light throughout (its tevstr), so there is no change at all there; the host has
-// one light for the picture.
+// (mStayNo: the palettes of sky_blend_state's scenery side, HD's brightness for them, the room's light), fades
+// from the room he left to the new one over kRoomFadeRetraces, as the game blends its own light from the floor's
+// palettes when he crosses (its mColPatBlend, 42 retraces in kindan). Changed at once, all of the picture jumped
+// when Forbidden Woods' door into its clearing (room 1 to 2) opened: HD's brightness 1.00 to 1.65, the shade's
+// ground and lit colours, the room light's direction. In HD each room's scenery keeps its own light throughout
+// (its tevstr), so there is no change at all there; the host has one light for the picture. The room light's
+// direction still changes at once (room_light): turned through the fade, the shadows swept across the clearing.
 enum { kRoomFadeRetraces = 42 };
 static struct {
     char stage[8];
@@ -2350,6 +2461,120 @@ static void floor_colours(CPUState* cpu, bool hd) {
     }
 }
 
+// Scenery Wind Waker HD remade away: a room model's vertices whose HD model (the same draw, the same vertex order)
+// moved them, written into the game's vertex arrays while HD's palettes are in, each original kept and written back
+// when they go. HD's palettes make the GameCube's sky and sea one colour no longer, and this geometry then shows.
+// Tower of the Gods' sky corridor (Siren room 18): the GameCube's room has a 70,000-unit square at y -14,102 under
+// the tower, fogged part way to the haze, its hard edge against HD's pale cyan sky (Dale's quick-35801). HD's room 18
+// draws the same quad (Cemu nov3-eve S2, event 2492: 6 indices, first among the room's draws) as a 305-unit square
+// at y -20,348, which never shows, so its corridor looks down on the sky dome alone. The square's four corners are
+// four consecutive entries of a model's position array (two models hold it); only such whole sets are written, never
+// a lone corner elsewhere (other shapes share two of its points). BLUEWAKE_HD_ROOM_SHAPES=0 keeps the GameCube's.
+typedef struct RoomShape {
+    const char* stage;
+    int room;  // looked for while Link is in it
+    float gc[4][3], hd[4][3];
+} RoomShape;
+static const RoomShape kRoomShapes[] = {
+    {"Siren", 18,
+     {{35000.0f, -14101.9f, 25179.0f}, {-35000.0f, -14101.9f, 25179.0f}, {35000.0f, -14101.9f, -44821.0f},
+      {-35000.0f, -14101.9f, -44821.0f}},
+     {{152.781f, -20347.6f, 152.748f}, {-152.781f, -20347.6f, 152.748f}, {152.781f, -20347.6f, -152.816f},
+      {-152.781f, -20347.6f, -152.816f}}},
+};
+enum { kRoomShapeCount = sizeof kRoomShapes / sizeof kRoomShapes[0], kRoomShapeSets = 4 };
+static struct {
+    u32 at[kRoomShapeSets];      // each whole set's first entry (0: none)
+    u8 corner[kRoomShapeSets][4]; // which corner each of its four entries is
+    u32 sets;
+} g_room_shape[kRoomShapeCount];
+
+static bool vertex_is(CPUState* cpu, u32 a, const float v[3]) {
+    for (u32 i = 0; i < 3u; ++i)
+        if (!(fabsf(read_float(cpu, a + i * 4u) - v[i]) <= 0.05f))
+            return false;
+    return true;
+}
+
+static void vertex_write(CPUState* cpu, u32 a, const float v[3]) {
+    for (u32 i = 0; i < 3u; ++i)
+        write_float(cpu, a + i * 4u, v[i]);
+}
+
+// Whether each entry of set s holds HD's corner (hd) or the GameCube's.
+static bool room_shape_holds(CPUState* cpu, u32 n, u32 s, bool hd) {
+    for (u32 e = 0; e < 4u; ++e) {
+        const u32 c = g_room_shape[n].corner[s][e];
+        if (!vertex_is(cpu, g_room_shape[n].at[s] + e * 12u, hd ? kRoomShapes[n].hd[c] : kRoomShapes[n].gc[c]))
+            return false;
+    }
+    return true;
+}
+
+static void room_shapes_restore(CPUState* cpu, u32 n, bool write) {
+    for (u32 s = 0; write && s < g_room_shape[n].sets; ++s)
+        if (room_shape_holds(cpu, n, s, true))
+            for (u32 e = 0; e < 4u; ++e)
+                vertex_write(cpu, g_room_shape[n].at[s] + e * 12u, kRoomShapes[n].gc[g_room_shape[n].corner[s][e]]);
+    memset(&g_room_shape[n], 0, sizeof g_room_shape[n]);
+}
+
+static void room_shapes(CPUState* cpu, bool hd, unsigned long long retrace) {
+    static int s_on = -1;
+    if (s_on < 0)
+        s_on = setting("BLUEWAKE_HD_ROOM_SHAPES") != 0;
+    char stage[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+    const int stay = (s8)mem_read8(cpu, 0x803F6A78u);       // dStage_roomControl_c::mStayNo
+    for (u32 n = 0; n < kRoomShapeCount; ++n) {
+        const bool want = s_on && hd && strcmp(stage, kRoomShapes[n].stage) == 0;
+        if (g_room_shape[n].sets != 0u) {
+            // Still HD's where it was written (the room still loaded), and still wanted: nothing to do.
+            bool held = true;
+            for (u32 s = 0; s < g_room_shape[n].sets && held; ++s)
+                held = room_shape_holds(cpu, n, s, true);
+            if (held && want)
+                continue;
+            room_shapes_restore(cpu, n, held);  // gone (the room unloaded): its memory isn't the model's now
+        }
+        // Looked for (a scan of MEM1) as Link comes into the room, then twice a second while not found.
+        static int s_stay[kRoomShapeCount];
+        const bool arrived = stay != s_stay[n];
+        s_stay[n] = stay;
+        if (!want || stay != kRoomShapes[n].room || (!arrived && retrace % 30u != 0u))
+            continue;
+        const float* gc = &kRoomShapes[n].gc[0][0];
+        for (u32 a = 0x80000000u; a + 48u <= 0x81800000u && g_room_shape[n].sets < kRoomShapeSets; a += 4u) {
+            if (fabsf(read_float(cpu, a) - gc[0]) > 0.05f && fabsf(read_float(cpu, a) + gc[0]) > 0.05f)
+                continue;
+            u8 corner[4];
+            u32 seen = 0u;
+            for (u32 e = 0; e < 4u; ++e) {
+                corner[e] = 4u;
+                for (u32 c = 0; c < 4u; ++c)
+                    if (!(seen & (1u << c)) && vertex_is(cpu, a + e * 12u, kRoomShapes[n].gc[c])) {
+                        corner[e] = (u8)c;
+                        seen |= 1u << c;
+                        break;
+                    }
+                if (corner[e] == 4u)
+                    break;
+            }
+            if (seen != 0xFu)
+                continue;
+            const u32 s = g_room_shape[n].sets++;
+            g_room_shape[n].at[s] = a;
+            memcpy(g_room_shape[n].corner[s], corner, 4);
+            for (u32 e = 0; e < 4u; ++e)
+                vertex_write(cpu, a + e * 12u, kRoomShapes[n].hd[corner[e]]);
+            if (g_trace)
+                fprintf(stderr, "[hd-look] %s room %d: HD's room shape written at %08X\n", stage, stay, a);
+            a += 44u;
+        }
+    }
+}
+
 static void sky(CPUState* cpu) {
     if (g_sky_count == 0u)
         return;
@@ -2413,6 +2638,8 @@ void bluewake_hd_look_state_loaded(bool reapply) {
     // The loaded RAM has its own collision bytes: forget what was kept, without writing it.
     for (u32 slot = 0; slot < kBgChkCount; ++slot)
         floor_colours_restore(NULL, slot, false);
+    for (u32 n = 0; n < kRoomShapeCount; ++n)
+        room_shapes_restore(NULL, n, false);
 }
 
 // Wind Waker HD's far blur level for the hour (d_kankyo_4.cpp's preset blend): wwHD_basic's 1.2 from 08:00 to 18:00,
@@ -2449,6 +2676,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
     clouds(cpu, retrace);
     sky(cpu);
     floor_colours(cpu, sky_palettes_shown());
+    room_shapes(cpu, sky_palettes_shown(), retrace);
     far_blur_level(cpu);
     if (g_trace && retrace % 300u == 0u)
         trace_islands(cpu, retrace);

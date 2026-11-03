@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "936e2cb3d53adb73d9c5173f84361ba9384af906",
+      "sha": "dca1d7a8efa655d1796cc998eb81573817716c1e",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -888,6 +888,27 @@
             "patches/recompcore/0223-Characters-each-character-s-own-palettes-on-Wind-Waker-HD-s-actor-light-aurora_set_actor_light_hd_own.patch"
           ],
           "evidence": "pdale-boop's: at Windfall (T09a) a kid's shirt goes from (132, 81, 66) to (218, 140, 109) against Cemu's (232, 160, 127); Link's own colours identical; gxcore tests 13/13."
+        },
+        "hd_caster_cull": {
+          "runtime": "dca1d7a8efa655d1796cc998eb81573817716c1e",
+          "tracked_patches": [
+            "patches/recompcore/0224-Sun-shadows-Wind-Waker-HD-s-caster-culling-and-lava-glow-in-its-lit-rooms-aurora_set_sun_caster_cull.patch"
+          ],
+          "evidence": "pdale-boop's: in Dragon Roost Cavern's room 0, 225 of HD's 240 map draws cull back faces, the rest none; with them culled the floor is lit and shows Link's shadow, as in HD. Lava glow: Cave01 from 0.47 to 0.97 of HD's brightness and to its hue (red share 0.50, HD 0.49); GanonB from 0.60 to 0.86."
+        },
+        "hd_lava_drc": {
+          "runtime": "dca1d7a8efa655d1796cc998eb81573817716c1e",
+          "tracked_patches": [
+            "patches/recompcore/0224-Sun-shadows-Wind-Waker-HD-s-caster-culling-and-lava-glow-in-its-lit-rooms-aurora_set_sun_caster_cull.patch"
+          ],
+          "evidence": "pdale-boop's: Dragon Roost Cavern room 11's lit right wall from 0.71 of HD's red to 1.02 (Cemu, 12:00)."
+        },
+        "hd_water_floor": {
+          "runtime": "dca1d7a8efa655d1796cc998eb81573817716c1e",
+          "tracked_patches": [
+            "patches/recompcore/0224-Sun-shadows-Wind-Waker-HD-s-caster-culling-and-lava-glow-in-its-lit-rooms-aurora_set_sun_caster_cull.patch"
+          ],
+          "evidence": "pdale-boop's: ToG room 0 at 12:00, 16 frames: the floor's linear luminance from 0.155 to 0.098 (Cemu 0.074), the lit caustics from 0.223 to 0.120 (Cemu about 0.10); the rest is the boat's ripple quads. WGSL test of the match and its rejects."
         }
       }
     },

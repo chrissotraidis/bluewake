@@ -421,3 +421,23 @@ intensities (Link's). The host gives the GameCube's global actor C0 and K0 (`aur
 character draw whose toon registers (C0, the ramp stage's KONST) differ takes HD's c0 and k times those ratios in
 linear light (clamped 0-4), the shadow colour global. Link's own draws have ratio 1.
 `DOL_AURORA_ACTOR_LIGHT_HD_OWN=0` turns it off.
+
+Patch 0224 adds `aurora_set_sun_caster_cull`: the scenery's casters take their draw's own cull mode, as Wind Waker
+HD draws its shadow map's casters, so a closed room's ceiling no longer shades the whole floor from a room light
+above. Characters keep their own. The host turns it on in HD's lit rooms; `DOL_AURORA_SUN_SHADOW_CASTER_CULL`
+overrides it for tests. In HD's lava and fire rooms (GanonB, Cave01, MiniKaz, Ganon's Tower's lava
+parts) a lit room draw in the GameCube's two-stage form adds HD's lava glow, albedo x lava K x 4 x the vertex red
+squared, outside the shade, with lava K the material's konst2 animation at the game frame, from a version 2
+stage colour table (`aurora_set_hd_stage_colours`).
+
+Patch 0224 also gives Dragon Roost Cavern's lava rooms Wind Waker HD's glow: its shaders for the konst2 materials add
+albedo x lava K x 4 x (1 - the vertex alpha) squared (read from the disc's model.sharcfb), which the importer gives
+as the glow. Their GameCube materials are three stages, the third the GameCube's own glow (PREV + C1 x APREV),
+which HD's programs don't have: the draw takes C1 black and the glow goes on after stage 1. Two-stage draws make
+the same WGSL as before.
+
+Patch 0224 also draws the Tower of the Gods' water floor (Obj_Humi's Humi00_v, the only material of its kind) as Wind
+Waker HD does: KONST + C0 x texel, plus KONST x the second layer's texel x (1 - the vertex alpha x the first's), on
+the colours made linear, then back to gamma for the GX fog. `gxc::hd_water_floor_stage()` matches its three
+stages, and `ShaderKey::hd_water` flags it while HD's palettes are in place. On the GameCube's gamma colours the
+caustics came out twice HD's brightness.

@@ -1,0 +1,864 @@
+From dca1d7a8efa655d1796cc998eb81573817716c1e Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 07:29:52 -0600
+Subject: [PATCH] Sun shadows: Wind Waker HD's caster culling and lava glow in
+ its lit rooms (aurora_set_sun_caster_cull)
+
+HD draws its shadow map's casters with their materials' cull mode (an HD capture of
+Dragon Roost Cavern's room 0: 225 of its 240 map draws cull back faces, the
+rest none), with its bias (80, 3) for the faces that do cast. RecompCore drew
+every caster's both sides, so in a closed room the ceiling, seen from the room
+light above, shaded the whole floor.
+
+aurora_set_sun_caster_cull(on): the scenery's casters take their draw's own cull
+mode (DrawData::sunCasterCull, front face clockwise as the scene's pipelines);
+characters keep their own (none, or DOL_AURORA_SUN_SHADOW_CHARACTER_CULL).
+DOL_AURORA_SUN_SHADOW_CASTER_CULL=1 or 0 overrides the host for tests. The host
+turns it on in HD's lit rooms only; outdoors keeps both sides until it is
+checked there.
+
+Wind Waker HD's lava glow in its lava and fire rooms (GanonB, Cave01, MiniKaz,
+Ganon's Tower's lava parts). HD's lava materials (PS 4345 in Cemu) add albedo
+x lava K x 4 x the vertex red squared to the light, outside the shade, with
+lava K the material's konst2 animation at the game frame (GanonB's capture:
+0.453, 0.0415, 0.0005, its frame 23). A version 2 stage table has that curve
+and each vertex's glow; a lit room draw in the GameCube's two-stage form (the
+light, then x the texture) takes it from its vertices' colour 1 after the last
+stage, and their share of the lit light goes through the sea mask's pass into
+the normals' alpha, which the sun pass leaves unshaded. Cave01 goes from 0.47
+to 0.97 of HD's brightness and from HD's red (0.77 red share) to its hue
+(0.50, HD 0.49); GanonB from 0.60 to 0.86.
+
+Dragon Roost Cavern's lava glow. HD's shaders for its konst2 materials (the
+disc's model.sharcfb) add albedo x lava K x 4 x (1 - the vertex alpha)
+squared, which the importer now gives as the glow, by the same rule as
+Ganon's Tower's. Its _v_x materials are three stages on the GameCube, a
+third PREV + C1 x APREV (the GameCube's own glow), and HD's program for
+each is its plain material's: no such term. hd_lava_shape takes that form,
+the draw takes C1 black (hd_light_constants()), and the glow goes on after
+stage 1, on its texel (emit_hd_lava(); stage 2 has none). Two-stage draws
+make the same WGSL as before. Room 11's lit right wall goes from 0.71 of
+HD's red to 1.02 (Cemu, 12:00).
+
+The Tower of the Gods' water floor (Obj_Humi's Humi00_v, the only material of its kind on the disc) sums its colours
+in linear light, as Wind Waker HD's shader for it does (Cemu, ToG room 0, PS 27623): KONST + C0 x texel, plus
+KONST x the second layer's texel x (1 - the vertex alpha x the first's), on the colours made linear in 8 bits
+((c / 255)^2.2, HD's constants 4,11,10 and 11,28,27 for the game's 39,61,59 and 61,93,92), then back to gamma for the
+GX fog. On the GameCube's gamma colours the caustics came out twice HD's brightness in linear. gxc::
+hd_water_floor_stage() matches its three stages; ShaderKey::hd_water (the pad byte) flags it while HD's palettes are
+in place (post_fx::actor_light_wanted()). HD's (1 + light buffer) / 2 is 1 where the floor is lit and is left to the
+sun pass. WGSL test: the match, its rejects and the block's place.
+
+ToG room 0 at 12:00, 16 frames: the floor's linear luminance 0.155 -> 0.098 (Cemu 0.074); the lit caustics
+0.223 -> 0.120 (Cemu about 0.10), the floor colour itself unchanged. The rest is the boat's ripple quads.
+ToG room 1, the sea and Cave01 are unchanged (no draw of the shape there).
+---
+ .../graphics/aurora/include/aurora/aurora.h   |   9 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 186 +++++++++++++++---
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   2 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp |  26 +++
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |   4 +
+ .../include/gxruntime/gxcore/shader.hpp       |  15 +-
+ .../graphics/gxcore/src/gxcore_shader.cpp     |  90 ++++++++-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 120 +++++++++++
+ 8 files changed, 424 insertions(+), 28 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index a94c74f327..eb800e0b1a 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -241,13 +241,20 @@ void aurora_set_sun_hd_light(int on, int night, float fade);
+    true sun: with HD's light rule the light is held at 40,000 high at dawn and dusk. DOL_AURORA_CLOUD_SHADOWS_HD_POWER
+    still overrides both. Takes effect at the next frame. */
+ void aurora_set_cloud_hd_floor(float floor);
++/* Wind Waker HD's caster culling: with `on`, the scenery draws into the sun shadow map with its own cull mode (as HD
++   draws its map's casters: back faces culled for most), so what faces away from the light casts nothing, as a closed
++   room's ceiling seen from below. Characters keep their own. `on` 0, the default, draws every caster's both sides.
++   DOL_AURORA_SUN_SHADOW_CASTER_CULL=1 or 0 (local test) overrides it. Takes effect at the next frame. */
++void aurora_set_sun_caster_cull(int on);
+ /* Wind Waker HD's own normals for the stage in play (the HD pack's optional/hd-normals/<stage>.bin, made by the
+    importer from the player's HD dump), for the sun shadows' facing term; NULL or a missing file: none, and
+    the facing term makes its own. Loaded at once; call it as the stage changes. */
+ void aurora_set_hd_normals(const char* path);
+ /* Wind Waker HD's own vertex colours for the stage in play's rooms (the HD pack's optional/hd-colours/<stage>.bin,
+    made by the importer): HD remade its rooms' colours, so the draws with HD's light take HD's (in the game's gamma)
+-   where a position has one, before the objects' table. NULL or a missing file: none. Call it as the stage changes. */
++   where a position has one, before the objects' table. A version 2 table also has HD's lava glow (its lava rooms'
++   konst2 animation and each vertex's glow), which the lit room draws add outside the shade. NULL or a missing file:
++   none. Call it as the stage changes. */
+ void aurora_set_hd_stage_colours(const char* path);
+ /* Wind Waker HD's normals and vertex colours for the game's object models (the HD pack's
+    optional/hd-normals/objects.bin and optional/hd-colours/objects.bin, made by the importer from the player's HD
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index a68d9feac1..5c082899e0 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -943,7 +943,7 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config) {
+   if (uber || tex_hi ||
+       ((key.shader.lit_valid != 0 || has_emboss || has_normal_source) &&
+        key.shader.has_vertex_normal != 0) ||
+-      key.shader.hd_point_light == 2u) {
++      (key.shader.hd_point_light & 3u) == 2u) {
+     attributes.push_back(wgpu::VertexAttribute{
+         .format = wgpu::VertexFormat::Float32x3,
+         .offset = gxc::kVertexNormalOffset,
+@@ -1659,7 +1659,8 @@ constexpr uint64_t kSunCasterUniformSize = 12 * sizeof(float);
+ wgpu::BindGroupLayout g_sunCasterLayout;
+ // [character * 4 + alpha * 2 + indexed]: current, indexed, then the same with the alpha cutout; then the same for
+ // characters (BlueWake's own depth bias, see make_sun_caster_pipelines()).
+-std::array<wgpu::RenderPipeline, 8> g_sunCasterPipelines;
++// By [cull (none, back, front) x 8 + character x 4 + alpha x 2 + indexed].
++std::array<wgpu::RenderPipeline, 24> g_sunCasterPipelines;
+ struct SunCasterState {
+   int pipeline = -1;
+   WGPUBindGroup group1 = nullptr;
+@@ -1752,6 +1753,13 @@ void make_sun_caster_pipelines() {
+   auto characterCull = wgpu::CullMode::None;
+   if (const char* cull = std::getenv("DOL_AURORA_SUN_SHADOW_CHARACTER_CULL"))
+     characterCull = cull[0] == 'f' ? wgpu::CullMode::Front : cull[0] == 'b' ? wgpu::CullMode::Back : wgpu::CullMode::None;
++  // Wind Waker HD culls its casters as their materials do (its map's draws in captures-nov3 s01, Dragon Roost
++  // Cavern: 225 with back faces culled, 15 with none), so what faces away from the light (a closed room's ceiling,
++  // seen from below) casts nothing; with HD's bias (80, 3) for the faces that do. The scenery's casters take the
++  // draw's own cull mode while post_fx::sun_caster_cull() is on; characters keep characterCull.
++  static constexpr wgpu::CullMode kCasterCull[3] = {wgpu::CullMode::None, wgpu::CullMode::Back,
++                                                    wgpu::CullMode::Front};
++  for (int cull = 0; cull < 3; ++cull) {
+   for (int character = 0; character < 2; ++character) {
+   for (int alpha = 0; alpha < 2; ++alpha) {
+     for (int indexed = 0; indexed < 2; ++indexed) {
+@@ -1766,15 +1774,19 @@ void make_sun_caster_pipelines() {
+                      .bufferCount = 1,
+                      .buffers = alpha != 0 ? &alphaVertexLayout : &vertexLayout},
+           .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList,
+-                        .cullMode = indexed != 0 ? characterCull : wgpu::CullMode::None},
++                        .frontFace = cull != 0 ? wgpu::FrontFace::CW : wgpu::FrontFace::CCW,
++                        .cullMode = cull != 0 ? kCasterCull[cull]
++                                    : indexed != 0 ? characterCull : wgpu::CullMode::None},
+           .depthStencil = character != 0 ? &characterDepthStencil : &depthStencil,
+           .multisample = {.count = 1, .mask = UINT32_MAX},
+           .fragment = alpha != 0 ? &alphaFragment : nullptr,
+       };
+-      g_sunCasterPipelines[character * 4 + alpha * 2 + indexed] = g_device.CreateRenderPipeline(&descriptor);
++      g_sunCasterPipelines[cull * 8 + character * 4 + alpha * 2 + indexed] =
++          g_device.CreateRenderPipeline(&descriptor);
+     }
+   }
+   }
++  }
+ }
+ } // namespace
+ 
+@@ -1850,7 +1862,12 @@ void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass
+   // Skinned scenery (skinned_scenery(), a palm's leaves) casts with the scenery's bias and HD's lookup (no slope
+   // term), or its thin leaves shaded themselves.
+   const bool character = data.character && (data.toon || !skinned_scenery());
+-  const int pipeline = (character ? 4 : 0) + (alpha ? 2 : 0) + (data.posMtxIdx ? 1 : 0);
++  int cull = 0;
++  if (!character && post_fx::sun_caster_cull()) {
++    const auto mode = static_cast<gxc::CullMode>(data.sunCasterCull);
++    cull = mode == gxc::CullMode::Back ? 1 : mode == gxc::CullMode::Front ? 2 : 0;
++  }
++  const int pipeline = cull * 8 + (character ? 4 : 0) + (alpha ? 2 : 0) + (data.posMtxIdx ? 1 : 0);
+   if (state.pipeline != pipeline) {
+     pass.SetPipeline(g_sunCasterPipelines[pipeline]);
+     state.pipeline = pipeline;
+@@ -2000,15 +2017,19 @@ fn fs_actor_alpha_n(in: VertexOutUv) -> MaskOut {
+ // Scenery with smooth normals in its vertices' normal slot (made on the CPU, submit_draw_plan()): the normal
+ // turned into view space by the position matrix (the scenery's is a rotation, scale and move), blended across
+ // each triangle as HD's models' per-vertex light is.
++// Colour 1's alpha below -0.5: a lava vertex (hd_lava_draw()), -(1 + the share of its light that is the lava's
++// glow), which goes into the normal's alpha as 1 - 0.49 x the share for the sun pass to leave unshaded.
+ struct VertexInN {
+     @location(0) rawpos: vec3f,
+     @location(1) posmtx: u32,
+     @location(3) normal: vec3f,
++    @location(4) glow: vec4f,
+ };
+ struct VertexOutN {
+     @builtin(position) pos: vec4f,
+     @location(0) viewpos: vec3f,
+     @location(1) normal: vec3f,
++    @location(2) glow: f32,
+ };
+ fn smooth_out(p0: vec4f, p1: vec4f, p2: vec4f, in: VertexInN) -> VertexOutN {
+     var out: VertexOutN;
+@@ -2019,6 +2040,7 @@ fn smooth_out(p0: vec4f, p1: vec4f, p2: vec4f, in: VertexInN) -> VertexOutN {
+     // per-vertex N.y blended (its hemisphere colour is per vertex, so linear across the triangle).
+     let nv = vec3f(dot(p0.xyz, in.normal), dot(p1.xyz, in.normal), dot(p2.xyz, in.normal));
+     out.normal = select(vec3f(0.0), nv / max(length(nv), 1e-12), length(nv) > 1e-6);
++    out.glow = select(0.0, clamp(-in.glow.a - 1.0, 0.0, 1.0), in.glow.a < -0.5);
+     return out;
+ }
+ @vertex
+@@ -2050,7 +2072,11 @@ fn seen_normal(in: VertexOutN) -> vec4f {
+ }
+ @fragment
+ fn fs_land_smooth_n(in: VertexOutN) -> MaskOut {
+-    return MaskOut(vec4f(0.0, 0.0, bloom_b, 0.0), seen_normal(in));
++    var n = seen_normal(in);
++    if (n.a > 0.5 && in.glow > 0.0) {
++        n.a = 1.0 - 0.49 * in.glow;
++    }
++    return MaskOut(vec4f(0.0, 0.0, bloom_b, 0.0), n);
+ }
+ // A character's cut-out part with its own normals (a palm's leaves): kind 5's cutout, kind 8's normal.
+ struct VertexInUvN {
+@@ -2086,7 +2112,7 @@ fn vs_indexed_uvn(in: VertexInUvN) -> VertexOutUvN {
+ @fragment
+ fn fs_actor_alpha_smooth_n(in: VertexOutUvN) -> MaskOut {
+     // The normal (its derivatives) and the texture before the discard, in uniform control flow.
+-    let n = seen_normal(VertexOutN(in.pos, in.viewpos, in.normal));
++    let n = seen_normal(VertexOutN(in.pos, in.viewpos, in.normal, 0.0));
+     if (textureSample(tex, samp, in.uv).a < 0.5) {
+         discard;
+     }
+@@ -2157,6 +2183,7 @@ const wgpu::RenderPipeline& sea_mask_pipeline(int normals, int bloom, int kind,
+       attributes[0],
+       attributes[1],
+       wgpu::VertexAttribute{.format = wgpu::VertexFormat::Float32x3, .offset = gxc::kVertexNormalOffset, .shaderLocation = 3},
++      wgpu::VertexAttribute{.format = wgpu::VertexFormat::Float32x4, .offset = gxc::kVertexColor1Offset, .shaderLocation = 4},
+   };
+   const wgpu::VertexBufferLayout normalVertexLayout{
+       .arrayStride = gxc::kVertexStrideBytes,
+@@ -3086,12 +3113,18 @@ static std::shared_ptr<const HdNormals> hd_object_normals() {
+ // Wind Waker HD's own vertex colours, by the same exact positions: the objects' (the HD pack's
+ // optional/hd-colours/objects.bin; aurora_set_hd_object_tables), or one fixed table for tests
+ // (DOL_AURORA_HD_VERTEX_COLOURS). Format: b'BWHC', u32 version 1, u32 count, then count x f32 x, y, z, r, g, b, a.
++// A stage's table with Wind Waker HD's lava glow is version 2: u32 count, u32 curves, each curve's u32 frame count
++// and its frames' f32 linear r, g, b (HD's konst2 animation, the lava's glow colour, at each game frame), then count
++// x f32 x, y, z, r, g, b, a, glow (HD's vertex red squared), curve (-1 none).
+ // HD lights its palms as texture x vertex colour x (sky-to-ground ambient + sun x N.L x shadow); the sun pass makes
+ // the light, so the draw gives texture x vertex colour x the light colour: the GameCube's palms go from the shade
+ // colour (C0) to the light one (KONST) by their vertex colour, so such a draw takes C0 black and HD's colour (a
+ // vertex the table hasn't keeps its own result). Only in the draws that take smooth normals, so only while the HD
+ // sun shadows' facing term is on.
+-using HdColours = absl::flat_hash_map<std::array<uint32_t, 3>, std::array<float, 4>>;
++// A row: r, g, b, a, glow, its curve (-1 none).
++struct HdColours : absl::flat_hash_map<std::array<uint32_t, 3>, std::array<float, 6>> {
++  std::vector<std::vector<std::array<float, 3>>> curves; // the lava's glow colour at each game frame, linear
++};
+ 
+ // gamma: the stage's rooms' colours (aurora_set_hd_stage_colours), which HD multiplies raw in linear light, taken to
+ // the game's gamma (^ 1/2.2) for the TEV, which multiplies in it.
+@@ -3100,20 +3133,34 @@ static std::shared_ptr<const HdColours> load_hd_colours(const char* path, bool g
+   if (f == nullptr)
+     return nullptr;
+   char magic[4]{};
+-  uint32_t version = 0, count = 0;
++  uint32_t version = 0, count = 0, curveCount = 0;
+   bool ok = std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "BWHC", 4) == 0 &&
+-            std::fread(&version, 4, 1, f) == 1 && version == 1 && std::fread(&count, 4, 1, f) == 1;
+-  std::vector<std::array<float, 7>> rows(ok ? count : 0);
+-  ok = ok && std::fread(rows.data(), sizeof(rows[0]), rows.size(), f) == rows.size();
++            std::fread(&version, 4, 1, f) == 1 && (version == 1 || version == 2) &&
++            std::fread(&count, 4, 1, f) == 1 && count < (1u << 24);
++  auto out = std::make_shared<HdColours>();
++  if (ok && version == 2) {
++    ok = std::fread(&curveCount, 4, 1, f) == 1 && curveCount < 256;
++    for (uint32_t c = 0; ok && c < curveCount; ++c) {
++      uint32_t frames = 0;
++      ok = std::fread(&frames, 4, 1, f) == 1 && frames > 0 && frames <= 4096;
++      std::vector<std::array<float, 3>> curve(ok ? frames : 0);
++      ok = ok && std::fread(curve.data(), sizeof(curve[0]), curve.size(), f) == curve.size();
++      out->curves.push_back(std::move(curve));
++    }
++  }
++  const size_t floats = version == 2 ? 9 : 7;
++  std::vector<float> rows(ok ? size_t(count) * floats : 0);
++  ok = ok && std::fread(rows.data(), sizeof(float), rows.size(), f) == rows.size();
+   std::fclose(f);
+   if (!ok)
+     return nullptr;
+-  auto out = std::make_shared<HdColours>();
+-  for (const auto& r : rows) {
++  for (size_t i = 0; i < count; ++i) {
++    const float* r = &rows[i * floats];
+     std::array<uint32_t, 3> key{};
+-    std::memcpy(key.data(), r.data(), sizeof(key));
++    std::memcpy(key.data(), r, sizeof(key));
+     const auto g = [&](float v) { return gamma ? std::pow(std::clamp(v, 0.f, 1.f), 1.f / 2.2f) : v; };
+-    out->try_emplace(key, std::array<float, 4>{g(r[3]), g(r[4]), g(r[5]), r[6]});
++    const float curve = floats == 9 && r[8] >= 0.f && r[8] < static_cast<float>(out->curves.size()) ? r[8] : -1.f;
++    out->try_emplace(key, std::array<float, 6>{g(r[3]), g(r[4]), g(r[5]), r[6], curve >= 0.f ? r[7] : 0.f, curve});
+   }
+   std::fprintf(stderr, "[sun-facing] HD vertex colours: %zu positions from %s\n", out->size(), path);
+   return out;
+@@ -3123,7 +3170,7 @@ std::shared_ptr<const HdColours> g_hdObjectColours;  // aurora_set_hd_object_tab
+ std::shared_ptr<const HdColours> g_hdStageColours;   // aurora_set_hd_stage_colours, in the game's gamma
+ 
+ // The stage's rooms' colour for a position, then the objects'.
+-static const std::array<float, 4>* hd_colour(const HdColours* stage, const HdColours* objects,
++static const std::array<float, 6>* hd_colour(const HdColours* stage, const HdColours* objects,
+                                              const std::array<uint32_t, 3>& key) {
+   if (stage != nullptr)
+     if (const auto it = stage->find(key); it != stage->end())
+@@ -3207,14 +3254,66 @@ static bool hd_light_draw(const gxc::DrawPlan& plan) {
+   return false;
+ }
+ 
+-// Such a draw's pixel constants: C0's colour black.
+-static const gxc::PixelShaderConstants& hd_light_constants(const gxc::DrawPlan& plan) {
++// Such a draw's pixel constants: C0's colour black; C1's too for a lava draw with the GameCube's own glow
++// (hd_lava_gc_glow()), which HD's shaders for those materials haven't.
++static const gxc::PixelShaderConstants& hd_light_constants(const gxc::DrawPlan& plan, bool noGcGlow) {
+   static thread_local gxc::PixelShaderConstants pc;
+   pc = plan.pixel_constants;
+   pc.colors[1][0] = pc.colors[1][1] = pc.colors[1][2] = 0;
++  if (noGcGlow)
++    pc.colors[2][0] = pc.colors[2][1] = pc.colors[2][2] = 0;
+   return pc;
+ }
+ 
++// Wind Waker HD's lava and fire rooms (GanonB, Cave01, MiniKaz, Ganon's Tower's lava parts): their materials with
++// a konst2 animation add the lava's light, albedo x lava K x 4 x the vertex red squared (Cemu, GanonB's PS 4345;
++// lava K the animation at the game frame, 0.453, 0.0415, 0.0005 at frame 23), outside the shade and before the fog.
++// The stage's table (version 2) has each such vertex's glow and curve. A lit room draw in the GameCube's two-stage
++// form (the light, then x the texture: every such material's) with HD's light buffer on takes it: its vertices'
++// colour 1 (no stage reads it) carry the glow's light, linear, and in alpha -(1 + its share of the lit light), which
++// the sea mask's pass puts in the normals' alpha so the sun pass leaves that share unshaded.
++// Dragon Roost Cavern's (M_NewD2 rooms 2, 7, 8, 10-13, 15; the disc's model.sharcfb) add lava K x 4 x (1 - the
++// vertex alpha) squared, the importer's glow there, by the same rule. Its _v_x materials are three stages on the
++// GameCube, a third PREV + C1 x APREV (the GameCube's own glow, hd_lava_gc_glow()); HD's shaders for them are their
++// plain materials' (the same program, no such term), so the draw takes C1 black (hd_light_constants()) and the glow
++// goes on after the texture's stage (gxcore_shader.cpp emit_hd_lava()).
++static bool hd_lava_gc_glow(const gxc::ShaderKey& s) {
++  if (s.num_tev_stages != 3u)
++    return false;
++  const gxc::TevStageKey& t = s.tev_stages[2];
++  // a ZERO, b C1, c APREV, d CPREV; add, no bias or scale, into PREV
++  return t.cc_a == 15u && t.cc_b == 4u && t.cc_c == 1u && t.cc_d == 0u && t.cc_bias == 0u && t.cc_op == 0u &&
++         t.cc_scale == 0u && t.cc_dest == 0u;
++}
++
++static bool hd_lava_shape(const gxc::ShaderKey& s) {
++  if ((s.num_tev_stages != 2u && !hd_lava_gc_glow(s)) || s.num_color_chans > 1u)
++    return false;
++  const gxc::TevStageKey& t = s.tev_stages[1];
++  return t.cc_a == 15u && t.cc_d == 15u && ((t.cc_b == 0u && t.cc_c == 8u) || (t.cc_b == 8u && t.cc_c == 0u)) &&
++         t.cc_bias == 0u && t.cc_op == 0u && t.cc_scale == 0u && t.cc_dest == 0u;
++}
++
++static bool hd_lava_draw(const gxc::DrawPlan& plan) {
++  if (!hd_terrain_light() || !hd_lava_shape(plan.pipeline.shader) || !hd_light_draw(plan))
++    return false;
++  const std::shared_ptr<const HdColours> stage = hd_stage_colours();
++  if (stage == nullptr || stage->curves.empty())
++    return false;
++  const size_t count = plan.vertices.size() / gxc::kVertexFloats;
++  for (size_t v = 0; v < count; ++v) {
++    std::array<uint32_t, 3> key{};
++    std::memcpy(key.data(), &plan.vertices[v * gxc::kVertexFloats + gxc::kVertexPosOffset / sizeof(float)],
++                sizeof(key));
++    if (const auto it = stage->find(key); it != stage->end() && it->second[5] >= 0.f)
++      return true;
++  }
++  return false;
++}
++
++// The draw being uploaded takes the lava's glow (submit_draw_plan(), read by apply_hd_colours()).
++static thread_local bool t_hdLavaDraw = false;
++
+ // Such a draw's vertex colours: HD's, and, where the table hasn't the position, the fraction of the light colour
+ // the GameCube's mix gave (shade + (light - shade) x own) / light; with HD's terrain light, its own.
+ static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vertices) {
+@@ -3233,12 +3332,13 @@ static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vert
+   static thread_local uint64_t s_draws = 0;
+   const size_t count = vertices.size() / gxc::kVertexFloats;
+   size_t hits = 0;
++  const uint64_t frame = frame_interp::game_frame_number();
+   for (size_t v = 0; v < count; ++v) {
+     float* vert = &vertices[v * gxc::kVertexFloats];
+     std::array<uint32_t, 3> key{};
+     std::memcpy(key.data(), vert + gxc::kVertexPosOffset / sizeof(float), sizeof(key));
+     float* col = vert + gxc::kVertexColor0Offset / sizeof(float);
+-    const std::array<float, 4>* hd = hd_colour(stage.get(), table.get(), key);
++    const std::array<float, 6>* hd = hd_colour(stage.get(), table.get(), key);
+     if (hd != nullptr)
+       ++hits;
+     for (int ch = 0; ch < 3; ++ch) {
+@@ -3248,6 +3348,29 @@ static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vert
+         col[ch] = std::clamp((c[ch] + (k[ch] - c[ch]) * col[ch]) / static_cast<float>(k[ch]), 0.f, 1.f);
+       }
+     }
++    if (t_hdLavaDraw) {
++      // The lava's glow (hd_lava_draw()): lava K x 4 x the glow, and its share of the lit light, K x the colour
++      // (the sun pass's lit light, the lamps left out), by luminance.
++      float* col1 = vert + gxc::kVertexColor1Offset / sizeof(float);
++      std::array<float, 3> glow{0.f, 0.f, 0.f};
++      if (hd != nullptr && (*hd)[5] >= 0.f && stage != nullptr) {
++        const auto& curve = stage->curves[static_cast<size_t>((*hd)[5])];
++        const auto& lava = curve[static_cast<size_t>(frame % curve.size())];
++        for (int ch = 0; ch < 3; ++ch)
++          glow[ch] = 4.f * lava[ch] * (*hd)[4];
++      }
++      constexpr std::array<float, 3> luma{0.2126f, 0.7152f, 0.0722f};
++      float lit = 0.f, glowLuma = 0.f;
++      for (int ch = 0; ch < 3; ++ch) {
++        lit += luma[ch] * std::pow(std::clamp(static_cast<float>(k[ch]) / 255.f * col[ch], 0.f, 1.f), 2.2f);
++        glowLuma += luma[ch] * glow[ch];
++      }
++      const float share = glowLuma > 0.f ? glowLuma / (lit + glowLuma) : 0.f;
++      col1[0] = glow[0];
++      col1[1] = glow[1];
++      col1[2] = glow[2];
++      col1[3] = -1.f - share;
++    }
+   }
+   if (log && ++s_draws % 600 == 1)
+     std::fprintf(stderr, "[sun-facing] HD light: %zu of %zu vertices HD's colours, shade %d,%d,%d light %d,%d,%d\n",
+@@ -3393,7 +3516,7 @@ struct SmoothNormalInputs {
+ 
+ // The draw's vertices with smooth normals, made once while the draw stays the same (smooth_normal_cache.hpp): a
+ // still room's lit scenery made them every frame, Hyrule Castle's hall 66 draws and 47,000 vertices a game frame
+-// (on an i5-6500, 7 ms of the GX worker's 20).
++// (on an i5-6500, 7 ms of the GX worker's 20). Not for a lava draw (its glow follows the game frame).
+ // DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0: made every frame, as before.
+ // DOL_AURORA_SUN_SHADOW_NORMAL_CACHE_LOG=1 (local debug): draws, vertices and hits a game frame, every 600 frames.
+ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan) {
+@@ -3401,7 +3524,7 @@ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan)
+     const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_NORMAL_CACHE");
+     return env == nullptr || env[0] != '0';
+   }();
+-  if (!cacheOn)
++  if (!cacheOn || t_hdLavaDraw)
+     return smooth_normals_uncached(plan);
+   static thread_local SmoothNormalCache<SmoothNormalInputs> cache;
+   const uint64_t frame = frame_interp::game_frame_number();
+@@ -4013,9 +4136,14 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                              !character_draw(plan.pipeline) && !seaSurface && !positions_written(plan);
+   const bool alphaCaster = cutoutBindGroup != 0 && (sun_caster_alpha(plan.pipeline) || blendedCutout);
+   const bool smoothNormal = smooth_normal_draw(plan, seaSurface);
+-  // A palm with Wind Waker HD's light (apply_hd_colours()): its shade colour black.
++  // A palm with Wind Waker HD's light (apply_hd_colours()): its shade colour black. A lava draw with the GameCube's
++  // own glow (hd_lava_gc_glow()) that takes HD's (t_hdLavaDraw below, the same tests): C1 black too.
++  const bool lightDraw = smoothNormal && hd_light_draw(plan);
++  const bool noGcGlow = lightDraw && tev && hd_lava_gc_glow(plan.pipeline.shader) &&
++                        post_fx::point_lights_hd_switch() && post_fx::actor_light_hd_switch() &&
++                        gxc::hd_point_light_stage(plan.pipeline.shader) && hd_lava_draw(plan);
+   const gxc::PixelShaderConstants& pixelConstants =
+-      smoothNormal && hd_light_draw(plan) ? hd_light_constants(plan) : plan.pixel_constants;
++      lightDraw ? hd_light_constants(plan, noGcGlow) : plan.pixel_constants;
+   Range pixelUniformRange{};
+   bool pixelRepeats = false;
+   if (tev) {
+@@ -4058,6 +4186,14 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   if (tev && post_fx::point_lights_hd_switch() && post_fx::actor_light_hd_switch() &&
+       key.shader.hd_actor_light == 0u && gxc::hd_point_light_stage(key.shader))
+     key.shader.hd_point_light = smoothNormal ? 2u : 1u;
++  // Wind Waker HD's lava glow (hd_lava_draw()), in the lit scenery's flagged shader (4) and its vertices' colour 1.
++  t_hdLavaDraw = smoothNormal && key.shader.hd_point_light != 0u && hd_lava_draw(plan);
++  if (t_hdLavaDraw)
++    key.shader.hd_point_light |= 4u;
++  // Wind Waker HD's water floor (gxc::hd_water_floor_stage()), its sum in linear light on HD's linear colours, while
++  // HD's palettes (whose colours it takes) and its light are in place.
++  if (tev && gxc::hd_water_floor_stage(key.shader) && post_fx::actor_light_wanted())
++    key.shader.hd_water = 1u;
+   const PipelineConfig colorConfig{
+       .version = GXCorePipelineConfigVersion,
+       .key = key,
+@@ -4209,6 +4345,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   const auto vertRange = push_verts_strided(
+       reinterpret_cast<const uint8_t*>(smoothNormal ? with_smooth_normals(plan).data() : plan.vertices.data()),
+       vertBytes, gxc::kVertexStrideBytes);
++  t_hdLavaDraw = false;
+   Range idxRange;
+   if (batch != nullptr) {
+     static std::vector<uint16_t> rebased;
+@@ -4297,6 +4434,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       .sunCaster = (sun_caster(plan.pipeline) || clothCaster || blendedCaster) &&
+                    !(sun_caster(plan.pipeline) && post_fx::sun_shadow_map_enabled() && sea_surface(plan)),
+       .posMtxIdx = plan.pipeline.shader.has_pos_mtx_idx != 0,
++      .sunCasterCull = plan.pipeline.cull_mode,
+       .farCaster = plan.far_caster,
+       // DOL_AURORA_SUN_CASTER_LOG=1: why a cloth's or wake's draw (a scope)
+       // does or does not cast, once per distinct state (local debug).
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 519f89eea0..106f1ac767 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -74,6 +74,8 @@ struct DrawData {
+   // per-vertex matrices (a skinned model) or the current one.
+   bool sunCaster = false;
+   bool posMtxIdx = false;
++  // The draw's own cull mode (gxc::CullMode), for the map's casters while post_fx::sun_caster_cull() is on.
++  uint8_t sunCasterCull = 0;
+   // It casts in the cascades past the second too (gxc::DrawPlan::far_caster: the stage's BG lists, as Wind Waker
+   // HD's far cascades draw only its BG model list).
+   bool farCaster = true;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 2811f10177..194538625c 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -2299,6 +2299,17 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+             }
+         }
+     }
++    // Wind Waker HD's lava glow (gxcore_draw.cpp hd_lava_draw()): HD adds it outside the shade, so its share of the
++    // scenery's lit light, 1 - the normals' alpha over 0.49 where the sea mask's pass put it there, is left unshaded.
++    if (view.facing.z > 0.5 && view.facing.y > 0.5 && water < 0.5) {
++        let gsize = vec2<f32>(textureDimensions(normals));
++        let gp = clamp(vec2<i32>(in.uv * gsize), vec2<i32>(0), vec2<i32>(gsize) - vec2<i32>(1));
++        let ga = textureLoad(normals, gp, 0).a;
++        if (ga > 0.5 && ga < 0.995) {
++            let glow = clamp((1.0 - ga) / 0.49, 0.0, 1.0);
++            shade = pow(mix(pow(shade, vec3(2.2)), vec3(1.0), glow), vec3(1.0 / 2.2));
++        }
++    }
+     // The sea's shadow at sea_shadow of its strength (HD's cPrimShadowIntensity, 0.5 in its pass), where the sea mask
+     // has the sea.
+     if (sea_shadow < 0.999 && view.facing.x > 0.5) {
+@@ -4665,6 +4676,20 @@ void set_cloud_hd_floor(float floor) noexcept {
+   g_cloudHdFloor.store(floor >= 0.f ? std::min(floor, 1.f) : -1.f, std::memory_order_relaxed);
+ }
+ 
++namespace {
++std::atomic<bool> g_sunCasterCull{false};
++} // namespace
++
++void set_sun_caster_cull(bool on) noexcept { g_sunCasterCull.store(on, std::memory_order_relaxed); }
++
++bool sun_caster_cull() noexcept {
++  static const int forced = [] {
++    const char* value = std::getenv("DOL_AURORA_SUN_SHADOW_CASTER_CULL");
++    return value == nullptr || value[0] == '\0' ? -1 : value[0] == '1' ? 1 : 0;
++  }();
++  return forced >= 0 ? forced == 1 : g_sunCasterCull.load(std::memory_order_relaxed);
++}
++
+ void set_far_blur_level(float level) noexcept {
+   g_farLevel.store(std::clamp(level, 0.f, 4.f), std::memory_order_relaxed);
+ }
+@@ -5815,6 +5840,7 @@ void aurora_set_sun_hd_light(int on, int night, float fade) {
+ }
+ 
+ void aurora_set_cloud_hd_floor(float floor) { aurora::gfx::post_fx::set_cloud_hd_floor(floor); }
++void aurora_set_sun_caster_cull(int on) { aurora::gfx::post_fx::set_sun_caster_cull(on != 0); }
+ 
+ void aurora_set_edge_light(bool enabled) { aurora::gfx::post_fx::set_edge_light(enabled); }
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index cfe0d43576..bebe00a638 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -120,6 +120,10 @@ bool actor_cloud_source(const Camera& camera, float cloud[4], wgpu::TextureView&
+ void set_sun_hd_light(bool on, bool night, float fade) noexcept;
+ // Wind Waker HD's cloud floor from the host's clock (aurora_set_cloud_hd_floor), negative while unset.
+ void set_cloud_hd_floor(float floor) noexcept;
++// The scenery's shadow casters culled as their draws are (aurora_set_sun_caster_cull; DOL_AURORA_SUN_SHADOW_CASTER_CULL
++// =1 or 0 overrides it).
++void set_sun_caster_cull(bool on) noexcept;
++bool sun_caster_cull() noexcept;
+ void set_sun_direction(float x, float y, float z) noexcept;
+ void set_exposure(float gain) noexcept;
+ // The scene is brightened this frame (the game's gain over 1): the sea's draws
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 617681da03..04a2bb55ea 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -275,9 +275,14 @@ struct ShaderKey {
+   // group 0, which a flagged key takes as the characters' do). 2: the
+   // vertices' normal slot holds smooth normals made on the CPU for a draw that
+   // has none of its own (the sun shadows' scenery), turned by the position
+-  // matrix. Two pad bytes keep the scalar block a multiple of 4.
++  // matrix. Bit 4 (with 2): Wind Waker HD's lava glow, the vertices' colour 1 x the last stage's texel added after
++  // it (gxcore_shader.cpp hd_scenery_lava()).
+   std::uint8_t hd_point_light = 0;
+-  std::uint8_t pad_hd[2]{};
++  // Wind Waker HD's water floor (hd_water_floor_stage() matched while HD's palettes are in place): its three stages
++  // worked in linear light on HD's linear colours, as HD's shader for it does. One pad byte keeps the scalar block a
++  // multiple of 4.
++  std::uint8_t hd_water = 0;
++  std::uint8_t pad_hd[1]{};
+   LightChanKey litchan[4]{}; // color0, color1, alpha0, alpha1
+   TexGenKey tex_gens[kMaxTexGens]{};
+   IndirectStageKey ind_stages[kMaxIndirectStages]{};
+@@ -748,6 +753,12 @@ ToonLightMatch toon_light_stage(const ShaderKey& key);
+ // Gods' room materials). Not a toon draw (toon_light_stage()).
+ bool hd_point_light_stage(const ShaderKey& key);
+ 
++// The water floor of the Tower of the Gods' flooded rooms: KONST + C0 x TEXC (alpha RASA x TEXA) into C2, KONST x
++// TEXC (another texcoord) into PREV, then PREV x (1 - APREV) + C2, untextured. Wind Waker HD's shader for it (Cemu,
++// ToG room 0) adds the same terms in linear light on the colours made linear (u8, (c / 255)^2.2): two layers of
++// caustics over the floor's colour. On the GameCube's gamma colours the sum came out twice as bright in linear.
++bool hd_water_floor_stage(const ShaderKey& key);
++
+ // The uniform a ShaderKey::hd_actor_light shader reads at group(0) binding(2)
+ // (binding 0 and 1 are the pass's static storage buffers; binding 3 the shadow
+ // texture, 4 its sampler; 5 HD's cloud shadow texture, 6 its sampler). All
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 031ffc5a54..56865d4d6f 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -445,7 +445,49 @@ bool hd_scenery_light(const ShaderKey& key, const ToonLightMatch& hd) {
+ // Its normal: the smooth one made for the sun shadows in the normal slot (hd_point_light 2), else the draw's own
+ // where its vertex shader works one out (a lit channel and a vertex normal), else the triangle's, from the
+ // position's screen derivatives.
+-bool hd_scenery_smooth_normal(const ShaderKey& key) { return key.hd_point_light == 2u && key.raw_tex_hi_in_nbt == 0u; }
++bool hd_scenery_smooth_normal(const ShaderKey& key) {
++  return (key.hd_point_light & 3u) == 2u && key.raw_tex_hi_in_nbt == 0u;
++}
++
++// Wind Waker HD's lava glow on the lit scenery (hd_point_light 4, with the smooth normal): the vertices' colour 1
++// holds the glow's light, linear (alpha below -0.5 where it does), which goes on after the last stage times its
++// texel, the albedo, as HD adds albedo x lava K x 4 x red^2 to its lit colour (the host's lava rooms, gxcore_draw.cpp
++// hd_lava_draw()).
++bool hd_scenery_lava(const ShaderKey& key, const ToonLightMatch& hd) {
++  return (key.hd_point_light & 4u) != 0u && hd_scenery_light(key, hd);
++}
++
++// The glow, in linear on the stage's result, its texel the albedo. Dragon Roost Cavern's lava materials have a third
++// stage, PREV + C1 x APREV (the GameCube's own glow, which HD's shaders for them haven't; the host gives such a draw C1
++// black, gxcore_draw.cpp hd_light_constants()): there the glow goes on after stage 1, the texture's, whose texel is
++// the albedo (stage 2 has none); with two stages, after the last.
++void emit_hd_lava(std::string& out) {
++  emit(out, "    if (in.hd_em.a < -0.5) {\n"
++            "        let hd_alb = pow(vec3f(textemp.rgb & vec3i(255, 255, 255)) / 255.0, vec3f(2.2));\n"
++            "        let hd_glow = pow(clamp(vec3f(prev.rgb) / 255.0, vec3f(0.0), vec3f(1.0)), vec3f(2.2)) + "
++            "hd_alb * in.hd_em.rgb;\n"
++            "        prev = vec4i(vec3i(round(pow(clamp(hd_glow, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)) * "
++            "255.0)), prev.a);\n"
++            "    }\n");
++}
++
++// Wind Waker HD's water floor (ShaderKey::hd_water): its sum in linear light, as HD's shader for it adds (Cemu, ToG
++// room 0, PS 27623): X = clamp(clamp(C x t0 + K) + clamp(K x t1) x (1 - a)), K and C the GameCube's colours made
++// linear (HD's constants are (c / 255)^2.2 in 8 bits), t0 and t1 the stages' texels, a = the vertex alpha x t0's
++// alpha; then back to gamma for the GX fog. HD then scales it by its light buffer's (1 + L) / 2, which is 1 where the
++// floor is lit and its shadow where not; the sun pass shades it here.
++void emit_hd_water(std::string& out, const ShaderKey& key) {
++  emitf(out,
++        "    {\n"
++        "        let hd_wk = round(pow(vec3f(%s & vec3i(255, 255, 255)) / 255.0, vec3f(2.2)) * 255.0) / 255.0;\n"
++        "        let hd_wc = round(pow(vec3f(psc.colors[1].rgb & vec3i(255, 255, 255)) / 255.0, vec3f(2.2)) * 255.0) / "
++        "255.0;\n"
++        "        let hd_wx = clamp(clamp(hd_wc * hd_wt0 + hd_wk, vec3f(0.0), vec3f(1.0)) + "
++        "clamp(hd_wk * hd_wt1, vec3f(0.0), vec3f(1.0)) * (1.0 - hd_wa), vec3f(0.0), vec3f(1.0));\n"
++        "        prev = vec4i(vec3i(round(pow(hd_wx, vec3f(1.0 / 2.2)) * 255.0)), prev.a);\n"
++        "    }\n",
++        kKselC[key.tev_stages[0].ksel_kc]);
++}
+ 
+ bool hd_scenery_vertex_normal(const ShaderKey& key) {
+   return hd_scenery_smooth_normal(key) ||
+@@ -767,6 +809,14 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key, const ToonLightMa
+                 "        prev = vec4i(vec3i(round(pow(clamp(hd_lit, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)) * 255.0)), "
+                 "prev.a);\n"
+                 "    }\n");
++    if (n == 1u && key.num_tev_stages > 2u && hd_scenery_lava(key, hd))
++      emit_hd_lava(out);
++    // HD's water floor keeps its stages' texels and stage 0's alpha (the vertex alpha x the texel's).
++    if (key.hd_water != 0u && n == 0u)
++      emit(out, "    let hd_wt0 = vec3f(textemp.rgb & vec3i(255, 255, 255)) / 255.0;\n"
++                "    let hd_wa = f32(rastemp.a & 255) * f32(textemp.a & 255) / 65025.0;\n");
++    if (key.hd_water != 0u && n == 1u)
++      emit(out, "    let hd_wt1 = vec3f(textemp.rgb & vec3i(255, 255, 255)) / 255.0;\n");
+   }
+ 
+   // The last stage's destination register is what reaches the framebuffer.
+@@ -775,6 +825,10 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key, const ToonLightMa
+     emitf(out, "    prev = vec4i(%s.rgb, prev.a);\n", kTevOutput[last.cc_dest]);
+   if (last.ac_dest != 0)
+     emitf(out, "    prev = vec4i(prev.rgb, %s.a);\n", kTevOutput[last.ac_dest]);
++  if (key.num_tev_stages <= 2u && hd_scenery_lava(key, hd))
++    emit_hd_lava(out);
++  if (key.hd_water != 0u)
++    emit_hd_water(out, key);
+ 
+   if (hd.matched && !hd_after_albedo(hd))
+     emit_hd_actor_light(out, key, hd);
+@@ -1071,6 +1125,36 @@ bool hd_point_light_stage(const ShaderKey& key) {
+   return true;
+ }
+ 
++bool hd_water_floor_stage(const ShaderKey& key) {
++  if (key.tev_valid == 0u || key.num_tev_stages != 3u || key.num_ind_stages != 0u || key.num_tex_gens < 2u ||
++      key.textured == 0u)
++    return false;
++  // Colour a, b, c, d, then alpha a, b, c, d (GX's input numbers), the destination and whether a texture is read.
++  struct Want {
++    std::uint8_t c[4], a[4], cdest, adest, tex;
++  };
++  static constexpr Want kWant[3] = {
++      {{15, 2, 8, 14}, {7, 5, 4, 7}, 3, 0, 1},  // KONST + C0 x TEXC into C2; RASA x TEXA into PREV
++      {{15, 14, 8, 15}, {7, 7, 7, 0}, 0, 0, 1}, // KONST x TEXC; APREV kept
++      {{0, 15, 1, 6}, {7, 6, 0, 7}, 0, 0, 0},   // PREV x (1 - APREV) + C2
++  };
++  for (std::uint32_t n = 0; n < 3u; ++n) {
++    const TevStageKey& t = key.tev_stages[n];
++    const Want& w = kWant[n];
++    if (t.cc_a != w.c[0] || t.cc_b != w.c[1] || t.cc_c != w.c[2] || t.cc_d != w.c[3] || t.cc_dest != w.cdest ||
++        t.cc_op != 0u || t.cc_bias != 0u || t.cc_scale != 0u || t.cc_clamp == 0u || t.tevorders_enable != w.tex)
++      return false;
++    // Stage 2's alpha is not used by the sum (its result is the draw's alpha, kept as the GX gives it).
++    if (n < 2u && (t.ac_a != w.a[0] || t.ac_b != w.a[1] || t.ac_c != w.a[2] || t.ac_d != w.a[3] ||
++                   t.ac_dest != w.adest || t.ac_op != 0u || t.ac_bias != 0u || t.ac_scale != 0u))
++      return false;
++  }
++  // Both texture stages take the same konst colour (HD's one K), stage 0 colour channel 0's alpha.
++  return key.tev_stages[0].ksel_kc == key.tev_stages[1].ksel_kc && key.tev_stages[0].ksel_kc >= 12u &&
++         key.tev_stages[0].ksel_kc <= 15u && key.tev_stages[0].tevorders_colorchan == 0u &&
++         key.tev_stages[0].ras_swap[3] == 3u;
++}
++
+ HdActorLightPixel hd_actor_light_reference(const HdActorLightConstants& c, float s, float sh, float (*ramp)(float u),
+                                            float n_up, float n_dot_e, float l_dot_e, const float albedo_gamma[3],
+                                            float cloud, bool rim, const float* point) {
+@@ -1341,6 +1425,8 @@ std::string generate_wgsl(const ShaderKey& key) {
+     emitf(out, "    @location(%u) hd_pv: vec3f,\n", uv_loc_base + key.num_tex_gens);
+     if (hd_scenery_vertex_normal(key))
+       emitf(out, "    @location(%u) hd_nv: vec3f,\n", uv_loc_base + key.num_tex_gens + 1u);
++    if (hd_scenery_lava(key, hd))
++      emitf(out, "    @location(%u) hd_em: vec4f,\n", uv_loc_base + key.num_tex_gens + 2u);
+   }
+   emit(out, "};\n\n");
+ 
+@@ -1438,6 +1524,8 @@ std::string generate_wgsl(const ShaderKey& key) {
+       emit(out, "    o.hd_nv = vec3f(dot(p0.xyz, in.rawnormal), dot(p1.xyz, in.rawnormal), dot(p2.xyz, in.rawnormal));\n");
+     else if (hd_scenery_vertex_normal(key))
+       emit(out, "    o.hd_nv = _normal;\n");
++    if (hd_scenery_lava(key, hd))
++      emit(out, "    o.hd_em = in.rawcolor1;\n");
+   }
+ 
+   for (std::uint32_t i = 0; i < key.num_tex_gens; ++i) {
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index df21683108..896498eaba 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -1460,6 +1460,125 @@ void test_point_light_scenery() {
+   CHECK(ws.find("o.hd_nv = vec3f(dot(p0.xyz, in.rawnormal), dot(p1.xyz, in.rawnormal), dot(p2.xyz, in.rawnormal));") !=
+         std::string::npos);
+   CHECK(ws.find("let hd_sn = normalize(in.hd_nv);") != std::string::npos);
++  CHECK(ws.find("hd_em") == std::string::npos);
++  // Wind Waker HD's lava glow (4, with the smooth normals): colour 1 passed on after the normal, and its light times
++  // the last stage's texel added after the stages, in linear, where its alpha marks it.
++  auto lava = smooth;
++  lava.hd_point_light = 6;
++  const std::string wv = gxc::generate_wgsl(lava);
++  if (std::getenv("GXCORE_PRINT_WGSL") != nullptr)
++    std::printf("%s\n", wv.c_str());
++  CHECK(wv.find("@location(5) hd_em: vec4f,") != std::string::npos);
++  CHECK(wv.find("o.hd_em = in.rawcolor1;") != std::string::npos);
++  CHECK(wv.find("o.hd_nv = vec3f(dot(p0.xyz, in.rawnormal)") != std::string::npos);
++  const auto glow_at = wv.find("hd_alb * in.hd_em.rgb");
++  const auto last_at = wv.find("// TEV stage 1");
++  const auto alpha_at = wv.find("discard");
++  CHECK(glow_at != std::string::npos && last_at != std::string::npos && alpha_at != std::string::npos);
++  CHECK(last_at < glow_at && glow_at < alpha_at);
++  CHECK(wv.find("if (in.hd_em.a < -0.5) {") != std::string::npos);
++  // Dragon Roost Cavern's three stages (a third PREV + C1 x APREV, the GameCube's own glow, untextured): the glow
++  // once, after stage 1, on its texel, before stage 2 (whose texel is white).
++  auto lava3 = lava;
++  lava3.num_tev_stages = 3;
++  auto& s2 = lava3.tev_stages[2];
++  s2 = lava3.tev_stages[1];
++  s2.cc_a = 15;
++  s2.cc_b = 4;
++  s2.cc_c = 1;
++  s2.cc_d = 0;
++  s2.tevorders_enable = 0;
++  CHECK(gxc::hd_point_light_stage(lava3));
++  const std::string w3 = gxc::generate_wgsl(lava3);
++  if (std::getenv("GXCORE_PRINT_WGSL") != nullptr)
++    std::printf("%s\n", w3.c_str());
++  const auto glow3_at = w3.find("hd_alb * in.hd_em.rgb");
++  const auto s1_at = w3.find("// TEV stage 1");
++  const auto s2_at = w3.find("// TEV stage 2");
++  CHECK(glow3_at != std::string::npos && s1_at != std::string::npos && s2_at != std::string::npos);
++  CHECK(s1_at < glow3_at && glow3_at < s2_at);
++  CHECK(w3.find("hd_alb * in.hd_em.rgb", glow3_at + 1) == std::string::npos);
++  CHECK(w3.find("textemp = vec4i(255,255,255,255);", s2_at) != std::string::npos);
++  // Two stages: still after the last.
++  CHECK(wv.find("hd_alb * in.hd_em.rgb", glow_at + 1) == std::string::npos);
++}
++
++// The Tower of the Gods' water floor (as BlueWake draws it in room 0): KONST + C0 x TEXC into C2 (alpha RASA x TEXA),
++// KONST x TEXC from the other texcoord, then PREV x (1 - APREV) + C2. Flagged (hd_water), Wind Waker HD's sum in
++// linear light on its 8-bit linear colours replaces the GX colour after the stages, before the alpha test and fog.
++gxc::ShaderKey water_key() {
++  auto key = scenery_key();
++  key.num_tex_gens = 2;
++  key.uv_mask = 3;
++  key.tex_gens[1] = key.tex_gens[0];
++  key.num_tev_stages = 3;
++  auto& s0 = key.tev_stages[0];
++  s0.cc_a = 15, s0.cc_b = 2, s0.cc_c = 8, s0.cc_d = 14, s0.cc_dest = 3;
++  s0.ac_a = 7, s0.ac_b = 5, s0.ac_c = 4, s0.ac_d = 7, s0.ac_dest = 0, s0.ac_clamp = 1;
++  s0.ksel_kc = 12;
++  auto& s1 = key.tev_stages[1];
++  s1 = s0;
++  s1.tevorders_texcoord = 1;
++  s1.tevorders_texmap = 1;
++  s1.tevorders_colorchan = 7;
++  s1.cc_a = 15, s1.cc_b = 14, s1.cc_c = 8, s1.cc_d = 15, s1.cc_dest = 0;
++  s1.ac_a = 7, s1.ac_b = 7, s1.ac_c = 7, s1.ac_d = 0;
++  auto& s2 = key.tev_stages[2];
++  s2 = s1;
++  s2.tevorders_enable = 0;
++  s2.tevorders_texmap = 7;
++  s2.cc_a = 0, s2.cc_b = 15, s2.cc_c = 1, s2.cc_d = 6;
++  s2.ac_a = 7, s2.ac_b = 6, s2.ac_c = 0, s2.ac_d = 7;
++  s2.ksel_ka = 31;
++  return key;
++}
++
++void test_water_floor() {
++  auto key = water_key();
++  CHECK(gxc::hd_water_floor_stage(key));
++  CHECK(!gxc::hd_point_light_stage(key));
++  {
++    auto other = key;
++    other.tev_stages[2].cc_d = 4; // + C1, not C2
++    CHECK(!gxc::hd_water_floor_stage(other));
++    auto two = key;
++    two.num_tev_stages = 2;
++    CHECK(!gxc::hd_water_floor_stage(two));
++    auto konst = key;
++    konst.tev_stages[1].ksel_kc = 13; // another konst colour for the second layer
++    CHECK(!gxc::hd_water_floor_stage(konst));
++    auto scaled = key;
++    scaled.tev_stages[0].cc_scale = 1;
++    CHECK(!gxc::hd_water_floor_stage(scaled));
++    auto alpha = key;
++    alpha.tev_stages[0].ac_b = 7; // a not from the vertex alpha
++    CHECK(!gxc::hd_water_floor_stage(alpha));
++  }
++  // Unflagged: the GameCube's sum as before.
++  const std::string gx = gxc::generate_wgsl(key);
++  CHECK(gx.find("hd_w") == std::string::npos);
++  key.hd_water = 1;
++  const std::string w = gxc::generate_wgsl(key);
++  if (std::getenv("GXCORE_PRINT_WGSL") != nullptr)
++    std::printf("%s\n", w.c_str());
++  const auto s1_at = w.find("// TEV stage 1");
++  const auto s2_at = w.find("// TEV stage 2");
++  const auto t0_at = w.find("let hd_wt0 = vec3f(textemp.rgb & vec3i(255, 255, 255)) / 255.0;");
++  const auto a_at = w.find("let hd_wa = f32(rastemp.a & 255) * f32(textemp.a & 255) / 65025.0;");
++  const auto t1_at = w.find("let hd_wt1 = vec3f(textemp.rgb & vec3i(255, 255, 255)) / 255.0;");
++  const auto k_at = w.find("let hd_wk = round(pow(vec3f(psc.kcolors[0].rgb & vec3i(255, 255, 255)) / 255.0, "
++                           "vec3f(2.2)) * 255.0) / 255.0;");
++  const auto sum_at = w.find("clamp(hd_wk * hd_wt1, vec3f(0.0), vec3f(1.0)) * (1.0 - hd_wa)");
++  const auto out_at = w.find("prev = vec4i(vec3i(round(pow(hd_wx, vec3f(1.0 / 2.2)) * 255.0)), prev.a);");
++  const auto discard_at = w.find("discard");
++  CHECK(s1_at != std::string::npos && s2_at != std::string::npos && t0_at != std::string::npos &&
++        a_at != std::string::npos && t1_at != std::string::npos && k_at != std::string::npos &&
++        sum_at != std::string::npos && out_at != std::string::npos && discard_at != std::string::npos);
++  CHECK(t0_at < s1_at && a_at < s1_at && s1_at < t1_at && t1_at < s2_at && s2_at < k_at && k_at < sum_at &&
++        sum_at < out_at && out_at < discard_at);
++  CHECK(w.find("hdp") == std::string::npos && w.find("hdl") == std::string::npos);
++  // Byte for byte the GameCube's module apart from the HD block.
++  CHECK(w.size() > gx.size());
+ }
+ 
+ // Dolphin VertexShaderGen SourceRow::Normal: use the raw normal only when the
+@@ -3016,6 +3135,7 @@ int main() {
+   test_toon_light_reference();
+   test_point_light_reference();
+   test_point_light_scenery();
++  test_water_floor();
+   test_toon_light_extended();
+   test_texgen_normal_source();
+   test_five_texgens();
+-- 
+2.49.0.windows.1
+
