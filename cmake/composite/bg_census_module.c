@@ -22,6 +22,30 @@ static unsigned long long s_group_bins[kBins], s_through_bins[kBins], s_rp_bins[
 static unsigned long long s_group_max, s_through_max, s_rp_max;
 static unsigned s_groups, s_through, s_rp;
 static int s_open;
+/* Per top-level walk (a GroundCrossGrpRp call at depth 1): its subtree's
+ * visits, whether it reaches a polygon tree, and the visits before the first. */
+static unsigned long long s_top_calls, s_top_with_tree, s_top_visits, s_top_visits_before_tree;
+static unsigned long long s_top_size_bins[kBins], s_top_tree_size_bins[kBins], s_top_before_bins[kBins];
+static unsigned s_top_size, s_top_before;
+static int s_top_open, s_top_tree;
+
+static unsigned bin(unsigned n);
+
+static void close_top(void) {
+    if (!s_top_open)
+        return;
+    s_top_calls++;
+    s_top_visits += s_top_size;
+    s_top_size_bins[bin(s_top_size)]++;
+    if (s_top_tree) {
+        s_top_with_tree++;
+        s_top_visits_before_tree += s_top_before;
+        s_top_tree_size_bins[bin(s_top_size)]++;
+        s_top_before_bins[bin(s_top_before)]++;
+    }
+    s_top_open = s_top_tree = 0;
+    s_top_size = s_top_before = 0;
+}
 
 static unsigned bin(unsigned n) {
     unsigned b = 0;
@@ -45,6 +69,7 @@ static void close_check(void) {
 void bluewake_bg_census_module(const CPUState* cpu, unsigned int address) {
     switch (address) {
     case BLUEWAKE_BG_CENSUS_MODULE_GROUND_CROSS:
+        close_top();
         close_check();
         s_open = 1;
         s_entries[kGroundCross]++;
@@ -54,15 +79,28 @@ void bluewake_bg_census_module(const CPUState* cpu, unsigned int address) {
         s_entries[kGrpRp]++;
         s_depth[depth < kDepths ? depth : kDepths - 1u]++;
         s_groups++;
+        if (depth <= 1u) {
+            close_top();
+            s_top_open = 1;
+        }
+        s_top_size++;
         break;
     }
     case BLUEWAKE_BG_CENSUS_MODULE_GRP_THROUGH: s_entries[kGrpThrough]++; s_through++; break;
-    case BLUEWAKE_BG_CENSUS_MODULE_RP: s_entries[kRp]++; s_rp++; break;
+    case BLUEWAKE_BG_CENSUS_MODULE_RP:
+        s_entries[kRp]++;
+        s_rp++;
+        if (s_top_open && !s_top_tree) {
+            s_top_tree = 1;
+            s_top_before = s_top_size; /* visits so far, the one with the tree included */
+        }
+        break;
     default: break;
     }
 }
 
 BW_BG_CENSUS_EXPORT void bluewake_bg_census_module_report(void) {
+    close_top();
     close_check();
     for (unsigned k = 0; k < kKinds; ++k)
         fprintf(stderr, "[bg-census-module] entries %s=%llu\n", kNames[k], s_entries[k]);
@@ -74,4 +112,9 @@ BW_BG_CENSUS_EXPORT void bluewake_bg_census_module_report(void) {
                 kBinNames[b], s_group_bins[b], s_through_bins[b], s_rp_bins[b]);
     fprintf(stderr, "[bg-census-module] per ground check max: groups=%llu filters=%llu tree_tests=%llu\n",
             s_group_max, s_through_max, s_rp_max);
+    fprintf(stderr, "[bg-census-module] top-level walks=%llu visits=%llu with_tree=%llu visits_before_first_tree=%llu\n",
+            s_top_calls, s_top_visits, s_top_with_tree, s_top_visits_before_tree);
+    for (unsigned b = 0; b < kBins; ++b)
+        fprintf(stderr, "[bg-census-module] top-level walk size %s: all=%llu with_tree=%llu; visits before first tree %s: %llu\n",
+                kBinNames[b], s_top_size_bins[b], s_top_tree_size_bins[b], kBinNames[b], s_top_before_bins[b]);
 }
