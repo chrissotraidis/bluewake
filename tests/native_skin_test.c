@@ -2,6 +2,7 @@
  * storage on Windows and POSIX. Compares every CPU byte, including the cycle
  * observation suffix, and every byte of MEM1. Personal modules remain local.
  * Usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]
+ *        native_skin_test MODULE --bench   (host time, translated vs native)
  */
 #include "native_skin.h"
 #include "StaticRecompABI.h"
@@ -10,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
+#include <time.h>
 #include "module_cpu_contract.h"
 #if defined(_WIN32)
 #include <windows.h>
@@ -56,8 +58,10 @@ static void put16(u8* ram, u32 address, u16 value) { write_be16(ram + (address -
 static void put8(u8* ram, u32 address, u8 value) { ram[address - GC_RAM_BASE] = value; }
 
 /* The model, and a CPU about to call the function. */
+static u32 force_count, force_mix; /* --bench: a fixed model size */
 static CPUState build(u8* ram, unsigned scenario) {
-    const u32 count = scenario % 11u == 0u ? 0u : 1u + next() % 24u;
+    u32 count = scenario % 11u == 0u ? 0u : 1u + next() % 24u;
+    if (force_count) count = force_count;
     put32(ram, SELF + 4u, MODEL);
     put32(ram, SELF + 132u, SCALE_FLAGS);
     put32(ram, SELF + 136u, ENVELOPE_FLAGS);
@@ -70,7 +74,7 @@ static CPUState build(u8* ram, unsigned scenario) {
     put32(ram, MODEL + 64u, INVERSE);
     u32 joints = 0;
     for (u32 i = 0; i < count; ++i) {
-        const u32 mix = next() % 13u == 0u ? 0u : 1u + next() % 4u;
+        const u32 mix = force_mix ? force_mix : next() % 13u == 0u ? 0u : 1u + next() % 4u;
         put8(ram, MIX_COUNTS + i, (u8)mix);
         joints += mix != 0u ? mix : 1u;
     }
@@ -186,9 +190,78 @@ static int run_window(Module* module, CPUState initial, u8* ram) {
     return 1;
 }
 
+/* run_window without the state-load hook, for timing (the hook ran once). */
+static int run_hot(Module* module, const CPUState* initial, u8* ram) {
+    CPUState* cpu = module->storage.cpu;
+    *cpu = *initial; cpu->ram = ram;
+    unsigned turns = 0;
+    while (cpu->pc != 0xFFFFFFFCu && cpu->downcount > -cpu->cycle_budget && !cpu->exception)
+        if (++turns > 10000 || !module->desc->dispatch(cpu, cpu->pc)) return 0;
+    return 1;
+}
+
+static double now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1e9 + ts.tv_nsec;
+}
+
+/* --bench: host time per call, translated function against the native plus the
+ * translation's hand-over tail, on the same module, model and memory. The
+ * function's stores never overlap its loads, so repeating a call gives the same
+ * result and memory needs no reset. Guest cycle costs: 58 + 23/envelope +
+ * 60/joint; turns are long here, so every native run is complete. */
+static int bench(Module* module, u8* ram) {
+    static const u32 sizes[][2] = {{4, 2}, {12, 3}, {24, 4}, {60, 3}, {120, 3}, {200, 4}};
+    printf("%9s %7s %7s %12s %12s %8s\n", "envelopes", "joints", "cycles", "translated", "native", "speedup");
+    for (unsigned s = 0; s < sizeof sizes / sizeof sizes[0]; ++s) {
+        force_count = sizes[s][0];
+        force_mix = sizes[s][1];
+        seed = 0x5EED1234u + s;
+        CPUState c = build(ram, 1u);
+        c.cycle_budget = (s64)1 << 40;
+        c.cycle_deadline_budget = 0;
+        c.gqr[0] = 0;
+        c.fpscr &= ~0x7u;
+        const u32 joints = force_count * force_mix;
+        const unsigned reps = 20000u / force_count + 200u;
+        double best_t = 1e30, best_n = 1e30;
+        for (unsigned round = 0; round < 7; ++round) {
+            if (round == 0 && !run_window(module, c, ram)) return 1;
+            double t0 = now_ns();
+            for (unsigned r = 0; r < reps; ++r)
+                if (!run_hot(module, &c, ram)) return 1;
+            double t1 = now_ns();
+            for (unsigned r = 0; r < reps; ++r) {
+                CPUState* cpu = module->storage.cpu;
+                *cpu = c; cpu->ram = ram;
+                ppc_fpscr_updated(cpu);
+                const int result = bluewake_native_skin(cpu);
+                if (result != 1) { fprintf(stderr, "bench: native declined (%d)\n", result); return 1; }
+                cpu->pc = 0x802EE834u;
+                unsigned turns = 0;
+                while (cpu->pc != 0xFFFFFFFCu && !cpu->exception)
+                    if (++turns > 10000 || !module->desc->dispatch(cpu, cpu->pc)) return 1;
+            }
+            double t2 = now_ns();
+            if (t1 - t0 < best_t) best_t = t1 - t0;
+            if (t2 - t1 < best_n) best_n = t2 - t1;
+        }
+        printf("%9u %7u %7u %10.0fns %10.0fns %7.2fx\n", force_count, joints, 58u + 23u * force_count + 60u * joints,
+               best_t / reps, best_n / reps, best_t / best_n);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc == 3 && strcmp(argv[2], "--bench") == 0) {
+        Module module = {0};
+        if (!load_module(argv[1], &module)) return 1;
+        return bench(&module, module.storage.mem1);
+    }
     if (argc < 2 || argc > 4) {
-        fprintf(stderr, "usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]\n");
+        fprintf(stderr, "usage: native_skin_test ORIGINAL_MODULE [CASES] [ROUTED_MODULE]\n"
+                        "       native_skin_test MODULE --bench\n");
         return 2;
     }
 #if defined(_WIN32)
