@@ -266,3 +266,14 @@ swell's height unlit and lit the swells' crests. Pools, rivers and falls count a
 from 10,000 to 25,000 units away (`DOL_AURORA_EXPOSURE_FAR`), where islands are the haze's colour, and tapers off on what is already bright
 (`DOL_AURORA_EXPOSURE_HIGHLIGHTS`, ice and white rock). `DOL_AURORA_SEA_MASK_DEBUG=1`
 shows the mask.
+
+Patch 0206 keeps the HD look's shading off the effects drawn over the scene. The sun shadows, the occlusion and the
+cloud shadows are worked out after the scene from its depth buffer, and an effect drawn blended without writing depth
+(the spin attack's rings and burst, the Master Sword's glow, sparks) leaves the depth there the scenery's behind it:
+Link's cast shadow was drawn across the glowing rings. Wind Waker HD draws such effects after its lighting. The scene's
+effects are drawn again with their own pipelines into a mask, over black and against the finished depth, and the
+shading takes away as much of its shade as they make up (their brightest channel times 2,
+`DOL_AURORA_EFFECT_MASK_GAIN`), within 3,000 units. Left out of the mask: the sea's surf, the GameCube's own shadows,
+what has no depth test (the sky's clouds) and a character's eyes and mouth; the effects are drawn 5% of their distance
+further back (`DOL_AURORA_EFFECT_MASK_PUSH`), so what lies on a surface keeps its shade.
+`DOL_AURORA_EFFECT_MASK_DEBUG=1` shows in red what the sun shadows leave.

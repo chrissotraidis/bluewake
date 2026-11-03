@@ -112,12 +112,12 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "f9e3f4e59be4d49f10130bf6e68bc5d5fa0451e6",
+      "sha": "ebbb718930aa6594c86cc6809a15bfcb19fc72b3",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
-      "verified": "2026-11-07",
+      "verified": "2026-11-03",
       "upstream": {
         "url": "https://github.com/ExpansionPak/RecompCore",
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
@@ -705,6 +705,13 @@
             "patches/recompcore/0196-GXRuntime-the-remembered-alias-also-builds-with-MSVC.patch"
           ],
           "evidence": "irregularthanis's RecompCore #45 (ppc_guest_alias_range_overlaps and an alias registry generation, used by BlueWake #495's gather-pipe alias cache) and #48 (ppc_guest_alias_resolve finds an alias from the last hit, then a 4 KiB page index, with the same results; differential test guest_alias_lookup_test.c, run by BlueWake's Linux and Windows host CI). Steam Deck, rendered, interleaved against 0.9.0 with BlueWake #480 and #495: 31.86 to 36.38 game FPS (+14.2%) over five scenes, the lava room +33%, guest checkpoints identical (BlueWake #501). Merged into bluewake-next with pdale-boop's 0186-0192 for 0.10.0."
+        },
+        "hd_effects_unshaded": {
+          "runtime": "ebbb718930aa6594c86cc6809a15bfcb19fc72b3",
+          "tracked_patches": [
+            "patches/recompcore/0206-Aurora-the-HD-look-s-shading-leaves-the-effects-drawn-over-the-scene-alone.patch"
+          ],
+          "evidence": "pdale-boop's: the HD look's sun shadows (the shadow map's and the screen's), occlusion and cloud shadows, worked out after the scene from its depth, leave the effects drawn over it alone, as Wind Waker HD draws them after its lighting: Link's cast shadow had been drawn across the spin attack's glowing rings. A 3D draw that is blended, tests depth and writes none (not the sea's surf, the GameCube's own dst-alpha shadows, what has no depth test, or a skinned model's eyes and mouth) is drawn again with its own pipeline into a mask over black against the finished depth, 5% of its distance further back so what lies on a surface keeps its shade; the shading takes away twice the mask's brightest channel, within 3,000 units. Arch Linux (Ryzen 9 9900X, RTX 5070 Ti, Vulkan), rendered from Dale's charged spin attack state against the same build without it, frames matched by content: Link's shadow no longer crosses the rings and burst (the changed pixels, 1.2-4.2% of the frame, are within 3 steps of the sun-shadows-off frame for about 90% of them), Link's shadow on the grass and the rest of the frame unchanged but for a grass fringe at a cliff's edge; with the sun shadows off, 0.0-0.3% changed (the occlusion and cloud shadows on the rings). Windows and Mac not yet checked."
         }
       }
     },
