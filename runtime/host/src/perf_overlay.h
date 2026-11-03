@@ -98,7 +98,7 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
     // than its atlas is what looks stretched. Everything below is in font sizes, so
     // a new resolution or text size re-lays the panel out instead of scaling it.
     const float base_size = font != nullptr ? font->FontSize : ImGui::GetFontSize();
-    const float panel_scale = font_scale * 1.5f < 1.f ? font_scale * 1.5f : 1.f;
+    const float panel_scale = font_scale * 1.5f < 1.5f ? font_scale * 1.5f : 1.5f;
     const float font_size = base_size * panel_scale;
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     const float margin = 0.7f * font_size;
