@@ -371,3 +371,20 @@ cloud), the cloud read from the same texture, drift and floor as the scenery's c
 is HD's from the clock, 1 - max(0.25, -0.9 cos(time - 15 degrees)), which the host gives
 (`aurora_set_cloud_hd_floor`); unset, it comes from the light's height. `DOL_AURORA_ACTOR_LIGHT_DEBUG=6` shows the
 characters' cloud term.
+
+Patch 0218 makes the HD shadow quality's cascades follow the camera, as Wind Waker HD's: each cascade is fitted to
+its slice of the view between the splits, a far fade to lit from 12,000 to 14,000, and the facing term no longer
+fades with distance. Each cascade is HD's own fit (`DOL_AURORA_SUN_SHADOW_CASCADES_HD=1`, the default), read from
+Cemu captures of a turn at Outset's pier: the tight box round its slice of the view (the first from 30 units to the
+first split), in a frame whose y is the camera's forward made flat to the sun, refitted every frame. At 21:9 the
+square about the sphere round the slice wasted most of its texels: from the boat at Outset the first cascade was
+4096 units square where HD's fit is 3194 x 1038. `=2` takes HD's frame only, the sizes held in steps and the centre
+snapped to whole texels. `=0` gives stable cascades: each in the frame fixed to the sun, its box the square about the
+sphere round its slice, so the grid doesn't move as the camera turns; with it,
+`DOL_AURORA_SUN_SHADOW_CASCADES_STABLE=0` turns the frame with the camera instead (and `_TURN_STEP` applies only
+then). Past the second cascade only the stage's BG lists cast, as Wind Waker HD's drawShadowCascade draws mpModelList
+into every cascade and the other lists into the first two: the host marks the game's draw list in BP register 0x7A
+(0 or never written: a BG list, 1: another), kept until written again, and a game module that doesn't write it keeps
+the old rule (`DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all` keeps every caster in every cascade).
+`DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0` keeps the cascades fixed to the sun, to compare;
+`DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=2` shows debug view 12 unblurred, with the pre-pass shadow in red.

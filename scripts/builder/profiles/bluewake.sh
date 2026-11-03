@@ -66,8 +66,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Wind Waker HD's actor light (its toon shader for the characters: ramp switch times the sun shadow, hemisphere shade, rim; aurora_set_actor_light_hd; test switch): patches/recompcore/0215 (pdale-boop).
 # The sea as Wind Waker HD's: the sea rooms' square of sea in the sea mask at the size it is drawn, foliage in front clearing the marks behind it, and HD's own sea term on its light: patches/recompcore/0216 (pdale-boop).
 # Wind Waker HD's clouds on the characters' light, and its cloud floor from the game's clock (aurora_set_cloud_hd_floor): patches/recompcore/0217 (pdale-boop).
+# Wind Waker HD's cascades that follow the camera, each Wind Waker HD's own fit to its slice of the view (DOL_AURORA_SUN_SHADOW_CASCADES_HD=0 gives stable ones fixed to the sun, DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0 the old ones), and past the second only the stage's BG lists cast, as in Wind Waker HD, from the host's mark in BP register 0x7A (DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all keeps every caster): patches/recompcore/0218 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=d6960b2c0b5b1d6f14d416476db706c502e90381
+RECOMPCORE_SHA=0fb3c10d6b029cb9b92ec7f0bbea2869b7748d72
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
