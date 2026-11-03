@@ -16,7 +16,7 @@ class CertificationTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         (self.root / "generated.h").write_text("/* synthetic header */\n")
-        self.body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\nlabel_802EE6F0:\nlabel_802EE834:\n'
+        self.body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\nlabel_802EE834:\n'
         digest = hashlib.sha256(' '.join(self.body.split()).encode()).hexdigest()
         self.old_leaves = prepare.LEAVES
         prepare.LEAVES = ((0x100, 0x104, {digest}),)
@@ -57,9 +57,9 @@ class CertificationTest(unittest.TestCase):
             prepare.prepare(self.root)
 
     def test_missing_hand_over_label(self):
-        # The native hands over at the loop head and the epilogue: both must be
-        # labels inside the certified body, in every variant.
-        body = self.body.replace('label_802EE6F0:\n', '')
+        # The native hands over at the epilogue: it must be a label inside the
+        # certified body, in every variant.
+        body = self.body.replace('label_802EE834:\n', '')
         digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
         prepare.LEAVES = ((0x100, 0x104, {digest}),)
         self.file.write_text(self.source.replace(self.body, body))

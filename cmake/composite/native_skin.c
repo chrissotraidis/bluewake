@@ -14,8 +14,10 @@
  * registers, CR0, the FPRF, the stack frame, the matrices and flags written,
  * the reservation, the cycles (37, and per envelope 23 and 60 a joint) and
  * the last block's cycle suffix, at the envelope loop's test (0x802EE830).
- * The translation then runs its own epilogue (0x802EE834), or, when only the
- * first envelopes fit the turn (opt-in), the rest of the loop (0x802EE6F0).
+ * The translation then runs its own epilogue (0x802EE834), which restores
+ * the registers and returns as each build's transforms shaped it (the inline
+ * _restgpr of the #503 stack leaves a different cycle suffix from the plain
+ * call, so the native does not replay it).
  *
  * It declines, changing nothing, unless that result is certain: FP available,
  * paired singles unscaled, rounding to nearest, no write journal, every
@@ -23,10 +25,11 @@
  * order of its loads and stores cannot matter), every float it reads finite
  * and below 2^31 in magnitude (so no product, sum or single rounding reaches
  * infinity or NaN, and every paired-single operation takes the inline path
- * the translation takes), and the whole function inside the turn's cycle
- * budget and before the next deadline (so the translation would neither have
- * stopped part of the way through nor charged a block instruction by
- * instruction).
+ * the translation takes), and the prologue and the whole loop inside the
+ * turn's cycle budget and before the next deadline (so the translation would
+ * neither have stopped part of the way through nor charged a block
+ * instruction by instruction). Partial runs of the loop were measured and
+ * dropped (#541 M2: exact, no measurable gain).
  *
  * scripts/windows/native_skin.py routes the certified function entry once
  * the translated body is the one this was checked against
@@ -60,26 +63,18 @@ BW_SKIN_EXPORT int bluewake_composite_native_skin_v1(
     s_ready_user = s_ready != NULL ? user : NULL;
     return s_ready != NULL;
 }
-/* The native's own result (0, 1 or 2): a logical `&&` here would turn a partial
- * run's 2 into 1, sending the hook to the epilogue with envelopes left (#541). */
+/* The native's own result, passed through: a logical `&&` here once turned a
+ * result code into a boolean (#541 M2), which the tests did not see because
+ * they called the native directly; they now call this. */
 int bluewake_native_skin_try(CPUState* cpu) {
     if (cpu == NULL || s_ready == NULL || !s_ready(s_ready_user, cpu, BLUEWAKE_NATIVE_SKIN_ENTRY))
         return 0;
     return bluewake_native_skin(cpu);
 }
-static unsigned long long s_skin_runs, s_skin_partial, s_skin_declined, s_skin_joints;
+static unsigned long long s_skin_runs, s_skin_declined, s_skin_joints;
 /* Cycles from the entry to the loop's first head: the prologue blocks (15),
  * the register-save helper (4), the set-up (14) and the first test (4). */
 #define SKIN_LOOP_HEAD_CYCLES 37u
-/* Partial runs (#541 M2) are opt-in while measured: BLUEWAKE_NATIVE_SKIN_PARTIAL=1. */
-static bool skin_partial_enabled(void) {
-    static int s_enabled = -1;
-    if (s_enabled < 0) {
-        const char* value = getenv("BLUEWAKE_NATIVE_SKIN_PARTIAL");
-        s_enabled = value != NULL && value[0] == '1';
-    }
-    return s_enabled != 0;
-}
 
 /* BLUEWAKE_SKIN_CENSUS (compile time, diagnostic builds only, #541): each
  * decline by its reason, and the accepted and timing-declined calls by the
@@ -105,8 +100,8 @@ static unsigned skin_bin(unsigned long long cycles) {
 #endif
 
 BW_SKIN_EXPORT void bluewake_native_skin_report(void) {
-    fprintf(stderr, "[native-skin] calcWeightEnvelopeMtx native=%llu partial=%llu declined=%llu joints=%llu\n",
-            s_skin_runs, s_skin_partial, s_skin_declined, s_skin_joints);
+    fprintf(stderr, "[native-skin] calcWeightEnvelopeMtx native=%llu declined=%llu joints=%llu\n",
+            s_skin_runs, s_skin_declined, s_skin_joints);
 #if defined(BLUEWAKE_SKIN_CENSUS)
     for (unsigned r = 0; r < SKIN_REASONS; ++r)
         fprintf(stderr, "[native-skin-census] decline %s=%llu\n", s_skin_reasons[r], s_skin_reason_counts[r]);
@@ -206,12 +201,12 @@ static inline SkinPair skin_madd(const CPUState* cpu, SkinPair a, SkinPair c, Sk
 
 #if defined(BLUEWAKE_SKIN_DUMP)
 /* BLUEWAKE_SKIN_DUMP (compile time, diagnostic builds only, #541): the CPU and
- * MEM1 at the entry of up to 100 calls that will run partially (every Nth with
+ * MEM1 at the entry of up to 100 calls the native runs (every Nth with
  * BLUEWAKE_SKIN_DUMP_EVERY=N), into the folder the BLUEWAKE_SKIN_DUMP variable names, for tests/native_skin_test.c --replay. */
 static void skin_dump(const CPUState* cpu) {
     static unsigned s_dumped, s_seen;
     const char* folder = getenv("BLUEWAKE_SKIN_DUMP");
-    const char* every_text = getenv("BLUEWAKE_SKIN_DUMP_EVERY"); /* every Nth partial run (default 1) */
+    const char* every_text = getenv("BLUEWAKE_SKIN_DUMP_EVERY"); /* every Nth call (default 1) */
     const unsigned every = every_text != NULL && atoi(every_text) > 0 ? (unsigned)atoi(every_text) : 1u;
     if (folder == NULL || folder[0] == '\0' || s_dumped >= 100u || cpu->ram == NULL || s_seen++ % every != 0u)
         return;
@@ -317,36 +312,13 @@ int bluewake_native_skin(CPUState* cpu) {
 #if defined(BLUEWAKE_SKIN_CENSUS)
     census_cycles = cycles;
 #endif
-    /* Where the whole call does not fit, the first envelopes that do run here
-     * and the translation takes over at the loop's head (0x802EE6F0), exactly
-     * where its own loop branch at 0x802EE830 would jump: its checks there
-     * then stop the turn as they would have. */
     const s64 deadline = cpu->cycle_deadline_budget;
-    if (deadline > 0 && deadline < 60)
+    if (cpu->downcount - (s64)cycles <= -cpu->cycle_budget)
+        SKIN_DECLINE(8);
+    if (deadline > 0 && (deadline < 60 || deadline + cpu->downcount < (s64)cycles))
         SKIN_DECLINE(9);
-#define SKIN_FITS(c) (cpu->downcount - (s64)(c) > -cpu->cycle_budget && \
-                      (deadline <= 0 || deadline + cpu->downcount >= (s64)(c)))
-    u32 limit = count;
-    if (!SKIN_FITS(cycles)) {
-        const u8* counts = cpu->ram + (mix_counts - GC_RAM_BASE);
-        u64 prefix = SKIN_LOOP_HEAD_CYCLES;
-        for (limit = 0; skin_partial_enabled() && limit < count; ++limit) {
-            const u64 next = prefix + 23u + 60u * (u64)(counts[limit] != 0u ? counts[limit] : 1u);
-            if (!SKIN_FITS(next))
-                break;
-            prefix = next;
-        }
-        if (limit == 0u) {
-            if (cpu->downcount - (s64)cycles <= -cpu->cycle_budget)
-                SKIN_DECLINE(8);
-            SKIN_DECLINE(9);
-        }
-        cycles = prefix;
-    }
-#undef SKIN_FITS
 #if defined(BLUEWAKE_SKIN_DUMP)
-    if (limit < count)
-        skin_dump(cpu);
+    skin_dump(cpu);
 #endif
 
     /* The prologue: the frame, the return address, f27-f31 twice, r29-r31. */
@@ -380,7 +352,7 @@ int bluewake_native_skin(CPUState* cpu) {
     u32 r5 = weights, r6 = model, r7 = unit, r9 = cpu->gpr[9], r10 = cpu->gpr[10], r12 = cpu->gpr[12];
     /* r0 from mflr and r11 from the save helper's set-up, until the first joint. */
     u32 index_at = indices, weight_at = weights, r0 = return_address, r11 = frame + 32u;
-    for (u32 i = 0; i < limit; ++i) {
+    for (u32 i = 0; i < count; ++i) {
         r7 = envelope_flags;
         cpu->ram[envelope_flags + i - GC_RAM_BASE] = 1u;
         clear_matching_reservation(cpu, envelope_flags + i);
@@ -453,12 +425,10 @@ int bluewake_native_skin(CPUState* cpu) {
         f31 = zero;
     }
 
-    /* The state after the loop test at 0x802EE824-0x802EE830 with r31 = limit:
+    /* The state after the loop's last test (0x802EE824-0x802EE830, r31 = count):
      * the frame up, LR from the register-save helper's call, f27 the unit pair
-     * and the last joint's registers live. The translation goes on from there:
-     * the loop head when envelopes remain, else the epilogue at 0x802EE834,
-     * which restores the registers and returns as each build's transforms
-     * shaped it. */
+     * and the last joint's registers live. The translation goes on from there,
+     * at the epilogue 0x802EE834. */
     for (unsigned r = 0; r < 14; ++r) {
         cpu->fpr[r] = f[r].p0;
         cpu->ps1[r] = f[r].p1;
@@ -472,7 +442,7 @@ int bluewake_native_skin(CPUState* cpu) {
         cpu->fpscr = (cpu->fpscr & ~(0x1Fu << 12)) | (fprf << 12);
     cpu->gpr[0] = r0;
     cpu->gpr[1] = frame;
-    cpu->gpr[4] = 48u * limit;
+    cpu->gpr[4] = 48u * count;
     cpu->gpr[5] = r5;
     cpu->gpr[6] = r6;
     cpu->gpr[7] = r7;
@@ -483,9 +453,9 @@ int bluewake_native_skin(CPUState* cpu) {
     cpu->gpr[12] = r12;
     cpu->gpr[29] = weight_at - 4u;
     cpu->gpr[30] = index_at - 2u;
-    cpu->gpr[31] = limit;
-    /* cmpw r31, r8: less while envelopes remain, else equal; SO from XER. */
-    cpu->cr = (cpu->cr & 0x0FFFFFFFu) | (((limit < count ? 0x8u : 0x2u) | (cpu->xer >> 31)) << 28);
+    cpu->gpr[31] = count;
+    /* cmpw r31, r8 at the loop's exit: equal, with SO from XER. */
+    cpu->cr = (cpu->cr & 0x0FFFFFFFu) | ((0x2u | (cpu->xer >> 31)) << 28);
     cpu->lr = SKIN_SAVE_RETURN;
     cpu->downcount -= (s64)cycles;
     if (count != 0u) {
@@ -499,10 +469,6 @@ int bluewake_native_skin(CPUState* cpu) {
 #if defined(BLUEWAKE_SKIN_CENSUS)
     s_skin_accepted_bins[skin_bin(cycles)]++;
 #endif
-    if (limit < count) {
-        s_skin_partial++;
-        return 2;
-    }
     s_skin_runs++;
     return 1;
 

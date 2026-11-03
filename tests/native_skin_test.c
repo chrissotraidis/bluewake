@@ -131,8 +131,7 @@ static CPUState build(u8* ram, unsigned scenario) {
     c.cycle_deadline_budget = scenario % 4u == 0u ? 0 : 100000;
     if (scenario % 17u == 2u) c.cycle_deadline_budget = 40;    /* too near: declines */
     if (scenario % 19u == 3u) c.cycle_budget = 200;            /* the turn would end inside: declines */
-    /* The turn ends inside the loop: the first envelopes run natively, the
-     * translation finishes from the loop head (#541 M2, opt-in). */
+    /* The turn ends inside the call: the native declines. */
     if (scenario % 5u == 2u) c.cycle_budget = 100 + (s64)(next() % 3000u);
     if (scenario % 6u == 4u) {
         c.reserve_valid = true;
@@ -268,7 +267,7 @@ static int bench(Module* module, u8* ram) {
 }
 
 /* --replay DIR: CPU and MEM1 captured in play at the entry of calls that ran
- * partially (native_skin.c, BLUEWAKE_SKIN_DUMP). Each is run by the translation
+ * by the native (native_skin.c, BLUEWAKE_SKIN_DUMP). Each is run by the translation
  * alone, and by the native then the translation from its hand-over, to the
  * function's return or the end of the turn; every CPU byte and MEM1 compared. */
 static int run_to(Module* module, CPUState start, u8* ram, u32 stop) {
@@ -323,7 +322,7 @@ static int replay(Module* module, const char* folder, bool routed) {
             CPUState native = start; native.ram = ram;
             result = bluewake_native_skin_try(&native);
             if (result == 0) { printf("case %u: declined\n", n); continue; }
-            native.pc = result == 2 ? 0x802EE6F0u : 0x802EE834u;
+            native.pc = 0x802EE834u;
             if (!run_to(module, native, ram, stop)) return 1;
         }
         CPUState actual = *module->storage.cpu;
@@ -348,11 +347,6 @@ static int replay(Module* module, const char* folder, bool routed) {
 
 int main(int argc, char** argv) {
     if (argc == 4 && (strcmp(argv[2], "--replay") == 0 || strcmp(argv[2], "--replay-module") == 0)) {
-#if defined(_WIN32)
-        _putenv("BLUEWAKE_NATIVE_SKIN_PARTIAL=1");
-#else
-        setenv("BLUEWAKE_NATIVE_SKIN_PARTIAL", "1", 1);
-#endif
         Module module = {0};
         if (!load_module(argv[1], &module)) return 1;
         enable_try();
@@ -369,11 +363,6 @@ int main(int argc, char** argv) {
                         "       native_skin_test MODULE --bench\n");
         return 2;
     }
-#if defined(_WIN32)
-    _putenv("BLUEWAKE_NATIVE_SKIN_PARTIAL=1");
-#else
-    setenv("BLUEWAKE_NATIVE_SKIN_PARTIAL", "1", 1);
-#endif
     const unsigned cases = argc > 2 ? (unsigned)strtoul(argv[2], NULL, 10) : 4000u;
     enable_try();
     Module original = {0}, candidate = {0};
@@ -386,7 +375,7 @@ int main(int argc, char** argv) {
     u8* before_ram = calloc(1, RAM_SIZE);
     u8* want_ram = calloc(1, RAM_SIZE);
     if (!reference_ram || !native_ram || !before_ram || !want_ram) return 1;
-    unsigned ran = 0, partial = 0, declined = 0;
+    unsigned ran = 0, declined = 0;
     for (unsigned i = 0; i < cases; ++i) {
         CPUState c = build(native_ram, i);
         memcpy(reference_ram, native_ram, RAM_SIZE);
@@ -415,10 +404,8 @@ int main(int argc, char** argv) {
         CPUState untouched = native;
         const int result = bluewake_native_skin_try(&native);
         if (result != 0) {
-            /* The hook's goto: the epilogue, or the loop head, which records
-             * its PC when the turn stops there. The translation finishes. */
-            partial += result == 2;
-            native.pc = result == 2 ? 0x802EE6F0u : 0x802EE834u;
+            /* The hook's goto to the epilogue; the translation finishes. */
+            native.pc = 0x802EE834u;
             memcpy(reference_ram, native_ram, RAM_SIZE);
             if (!run_window(&original, native, reference_ram)) return 1;
             native = *original.storage.cpu;
@@ -452,8 +439,7 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    printf("native skin: %u cases identical to the translation (%u partial), %u declined unchanged\n", ran,
-           partial, declined);
+    printf("native skin: %u cases identical to the translation, %u declined unchanged\n", ran, declined);
     if (candidate.desc) {
         if (candidate.report) candidate.report();
         printf("routed skin: %u readiness queries, %u complete CPU/MEM1 comparisons\n", routed_queries, cases);
