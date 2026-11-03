@@ -1,6 +1,6 @@
 # TECH_PLAN — Native extensions for Outset's character work
 
-Status: M0 ready to measure; M1 blocked on porting both native sets  
+Status: M0 done (turn budget refuses the big models); M2 next; M1 blocked on porting  
 Source: BlueWake `main` at `ee991d312`  
 [PRD](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -30,9 +30,9 @@ if (cpu->cycle_deadline_budget > 0 &&
 
 ## Approach
 
-1. **M0, decline reasons (counting build).** Count each decline by reason (data checks, turn budget, deadline) and by model size (envelopes, joints), plus the accepted calls by size. Outset, Game Mode, one minute. This confirms or rejects the timing explanation before any design work.
+1. **M0, decline reasons (counting build). Done:** all timing declines are the turn budget, none the deadline; calls of 8k cycles or more are refused 91–100% of the time. Originally: Count each decline by reason (data checks, turn budget, deadline) and by model size (envelopes, joints), plus the accepted calls by size. Outset, Game Mode, one minute. This confirms or rejects the timing explanation before any design work.
 2. **M1, the switches (found not to be switches).** Both need porting first: `--native-entries`' generator must handle the lean-memory write forms, and `--native-set4`'s entry points must be certified against this tree. Originally: Full builds with `--native-entries`, with `--native-set4`, and with both, each trained on its own code. Six-launch Game Mode A/B against #503's stack; checkpoints. Retain each set that is consistent and exact.
-3. **M2, resumable skinning (if M0 confirms timing).** Let the native run envelope by envelope and stop at the same envelope-loop block boundary where the translation would stop for the budget or deadline. It hands back the translated loop's exact state there (loop counter, pointers, the FP registers in use, `pc` at the loop head), and the translation finishes the call. Big models then run mostly natively.
+3. **M2, resumable skinning (M0 confirmed timing; only the turn budget matters).** Let the native run envelope by envelope and stop at the same envelope-loop block boundary where the translation would stop for the budget or deadline. It hands back the translated loop's exact state there (loop counter, pointers, the FP registers in use, `pc` at the loop head), and the translation finishes the call. Big models then run mostly natively.
 4. **M3, qualify.** The differential test (`native_skin_test.c`, every register and byte against the translation) extended to stops at every envelope; Game Mode A/B; checkpoints.
 
 ## Changes (planned)

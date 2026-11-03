@@ -1,6 +1,6 @@
 # PROGRESS — Native extensions for Outset's character work
 
-Status: M0 census build ready; M1 blocked: both native sets need porting before they can run  
+Status: M0 done: the turn budget refuses the big models; M2 (resumable skinning) next; M1 blocked on porting  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -8,7 +8,7 @@ Status: M0 census build ready; M1 blocked: both native sets need porting before 
 ### M0: Why skinning declines
 
 - [x] M0-T01: Decline-reason and model-size counters in `native_skin.c` (diagnostic define). `BLUEWAKE_SKIN_CENSUS`: each of the ten decline sites by name (state, guest data, model, overlapping stores, mix counts, joint count, joint tables, joint matrices, turn budget, deadline), and the accepted and timing-declined calls by estimated cycles (< 1k … ≥ 16k), printed through the native's existing exit report. Without the define, `SKIN_DECLINE(n)` is the original `goto decline`.
-- [ ] M0-T02: Outset, Game Mode, one minute: declines by reason and size; accepted calls by size.
+- [x] M0-T02: Outset, Game Mode, one minute: declines by reason and size; accepted calls by size. **All timing declines are the turn budget** (28,118 of 28,120); big models are refused: 50% at 4–8k cycles, 91% at 8–16k, 100% at ≥ 16k. M2 confirmed as the route.
 
 ### M1: The native switches (can run beside M0)
 
@@ -31,4 +31,5 @@ Status: M0 census build ready; M1 blocked: both native sets need porting before 
 |---|---|---|---|---|
 | M1 | Local `bench/541-ctl` (#503 stack, `a64af0e`); full builds with `--native-entries` and `--native-set4` | `build_script` with each option, own training | Linux workstation | **Neither set can be measured as it stands.** `--native-entries`: build fails in `native-leaf-gen` on `__ieee754_fmod` (`unhandled ctx: bw_write32_ato(&bw_ool, ctx, 0x8032EC1Cu, …)`). `--native-set4`: builds (`t541-set4`), but its hooks are not inserted until hashes are recorded for this tree, so its natives are never called |
 | M0 | Control `a64af0e` (AppImage `t541-ctl/a64af0e941c4`, own training) and the census build `78a3382` (`--reuse` over it, `BLUEWAKE_SKIN_CENSUS` on locally) | Census symbols confirmed in the module | Linux workstation | Ready for the one-minute Outset run on the Deck |
+| M0-T02 | Census build `78a3382` (#503 stack + `BLUEWAKE_SKIN_CENSUS` on, `--reuse` over the control); local `measure-541/census.log` (private) | One Game Mode launch, ≈ 90 s, then SIGTERM; the native's exit report | Worst-angle Outset state, 16:9, widescreen mod, 27 game FPS | native 282,718, declined 28,120 (9%). **Reasons: turn budget 28,118, CPU state 2, every data check 0, deadline 0.** By estimated cost (accepted / budget-declined): < 1k 258,829 / 1,660; 1–2k 7,827 / 929; 4–8k 15,445 / 15,201; 8–16k 617 / 5,950; ≥ 16k 0 / 4,378. Weighted by cost, the declined calls carry roughly half of the function's guest cycles: the big models, refused because what is left of a turn (≈ 8,600 cycles on average, set by the DSP step) is too short |
 | Planning | #503 `measure-503/m1-native-counts.txt`, `m1-functions.txt` (private) | Native counters and the game-function mapping from #503's Outset session | Game Mode, Outset, stage select off | `calcWeightEnvelopeMtx`: native 1,080,359 runs, 114,745 declined (≈ 10%), yet 2.33 M cycles/frame still translated against 0.83 M in the native. Translated costs of functions whose natives are switched off: Maya `calcTransform` 0.59, key-frame 0.46 + 0.44, `JMAEulerToQuat` 0.40 M cycles/frame |
