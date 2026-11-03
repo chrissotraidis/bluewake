@@ -8394,6 +8394,9 @@ int main(int argc, char** argv) {
         }
         atexit(report_credit_census);
     }
+    bluewake_bg_census_init();
+    if (bluewake_bg_census_on)
+        atexit(bluewake_bg_census_report);
     g_deadline_census_enabled = getenv("BLUEWAKE_DEADLINE_CENSUS") != NULL;
     {
         const char* native = getenv("BLUEWAKE_ACTOR_SEARCH_NATIVE");

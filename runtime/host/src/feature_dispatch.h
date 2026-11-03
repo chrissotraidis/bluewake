@@ -7,6 +7,7 @@
 #include "forest_water.h"
 #include "mouse_camera.h"
 #include "quick_doors.h"
+#include "bg_census.h"
 
 /* These hooks only run at fixed GZLE01 addresses in this interval. Reject
  * addresses outside it before checking each hook's addresses/armed flags.
@@ -14,15 +15,17 @@
 static inline bool bluewake_feature_observes(u32 address) {
     return bluewake_mouse_camera_observes(address) || bluewake_climb_observes(address) ||
            bluewake_quick_doors_observes(address) || bluewake_draw_tags_observes(address) ||
-           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address);
+           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address) ||
+           bluewake_bg_census_observes(address);
 }
 
 /* The chassis services every block boundary except the block a host turn
  * starts on, which the host dispatches itself. The host calls this for that
  * block; Forest Water has its own turn-start call. */
 static inline void bluewake_feature_dispatch_turn_entry(CPUState* cpu, u32 address) {
-    // The audio watch's hooks are outside the interval below.
+    // The audio watch's and the ground census's hooks are outside the interval below.
     bluewake_audio_watch_dispatch(cpu, address);
+    bluewake_bg_census_dispatch(cpu, address);
     if (address - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE >
         BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE)
         return;

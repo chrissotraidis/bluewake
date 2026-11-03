@@ -30,6 +30,7 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/aram_dma.c
     ${BLUEWAKE_HOST_SRC}/audio_capture.c
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
+    ${BLUEWAKE_HOST_SRC}/bg_census.c
     ${BLUEWAKE_HOST_SRC}/ipl_sram.c
     ${BLUEWAKE_HOST_SRC}/card_runtime.c
     ${BLUEWAKE_HOST_SRC}/callback_delivery.c

@@ -70,6 +70,8 @@ SKIP_HARNESS = r"""
 #include "bw_edge_watch.inc"
 bool bluewake_climb_on, bluewake_quick_doors_armed, bluewake_draw_tags_enabled;
 bool bluewake_forest_water_enabled;
+bool bluewake_bg_census_on; /* the ground census's addresses are unwatched by design (bg_census.h) */
+void bluewake_bg_census_enter(const CPUState* cpu, u32 address) { (void)cpu; (void)address; }
 u32 bluewake_forest_water_tree_timer_check;
 static unsigned char watched[0x01800000u / 4u];
 int main(void) {

@@ -32,6 +32,9 @@ void bluewake_draw_tags_enter(CPUState* cpu, u32 address) {
 void bluewake_forest_water_enter(CPUState* cpu, u32 address) {
     (void)cpu; (void)address; ++calls[4]; order = order * 6 + 0;
 }
+/* The ground census (bg_census.h) is off here: it observes nothing. */
+bool bluewake_bg_census_on;
+void bluewake_bg_census_enter(const CPUState* cpu, u32 address) { (void)cpu; (void)address; assert(0); }
 void bluewake_audio_watch_cue(CPUState* cpu) {
     (void)cpu; ++calls[5]; order = order * 6 + 5;
 }

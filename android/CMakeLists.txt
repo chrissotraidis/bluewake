@@ -92,6 +92,7 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/forest_water.c
     ${BLUEWAKE_HOST_SRC}/hd_look.c
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
+    ${BLUEWAKE_HOST_SRC}/bg_census.c
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c
     ${BLUEWAKE_HOST_SRC}/save_state.c)
 # The shell (the touch controls and the ⋯ menu) is the iPhone app's, so the

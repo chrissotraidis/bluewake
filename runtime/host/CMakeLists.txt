@@ -42,6 +42,7 @@ add_executable(bluewake_host
     src/forest_water.c
     src/hd_look.c
     src/audio_watch.c
+    src/bg_census.c
     src/fast_load.c
     src/fps_watch.c
     src/dpad_menus.c
