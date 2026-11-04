@@ -264,6 +264,67 @@ int bluewake_disc_check(const char* iso_path, char* error, size_t error_size) {
     return rc;
 }
 
+// Present is not the same as whole. The file table names an offset and a size
+// for every file on the disc, so the furthest of them is the last byte the game
+// can ask for; an image that ends before it was copied short (a provider that
+// ended the stream early, an interrupted push) even though its header is intact.
+// Directory entries (e[0] != 0) keep the index one past their last child in the
+// size field, not a length, so they are skipped.
+int bluewake_disc_check_complete(const char* iso_path, char* error,
+                                 size_t error_size) {
+    if (bluewake_disc_check(iso_path, error, error_size) != 0)
+        return -1;
+    FILE* f = fopen(iso_path, "rb");
+    if (f == NULL)
+        return fail(error, error_size, "The disc image could not be opened.");
+    int rc = -1;
+    uint8_t* h = NULL;
+    uint8_t* fst = NULL;
+    h = read_at(f, 0, 0x440);
+    if (h == NULL) {
+        fail(error, error_size, "The disc header could not be read.");
+        goto done;
+    }
+    off_t image_size = fseeko(f, 0, SEEK_END) == 0 ? ftello(f) : (off_t)-1;
+    if (image_size < 0) {
+        fail(error, error_size, "The disc image could not be measured.");
+        goto done;
+    }
+    const uint32_t fst_off = be32(h + 0x424), fst_size = be32(h + 0x428);
+    fst = fst_size >= 12 ? read_at(f, fst_off, fst_size) : NULL;
+    if (fst == NULL) {
+        fail(error, error_size, "The disc's file table could not be read.");
+        goto done;
+    }
+    const uint32_t count = be32(fst + 8);
+    if (count == 0 || (uint64_t)count * 12 > fst_size) {
+        fail(error, error_size, "The disc's file table is malformed.");
+        goto done;
+    }
+    uint64_t last = (uint64_t)fst_off + fst_size;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint8_t* e = fst + i * 12;
+        if (e[0] != 0)
+            continue;
+        const uint64_t end = (uint64_t)be32(e + 4) + (uint64_t)be32(e + 8);
+        if (end > last)
+            last = end;
+    }
+    if (last > (uint64_t)image_size) {
+        fail(error, error_size,
+             "The disc image is incomplete: it holds %lld bytes, but the files "
+             "on the disc end at %llu. Choose the disc image again.",
+             (long long)image_size, (unsigned long long)last);
+        goto done;
+    }
+    rc = 0;
+done:
+    free(h);
+    free(fst);
+    fclose(f);
+    return rc;
+}
+
 // Unpacks the .rel members of RELS.arc (a RARC archive, possibly inside a
 // Yaz0 wrapper, whose members are Yaz0 RELs). Returns the count or -1.
 static int unpack_rels_arc(uint8_t* arc, size_t arc_size, const char* out,
