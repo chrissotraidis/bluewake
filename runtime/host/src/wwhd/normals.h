@@ -20,6 +20,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1657,16 +1658,31 @@ class HdNormals {
     // Models matched so far (the stages' and the objects'), for the import's progress.
     size_t models_matched() const { return stage_models_ + object_models_; }
 
-    Tables tables() {
+    // At most how many tables tables() writes (each stage with GameCube arcs a normals and a colours table, and
+    // the objects' two), known from the start: the import's progress counts them with the HD files.
+    size_t tables_most() const {
+        std::set<std::string> stages;
+        for (const auto& arc : stage_arcs_)
+            stages.insert(arc.second.first);
+        return 2 * stages.size() + 2;
+    }
+
+    // With `each`, every table goes to it as soon as it is made, in the order of `files` (left empty), after
+    // `counted` has been told how many there are: the importer writes and counts them one by one.
+    Tables tables(const std::function<void(size_t)>& counted = {},
+                  const std::function<void(const std::string&, const Bytes&)>& each = {}) {
         using namespace normals_detail;
         flush();
         Tables out;
+        std::vector<std::pair<std::string, std::function<Bytes()>>> todo; // relative path, its table
         size_t stages = 0;
         for (const auto& [stage, rows] : stages_)
             if (!rows.empty()) {
                 stages++;
-                out.files.emplace_back(std::string(kHdNormalsFolder) + "/" + stage + ".bin", normals_table(rows));
+                todo.emplace_back(std::string(kHdNormalsFolder) + "/" + stage + ".bin",
+                                  [&rows = rows] { return normals_table(rows); });
             }
+        std::list<StageColours> kept_tables;
         for (const auto& [stage, table] : stage_colours_) {
             StageColours kept;
             const std::set<Key>& clashes = stage_clashes_[stage];
@@ -1674,17 +1690,31 @@ class HdNormals {
                 if (!clashes.count(key))
                     kept.emplace(key, c);
             const auto rows = stages_.find(stage);
-            if (!kept.empty() && rows != stages_.end() && !rows->second.empty())
-                out.files.emplace_back(std::string(kHdColoursFolder) + "/" + stage + ".bin", colours_table(kept));
+            if (!kept.empty() && rows != stages_.end() && !rows->second.empty()) {
+                const StageColours& k = kept_tables.emplace_back(std::move(kept));
+                todo.emplace_back(std::string(kHdColoursFolder) + "/" + stage + ".bin",
+                                  [&k] { return colours_table(k); });
+            }
         }
         std::map<Key, std::array<double, 4>> cols;
         for (const auto& [key, c] : object_colours_)
             if (!clashes_.count(key))
                 cols.emplace(key, c);
         if (!objects_.empty())
-            out.files.emplace_back(std::string(kHdNormalsFolder) + "/" + kHdObjectsFile, normals_table(objects_));
+            todo.emplace_back(std::string(kHdNormalsFolder) + "/" + kHdObjectsFile,
+                              [this] { return normals_table(objects_); });
         if (!cols.empty())
-            out.files.emplace_back(std::string(kHdColoursFolder) + "/" + kHdObjectsFile, colours_table(cols));
+            todo.emplace_back(std::string(kHdColoursFolder) + "/" + kHdObjectsFile,
+                              [&cols] { return colours_table(cols); });
+        if (counted)
+            counted(todo.size());
+        for (auto& [name, make] : todo) {
+            Bytes table = make();
+            if (each)
+                each(name, table);
+            else
+                out.files.emplace_back(name, std::move(table));
+        }
         out.report = "{\"stage_models\": " + std::to_string(stage_models_) +
                      ", \"stage_models_skipped\": " + std::to_string(stage_models_skipped_) +
                      ", \"object_models\": " + std::to_string(object_models_) +

@@ -630,6 +630,8 @@ ImportResult import_pack(const ImportOptions& o) {
         // HD's normals and vertex colours by the GameCube's positions (the HD look's sun shadows): each
         // GameCube arc is read from its disc as its HD archive turns up.
         HdNormals normals(o.gc_disc);
+        // The shading tables written at the end count as files too, at most two a stage until they are counted.
+        progress.files_total = files.size() + normals.tables_most();
         for (const std::string& source : files) {
             check_cancel();
             progress.files_read++;
@@ -842,14 +844,22 @@ ImportResult import_pack(const ImportOptions& o) {
         progress.shaded_models = normals.models_matched();
         progress.cloud_shadow = cloud_shadow != "null";
         report("Writing HD's shading for the sun shadows");
-        const HdNormals::Tables normal_tables = normals.tables();
-        for (const auto& [name, table] : normal_tables.files) {
-            const fs::path file = staging / name;
-            fs::create_directories(file.parent_path(), ec);
-            if (ec)
-                throw WriteError("cannot make " + file.parent_path().string() + ": " + ec.message());
-            write_file(file, table);
-        }
+        const HdNormals::Tables normal_tables = normals.tables(
+            [&](size_t count) {
+                progress.files_total = files.size() + count;
+                report("Writing HD's shading for the sun shadows");
+            },
+            [&](const std::string& name, const Bytes& table) {
+                check_cancel();
+                const fs::path file = staging / name;
+                fs::create_directories(file.parent_path(), ec);
+                if (ec)
+                    throw WriteError("cannot make " + file.parent_path().string() + ": " + ec.message());
+                write_file(file, table);
+                progress.files_read++;
+                if (progress.files_read % 20 == 0 || progress.files_read == progress.files_total)
+                    report("Writing HD's shading for the sun shadows");
+            });
         result.errors.insert(result.errors.end(), normal_tables.errors.begin(), normal_tables.errors.end());
         writer.drain();
         check_cancel();

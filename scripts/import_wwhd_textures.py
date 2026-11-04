@@ -433,9 +433,13 @@ def build(args) -> dict:
             normals.flush()
         normal_tables, normals_report = normals.tables()
         gc_file.close()
-        for name, table in normal_tables.items():
+        # The shading tables count as files too, as the in-app importer's progress counts them.
+        for written, (name, table) in enumerate(normal_tables.items(), 1):
             (staging / name).parent.mkdir(parents=True, exist_ok=True)
             (staging / name).write_bytes(table)
+            if written % 20 == 0 or written == len(normal_tables):
+                print(f"Wrote {written} of {len(normal_tables)} shading tables "
+                      f"({scanned + written} files with the HD resources)", flush=True)
         errors.extend(normals_report.pop("errors"))
         for key in conflicts:
             for name in matches[key]["generated_files"]:
