@@ -1,6 +1,6 @@
 # TECH_PLAN — Clang version evaluation
 
-Status: Historical compiler result recorded; current 2×2 grid planned
+Status: Current 2×2 measured; Clang 22 with libc++ selected
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
@@ -219,6 +219,31 @@ Rendered scene loading was not confirmed, so rendered and Game Mode observations
 are excluded from the decision. Repeat their qualified grids before changing a
 default. Keep raw states, session logs, and `perf.data` private.
 
+## Current 2×2 findings
+
+Cells A–D were built from `14c558d62` (M4): A/B share the Clang 18.1.3 module,
+C/D the Clang 22.1.8 module. Rendered grid with render_bench, five scenes,
+render scale 3, Smooth Motion, widescreen and efficient soft effects on for all,
+balanced `A/B/C/D/D/C/B/A` rounds, 10 runs per cell per machine:
+
+| Contrast | Steam Deck, session 1 / 2 | Desktop, session 1 / 2 |
+|---|---:|---:|
+| Clang 22 vs 18, libc++ (C vs A) | **+1.0% / +1.3%** | **+1.1% / +0.9%** |
+| Clang 22 vs 18, static libstdc++ (D vs B) | **+1.4% / +1.8%** | **+0.7% / +0.8%** |
+| static libstdc++ vs libc++, Clang 18 (B vs A) | −0.5% / −0.6% | +0.5% / +0.2% |
+| static libstdc++ vs libc++, Clang 22 (D vs C) | −0.1% / −0.1% | 0.0% / +0.1% |
+| Interaction (D−C)−(B−A) | +0.4 / +0.5 points | −0.5 / −0.1 points |
+
+- **Exact:** guest checkpoints identical in every run.
+- **Compiler:** Clang 22 wins in all 8 contrasts, by about 1%. This supersedes
+  the #446 headless result above.
+- **Runtime and interaction:** noise; the static-libstdc++ choice adds nothing.
+- **Picture flags** (Butterfly Room, Hyrule Castle "flicker") appear between
+  same-compiler cells too and move between pairs from session to session; with
+  identical checkpoints they are screenshot timing, not a rendering change.
+- **Decision:** cell C, Clang 22 with libc++. Default change follows the ABI
+  audit and smoke test (M4-T03) in its own PR.
+
 ## Remaining measurement order
 
 Do not reuse the private `48a5872` artifacts for the current grid. Build A–D
@@ -231,7 +256,7 @@ identical.
 | 1 | Artifact validation | Source/options/Dawn identity; compiler/runtime; PGO and module SHA; ABI/smoke | Four valid cells; A/B and C/D module hashes match |
 | 2 | Headless grid | Full five-scene interleaved runs and checkpoints | All cells complete; checkpoints match |
 | 3 | Rendered preflight and A/A | Every scene loads; at least three matched controls | Loading is confirmed and noise recorded |
-| 4 | Rendered grid | At least five interleaved four-cell rounds | Per-scene medians/dispersion and checkpoints recorded |
+| 4 (done) | Rendered grid | At least five interleaved four-cell rounds | Per-scene medians/dispersion and checkpoints recorded |
 | 5 | Game Mode grid | Fixed route; at least three controls then five interleaved rounds | FPS, dips, busy/waits, temperature/power and artifact identity recorded |
 | 6 | #472 shipping check | Winning runtime with #472's packaged Dawn versus its factor-grid counterpart | Quantifies provider effect separately |
 | 7 | Decision | Main effects, interaction and shipping check | Select a complete recipe or record inconclusive; no silent default change |

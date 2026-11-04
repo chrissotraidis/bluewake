@@ -1,6 +1,6 @@
 # PRD — Clang version evaluation
 
-Status: Partial compiler result; current 2×2 recipe evaluation planned
+Status: Current 2×2 measured: Clang 22 with libc++ selected; A/A noise, #472 check and ABI audit open
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
@@ -78,5 +78,26 @@ The historical fixed-state five-scene headless grid favored the Clang 18
 recipe by 3.2% with matching checkpoints. That result used pre-merge #446 and
 does not answer the current 2×2 question. #472 reported an approximately 3%
 rendered gain from static libstdc++ on Clang 18, but used an older source and
-also changed the Dawn provider. Both findings motivate the grid; neither is a
-current recipe decision.
+also changed the Dawn provider. Both findings motivated the grid.
+
+**The current grid reverses the compiler result and refutes the runtime one.**
+Four cells from the frozen `14c558d62`, render_bench over five scenes, five
+interleaved rounds per cell (two sessions) on the Steam Deck and on a desktop
+(Ryzen 7 5800X3D, RX 9070 XT):
+
+| Contrast | Steam Deck, session 1 / 2 | Desktop, session 1 / 2 |
+|---|---:|---:|
+| Clang 22 vs 18, libc++ (C vs A) | **+1.0% / +1.3%** | **+1.1% / +0.9%** |
+| Clang 22 vs 18, static libstdc++ (D vs B) | **+1.4% / +1.8%** | **+0.7% / +0.8%** |
+| static libstdc++ vs libc++, Clang 18 (B vs A) | −0.5% / −0.6% | +0.5% / +0.2% |
+| static libstdc++ vs libc++, Clang 22 (D vs C) | −0.1% / −0.1% | 0.0% / +0.1% |
+| Interaction (D−C)−(B−A) | +0.4 / +0.5 points | −0.5 / −0.1 points |
+
+- Guest checkpoints identical in every run of every cell on both machines.
+- Clang 22 is faster in all 8 contrasts: about +1.3% on the Deck, +0.9% on the
+  desktop. The old 3.2% Clang 18 lead came from pre-merge #446 and does not
+  hold on the current tree.
+- The runtime has no effect: under ±0.6%, opposite in sign between machines.
+  #472's +3% came from its other changes, not static libstdc++.
+- Decision: Clang 22 with libc++ (cell C). Making it the default is a separate
+  change, gated on the ABI audit and smoke test.

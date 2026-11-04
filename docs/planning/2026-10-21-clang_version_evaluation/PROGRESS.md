@@ -1,8 +1,9 @@
 # PROGRESS — Clang version evaluation
 
-Status: The historical headless grid favors Clang 18 by 3.2%; no default
-changes. A current 2×2 Clang/runtime grid, cross-referenced with
-[#472](https://github.com/chrissotraidis/bluewake/pull/472), is planned.
+Status: The current 2×2 grid (five rounds, Deck and desktop) selects Clang 22
+with libc++: about +1% and exact; static libstdc++ has no effect, against
+[#472](https://github.com/chrissotraidis/bluewake/pull/472)'s +3%. Open: A/A
+noise, #472 packaged-Dawn check, ABI audit and smoke; no default change yet.
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
