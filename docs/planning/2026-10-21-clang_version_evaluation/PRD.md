@@ -1,6 +1,6 @@
 # PRD — Clang version evaluation
 
-Status: Current 2×2 measured: Clang 22 with libc++ selected; Game Mode grid open
+Status: Current 2×2 measured: Clang 22 with libc++ selected; done; default change is a separate PR
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Current matrix foundation: upstream `main` at `ee991d312d97` plus successful

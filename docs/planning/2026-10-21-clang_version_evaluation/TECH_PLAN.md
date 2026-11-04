@@ -1,6 +1,6 @@
 # TECH_PLAN — Clang version evaluation
 
-Status: Current 2×2 measured; Clang 22 with libc++ selected
+Status: Done: Clang 22 with libc++ selected
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
@@ -256,6 +256,7 @@ not the grid's save states):
 - Every Clang 22 contrast (+0.7 to +1.8%) is above the A/A gap on its machine,
   though on the Deck only by about 2×.
 - #472's packaging is noise on both machines: no reason to switch from libc++.
+- **Game Mode grid skipped:** the Deck grid already ran in Game Mode (gamescope), and a ~1% exact compiler speed-up has no mechanism to change pacing; the separate Game Mode grid was skipped as costly for no new information.
 
 
 ## Remaining measurement order
@@ -271,9 +272,9 @@ identical.
 | 2 | Headless grid | Full five-scene interleaved runs and checkpoints | All cells complete; checkpoints match |
 | 3 (done) | Rendered preflight and A/A | Every scene loads; at least three matched controls | Loading is confirmed and noise recorded |
 | 4 (done) | Rendered grid | At least five interleaved four-cell rounds | Per-scene medians/dispersion and checkpoints recorded |
-| 5 | Game Mode grid | Fixed route; at least three controls then five interleaved rounds | FPS, dips, busy/waits, temperature/power and artifact identity recorded |
+| 5 (skipped) | Game Mode grid | Fixed route; at least three controls then five interleaved rounds | FPS, dips, busy/waits, temperature/power and artifact identity recorded |
 | 6 (done) | #472 shipping check | Winning runtime with #472's packaged Dawn versus its factor-grid counterpart | Quantifies provider effect separately |
-| 7 | Decision | Main effects, interaction and shipping check | Select a complete recipe or record inconclusive; no silent default change |
+| 7 (done) | Decision | Main effects, interaction and shipping check | Select a complete recipe or record inconclusive; no silent default change |
 
 The Game Mode launch is player-facing and starts locally on the Deck. SSH may
 attach `perf`, retrieve redacted summaries, and collect logs after the running

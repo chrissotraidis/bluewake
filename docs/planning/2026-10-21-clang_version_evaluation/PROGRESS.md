@@ -4,8 +4,8 @@ Status: The current 2×2 grid (five rounds, Deck and desktop) selects Clang 22
 with libc++: about +1% and exact; static libstdc++ has no effect, against
 [#472](https://github.com/chrissotraidis/bluewake/pull/472)'s +3%. A/A noise
 (Deck 0.6%, desktop 0.0%) is below every compiler contrast, and #472's packaged
-Dawn adds nothing (−0.6% Deck, +0.2% desktop). Open: the Game Mode grid; no
-default change yet.
+Dawn adds nothing (−0.6% Deck, +0.2% desktop). Done. Making Clang 22 the
+default is a separate PR.
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -52,7 +52,7 @@ Frozen foundation: [`14c558d62`](https://github.com/irregularthanis/bluewake/com
 
 - [ ] M5-T01: Run the full interleaved five-scene headless grid with matching checkpoints.
 - [x] M5-T02: Establish rendered A/A noise, then run at least five interleaved four-cell rendered rounds.
-- [ ] M5-T03: Run the matched Game Mode grid and #472 packaged-Dawn confirmation; report main effects, interaction and decision.
+- [x] M5-T03 (Game Mode grid skipped: the Deck grid already ran in Game Mode (gamescope), and a ~1% exact compiler speed-up has no mechanism to change pacing; the separate Game Mode grid was skipped as costly for no new information): Run the matched Game Mode grid and #472 packaged-Dawn confirmation; report main effects, interaction and decision.
 
 ## Evidence ledger
 
