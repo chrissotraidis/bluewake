@@ -103,6 +103,22 @@ int main(void) {
 
 
 class DirectPreparationTests(unittest.TestCase):
+    def test_stage_select_fast_contract_covers_every_observed_address(self):
+        stage = (ROOT / 'runtime/host/src/stage_select.h').read_text()
+        host = (ROOT / 'runtime/host/src/main.c').read_text()
+        observer = re.search(
+            r'bluewake_stage_select_observes_body\(u32 address\) \{(.*?)\n\}', stage, re.S)
+        self.assertIsNotNone(observer)
+        observed = set(re.findall(r'address == (BLUEWAKE_STAGE_SELECT_[A-Z_]+)',
+                                  observer.group(1)))
+        supplied = set(re.findall(r'g_skip_fast\.watched\[\d+\] = '
+                                  r'(BLUEWAKE_STAGE_SELECT_[A-Z_]+);', host))
+        self.assertEqual(supplied, observed)
+        count = re.search(r'g_skip_fast\.watched_count = bluewake_stage_select_live \? (\d+)u',
+                          host)
+        self.assertIsNotNone(count)
+        self.assertEqual(int(count.group(1)), len(observed))
+
     def test_direct_and_fixed_cpu_calls_keep_both_boundary_queries(self):
         for source in (CALL, CALL.replace('CPUState* ctx)', 'CPUState* ctx_param)')):
             with self.subTest(fixed='ctx_param' in source):

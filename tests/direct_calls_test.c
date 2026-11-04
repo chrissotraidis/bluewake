@@ -122,6 +122,26 @@ int main(void) {
     assert(!bluewake_composite_direct_calls_v3(true, NULL, NULL, NULL, NULL, NULL, NULL, &fast, true));
     assert(bw_host_skip_fast == NULL && !bw_host_skip_verify);
 
+    /* v4: fixed host watches decline both ordinary and mirrored addresses. */
+    BwHostSkipFastV4 fast_v4 = {fast, 2u, {0x80029E6Cu, 0x8022ED50u}};
+    fast_v4.base.simple = 1u;
+    assert(bluewake_composite_direct_calls_v4(true, &attention, &decrementer, &cause, &mask,
+                                             can_skip, &allow, &fast_v4, false));
+    before = queries;
+    assert(!bw_direct_call_ready(&cpu, 0x80029E6Cu));
+    assert(!bw_direct_call_ready(&cpu, 0xC0029E6Cu));
+    assert(!bw_direct_call_ready(&cpu, 0x8022ED50u));
+    assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
+    /* A malformed count stays bounded by the ABI's fixed capacity. */
+    fast_v4.watched_count = BW_HOST_SKIP_WATCH_MAX + 1u;
+    assert(!bw_direct_call_ready(&cpu, 0x80029E6Cu));
+    assert(!bw_direct_call_ready(&cpu, 0x80009000u));
+    /* Falling back to v3 removes the v4-only watches. */
+    assert(bluewake_composite_direct_calls_v3(true, &attention, &decrementer, &cause, &mask,
+                                             can_skip, &allow, &fast_v4.base, false));
+    assert(bw_host_skip_fast_v4 == NULL);
+    assert(bw_direct_call_ready(&cpu, 0x80029E6Cu));
+
     assert(!bluewake_composite_direct_calls_v2(false, NULL, NULL, NULL, NULL, NULL, NULL));
     assert(!bw_edge_filter_enabled && !bw_direct_call_ready(&cpu, 0x80004000u));
     puts("Direct calls: host contract, inline answer, interrupts, budget, watches, mirrors and depth pass");

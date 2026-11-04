@@ -1,7 +1,8 @@
 # PRD — Stage-select direct-call cost
 
-Status: Draft  
-Source: BlueWake [`0c8a70d`](https://github.com/chrissotraidis/bluewake/commit/0c8a70dde95d3acca12ce98a99232fc0adc7e3ac); discovery in [#503](https://github.com/chrissotraidis/bluewake/pull/503) at `4806997`  
+Status: Implementation ready for build and hardware qualification
+
+Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e); discovery in [#503](https://github.com/chrissotraidis/bluewake/pull/503) at `4806997`
 Scope: remove persistent direct-call overhead while stage selection or a benchmark warp is enabled; excluded: changing stage-select behavior, game logic, or unrelated Outset optimization
 
 ## Motivation
@@ -31,5 +32,5 @@ The useful outcome is not a faster default build: it is preserving stage selecti
 
 - Default players do not pay this cost because the stage select is off by default.
 - The measured result is historical evidence from #503, not proof that a proposed fix works.
-- The exact fast representation remains an M0 decision: it must cover every observed address and be versioned so host and module revisions cannot disagree.
+- The implementation uses a new `v4` export. It does not alter the existing `v2`/`v3` ABI and falls back conservatively when either side lacks `v4`.
 

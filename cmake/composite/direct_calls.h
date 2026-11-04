@@ -53,7 +53,12 @@ int bluewake_composite_direct_calls_v2(bool, const bool*, const bool*, const u32
 int bluewake_composite_direct_calls_v3(bool, const bool*, const bool*, const u32*,
                                      const u32*, BwHostCanSkipFn, void*,
                                      const BwHostSkipFast*, bool);
+/* v4 keeps the v3 layout intact and adds host-supplied fixed watches. */
+int bluewake_composite_direct_calls_v4(bool, const bool*, const bool*, const u32*,
+                                     const u32*, BwHostCanSkipFn, void*,
+                                     const BwHostSkipFastV4*, bool);
 extern const volatile BwHostSkipFast* bw_host_skip_fast;
+extern const volatile BwHostSkipFastV4* bw_host_skip_fast_v4;
 extern bool bw_host_skip_verify;
 void bw_host_skip_verify_check(const CPUState* cpu, u32 address, bool allowed);
 void bluewake_composite_direct_skip_counts(unsigned long long* unsafe,
@@ -85,9 +90,23 @@ static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
      * instead of a call into the host for every direct call. */
     const volatile BwHostSkipFast* fast = bw_host_skip_fast;
     if (fast != NULL && fast->simple) {
-        const bool allowed = address != fast->single[0] && address != fast->single[1] &&
+        bool allowed = address != fast->single[0] && address != fast->single[1] &&
                              address - fast->range_first[0] > fast->range_span[0] &&
                              address - fast->range_first[1] > fast->range_span[1];
+        const volatile BwHostSkipFastV4* fast_v4 = bw_host_skip_fast_v4;
+        if (allowed && fast_v4 != NULL) {
+            const u32 canonical = address & ~0x40000000u;
+            const u32 count = fast_v4->watched_count;
+            /* An invalid future/partial contract must decline, not silently
+             * ignore addresses the current module cannot represent. */
+            if (count > BW_HOST_SKIP_WATCH_MAX)
+                allowed = false;
+            for (u32 i = 0; allowed && i < count; ++i)
+                if (canonical == (fast_v4->watched[i] & ~0x40000000u)) {
+                    allowed = false;
+                    break;
+                }
+        }
         if (__builtin_expect(bw_host_skip_verify, 0))
             bw_host_skip_verify_check(cpu, address, allowed);
         return allowed;

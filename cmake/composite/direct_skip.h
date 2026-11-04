@@ -23,4 +23,14 @@ typedef struct BwHostSkipFast {
     uint32_t range_span[2];  /* an empty range is first 0xFFFFFFFF, span 0 */
 } BwHostSkipFast;
 
+/* v4 extends, rather than changes, the v3 ABI. The host may name fixed guest
+ * addresses added after a game module was built. They are checked with the
+ * 0x40000000 code-mirror bit removed, matching the edge-watch table. */
+#define BW_HOST_SKIP_WATCH_MAX 5u
+typedef struct BwHostSkipFastV4 {
+    BwHostSkipFast base;
+    uint32_t watched_count;
+    uint32_t watched[BW_HOST_SKIP_WATCH_MAX];
+} BwHostSkipFastV4;
+
 #endif

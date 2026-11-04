@@ -1,7 +1,8 @@
 # TECH_PLAN — Stage-select direct-call cost
 
-Status: Planning only  
-Source: BlueWake [`0c8a70d`](https://github.com/chrissotraidis/bluewake/commit/0c8a70dde95d3acca12ce98a99232fc0adc7e3ac); measured control recorded by [#503](https://github.com/chrissotraidis/bluewake/pull/503)  
+Status: Implemented locally; full build and Deck qualification pending
+
+Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e); measured control recorded by [#503](https://github.com/chrissotraidis/bluewake/pull/503)
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
 ## Inspected facts
@@ -32,26 +33,38 @@ flowchart TD
 
 The safe optimization is selective: stage selection must not globally disable the inline answer, but every address it can observe must still return to the host. A versioned handshake must fall back to `v2`/`v3` when either side lacks the new contract.
 
-Proposed shape, subject to M0 coverage results:
+Selected `v4` shape:
 
 ```c
 /* Proposed v4 contract; do not change the v3 struct in place. */
 typedef struct BwHostSkipFastV4 {
-    u32 simple;
+    BwHostSkipFast base; /* unchanged v3 contract */
     u32 watched_count;
-    u32 watched[BW_HOST_SKIP_WATCH_MAX];
-    /* Existing dynamic singles/ranges remain represented. */
+    u32 watched[5];
 } BwHostSkipFastV4;
 ```
+
+| Stage-select watch | Guest address | Purpose |
+|---|---:|---|
+| `CHANGE` | `0x80029E6C` | Scene-change interception used by stage selection and warps |
+| `DATA_SELECT` | `0x80181634` | Automated file selection |
+| `EXECUTE` | `0x8022ED50` | Stage-select menu input and execution |
+| `PLAY_EXECUTE` | `0x80234FD0` | F7/warp arrival handling |
+| `MENU_DELETE` | `0x8022F320` | Return from the stage-select menu |
+
+The module canonicalizes the `0x40000000` code-mirror bit before comparing
+these watches. An invalid count declines the inline path. A host paired with an
+older module uses the existing `v2` callback while stage selection is live;
+`v3` remains available when it is not.
 
 ## Changes
 
 | Status | File / symbol | Practical edit | Milestone | Architecture |
 |---|---|---|---|---|
-| Inspect, then modify | [`stage_select.h`](../../../runtime/host/src/stage_select.h) observer predicates | Enumerate the complete fixed-address contract and distinguish menu/warp lifecycle state | M0–M1 | [Host observations](../../architecture/GameThread.md#translated-dispatch) |
-| Modify | [`direct_skip.h`](../../../cmake/composite/direct_skip.h), [`direct_calls.h`](../../../cmake/composite/direct_calls.h), [`direct_calls.c`](../../../cmake/composite/direct_calls.c) | Add a versioned fast contract; preserve conservative fallback for older modules | M1 | [Module boundary](../../architecture/GameModule.md#translated-code-dispatch) |
-| Modify | [`main.c`](../../../runtime/host/src/main.c) direct-call setup | Supply stage-select watches and allow the inline answer when the new contract is available | M1 | [Host lifecycle](../../architecture/Host.md#main-loop-execution) |
-| Modify | [`direct_calls_test.c`](../../../tests/direct_calls_test.c), [`test_direct_calls.py`](../../../tests/test_direct_calls.py) | Cover watched stage addresses, mirrors, fallback, verification disagreement and runtime state changes | M2 | [Compiled tests](../../architecture/Testing.md#compiled-component-tests) |
+| Done | [`stage_select.h`](../../../runtime/host/src/stage_select.h) observer predicates | Enumerate the complete fixed-address contract and distinguish menu/warp lifecycle state | M0–M1 | [Host observations](../../architecture/GameThread.md#translated-dispatch) |
+| Done | [`direct_skip.h`](../../../cmake/composite/direct_skip.h), [`direct_calls.h`](../../../cmake/composite/direct_calls.h), [`direct_calls.c`](../../../cmake/composite/direct_calls.c) | Add a versioned fast contract; preserve conservative fallback for older modules | M1 | [Module boundary](../../architecture/GameModule.md#translated-code-dispatch) |
+| Done | [`main.c`](../../../runtime/host/src/main.c) direct-call setup | Supply stage-select watches and allow the inline answer when the new contract is available | M1 | [Host lifecycle](../../architecture/Host.md#main-loop-execution) |
+| Done | [`direct_calls_test.c`](../../../tests/direct_calls_test.c), [`test_direct_calls.py`](../../../tests/test_direct_calls.py) | Cover watched stage addresses, mirrors, fallback and contract completeness | M2 | [Compiled tests](../../architecture/Testing.md#compiled-component-tests) |
 | Modify after #522 lands | [`PROFILING.md`](../../../docs/PROFILING.md) and measurement guidance | Record stage-select/warp state and distinguish absolute warp numbers from normal play | M2 | [Hardware validation](../../architecture/Testing.md#private-and-hardware-validation) |
 
 ## Verification
