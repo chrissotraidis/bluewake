@@ -49,3 +49,7 @@ Planned after M3 ([PRD](PRD.md#steps)).
 | M2-T03 | `fp553` (A, M1) against `fp553m2` (B, M1 + M2); local `fp-553m2-deck/` (private) | render_bench as M1-T06 | Steam Deck, Game Mode | **B +1.95% overall**: Outset +2.1%, Lava Room +1.9%, Hyrule Castle +1.8%, Butterfly Room +2.4%, Shipwreck +1.7%. Per run A 39.62 / 39.39 / 39.86 / 39.54 / 39.86 / 39.67, B 40.56 / 40.42 / 40.40 / 40.05 / 40.48 / 40.29. Guest checkpoints identical across every run |
 | M3-T03 | `fp553m2` (A, M1 + M2) against `fp553m3` (B, `bench/fp-m3` `c6f54ad41b4b`, M1 + M2 + M3); local `measure-553/` (private) | `perf stat`, headless, 2,400 retraces from `1-outset.bwstate`, A B B A A B | Desktop PC | Per game frame: A 72.56 / 72.72 / 72.58 M cycles, 203.76 M instructions; B 72.15 / 72.12 / 72.44 M cycles, 203.10 M instructions (**−0.5% cycles, −0.3% instructions**); rate 122.7–122.8 → 123.1–123.8 (**+0.6%**). Checkpoints identical to M2's |
 | M3-T03 | `fp553m2` (A) against `fp553m3` (B); local `fp-553m3-deck/` (private) | render_bench as M1-T06 | Steam Deck, Game Mode | **B −0.36% overall**: Outset −0.1%, Lava Room +0.1%, Hyrule Castle −2.1%, Butterfly Room −0.6%, Shipwreck +0.4%. Per run A 40.50 / 40.54 / 40.69 / 40.46 / 40.22 / 40.55, B 40.18 / 40.25 / 39.88 / 40.51 / 40.40 / 40.34. Checkpoints identical. **No-go** |
+
+### Default
+
+- [x] D-T01: `fp_checks` in `LINUX_DEFAULT_OPTIMIZATIONS`, with `--no-fp-checks` to opt out (2026-11-04); `tests/test_linux_ci_container.py` checks both. The Windows builder doesn't run the pass yet.

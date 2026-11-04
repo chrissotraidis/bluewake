@@ -1453,7 +1453,7 @@ LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_p
                                "inline_gpr",
                                "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
-                               "behaviour_timing")
+                               "behaviour_timing", "fp_checks")
 
 
 def main():
@@ -1546,7 +1546,10 @@ def main():
                              "(off by default; after return-ranges, before native-entries)")
     parser.add_argument("--fp-checks", action="store_true",
                         help="one FP-available test per stretch of a prepaid copy, so lean memory can "
-                             "make FP loads and stores lean (fp_checks.py; off by default)")
+                             "make FP loads and stores lean (fp_checks.py; on by default, #553)")
+    parser.add_argument("--no-fp-checks", action="store_true",
+                        help="keep every FP-available test in the prepaid copies, as before #553: "
+                             "about 3%% slower on a Steam Deck")
     parser.add_argument("--native-gx", action="store_true",
                         help="Wind Waker Recomp's GX FIFO writer natives, the fifth set "
                              "(off by default; needs --direct-calls, --gather-pipe and --native-vec; "
@@ -1606,6 +1609,8 @@ def main():
         args.lean_deadlines = False
     if args.no_behaviour_timing:
         args.behaviour_timing = False
+    if args.no_fp_checks:
+        args.fp_checks = False
     if args.host_only and (args.retrain or args.no_train or args.no_pgo):
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:

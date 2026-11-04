@@ -54,5 +54,6 @@ Each later step is planned and measured after the one before.
 
 ## Decisions
 
-- **Opt-in:** each step is a builder option, off by default, until it's measured.
+- **Opt-in until measured:** each step starts as a builder option, off by default.
+- **M1 on by default (2026-11-04):** after its Deck result, `fp_checks` joined the Linux builder's default preparations. `--no-fp-checks` keeps every test, and `--conservative` builds the plain translation as before.
 - **Exactness first:** the per-stretch test keeps the first test of each stretch at its place, so an FP-unavailable trap (the Dolphin OS switches FPU state lazily) behaves exactly as before.
