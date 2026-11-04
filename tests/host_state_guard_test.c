@@ -31,17 +31,6 @@ static int guard_mkdir(const char* path, unsigned mode) {
     return 0;
 }
 
-// The draw-done overlap's bookkeeping and its flush, which the save path reads
-// (a pending finish has to be raised before the clean point is taken). The test
-// keeps the switch off, so a save here takes the drain it always took, and the
-// declarations are the host's own: platform.h for the position, and one stub for
-// the drain the real code calls.
-#include "gxruntime/platform.h"
-static bool g_draw_done_overlap;
-static bool g_draw_done_pending;
-static u64 g_draw_done_target;
-static void draw_done_force(const char* why) { (void)why; }
-
 // Only I/O endpoints are replaced. No real directory, state file or game data
 // is touched; a call to either endpoint makes a visible, testable change.
 #ifdef mkdir

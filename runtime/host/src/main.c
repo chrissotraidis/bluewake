@@ -7193,6 +7193,94 @@ unsigned bluewake_status_read(char* text, size_t size) {
     return 0u;
 }
 
+// Placed above the state-save section on purpose: cmake/host_state_save_test.cmake
+// cuts the guard test's slice from `bluewake_save_state_hotkey` to `main`, and a
+// helper that sits inside that slice has to be stubbed in tests/host_state_guard_test.c.
+/* The draw-done overlap (BLUEWAKE_DRAW_DONE_OVERLAP), used from the loop below.
+
+   Both draw-done commits used to drain the translation worker before they ran,
+   so the guest stood still at GXDrawDone's return until the frame's command
+   stream was translated. With the overlap on, the host records the stream
+   position instead and commits when the worker reaches it, and the guest
+   spends those microseconds on its own next frame. */
+static bool draw_done_position(void) {
+    g_draw_done_target = dol_platform_gx_position();
+    // No position from the backend (no translation worker, a traced frame, a
+    // headless build): there is nothing to defer to, and the caller keeps the
+    // drain it would have taken. Without this the finish would simply never be
+    // raised in those modes.
+    if (g_draw_done_target == 0u) {
+        g_draw_done_pending = false;
+        return false;
+    }
+    clock_gettime(CLOCK_MONOTONIC, &g_draw_done_positioned_at);
+    g_draw_done_positioned_retrace = g_host_retrace_count;
+    g_draw_done_pending = true;
+    ++g_draw_done_deferred;
+    return true;
+}
+
+static void draw_done_commit(void) {
+    dol_interrupts_commit_pe_finish(&g_interrupts);
+    if (!g_draw_done_pending)
+        return;
+    g_draw_done_pending = false;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    const u64 lead_us = bw_elapsed_us(g_draw_done_positioned_at, now);
+    if (lead_us > g_draw_done_max_lead_us)
+        g_draw_done_max_lead_us = lead_us;
+    // A deferral is allowed to cross a retrace, and when it does that frame
+    // takes the extra frame of latency this mode is documented to cost. Count
+    // them so the cost is a number: a large share means the worker's tail is
+    // longer than a frame's slack, which is where the drain was the right
+    // answer anyway.
+    if (g_host_retrace_count != g_draw_done_positioned_retrace)
+        ++g_draw_done_late;
+}
+
+/* The drain a deferred commit still needs: when the next draw-done arrives
+   first (the one-frame bound), and before a state save. The save's own GX blob
+   already drains the worker (dol_aurora_gx_save_state), but the PE finish a
+   pending commit owes is part of the interrupt state the save records, so it
+   has to be raised first or a loaded state starts a frame whose finish never
+   comes. */
+static void draw_done_force(const char* why) {
+    if (!g_draw_done_pending)
+        return;
+    ++g_draw_done_forced;
+    dol_platform_gx_flush();
+    draw_done_commit();
+    if (g_draw_done_forced == 1u || g_draw_done_forced % 600u == 0u)
+        fprintf(stderr,
+                "[gx] draw-done overlap: drained early (%s), %llu so far\n", why,
+                (unsigned long long)g_draw_done_forced);
+}
+
+/* Once per turn: take the present the worker stopped at (the drain used to),
+   and raise the deferred PE finish when the worker has parsed the frame. */
+static void draw_done_service(void) {
+    if (!g_draw_done_overlap)
+        return;
+    if (dol_platform_gx_service())
+        ++g_draw_done_presents;
+    if (!g_draw_done_pending)
+        return;
+    if (dol_platform_gx_parsed() < g_draw_done_target)
+        return;
+    draw_done_commit();
+    if (g_draw_done_deferred == 1u || g_draw_done_deferred % 600u == 0u)
+        fprintf(stderr,
+                "[gx] draw-done overlap: deferred=%llu early=%llu bound=%llu "
+                "late=%llu max_lead_us=%llu presents=%llu\n",
+                (unsigned long long)g_draw_done_deferred,
+                (unsigned long long)g_draw_done_forced,
+                (unsigned long long)g_draw_done_bound_waits,
+                (unsigned long long)g_draw_done_late,
+                (unsigned long long)g_draw_done_max_lead_us,
+                (unsigned long long)g_draw_done_presents);
+}
+
 // F5 / F8 from the window's event observer (mouse_camera.c), main thread.
 void bluewake_save_state_hotkey(bool load) {
     if (load)
@@ -7316,91 +7404,6 @@ static inline void host_state_turn(CPUState* cpu, const StaticRecompModuleDesc* 
     }
     if (__builtin_expect(g_state_save_armed, 0))
         host_state_try_save(cpu, mod, loop, retrace_boundary);
-}
-
-/* The draw-done overlap (BLUEWAKE_DRAW_DONE_OVERLAP), used from the loop below.
-
-   Both draw-done commits used to drain the translation worker before they ran,
-   so the guest stood still at GXDrawDone's return until the frame's command
-   stream was translated. With the overlap on, the host records the stream
-   position instead and commits when the worker reaches it, and the guest
-   spends those microseconds on its own next frame. */
-static bool draw_done_position(void) {
-    g_draw_done_target = dol_platform_gx_position();
-    // No position from the backend (no translation worker, a traced frame, a
-    // headless build): there is nothing to defer to, and the caller keeps the
-    // drain it would have taken. Without this the finish would simply never be
-    // raised in those modes.
-    if (g_draw_done_target == 0u) {
-        g_draw_done_pending = false;
-        return false;
-    }
-    clock_gettime(CLOCK_MONOTONIC, &g_draw_done_positioned_at);
-    g_draw_done_positioned_retrace = g_host_retrace_count;
-    g_draw_done_pending = true;
-    ++g_draw_done_deferred;
-    return true;
-}
-
-static void draw_done_commit(void) {
-    dol_interrupts_commit_pe_finish(&g_interrupts);
-    if (!g_draw_done_pending)
-        return;
-    g_draw_done_pending = false;
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    const u64 lead_us = bw_elapsed_us(g_draw_done_positioned_at, now);
-    if (lead_us > g_draw_done_max_lead_us)
-        g_draw_done_max_lead_us = lead_us;
-    // A deferral is allowed to cross a retrace, and when it does that frame
-    // takes the extra frame of latency this mode is documented to cost. Count
-    // them so the cost is a number: a large share means the worker's tail is
-    // longer than a frame's slack, which is where the drain was the right
-    // answer anyway.
-    if (g_host_retrace_count != g_draw_done_positioned_retrace)
-        ++g_draw_done_late;
-}
-
-/* The drain a deferred commit still needs: when the next draw-done arrives
-   first (the one-frame bound), and before a state save. The save's own GX blob
-   already drains the worker (dol_aurora_gx_save_state), but the PE finish a
-   pending commit owes is part of the interrupt state the save records, so it
-   has to be raised first or a loaded state starts a frame whose finish never
-   comes. */
-static void draw_done_force(const char* why) {
-    if (!g_draw_done_pending)
-        return;
-    ++g_draw_done_forced;
-    dol_platform_gx_flush();
-    draw_done_commit();
-    if (g_draw_done_forced == 1u || g_draw_done_forced % 600u == 0u)
-        fprintf(stderr,
-                "[gx] draw-done overlap: drained early (%s), %llu so far\n", why,
-                (unsigned long long)g_draw_done_forced);
-}
-
-/* Once per turn: take the present the worker stopped at (the drain used to),
-   and raise the deferred PE finish when the worker has parsed the frame. */
-static void draw_done_service(void) {
-    if (!g_draw_done_overlap)
-        return;
-    if (dol_platform_gx_service())
-        ++g_draw_done_presents;
-    if (!g_draw_done_pending)
-        return;
-    if (dol_platform_gx_parsed() < g_draw_done_target)
-        return;
-    draw_done_commit();
-    if (g_draw_done_deferred == 1u || g_draw_done_deferred % 600u == 0u)
-        fprintf(stderr,
-                "[gx] draw-done overlap: deferred=%llu early=%llu bound=%llu "
-                "late=%llu max_lead_us=%llu presents=%llu\n",
-                (unsigned long long)g_draw_done_deferred,
-                (unsigned long long)g_draw_done_forced,
-                (unsigned long long)g_draw_done_bound_waits,
-                (unsigned long long)g_draw_done_late,
-                (unsigned long long)g_draw_done_max_lead_us,
-                (unsigned long long)g_draw_done_presents);
 }
 
 int main(int argc, char** argv) {
