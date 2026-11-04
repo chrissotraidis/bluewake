@@ -38,6 +38,7 @@
 #include "fps_watch.h"
 #include "dpad_menus.h"
 #include "jump_button.h"
+#include "module_hugepages.h"
 #include "settings_menu.h"
 #include "sprint.h"
 #include "quick_doors.h"
@@ -7370,6 +7371,24 @@ int main(int argc, char** argv) {
 
     GetModuleFn get_module = (GetModuleFn)dlsym(lib, "staticrecomp_get_module");
     if (!get_module) { fprintf(stderr, "dlsym: %s\n", dlerror()); return 1; }
+#if defined(__linux__)
+    // The module's code on 2 MB pages (module_hugepages.h; opt-in), before any
+    // of it runs.
+    {
+        const char* huge_env = getenv("BLUEWAKE_MODULE_HUGEPAGES");
+        if (huge_env != NULL && strcmp(huge_env, "1") == 0) {
+            uintptr_t moved_start = 0;
+            size_t moved = 0;
+            const char* why = "";
+            if (bluewake_module_text_hugepages(dylib_path, &moved_start, &moved, &why)) {
+                fprintf(stderr, "[module] huge pages: %zu MB of code copied, %zu MB on huge pages\n",
+                        moved >> 20, bluewake_module_text_huge_kb((const void*)moved_start) >> 10);
+            } else {
+                fprintf(stderr, "[module] huge pages: off (%s)\n", why);
+            }
+        }
+    }
+#endif
 
     const StaticRecompModuleDesc* mod = get_module();
     if (!bluewake_guest_checkpoint_interval(

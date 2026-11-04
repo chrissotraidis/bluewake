@@ -14,9 +14,12 @@ Acceptance: ahead of the control in every interleaved launch (at least six), che
 - [x] M1-T03: Build on the #437 recipe with `--split-functions` (`.text.hot` 61.8 MB, `.text.split` 139.5 MB, `.text.unlikely` 168.9 MB): desktop **−2.5%** (cycles per frame +2.7%), iTLB page walks **+12.6%**, checkpoints identical. The split follows the training profile, and blocks Outset runs that training didn't are now 140 MB away.
 - [x] M1-T05: **No-go:** reverted (`170e394c4` keeps the code). The Deck run was skipped: a 2.5% loss with a worse mechanism won't turn into a gain there.
 
-### M2: The module's text on huge pages
+### M2: The module's code on huge pages
 
-Without splitting: the host copies the module's executable segment into 2 MB pages after loading it (SteamOS runs transparent huge pages in `always` mode). That cuts page walks wherever the hot code sits. Opt-in, host-only.
+- [x] M2-T01: `module_hugepages.h`, called after `dlopen` behind `BLUEWAKE_MODULE_HUGEPAGES=1`; the host compiles cleanly (`-Wall -Wextra`) in the build container.
+- [ ] M2-T02: Host-only build over the control (same module); a desktop run checks it loads and plays identically (no THP there).
+- [ ] M2-T03: Steam Deck render_bench (THP `always`), five save states.
+- [ ] M2-T04: Decide.
 
 ## Evidence ledger
 

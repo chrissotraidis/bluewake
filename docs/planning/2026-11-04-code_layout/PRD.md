@@ -35,7 +35,7 @@ The same code with the hot parts packed together, then, if that's measurable, th
 | Step | Change |
 |---|---|
 | M1 | ~~`-fsplit-machine-functions` with the training profile~~: no-go, desktop −2.5%, iTLB walks +12.6%; reverted |
-| M2 | The module's executable segment copied into 2 MB pages at load, without splitting (SteamOS runs transparent huge pages in `always` mode) |
+| M2 | The module's executable segment copied into 2 MB pages at load, without splitting (SteamOS runs transparent huge pages in `always` mode); host-only, opt-in `BLUEWAKE_MODULE_HUGEPAGES=1` |
 
 ## Success and constraints
 
