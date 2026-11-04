@@ -1001,9 +1001,11 @@ static void clouds(CPUState* cpu, unsigned long long retrace) {
         const u32 view = mem_read32(cpu, kCurrentView);
         const bool outdoors = type == 0u || type == 7u;
         const bool room = !outdoors && hd_room(type);
-        // HD's casters culled as their materials are (its map in Dragon Roost Cavern): in its lit rooms, so a
-        // closed room's ceiling casts nothing on the floor. Outdoors keeps both sides for now (not checked there).
-        aurora_set_sun_caster_cull(room ? 1 : 0);
+        // HD's casters culled as their materials are, wherever its sun shadows are (its maps in Dragon Roost
+        // Cavern, at Outset and in the Forest Haven: back faces culled but for a double-sided material), so what
+        // faces away from the light casts nothing: a closed room's ceiling, or the Forest Haven's (Omori, an
+        // outdoor stage type), which shaded all of its floor with both sides cast.
+        aurora_set_sun_caster_cull(outdoors || room ? 1 : 0);
         if (g_trace && retrace % 300u == 0u)
             fprintf(stderr, "[hd-look] stage type %u (%s)\n", type,
                     outdoors ? "outdoors" : room ? "indoors, HD's lit room" : "indoors");
