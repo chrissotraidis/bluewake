@@ -3,6 +3,12 @@
 Status: **Done.** M1 (split functions) no-go, reverted. **M2 (huge pages) kept, opt-in: +4.47% on the Steam Deck**, exact. The switch is Config → Performance → *Game code on large memory pages*, on #531's branch (`06715f0`), off by default.
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
+## Overview
+
+The game module (`gGZLE01_recomp.so`) is about 370 MB of compiled translated code. The game thread runs a few tens of megabytes of it, scattered through the rest. The processor keeps a small cache of where code pages live (the instruction TLB); on 4 KB pages it keeps missing, and every miss walks the page table.
+
+This PR leaves the module's code byte for byte as it is, and changes how the host maps it into memory.
+
 ## What we tried
 
 The game thread was short of instruction fetch. The translated module is about 370 MB of code, the hot part is scattered through it, and on 4 KB pages the instruction TLB (the processor's cache of where code pages live) keeps missing. We tried two ways to fix it:
@@ -61,6 +67,26 @@ flowchart TD
 - **Combined with the other work:** on the Deck, huge pages, the direct-call gate (#552) and the FP checks (#553) together are **+15.0%** over the #437 control. That lifts Outset from 27.6 to 30.9 game FPS in render_bench.
 - **Where it helps:** the gain needs transparent huge pages (SteamOS has them in `always` mode). Linux desktops without THP get nothing, and other platforms don't run it.
 - **Open:** an automated test for the remap (map a test library, remap it, run it, compare its bytes).
+
+## Code
+
+- [`runtime/host/src/module_hugepages.h`](../../../runtime/host/src/module_hugepages.h), Linux only:
+  - `bluewake_module_text_find()`: finds the module's executable mapping in `/proc/self/maps`, by the file's real path.
+  - `bluewake_module_text_hugepages()`: copies the 2 MB-aligned middle of that mapping to a buffer, maps anonymous memory over the same addresses (`MAP_FIXED`), advises `MADV_HUGEPAGE`, copies the code back and restores read-execute.
+  - `bluewake_module_text_huge_kb()`: reads `AnonHugePages` from `/proc/self/smaps`, for the log line.
+- [`runtime/host/src/main.c`](../../../runtime/host/src/main.c): right after `dlopen` of the module, and before any of its code runs, calls the remap when `BLUEWAKE_MODULE_HUGEPAGES=1`. It logs `[module] huge pages: N MB of code copied, M MB on huge pages`.
+- **The switch:** Config → Performance → *Game code on large memory pages*, a row in `runtime/host/src/settings_table.h` on #531's branch (`06715f0`), off by default. The settings-table test checks it.
+- **M1, reverted:** `--split-functions` in `scripts/linux/build.py`; the code is kept in `170e394c4`.
+
+## Impact
+
+| | Result |
+|---|---|
+| **Steam Deck** | **+4.47%** overall, every scene (+3.3% to +6.5%), every launch ahead |
+| Game module | Byte-identical: the candidate was a host-only rebuild over the control |
+| Guest checkpoints | Identical |
+| Memory | About 370 MB more resident |
+| Where it applies | Linux with transparent huge pages (SteamOS: `always`). Elsewhere the switch does nothing |
 
 ## Design details
 
