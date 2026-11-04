@@ -61,8 +61,10 @@ TARGET_SDK = 35
 # What shapes a compiled game module: the source preparations, the mods compiled into it, and its compile.
 # OUT/composite/module.json records them when the module is compiled; --app-only reuses the module only
 # for the same request (AndroidBuilder.reused_module), and the APK's record describes the module it holds.
+# direct_gate (#552) shapes only the training, so the module's profile: a
+# module trained with the gate open is not reused for one trained without.
 MODULE_FLAGS = tuple(dict.fromkeys((*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_memory", "lean_deadlines",
-                                    "native_entries", "behaviour_timing")))
+                                    "native_entries", "behaviour_timing", "direct_gate")))
 
 
 def module_request(args):
@@ -516,6 +518,8 @@ class AndroidBuilder(wb.Builder):
             "lean_memory": options["lean_memory"],
             "lean_deadlines": options["lean_deadlines"],
             "behaviour_timing": options["behaviour_timing"],
+            "fp_checks": options.get("fp_checks", False),
+            "direct_gate_training": options.get("direct_gate", False),
             "module_options": options,
             "cpu": options["cpu"],
             "local_training": record["profile_sha256"] is not None,
@@ -691,6 +695,9 @@ class AndroidBuilder(wb.Builder):
             "BLUEWAKE_PAD_CONFIRM_EVENT": "any",
             "BLUEWAKE_PAD_SCRIPT": ",".join([f"{n}:0x0100:2" for n in range(17800, 22001, 150)] + self.TRAINING_RUN),
             "BLUEWAKE_MODS": mods or "",
+            # --direct-gate: the module's training runs with the gate open, as play
+            # with BLUEWAKE_DIRECT_GATE=1 does (#552); otherwise it stays closed.
+            "BLUEWAKE_DIRECT_GATE": "1" if getattr(self.args, "direct_gate", False) and not rendered else "",
         }
         local_env = run / "launch.env"
         local_env.write_text("".join(f"{k}={v}\n" for k, v in env.items() if v), encoding="utf-8", newline="\n")
@@ -878,6 +885,13 @@ def parse_args(argv=None):
     parser.add_argument("--no-behaviour-timing", action="store_true",
                         help="check the turn's budget after every block, as before behaviour timing (as in "
                              "scripts/windows/build.py)")
+    parser.add_argument("--no-fp-checks", action="store_true",
+                        help="keep every MSR[FP] test and pc store around FP instructions (#553; as in "
+                             "scripts/windows/build.py)")
+    parser.add_argument("--direct-gate", action="store_true",
+                        help="train on the device with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1, "
+                             "#552), for a build that measures it; the app opens the gate only when "
+                             "launch.env sets BLUEWAKE_DIRECT_GATE=1")
     parser.add_argument("--profile", type=Path, help="an optimization profile (.profdata) for the game module")
     parser.add_argument("--device", metavar="SERIAL",
                         help="train the optimization profile on this adb device (the phone the game is for)")
@@ -915,6 +929,10 @@ def parse_args(argv=None):
         args.lean_deadlines = False
     if args.no_behaviour_timing:
         args.behaviour_timing = False
+    if args.no_fp_checks:
+        args.fp_checks = False
+    if args.direct_gate and not args.direct_calls:
+        parser.error("--direct-gate requires --direct-calls")
     if args.lean_blocks:
         args.prepared_blocks = True
     if args.lean_memory and not args.prepared_blocks:
