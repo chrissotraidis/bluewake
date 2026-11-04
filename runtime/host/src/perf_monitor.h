@@ -25,6 +25,9 @@ typedef struct {
     // The machine, sampled twice a second while the overlay is on.
     char cpu_name[64], gpu_name[96];
     float cpu_total_pct, cpu_game_pct, cpu_temp_c;
+    // The mean clock of the cores and the fastest a core can go: what a platform that will not say how busy it
+    // is (a phone: /proc/stat is denied to apps) does say about the same thing.
+    float cpu_clock_mhz, cpu_clock_max_mhz;
     float ram_used_mb, ram_total_mb, ram_game_mb;
     float gpu_pct, gpu_temp_c, gpu_power_w, gpu_clock_mhz, vram_used_mb, vram_total_mb;
 } BwPerfStats;

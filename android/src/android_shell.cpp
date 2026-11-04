@@ -206,11 +206,11 @@ JNIEXPORT void SHELL(nativePerfMode)(JNIEnv*, jclass, jint mode) {
 JNIEXPORT void SHELL(nativePerfSnapshot)(JNIEnv* env, jclass, jfloatArray values, jobjectArray names) {
     BwPerfStats stats;
     bw_perf_snapshot(&stats);
-    if (values != nullptr && env->GetArrayLength(values) >= 16 + BW_PERF_HISTORY) {
-        float out[16 + BW_PERF_HISTORY];
+    if (values != nullptr && env->GetArrayLength(values) >= 18 + BW_PERF_HISTORY) {
+        float out[18 + BW_PERF_HISTORY];
         int kept = 0;
         for (int i = 0; i < BW_PERF_HISTORY; ++i) {
-            out[16 + i] = stats.frame_ms[i];
+            out[18 + i] = stats.frame_ms[i];
             if (stats.frame_ms[i] > 0.f)
                 kept = i + 1;
         }
@@ -230,7 +230,9 @@ JNIEXPORT void SHELL(nativePerfSnapshot)(JNIEnv* env, jclass, jfloatArray values
         out[13] = stats.vram_used_mb;
         out[14] = stats.vram_total_mb;
         out[15] = (float)kept;
-        env->SetFloatArrayRegion(values, 0, 16 + BW_PERF_HISTORY, out);
+        out[16] = stats.cpu_clock_mhz;
+        out[17] = stats.cpu_clock_max_mhz;
+        env->SetFloatArrayRegion(values, 0, 18 + BW_PERF_HISTORY, out);
     }
     if (names != nullptr && env->GetArrayLength(names) >= 2) {
         env->SetObjectArrayElement(names, 0, env->NewStringUTF(stats.cpu_name));

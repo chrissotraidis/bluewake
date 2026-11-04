@@ -94,6 +94,7 @@ void bw_perf_reset(void) {
     memset(&g, 0, sizeof g);
     memset(&machine, 0, sizeof machine);
     g.stats.cpu_total_pct = g.stats.cpu_game_pct = g.stats.cpu_temp_c = -1.f;
+    g.stats.cpu_clock_mhz = g.stats.cpu_clock_max_mhz = -1.f;
     g.stats.ram_used_mb = g.stats.ram_total_mb = g.stats.ram_game_mb = -1.f;
     g.stats.gpu_pct = g.stats.gpu_temp_c = g.stats.gpu_power_w = g.stats.gpu_clock_mhz = -1.f;
     g.stats.vram_used_mb = g.stats.vram_total_mb = -1.f;
@@ -491,6 +492,30 @@ static void android_parts(BwPerfStats* s) {
 }
 #endif
 
+// The processors' clocks in MHz: the mean of what the cores run at now, and the fastest any of them can go.
+// cpufreq has them on Linux and on Android alike, and where the machine will not say how busy it is this is the
+// platform's own answer to the same question.
+static void read_cpu_clock(BwPerfStats* s) {
+    double sum = 0.0, top = 0.0;
+    int cores = 0;
+    for (int i = 0; i < 16; ++i) {
+        char dir[96];
+        snprintf(dir, sizeof dir, "/sys/devices/system/cpu/cpu%d/cpufreq", i);
+        const unsigned long long now = read_number(dir, "scaling_cur_freq");
+        const unsigned long long max = read_number(dir, "cpuinfo_max_freq");
+        if (max < 100000ull || max > 10000000ull)
+            continue;   // no cpufreq here (a core that is offline), or not a clock the panel can show
+        sum += (double)now / 1e3;
+        if ((double)max / 1e3 > top)
+            top = (double)max / 1e3;
+        ++cores;
+    }
+    if (cores > 0) {
+        s->cpu_clock_mhz = (float)(sum / (double)cores);
+        s->cpu_clock_max_mhz = (float)top;
+    }
+}
+
 static void sample_machine(unsigned long long now_ns) {
     BwPerfStats* s = &g.stats;
     // The whole machine: busy over the time since the last read.
@@ -548,6 +573,8 @@ static void sample_machine(unsigned long long now_ns) {
         if (sscanf(statm, "%llu %llu", &pages_all, &pages_resident) == 2 && page > 0)
             s->ram_game_mb = (float)((double)pages_resident * (double)page / 1048576.0);
     }
+
+    read_cpu_clock(s);
 
     // The parts' names and temperatures, once: they do not change while the game runs.
     if (!named) {
