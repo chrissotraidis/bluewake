@@ -1,6 +1,6 @@
 # PROGRESS — Direct-call gate
 
-Status: In progress. Desktop first read: **−7.3% instructions and cycles per frame, +8.0% rate**, checkpoints identical, 0 unsafe gate answers in 528 M. The Steam Deck runs are next.
+Status: **Steam Deck render_bench +5.5% overall** (every scene faster, every gate run ahead of every control run, checkpoints identical); desktop −7.3% cycles per frame; 0 unsafe gate answers in 528 M. Iteration 2 (run-time targets) is being measured.
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · Stacked on [#503](https://github.com/chrissotraidis/bluewake/pull/503)
 
 Acceptance (#503's rule): the candidate ahead of the control in every interleaved Game Mode launch (at least six), checkpoints identical, zero unsafe gate answers under verify, focused tests in CI. No minimum gain.
@@ -24,8 +24,8 @@ Acceptance (#503's rule): the candidate ahead of the control in every interleave
 ### M3: Measure (depends: M2)
 
 - [x] M3-T01: Desktop first read: instructions and cycles per frame against the `clang22` control. **−7.3% / −7.3%, rate +8.0%**, all three gate runs ahead of all three control runs, checkpoints identical.
-- [ ] M3-T02: Steam Deck Game Mode A/B, at least six interleaved launches.
-- [ ] M3-T03: render_bench, five scenes: checkpoints identical.
+- [x] M3-T02/T03: Steam Deck render_bench in Game Mode's session, five scenes, six interleaved launches of each build: **+5.5% overall**, every gate run (40.26–41.08) ahead of every control run (38.32–38.62); guest checkpoints identical across all 12 runs.
+- [ ] M3-T04: Iteration 2: the gate also for targets known only at run time (indirect calls, 1.3% of samples with the first gate). Build, desktop read, Deck render_bench against the first gate.
 
 ### M4: Decide (depends: M3)
 
@@ -40,3 +40,5 @@ Acceptance (#503's rule): the candidate ahead of the control in every interleave
 | M2-T01 | Candidate `gate503` (`bench/503-gate` `e627ece79b59` = `14c558d` + this change; Clang 22.1.8, libc++, trained with the gate open: provenance `direct_gate_training: true`) | `build_script gate503 bench/503-gate … --clang22 --direct-gate` | Desktop PC | Built in about 55 minutes |
 | M2-T02 | `gate503` | `BLUEWAKE_DIRECT_GATE=1 BLUEWAKE_DIRECT_SKIP_VERIFY=1`, headless, `1-outset.bwstate`, 3,000 retraces with a warp to Windfall at +1,200 | Desktop PC | `[direct-gate] verify: answers=528437808 unsafe=0 conservative=310417`; `[direct-skip] verify: inline=544293898 unsafe=0` |
 | M3-T01 | Control `clang22` (A, `14c558d`) against `gate503` (B); local `measure-552/` (private) | `perf stat -e cycles:u,instructions:u`, headless, unpaced, 2,400 retraces from `1-outset.bwstate`, order A B B A A B, `BLUEWAKE_DIRECT_GATE=1` for both (A has no gate) | Desktop PC (Ryzen 7 5800X3D) | Per game frame: A 76.31 / 76.38 / 75.98 M cycles, 210.32 M instructions; B 70.63 / 70.75 / 70.52 M cycles, 195.02 M instructions (**−7.3% each**). Median rate A 116.9–117.3, B 125.9–126.5 retraces/s (**+8.0%**). Guest checkpoints identical in all six runs |
+| M3-T02/T03 | Control `clang22` (A, `14c558d`) against `gate503` (B, `e627ece79b59`); local `gate-552-deck/` (private) | `render_bench deck@… A B --states test_render/states --display desktop --pairs 3`, `--set BLUEWAKE_DIRECT_GATE=1` (both; A has no gate), render scale 3, Smooth Motion 1 step, widescreen, efficient soft effects | Steam Deck, Game Mode (gamescope's X server) | **B +5.49% overall**: Outset +4.8%, Lava Room +8.2%, Hyrule Castle +3.6%, Butterfly Room +4.8%, Shipwreck +5.5%. Per run, A 38.59 / 38.32 / 38.62 / 38.36 / 38.56 / 38.56, B 40.28 / 40.61 / 41.08 / 40.43 / 40.26 / 40.53. Guest checkpoints identical across every run; picture flags are the known capture-timing ones (Outset PSNR 33.9, Butterfly Room 15.48, as in #437's grid) |
+| M3-T04 | With the first gate (`gate503`); local profile | `perf record`, as M0-T01 | Desktop PC | Direct-call checks **2.08%** of samples (were 8.38%): `bw_direct_call_ready_full` 1.33% (run-time targets), `host_can_skip_observation` 0.56%, `_plain` 0.13% (REL targets: not worth a gate of their own) |
