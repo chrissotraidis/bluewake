@@ -27,6 +27,19 @@ const volatile BwHostSkipFast* bw_host_skip_fast;
 bool bw_host_skip_verify;
 static unsigned long long s_skip_unsafe, s_skip_conservative, s_skip_inline;
 
+/* The gate (direct_skip.h): the host's word while direct calls and the
+ * address-only answer are on and verify is off, a closed word otherwise. */
+static const volatile u32 k_gate_closed = 1u;
+const volatile u32* bw_direct_gate = &k_gate_closed;
+static const volatile u32* s_host_gate;
+static unsigned long long s_gate_unsafe, s_gate_conservative, s_gate_answers;
+
+static void gate_refresh(void) {
+    const bool open = bw_direct_enabled && bw_host_skip_fast != NULL && !bw_host_skip_verify &&
+                      s_host_gate != NULL;
+    bw_direct_gate = open ? s_host_gate : &k_gate_closed;
+}
+
 u32 bw_edge_watch_table[BW_EDGE_WATCH_SLOTS];
 bool bw_edge_watch_ready;
 bool bw_edge_filter_enabled;
@@ -104,6 +117,7 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls(bool enabled, const bool* s
     bw_host_can_skip = NULL;
     bw_host_can_skip_user = NULL;
     bw_host_skip_fast = NULL; /* set only while direct calls are on (direct_calls.h) */
+    gate_refresh();
     return 0;
 }
 
@@ -117,6 +131,7 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v2(
         bw_host_can_skip = NULL;
         bw_host_can_skip_user = NULL;
         bw_host_skip_fast = NULL; /* set only while direct calls are on (direct_calls.h) */
+        gate_refresh();
         return 0;
     }
     bw_host_sources_dirty = sources_dirty;
@@ -127,6 +142,7 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v2(
     bw_host_can_skip_user = user;
     bw_host_skip_fast = NULL;
     bw_direct_enabled = true;
+    gate_refresh();
     return 1;
 }
 
@@ -138,7 +154,44 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v3(
                                                       pi_cause, pi_mask, can_skip, user);
     bw_host_skip_fast = on ? fast : NULL;
     bw_host_skip_verify = on && fast != NULL && verify;
+    gate_refresh();
     return on;
+}
+
+/* The host's gate word (direct_skip.h), handed over after v3; NULL takes it
+ * back. A host that never calls this leaves the gate closed, so its direct
+ * calls take the out-of-line checks. Returns 1 when the module reads the word
+ * inline, 0 when it stays closed (direct calls or the answer off, or verify). */
+BW_DIRECT_EXPORT int bluewake_composite_direct_gate(const volatile u32* gate) {
+    s_host_gate = gate;
+    gate_refresh();
+    return gate != NULL && bw_direct_gate == gate;
+}
+
+/* BLUEWAKE_DIRECT_SKIP_VERIFY with a gate handed over: what the inline path
+ * would have answered for this call, against the exact answer. An inline yes
+ * where the check says no would be a bug; an inline no is the gate's
+ * conservative side (an interrupt pending while MSR[EE] is clear, say). */
+void bw_direct_gate_verify(const CPUState* cpu, u32 address, bool exact) {
+    const volatile u32* gate = s_host_gate;
+    if (gate == NULL || cpu == NULL || !bw_skip_main_code(address) || !bw_skip_range_outside(address))
+        return;
+    const bool inline_yes = *gate == 0u && bw_direct_gate_ready(cpu);
+    ++s_gate_answers;
+    if (inline_yes && !exact) {
+        if (++s_gate_unsafe <= 8u)
+            fprintf(stderr, "[direct-gate] UNSAFE: gate open at 0x%08X where the check says no\n", address);
+    } else if (!inline_yes && exact) {
+        ++s_gate_conservative;
+    }
+}
+
+BW_DIRECT_EXPORT void bluewake_composite_direct_gate_counts(unsigned long long* unsafe,
+                                                         unsigned long long* conservative,
+                                                         unsigned long long* answers) {
+    if (unsafe != NULL) *unsafe = s_gate_unsafe;
+    if (conservative != NULL) *conservative = s_gate_conservative;
+    if (answers != NULL) *answers = s_gate_answers;
 }
 
 /* BLUEWAKE_DIRECT_SKIP_VERIFY: ask the host as well and count disagreements. An
