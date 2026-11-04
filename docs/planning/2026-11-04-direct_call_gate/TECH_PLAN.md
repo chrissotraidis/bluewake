@@ -7,21 +7,25 @@ Status: **Done: kept, opt-in.** Steam Deck **+5.5%**, exact. Iteration 2 was a n
 
 Before every direct guest call (a `bl` the builder rewrote to call the target chunk without going round the dispatch loop), translated code asks: *is it safe to skip the loop?* [#503](https://github.com/chrissotraidis/bluewake/pull/503) made that check cheaper, but it was still a call, about a billion times in a long run. We replaced the call with a single word read inline for the common case.
 
+**Before:** every direct call makes two nested calls.
+
 ```mermaid
-flowchart LR
-    subgraph Before["Before: every direct call"]
-        B1["bl target"] --> B2["call<br/>bw_direct_call_ready_plain"]
-        B2 --> B3["call<br/>bw_host_quiet"]
-        B3 --> B4["~15 loads through<br/>host pointers"]
-        B4 --> B5["call the target chunk<br/>or go round the loop"]
-    end
-    subgraph After["After: with the gate open"]
-        A1["bl target"] --> A2{"gate word<br/>== 0 ?"}
-        A2 -- "yes (nearly always)" --> A3["inline: depth,<br/>exception, budget"]
-        A3 --> A5["call the target chunk"]
-        A2 -- no --> A4["the old out-of-line check<br/>(exact, unchanged)"]
-        A4 --> A6["call the target chunk<br/>or go round the loop"]
-    end
+flowchart TD
+    B1["bl target"] --> B2["call the check"]
+    B2 --> B3["call bw_host_quiet"]
+    B3 --> B4["about 15 loads<br/>through host pointers"]
+    B4 --> B5["call the target,<br/>or go round the loop"]
+```
+
+**After:** with the gate open, one word read inline.
+
+```mermaid
+flowchart TD
+    A1["bl target"] --> A2{"gate word<br/>is zero?"}
+    A2 -- "yes, nearly always" --> A3["inline: depth,<br/>exception, budget"]
+    A3 --> A4["call the target"]
+    A2 -- no --> A5["the old check,<br/>exact, unchanged"]
+    A5 --> A6["call the target,<br/>or go round the loop"]
 ```
 
 ## What we found
@@ -36,14 +40,14 @@ flowchart LR
 One 32-bit host word. Zero means every host-side condition of the plain check holds, so only the guest-side tests remain inline.
 
 ```mermaid
-flowchart TB
-    W["gate word (4 bytes)"] --> D["byte 0: interrupt sources dirty<br/><i>is</i> the host's own flag"]
-    W --> T["byte 1: decrementer pending<br/><i>is</i> the host's own flag"]
-    W --> C["byte 2: closed<br/>answer off, not simple, or a single<br/>address inside the main code"]
-    W --> I["byte 3: PI interrupt pending<br/>refreshed where the dirty flag clears<br/>and before each dispatch"]
+flowchart TD
+    W["gate word: 4 bytes"] --> D["byte 0: sources dirty<br/>(the host's own flag)"]
+    W --> T["byte 1: decrementer pending<br/>(the host's own flag)"]
+    W --> C["byte 2: closed<br/>(answer off, or a watched<br/>address in the main code)"]
+    W --> I["byte 3: PI interrupt pending"]
     D & T & C & I --> Z{"all zero?"}
-    Z -- yes --> Q["quiet: MSR[EE] cannot matter,<br/>no watched single can be the target"]
-    Z -- no --> S["take the exact out-of-line check"]
+    Z -- yes --> Q["quiet: the shortcut<br/>is safe"]
+    Z -- no --> S["use the exact check"]
 ```
 
 Storing the two flags *in* the word means every one of their ~15 existing writes updates the gate for free; a non-zero word only ever costs the shortcut, never correctness.
@@ -51,10 +55,10 @@ Storing the two flags *in* the word means every one of their ~15 existing writes
 ### How the iterations went
 
 ```mermaid
-flowchart LR
-    P["#503 stack 1<br/>check out of line<br/>+0.7%"] --> M4["#503 M4<br/>cheaper interrupt read<br/>≤ 0.3%: no-go"]
-    M4 --> G1["#552 gate<br/>call removed for<br/>constant targets<br/><b>Deck +5.5%: kept</b>"]
-    G1 --> G2["#552 iteration 2<br/>run-time targets too<br/>Deck +0.7%, inconsistent:<br/>reverted"]
+flowchart TD
+    P["#503 stack 1<br/>check out of line<br/>+0.7%"] --> M4["#503 M4<br/>cheaper interrupt read<br/>no-go"]
+    M4 --> G1["#552 gate<br/>call removed<br/>Deck +5.5%: kept"]
+    G1 --> G2["#552 iteration 2<br/>indirect calls too<br/>inconsistent: reverted"]
 ```
 
 ## Decision
