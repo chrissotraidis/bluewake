@@ -26,6 +26,13 @@ enum {
     kSailListSize = 0x220u,
     kSailVertexSize = 3u, // position, normal and texture coordinate, an 8-bit index each
     kLoadBp = 0x61u,
+    // Whether the draws that follow are a BG list's (0) or another list's (1): the sun shadows' far cascades take
+    // only the BG lists' casters, as Wind Waker HD's (hd_layer_shadow.cpp drawShadowCascade: cascades from 2 on
+    // draw only mpModelList). Kept until written again.
+    kDrawListRegister = 0x7Au,
+    kDrawList = 0x803CA924u,  // g_dComIfG_gameInfo.drawlist (dDlst_list_c, +0x5D1C)
+    kOpaListBG = 0x0Cu,       // its mpOpaListBG, then mpXluListBG (J3DDrawBuffer*)
+    kXluListBG = 0x10u,
 };
 
 bool bluewake_draw_tags_enabled = true;
@@ -73,6 +80,18 @@ static u32 sail_list_draws(CPUState* cpu) {
 void bluewake_draw_tags_enter(CPUState* cpu, u32 address) {
     if (cpu == NULL)
         return;
+    if (address == BLUEWAKE_DRAW_LIST_HEAD || address == BLUEWAKE_DRAW_LIST_TAIL) {
+        const u32 buffer = cpu->gpr[3];
+        const u32 opa_bg = mem_read32(cpu, kDrawList + kOpaListBG), xlu_bg = mem_read32(cpu, kDrawList + kXluListBG);
+        const bool bg = buffer == opa_bg || buffer == xlu_bg;
+        static unsigned reported;
+        if (reported < 2u && bg) {
+            reported++;
+            fprintf(stderr, "[draw-tags] BG list %08X (opa %08X, xlu %08X)\n", buffer, opa_bg, xlu_bg);
+        }
+        write_bp(kDrawListRegister, bg ? 0u : 1u);
+        return;
+    }
     if (address == BLUEWAKE_CLOTH_DRAW || address == BLUEWAKE_SAIL_DRAW) {
         const u32 packet = cpu->gpr[3];
         if (!guest_object(packet))
