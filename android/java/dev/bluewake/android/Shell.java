@@ -55,6 +55,8 @@ final class Shell {
     static native String nativeDiscPrepare(String iso, String gameDir);
     /** Whether the disc image is whole, not merely present; null = it is, else the reason. */
     static native String nativeDiscCheck(String iso);
+    /** The card written out as a Dolphin .gci, or null with error[0] set. The card is only read. */
+    static native byte[] nativeCardExport(byte[] card, String[] error);
 
     static void log(String line) {
         try {

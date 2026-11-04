@@ -40,7 +40,7 @@ int main() {
         "# BlueWake settings (the in-game menu, F1, writes this file)\n"
         "fullscreen=1\nwindow=1920x1080\nwindow_position=40,60\nrender_scale=3\nanisotropy=8\nsmooth_motion=1\n"
         "show_fps=1\npause_unfocused=1\nfps_position=top-left\ncompile_shaders_first=1\nsmooth_motion_fps=display\n"
-        "mouse_camera=0\nmouse_sensitivity=0.35\nmouse_invert_y=1\ncontroller_swap_ab=1\ncontroller_swap_xy=1\n"
+        "mouse_camera=0\nmouse_sensitivity=0.35\nmouse_invert_y=1\ncontroller_swap_ab=1\n"
         "controller_swap_lr=1\ndpad_menus=1\nbutton_map=1,0,2,3,10,6\nmouse_buttons=a,b,x,y,z\nkey_map=13,14,24,12,20,8,21,40\n"
         "controller_invert_x=1\ncontroller_invert_y=1\nstick_camera=0\nstick_camera_speed=500\nstick_aim_speed=90\n"
         "stick_zoom=1\nstick_zoom_speed=0.750\naim_invert_y=1\ngyro_aim=1\ngyro_aim_speed=2.50\nclimb=1\n"
@@ -59,7 +59,7 @@ int main() {
         {"DOL_AURORA_SHOW_FPS", "1"}, {"BLUEWAKE_PAUSE_UNFOCUSED", "1"}, {"DOL_AURORA_FPS_POSITION", "top-left"},
         {"BLUEWAKE_SHADERS_FIRST", "1"}, {"DOL_AURORA_FRAME_INTERP_STEPS", "display"},
         {"BLUEWAKE_MOUSE_CAMERA", "0"}, {"BLUEWAKE_MOUSE_SENSITIVITY", "0.35"}, {"BLUEWAKE_MOUSE_INVERT_Y", "1"},
-        {"BLUEWAKE_PAD_SWAP_AB", "1"}, {"BLUEWAKE_PAD_SWAP_XY", "1"}, {"BLUEWAKE_PAD_SWAP_LR", "1"},
+        {"BLUEWAKE_PAD_SWAP_AB", "1"}, {"BLUEWAKE_PAD_SWAP_LR", "1"},
         {"BLUEWAKE_DPAD_MENUS", "1"}, {"BLUEWAKE_BUTTON_MAP", "1,0,2,3,10,6"},
         {"BLUEWAKE_MOUSE_BUTTONS", "a,b,x,y,z"}, {"BLUEWAKE_KEY_MAP", "13,14,24,12,20,8,21,40"},
         {"BLUEWAKE_STICK_CAMERA_INVERT_X", "1"}, {"BLUEWAKE_STICK_CAMERA_INVERT_Y", "1"},

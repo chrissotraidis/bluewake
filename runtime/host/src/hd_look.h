@@ -7,7 +7,8 @@
 // The Wind Waker HD look (docs/WWHD_LOOK.md): the HD release's changes to how
 // the game is drawn, rebuilt on the GameCube game. Every part is off by
 // default. BLUEWAKE_HD_LOOK=1 turns on every part that exists except sun
-// shadows; a part's own variable (=1 or =0) overrides that.
+// shadows; a part's own variable (=1 or =0) overrides that, and the menu has a
+// switch for each. Turning the look off (BLUEWAKE_HD_LOOK=0, F2) takes every part.
 //
 // Distant islands (BLUEWAKE_HD_DISTANT_ISLANDS): each island's far-away model
 // (d_a_lod_bg) appears and is unloaded 100,000 units further out, as in HD.
@@ -16,7 +17,12 @@
 // camera and sun. Torch light (BLUEWAKE_HD_TORCH_LIGHT) everywhere, from the
 // game's own point lights. Ambient occlusion (BLUEWAKE_HD_AO), far blur (BLUEWAKE_HD_FAR_BLUR) and
 // bloom (BLUEWAKE_HD_BLOOM): Aurora's post_fx, on the finished scene before
-// the HUD.
+// the HUD. HD's sky clouds (BLUEWAKE_HD_CLOUDS) are textures, from the HD
+// texture pack's optional/hd-clouds, and need the look and the pack. HD's sky
+// and light (BLUEWAKE_HD_SKY): its palettes over every stage's own, its
+// brightness for the hour and its light schedule, from the pack's
+// optional/hd-sky, with HD's sky models (BLUEWAKE_HD_SKY_MODELS) and its blend
+// in linear light (BLUEWAKE_HD_SKY_LINEAR); each off until set to 1 (sky()).
 // Read again by the settings menus.
 void bluewake_hd_look_reload(void);
 // The softer starting strengths for Aurora's parts; call before Aurora starts.

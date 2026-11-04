@@ -550,8 +550,9 @@ int main(int argc, char** argv) {
     char* host_argv[3] = {argv[0], module, NULL};
     char launch_marker[4096];
     snprintf(launch_marker, sizeof launch_marker, "%slaunch.pending", g_data_dir);
-    // The last launch never got as far as a clean exit: start in safe mode,
-    // as Windows does (settings_menu.cpp's bluewake_settings_load).
+    // The last launch never got through its first 600 frames (settings_menu.cpp
+    // clears the marker then, and at a clean exit): start in safe mode, as
+    // Windows does (settings_menu.cpp's bluewake_settings_load).
     if (bw_launch_pending(launch_marker)) {
         fprintf(stderr, "[safe-mode] the last launch didn't finish; starting in safe mode\n");
         setenv("BLUEWAKE_SAFE_MODE", "1", 1);

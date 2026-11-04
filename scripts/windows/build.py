@@ -60,8 +60,61 @@ def die(message):
     raise BuildError(message)
 
 
+def configure_output():
+    """Embedded Python ignores PYTHONUTF8; status paths must still be printable."""
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def step(title):
     print(f"\n==> {title}", flush=True)
+
+
+def windows_kits_root():
+    """Windows Kits 10 folder from the registry, or None."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    for view in (winreg.KEY_WOW64_32KEY, winreg.KEY_WOW64_64KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows Kits\Installed Roots",
+                                0, winreg.KEY_READ | view) as key:
+                return Path(winreg.QueryValueEx(key, "KitsRoot10")[0])
+        except OSError:
+            continue
+    return None
+
+
+def add_windows_sdk(env, root=None):
+    """Add the Windows SDK to a developer environment that lacks it.
+
+    vcvars finds the SDK with reg.exe, which the "Prevent access to registry
+    editing tools" policy blocks on some managed PCs; the SDK is still installed
+    and Python can read the same key. Uses the newest complete x64 SDK.
+    """
+    root = root or windows_kits_root()
+    if root is None:
+        return
+    def complete(version):
+        return all((root / part).is_file() for part in (
+            f"Include/{version}/ucrt/stdlib.h", f"Include/{version}/um/windows.h",
+            f"Lib/{version}/ucrt/x64/ucrt.lib", f"Lib/{version}/um/x64/kernel32.lib"))
+    versions = [p.name for p in (root / "Include").glob("10.*") if complete(p.name)]
+    if not versions:
+        return
+    version = max(versions, key=lambda v: tuple(int(x) for x in v.split(".")))
+    include, lib = root / "Include" / version, root / "Lib" / version
+    def prepend(name, paths):
+        env[name] = os.pathsep.join([str(p) for p in paths if p.is_dir()] + ([env[name]] if env.get(name) else []))
+    prepend("INCLUDE", [include / part for part in ("ucrt", "shared", "um", "winrt", "cppwinrt")])
+    prepend("LIB", [lib / "ucrt/x64", lib / "um/x64"])
+    prepend("PATH", [root / "bin" / version / "x64"])
+    env.update(WindowsSdkDir=f"{root}\\", WindowsSDKVersion=f"{version}\\", UniversalCRTSdkDir=f"{root}\\",
+               UCRTVersion=version)
+    print(f"Windows SDK {version} added from {root} (vcvars could not find it)")
 
 
 def default_jobs():
@@ -220,7 +273,7 @@ def save_times(path, times):
 
 def tree_digest(root):
     """scripts/ios/composite_manifest.py's digest of a generated tree."""
-    out = subprocess.check_output([sys.executable, str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
+    out = subprocess.check_output([sys.executable, "-X", "utf8", str(ROOT / "scripts/ios/composite_manifest.py"), str(root)],
                                   text=True)
     return out.split()[0]
 
@@ -241,6 +294,14 @@ class Builder:
         self.logs.mkdir(parents=True, exist_ok=True)
         log = self.logs / f"{name}.log"
         environment = dict(env or self.env or os.environ)
+        command = list(command)
+        if command[:1] == [sys.executable]:
+            command[1:1] = ["-X", "utf8"]
+        if command[:1] == ["cmake"] and "-S" in command and platform.machine().lower() == "arm64":
+            # Windows on ARM builds the x64 game: say so, or CMake takes this ARM64 PC's
+            # processor for the target and libraries pick ARM code for the x64 compiler
+            # (libpng: "NEON intrinsics not available").
+            command += ["-DCMAKE_SYSTEM_NAME=Windows", "-DCMAKE_SYSTEM_PROCESSOR=AMD64"]
         if ninja:
             environment["NINJA_STATUS"] = "[%f/%t] "
         start = time.monotonic()
@@ -295,8 +356,13 @@ class Builder:
     def check_tools(self):
         if platform.system() != "Windows":
             die("this builder is for Windows; on a Mac use scripts/builder/build.sh")
-        if platform.machine().lower() not in ("amd64", "x86_64"):
-            die(f"an x86-64 PC is required (this is {platform.machine()})")
+        machine = platform.machine().lower()
+        if machine not in ("amd64", "x86_64", "arm64"):
+            die(f"an x86-64 or ARM64 Windows PC is required (this is {platform.machine()})")
+        if machine == "arm64":
+            # Windows on ARM runs x64 programs: the same x64 tools and game as on an x64 PC,
+            # under Windows' x64 emulation (slower to build and play than native x64).
+            print("Windows on ARM: building the x64 game, which runs under Windows' x64 emulation")
         if sys.version_info < (3, 10):
             die("Python 3.10 or newer is required")
         for tool in ("git", "cmake", "ninja"):
@@ -341,8 +407,8 @@ class Builder:
         # SDK installers add them); keep the clean ones for the build.
         path = [p.strip('"') for p in os.environ.get("PATH", "").split(os.pathsep)]
         base = dict(os.environ, PATH=os.pathsep.join(p for p in path if p and "(" not in p and ")" not in p))
-        output = subprocess.run(f'cmd /d /c ""{vcvars}" >nul 2>&1 && set"', capture_output=True, text=True,
-                                env=base, shell=False)
+        output = subprocess.run(f'cmd /d /u /c ""{vcvars}" >nul 2>&1 && set"', capture_output=True, text=True,
+                                env=base, shell=False, encoding="utf-16le")
         if output.returncode != 0 or "INCLUDE=" not in output.stdout:
             die(f"{vcvars} failed; open a 'x64 Native Tools Command Prompt' and rerun from there")
         env = {}
@@ -350,6 +416,8 @@ class Builder:
             key, sep, value = line.partition("=")
             if sep and key:
                 env[key] = value
+        if not env.get("WindowsSdkDir"):
+            add_windows_sdk(env)
         env["PATH"] = str(install / "VC/Tools/Llvm/x64/bin") + os.pathsep + env.get("PATH", "")
         print(f"Visual Studio: {install}")
         return env
@@ -501,6 +569,7 @@ int main(void) {
         self.run("dolrecomp-configure", ["cmake", "-S", self.recompcore / "DolRecomp", "-B", build, "-G", "Ninja",
                                          "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_C_COMPILER=clang-cl",
                                          "-DDOLRECOMP_WARNINGS_AS_ERRORS=OFF",
+                                         f"-DCMAKE_PROJECT_DolRecomp_INCLUDE={ROOT / 'windows/dolrecomp-utf8.cmake'}",
                                          "-DCMAKE_EXE_LINKER_FLAGS=binmode.obj"])
         self.run("dolrecomp-build", ["cmake", "--build", build, "--target", "dolrecomp", "-j", self.args.jobs],
                  ninja=True)
@@ -533,7 +602,7 @@ int main(void) {
             self._app_profile_readable = readable
         return self._app_profile_readable
 
-    def configure_app(self, build=None, instrument=False):
+    def configure_app(self, build=None, instrument=False, *, extractor_only=False):
         """The app's build, by default build/windows/app. With the committed
         profile of the app's own code (windows/pgo/app.profdata,
         scripts/windows/train_app_profile.py) it is compiled with it and with
@@ -565,6 +634,7 @@ int main(void) {
             f"-DCMAKE_CXX_FLAGS=-march={self.args.march} -g -gcodeview {profile}",
             "-DBUILD_TESTING=OFF", f"-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,/DEBUG -Wl,/OPT:REF -Wl,/OPT:ICF {link}",
             f"-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld {link}",
+            f"-DBLUEWAKE_WINDOWS_EXTRACTOR_ONLY={'ON' if extractor_only else 'OFF'}",
             f"-DBLUEWAKE_WINDOWS_CONSOLE={'ON' if self.args.console else 'OFF'}"])
 
     # --- 4 extract ---------------------------------------------------------
@@ -630,7 +700,7 @@ int main(void) {
         # compile start over. Mods are part of the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.gather_alias_cache)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
                        + ("lean_blocks\n" if getattr(self.args, "lean_blocks", False) else "")
@@ -686,7 +756,14 @@ int main(void) {
         saved = (o / "composite-final.digest").read_text().strip() if (o / "composite-final.digest").exists() else ""
         same_inputs = (o / "composite-inputs.digest").exists() and \
             (o / "composite-inputs.digest").read_text().strip() == inputs
-        if current.exists() and same_inputs and saved and tree_digest(current) == saved:
+        # generate() also records the plain tree for --source-only. A matching
+        # digest alone does not prove the later preparation phase completed.
+        try:
+            prepared = json.loads((o / "prepared-blocks.json").read_text())
+        except (OSError, ValueError):
+            prepared = {}
+        prepared_done = isinstance(prepared, dict) and prepared.get("final_digest") == saved
+        if current.exists() and same_inputs and saved and prepared_done and tree_digest(current) == saved:
             shutil.rmtree(new)
             print("the existing composite source is current")
             self.mods_pending = (o / "mods.done").read_text().strip() != "complete" \
@@ -702,6 +779,9 @@ int main(void) {
             self.source_times = saved_times(o / "composite-src.times.json") or file_times(current)
             save_times(o / "composite-src.times.json", self.source_times)
             sync_tree(new, current)
+            # A former plain/conservative receipt can have this same base digest
+            # but different options. It no longer describes the reset source.
+            (o / "prepared-blocks.json").unlink(missing_ok=True)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
             (o / "composite-final.digest").write_text(digest + "\n")
@@ -719,7 +799,7 @@ int main(void) {
         options = ROOT / "mods/betterww/options.txt"
         # The site list DolRecomp reads, with LF line ends (Python's stdout
         # writes CRLF on Windows).
-        listed = subprocess.run([sys.executable, ROOT / "scripts/mods/game_options.py", "sites", options],
+        listed = subprocess.run([sys.executable, "-X", "utf8", ROOT / "scripts/mods/game_options.py", "sites", options],
                                 capture_output=True, check=True).stdout
         (m / "option-sites.txt").write_bytes(listed.replace(b"\r\n", b"\n"))
         sites = ("--option-sites", m / "option-sites.txt")
@@ -881,6 +961,7 @@ int main(void) {
                    "fixed_mem1": self.args.fixed_mem1,
                    "inline_fp": self.args.inline_fp,
                    "gather_pipe": self.args.gather_pipe,
+                   "gather_alias_cache": self.args.gather_alias_cache,
                    "direct_calls": self.args.direct_calls,
                    "inline_gpr": self.args.inline_gpr,
                    "native_j3d": self.args.native_j3d,
@@ -1006,6 +1087,7 @@ int main(void) {
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
@@ -1092,7 +1174,7 @@ int main(void) {
                                "mods": self.mods,
                                "options": {name: getattr(self.args, name, False) for name in
                                            ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp",
-                                            "gather_pipe", "direct_calls", "inline_gpr", "native_j3d",
+                                            "gather_pipe", "gather_alias_cache", "direct_calls", "inline_gpr", "native_j3d",
                                             "native_vec", "native_math", "native_skin", "native_game_math",
                                             "lean_memory", "native_entries", "lean_blocks")},
                                **({"lean_deadlines": True} if getattr(self.args, "lean_deadlines", False) else {}),
@@ -1373,6 +1455,7 @@ int main(void) {
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
+            "gather_alias_cache": self.args.gather_alias_cache,
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
             "native_j3d": self.args.native_j3d,
@@ -1426,7 +1509,7 @@ int main(void) {
             return
         step("4/10 extract the game from the disc")
         self.dolrecomp = self.build_dolrecomp()
-        self.configure_app()
+        self.configure_app(extractor_only=args.source_only or getattr(args, "module_sources", False))
         game = self.out / "game"
         stamp = self.out / "game.json"
         key = {"iso": str(self.iso), "size": self.iso.stat().st_size, "mtime": self.iso.stat().st_mtime_ns,
@@ -1459,6 +1542,9 @@ int main(void) {
             changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
             (self.out / "composite-src.times.json").unlink(missing_ok=True)
             print(f"composite source: {changed} of {total} files changed since the last build")
+        if getattr(args, "module_sources", False):
+            print(f"\nmodule sources ready: {self.out / 'composite-src'} (mods and preparations complete)")
+            return
         if not (args.no_train or args.no_pgo):
             self.llvm_profdata = str(Path(self.clang).with_name("llvm-profdata.exe"))
             if not Path(self.llvm_profdata).is_file():
@@ -1520,13 +1606,15 @@ a user folder here instead (a rebuild leaves it alone).
 # CPU and RAM storage, inline floating point and gather-pipe writes, inlined
 # register saves, prepaid blocks, direct calls and the certified natives). The
 # app enables each one only where the module it loads was prepared with it.
-WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
+WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "gather_alias_cache",
+                                 "inline_gpr",
                                  "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                  "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
                                  "behaviour_timing")
 
 
 def main():
+    configure_output()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("disc", type=Path, help="your GZLE01 revision 0 disc image (.iso, .gcm, .rvz, ...)")
     parser.add_argument("--out", type=Path, default=ROOT / "build/windows",
@@ -1568,6 +1656,10 @@ def main():
                         help="opt into experimental inline floating-point helpers (off by default)")
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
+    parser.add_argument("--gather-alias-cache", action="store_true",
+                        help="cache gather-pipe alias-window overlap by registry generation (on by default; requires --gather-pipe)")
+    parser.add_argument("--no-gather-alias-cache", action="store_true",
+                        help="disable the default gather-pipe alias-window cache")
     parser.add_argument("--inline-gpr", action="store_true",
                         help="inline certified register saves/restores; requires --direct-calls")
     parser.add_argument("--direct-calls", action="store_true",
@@ -1630,15 +1722,21 @@ def main():
                         help="build the app without its committed optimization profile and ThinLTO")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
+    parser.add_argument("--module-sources", action="store_true",
+                        help="stop after mods and module preparations, before training or platform compilation")
     parser.add_argument("--source-only", action="store_true",
                         help="stop after generating the source: checks tools, disc and translation in minutes")
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
     args = parser.parse_args()
+    if args.module_sources and (args.source_only or args.host_only or args.check_only):
+        parser.error("--module-sources cannot be combined with --source-only, --host-only or --check-only")
     # Wind Waker Recomp's Windows builds prepare all of these every time; BlueWake
     # matches that by default. --conservative builds the plain translation.
     if not args.conservative:
         for name in WINDOWS_DEFAULT_OPTIMIZATIONS:
             setattr(args, name, True)
+    if args.no_gather_alias_cache:
+        args.gather_alias_cache = False
     if args.no_lean_blocks:
         args.lean_blocks = False
     if args.no_lean_memory:
@@ -1651,6 +1749,8 @@ def main():
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:
         parser.error("--inline-gpr requires --direct-calls")
+    if args.gather_alias_cache and not args.gather_pipe:
+        parser.error("--gather-alias-cache requires --gather-pipe")
     if args.fixed_mem1 and not args.fixed_cpu:
         parser.error("--fixed-mem1 requires --fixed-cpu")
     if args.lean_blocks:
@@ -1671,6 +1771,10 @@ def main():
         parser.error("--native-set4 requires --direct-calls, --gather-pipe and --native-vec")
     if args.jobs is None:
         args.jobs = default_jobs()
+    if args.source_only or args.module_sources:
+        # Only the disc extractor is built from the app's project: its optimization
+        # profile is for the app, and an older Visual Studio clang cannot read it.
+        args.no_app_pgo = True
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     # The preparation steps rewrite the chunks on as many processes (chunk_pool.py).

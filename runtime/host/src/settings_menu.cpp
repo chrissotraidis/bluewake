@@ -5,6 +5,7 @@
 #include "settings_menu.h"
 #include "desktop_menu.h"
 #include "desktop_theme.h"
+#include "launch_marker.h"
 
 // The host's modules are C.
 extern "C" {
@@ -155,7 +156,18 @@ Look look(SDL_Window*) {
     return look;
 }
 
-void frame(SDL_Window*, unsigned long long now_ms) { draw_renderer_notice(now_ms); }
+void frame(SDL_Window*, unsigned long long now_ms) {
+    draw_renderer_notice(now_ms);
+    // A launch that gets through 600 frames has started, so linux_entry.c's
+    // marker goes then, as on Windows (win_settings.cpp), instead of only at a
+    // clean exit: a game closed from outside, from Steam's menu or by a killed
+    // process, no longer starts the next launch in safe mode, which reset the
+    // settings (#511). The Mac sets no data folder and has no marker.
+    static unsigned healthy_frames;
+    if (!bw_desktop::menu_open() && ++healthy_frames == 600u && !bw_desktop::data_dir().empty() &&
+        !bw_launch_clear((bw_desktop::data_dir() + "launch.pending").c_str()))
+        std::fprintf(stderr, "[safe-mode] could not clear launch marker\n");
+}
 
 // The mouse is handed back while the menu is open.
 void menu_opened(bool open) {

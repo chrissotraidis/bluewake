@@ -34,6 +34,16 @@ inline size_t count(const std::string& folder) {
     fs::recursive_directory_iterator it(fs::path(folder), fs::directory_options::skip_permission_denied, ec);
     for (const fs::recursive_directory_iterator end; !ec && it != end; it.increment(ec)) {
         std::error_code type;
+        // optional/ holds alternatives the renderer loads over the pack only
+        // when asked (HD's sky clouds), so they are not counted.
+        if (it.depth() == 0 && it->is_directory(type)) {
+            std::string name = it->path().filename().string();
+            for (char& c : name)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (name == "optional")
+                it.disable_recursion_pending();
+            continue;
+        }
         if (!it->is_regular_file(type))
             continue;
         std::string ext = it->path().extension().string();

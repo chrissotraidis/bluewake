@@ -603,6 +603,7 @@ int main(void) {{
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
                        f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
+                       f"{int(self.args.gather_alias_cache)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
                        + ("lean_blocks\n" if getattr(self.args, "lean_blocks", False) else "")
@@ -658,7 +659,14 @@ int main(void) {{
         saved = (o / "composite-final.digest").read_text().strip() if (o / "composite-final.digest").exists() else ""
         same_inputs = (o / "composite-inputs.digest").exists() and \
             (o / "composite-inputs.digest").read_text().strip() == inputs
-        if current.exists() and same_inputs and saved and tree_digest(current) == saved:
+        # generate() also records the plain tree for --source-only. A matching
+        # digest alone does not prove the later preparation phase completed.
+        try:
+            prepared = json.loads((o / "prepared-blocks.json").read_text())
+        except (OSError, ValueError):
+            prepared = {}
+        prepared_done = isinstance(prepared, dict) and prepared.get("final_digest") == saved
+        if current.exists() and same_inputs and saved and prepared_done and tree_digest(current) == saved:
             shutil.rmtree(new)
             print("the existing composite source is current")
             self.mods_pending = (o / "mods.done").read_text().strip() != "complete" \
@@ -674,6 +682,9 @@ int main(void) {{
             self.source_times = saved_times(o / "composite-src.times.json") or file_times(current)
             save_times(o / "composite-src.times.json", self.source_times)
             sync_tree(new, current)
+            # A former plain/conservative receipt can have this same base digest
+            # but different options. It no longer describes the reset source.
+            (o / "prepared-blocks.json").unlink(missing_ok=True)
             (o / "composite-src.digest").write_text(digest + "\n")
             (o / "composite-inputs.digest").write_text(inputs + "\n")
             (o / "composite-final.digest").write_text(digest + "\n")
@@ -948,6 +959,7 @@ int main(void) {{
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
             f"-DCOMPOSITE_OPTIMIZATION_LEVEL={opt_level}", f"-DCOMPOSITE_DIR={self.out / 'composite-src'}",
@@ -1273,6 +1285,7 @@ int main(void) {{
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
+            "gather_alias_cache": self.args.gather_alias_cache,
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
             "fp_checks": getattr(self.args, "fp_checks", False),
@@ -1373,6 +1386,9 @@ int main(void) {{
             changed, total = keep_unchanged_times(self.out / "composite-src", self.source_times)
             (self.out / "composite-src.times.json").unlink(missing_ok=True)
             print(f"composite source: {changed} of {total} files changed since the last build")
+        if getattr(args, "module_sources", False):
+            print(f"\nmodule sources ready: {self.out / 'composite-src'} (mods and preparations complete)")
+            return
         if args.host_only:
             step("local optimization training: kept from the last build (--host-only)")
             self.profile = self.kept_profile()
@@ -1437,7 +1453,8 @@ a user folder here instead (a rebuild leaves it alone).
 # Linux builder matches that by default so a Linux build behaves the same as a
 # Windows one; --conservative builds the plain translation. The app enables each
 # one only where the module it loads was prepared with it.
-LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "inline_gpr",
+LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "gather_alias_cache",
+                               "inline_gpr",
                                "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
                                "behaviour_timing", "fp_checks")
@@ -1482,6 +1499,10 @@ def main():
                         help="opt into experimental inline floating-point helpers (off by default)")
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
+    parser.add_argument("--gather-alias-cache", action="store_true",
+                        help="cache gather-pipe alias-window overlap by registry generation (on by default; requires --gather-pipe)")
+    parser.add_argument("--no-gather-alias-cache", action="store_true",
+                        help="disable the default gather-pipe alias-window cache")
     parser.add_argument("--inline-gpr", action="store_true",
                         help="inline certified register saves/restores; requires --direct-calls")
     parser.add_argument("--direct-calls", action="store_true",
@@ -1550,6 +1571,8 @@ def main():
                              "(the individual --... options then add them one at a time)")
     parser.add_argument("--accept-new-composite", action="store_true",
                         help="continue if the generated source differs from the verified one")
+    parser.add_argument("--module-sources", action="store_true",
+                        help="stop after mods and module preparations, before training or platform compilation")
     parser.add_argument("--source-only", action="store_true",
                         help="stop after generating the source: checks tools, disc and translation in minutes")
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
@@ -1563,6 +1586,8 @@ def main():
     parser.add_argument("--appimage", action="store_true",
                         help="after the normal app-folder build, package it as an AppImage")
     args = parser.parse_args()
+    if args.module_sources and (args.source_only or args.host_only or args.check_only):
+        parser.error("--module-sources cannot be combined with --source-only, --host-only or --check-only")
     if args.clang22 and not args.ci_container:
         parser.error("--clang22 requires --ci-container")
     if args.ci_container and os.environ.get(CI_CONTAINER_ENV) != "1":
@@ -1581,6 +1606,8 @@ def main():
     if not args.conservative:
         for name in LINUX_DEFAULT_OPTIMIZATIONS:
             setattr(args, name, True)
+    if args.no_gather_alias_cache:
+        args.gather_alias_cache = False
     if args.no_lean_blocks:
         args.lean_blocks = False
     if args.no_lean_memory:
@@ -1605,6 +1632,8 @@ def main():
         parser.error("--fp-checks requires --prepared-blocks")
     if args.lean_memory and not args.gather_pipe:
         parser.error("--lean-memory requires --gather-pipe (its accesses call gather_pipe.h's helpers)")
+    if args.gather_alias_cache and not args.gather_pipe:
+        parser.error("--gather-alias-cache requires --gather-pipe")
     if getattr(args, "behaviour_timing", False) and not args.prepared_blocks:
         parser.error("--behaviour-timing requires --prepared-blocks")
     if args.lean_deadlines and not args.lean_memory:
