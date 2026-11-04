@@ -1,6 +1,6 @@
 # PROGRESS — Direct-call gate
 
-Status: **Steam Deck render_bench +5.5% overall** (every scene faster, every gate run ahead of every control run, checkpoints identical); desktop −7.3% cycles per frame; 0 unsafe gate answers in 528 M. Iteration 2 (run-time targets) is being measured.
+Status: **Steam Deck render_bench +5.5% overall** (every scene faster, every gate run ahead of every control run, checkpoints identical); desktop −7.3% cycles per frame; 0 unsafe gate answers in 528 M. Iteration 2 (run-time targets) was not consistent on the Deck and is removed (`7ef8ca5b9`, reverted).
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · Stacked on [#503](https://github.com/chrissotraidis/bluewake/pull/503)
 
 Acceptance (#503's rule): the candidate ahead of the control in every interleaved Game Mode launch (at least six), checkpoints identical, zero unsafe gate answers under verify, focused tests in CI. No minimum gain.
@@ -25,7 +25,8 @@ Acceptance (#503's rule): the candidate ahead of the control in every interleave
 
 - [x] M3-T01: Desktop first read: instructions and cycles per frame against the `clang22` control. **−7.3% / −7.3%, rate +8.0%**, all three gate runs ahead of all three control runs, checkpoints identical.
 - [x] M3-T02/T03: Steam Deck render_bench in Game Mode's session, five scenes, six interleaved launches of each build: **+5.5% overall**, every gate run (40.26–41.08) ahead of every control run (38.32–38.62); guest checkpoints identical across all 12 runs.
-- [ ] M3-T04: Iteration 2: the gate also for targets known only at run time (indirect calls, 1.3% of samples with the first gate). Build, desktop read, Deck render_bench against the first gate.
+- [x] M3-T04: Iteration 2: the gate also for targets known only at run time (indirect calls, 1.3% of samples with the first gate). Desktop −1.6% instructions, −1.2% cycles, consistent; **Deck +0.73% and +0.66% in two sessions, but not ahead in every launch** (4 of 6 rounds). **No-go by the acceptance rule:** the code is reverted, and it stays in history as `7ef8ca5b9`.
+- [ ] M4-T01: Decide on the first gate: propose as the default, with a Config → Performance switch (#531's section).
 
 ### M4: Decide (depends: M3)
 
@@ -44,3 +45,4 @@ Acceptance (#503's rule): the candidate ahead of the control in every interleave
 | M3-T04 | With the first gate (`gate503`); local profile | `perf record`, as M0-T01 | Desktop PC | Direct-call checks **2.08%** of samples (were 8.38%): `bw_direct_call_ready_full` 1.33% (run-time targets), `host_can_skip_observation` 0.56%, `_plain` 0.13% (REL targets: not worth a gate of their own) |
 | M3-T04 | Iteration 1 `gate503` (A) against iteration 2 `gate552b` (B, `bench/552-gate2` `7ef8ca5b9258`: the first gate plus run-time targets; trained with the gate open); local `measure-552/` (private) | As M3-T01: verify run, then `perf stat`, headless, 2,400 retraces from `1-outset.bwstate`, A B B A A B | Desktop PC | Verify: 0 unsafe in 528,437,808 gate answers (the count covers run-time targets too). Per game frame: A 70.73 / 70.52 / 70.50 M cycles, 195.05 M instructions; B 69.70 / 69.60 / 69.81 M cycles, 192.02 M instructions (**−1.6% instructions, −1.2% cycles**); rate 126.1–126.7 → 127.7–128.1 (**+1.0%**). Checkpoints identical, and equal to the control's |
 | M3-T04 | Iteration 1 `gate503` (A) against iteration 2 `gate552b` (B), session 1; local `gate-552b-deck/` (private) | render_bench as M3-T02/T03, three A/B/B/A pairs | Steam Deck, Game Mode | B **+0.73% overall** (Outset +0.7%, Lava Room −0.2%, Hyrule Castle −1.0%, Butterfly Room +1.8%, Shipwreck +0.9%); per run A 40.50 / 40.66 / 40.94 / 40.75 / 40.73 / 40.30, B 41.01 / 41.03 / 40.66 / 40.93 / 40.69 / 40.81: **not ahead in every launch**. Checkpoints identical. A second session follows |
+| M3-T04 | Same pair, session 2; local `gate-552b-deck-2/` (private) | As session 1 | Steam Deck, Game Mode | B **+0.66% overall**; per run A 40.45 / 40.37 / 40.54 / 40.70 / 40.45 / 40.67, B 40.73 / 40.71 / 40.26 / 40.73 / 40.99 / 41.08: one gate run behind both control runs of its round again. Checkpoints identical. **No-go:** reverted |
