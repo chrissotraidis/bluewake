@@ -93,7 +93,9 @@ The test becomes `(exponent - 1 < 254) | (bits << 1 == 0)`, a bitwise OR, so it'
 - **Result:** 4,261,412,866 patterns on the fast path, 0 mismatches in both modes.
 - **Not in CI:** the test needs a prepared source. It's run by hand (command in its header).
 
-## M3: `frsp` and `fctiw` inline
+## M3: `frsp` and `fctiw` inline (no-go, reverted)
+
+> **Outcome:** desktop +0.6%, but Steam Deck −0.36% (Hyrule Castle −2.1%), not ahead in its launches. The code is reverted; it stays in history as `cea5f9753`.
 
 ### Why
 
