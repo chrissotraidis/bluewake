@@ -37,7 +37,7 @@ flowchart TD
 
 ## What we found
 
-- **M1 made it worse:** desktop −2.5% (cycles per frame +2.7%), with page walks up 12.6%. The split follows the *training* profile, and blocks Outset runs that training didn't were moved 140 MB away, so they cost a jump onto another page.
+- **M1 made it worse:** 2.5% slower on the desktop (2.7% more cycles per frame), with page walks up 12.6%. The split follows the *training* profile, and blocks Outset runs that training didn't were moved 140 MB away, so they cost a jump onto another page.
 - **M2 worked:** on the Deck, all 372 MB of the module's code went onto 2 MB pages (`[module] huge pages: 372 MB of code copied, 372 MB on huge pages`).
   - **The gain:** **+4.47%** overall, every scene faster (+3.3% to +6.5%), every launch ahead.
   - **Exactness:** the game module was byte-identical in both builds, because the candidate was a host-only rebuild over the control, and the guest checkpoints were identical.
@@ -92,7 +92,7 @@ flowchart TD
 
 ## M1: split the cold blocks, keep the hot sections together (no-go, reverted)
 
-> **Outcome:** desktop −2.5%, and iTLB page walks rose 12.6%. The split follows the training profile, and blocks Outset runs that training didn't are now 140 MB away. The code stays in history as `170e394c4`.
+> **Outcome:** 2.5% slower on the desktop, and iTLB page walks rose 12.6%. The split follows the training profile, and blocks Outset runs that training didn't are now 140 MB away. The code stays in history as `170e394c4`.
 
 **The change:** `scripts/linux/build.py --split-functions` adds, only to the final module compile that uses the training profile:
 - **`-fsplit-machine-functions`:** blocks the profile never saw run move to `.text.split.<function>`, as a `<function>.cold` part.
