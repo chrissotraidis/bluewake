@@ -858,22 +858,10 @@ int main(void) {{
                 # size optimization off, and every chunk at -O2 (docs/PERFORMANCE.md).
                 flags += ["-mllvm", "-pgso=false"]
                 print("--no-cold: code the training never ran is compiled for speed too")
-        link_flags = []
-        if self.profile is not None and getattr(self.args, "split_functions", False):
-            # Each chunk is one function holding its blocks' prepaid copies, the
-            # original blocks they fall back to and the fallbacks' calls, so its
-            # hot code is spread through hundreds of kilobytes. The profile says
-            # which blocks never ran: split them into .text.split, and keep the
-            # compiler's .text.hot/.text.unlikely sections apart at the link, so
-            # the hot code of every chunk packs together (opt-in, measured).
-            flags += ["-fsplit-machine-functions"]
-            link_flags += ["-Wl,-z,keep-text-section-prefix"]
-            print("--split-functions: cold blocks split out of the chunks, hot sections kept together")
         tiered = (self.profile is not None and not getattr(self.args, "no_tiered", False)
                   and not getattr(self.args, "no_cold", False))
         cold = self.cold_sources() if tiered else None
-        return self.compile_composite(self.out / "composite", self.args.opt_level, flags, link_flags, "composite",
-                                      cold)
+        return self.compile_composite(self.out / "composite", self.args.opt_level, flags, [], "composite", cold)
 
     def cold_sources(self):
         """The chunks whose function the training never ran, listed for
@@ -1288,7 +1276,6 @@ int main(void) {{
             "inline_gpr": self.args.inline_gpr,
             "native_j3d": self.args.native_j3d,
             "native_vec": self.args.native_vec,
-            "split_functions": getattr(self.args, "split_functions", False),
             "native_math": self.args.native_math,
             "native_skin": self.args.native_skin,
             "native_game_math": self.args.native_game_math,
@@ -1542,9 +1529,6 @@ def main():
     parser.add_argument("--native-entries", action="store_true",
                         help="Wind Waker Recomp's certified native entries, the second, third and seventh sets "
                              "(off by default; needs --direct-calls, --gather-pipe and --native-vec)")
-    parser.add_argument("--split-functions", action="store_true",
-                        help="split the blocks the training never ran out of the chunks and keep the hot "
-                             "sections together at the link (needs a training profile; opt-in, measured)")
     parser.add_argument("--cache-ops", action="store_true",
                         help="dcbf, dcbst, dcbi and icbi as the pc store the host's fallback makes "
                              "(off by default; after return-ranges, before native-entries)")
