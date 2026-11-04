@@ -319,6 +319,24 @@ inline constexpr Setting kSettings[] = {
      .note = "Hands the game's graphics commands to the renderer in runs instead of one at a time. "
              "Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // The direct-call gate (#552): one host word read inline before a direct
+    // call between translated chunks, instead of a call into the check. Opt-in:
+    // measured +5.5% on a Steam Deck, exact; read when the module is set up.
+    {.key = "BLUEWAKE_DIRECT_GATE", .kind = Kind::Bool,
+     .label = "Faster calls inside the game's code", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Checks, without a call, whether the game's code can call its next "
+             "function directly. Off by default; measured on a Steam Deck. Takes effect when "
+             "BlueWake starts again.",
+     .next_launch = Os::All},
+    // The game module's code on 2 MB pages (#554, module_hugepages.h), copied
+    // right after the module loads. Opt-in: measured +4.5% on a Steam Deck,
+    // exact; costs about 370 MB of memory. The host does it on Linux only.
+    {.key = "BLUEWAKE_MODULE_HUGEPAGES", .kind = Kind::Bool,
+     .label = "Game code on large memory pages", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Keeps the game's code on 2 MB memory pages so the processor finds it "
+             "faster. Uses about 370 MB more memory. Linux only (elsewhere it does nothing). Off by "
+             "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
