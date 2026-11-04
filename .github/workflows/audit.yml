@@ -47,6 +47,7 @@ jobs:
           python3 tests/test_direct_calls.py
           python3 tests/test_inline_gpr.py
           python3 tests/test_lean_deadlines.py
+          python3 tests/test_fp_checks.py
           python3 tests/native_j3d_source_test.py
           # Match the Apple Python used by PadMint.command.
           /usr/bin/python3 --version
