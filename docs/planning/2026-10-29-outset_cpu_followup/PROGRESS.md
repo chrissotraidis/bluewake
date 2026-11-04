@@ -53,6 +53,7 @@ Acceptance: the candidate ahead of the control in every interleaved Game Mode la
 | [#530](https://github.com/chrissotraidis/bluewake/pull/530) | Count the dispatch-loop edges in Outset | ≈ 4.3 M cycles per frame, unattributed. **Outcome: no-go**; planning record only |
 | [#531](https://github.com/chrissotraidis/bluewake/pull/531) | Profile the GX command stream in Outset | ≈ 5.1 M cycles per frame, host side not broken down. **Batch GX writes by default on every platform: exact, +1.7% Game Mode, +1.2% rendered** (Linux qualified) |
 | [#541](https://github.com/chrissotraidis/bluewake/pull/541) | Native extensions for Outset's character work | The skinning native declines the big models (2.33 M cycles/frame still translated); two native sets off |
+| [#552](https://github.com/chrissotraidis/bluewake/pull/552) | An opt-in gate read inline instead of the direct-call check's call (stacked on this PR) | Every step here kept the check as a call; on the #437 build the checks are still 8.4% of samples, mostly the call. **In progress** |
 
 ## Evidence ledger
 
