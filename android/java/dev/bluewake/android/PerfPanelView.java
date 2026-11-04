@@ -49,6 +49,10 @@ final class PerfPanelView extends View {
     private final Paint value = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint footer = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path graph = new Path();
+    // Which rows this phone can fill at all. Decided from the first numbers, not per frame, so the panel does not
+    // change shape under the eye; a phone that reports no graphics card counters keeps the rows out rather than
+    // showing four dashes forever.
+    private boolean decided, showGpu, showVram, showCpuName, showGpuName;
     private final RectF box = new RectF();
     private final float dp, row, gap, graphHeight, footerHeight, pad, labelWidth, col1, col2, col3, round;
 
@@ -85,6 +89,15 @@ final class PerfPanelView extends View {
             Shell.nativePerfSnapshot(values, names);
         } catch (UnsatisfiedLinkError ignored) {
             // Before libmain.so is loaded: the next tick reads them.
+            return;
+        }
+        if (!decided && known(values[FPS]) && values[FPS] > 0f) {
+            decided = true;
+            showGpu = known(values[GPU_PCT]) || known(values[GPU_TEMP]) || known(values[GPU_CLOCK]);
+            showVram = known(values[VRAM_USED]) || known(values[VRAM_TOTAL]);
+            showCpuName = names[0] != null && !names[0].isEmpty();
+            showGpuName = names[1] != null && !names[1].isEmpty();
+            requestLayout();
         }
         invalidate();
     }
@@ -101,9 +114,16 @@ final class PerfPanelView extends View {
         return pad * 2f + labelWidth + col1 + col2 + col3;
     }
 
+    private int rowCount() {
+        return 3 + (showGpu ? 1 : 0) + (showVram ? 1 : 0);   // CPU, RAM, frame, and the card's rows when it has any
+    }
+
+    private int nameLines() {
+        return (showCpuName ? 1 : 0) + (showGpuName ? 1 : 0);
+    }
+
     private float panelHeight() {
-        // five rows (GPU, VRAM, CPU, RAM, frame), the graph, two names
-        return pad * 2f + row * 5f + gap * 2f + graphHeight + footerHeight * 2f;
+        return pad * 2f + row * rowCount() + gap * 2f + graphHeight + footerHeight * nameLines();
     }
 
     @Override
@@ -128,14 +148,16 @@ final class PerfPanelView extends View {
         canvas.drawRoundRect(box, round, round, paint);
 
         float y = pad;
-        y = part(canvas, y, "GPU", GPU,
+        if (showGpu)
+            y = part(canvas, y, "GPU", GPU,
                 known(values[GPU_PCT]) ? fmt("%.0f%%", values[GPU_PCT]) : null,
                 known(values[GPU_PCT]) ? values[GPU_PCT] / 100f : NO_BAR,
                 known(values[GPU_TEMP]) ? fmt("%.0f C", values[GPU_TEMP]) : null,
                 known(values[GPU_TEMP]) ? values[GPU_TEMP] / 100f : NO_BAR,
                 known(values[GPU_CLOCK]) ? fmt("%.0f MHz", values[GPU_CLOCK]) : null,
                 known(values[GPU_CLOCK]) ? values[GPU_CLOCK] / 3000f : NO_BAR);
-        y = part(canvas, y, "VRAM", GPU,
+        if (showVram)
+            y = part(canvas, y, "VRAM", GPU,
                 known(values[VRAM_USED]) ? fmt("%.1f GB", values[VRAM_USED] / 1024f) : null, NO_BAR,
                 known(values[VRAM_TOTAL]) ? "of " + fmt("%.1f GB", values[VRAM_TOTAL] / 1024f) : null, NO_BAR,
                 null, NO_BAR);
@@ -163,8 +185,10 @@ final class PerfPanelView extends View {
         y += graphHeight + gap;
         // The names last and brighter than a disabled line, as on the desktop: they are the last thing read, and the
         // game behind them is busy.
-        canvas.drawText(names[1] != null && !names[1].isEmpty() ? names[1] : "-", pad, y + footerHeight * 0.8f, footer);
-        canvas.drawText(names[0] != null && !names[0].isEmpty() ? names[0] : "-", pad, y + footerHeight * 1.8f, footer);
+        if (showGpuName)
+            canvas.drawText(names[1], pad, y + footerHeight * 0.8f, footer);
+        if (showCpuName)
+            canvas.drawText(names[0], pad, y + footerHeight * (showGpuName ? 1.8f : 0.8f), footer);
     }
 
     /**

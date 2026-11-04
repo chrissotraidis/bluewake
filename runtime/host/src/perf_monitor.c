@@ -474,10 +474,19 @@ static void android_parts(BwPerfStats* s) {
     }
     if (!logged) {
         logged = 1;
+        // The machine-wide share is the one number a phone usually withholds: /proc/stat is
+        // denied to apps, so the panel keeps the game's own share and says why the other is "-".
+        FILE* stat = fopen("/proc/stat", "r");
+        const int machine_cpu = stat != NULL;
+        if (stat != NULL)
+            fclose(stat);
         fprintf(stderr,
-                "[perf] panel (android): zones %s; cpu %.0f C, gpu %.0f%%, %.0f MHz, %.0f C; soc \"%s\", card \"%s\"\n",
+                "[perf] panel (android): zones %s; cpu %.0f C, gpu %.0f%%, %.0f MHz, %.0f C; soc \"%s\", card \"%s\"; "
+                "machine-wide CPU %s\n",
                 cpu_seen[0] != '\0' ? cpu_seen : "none readable", s->cpu_temp_c, s->gpu_pct, s->gpu_clock_mhz,
-                s->gpu_temp_c, s->cpu_name[0] != '\0' ? s->cpu_name : "?", s->gpu_name[0] != '\0' ? s->gpu_name : "?");
+                s->gpu_temp_c, s->cpu_name[0] != '\0' ? s->cpu_name : "?", s->gpu_name[0] != '\0' ? s->gpu_name : "?",
+                machine_cpu ? "from /proc/stat"
+                            : "not readable (denied to apps), so the panel shows the game's own share only");
     }
 }
 #endif
