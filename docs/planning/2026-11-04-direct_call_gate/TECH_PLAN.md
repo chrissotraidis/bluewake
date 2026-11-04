@@ -32,8 +32,8 @@ flowchart TD
 
 - **The check was a large cost:** on the #437 build, the direct-call checks were **8.4%** of all samples. Most of that was the call itself (function entry, pointer loads), not the tests; the module even held 840 copies of each helper, one per chunk.
 - **Earlier work had ruled out the obvious fixes:** #503 cut the check's work (+0.7%) and bounded a cheaper interrupt test (≤ 0.3%, no-go); inlining the whole check made the chunks bigger and slower. Every attempt kept the call.
-- **The gate removes the call:** direct-call checks fell from 8.4% to 2.1% of samples. Desktop −7.3% cycles per frame; **Steam Deck +5.5%**, every launch ahead, guest checkpoints identical, and 0 unsafe answers in 528 million verified calls.
-- **Iteration 2 (the gate for indirect calls too) didn't hold on the Deck:** desktop −1.2% cycles, but Deck +0.7% and not ahead in every launch, twice. Reverted.
+- **The gate removes the call:** direct-call checks fell from 8.4% to 2.1% of samples. **+8.0% faster on the desktop** (7.3% fewer cycles per frame) and **+5.5% on the Steam Deck**, every launch ahead, guest checkpoints identical, and 0 unsafe answers in 528 million verified calls.
+- **Iteration 2 (the gate for indirect calls too) didn't hold on the Deck:** about +1.2% faster on the desktop, but only +0.7% on the Deck and not ahead in every launch, twice. Reverted.
 
 ### What the gate word stands for
 
