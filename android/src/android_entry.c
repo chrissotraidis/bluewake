@@ -325,6 +325,13 @@ int main(int argc, char** argv) {
     // The direct-call gate (#552) is off at run time unless asked for, because it is
     // the newest path; the phone build asks for it, and launch.env still wins.
     bw_default("BLUEWAKE_DIRECT_GATE", "1");
+
+    // Present without waiting on the display. A phone compositor holds the buffer the way
+    // Wayland does, and a FIFO present waits on the game thread: a frame that misses the
+    // vsync it aimed for (33.3 ms at 60 Hz) waits for the next-but-one, 50 ms, which reads
+    // as the frame rate falling by a flat 10. Mailbox returns at once and the compositor
+    // still times the display, exactly as the Wayland path already asks for.
+    bw_default("BLUEWAKE_VSYNC", "0");
     bw_default("DOL_AURORA_FULLSCREEN", "1");
     // A phone's screen is never 4:3: keep the game's shape, as on iOS (Display
     // > Aspect Ratio and Render Resolution in the ⋯ menu set both).

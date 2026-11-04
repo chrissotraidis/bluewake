@@ -247,6 +247,13 @@ denied to it, so the machine-wide processor share is not shown, only the game's 
 graphics card counters or temperatures to apps, so those rows are left out rather than drawn as permanent dashes.
 The one-time `[perf] panel (android)` line in the log says which of them the phone would give.
 
+The phone presents without waiting on the display. Its compositor holds the buffer the way Wayland does, so a
+FIFO present blocks the game thread, and a frame that misses the vsync it aimed for (33.3 ms at 60 Hz) waits for
+the next but one — 50 ms, 20 fps — which reads as the frame rate falling by a flat 10 rather than by the few
+milliseconds the frame actually lost. Mailbox returns at once and the compositor still times the display, so a
+scene that needs 36 ms shows 27 fps instead of 20. `BLUEWAKE_VSYNC=1` in `launch.env` restores the blocking
+present.
+
 ## Files
 
 | | |
