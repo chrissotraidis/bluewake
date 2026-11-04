@@ -229,6 +229,9 @@ panel (`runtime/host/src/perf_monitor.c`) drawn in the Android shell's own idiom
 is remembered with the other display settings. An Android app is not given everything a desktop is: `/proc/stat` is
 denied to it, so the machine-wide processor share is not shown, only the game's own; and a phone publishes no
 graphics card counters or temperatures to apps, so those rows are left out rather than drawn as permanent dashes.
+What the platform does say is used instead: the processors' mean clock and the fastest core (from `cpufreq`), the
+thermal status in place of a temperature, and the SoC's and the card's names from the build and from the driver's
+own GL renderer, as the panel's last lines.
 The one-time `[perf] panel (android)` line in the log says which of them the phone would give.
 
 ## Files
