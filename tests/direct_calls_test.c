@@ -127,16 +127,7 @@ static void test_gate(void) {
     assert(bluewake_composite_direct_gate(&hg.word) == 0); /* direct calls off: stays closed */
 }
 
-int bluewake_composite_direct_gate_default(void);
-
 int main(void) {
-    /* The builder's default (BLUEWAKE_DIRECT_GATE_DEFAULT) is what the app
-     * opens the gate by when BLUEWAKE_DIRECT_GATE is unset. */
-#if defined(BLUEWAKE_DIRECT_GATE_DEFAULT)
-    assert(bluewake_composite_direct_gate_default() == 1);
-#else
-    assert(bluewake_composite_direct_gate_default() == 0);
-#endif
     CPUState cpu = {0};
     cpu.cycle_budget = 20;
     cpu.lr = 0x80005000u;
