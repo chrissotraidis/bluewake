@@ -14,7 +14,7 @@ flowchart TD
   end
   subgraph After
     B1[prepared-blocks] --> B2[direct-calls] --> B3["fp-checks (default, --no-fp-checks)"] --> B4[lean-memory]
-    B5["gate on by default: training open, module asks the app; BLUEWAKE_DIRECT_GATE=0 closes it"]
+    B5["training: BLUEWAKE_DIRECT_GATE=1 only with --direct-gate"]
   end
   Before --> After
 ```
@@ -31,7 +31,7 @@ The changes in [scripts/windows/build.py](../../../scripts/windows/build.py), th
 - **Provenance.** `BuilderProvenance.json` gets `fp_checks` and `direct_gate_training`.
 - **Options.**
   - `fp_checks` is in `WINDOWS_DEFAULT_OPTIMIZATIONS`, so `--conservative` drops it and `--no-fp-checks` turns it off. It needs `--prepared-blocks`.
-  - `direct_gate` is in `WINDOWS_DEFAULT_OPTIMIZATIONS`. `--no-direct-gate` turns it off, `--conservative` drops it, and it needs `direct_calls`. With it on, training runs with the gate open, and `-DBLUEWAKE_DIRECT_GATE_DEFAULT=ON` makes the module export `bluewake_composite_direct_gate_default() = 1`. The app opens the gate when `BLUEWAKE_DIRECT_GATE` is unset; `=0` closes it.
+  - `--direct-gate` only sets `BLUEWAKE_DIRECT_GATE=1` for training. The module is the same either way.
 
 The test is [tests/test_windows_perf_options.py](../../../tests/test_windows_perf_options.py), run by `audit.yml` on Linux. It covers the defaults, the opt-outs, the pass order, the training env and the provenance keys.
 

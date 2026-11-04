@@ -1094,7 +1094,6 @@ int main(void) {
             f"-DBLUEWAKE_NATIVE_SET4={'ON' if getattr(self.args, 'native_set4', False) else 'OFF'}",
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
-            f"-DBLUEWAKE_DIRECT_GATE_DEFAULT={'ON' if getattr(self.args, 'direct_gate', False) else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
             f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
@@ -1625,7 +1624,7 @@ WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather
                                  "inline_gpr",
                                  "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                  "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
-                                 "behaviour_timing", "fp_checks", "direct_gate")
+                                 "behaviour_timing", "fp_checks")
 
 
 def main():
@@ -1720,10 +1719,8 @@ def main():
     parser.add_argument("--no-fp-checks", action="store_true",
                         help="keep every FP-available test in the prepaid copies, as before #553")
     parser.add_argument("--direct-gate", action="store_true",
-                        help="the direct-call gate (#552), on by default: training runs with it open "
-                             "and the module asks the app to open it (BLUEWAKE_DIRECT_GATE=0 closes it)")
-    parser.add_argument("--no-direct-gate", action="store_true",
-                        help="build without the direct-call gate opened by default")
+                        help="train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1, #552), "
+                             "for a build that measures it; the module is the same either way")
     parser.add_argument("--native-entries", action="store_true",
                         help="Wind Waker Recomp's certified native entries, the second, third and seventh sets "
                              "(off by default; needs --direct-calls, --gather-pipe and --native-vec)")
@@ -1772,8 +1769,6 @@ def main():
         args.behaviour_timing = False
     if args.no_fp_checks:
         args.fp_checks = False
-    if args.no_direct_gate or not getattr(args, "direct_calls", False):
-        args.direct_gate = False
     if args.host_only and (args.retrain or args.no_train or args.no_pgo):
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:
