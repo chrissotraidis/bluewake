@@ -65,7 +65,7 @@ on a Steam Deck (or any Linux machine) over SSH, or here:
 
 ```
 render_bench [user@host] BUILD_A [BUILD_B ...] [--states DIR] [--card PATH] [--pairs 2] [--runs 3] [--headless]
-             [--cpu-profile]
+             [--cpu-profile] [--set-build A:KEY=VALUE ...]
 ```
 
 Every path you give (the builds, `--states`, `--card`, `--out`) is on the machine you run it from; what the target
@@ -91,6 +91,8 @@ at Outset. With `--states DIR`, each `*.bwstate` in `DIR`, in lexical order, is 
 **Runs.** One build: `--runs` (3). Multiple builds: `--pairs` (2) of forward/reverse rounds—for example,
 A/B/C/D/D/C/B/A—so heat or battery drift hits every build from both directions. The report contains each build's
 scene results, changes against the final reference, and a full pairwise overall-FPS matrix.
+Use repeatable `--set-build BUILD:KEY=VALUE` options to compare settings in the same interleaved run; labels come
+from build argument order. Passing the same AppImage more than once is supported.
 `--warmup` runs of each first aren't measured. Every measured run is unpaced, with vsync off, the perf log, guest
 checkpoints every 300 retraces and Aurora's GPU profiler (the pictures runs, below, are paced). Rendered (the
 default) runs the real renderer under offscreen gamescope (nothing shows on the Deck's screen; `--display desktop`

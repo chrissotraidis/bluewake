@@ -70,6 +70,9 @@ Target:
                             desktop uses the running session (DISPLAY=:0)
                             (default: auto, gamescope if there is one)
   --size WxH                headless size (default 1280x800 on a Deck)
+  --set-build BUILD:KEY=VALUE
+                            set one variable only for a labeled build; repeatable
+                            (for example A:BLUEWAKE_STAGE_SELECT=1)
   --ssh-key PATH            SSH private key for user@host
   --keep-remote             leave the run's folder on the target
 
@@ -181,6 +184,10 @@ while [[ $# -gt 0 ]]; do
             options+=("$1" "$2"); shift ;;
         --size)
             [[ ${2:-} =~ ^[0-9]+x[0-9]+$ ]] || die "--size must be WxH"
+            options+=("$1" "$2"); shift ;;
+        --set-build)
+            [[ ${2:-} =~ ^[A-Z]+:[A-Z_][A-Z0-9_]*=.*$ ]] ||
+                die "--set-build needs BUILD:KEY=VALUE (for example A:BLUEWAKE_STAGE_SELECT=1)"
             options+=("$1" "$2"); shift ;;
         -h|--help) usage; exit 0 ;;
         -*) die "unknown option: $1" ;;

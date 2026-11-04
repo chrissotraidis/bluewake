@@ -82,6 +82,17 @@ class Plan(unittest.TestCase):
         self.assertEqual(render_bench.plan(['A', 'B', 'C'], args)[:3],
                          [('A', False), ('B', False), ('C', False)])
 
+    def test_per_build_settings_are_labeled_and_repeatable(self):
+        self.assertEqual(
+            render_bench.per_build_settings(
+                ['A:BLUEWAKE_STAGE_SELECT=1', 'A:EXTRA=on', 'D:BLUEWAKE_STAGE_SELECT=0'],
+                ['A', 'B', 'C', 'D']),
+            {'A': ['BLUEWAKE_STAGE_SELECT=1', 'EXTRA=on'], 'B': [], 'C': [],
+             'D': ['BLUEWAKE_STAGE_SELECT=0']})
+        for value in ('E:OPTION=1', 'A:nope=1', 'A:OPTION'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                render_bench.per_build_settings([value], ['A', 'B'])
+
     def test_the_commit_comes_from_build_script_paths(self):
         with tempfile.TemporaryDirectory() as d:
             for folder in ('artifacts/main-090/211abfdecf13', 'gpr-8d8587b37c36'):
@@ -189,6 +200,16 @@ class Runs(Work):
 
 @unittest.skipUnless(HAVE_IMAGES, 'needs numpy and Pillow')
 class Tour(Work):
+    def test_per_build_settings_reach_only_the_named_builds(self):
+        code, summary, report = self.bench(
+            'plain', 'plain', 'plain', 'plain',
+            extra=('--pairs', '1', '--every', '0',
+                   '--set-build', 'A:BLUEWAKE_TEST_RATE=80',
+                   '--set-build', 'C:BLUEWAKE_TEST_RATE=100'))
+        self.assertEqual(code, 0, report)
+        self.assertEqual({name: summary['overall'][name]['fps'] for name in ('A', 'B', 'C', 'D')},
+                         {'A': 40.0, 'B': 60.0, 'C': 50.0, 'D': 60.0})
+
     def test_a_against_b_scene_by_scene(self):
         code, summary, report = self.bench('plain', 'plain-slow', extra=('--pairs', '1'))
         self.assertEqual(code, 0, report)
@@ -384,6 +405,7 @@ class Arguments(unittest.TestCase):
             self.assertEqual(subprocess.run(['bash', str(script), *bad], capture_output=True).returncode, 2, bad)
         help_text = subprocess.run(['bash', str(script), '--help'], capture_output=True, text=True).stdout
         self.assertIn('--cpu-profile', help_text)
+        self.assertIn('--set-build', help_text)
 
 
 if __name__ == '__main__':

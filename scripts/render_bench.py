@@ -4,7 +4,7 @@
   python3 scripts/render_bench.py collect OUT_DIR --app A=APP [--app B=APP ...] [--states DIR] [--card CARD]
                                   [--pairs 2] [--runs 3] [--warmup 0] [--headless] [--retraces 1800] [--every 300]
                                   [--display auto|headless|desktop] [--size WxH] [--cache ~/bluewake-render]
-                                  [--cpu-profile]
+                                  [--cpu-profile] [--set-build A:KEY=VALUE ...]
   python3 scripts/render_bench.py make-state STATE.bwstate --app APP --warp stage:room:point [--card CARD]
                                   [--time noon] [--settle 180]
   python3 scripts/render_bench.py analyze OUT_DIR --build A=PATH [--build B=PATH ...] [--into DIR]
@@ -100,6 +100,18 @@ def is_deck():
         return Path("/sys/devices/virtual/dmi/id/product_name").read_text().strip() in ("Jupiter", "Galileo")
     except OSError:
         return False
+
+
+def per_build_settings(values, builds):
+    """Parse repeated BUILD:KEY=VALUE settings and reject unknown labels."""
+    result = {build: [] for build in builds}
+    for value in values:
+        build, colon, assignment = value.partition(":")
+        key, equals, _ = assignment.partition("=")
+        if not colon or not equals or build not in result or not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key):
+            raise ValueError(f"invalid --set-build {value!r}; expected an existing BUILD:KEY=VALUE")
+        result[build].append(assignment)
+    return result
 
 
 def launcher(app, folder, mode, size, name):
@@ -239,6 +251,11 @@ def collect(args):
     if not apps or len(set(builds)) != len(builds) or any(not name or not str(app) for name, app in apps):
         print("render_bench: give one or more --app NAME=APP with different nonempty names", file=sys.stderr)
         return 2
+    try:
+        build_settings = per_build_settings(args.set_build, builds)
+    except ValueError as error:
+        print(f"render_bench: {error}", file=sys.stderr)
+        return 2
     missing = [str(app) for _, app in apps if not app.is_file()]
     if missing:
         print(f"render_bench: no such app: {', '.join(missing)}", file=sys.stderr)
@@ -267,6 +284,7 @@ def collect(args):
                              "desktop": "a window" if sys.platform in ("darwin", "win32") else "desktop session",
                              "none": "no renderer"}[mode],
                  "builds": builds, "apps": {name: app.name for name, app in apps},
+                 "build_settings": build_settings,
                  "kind": "states" if args.states else "tour", "retraces": args.retraces, "every": args.every,
                  "tour_start": tour_start, "stops": [s._asdict() for s in stops] if tour_start else None,
                  "scenes": [], "states": {}, "runs": []}
@@ -303,6 +321,8 @@ def collect(args):
             options = ["--state", state.resolve(), "--timeout", args.timeout,
                        "--set", "BLUEWAKE_PERF_LOG=1", "--set", "BLUEWAKE_GUEST_CHECKPOINT_INTERVAL=300",
                        "--set", "BLUEWAKE_LOOSE_REL_RETRACES=1"]
+            for setting in build_settings[build]:
+                options += ["--set", setting]
             if args.card:
                 options += ["--card", Path(args.card).resolve()]
             if tour_start:
@@ -925,6 +945,8 @@ def main():
     p.add_argument("--headless", action="store_true")
     p.add_argument("--cpu-profile", action="store_true",
                    help="profile measured scenes with Linux perf; do not use their FPS as benchmark results")
+    p.add_argument("--set-build", action="append", default=[], metavar="BUILD:KEY=VALUE",
+                   help="set KEY only for one labeled build; repeatable")
     p.add_argument("--retraces", type=int, default=STOP_RETRACES)
     p.add_argument("--every", type=int, default=300)
     p.add_argument("--timeout", type=int, default=1200)
