@@ -5,6 +5,8 @@
 #include "core/cpu.h"
 #include "inline_fp.h"
 
+#undef ppc_frsp
+#undef ppc_fctiw
 #undef ppc_fadds
 #undef ppc_fsubs
 #undef ppc_fadd
@@ -198,6 +200,32 @@ int main(void) {
                 memcmp(&out_reference, &out_candidate, sizeof out_reference) != 0)
                 report("fma", i);
         }
+        {
+            const u8 d = (u8)(next() % 32u), x = (u8)(next() % 32u);
+            randomize(&reference);
+            candidate = reference;
+            ppc_frsp(&reference, d, x);
+            bw_fp_frsp(&candidate, d, x);
+            if (!same(&reference, &candidate))
+                report("frsp", i);
+        }
+        {
+            const bool toward_zero = (next() & 1u) != 0u;
+            randomize(&reference);
+            candidate = reference;
+            /* Integers, halves (the ties), the 32-bit edges and ordinary operands. */
+            f64 value = operand();
+            switch (next() % 4u) {
+            case 0: value = (f64)(s32)next() + (f64)(next() % 4u) * 0.25; break;
+            case 1: value = (next() & 1u ? 2147483647.5 : -2147483648.5) + (f64)(s32)(next() % 3u) - 1.0; break;
+            default: break;
+            }
+            u64 out_reference = 0u, out_candidate = 0u;
+            const bool ok_reference = ppc_fctiw(&reference, value, toward_zero, &out_reference);
+            const bool ok_candidate = bw_fp_fctiw(&candidate, value, toward_zero, &out_candidate);
+            if (!same(&reference, &candidate) || ok_reference != ok_candidate || out_reference != out_candidate)
+                report("fctiw", i);
+        }
         CHECK3("fadds", bw_fp_fadds, ppc_fadds);
         CHECK3("fsubs", bw_fp_fsubs, ppc_fsubs);
         CHECK3("fadd", bw_fp_fadd, ppc_fadd);
@@ -224,6 +252,6 @@ int main(void) {
         fprintf(stderr, "inline_fp: %u differences\n", failures);
         return 1;
     }
-    printf("inline_fp: %u iterations of 19 operations match the interpreter\n", iterations);
+    printf("inline_fp: %u iterations of 21 operations match the interpreter\n", iterations);
     return 0;
 }

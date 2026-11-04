@@ -23,9 +23,15 @@ Acceptance: the candidate ahead of the control in every interleaved Game Mode la
 - [x] M2-T02: The change and `tests/f32_from_bits_test.c` with DAZ off and on: 0 mismatches in 2³² patterns each.
 - [ ] M2-T03: Build M1 + M2 and measure against M1 (desktop, then Deck render_bench).
 
-### M3–M5
+### M3: `frsp` and `fctiw` inline (depends: M2)
 
-Planned after M1 and M2 ([PRD](PRD.md#steps)).
+- [x] M3-T01: Profile M1 + M2: FP compares branchless already; `ppc_fctiw` 0.67%, `ppc_frsp` 0.55%, `ppc_frsqrte` 0.27% still out of line; the quantized `psq` path only 0.09% (that step dropped).
+- [x] M3-T02: The inline paths and `tests/inline_fp_test.c`: 2,000,000 iterations of 21 operations match the interpreter.
+- [ ] M3-T03: Build M1 + M2 + M3 and measure against M1 + M2.
+
+### M4–M5
+
+Planned after M3 ([PRD](PRD.md#steps)).
 
 ## Evidence ledger
 
@@ -37,3 +43,6 @@ Planned after M1 and M2 ([PRD](PRD.md#steps)).
 | M1-T04 | `fp553` (`bench/fp-checks` `6079b278f687` = `14c558d` + M1; Clang 22.1.8, libc++, `fp_checks: true`, trained with it) | `build_script fp553 bench/fp-checks … --clang22 --fp-checks` | Desktop PC | `FP-available tests removed: 296188 in 811 chunks`; `lean memory accesses: 708394 in 842 chunks` (control: 531009) |
 | M1-T05 | Control `clang22` (A) against `fp553` (B); local `measure-553/` (private) | `perf stat`, headless, 2,400 retraces from `1-outset.bwstate`, A B B A A B; `BLUEWAKE_SAVE_STATE=…@11700` and `@12300` from each build, compared with `cmp` | Desktop PC | Per game frame: A 76.05 / 76.00 / 75.82 M cycles, 210.35 M instructions; B 73.61 / 73.74 / 73.48 M cycles, 204.82 M instructions (**−3.1% cycles, −2.6% instructions**); rate 117.2–117.4 → 120.8–121.3 (**+3.2%**). Checkpoints: cycles and guest RAM equal at all eight, CPU hash different from retrace 11700; save states **byte-identical** at 11700 and 12300 |
 | M1-T06 | Control `clang22` (A) against `fp553` (B); local `fp-553-deck/` (private) | `render_bench deck@… A B --states test_render/states --display desktop --pairs 3`, render scale 3, Smooth Motion 1 step, widescreen, efficient soft effects | Steam Deck, Game Mode (gamescope's X server) | **B +3.05% overall**: Outset +3.5%, Lava Room +2.0%, Hyrule Castle +3.1%, Butterfly Room +3.0%, Shipwreck +4.0%. Per run A 38.54 / 38.57 / 38.40 / 38.16 / 38.37 / 38.46, B 39.25 / 39.72 / 39.61 / 39.55 / 39.78 / 39.52. Checkpoints: "1-outset: run 2 (B) differs from run 1 (A) at retrace 10500", the CPU hash's scratch suffix (M1-T05) |
+| M2-T03 | `fp553` (A, M1) against `fp553m2` (B, `bench/fp-m2` `bbd9bc03cad2`, M1 + M2); local `measure-553/` (private) | `perf stat`, headless, 2,400 retraces from `1-outset.bwstate`, A B B A A B | Desktop PC | Per game frame: A 73.50 / 73.66 / 73.68 M cycles, 204.81 M instructions; B 72.65 / 72.51 / 72.81 M cycles, 203.76 M instructions (**−1.3% cycles, −0.5% instructions**); rate 121.1–121.5 → 122.6–122.9 (**+1.1%**). Checkpoints identical to M1's in all six runs |
+| M3-T01 | `fp553m2`; local profile, six hottest chunks with line tables | As M1-T01 | Desktop PC | Hot chunks: FP arithmetic 20.1% (was 22.4%), FP loads and stores 12.6% (was 14.0%); `fcmpo` compiles branchless (`seta`/`cmovbe`). Out of line: `ppc_fctiw` 0.67%, `ppc_frsp` 0.55%, `ppc_frsqrte` 0.27%, `ppc_psq_load` 0.09% |
+| M3-T02 | This branch | `tests/inline_fp_test.c` built with GXRuntime's core sources, `-O2 -march=x86-64-v3 -ffp-contract=off` | Desktop PC | `inline_fp: 2000000 iterations of 21 operations match the interpreter` |

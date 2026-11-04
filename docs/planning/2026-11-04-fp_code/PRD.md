@@ -37,9 +37,10 @@ Cheaper emitted code around guest FP instructions, with every guest-visible resu
 |---|---|
 | M1 | One FP-available test per stretch of a prepaid copy, so FP loads and stores become lean (this PR) |
 | M2 | `lfs`: zeros through the hardware's widening (denormals stay on the generic path: the host's DAZ is on in non-IEEE mode) |
-| M3 | A special-value fallback that doesn't clobber the guest registers |
-| M4 | Lazy FPRF: the result class computed only where the FP status register is read |
-| M5 | `psq_l`/`psq_st` specialized on the quantization registers the game fixes at boot |
+| M3 | `frsp` and `fctiw` inline (they were out-of-line calls, 1.2% of samples) |
+| M4 | A special-value fallback that doesn't clobber the guest registers |
+| M5 | Lazy FPRF: the result class computed only where the FP status register is read |
+| — | ~~`psq_l`/`psq_st` specialized on the quantization registers~~: dropped, the generic path is 0.09% of samples after M1 and M2 |
 
 Each later step is planned and measured after the one before.
 

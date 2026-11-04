@@ -93,6 +93,31 @@ The test becomes `(exponent - 1 < 254) | (bits << 1 == 0)`, a bitwise OR, so it'
 - **Result:** 4,261,412,866 patterns on the fast path, 0 mismatches in both modes.
 - **Not in CI:** the test needs a prepared source. It's run by hand (command in its header).
 
+## M3: `frsp` and `fctiw` inline
+
+### Why
+
+After M1 and M2, a profile of the hot chunks shows the FP compares are already branchless and the rest of the inline FP cost is spread thin. But three FP operations are still out-of-line calls into the interpreter, each with its nested helpers:
+
+| Helper | Share of samples |
+|---|---:|
+| `ppc_fctiw` (mostly `fctiwz`, in collision code) | 0.67% |
+| `ppc_frsp` | 0.55% |
+| `ppc_frsqrte` | 0.27% |
+
+### Design
+
+Inline fast paths in `inline_fp.h`, in the interpreter's own terms, defined as `ppc_frsp` and `ppc_fctiw`:
+- **`frsp`:** any operand but a NaN. The same `force_single`, the inexact exception (FX, XX, then the VX summary and FEX, as `set_fp_exception` and `ppc_fpscr_updated` do), FI, FR, the FPRF and both halves.
+- **`fctiw`:** an operand that isn't a NaN and rounds into the 32-bit range. The same rounding (`trunc`, `ceil`, `floor`, or the interpreter's `round_nearest_even`), the inexact flags and the result word.
+- **Anything else** calls the interpreter, from the unmodified state.
+
+`frsqrte` (a table estimate) stays out of line.
+
+### Verification
+
+`tests/inline_fp_test.c` (in CI) compares every operation with the interpreter over the whole CPU state, from random registers and FPSCR (rounding modes, NI, exception enables, with the host's DAZ set to match). It now includes `frsp` and `fctiw`, with integers, ties and the 32-bit edges. **Result:** 2,000,000 iterations of 21 operations match.
+
 ## Later steps
 
-M3–M5 (see the [PRD](PRD.md#steps)) are planned after M1 and M2 are measured. Each gets its own section here.
+M4 and M5 (see the [PRD](PRD.md#steps)) come after M3 is measured.
