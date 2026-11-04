@@ -1,6 +1,6 @@
 # PROGRESS — Outset game-thread follow-up
 
-Status: +1.4–1.8% Game Mode, +1.6% rendered, exact (tag `outset-503-stack1`); M4 closed as no-go; **M5 (the call itself, opt-in) in progress**; follow-ups #529–#531  
+Status: Ready for review: +1.4–1.8% Game Mode, +1.6% rendered, exact (tag `outset-503-stack1`); M4 closed as no-go; follow-ups #529–#531  
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -45,19 +45,6 @@ Acceptance: the candidate ahead of the control in every interleaved Game Mode la
 - [ ] ~~M4-T03~~: Not implemented: M4-T01 showed even a perfect word does not beat the stack consistently.
 - [ ] ~~M4-T04~~: Not needed.
 
-### M5: The call itself (depends: M3; opt-in, `BLUEWAKE_DIRECT_GATE=1`)
-
-Specification: [TECH_PLAN M5](TECH_PLAN.md#m5-the-call-itself-in-progress-opt-in).
-
-Acceptance: the M4 rule. The candidate is ahead of the control in every interleaved Game Mode launch (at least six), with identical checkpoints, zero unsafe gate answers and focused tests in CI.
-
-- [x] M5-T01: Attribute the remaining check cost. The direct-call checks are 8.4% of samples on the #437 build, mostly the call's entry; 840 copies of each helper.
-- [x] M5-T02: Implement the gate, opt-in, with its unit test (1,024 states, verify counters, stale-byte detection; -O0 and -O2).
-- [ ] M5-T03: Build the candidate (the #437 recipe plus this change, `--direct-gate`) and run verify: zero unsafe gate answers.
-- [ ] M5-T04: First read on the desktop: instructions and cycles per frame, A/B.
-- [ ] M5-T05: Steam Deck Game Mode A/B (at least six launches) and render_bench checkpoints.
-- [ ] M5-T06: Decide: keep opt-in, propose it as the default, or no-go.
-
 ## Follow-ups
 
 | PR | Plan | Basis in this PR |
@@ -94,4 +81,3 @@ Acceptance: the M4 rule. The candidate is ahead of the control in every interlea
 | M3-T01 | Re-check on current `main`: control `6b429fe` (AppImage `49df97eeefaf`, full build, composite profile `68112e95`) against #503's merged head `72d288f` (AppImage `274b6290a1e2`, same profile); local `measure-503/main-ab/windows.jsonl` (private) | `gamemode_measure.py` 3 × 15 s per launch, six launches: control → candidate → control, then candidate → control → candidate | Game Mode, worst-angle Outset state; #504 not in `main`, so no Efficient soft effects | **26.4 → 26.8 game FPS (+1.4%)**. The candidate beat the control in every launch, by launch: control 26.6, 26.5, 26.2 against candidate 26.8, 26.8, 26.9; the control drifted 0.4 FPS over the session, so the spread (0.6) covers the mean. A rendered re-check failed to start: the desktop session opened over SSH refused the window to both builds (X authorization), so no rendered numbers on `main` |
 | M4-T01 | Interrupt-test ceiling (`6ad94d6`: stack 1 with the plain check's four interrupt reads replaced by one host flag; AppImage `758221b76bc4`, composite profile `68112e95`) against stack 1 (`cand-503`, `274b6290a1e2`); local `measure-503/irq-ceiling/windows.jsonl` (private) | `gamemode_measure.py` 3 × 15 s per launch, six launches alternating stack 1 → ceiling | Game Mode, worst-angle Outset state | **26.87 → 26.96 (+0.3%), not consistent**: by pair 26.80/27.00, 26.97/26.90, 26.83/26.97. A perfect word does not beat the stack, so M4 is a no-go. It also explains the first ceiling's +3.1%: ≈ 0.7% came from the range tests and ≤ 0.3% from the interrupt reads; the rest came from taking interrupts late (less handler work, the same drift that changed its checkpoints), which no exact change can recover |
 | M1-T03 | Same session's exit reports (`[native-*]` lines; local `measure-503/m1-native-counts.txt`) | Accepted/declined counts over the session (22,417 retraces, ≈ 8,500 game frames) | As above | ≈ 304 M native runs and ≈ 10.7 M declines: **≈ 37,000 routing decisions per game frame**. The readiness callback (`host_can_skip_observation`) is only 0.33% of the game thread, so the `*_try` functions' 7.5% is mostly the native routines' own (inlined) work. Declines are dominated by `key-s` (79% declined) and `transform-simple` (80%), ≈ 1,060 per frame: a minor candidate. The 13% gap to 30 FPS has to come from the translated chunks (M1-T02) |
-| M5-T01 | #437 build `clang22` (`perf/clang-runtime-matrix@14c558d`, Clang 22.1.8, libc++); local profile and attribution (private) | `perf record -e cycles:u -F 4000`, headless, unpaced, 2,400 retraces from `1-outset.bwstate`; symbols grouped by layer | Desktop PC (Ryzen 7 5800X3D), Linux | Direct-call checks **8.4%** of all samples (translated chunks 58.6%, natives 12.2%, dispatch loop 5.0%); in `bw_direct_call_ready_plain` most samples sit on the entry and the `bw_host_skip_fast` load; 840 copies of each helper in the module |
