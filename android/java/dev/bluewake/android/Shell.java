@@ -25,6 +25,10 @@ final class Shell {
     static native int nativePauseReasons();
     /** shown, speed, worst_ms, display, game, smooth_paused (1 or 0). */
     static native void nativeFps(float[] out);
+    /** The performance panel: 0 off, 2 the full panel (perf_monitor.h); a change restarts the frame times. */
+    static native void nativePerfMode(int mode);
+    /** PerfPanelView's numbers (perf_monitor.h's BwPerfStats), then names[0] the processor, names[1] the card. */
+    static native void nativePerfSnapshot(float[] values, String[] names);
     /** natives: GameCube A, B, X, Y, Z, Start as SDL gamepad buttons, or null for the defaults. */
     static native void nativeApplySettings(int renderScale, int anisotropy, boolean invertX, boolean invertY,
                                            int[] natives, int smoothMotion);
