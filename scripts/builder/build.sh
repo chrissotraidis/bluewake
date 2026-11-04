@@ -47,10 +47,8 @@
 #   --fp-checks               with --lean-blocks: one FP-available test per stretch of a prepaid
 #                             copy (fp_checks.py, #553); part of the default set
 #   --no-fp-checks            the default set without fp_checks.py
-#   --direct-gate             with --combined-optimizations: the direct-call gate (#552); the module
-#                             opens it by default (BLUEWAKE_DIRECT_GATE=0 closes it) and training
-#                             plays with it open; part of the default set
-#   --no-direct-gate          the default set without the gate opened by default
+#   --direct-gate             train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1,
+#                             #552), for a build that measures it; the module is the same either way
 #   --identity NAME           codesign identity, e.g. "Apple Development: You (TEAMID)"
 #   --profile FILE            device provisioning profile (with --identity)
 #   --install DEVICE          install with devicectl after signing (needs --identity)
@@ -86,7 +84,7 @@ composite_pgo=()
 # -O2 always: -O1 compiled in 47 min instead of 80 but held only 26 FPS
 # on an iPad Pro (M2) at Outset (docs/BUILDER.md), so there is no quick option.
 device_cpu=apple-a13 opt_level=2 mods=1 accept_new=0 source_only=0 use_pgo=1 tiered=1 lean_arg="" lean_memory=0 lean_deadlines=0 behaviour_timing=0
-fp_checks=auto direct_gate=auto
+fp_checks=auto direct_gate=0
 
 die() { echo "builder: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
@@ -112,8 +110,7 @@ while [ $# -gt 0 ]; do
         --behaviour-timing) behaviour_timing=1; module_options_named=1; shift ;;
         --fp-checks) fp_checks=1; module_options_named=1; shift ;;
         --no-fp-checks) fp_checks=0; shift ;;
-        --direct-gate) direct_gate=1; module_options_named=1; shift ;;
-        --no-direct-gate) direct_gate=0; shift ;;
+        --direct-gate) direct_gate=1; shift ;;
         --conservative) conservative=1; shift ;;
         --identity) identity=$2; shift 2 ;;
         --profile) profile=$2; shift 2 ;;
@@ -143,13 +140,8 @@ if [ "$conservative" -eq 1 ]; then
 elif [ "$module_options_named" -eq 0 ] && [ "$app_only" -eq 0 ] && { [ "$platform" = macos ] || [ "$platform" = ios ]; }; then
     module_optimizations=combined-v1 lean_arg=--lean lean_memory=1 lean_deadlines=1 behaviour_timing=1
     [ "$fp_checks" = 0 ] || fp_checks=1
-    [ "$direct_gate" = 0 ] || direct_gate=1
 fi
 [ "$fp_checks" = 1 ] || fp_checks=0
-[ "$direct_gate" = 1 ] || direct_gate=0
-if [ "$direct_gate" -eq 1 ]; then
-    [ "$module_optimizations" != none ] || die "--direct-gate needs --combined-optimizations (the direct calls)"
-fi
 if [ "$module_optimizations" != none ]; then
     [ "$platform" = macos ] || [ "$platform" = ios ] || die "--combined-optimizations is for --platform macos or ios"
     [ "$app_only" -eq 0 ] || die "--combined-optimizations needs a personal build (it changes the game module)"

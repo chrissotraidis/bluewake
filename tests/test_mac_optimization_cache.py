@@ -90,20 +90,6 @@ class MacPerfOptionsTest(unittest.TestCase):
         self.assertIn('digest.update(b"\\0direct-gate")', text)
         self.assertIn("args+=(--direct-gate)", (ROOT / "scripts/builder/profiles/bluewake.sh").read_text())
 
-    def test_gate_default_follows_the_direct_calls(self):
-        self.assertIn("-DBLUEWAKE_DIRECT_GATE_DEFAULT=ON", optimizations.cmake_flags("combined-v1", True))
-        self.assertIn("-DBLUEWAKE_DIRECT_GATE_DEFAULT=OFF", optimizations.cmake_flags("combined-v1"))
-        # No direct calls, no gate: the plain translation never asks for it.
-        self.assertIn("-DBLUEWAKE_DIRECT_GATE_DEFAULT=OFF", optimizations.cmake_flags("none", True))
-        out = subprocess.run([sys.executable, str(ROOT / "scripts/builder/module_optimizations.py"),
-                              "flags", "combined-v1", "--direct-gate"],
-                             capture_output=True, text=True, check=True).stdout
-        self.assertIn("-DBLUEWAKE_DIRECT_GATE_DEFAULT=ON", out.split())
-        profile = (ROOT / "scripts/builder/profiles/bluewake.sh").read_text()
-        self.assertIn('gate_arg=(--direct-gate)', profile)
-        self.assertIn("cmake_flags(args.module_optimizations, args.direct_gate)",
-                      (ROOT / "scripts/builder/train_local_pgo.py").read_text())
-
     def builder(self, *args):
         with tempfile.TemporaryDirectory() as bin_dir:
             stub = Path(bin_dir) / "sysctl"
@@ -115,15 +101,12 @@ class MacPerfOptionsTest(unittest.TestCase):
 
     def test_builder_option_checks(self):
         for args, message in ((("--fp-checks", "--platform", "macos", "x.iso"), "--fp-checks needs --lean-blocks"),
-                              (("--conservative", "--fp-checks", "x.iso"), "--conservative builds without"),
-                              (("--direct-gate", "--platform", "macos", "x.iso"), "--direct-gate needs --combined-optimizations"),
-                              (("--conservative", "--direct-gate", "x.iso"), "--conservative builds without")):
+                              (("--conservative", "--fp-checks", "x.iso"), "--conservative builds without")):
             result = self.builder(*args)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(message, result.stderr)
         self.assertIn("--no-fp-checks", self.builder("--help").stdout)
         self.assertIn("--direct-gate", self.builder("--help").stdout)
-        self.assertIn("--no-direct-gate", self.builder("--help").stdout)
 
 
 if __name__ == "__main__":

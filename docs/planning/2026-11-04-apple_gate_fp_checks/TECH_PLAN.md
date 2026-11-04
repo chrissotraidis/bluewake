@@ -10,13 +10,11 @@ flowchart TB
       B1[build.sh default set] --> B2[module_optimizations.py prepare]
       B2 --> B3[fast_blocks --lean -> direct_calls -> lean_memory -> lean_deadlines -> behaviour_timing]
       B4[train_local_pgo.py] --> B5[training run: gate closed]
-      B6[composite configure] --> B7[module: gate closed unless BLUEWAKE_DIRECT_GATE=1]
     end
     subgraph After
       A1[build.sh default set, fp_checks on] --> A2[module_optimizations.py prepare --fp-checks]
       A2 --> A3[fast_blocks --lean -> direct_calls -> fp_checks -> lean_memory -> lean_deadlines -> behaviour_timing]
       A4[train_local_pgo.py --direct-gate] --> A5[training run: BLUEWAKE_DIRECT_GATE=1]
-      A6[composite configure -DBLUEWAKE_DIRECT_GATE_DEFAULT=ON] --> A7[module opens the gate; =0 closes it]
     end
     Before --> After
 ```
@@ -27,10 +25,9 @@ flowchart TB
 - [`scripts/builder/build.sh`](../../../scripts/builder/build.sh):
   - `fp_checks=auto` turns on with the default set. `--no-fp-checks` drops it, and the other options stay as they are.
   - `--fp-checks` names it explicitly. Like every named option, that builds only the named set, and it needs `--lean-blocks`.
-  - `direct_gate=auto` turns on with the default set for macOS and iOS. `--no-direct-gate` drops it. `--direct-gate` names it explicitly and needs `--combined-optimizations`, because the gate rides on the direct calls.
-- [`scripts/builder/module_optimizations.py`](../../../scripts/builder/module_optimizations.py) `cmake_flags(mode, direct_gate)`: adds `-DBLUEWAKE_DIRECT_GATE_DEFAULT=ON` only with combined-v1, because the plain translation has no direct calls. The `flags` action takes `--direct-gate`.
-- [`scripts/builder/profiles/bluewake.sh`](../../../scripts/builder/profiles/bluewake.sh): `profile_compile` passes the gate to the composite configure for macOS and iOS, and `profile_train` passes `--direct-gate`.
-- [`scripts/builder/train_local_pgo.py`](../../../scripts/builder/train_local_pgo.py): `--direct-gate` sets `BLUEWAKE_DIRECT_GATE` to 1 or 0 in the training environment and adds `\0direct-gate` to the training fingerprint, as Linux's `direct_gate_training` provenance key does. It builds the training module with the same `BLUEWAKE_DIRECT_GATE_DEFAULT`.
+  - `--direct-gate` reaches training only.
+- [`scripts/builder/profiles/bluewake.sh`](../../../scripts/builder/profiles/bluewake.sh): `profile_train` passes `--direct-gate`.
+- [`scripts/builder/train_local_pgo.py`](../../../scripts/builder/train_local_pgo.py): `--direct-gate` sets `BLUEWAKE_DIRECT_GATE` to 1 or 0 in the training environment and adds `\0direct-gate` to the training fingerprint, as Linux's `direct_gate_training` provenance key does.
 
 ## The gate on Apple clang, arm64
 

@@ -31,15 +31,10 @@ STEPS = (
 )
 
 
-def cmake_flags(mode, direct_gate=False):
-    """The composite's options. The gate (#552) needs the direct calls, so it is
-    ON only with combined-v1: the module then asks the app to open it
-    (bluewake_composite_direct_gate_default; BLUEWAKE_DIRECT_GATE=0 closes it)."""
+def cmake_flags(mode):
     if mode not in MODES:
         raise ValueError(f"unknown module optimization mode: {mode}")
-    flags = [f"-DBLUEWAKE_{name}={'ON' if mode == 'combined-v1' else 'OFF'}" for name in FEATURES]
-    flags.append(f"-DBLUEWAKE_DIRECT_GATE_DEFAULT={'ON' if direct_gate and mode == 'combined-v1' else 'OFF'}")
-    return flags
+    return [f"-DBLUEWAKE_{name}={'ON' if mode == 'combined-v1' else 'OFF'}" for name in FEATURES]
 
 
 def steps(lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=False, fp_checks=False):
@@ -123,8 +118,6 @@ def main():
     parser.add_argument("--lean-deadlines", action="store_true", help="lean_deadlines.py after lean_memory.py")
     parser.add_argument("--behaviour-timing", action="store_true",
                         help="behaviour_timing.py --loop-checks last: every block prepaid, the budget checked at loops (a prototype)")
-    parser.add_argument("--direct-gate", action="store_true",
-                        help="flags: the module asks the app to open the direct-call gate (#552)")
     parser.add_argument("--fp-checks", action="store_true",
                         help="fp_checks.py after the direct calls: one FP-available test per stretch of a prepaid copy (#553)")
     args = parser.parse_args()
@@ -136,7 +129,7 @@ def main():
         print(fingerprint(args.mode, args.lean, args.lean_memory, args.lean_deadlines, args.behaviour_timing,
                           args.fp_checks))
     elif args.action == "flags":
-        print("\n".join(cmake_flags(args.mode, args.direct_gate)))
+        print("\n".join(cmake_flags(args.mode)))
     elif args.out is None:
         parser.error("prepare requires --out")
     else:

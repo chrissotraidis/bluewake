@@ -113,7 +113,7 @@ def main():
     parser.add_argument("--save", type=Path, help="optional personal BlueWake .card container; only a copy is used")
     parser.add_argument("--module-optimizations", choices=MODES, default="none")
     parser.add_argument("--direct-gate", action="store_true",
-                        help="the direct-call gate (#552): the module opens it by default and training plays with it open")
+                        help="train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1, #552)")
     parser.add_argument("--instrumented-opt-level", type=int, choices=(0, 1), default=0,
                         help="optimization level of the instrumented module (default 0, the fastest to compile; "
                              "1 for a module too large for Apple's linker at 0, as lean memory makes it)")
@@ -171,7 +171,7 @@ def main():
     # code, branches out of range), and at O1 it is a third of that and links.
     run(["cmake", "-S", ROOT / "cmake/composite", "-B", module_build, *common,
          "-DCMAKE_SHARED_LINKER_FLAGS=-fprofile-instr-generate -Wl,-no_compact_unwind", f"-DCOMPOSITE_OPTIMIZATION_LEVEL={args.instrumented_opt_level}",
-         *cmake_flags(args.module_optimizations, args.direct_gate),
+         *cmake_flags(args.module_optimizations),
          f"-DCOMPOSITE_DIR={args.out / 'composite-src'}", f"-DGXRUNTIME_DIR={donor / 'GXRuntime'}",
          f"-DABI_DIR={donor / 'Source/Core/Core/PowerPC/StaticRecomp'}"], logs / "composite-configure.log")
     run(["cmake", "--build", module_build, "-j", args.jobs], logs / "composite-build.log")
