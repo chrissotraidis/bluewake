@@ -2519,6 +2519,120 @@ static void floor_colours(CPUState* cpu, bool hd) {
     }
 }
 
+// Scenery Wind Waker HD remade away: a room model's vertices whose HD model (the same draw, the same vertex order)
+// moved them, written into the game's vertex arrays while HD's palettes are in, each original kept and written back
+// when they go. HD's palettes make the GameCube's sky and sea one colour no longer, and this geometry then shows.
+// Tower of the Gods' sky corridor (Siren room 18): the GameCube's room has a 70,000-unit square at y -14,102 under
+// the tower, fogged part way to the haze, its hard edge against HD's pale cyan sky (Dale's quick-35801). HD's room 18
+// draws the same quad (Cemu nov3-eve S2, event 2492: 6 indices, first among the room's draws) as a 305-unit square
+// at y -20,348, which never shows, so its corridor looks down on the sky dome alone. The square's four corners are
+// four consecutive entries of a model's position array (two models hold it); only such whole sets are written, never
+// a lone corner elsewhere (other shapes share two of its points). BLUEWAKE_HD_ROOM_SHAPES=0 keeps the GameCube's.
+typedef struct RoomShape {
+    const char* stage;
+    int room;  // looked for while Link is in it
+    float gc[4][3], hd[4][3];
+} RoomShape;
+static const RoomShape kRoomShapes[] = {
+    {"Siren", 18,
+     {{35000.0f, -14101.9f, 25179.0f}, {-35000.0f, -14101.9f, 25179.0f}, {35000.0f, -14101.9f, -44821.0f},
+      {-35000.0f, -14101.9f, -44821.0f}},
+     {{152.781f, -20347.6f, 152.748f}, {-152.781f, -20347.6f, 152.748f}, {152.781f, -20347.6f, -152.816f},
+      {-152.781f, -20347.6f, -152.816f}}},
+};
+enum { kRoomShapeCount = sizeof kRoomShapes / sizeof kRoomShapes[0], kRoomShapeSets = 4 };
+static struct {
+    u32 at[kRoomShapeSets];      // each whole set's first entry (0: none)
+    u8 corner[kRoomShapeSets][4]; // which corner each of its four entries is
+    u32 sets;
+} g_room_shape[kRoomShapeCount];
+
+static bool vertex_is(CPUState* cpu, u32 a, const float v[3]) {
+    for (u32 i = 0; i < 3u; ++i)
+        if (!(fabsf(read_float(cpu, a + i * 4u) - v[i]) <= 0.05f))
+            return false;
+    return true;
+}
+
+static void vertex_write(CPUState* cpu, u32 a, const float v[3]) {
+    for (u32 i = 0; i < 3u; ++i)
+        write_float(cpu, a + i * 4u, v[i]);
+}
+
+// Whether each entry of set s holds HD's corner (hd) or the GameCube's.
+static bool room_shape_holds(CPUState* cpu, u32 n, u32 s, bool hd) {
+    for (u32 e = 0; e < 4u; ++e) {
+        const u32 c = g_room_shape[n].corner[s][e];
+        if (!vertex_is(cpu, g_room_shape[n].at[s] + e * 12u, hd ? kRoomShapes[n].hd[c] : kRoomShapes[n].gc[c]))
+            return false;
+    }
+    return true;
+}
+
+static void room_shapes_restore(CPUState* cpu, u32 n, bool write) {
+    for (u32 s = 0; write && s < g_room_shape[n].sets; ++s)
+        if (room_shape_holds(cpu, n, s, true))
+            for (u32 e = 0; e < 4u; ++e)
+                vertex_write(cpu, g_room_shape[n].at[s] + e * 12u, kRoomShapes[n].gc[g_room_shape[n].corner[s][e]]);
+    memset(&g_room_shape[n], 0, sizeof g_room_shape[n]);
+}
+
+static void room_shapes(CPUState* cpu, bool hd, unsigned long long retrace) {
+    static int s_on = -1;
+    if (s_on < 0)
+        s_on = setting("BLUEWAKE_HD_ROOM_SHAPES") != 0;
+    char stage[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+    const int stay = (s8)mem_read8(cpu, 0x803F6A78u);       // dStage_roomControl_c::mStayNo
+    for (u32 n = 0; n < kRoomShapeCount; ++n) {
+        const bool want = s_on && hd && strcmp(stage, kRoomShapes[n].stage) == 0;
+        if (g_room_shape[n].sets != 0u) {
+            // Still HD's where it was written (the room still loaded), and still wanted: nothing to do.
+            bool held = true;
+            for (u32 s = 0; s < g_room_shape[n].sets && held; ++s)
+                held = room_shape_holds(cpu, n, s, true);
+            if (held && want)
+                continue;
+            room_shapes_restore(cpu, n, held);  // gone (the room unloaded): its memory isn't the model's now
+        }
+        // Looked for (a scan of MEM1) as Link comes into the room, then twice a second while not found.
+        static int s_stay[kRoomShapeCount];
+        const bool arrived = stay != s_stay[n];
+        s_stay[n] = stay;
+        if (!want || stay != kRoomShapes[n].room || (!arrived && retrace % 30u != 0u))
+            continue;
+        const float* gc = &kRoomShapes[n].gc[0][0];
+        for (u32 a = 0x80000000u; a + 48u <= 0x81800000u && g_room_shape[n].sets < kRoomShapeSets; a += 4u) {
+            if (fabsf(read_float(cpu, a) - gc[0]) > 0.05f && fabsf(read_float(cpu, a) + gc[0]) > 0.05f)
+                continue;
+            u8 corner[4];
+            u32 seen = 0u;
+            for (u32 e = 0; e < 4u; ++e) {
+                corner[e] = 4u;
+                for (u32 c = 0; c < 4u; ++c)
+                    if (!(seen & (1u << c)) && vertex_is(cpu, a + e * 12u, kRoomShapes[n].gc[c])) {
+                        corner[e] = (u8)c;
+                        seen |= 1u << c;
+                        break;
+                    }
+                if (corner[e] == 4u)
+                    break;
+            }
+            if (seen != 0xFu)
+                continue;
+            const u32 s = g_room_shape[n].sets++;
+            g_room_shape[n].at[s] = a;
+            memcpy(g_room_shape[n].corner[s], corner, 4);
+            for (u32 e = 0; e < 4u; ++e)
+                vertex_write(cpu, a + e * 12u, kRoomShapes[n].hd[corner[e]]);
+            if (g_trace)
+                fprintf(stderr, "[hd-look] %s room %d: HD's room shape written at %08X\n", stage, stay, a);
+            a += 44u;
+        }
+    }
+}
+
 static void sky(CPUState* cpu) {
     if (g_sky_count == 0u)
         return;
@@ -2632,6 +2746,8 @@ void bluewake_hd_look_state_loaded(bool reapply) {
     // The loaded RAM has its own collision bytes: forget what was kept, without writing it.
     for (u32 slot = 0; slot < kBgChkCount; ++slot)
         floor_colours_restore(NULL, slot, false);
+    for (u32 n = 0; n < kRoomShapeCount; ++n)
+        room_shapes_restore(NULL, n, false);
 }
 
 // Wind Waker HD's far blur level for the hour (d_kankyo_4.cpp's preset blend): wwHD_basic's 1.2 from 08:00 to 18:00,
@@ -2730,6 +2846,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
     clouds(cpu, retrace);
     sky(cpu);
     floor_colours(cpu, sky_palettes_shown());
+    room_shapes(cpu, sky_palettes_shown(), retrace);
     monotone(cpu, retrace);
     far_blur_level(cpu);
     if (g_trace && retrace % 300u == 0u)
