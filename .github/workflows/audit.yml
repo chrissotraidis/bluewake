@@ -27,6 +27,8 @@ jobs:
         run: python3 tests/test_mac_sqlite.py
       - name: Preserve explicit Windows optimization cache selection
         run: python3 tests/test_windows_prepared_cache.py
+      - name: Windows builder prepares fp_checks by default and keeps the direct-call gate opt-in
+        run: python3 tests/test_windows_perf_options.py
       - name: Android --app-only reuses only the module it was compiled as
         run: python3 tests/test_android_app_only.py
       - name: Android training requires player control before accepting a profile
