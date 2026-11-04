@@ -16,6 +16,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 #else
+#include <dirent.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #endif
@@ -282,7 +283,7 @@ static int vulkan_device(char* name, size_t size, float* vram_mb) {
 
 // --- the machine, as each system reports it ----------------------------------
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__ANDROID__)
 
 static int read_line(const char* path, char* out, size_t size) {
     FILE* f = fopen(path, "r");
@@ -371,6 +372,124 @@ static unsigned long long process_cpu_us(void) {
     const long hz = sysconf(_SC_CLK_TCK);
     return hz > 0 ? (utime + stime) * 1000000ull / (unsigned long long)hz : 0ull;
 }
+
+
+#if defined(__ANDROID__)
+// --- Android: what a phone's kernel lets an app read -------------------------
+//
+// A desktop's numbers come from hwmon (the processor's and the card's
+// temperatures) and /sys/class/drm (the card's counters). A phone has neither
+// that a third-party app may read: SELinux denies /sys/class/hwmon and the
+// thermal zones are named by each vendor (cpu, soc, big, little, gpu), while
+// the graphics card is a Mali or an Adreno whose clock and load live under
+// /sys/class/devfreq or /sys/class/kgsl. Everything here is best effort — a file
+// the phone does not let this app read leaves its number "-" — and one line in
+// the log says what was found, so a missing number is one line from its reason.
+static int android_file(const char* dir, const char* name, char* out, size_t size) {
+    char path[256];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    return read_line(path, out, size);
+}
+
+// A thermal zone's temperature in degrees, by the first zone whose type holds
+// one of these words: 1 when one read a plausible temperature.
+static int android_zone(const char* const* words, int count, float* celsius, char* seen, size_t seen_size) {
+    for (int i = 0; i < 40; ++i) {
+        char dir[96], type[64], temp[64];
+        snprintf(dir, sizeof dir, "/sys/class/thermal/thermal_zone%d", i);
+        if (!android_file(dir, "type", type, sizeof type))
+            continue;
+        if (seen != NULL && seen_size > 0 && strlen(seen) + strlen(type) + 2 < seen_size)
+            strcat(strcat(seen, seen[0] != '\0' ? " " : ""), type);
+        int match = 0;
+        for (int w = 0; w < count; ++w)
+            match |= strstr(type, words[w]) != NULL;
+        if (!match || !android_file(dir, "temp", temp, sizeof temp))
+            continue;
+        const long milli = strtol(temp, NULL, 10);
+        if (milli > 1000 && milli < 150000) {   // 1-150 C: a sensor that is reading
+            *celsius = (float)((double)milli / 1000.0);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The card's clock (and a Mali's load, when its devfreq entry publishes one):
+// the entry whose name says mali or gpu carries them in Hz and percent.
+static void android_card(BwPerfStats* s) {
+    DIR* dir = opendir("/sys/class/devfreq");
+    if (dir == NULL)
+        return;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.')
+            continue;
+        char base[192], name[64], value[64];
+        snprintf(base, sizeof base, "/sys/class/devfreq/%s", entry->d_name);
+        if (!android_file(base, "name", name, sizeof name))
+            continue;
+        if (strstr(name, "mali") == NULL && strstr(name, "gpu") == NULL)
+            continue;
+        if (s->gpu_clock_mhz < 0.f && android_file(base, "cur_freq", value, sizeof value)) {
+            const unsigned long long hz = strtoull(value, NULL, 10);
+            if (hz >= 1000000ull && hz <= 10000000000ull)
+                s->gpu_clock_mhz = (float)((double)hz / 1e6);
+        }
+        if (s->gpu_pct < 0.f && android_file(base, "gpu_load", value, sizeof value))
+            s->gpu_pct = (float)strtod(value, NULL);
+    }
+    closedir(dir);
+}
+
+static void android_parts(BwPerfStats* s) {
+    static int logged;
+    char cpu_seen[400] = "";
+    static const char* const kCpuZones[] = {"cpu", "soc", "big", "little", "mid", "cluster", "core"};
+    static const char* const kGpuZones[] = {"gpu", "GPUSS", "mali"};
+    // The processor's temperature, where hwmon gave none.
+    if (s->cpu_temp_c < 0.f)
+        android_zone(kCpuZones, (int)(sizeof kCpuZones / sizeof kCpuZones[0]), &s->cpu_temp_c, cpu_seen, sizeof cpu_seen);
+    // An Adreno publishes its load as a percentage; a Mali's is not readable.
+    if (s->gpu_pct < 0.f) {
+        char line[64];
+        if (android_file("/sys/class/kgsl/kgsl-3d0", "gpu_busy_percentage", line, sizeof line))
+            s->gpu_pct = (float)strtod(line, NULL);
+    }
+    if (s->gpu_temp_c < 0.f)
+        android_zone(kGpuZones, (int)(sizeof kGpuZones / sizeof kGpuZones[0]), &s->gpu_temp_c, NULL, 0);
+    if (s->gpu_clock_mhz < 0.f)
+        android_card(s);
+    // A phone's graphics memory is the system's RAM the panel already shows: the
+    // device-local heap Vulkan reports is that same memory, so both stay unknown
+    // rather than reading as a second pool.
+    s->vram_used_mb = s->vram_total_mb = -1.f;
+    // An ARM /proc/cpuinfo has no "model name": the SoC is named in sysfs.
+    if (s->cpu_name[0] == '\0') {
+        char line[128];
+        if (android_file("/sys/devices/soc0", "machine", line, sizeof line))
+            snprintf(s->cpu_name, sizeof s->cpu_name, "%.*s", (int)sizeof s->cpu_name - 1, line);
+        if (s->cpu_name[0] == '\0' && android_file("/sys/devices/soc0", "family", line, sizeof line))
+            snprintf(s->cpu_name, sizeof s->cpu_name, "%.*s", (int)sizeof s->cpu_name - 1, line);
+    }
+    if (!logged) {
+        logged = 1;
+        // The machine-wide share is the one number a phone usually withholds: /proc/stat is
+        // denied to apps, so the panel keeps the game's own share and says why the other is "-".
+        FILE* stat = fopen("/proc/stat", "r");
+        const int machine_cpu = stat != NULL;
+        if (stat != NULL)
+            fclose(stat);
+        fprintf(stderr,
+                "[perf] panel (android): zones %s; cpu %.0f C, gpu %.0f%%, %.0f MHz, %.0f C; soc \"%s\", card \"%s\"; "
+                "machine-wide CPU %s\n",
+                cpu_seen[0] != '\0' ? cpu_seen : "none readable", s->cpu_temp_c, s->gpu_pct, s->gpu_clock_mhz,
+                s->gpu_temp_c, s->cpu_name[0] != '\0' ? s->cpu_name : "?", s->gpu_name[0] != '\0' ? s->gpu_name : "?",
+                machine_cpu ? "from /proc/stat"
+                            : "not readable (denied to apps), so the panel shows the game's own share only");
+    }
+}
+#endif
 
 static void sample_machine(unsigned long long now_ns) {
     BwPerfStats* s = &g.stats;
@@ -536,6 +655,9 @@ static void sample_machine(unsigned long long now_ns) {
                         "vulkan: \"%s\", vram total %.0f MB)\n",
                 s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_total_mb);
     }
+#if defined(__ANDROID__)
+    android_parts(s);
+#endif
 }
 
 #elif defined(_WIN32)

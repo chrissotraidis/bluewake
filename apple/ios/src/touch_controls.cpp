@@ -28,6 +28,13 @@
 #include "../../../runtime/host/src/jump_button.h"
 #include "../../../runtime/host/src/sprint.h"
 
+#if defined(__ANDROID__)
+// android_shell.cpp: the performance panel's frame clock. The panel is the
+// Android and desktop app's; the iPhone app has no perf_monitor.c, so this is a
+// weak reference there and the tick checks it.
+extern "C" void bluewake_perf_frame(void) __attribute__((weak));
+#endif
+
 extern "C" unsigned long long bluewake_host_retrace_count(void);  // runtime/host/src/main.c
 extern "C" unsigned long long bluewake_host_thread_cpu_us(void);
 extern "C" int bluewake_thermal_state(void);  // controller_settings.mm: 0 nominal .. 3 critical
@@ -275,6 +282,10 @@ void frame_tick(void*) {
         bluewake_shell_install_overlay();
     }
     bluewake_settings_tick();
+#if defined(__ANDROID__)
+    if (bluewake_perf_frame != nullptr)
+        bluewake_perf_frame();
+#endif
     fps_tick();
     std::lock_guard<std::mutex> lock(g_pad_mutex);
     if (g_latched == 0)
