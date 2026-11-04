@@ -2369,6 +2369,80 @@ static bool sky_kept(CPUState* cpu, u32 table) {
 
 static u32 s_pale, s_virt;  // the tables the host keeps
 
+// Wind Waker HD reads no floor palettes outside the dungeons: its dBgS::GetPolyColor returns 0xFF ("none") unless
+// the stage type is 1 (wwhd d_bg_s.cpp; the GameCube's, 0x800A06A4, has no such check), so outdoors and in houses,
+// boss and sub-dungeon stages Link and the characters stay on their room's palettes (Windfall's stalls and arch:
+// the GameCube's envr 50, HD's room 11). With HD's palettes in, the collision's floor colours (bits 19-26 of each
+// poly info's first word, which only GetPolyColor reads) are set to 0xFF on such stages, each original kept and
+// written back when the look or the palettes go, or on a type 1 stage. Only collision still registered with the
+// game's dBgS is touched. BLUEWAKE_HD_FLOOR_PALETTES=1 keeps the GameCube's floor palettes everywhere.
+enum {
+    kBgS = 0x803C5EA8u,     // g_dComIfG_gameInfo.play.mBgS (dBgS: m_chk_element[256], 0x14 each)
+    kBgChkCount = 256u,
+    kBgwBgd = 0x94u,        // cBgW::pm_bgd (cBgD_t)
+    kBgdTiNum = 0x28u,      // cBgD_t::m_ti_num
+    kBgdTiTbl = 0x2Cu,      // cBgD_t::m_ti_tbl (cBgD_Ti_t, 0x10 each; m_info0 first)
+    kFloorColourMask = 0x07F80000u,
+};
+typedef struct FloorColours {
+    u32 table, count;
+    u8* saved;  // each entry's original colour (bits 19-26)
+} FloorColours;
+static FloorColours g_floor[kBgChkCount];
+
+static void floor_colours_restore(CPUState* cpu, u32 slot, bool write) {
+    FloorColours* f = &g_floor[slot];
+    if (f->saved != NULL && write)
+        for (u32 i = 0; i < f->count; ++i) {
+            const u32 a = f->table + i * 0x10u;
+            const u32 w = mem_read32(cpu, a);
+            mem_write32(cpu, a, (w & ~kFloorColourMask) | ((u32)f->saved[i] << 19));
+        }
+    free(f->saved);
+    memset(f, 0, sizeof *f);
+}
+
+static void floor_colours(CPUState* cpu, bool hd) {
+    static int s_keep = -1;
+    if (s_keep < 0)
+        s_keep = setting("BLUEWAKE_HD_FLOOR_PALETTES") == 1;
+    const u32 info = mem_read32(cpu, kStagInfo);
+    const u32 type = guest_pointer(info) ? (mem_read32(cpu, info + 0x0Cu) >> 16) & 7u : 1u;
+    const bool none = hd && !s_keep && type != 1u;
+    for (u32 slot = 0; slot < kBgChkCount; ++slot) {
+        const bool used = (mem_read32(cpu, kBgS + slot * 0x14u + 4u) & 1u) != 0u;  // m_flags: ChkUsed
+        const u32 bgw = used ? mem_read32(cpu, kBgS + slot * 0x14u) : 0u;
+        const u32 bgd = guest_pointer(bgw) ? mem_read32(cpu, bgw + kBgwBgd) : 0u;
+        const u32 table = guest_pointer(bgd) ? mem_read32(cpu, bgd + kBgdTiTbl) : 0u;
+        const u32 count = guest_pointer(table) ? mem_read32(cpu, bgd + kBgdTiNum) : 0u;
+        FloorColours* f = &g_floor[slot];
+        const bool same = f->saved != NULL && f->table == table && f->count == count;
+        if (f->saved != NULL && (!same || !none))
+            floor_colours_restore(cpu, slot, same);  // gone or replaced: its memory isn't the game's collision now
+        if (!none || count == 0u || count > 0x10000u || f->saved != NULL)
+            continue;
+        bool shared = false;  // one model's collision for several (moving BG actors): kept by the first slot only
+        for (u32 other = 0; other < kBgChkCount && !shared; ++other)
+            shared = other != slot && g_floor[other].saved != NULL && g_floor[other].table == table;
+        if (shared)
+            continue;
+        f->saved = (u8*)malloc(count);
+        if (f->saved == NULL)
+            continue;
+        f->table = table;
+        f->count = count;
+        for (u32 i = 0; i < count; ++i) {
+            const u32 a = table + i * 0x10u;
+            const u32 w = mem_read32(cpu, a);
+            f->saved[i] = (u8)((w & kFloorColourMask) >> 19);
+            mem_write32(cpu, a, w | kFloorColourMask);
+        }
+        if (g_trace)
+            fprintf(stderr, "[hd-look] floor palettes off (stage type %u): collision %u, %u poly infos\n", type, slot,
+                    count);
+    }
+}
+
 static void sky(CPUState* cpu) {
     if (g_sky_count == 0u)
         return;
@@ -2478,6 +2552,9 @@ void bluewake_hd_look_state_loaded(bool reapply) {
     sky_linear_forget();
     memset(s_shifted, 0, sizeof s_shifted);
     g_daynight.started = false;
+    // The loaded RAM has its own collision bytes: forget what was kept, without writing it.
+    for (u32 slot = 0; slot < kBgChkCount; ++slot)
+        floor_colours_restore(NULL, slot, false);
 }
 
 // Wind Waker HD's far blur level for the hour (d_kankyo_4.cpp's preset blend): wwHD_basic's 1.2 from 08:00 to 18:00,
@@ -2574,6 +2651,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
     g_palms_were_on = g_palms;
     clouds(cpu, retrace);
     sky(cpu);
+    floor_colours(cpu, sky_palettes_shown());
     monotone(cpu, retrace);
     far_blur_level(cpu);
     if (g_trace && retrace % 300u == 0u)
