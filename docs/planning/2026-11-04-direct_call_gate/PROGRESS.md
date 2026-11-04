@@ -1,6 +1,6 @@
 # PROGRESS — Direct-call gate
 
-Status: In progress. The gate is implemented, opt-in and unit-tested; the candidate build is next.
+Status: In progress. Desktop first read: **−7.3% instructions and cycles per frame, +8.0% rate**, checkpoints identical, 0 unsafe gate answers in 528 M. The Steam Deck runs are next.
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · Stacked on [#503](https://github.com/chrissotraidis/bluewake/pull/503)
 
 Acceptance (#503's rule): the candidate ahead of the control in every interleaved Game Mode launch (at least six), checkpoints identical, zero unsafe gate answers under verify, focused tests in CI. No minimum gain.
@@ -18,12 +18,12 @@ Acceptance (#503's rule): the candidate ahead of the control in every interleave
 
 ### M2: Build and verify (depends: M1)
 
-- [ ] M2-T01: Build the candidate: the #437 recipe plus this change, `--clang22 --direct-gate` (local `bench/503-gate`, not on the PR).
-- [ ] M2-T02: `BLUEWAKE_DIRECT_SKIP_VERIFY=1` with the gate handed over, in Outset and a scene change: zero unsafe gate answers.
+- [x] M2-T01: Build the candidate: the #437 recipe plus this change, `--clang22 --direct-gate` (local `bench/503-gate` `e627ece79b59`, not on the PR).
+- [x] M2-T02: `BLUEWAKE_DIRECT_SKIP_VERIFY=1` with the gate handed over, in Outset and a scene change: **0 unsafe in 528 M gate answers**.
 
 ### M3: Measure (depends: M2)
 
-- [ ] M3-T01: Desktop first read: instructions and cycles per frame against the `clang22` control.
+- [x] M3-T01: Desktop first read: instructions and cycles per frame against the `clang22` control. **−7.3% / −7.3%, rate +8.0%**, all three gate runs ahead of all three control runs, checkpoints identical.
 - [ ] M3-T02: Steam Deck Game Mode A/B, at least six interleaved launches.
 - [ ] M3-T03: render_bench, five scenes: checkpoints identical.
 
@@ -37,3 +37,6 @@ Acceptance (#503's rule): the candidate ahead of the control in every interleave
 |---|---|---|---|---|
 | M0-T01 | #437 build `clang22` (`perf/clang-runtime-matrix@14c558d`, Clang 22.1.8, libc++); local profile and attribution (private) | `perf record -e cycles:u -F 4000`, headless, unpaced, 2,400 retraces from `1-outset.bwstate`; symbols grouped by layer | Desktop PC (Ryzen 7 5800X3D), Linux | Direct-call checks **8.4%** of all samples (translated chunks 58.6%, natives 12.2%, dispatch loop 5.0%); in `bw_direct_call_ready_plain` most samples sit on the entry and the `bw_host_skip_fast` load; 840 copies of each helper in the module |
 | M1-T02 | This branch | `tests/direct_calls_test.c` at -O0 and -O2; host `main.c` syntax check in `bluewake-linux-ci:local`; `tests/test_linux_ci_container.py` | Desktop PC | All pass; the host compiles with no warnings |
+| M2-T01 | Candidate `gate503` (`bench/503-gate` `e627ece79b59` = `14c558d` + this change; Clang 22.1.8, libc++, trained with the gate open: provenance `direct_gate_training: true`) | `build_script gate503 bench/503-gate … --clang22 --direct-gate` | Desktop PC | Built in about 55 minutes |
+| M2-T02 | `gate503` | `BLUEWAKE_DIRECT_GATE=1 BLUEWAKE_DIRECT_SKIP_VERIFY=1`, headless, `1-outset.bwstate`, 3,000 retraces with a warp to Windfall at +1,200 | Desktop PC | `[direct-gate] verify: answers=528437808 unsafe=0 conservative=310417`; `[direct-skip] verify: inline=544293898 unsafe=0` |
+| M3-T01 | Control `clang22` (A, `14c558d`) against `gate503` (B); local `measure-552/` (private) | `perf stat -e cycles:u,instructions:u`, headless, unpaced, 2,400 retraces from `1-outset.bwstate`, order A B B A A B, `BLUEWAKE_DIRECT_GATE=1` for both (A has no gate) | Desktop PC (Ryzen 7 5800X3D) | Per game frame: A 76.31 / 76.38 / 75.98 M cycles, 210.32 M instructions; B 70.63 / 70.75 / 70.52 M cycles, 195.02 M instructions (**−7.3% each**). Median rate A 116.9–117.3, B 125.9–126.5 retraces/s (**+8.0%**). Guest checkpoints identical in all six runs |
