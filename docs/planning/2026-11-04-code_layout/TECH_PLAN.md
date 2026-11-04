@@ -1,6 +1,6 @@
 # TECH_PLAN — Code layout of the game module
 
-Status: M1 implemented, opt-in; measurement next.
+Status: **Done.** M1 (split functions) no-go, reverted; **M2 (huge pages) kept, opt-in: +4.47% on the Steam Deck.** The switch is Config → Performance → *Game code on large memory pages* (#531, `06715f0`).
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
 ## M1: split the cold blocks, keep the hot sections together (no-go, reverted)

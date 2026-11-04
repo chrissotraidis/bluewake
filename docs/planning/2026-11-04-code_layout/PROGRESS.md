@@ -1,6 +1,6 @@
 # PROGRESS — Code layout of the game module
 
-Status: **M2, the module's code on huge pages: +4.47% on the Steam Deck**, every scene faster, every launch ahead, checkpoints identical (host-only, opt-in `BLUEWAKE_MODULE_HUGEPAGES=1`). M1 (split functions) was a no-go and is reverted.
+Status: **Done: kept, opt-in.** M2, the module's code on huge pages: **+4.47% on the Steam Deck**, every scene faster, every launch ahead, checkpoints identical (host-only, opt-in `BLUEWAKE_MODULE_HUGEPAGES=1`). M1 (split functions) was a no-go and is reverted.
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 Acceptance: ahead of the control in every interleaved launch (at least six), checkpoints identical. No minimum gain.
@@ -19,7 +19,7 @@ Acceptance: ahead of the control in every interleaved launch (at least six), che
 - [x] M2-T01: `module_hugepages.h`, called after `dlopen` behind `BLUEWAKE_MODULE_HUGEPAGES=1`; the host compiles cleanly (`-Wall -Wextra`) in the build container.
 - [x] M2-T02: Host-only build over the control (`bench/huge` `31c47882ae1a`, `host_only: true`, module SHA-256 `3d3919e9a8f9` = the control's). On the desktop: `[module] huge pages: 372 MB of code copied, 0 MB on huge pages` (no THP in this kernel), checkpoints identical to the control's.
 - [x] M2-T03: Steam Deck render_bench (THP `always`), five save states: **+4.47% overall**, every huge-page run (39.79–40.27) ahead of every control run (38.12–38.59); the Deck logs `372 MB of code copied, 372 MB on huge pages`; checkpoints identical.
-- [ ] M2-T04: Decide: propose as the default on Linux, with a Config → Performance switch (#531's section).
+- [x] M2-T04: Decide: **kept, opt-in, no default** (2026-11-04). The switch is Config → Performance → *Game code on large memory pages*, on #531's branch (`06715f0`), off by default.
 
 ## Evidence ledger
 
