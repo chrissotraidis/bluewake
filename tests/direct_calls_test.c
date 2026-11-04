@@ -79,6 +79,14 @@ static void test_gate(void) {
         for (unsigned i = 0; i < sizeof targets / sizeof targets[0]; ++i)
             assert(bw_direct_call_ready_main(&cpu, targets[i]) ==
                    bw_direct_call_ready_full(&cpu, targets[i]));
+        /* A target known only at run time: the same answer through the inline
+         * range test and the gate, including addresses the gate never takes. */
+        static const u32 runtime[] = {0x80009000u, BW_GATE_MAIN_END - 4u, BW_SKIP_RANGE0_FIRST,
+                                      BW_SKIP_RANGE1_LAST, 0xC0400000u, 0xC13B1850u, 0x80003000u};
+        for (unsigned i = 0; i < sizeof runtime / sizeof runtime[0]; ++i) {
+            volatile u32 address = runtime[i];
+            assert(bw_direct_call_ready(&cpu, address) == bw_direct_call_ready_full(&cpu, address));
+        }
     }
     hg.bits.sources_dirty = hg.bits.decrementer_pending = false;
     hg_cause = hg_mask = 0u;

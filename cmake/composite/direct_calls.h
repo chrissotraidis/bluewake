@@ -159,13 +159,18 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready_main(cons
 
 /* At a call the translator wrote, the address is a constant: the range tests
  * are settled here, at build time, and so is whether the target is in the main
- * executable's code. */
+ * executable's code. A target known only at run time (an indirect call) makes
+ * the same tests inline before reading the gate; anything else takes the full
+ * check. */
 static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
     if (__builtin_constant_p(address) && bw_skip_range_outside(address)) {
         if (bw_skip_main_code(address))
             return bw_direct_call_ready_main(cpu, address);
         return bw_direct_call_ready_plain(cpu, address);
     }
+    if (bw_skip_main_code(address) && bw_skip_range_outside(address) &&
+        __builtin_expect(*bw_direct_gate == 0u, 1))
+        return bw_direct_gate_ready(cpu);
     return bw_direct_call_ready_full(cpu, address);
 }
 
