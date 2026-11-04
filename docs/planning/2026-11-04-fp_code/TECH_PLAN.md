@@ -1,7 +1,133 @@
 # TECH_PLAN — Floating-point code in the translated game
 
-Status: M1 implemented, opt-in and unit-tested; measurement next.
+Status: **Done for now.** **M1 (one FP-available test per stretch)** and **M2 (`lfs` zeros)** are kept and **on by default** in the Linux builder: Steam Deck **+3.05%** and **+1.95%** more. M3 was a no-go and is reverted. M4 and M5 are not started.
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
+
+## Overview
+
+The game is statically recompiled: each PowerPC instruction becomes C, and a builder pipeline then rewrites that C before it's compiled (`scripts/linux/build.py`, the prepare passes in `scripts/windows/`).
+
+Every floating-point instruction pays for exactness: a check that FP is enabled, a `pc` store, exact rounding and flag updates. In the hottest translated code, **FP is 36% of the time** (22.4% arithmetic, 14.0% loads and stores). One `ps_madd` was about 117 x86 instructions.
+
+This PR removes overhead around FP instructions without changing any result.
+
+```mermaid
+flowchart TD
+    T["DolRecomp: PowerPC to C"] --> F["fast_blocks.py:<br/>prepaid block copies"]
+    F --> D["direct_calls.py"]
+    D --> X["fp_checks.py (M1):<br/>drop repeated FP tests"]
+    X --> L["lean_memory.py:<br/>FP loads/stores now lean"]
+    L --> C["clang: compile the module,<br/>with inline_fp.h (M2)"]
+```
+
+## M1: one FP-available test per stretch
+
+### What changed
+
+**Before:** every FP instruction in a prepaid block copy tests MSR[FP].
+
+```mermaid
+flowchart TD
+    B1["ctx->pc = X"] --> B2["test MSR[FP],<br/>return if clear"]
+    B2 --> B3["FP instruction"]
+    B3 --> B4["ctx->pc = X+4"]
+    B4 --> B5["test MSR[FP],<br/>return if clear"]
+    B5 --> B6["FP load: not lean<br/>(pc and suffix stores,<br/>deadline test)"]
+```
+
+**After:** the first test of each stretch stays, the rest go, and FP loads and stores become lean.
+
+```mermaid
+flowchart TD
+    A1["ctx->pc = X"] --> A2["test MSR[FP],<br/>return if clear"]
+    A2 --> A3["FP instruction"]
+    A3 --> A4["FP instruction<br/>(no test)"]
+    A4 --> A5["FP load: lean,<br/>like an integer load"]
+```
+
+### Why it's exact
+
+- **The test can't go entirely:** the Dolphin OS switches FPU state lazily, so the first FP instruction after a thread switch really traps. That first test stays where it was, with its `pc` store.
+- **Inside a prepaid copy, MSR can't change between two tests:**
+  - FP operations never take an exception; they only set FPSCR bits.
+  - A copy is entered only at its start.
+  - Any call that could run guest code ends the stretch.
+- **The original blocks keep every test,** because they can be resumed mid-block after another thread has run.
+
+### Code
+
+- [`scripts/windows/fp_checks.py`](../../../scripts/windows/fp_checks.py): the pass.
+  - `thin()` keeps the first test per stretch.
+  - `safe()` is the explicit list of calls that can't change MSR.
+  - `transform()` touches prepaid copies only.
+- [`scripts/linux/build.py`](../../../scripts/linux/build.py): runs the pass between `direct-calls` and `lean-memory`.
+  - **On by default:** it's in `LINUX_DEFAULT_OPTIMIZATIONS`, with `--no-fp-checks` to opt out.
+  - **Recorded** in the prepared-source inputs, the receipt, the training fingerprint and provenance.
+- [`tests/test_fp_checks.py`](../../../tests/test_fp_checks.py) (audit job): the rules, the stretch-ending calls, original blocks untouched, repeatable, and end to end that a later `lfs` becomes lean.
+
+### Impact
+
+| | Result |
+|---|---|
+| Tests removed | 296,188 of 368,745, in 811 chunks |
+| FP loads and stores made lean | +177,385 (708,394 lean accesses, against 531,009 before) |
+| Desktop, Outset | −3.1% cycles per frame |
+| **Steam Deck** | **+3.05%**, every scene, every launch ahead |
+| Guest state | Save states byte-identical. The checkpoint's CPU hash differs only in the block-scratch `cycle_observation_suffix` ([#481](https://github.com/chrissotraidis/bluewake/pull/481)) |
+
+## M2: zeros through the hardware's widening in `lfs`
+
+### What changed
+
+**Before:** only normal singles took the fast path, so every `0.0f` went the slow way.
+
+```mermaid
+flowchart TD
+    B1["lfs: load 32 bits"] --> B2{"exponent<br/>1 to 254?"}
+    B2 -- yes --> B3["hardware widening"]
+    B2 -- "no (every zero)" --> B4["generated conversion,<br/>written out by hand"]
+```
+
+**After:** zeros join the fast path, in one test.
+
+```mermaid
+flowchart TD
+    A1["lfs: load 32 bits"] --> A2{"normal or zero?<br/>(one bitwise OR)"}
+    A2 -- yes --> A3["hardware widening"]
+    A2 -- "no (denormal, inf, NaN)" --> A4["generated conversion"]
+```
+
+### Why it's exact
+
+- **Zeros:** the hardware widens a zero of either sign to the same double.
+- **Denormals stay slow:** the game's non-IEEE mode makes the runtime set the host's **DAZ**, under which the hardware would widen them to zero. That would be wrong in 16,777,214 patterns.
+- **NaNs stay slow:** the hardware quiets a signalling NaN.
+
+### Code
+
+- [`cmake/composite/inline_fp.h`](../../../cmake/composite/inline_fp.h), `dolrecomp_f32_from_bits`: the fast-path test.
+- [`tests/f32_from_bits_test.c`](../../../tests/f32_from_bits_test.c): all 2³² patterns against the generated path, with DAZ off and on, 0 mismatches. It's run by hand, because it needs a prepared source.
+
+### Impact
+
+- **Steam Deck:** **+1.95%** on top of M1, every launch ahead, checkpoints identical.
+- **Desktop:** −1.3% cycles per frame.
+- **On:** always, wherever inline FP is on (the default).
+
+## What didn't work
+
+| Step | Result | Why |
+|---|---|---|
+| M3: `frsp` and `fctiw` inline | Deck −0.36% (desktop +0.6%), reverted (`cea5f9753`) | The inline rounding switch grows the hot code; Zen 2's caches pay for it |
+| `psq` quantized specialization | Dropped before building | Its path is only 0.09% of samples |
+
+## Long-term impact
+
+- **Combined with the other work:** on the Deck, M1 and M2 with the direct-call gate ([#552](https://github.com/chrissotraidis/bluewake/pull/552)) and huge pages ([#554](https://github.com/chrissotraidis/bluewake/pull/554)) are **+15.0%** over the #437 control. Outset goes from 27.6 to 30.9 game FPS.
+- **What's left in FP:** the per-operation cost is spread thin: finiteness tests, the FPRF classification, the `fma` tie check. M4 (a fallback that doesn't clobber the guest registers) and M5 (lazy FPRF) are the remaining ideas, each estimated under 1%.
+- **The lesson from M3:** a desktop gain isn't enough. Code growth can cost more on the Deck than it saves.
+
+## Design details
 
 ## M1: one FP-available test per stretch of a prepaid copy
 
