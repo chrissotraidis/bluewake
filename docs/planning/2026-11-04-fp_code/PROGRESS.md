@@ -52,4 +52,4 @@ Planned after M3 ([PRD](PRD.md#steps)).
 
 ### Default
 
-- [x] D-T01: `fp_checks` in `LINUX_DEFAULT_OPTIMIZATIONS`, with `--no-fp-checks` to opt out (2026-11-04); `tests/test_linux_ci_container.py` checks both. The Windows builder doesn't run the pass yet.
+- [x] D-T01: `fp_checks` in `LINUX_DEFAULT_OPTIMIZATIONS`, with `--no-fp-checks` to opt out (2026-11-04); `tests/test_linux_ci_container.py` checks both. The Windows and Apple builders get the pass in [#555](https://github.com/chrissotraidis/bluewake/pull/555) and [#556](https://github.com/chrissotraidis/bluewake/pull/556).

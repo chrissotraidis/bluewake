@@ -71,7 +71,8 @@ flowchart TD
 |---|---|---:|---:|
 | **Steam Deck** (Zen 2, SteamOS, Game Mode) | render_bench, 5 save states, rendered, 6 launches each | **+3.05%** (every scene, every launch ahead) | — |
 | **Desktop** (Ryzen 7 5800X3D, Linux) | Outset save state, headless, 3 launches each | **+3.2%** | 3.1% fewer cycles, 2.6% fewer instructions |
-| Windows, Mac | — | Not measured (the Windows builder doesn't run the pass yet) | — |
+| Windows | — | Not measured yet: [#555](https://github.com/chrissotraidis/bluewake/pull/555) (draft) runs the pass in the Windows builder | — |
+| Mac, iPhone, iPad | — | Not measured yet: [#556](https://github.com/chrissotraidis/bluewake/pull/556) (draft) runs the pass in the Apple builder | — |
 
 | | Result |
 |---|---|
@@ -121,7 +122,7 @@ M2 measured on top of M1:
 |---|---|---:|---:|
 | **Steam Deck** (Zen 2, SteamOS, Game Mode) | render_bench, 5 save states, rendered, 6 launches each | **+1.95%** (every scene, every launch ahead) | — |
 | **Desktop** (Ryzen 7 5800X3D, Linux) | Outset save state, headless, 3 launches each | **+1.1%** | 1.3% fewer cycles, 0.5% fewer instructions |
-| Windows, Mac | — | Not measured | — |
+| Windows, Mac, iPhone, iPad | — | Not measured yet. M2 is in the shared inline helper, so it's in every platform's build already; [#555](https://github.com/chrissotraidis/bluewake/pull/555) and [#556](https://github.com/chrissotraidis/bluewake/pull/556) are where it gets measured | — |
 
 Checkpoints are identical to M1's on both platforms. M2 is always on, wherever inline FP is on (the default). It gains more on the Deck than the desktop, which fits a mispredicted branch on every loaded zero costing more on Zen 2.
 
