@@ -48,13 +48,15 @@ final class PerfPanelView extends View {
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint value = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint footer = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint caption = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path graph = new Path();
     // Which rows this phone can fill at all. Decided from the first numbers, not per frame, so the panel does not
     // change shape under the eye; a phone that reports no graphics card counters keeps the rows out rather than
     // showing four dashes forever.
     private boolean decided, showGpu, showVram, showCpuName, showGpuName;
     private final RectF box = new RectF();
-    private final float dp, row, gap, graphHeight, footerHeight, pad, labelWidth, col1, col2, col3, round;
+    private final float dp, row, gap, graphHeight, captionHeight, footerHeight, pad, labelWidth, col1, col2, col3,
+            round;
 
     PerfPanelView(Context context) {
         super(context);
@@ -69,9 +71,11 @@ final class PerfPanelView extends View {
         col2 = 58f * dp;
         col3 = 94f * dp;
         round = 9f * dp;
+        captionHeight = 15f * dp;   // the graph's own line: what it plots, and its top
         setPaint(label, 12f, "sans-serif-medium", DIM);
         setPaint(value, 13f, "sans-serif-medium", Color.WHITE);
         setPaint(footer, 11f, "sans-serif", NAME);
+        setPaint(caption, 11f, "sans-serif", DIM);
         value.setFontFeatureSettings("tnum");
         label.setFontFeatureSettings("tnum");
         footer.setFontFeatureSettings("tnum");
@@ -123,7 +127,7 @@ final class PerfPanelView extends View {
     }
 
     private float panelHeight() {
-        return pad * 2f + row * rowCount() + gap * 2f + graphHeight + footerHeight * nameLines();
+        return pad * 2f + row * rowCount() + gap * 2f + captionHeight + graphHeight + footerHeight * nameLines();
     }
 
     @Override
@@ -181,6 +185,8 @@ final class PerfPanelView extends View {
                 known(values[MS_MAX]) ? values[MS_MAX] / 50f : NO_BAR,
                 null, NO_BAR);
         y += gap;
+        drawGraphCaption(canvas, y, w);
+        y += captionHeight;
         drawGraph(canvas, y, w);
         y += graphHeight + gap;
         // The names last and brighter than a disabled line, as on the desktop: they are the last thing read, and the
@@ -230,6 +236,18 @@ final class PerfPanelView extends View {
             box.set(x, top, x + Math.max(filled, bar), top + bar);
             canvas.drawRoundRect(box, bar * 0.5f, bar * 0.5f, paint);
         }
+    }
+
+    /** What the graph plots, and the frame time at its top: a line is only a number with a scale beside it. */
+    private void drawGraphCaption(Canvas canvas, float y, float w) {
+        float top = known(values[MS_MAX]) ? values[MS_MAX] : 0f;
+        if (top < 50f) {
+            top = 50f;
+        }
+        final float baseline = y + captionHeight * 0.85f;
+        canvas.drawText("frame time, ms", pad, baseline, caption);
+        final String scale = String.format(Locale.US, "0\u2013%.0f ms", top);
+        canvas.drawText(scale, w - pad - caption.measureText(scale), baseline, caption);
     }
 
     /**

@@ -322,6 +322,9 @@ int main(int argc, char** argv) {
     bw_default("BLUEWAKE_DSP_MODE", "hle");
     bw_default("BLUEWAKE_CLOCK", "now");
     bw_default("BLUEWAKE_NATIVE_MATH", "1");
+    // The direct-call gate (#552) is off at run time unless asked for, because it is
+    // the newest path; the phone build asks for it, and launch.env still wins.
+    bw_default("BLUEWAKE_DIRECT_GATE", "1");
     bw_default("DOL_AURORA_FULLSCREEN", "1");
     // A phone's screen is never 4:3: keep the game's shape, as on iOS (Display
     // > Aspect Ratio and Render Resolution in the ⋯ menu set both).

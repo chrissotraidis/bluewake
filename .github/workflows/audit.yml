@@ -42,6 +42,7 @@ jobs:
           python3 tests/test_direct_calls.py
           python3 tests/test_inline_gpr.py
           python3 tests/test_lean_deadlines.py
+          python3 tests/test_fp_checks.py
           python3 tests/native_j3d_source_test.py
           python3 tests/native_game_math_source_test.py
           python3 tests/native_skin_source_test.py
