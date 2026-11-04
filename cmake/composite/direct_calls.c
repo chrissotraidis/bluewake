@@ -162,17 +162,6 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v3(
  * back. A host that never calls this leaves the gate closed, so its direct
  * calls take the out-of-line checks. Returns 1 when the module reads the word
  * inline, 0 when it stays closed (direct calls or the answer off, or verify). */
-/* 1 when the builder made this module with the gate on by default (its
- * training ran with the gate open): the app then opens it unless
- * BLUEWAKE_DIRECT_GATE=0. */
-BW_DIRECT_EXPORT int bluewake_composite_direct_gate_default(void) {
-#if defined(BLUEWAKE_DIRECT_GATE_DEFAULT)
-    return 1;
-#else
-    return 0;
-#endif
-}
-
 BW_DIRECT_EXPORT int bluewake_composite_direct_gate(const volatile u32* gate) {
     s_host_gate = gate;
     gate_refresh();
