@@ -61,6 +61,8 @@ flowchart LR
 
 **Keep the gate, opt-in (`BLUEWAKE_DIRECT_GATE=1`); don't propose it as the default for now.**
 
+**The switch:** Config → Performance → *Faster calls inside the game's code*, off by default. The row is on #531's branch ([`06715f0`](https://github.com/chrissotraidis/bluewake/commit/06715f077)).
+
 - **Why keep it:** it's the largest exact gain measured on the game thread this cycle, it's consistent in every launch, and its exactness is checked three ways: a unit test over 1,024 host and CPU states, a verify mode that compares every answer, and identical checkpoints.
 - **Why opt-in:** it changes when the module trusts host state, so it should be played more widely before anyone turns it on for players.
 - **Why iteration 2 went:** the acceptance rule is "ahead in every launch". Its gain on the Deck was inside the launch-to-launch noise.
@@ -70,7 +72,7 @@ flowchart LR
 - **The pattern is reusable:** a host-maintained summary word, read inline, with the exact check as the fallback. Any per-call question whose answer rarely changes can use it.
 - **Where the cost went:** direct-call checks are now 2.1% of samples, mostly the full check for indirect calls (1.3%), and that path didn't pay on the Deck.
 - **Combined with the other work:** on the Deck, the gate, the FP checks (#553) and the module on huge pages (#554) together are **+15.0%** over the #437 control. That lifts Outset from 27.6 to 30.9 game FPS in render_bench.
-- **To make it a default later:** play it more widely; add a Config → Performance switch (#531's section); and build it with `--direct-gate`, so the training profile follows the gate's path.
+- **To make it a default later:** play it more widely; flip the switch's default; and build it with `--direct-gate`, so the training profile follows the gate's path.
 
 ## Design details
 

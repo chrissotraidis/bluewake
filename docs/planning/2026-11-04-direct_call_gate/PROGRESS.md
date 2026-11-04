@@ -30,6 +30,7 @@ Acceptance (#503's rule): the candidate ahead of the control in every interleave
 ### M4: Decide (depends: M3)
 
 - [x] M4-T01: Decide: **keep, opt-in, no default** (2026-11-04).
+- [x] M4-T03: The menu switch in Config → Performance, on #531 (`06715f0`), off by default; the settings-table test covers it.
 - [x] M4-T02: Combined with #553 (M1, M2) and #554 (huge pages): Steam Deck **+15.0%** over the #437 control (Outset 27.57 → 30.93); save states byte-identical.
 
 ## Evidence ledger
