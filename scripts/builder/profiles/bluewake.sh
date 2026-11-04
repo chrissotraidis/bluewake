@@ -234,7 +234,9 @@ profile_compile() {
     fi
     local flags="-mcpu=$device_cpu" feature_flags feature
     local optimization_flags=()
-    feature_flags=$(python3 "$root/scripts/builder/module_optimizations.py" flags "$module_optimizations")
+    local gate_arg=()
+    [ "${direct_gate:-0}" -eq 0 ] || gate_arg=(--direct-gate)
+    feature_flags=$(python3 "$root/scripts/builder/module_optimizations.py" flags "$module_optimizations" "${gate_arg[@]}")
     while IFS= read -r feature; do optimization_flags+=("$feature"); done <<< "$feature_flags"
     if [ ${#composite_pgo[@]} -gt 0 ]; then
         run composite-pgo-merge xcrun llvm-profdata merge -o "$out/composite.profdata" "${composite_pgo[@]}"

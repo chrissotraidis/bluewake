@@ -7,7 +7,7 @@
 | Step | State |
 |---|---|
 | fp_checks in the Apple preparation steps, on by default, `--no-fp-checks` | Done, unit-tested |
-| `--direct-gate` for training, with its fingerprint key | Done, unit-tested |
+| The gate on by default (`BLUEWAKE_DIRECT_GATE_DEFAULT` for macOS and iOS), `--no-direct-gate`, needs the direct calls; training plays with it open | Done, unit-tested |
 | Gate host code on Apple clang/arm64 | Checked by reading the code only |
 | Mac build and launch | **Not done**: no Mac |
 | Speed on Apple hardware | **Not measured** |
@@ -17,8 +17,8 @@
 
 - #553 M2's `dolrecomp_f32_from_bits` change applies to every platform. It was tested with DAZ off and on, on x86 only. arm64 flushes denormals through FPCR.FZ, not MXCSR, so it needs its own check.
 - On Apple the module grows with fp_checks and lean_memory. That hasn't been checked against the iOS link and size limits.
-- The Mac settings menu has no row for `BLUEWAKE_DIRECT_GATE` until [#531](https://github.com/chrissotraidis/bluewake/pull/531)'s rows land. Until then, it's an environment variable.
+- The gate is now on by default on iPhone and iPad, and there's no way to close it there for an A/B: it has no menu row until [#531](https://github.com/chrissotraidis/bluewake/pull/531)'s rows land. On a Mac, `BLUEWAKE_DIRECT_GATE=0` closes it.
 
 ## Decision
 
-The switches mirror Linux exactly. Whether to keep fp_checks in the Apple default is decided after a Mac build passes the save-state equality check and at least 6 interleaved launches.
+The switches and defaults mirror Linux exactly (fp_checks and the gate). Whether to keep both in the Apple default is decided after a Mac build passes the save-state equality check and at least 6 interleaved launches.
