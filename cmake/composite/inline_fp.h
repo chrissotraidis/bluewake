@@ -419,80 +419,6 @@ static inline void bw_fp_ps_sum1(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
     bw_fp_ps_write(cpu, d, s0, s1, s1);
 }
 
-/* set_fp_exception and ppc_fpscr_updated (cpu_interpreter_float.c): an
- * exception bit set, FX when it was clear, then the VX summary and FEX. */
-#define BW_FP_FPSCR_FX 0x80000000u
-#define BW_FP_FPSCR_FEX 0x40000000u
-#define BW_FP_FPSCR_VX 0x20000000u
-#define BW_FP_FPSCR_XX 0x02000000u
-#define BW_FP_FPSCR_VX_ANY 0x01F80700u
-static inline u32 bw_fp_fpscr_exception(u32 fpscr, u32 bit) {
-    if ((fpscr & bit) != bit)
-        fpscr |= BW_FP_FPSCR_FX;
-    fpscr |= bit;
-    fpscr = (fpscr & ~BW_FP_FPSCR_VX) | ((fpscr & BW_FP_FPSCR_VX_ANY) ? BW_FP_FPSCR_VX : 0u);
-    return (fpscr & ~BW_FP_FPSCR_FEX) | ((((fpscr >> 22) & fpscr & 0xF8u) != 0u) ? BW_FP_FPSCR_FEX : 0u);
-}
-
-/* ppc_frsp for any operand but a NaN (#553 M3): the same rounding (force_single),
- * the inexact flags, FR, the FPRF and both halves, in the interpreter's order. */
-static inline void bw_fp_frsp(CPUState* cpu, u8 d, u8 b) {
-    const f64 value = cpu->fpr[b];
-    if (__builtin_expect(value != value, 0)) {
-        ppc_frsp(cpu, d, b);
-        return;
-    }
-    const f32 rounded = bw_fp_single(cpu, value);
-    u32 fpscr = cpu->fpscr;
-    if (value != (f64)rounded)
-        fpscr = bw_fp_fpscr_exception(fpscr, BW_FP_FPSCR_XX) | BW_FP_FPSCR_FI;
-    else
-        fpscr &= ~BW_FP_FPSCR_FI;
-    fpscr = (fpscr & ~BW_FP_FPSCR_FR) | ((fabs((f64)rounded) > fabs(value)) ? BW_FP_FPSCR_FR : 0u);
-    cpu->fpscr = fpscr;
-    bw_fp_write_single(cpu, d, rounded);
-}
-
-/* round_nearest_even (cpu_interpreter_float.c), the default rounding of fctiw. */
-static inline f64 bw_fp_round_nearest_even(f64 value) {
-    const f64 lo = floor(value);
-    const f64 fraction = value - lo;
-    if (fraction < 0.5)
-        return lo;
-    if (fraction > 0.5)
-        return lo + 1.0;
-    return fmod(lo, 2.0) == 0.0 ? lo : lo + 1.0;
-}
-
-/* ppc_fctiw (fctiw, fctiwz) for an operand that is not a NaN and rounds into
- * the 32-bit range (#553 M3): no invalid exception, so the inexact flags and the
- * result word only. Anything else is the interpreter's, from the same state. */
-static inline bool bw_fp_fctiw(CPUState* cpu, f64 value, bool toward_zero, u64* output) {
-    if (__builtin_expect(value == value, 1)) {
-        f64 rounded;
-        switch (toward_zero ? 1u : (cpu->fpscr & 3u)) {
-        case 1: rounded = trunc(value); break;
-        case 2: rounded = ceil(value); break;
-        case 3: rounded = floor(value); break;
-        default: rounded = bw_fp_round_nearest_even(value); break;
-        }
-        if (__builtin_expect(rounded < 2147483648.0 && rounded >= -2147483648.0, 1)) {
-            const u32 result = (u32)(s32)rounded;
-            u32 fpscr = cpu->fpscr & ~(BW_FP_FPSCR_FI | BW_FP_FPSCR_FR);
-            if (rounded != value) {
-                fpscr = bw_fp_fpscr_exception(fpscr, BW_FP_FPSCR_XX) | BW_FP_FPSCR_FI;
-                if (fabs(rounded) > fabs(value))
-                    fpscr |= BW_FP_FPSCR_FR;
-            }
-            cpu->fpscr = fpscr;
-            *output = 0xFFF8000000000000ull | result |
-                      ((result == 0u && signbit(value)) ? 0x100000000ull : 0ull);
-            return true;
-        }
-    }
-    return ppc_fctiw(cpu, value, toward_zero, output);
-}
-
 /* lfs, lfsx, lfsu and the other single loads: the generated header widens the
  * single's bits by hand so that a signalling NaN keeps its payload and stays
  * signalling. For a normal single (exponent 1-254) the hardware's widening is
@@ -517,8 +443,6 @@ static inline f64 dolrecomp_f32_from_bits(u32 bits) {
 }
 #endif
 
-#define ppc_frsp bw_fp_frsp
-#define ppc_fctiw bw_fp_fctiw
 #define ppc_fadds bw_fp_fadds
 #define ppc_fsubs bw_fp_fsubs
 #define ppc_fadd bw_fp_fadd
