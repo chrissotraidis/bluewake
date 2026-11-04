@@ -15,9 +15,14 @@
 #include "inline_fp.h"
 
 #include <stdio.h>
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 #ifndef dolrecomp_f32_from_bits
-int main(void) {
+/* Once with the host's default MXCSR and once with FTZ and DAZ, as the runtime
+ * sets them while the guest runs in non-IEEE mode (cpu_interpreter_float.c). */
+static u64 compare_all(void) {
     u64 mismatches = 0, fast = 0;
     u32 bits = 0;
     do {
@@ -31,10 +36,20 @@ int main(void) {
                 printf("mismatch %08X: %016llX vs %016llX\n", bits, (unsigned long long)x, (unsigned long long)y);
             mismatches++;
         }
-        fast += ((bits >> 23) & 0xFFu) - 1u < 254u;
+        fast += (((bits >> 23) & 0xFFu) - 1u < 254u) | ((bits << 1) == 0u);
     } while (++bits != 0u);
     printf("4294967296 patterns, %llu on the fast path, %llu mismatches\n", (unsigned long long)fast,
            (unsigned long long)mismatches);
+    return mismatches;
+}
+
+int main(void) {
+    u64 mismatches = compare_all();
+#if defined(__x86_64__) || defined(_M_X64)
+    _mm_setcsr(_mm_getcsr() | 0x8040u);
+    printf("with FTZ and DAZ: ");
+    mismatches += compare_all();
+#endif
     return mismatches != 0;
 }
 #else

@@ -69,6 +69,30 @@ Within a prepaid copy, a removed test always passes, because MSR can't change be
 - **A call missing from the safe list** only ends a stretch early, which costs speed, not exactness. A call *wrongly* on the list could skip a needed test. The list is deliberately short: the FP operations, memory accesses and pure conversions.
 - **Module size** changes little; the removed lines are small.
 
+## M2: zeros through the hardware's widening in `lfs`
+
+### Why
+
+`dolrecomp_f32_from_bits` (in `inline_fp.h`) widens a single with the hardware only when its exponent is 1–254. Every other single takes the generated conversion, written out by hand. That includes **every zero**, and `0.0f` is among the most common floats the game loads. The test's line is 3.7% of the hottest chunks' time on its own.
+
+### What's exact
+
+**Zero (either sign):** the hardware's widening is the same double, so it can join the fast path.
+
+**Infinities:** also the same double, but rare; they stay on the generated path to keep the test to one OR.
+
+**Denormals:** the game runs in non-IEEE mode, and the runtime then sets the host's **FTZ and DAZ** (`cpu_interpreter_float.c`). Under DAZ the hardware widens a denormal to zero, while the generated path keeps its exact value: 16,777,214 patterns would differ. They stay on the generated path.
+
+**NaNs:** the hardware quiets a signalling one. They stay on the generated path.
+
+The test becomes `(exponent - 1 < 254) | (bits << 1 == 0)`, a bitwise OR, so it's one branch and a zero doesn't mispredict a first test.
+
+### Verification
+
+`tests/f32_from_bits_test.c` compares the fast path with the generated one over all 2³² patterns, now twice: with the default MXCSR and with FTZ and DAZ.
+- **Result:** 4,261,412,866 patterns on the fast path, 0 mismatches in both modes.
+- **Not in CI:** the test needs a prepared source. It's run by hand (command in its header).
+
 ## Later steps
 
-M2–M5 (see the [PRD](PRD.md#steps)) are planned after M1 is measured. Each gets its own section here.
+M3–M5 (see the [PRD](PRD.md#steps)) are planned after M1 and M2 are measured. Each gets its own section here.

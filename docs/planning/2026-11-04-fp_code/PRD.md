@@ -36,7 +36,7 @@ Cheaper emitted code around guest FP instructions, with every guest-visible resu
 | Step | Change |
 |---|---|
 | M1 | One FP-available test per stretch of a prepaid copy, so FP loads and stores become lean (this PR) |
-| M2 | `lfs`: only NaNs take the generic single-to-double conversion (zeros and denormals today) |
+| M2 | `lfs`: zeros through the hardware's widening (denormals stay on the generic path: the host's DAZ is on in non-IEEE mode) |
 | M3 | A special-value fallback that doesn't clobber the guest registers |
 | M4 | Lazy FPRF: the result class computed only where the FP status register is read |
 | M5 | `psq_l`/`psq_st` specialized on the quantization registers the game fixes at boot |
