@@ -67,12 +67,17 @@ flowchart TD
 
 ### Impact
 
+| Platform | How measured | Speed (higher is better) | Work per frame |
+|---|---|---:|---:|
+| **Steam Deck** (Zen 2, SteamOS, Game Mode) | render_bench, 5 save states, rendered, 6 launches each | **+3.05%** (every scene, every launch ahead) | — |
+| **Desktop** (Ryzen 7 5800X3D, Linux) | Outset save state, headless, 3 launches each | **+3.2%** | 3.1% fewer cycles, 2.6% fewer instructions |
+| Windows, Mac | — | Not measured (the Windows builder doesn't run the pass yet) | — |
+
 | | Result |
 |---|---|
 | Tests removed | 296,188 of 368,745, in 811 chunks |
 | FP loads and stores made lean | +177,385 (708,394 lean accesses, against 531,009 before) |
-| Desktop, Outset | −3.1% cycles per frame |
-| **Steam Deck** | **+3.05%**, every scene, every launch ahead |
+| **Speed, by platform** (higher is better) | See below |
 | Guest state | Save states byte-identical. The checkpoint's CPU hash differs only in the block-scratch `cycle_observation_suffix` ([#481](https://github.com/chrissotraidis/bluewake/pull/481)) |
 
 ## M2: zeros through the hardware's widening in `lfs`
@@ -110,9 +115,15 @@ flowchart TD
 
 ### Impact
 
-- **Steam Deck:** **+1.95%** on top of M1, every launch ahead, checkpoints identical.
-- **Desktop:** −1.3% cycles per frame.
-- **On:** always, wherever inline FP is on (the default).
+M2 measured on top of M1:
+
+| Platform | How measured | Speed (higher is better) | Work per frame |
+|---|---|---:|---:|
+| **Steam Deck** (Zen 2, SteamOS, Game Mode) | render_bench, 5 save states, rendered, 6 launches each | **+1.95%** (every scene, every launch ahead) | — |
+| **Desktop** (Ryzen 7 5800X3D, Linux) | Outset save state, headless, 3 launches each | **+1.1%** | 1.3% fewer cycles, 0.5% fewer instructions |
+| Windows, Mac | — | Not measured | — |
+
+Checkpoints are identical to M1's on both platforms. M2 is always on, wherever inline FP is on (the default). It gains more on the Deck than the desktop, which fits a mispredicted branch on every loaded zero costing more on Zen 2.
 
 ## What didn't work
 
