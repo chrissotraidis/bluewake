@@ -238,14 +238,19 @@ build first; `--headless` measures without drawing or pacing; `--env` adds launc
 player's display settings). `--probe` also logs the player's position, to check the spot; since #297 it keeps
 the full overlap watch on from a card save, so measure speed without it. The card is only read.
 
-The same numbers are on the phone: **⋯ → Display → Performance Panel → Full** draws a panel in the
-picture's top right corner — the frame rate, the average and longest frame with a graph of them, the game's share
-of the processor, and the memory in use against the whole, with a thin bar under each share. It is the desktop's F9
-panel (`runtime/host/src/perf_monitor.c`) drawn in the Android shell's own idiom, refreshed twice a second, and it
-is remembered with the other display settings. An Android app is not given everything a desktop is: `/proc/stat` is
-denied to it, so the machine-wide processor share is not shown, only the game's own; and a phone publishes no
-graphics card counters or temperatures to apps, so those rows are left out rather than drawn as permanent dashes.
-The one-time `[perf] panel (android)` line in the log says which of them the phone would give.
+The same numbers are on the phone: **⋯ → Display → Performance Panel → Full** draws a bar across the top of
+the picture, in the shape of the Steam Deck's overlay — the frame rate with a graph of the frame times beside it,
+then the game's share of the processor and the mean clock of its cores, the memory in use against the whole (and
+the game's own resident memory), and the battery, with a thin bar under each number that is a share of something.
+It is the desktop's F9 panel (`runtime/host/src/perf_monitor.c`) drawn in the Android shell's own idiom, refreshed
+twice a second, and it is remembered with the other display settings. The columns are measured from the widest
+number each can print and the least useful are dropped when the picture is narrow — the game's own memory and the
+clock go before the rate, the battery and the graph do — so the bar never changes shape as the numbers do. An
+Android app is not given everything a desktop is: `/proc/stat` is denied to it, so the machine-wide processor share
+is not shown, only the game's own; a phone publishes no graphics card counters or temperatures to apps, so the
+graphics card's part is left out rather than drawn as permanent dashes; and its thermal zones are denied too, so
+the platform's thermal word stands in the clock's place once the phone is no longer nominal. The one-time
+`[perf] panel (android)` line in the log says which of them the phone would give.
 
 The phone presents without waiting on the display. Its compositor holds the buffer the way Wayland does, so a
 FIFO present blocks the game thread, and a frame that misses the vsync it aimed for (33.3 ms at 60 Hz) waits for

@@ -137,7 +137,7 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         fpsParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         addView(fpsLabel, fpsParams);
 
-        // The performance panel: the desktop's F9 panel, in the Android idiom (PerfPanelView).
+        // The performance bar: the desktop's F9 panel in the Android idiom (PerfPanelView), a row across the top.
         perfPanel = new PerfPanelView(activity);
         perfPanel.setVisibility(GONE);
         addView(perfPanel, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
@@ -427,13 +427,13 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
             fpsLabel.setLayoutParams(fpsParams);
         }
         fpsLabel.setMaxWidth(Math.max(px(120), Math.round(safe.width() - 140f * dp)));
-        // The performance panel takes the top right corner of the picture, as the desktop's does: over the game,
-        // clear of the ⋯ button and of both columns of touch controls. Under the frame rate when that label is at
-        // the picture's left edge; the label is centered beside the columns, so there it needs no room.
-        final float perfX = Math.max(picture.left + 8f * dp,
-                                     picture.right - perfPanel.panelWidthPx() - 8f * dp);
-        final float perfY = picture.top + (settings.bool(Settings.SHOW_FPS, false) && !centered ? 46f : 12f) * dp;
-        place(perfPanel, perfX, perfY, perfPanel.panelWidthPx(), perfPanel.panelHeightPx());
+        // The performance bar lies across the picture's top edge, as the Steam Deck's overlay does: one row, the width
+        // of the picture, and clear of the ⋯ button where the picture reaches it. Over the game, under the menu.
+        final float perfInset = 8f * dp;
+        final float perfLeft = picture.left + perfInset;
+        final float perfRight = Math.min(picture.right, safe.right - 60f * dp) - perfInset;
+        place(perfPanel, perfLeft, Math.max(picture.top, safe.top) + perfInset,
+                Math.max(0f, perfRight - perfLeft), perfPanel.panelHeightPx());
         float panelWidth = Math.min(360f * dp, safe.width() - 32f * dp);
         panelMaxHeight = Math.round(Math.min(330f * dp, safe.height() - 72f * dp));
         place(settingsPanel, safe.right - panelWidth - 12f * dp, safe.top + 60f * dp, panelWidth,
@@ -447,7 +447,8 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     private void applyFPSVisibility() {
         boolean on = settings.bool(Settings.SHOW_FPS, false);
         final boolean panel = perfMode() == 2;
-        fpsLabel.setVisibility(on ? VISIBLE : GONE);
+        // The bar carries the rate, and would sit on the label's own row: with the panel on, the label goes.
+        fpsLabel.setVisibility(on && !panel ? VISIBLE : GONE);
         perfPanel.setVisibility(panel ? VISIBLE : GONE);
         try {
             Shell.nativePerfMode(panel ? 2 : 0);
@@ -704,7 +705,7 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         MenuView.Item perfPanelItem = menu("Performance Panel",
                 action("Off", () -> setPerfPanel(0)).checked(perf == 0),
                 action("Full", () -> setPerfPanel(2)).checked(perf == 2))
-                .subtitle("Frame times and a graph, the CPU, memory and graphics card");
+                .subtitle("A bar across the top: the frame rate and frame times, the CPU, memory and battery");
 
         final int smooth = settings.smoothMotion();
         List<MenuView.Item> smoothChoices = new ArrayList<>();
