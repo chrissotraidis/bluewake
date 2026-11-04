@@ -3,7 +3,9 @@
 Status: M1 implemented, opt-in; measurement next.
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
-## M1: split the cold blocks, keep the hot sections together
+## M1: split the cold blocks, keep the hot sections together (no-go, reverted)
+
+> **Outcome:** desktop −2.5%, and iTLB page walks rose 12.6%. The split follows the training profile, and blocks Outset runs that training didn't are now 140 MB away. The code stays in history as `170e394c4`.
 
 **The change:** `scripts/linux/build.py --split-functions` adds, only to the final module compile that uses the training profile:
 - **`-fsplit-machine-functions`:** blocks the profile never saw run move to `.text.split.<function>`, as a `<function>.cold` part.

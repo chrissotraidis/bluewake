@@ -34,8 +34,8 @@ The same code with the hot parts packed together, then, if that's measurable, th
 
 | Step | Change |
 |---|---|
-| M1 | `-fsplit-machine-functions` with the training profile, and `-Wl,-z,keep-text-section-prefix` (this PR) |
-| M2 | The hot text section copied into 2 MB pages at load (SteamOS runs transparent huge pages in `always` mode) |
+| M1 | ~~`-fsplit-machine-functions` with the training profile~~: no-go, desktop −2.5%, iTLB walks +12.6%; reverted |
+| M2 | The module's executable segment copied into 2 MB pages at load, without splitting (SteamOS runs transparent huge pages in `always` mode) |
 
 ## Success and constraints
 
