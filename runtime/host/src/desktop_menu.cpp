@@ -824,9 +824,29 @@ bool shader_wait_holds() {
     return true;
 }
 
+// While the game is held, the backend redraws the last picture with the menu
+// over it and asks hold() before each redraw, leaving the pace to the display.
+// With vsync off nothing slowed it: thousands of frames a second for a still
+// picture (#532). Each held redraw waits out the rest of one display refresh
+// (60 Hz when the refresh rate is unknown).
+void pace_held_redraw() {
+    static Uint64 last = 0;
+    const float hz = display_refresh();
+    const Uint64 interval = static_cast<Uint64>(1e9 / (hz >= 30.f ? hz : 60.f));
+    const Uint64 now = SDL_GetTicksNS();
+    if (last != 0 && now - last < interval)
+        SDL_DelayNS(interval - (now - last));
+    last = SDL_GetTicksNS();
+}
+
 // The game waits while the shaders compile, and while the menu is open if
 // the player has it pause.
-bool hold(void*) { return (g_open && g_menu_pauses) || shader_wait_holds(); }
+bool hold(void*) {
+    const bool held = (g_open && g_menu_pauses) || shader_wait_holds();
+    if (held)
+        pace_held_redraw();
+    return held;
+}
 
 constexpr ImGuiWindowFlags kNotice = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
                                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |

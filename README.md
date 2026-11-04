@@ -25,7 +25,7 @@
 | You play on | What to do |
 | --- | --- |
 | **Windows** 10 or 11 | [Download the ready-made build](#windows): nothing to build, just choose your disc image |
-| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it |
+| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it; building on Windows comes with the next release (experimental) |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/TVOS_BUILD.md) (experimental) |
 | **Linux** (x86-64) | [Build the native version](docs/LINUX.md); a ready-made download is not published yet |
@@ -56,7 +56,7 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download [`BlueWake-v0.9.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.9.0/BlueWake-v0.9.0-windows-x64.zip)
+1. Download [`BlueWake-v0.10.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-windows-x64.zip)
    from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play:
    you don't need PadMint or a Mac.
 2. Unpack the whole ZIP and run `BlueWake.exe`.
@@ -69,11 +69,14 @@ GPU gets Direct3D 11 instead of a black screen (not yet checked on such a PC). I
 
 ### Linux
 
-The native x86-64 Linux source build is available now; a ready-made AppImage has
-not been published yet. Build it from your disc, optionally package the
-AppImage, and open its graphical setup with `--setup`. See
-[BlueWake on Linux](docs/LINUX.md) for the commands, dependencies and AppImage
-instructions.
+1. Download [`BlueWake-v0.10.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-linux-x86_64.AppImage)
+   from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play,
+   and built to run on SteamOS too.
+2. Make it executable (`chmod +x`, or Properties › Permissions in the Deck's desktop mode) and run it.
+3. On first launch, **BlueWake Setup** asks for your disc image (`.iso` or `.gcm`). `--setup` opens it again later.
+
+You need an x86-64 CPU with AVX2, a Vulkan driver, and a system with glibc 2.38 or newer, which SteamOS and current
+distributions have. To build it yourself from your disc instead, see [BlueWake on Linux](docs/LINUX.md).
 
 ### iPhone and iPad
 
@@ -100,10 +103,11 @@ Then:
    ~~~
 
    Expect a first build of well over an hour. Add `--source-only` first to check your tools and
-   disc in a few minutes.
-2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode.
-3. **Copy the same disc image to your device:** in Finder, select the device, open **Files** and
-   drag it onto **BlueWake**. The app imports it on first launch.
+   disc in a few minutes. From the next release PadMint can also build it on a Windows PC, experimentally; see [On a Windows PC](docs/BUILD_YOUR_OWN.md#on-a-windows-pc-experimental).
+2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode. On Windows, Sideloadly.
+3. **Copy the same disc image to your device:** in Finder on a Mac, or the Apple Devices app on
+   Windows, select the device, open **Files** and drag it onto **BlueWake**. The app imports it on
+   first launch.
 
 Step by step, with updating and troubleshooting: [Build your own BlueWake](docs/BUILD_YOUR_OWN.md).
 If you used PadMint, please tell us how it went in
@@ -181,9 +185,8 @@ Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.m
 <details>
 <summary><strong>Can I download it?</strong></summary>
 
-On Windows, yes: the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest) has a
-ready-made build that needs your own disc image. The native Linux source build is available, but a
-ready-made Linux download has not been published yet. On Mac, iPhone and iPad, you build your own app
+On Windows and Linux, yes: the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest) has a
+ready-made Windows build and a Linux AppImage, both needing your own disc image. On Mac, iPhone and iPad, you build your own app
 from your disc (see [Install](#install)); if an app-only download says "Translated game code:
 Missing", add your game with PadMint.
 
@@ -261,7 +264,8 @@ scenes dip below 30 FPS on an iPhone 14.
 
 Yes. The native x86-64 Linux port was merged in
 [#107](https://github.com/chrissotraidis/bluewake/pull/107) and can be built from your own disc by
-following [the Linux guide](docs/LINUX.md). A ready-made Linux download has not been published yet.
+following [the Linux guide](docs/LINUX.md). Since 0.10.0 the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest)
+also has a ready-made AppImage, built to run on SteamOS too.
 
 </details>
 
