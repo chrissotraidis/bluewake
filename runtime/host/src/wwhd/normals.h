@@ -1330,13 +1330,25 @@ inline std::set<std::string> blue_shades(const Placed& hd) {
     return seen;
 }
 
+// The materials with a vertex whose green is 0.1 or more: shades, not (glow, 0, shade) masks (normals.py
+// grey_shades()).
+inline std::set<std::string> grey_shades(const Placed& hd) {
+    std::set<std::string> out;
+    for (size_t v = 0; v < hd.materials.size(); ++v)
+        if (hd.colour_kind[v] && hd.colours[v][1] >= 0.1)
+            out.insert(hd.materials[v]);
+    return out;
+}
+
 // key -> a stage's HD colour as its room shaders take it (normals.py colours() with curves): a mask material's
-// vertex (b, b, b, a), with its glow (red squared) where the material has a konst2 animation; averaged over the
-// vertices within kTol, the curve the hits' (none if none, or if they differ).
+// vertex (b, b, b, a), with its glow (red squared) where the material has a konst2 animation; another material with
+// the animation and grey shades (Dragon Roost Cavern's, its mask in alpha) its colour with (1 - a) squared as its
+// glow; averaged over the vertices within kTol, the curve the hits' (none if none, or if they differ).
 inline StageColours stage_colours(const J3DModel& gm, const std::vector<std::pair<int, std::vector<int>>>& rigid,
                                   const Placed& hd, const CurveMap& curves, const Moved& moved) {
     const Grid grid(hd.positions, 0.25);
     const std::set<std::string> blue = blue_shades(hd);
+    const std::set<std::string> grey = curves.empty() ? std::set<std::string>{} : grey_shades(hd);
     StageColours out;
     for (const auto& [i, joints] : rigid) {
         const auto& p = gm.positions[size_t(i)];
@@ -1367,6 +1379,13 @@ inline StageColours stage_colours(const J3DModel& gm, const std::vector<std::pai
                     kinds.push_back(uint8_t(b | b << 1 | b << 2 | a << 3 | 1 << 4));
                 }
                 glows.push_back(curve);
+            } else if (const auto it = curves.find(hd.materials[h]);
+                       it != curves.end() && it->second && grey.count(hd.materials[h])) {
+                // Another konst2 material (Dragon Roost Cavern's): its colour, and (1 - a) squared as its glow.
+                const uint8_t a = (k >> 3) & 1;
+                cols.push_back({c[0], c[1], c[2], c[3], (1.0 - c[3]) * (1.0 - c[3])});
+                kinds.push_back(uint8_t((k & 0xF) | a << 4));
+                glows.push_back(it->second);
             } else {
                 cols.push_back({c[0], c[1], c[2], c[3], 0.0});
                 kinds.push_back(uint8_t((k & 0xF) | 1 << 4));

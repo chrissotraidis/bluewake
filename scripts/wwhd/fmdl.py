@@ -287,8 +287,9 @@ def _value(segments, f):
 
 def glow_curves(bfres: bytes) -> dict:
     """Material name -> its konst2 colour animation at each of its frames 0 .. count - 1, (r, g, b) linear: the
-    lava's glow colour HD's lava shaders add (lava K x 4 x the vertex red squared; GanonB's walls, PS 4345 in Cemu,
-    take it at the animation's frame, 0.453, 0.0415, 0.0005 at frame 23). Only materials whose r, g and b all
+    lava's glow colour HD's lava shaders add (lava K x 4 x the vertex red squared, or in Dragon Roost Cavern
+    (1 - alpha) squared; GanonB's walls, PS 4345 in Cemu, take it at the animation's frame, 0.453, 0.0415, 0.0005 at
+    frame 23). Only materials whose r, g and b all
     animate (cubic or linear curves); the first animation that has a material wins."""
     out = {}
     if bfres[:4] != b"FRES":

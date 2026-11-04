@@ -15,7 +15,11 @@ HD's lava and fire rooms (GanonB, Cave01, MiniKaz, Ganon's Tower's lava parts) k
 vertex colours: (glow, 0, shade). Every room shader there lights by the blue alone, as a grey (GanonB's PS 4342 and
 4345 in Cemu), and the materials with a konst2 colour animation (fmdl.glow_curves) add the lava's light, lava K x 4
 x the red squared, times the texture, outside the shade. So a material whose vertices' green is all 0 gives
-(b, b, b); one with the animation also its glow (red squared) and its curve.
+(b, b, b); one with the animation also its glow (red squared) and its curve. Dragon Roost Cavern's lava rooms
+(M_NewD2 rooms 2, 7, 8, 10-13, 15) keep their colours as shades and the mask in alpha: their konst2 materials'
+shaders (the disc's model.sharcfb) add lava K x 4 x (1 - alpha) squared, the shade the rgb. So another material
+with the animation whose green reaches 0.1 (a shade, not a mask) keeps its colour and takes (1 - a) squared as its
+glow.
 
 Normals: b'BWHN', u32 version 1, u32 count, then count rows of little-endian float32 x, y, z, nx, ny, nz: the key
 (x, y, z) is the position exactly as stored in the GameCube model (its raw joint-local float32s, bit for bit); a
@@ -24,9 +28,9 @@ consecutive; rows sorted by the key's bytes. Colours: b'BWHC', u32 version 1, u3
 (0..1, HD's averaged over its vertices at the position); a position whose colour differs between models is left
 out. A stage with lava glow writes version 2: u32 curve count, each curve's u32 frame count and its frames' linear
 r, g, b (HD's konst2 at frames 0, 1, ...), then the rows, each x, y, z, r, g, b, a, glow, curve (-1 none; glow, the
-vertex red squared, 0 there). Positions drawn through a skinning envelope are left out. Each joint's points take a voted offset (HD moved a
-few pieces whole), sampling points evenly so the native importer (runtime/host/src/wwhd/normals.h) makes the same
-bytes.
+vertex red squared or (1 - alpha) squared, 0 there). Positions drawn through a skinning envelope are left out. Each
+joint's points take a voted offset (HD moved a few pieces whole), sampling points evenly so the native importer
+(runtime/host/src/wwhd/normals.h) makes the same bytes.
 """
 from __future__ import annotations
 
@@ -234,13 +238,28 @@ def room_colour(c, glow):
     return c[2], c[2], c[2], c[3], c[0] * c[0]
 
 
+def grey_shades(hd: fmdl.Placed):
+    """The materials with a vertex whose green is 0.1 or more: shades, not (glow, 0, shade) masks (MiniKaz's
+    lambert26, with HD's red squared shader, has green up to 0.04; Dragon Roost Cavern's greys reach 0.47 and
+    more)."""
+    return {m for m, c in zip(hd.materials, hd.colours) if c is not None and c[1] >= 0.1}
+
+
+def alpha_glow_colour(c):
+    """A konst2 material's vertex outside the masks (Dragon Roost Cavern's): its colour, the shade, and its glow
+    (1 - alpha) squared."""
+    return tuple(c) + ((1 - c[3]) * (1 - c[3]),)
+
+
 def colours(gm: j3d.Model, hd: fmdl.Placed, curves=None, moved=None):
     """key -> HD's colour averaged over its vertices within TOL of the position (the offset that matched it where
     match()'s moved has one, else none). For a stage (curves:
     the model's konst2 animations, fmdl.glow_curves), (r, g, b, a, glow, curve): the masks as room_colour takes them,
-    the glow averaged too, and the curve the hits' (None if none, or if they differ)."""
+    another animated material's with grey shades as alpha_glow_colour, the glow averaged too, and the curve the
+    hits' (None if none, or if they differ)."""
     grid = Grid(hd.positions, 0.25)
     blue = blue_shades(hd) if curves is not None else set()
+    grey = grey_shades(hd) if curves else set()
     out = {}
     for i, joints in gm.rigid().items():
         q = j3d.apply(gm.world(joints[0]), gm.positions[i])
@@ -261,6 +280,9 @@ def colours(gm: j3d.Model, hd: fmdl.Placed, curves=None, moved=None):
                 curve = curves.get(m)
                 cols.append(room_colour(hd.colours[h], curve))
                 kinds.append(curve)
+            elif m in curves and m in grey:
+                cols.append(alpha_glow_colour(hd.colours[h]))
+                kinds.append(curves[m])
             else:
                 cols.append(tuple(hd.colours[h]) + (0,))
                 kinds.append(None)
