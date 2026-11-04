@@ -2,8 +2,10 @@
 
 Status: The current 2×2 grid (five rounds, Deck and desktop) selects Clang 22
 with libc++: about +1% and exact; static libstdc++ has no effect, against
-[#472](https://github.com/chrissotraidis/bluewake/pull/472)'s +3%. Open: A/A
-noise and the #472 packaged-Dawn check; no default change yet.
+[#472](https://github.com/chrissotraidis/bluewake/pull/472)'s +3%. A/A noise
+(Deck 0.6%, desktop 0.0%) is below every compiler contrast, and #472's packaged
+Dawn adds nothing (−0.6% Deck, +0.2% desktop). Open: the Game Mode grid; no
+default change yet.
 
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) ·
 [Parent M5](https://github.com/chrissotraidis/bluewake/pull/421) ·
@@ -49,7 +51,7 @@ Frozen foundation: [`14c558d62`](https://github.com/irregularthanis/bluewake/com
 ### M5: Measure and decide (depends: M4)
 
 - [ ] M5-T01: Run the full interleaved five-scene headless grid with matching checkpoints.
-- [ ] M5-T02 (five rounds done; A/A noise pending): Establish rendered A/A noise, then run at least five interleaved four-cell rendered rounds.
+- [x] M5-T02: Establish rendered A/A noise, then run at least five interleaved four-cell rendered rounds.
 - [ ] M5-T03: Run the matched Game Mode grid and #472 packaged-Dawn confirmation; report main effects, interaction and decision.
 
 ## Evidence ledger
@@ -66,6 +68,8 @@ Frozen foundation: [`14c558d62`](https://github.com/irregularthanis/bluewake/com
 | Task | Commit / artifact | Command / method | Environment / input | Result |
 |---|---|---|---|---|
 | M4-T03 | `m437-a`…`m437-d` | `check_appimage_abi.py` on each AppImage; `--help` launch from each; checkpoints from the M5 runs; source contracts from M3 | Desktop PC | **All four pass:** maximum GLIBC_2.38, no private game files (A/C 14 ELF files, B/D 11); every AppImage launches; checkpoints identical in every M5 run |
+| M5-T02 A/A and M5-T03 #472 check (Deck) | C, a byte copy of C, and E (`m437-e`: Clang 22, static libstdc++, packaged Dawn, over C's module); local `m437-aa-e-deck/` (private) | render_bench, `--pairs 3`, same `--set` options; **the benchmark tour's five stops, headless gamescope** (the command omitted the grid's save states and display) | **Steam Deck** | Checkpoints identical (30 per run). **A/A: the copy −0.64%** (scenes −1.7 to +0.7%). **E vs C −0.57%**, inside the A/A gap |
+| M5-T02 A/A and M5-T03 #472 check (desktop) | Same three builds; local `m437-aa-e-desktop/` (private) | Same, plus `BLUEWAKE_PAUSE_UNFOCUSED=0` | **Desktop PC** | Checkpoints identical. **A/A −0.02%** (scenes ±0.3%). **E vs C +0.18%**: no effect |
 | M5-T01 (Deck, session 2) | `m437-a`…`m437-d`; local `m437-grid-deck-2/` (private) | Same bench and settings, `--pairs 3` (6 runs per cell) | **Steam Deck**, as session 1 | **Checkpoints identical across every run.** Overall FPS: A 38.30, B 38.06, C 38.79, D 38.74. **Compiler: +1.3% (C vs A) and +1.8% (D vs B).** **Runtime: −0.6% and −0.1%.** Picture flags again inconsistent between pairs and sessions: capture timing |
 | M5-T01 (desktop, session 2) | `m437-a`…`m437-d`; local `m437-grid-desktop-2/` (private) | As desktop session 1, `--pairs 3`; run at the same time as the Deck session (the Deck measures on itself) | **Desktop PC**, as session 1 | **Checkpoints identical across every run.** Overall FPS: A 78.25, B 78.44, C 78.95, D 79.04. **Compiler: +0.9% (C vs A) and +0.8% (D vs B).** **Runtime: +0.2% and +0.1%** |
 | M5, combined (5 rounds per cell on each machine) | The four sessions above | 10 runs per cell per machine | Deck and desktop | **Clang 22 is faster in all 8 contrasts: +1.0 to +1.8% on the Deck, +0.7 to +1.1% on the desktop.** **The runtime has no effect: −0.6 to −0.1% on the Deck, 0.0 to +0.5% on the desktop, never beyond noise.** Exact everywhere. Decision: Clang 22 is worth making the default (separate change, after M4-T03); keep libc++ |

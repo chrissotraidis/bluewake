@@ -1,6 +1,6 @@
 # PRD — Clang version evaluation
 
-Status: Current 2×2 measured: Clang 22 with libc++ selected; A/A noise, #472 check and ABI audit open
+Status: Current 2×2 measured: Clang 22 with libc++ selected; Game Mode grid open
 Source: pre-merge [PR #446](https://github.com/chrissotraidis/bluewake/pull/446)
 at `48a5872e213db41117e5bb4321a7aefbcf77993e`
 Current matrix foundation: upstream `main` at `ee991d312d97` plus successful
@@ -99,5 +99,8 @@ interleaved rounds per cell (two sessions) on the Steam Deck and on a desktop
   hold on the current tree.
 - The runtime has no effect: under ±0.6%, opposite in sign between machines.
   #472's +3% came from its other changes, not static libstdc++.
+- A/A noise is 0.6% on the Deck and 0.0% on the desktop, below every compiler
+  contrast. #472's packaging (static libstdc++ with packaged Dawn) on Clang 22
+  is noise: −0.6% Deck, +0.2% desktop.
 - Decision: Clang 22 with libc++ (cell C). Making it the default is a separate
   change, gated on the ABI audit and smoke test.

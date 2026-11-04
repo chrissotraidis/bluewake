@@ -241,8 +241,22 @@ balanced `A/B/C/D/D/C/B/A` rounds, 10 runs per cell per machine:
 - **Picture flags** (Butterfly Room, Hyrule Castle "flicker") appear between
   same-compiler cells too and move between pairs from session to session; with
   identical checkpoints they are screenshot timing, not a rendering change.
-- **Decision:** cell C, Clang 22 with libc++. Default change follows the ABI
-  audit and smoke test (M4-T03) in its own PR.
+- **Decision:** cell C, Clang 22 with libc++. Default change follows in its
+  own PR; the ABI audit and smoke test (M4-T03) pass.
+
+**Noise and #472's packaging** (C, a byte copy of C, and E = Clang 22 with
+#472's static libstdc++ and packaged Dawn; three rounds on the benchmark tour,
+not the grid's save states):
+
+| | Steam Deck | Desktop |
+|---|---:|---:|
+| A/A: copy of C vs C | −0.64% | −0.02% |
+| E (#472 packaging) vs C | −0.57% | +0.18% |
+
+- Every Clang 22 contrast (+0.7 to +1.8%) is above the A/A gap on its machine,
+  though on the Deck only by about 2×.
+- #472's packaging is noise on both machines: no reason to switch from libc++.
+
 
 ## Remaining measurement order
 
@@ -255,10 +269,10 @@ identical.
 |---:|---|---|---|
 | 1 | Artifact validation | Source/options/Dawn identity; compiler/runtime; PGO and module SHA; ABI/smoke | Four valid cells; A/B and C/D module hashes match |
 | 2 | Headless grid | Full five-scene interleaved runs and checkpoints | All cells complete; checkpoints match |
-| 3 | Rendered preflight and A/A | Every scene loads; at least three matched controls | Loading is confirmed and noise recorded |
+| 3 (done) | Rendered preflight and A/A | Every scene loads; at least three matched controls | Loading is confirmed and noise recorded |
 | 4 (done) | Rendered grid | At least five interleaved four-cell rounds | Per-scene medians/dispersion and checkpoints recorded |
 | 5 | Game Mode grid | Fixed route; at least three controls then five interleaved rounds | FPS, dips, busy/waits, temperature/power and artifact identity recorded |
-| 6 | #472 shipping check | Winning runtime with #472's packaged Dawn versus its factor-grid counterpart | Quantifies provider effect separately |
+| 6 (done) | #472 shipping check | Winning runtime with #472's packaged Dawn versus its factor-grid counterpart | Quantifies provider effect separately |
 | 7 | Decision | Main effects, interaction and shipping check | Select a complete recipe or record inconclusive; no silent default change |
 
 The Game Mode launch is player-facing and starts locally on the Deck. SSH may
