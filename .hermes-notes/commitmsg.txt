@@ -1,0 +1,8 @@
+Android: import the disc on first run, on the device
+
+Show a first-run screen when main.dol or the rels are missing, as the
+iPhone and iPad app does. The player picks their own GZLE01 disc image;
+it is copied into the game folder and main.dol + rels/ are extracted from
+it on the device (disc_import.c, the same importer the other platforms
+use). A separate launcher activity owns the flow before SDL starts, so the
+game's own lifecycle cannot tear the screen down.

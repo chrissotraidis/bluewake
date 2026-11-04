@@ -30,6 +30,103 @@ static void enable(void) {
     assert(bluewake_composite_edge_filter(true));
 }
 
+/* The gate (#503 M5) with the host's storage: the two flags are the word's
+ * first bytes, as in main.c, and gate_host_refresh sets the other two as
+ * host_skip_fast_refresh and host_direct_gate_pi do. */
+static BwHostGate hg;
+static u32 hg_cause, hg_mask;
+static bool in_main(u32 address) {
+    return address >= BW_GATE_MAIN_FIRST && address < BW_GATE_MAIN_END;
+}
+static void gate_host_refresh(const BwHostSkipFast* fast) {
+    hg.bits.closed = !fast->simple || in_main(fast->single[0]) || in_main(fast->single[1]);
+    hg.bits.pi_pending = (hg_cause & hg_mask) != 0u;
+}
+
+static void test_gate(void) {
+    CPUState cpu = {0};
+    cpu.cycle_budget = 20;
+    BwHostSkipFast fast = {1u, {0xC1000000u, 0u}, {BW_SKIP_RANGE0_FIRST, BW_SKIP_RANGE1_FIRST},
+                           {BW_SKIP_RANGE0_LAST - BW_SKIP_RANGE0_FIRST,
+                            BW_SKIP_RANGE1_LAST - BW_SKIP_RANGE1_FIRST}};
+    allow = true;
+    hg.bits.sources_dirty = hg.bits.decrementer_pending = false;
+    assert(bluewake_composite_direct_calls_v3(true, &hg.bits.sources_dirty, &hg.bits.decrementer_pending,
+                                             &hg_cause, &hg_mask, can_skip, &allow, &fast, false));
+    assert(*bw_direct_gate != 0u); /* closed until the host hands the word over */
+    gate_host_refresh(&fast);
+    assert(hg.word == 0u);
+    assert(bluewake_composite_direct_gate(&hg.word) == 1 && bw_direct_gate == &hg.word);
+    unsigned before = queries;
+    assert(bw_direct_call_ready_main(&cpu, 0x80009000u) && queries == before); /* no call, no query */
+
+    /* Every host and CPU state, simple or not, a single in the main code or
+     * not: the gate's answer is the full check's. */
+    static const u32 targets[] = {BW_GATE_MAIN_FIRST, 0x80009000u, BW_SKIP_RANGE0_FIRST - 4u,
+                                  BW_GATE_MAIN_END - 4u};
+    for (unsigned state = 0; state < 1024u; ++state) {
+        hg.bits.sources_dirty = state & 1u;
+        hg.bits.decrementer_pending = (state >> 1) & 1u;
+        hg_cause = (state >> 2) & 1u;
+        hg_mask = (state >> 3) & 1u;
+        cpu.msr = (state >> 4) & 1u ? PPC_MSR_EE : 0u;
+        cpu.exception = (state >> 5) & 1u;
+        cpu.downcount = (state >> 6) & 1u ? -20 : 0;
+        bw_direct_depth = (state >> 7) & 1u ? BW_DIRECT_DEPTH_MAX : 0u;
+        fast.simple = (state >> 8) & 1u ? 0u : 1u;
+        fast.single[1] = (state >> 9) & 1u ? 0x80009000u : 0u;
+        gate_host_refresh(&fast);
+        for (unsigned i = 0; i < sizeof targets / sizeof targets[0]; ++i)
+            assert(bw_direct_call_ready_main(&cpu, targets[i]) ==
+                   bw_direct_call_ready_full(&cpu, targets[i]));
+    }
+    hg.bits.sources_dirty = hg.bits.decrementer_pending = false;
+    hg_cause = hg_mask = 0u;
+    cpu.msr = 0u;
+    cpu.exception = 0u;
+    cpu.downcount = 0;
+    bw_direct_depth = 0u;
+    fast.simple = 1u;
+    fast.single[1] = 0u;
+    gate_host_refresh(&fast);
+
+    /* Verify keeps the gate closed for the calls; the full check counts what it
+     * would have answered. A stale pi_pending byte is an unsafe answer... */
+    assert(bluewake_composite_direct_calls_v3(true, &hg.bits.sources_dirty, &hg.bits.decrementer_pending,
+                                             &hg_cause, &hg_mask, can_skip, &allow, &fast, true));
+    assert(*bw_direct_gate != 0u && hg.word == 0u);
+    hg_cause = hg_mask = 1u; /* pending, but the byte was not refreshed */
+    cpu.msr = PPC_MSR_EE;
+    assert(!bw_direct_call_ready_full(&cpu, 0x80009000u));
+    unsigned long long unsafe = 0u, conservative = 0u, answers = 0u;
+    bluewake_composite_direct_gate_counts(&unsafe, &conservative, &answers);
+    assert(unsafe == 1u && conservative == 0u && answers == 1u);
+    /* ...and an interrupt pending while MSR[EE] is clear the conservative side. */
+    gate_host_refresh(&fast);
+    cpu.msr = 0u;
+    assert(bw_direct_call_ready_full(&cpu, 0x80009000u));
+    bluewake_composite_direct_gate_counts(&unsafe, &conservative, &answers);
+    assert(unsafe == 1u && conservative == 1u && answers == 2u);
+    /* Addresses the gate never answers are not counted. */
+    assert(bw_direct_call_ready_full(&cpu, 0xC0400000u));
+    bluewake_composite_direct_gate_counts(&unsafe, &conservative, &answers);
+    assert(answers == 2u);
+    hg_cause = hg_mask = 0u;
+    gate_host_refresh(&fast);
+
+    /* Off with verify, with the word taken back, and with direct calls off. */
+    assert(bluewake_composite_direct_calls_v3(true, &hg.bits.sources_dirty, &hg.bits.decrementer_pending,
+                                             &hg_cause, &hg_mask, can_skip, &allow, &fast, false));
+    assert(bw_direct_gate == &hg.word);
+    assert(bluewake_composite_direct_gate(NULL) == 0 && *bw_direct_gate != 0u);
+    assert(bluewake_composite_direct_gate(&hg.word) == 1);
+    enable(); /* v2 drops the address-only answer, and with it the gate */
+    assert(*bw_direct_gate != 0u);
+    assert(!bluewake_composite_direct_calls_v2(false, NULL, NULL, NULL, NULL, NULL, NULL));
+    assert(*bw_direct_gate != 0u);
+    assert(bluewake_composite_direct_gate(&hg.word) == 0); /* direct calls off: stays closed */
+}
+
 int main(void) {
     CPUState cpu = {0};
     cpu.cycle_budget = 20;
@@ -84,15 +181,46 @@ int main(void) {
     assert(!bw_edge_unwatched(0x80004000u)); /* Corrupt/full table cannot hang. */
 
     /* v3: the host's address-only answer, read inline without a call. */
-    BwHostSkipFast fast = {1u, {0x80004000u, 0u}, {0x80008000u, 0xFFFFFFFFu}, {0x100u, 0u}};
+    /* The ranges are always direct_skip.h's (main.c checks the host's agree). */
+    BwHostSkipFast fast = {1u, {0x80004000u, 0u}, {BW_SKIP_RANGE0_FIRST, BW_SKIP_RANGE1_FIRST},
+                           {BW_SKIP_RANGE0_LAST - BW_SKIP_RANGE0_FIRST,
+                            BW_SKIP_RANGE1_LAST - BW_SKIP_RANGE1_FIRST}};
     assert(bluewake_composite_direct_calls_v3(true, &attention, &decrementer, &cause, &mask,
                                              can_skip, &allow, &fast, false));
     before = queries;
     assert(!bw_direct_call_ready(&cpu, 0x80004000u)); /* a listed address */
-    assert(!bw_direct_call_ready(&cpu, 0x80008000u)); /* a range's first address */
-    assert(!bw_direct_call_ready(&cpu, 0x80008100u)); /* and its last */
-    assert(bw_direct_call_ready(&cpu, 0x80007FFCu));
-    assert(bw_direct_call_ready(&cpu, 0x80008104u));
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_FIRST)); /* a range's first address */
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_LAST)); /* and its last */
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_RANGE1_FIRST + 0x10u));
+    assert(bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_FIRST - 4u));
+    assert(bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_LAST + 4u));
+    /* A constant address outside both ranges takes the plain check: the same
+     * answer as the full one in every host and CPU state. */
+    {
+        static const u32 outside[] = {0x80004000u, 0x80009000u, BW_SKIP_RANGE0_FIRST - 4u,
+                                      BW_SKIP_RANGE1_LAST + 4u, 0xC0400000u, 0xC13B1850u};
+        const unsigned saved_queries = queries;
+        for (unsigned state = 0; state < 256u; ++state) {
+            attention = state & 1u;
+            decrementer = (state >> 1) & 1u;
+            cause = (state >> 2) & 1u;
+            mask = (state >> 3) & 1u;
+            cpu.msr = (state >> 4) & 1u ? PPC_MSR_EE : 0u;
+            cpu.exception = (state >> 5) & 1u;
+            cpu.downcount = (state >> 6) & 1u ? -20 : 0;
+            bw_direct_depth = (state >> 7) & 1u ? BW_DIRECT_DEPTH_MAX : 0u;
+            for (unsigned i = 0; i < sizeof outside / sizeof outside[0]; ++i)
+                assert(bw_direct_call_ready_plain(&cpu, outside[i]) ==
+                       bw_direct_call_ready_full(&cpu, outside[i]));
+        }
+        assert(queries == saved_queries); /* neither asked the host */
+        attention = decrementer = false;
+        cause = mask = 0u;
+        cpu.msr = 0u;
+        cpu.exception = 0u;
+        cpu.downcount = 0;
+        bw_direct_depth = 0u;
+    }
     allow = false; /* The inline answer does not ask the host... */
     assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
     attention = true; /* ...but the interrupt sources still come first. */
@@ -124,6 +252,8 @@ int main(void) {
 
     assert(!bluewake_composite_direct_calls_v2(false, NULL, NULL, NULL, NULL, NULL, NULL));
     assert(!bw_edge_filter_enabled && !bw_direct_call_ready(&cpu, 0x80004000u));
-    puts("Direct calls: host contract, inline answer, interrupts, budget, watches, mirrors and depth pass");
+    test_gate();
+    puts("Direct calls: host contract, inline answer, plain check, gate, interrupts, budget, watches, "
+         "mirrors and depth pass");
     return 0;
 }

@@ -177,6 +177,26 @@ In that same folder (`files/`):
 | `launch.env` | optional launch settings, one `NAME=value` a line (`install.py --env NAME=value`) |
 | `logs/session-*.log` | the newest eight sessions (also in logcat, tag `BlueWake`) |
 
+## First run, and the log a crash leaves
+
+With no `main.dol` or rels yet, the app opens its first-run screen instead of SDL (`FirstRunActivity`): the player
+picks their own `GZLE01.iso`, it is copied into `files/game`, and `main.dol` and `rels/` are extracted from it on the
+device. That runs before the game and its menu exist, so the session log starts with the first-run screen:
+`logs/session-*.log` then holds the disc import and the game after it in one file, with the copy's size and the free
+space logged as it goes.
+
+The copy is checked before and after it runs. Before, the space left in `files/` must cover the size the provider
+reports for the picked file plus 32 MB for the extraction, and the screen says both sizes when it does not. After,
+the copy must be that same size: a provider that ends the stream early — a cloud-backed file, a cancelled download —
+leaves a short image that passes the disc's header check and then dies when the game reads past its end. The image
+is written beside the real name as `GZLE01.iso.part` and renamed once it is whole, so a copy that a kill or a full
+filesystem interrupts leaves nothing for the game to read. When a provider cannot report a size, the log says so and
+the copy is only checked against the free space the filesystem reports.
+
+A session that ends properly deletes `logs/session-in-progress`; one that does not leaves it there naming its log,
+and the next first-run screen offers **Share Its Log** (through `LogProvider`, as Help & Feedback > Share Session Log
+does). A crash before the menu is reportable that way instead of existing only in logcat and the tombstone.
+
 **Uninstalling the app deletes this folder, saves included.** Back up the card first:
 `python scripts/android/install.py --pull-saves backup/`. Installing a new build over the old one keeps it.
 
@@ -221,6 +241,27 @@ heats and throttles. `--cool` waits for the phone to cool to under 34 °C at ful
 build first; `--headless` measures without drawing or pacing; `--env` adds launch settings (a test warp, the
 player's display settings). `--probe` also logs the player's position, to check the spot; since #297 it keeps
 the full overlap watch on from a card save, so measure speed without it. The card is only read.
+
+The same numbers are on the phone: **⋯ → Display → Performance Panel → Full** draws a bar across the top of
+the picture, in the shape of the Steam Deck's overlay — the frame rate with a graph of the frame times beside it,
+then the game's share of the processor and the mean clock of its cores, the memory in use against the whole (and
+the game's own resident memory), and the battery, with a thin bar under each number that is a share of something.
+It is the desktop's F9 panel (`runtime/host/src/perf_monitor.c`) drawn in the Android shell's own idiom, refreshed
+twice a second, and it is remembered with the other display settings. The columns are measured from the widest
+number each can print and the least useful are dropped when the picture is narrow — the game's own memory and the
+clock go before the rate, the battery and the graph do — so the bar never changes shape as the numbers do. An
+Android app is not given everything a desktop is: `/proc/stat` is denied to it, so the machine-wide processor share
+is not shown, only the game's own; a phone publishes no graphics card counters or temperatures to apps, so the
+graphics card's part is left out rather than drawn as permanent dashes; and its thermal zones are denied too, so
+the platform's thermal word stands in the clock's place once the phone is no longer nominal. The one-time
+`[perf] panel (android)` line in the log says which of them the phone would give.
+
+The phone presents without waiting on the display. Its compositor holds the buffer the way Wayland does, so a
+FIFO present blocks the game thread, and a frame that misses the vsync it aimed for (33.3 ms at 60 Hz) waits for
+the next but one — 50 ms, 20 fps — which reads as the frame rate falling by a flat 10 rather than by the few
+milliseconds the frame actually lost. Mailbox returns at once and the compositor still times the display, so a
+scene that needs 36 ms shows 27 fps instead of 20. `BLUEWAKE_VSYNC=1` in `launch.env` restores the blocking
+present.
 
 ## Files
 

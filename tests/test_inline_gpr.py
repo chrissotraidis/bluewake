@@ -64,6 +64,33 @@ class InlineGprTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertIn('bw_direct_call_ready(ctx, 0x80328F84u)', result)
 
+    def test_diagnostic_only_addresses_are_not_watched(self):
+        # The GX entry trace names four ranges between the markers, and every
+        # build with a trace on refuses the chassis skip anyway. direct_calls.py
+        # leaves them out of the watch list; the inliner has to as well, or the
+        # two preparations disagree about which calls may be made inline
+        # (issue #184, where the disagreement showed up as inlining counts that
+        # did not match between the two prepare steps).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'runtime/host/src').mkdir(parents=True)
+            (root / 'windows/src').mkdir(parents=True)
+            (root / 'runtime/host/src/main.c').write_text(
+                '// bluewake-unwatched-begin\n'
+                'static const u32 g_gx_entry_trace_ranges[][2] = {\n'
+                '    {0x803230C4u, 0x803231B4u},\n'
+                '};\n'
+                '// bluewake-unwatched-end\n'
+                'if (pc == 0x80311111u)\n'
+                '    return;\n')
+            with patch.object(gpr, 'ROOT', root):
+                watched = gpr.watched_addresses()
+        self.assertNotIn(0x803230C4, watched)
+        self.assertNotIn(0x803230C4 | 0x40000000, watched)
+        self.assertNotIn(0x803231B4, watched)
+        self.assertIn(0x80311111, watched)
+        self.assertIn(0x80311111 | 0x40000000, watched)
+
     def test_rel_call_through_the_mirror_is_inlined_by_its_canonical_entry(self):
         rel = (CALL.replace('80004000', 'C0DA0254').replace('80004004', 'C0DA0258')
                .replace('0x80328F84', '0xC0328F84'))

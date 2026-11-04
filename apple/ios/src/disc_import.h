@@ -20,6 +20,12 @@ typedef void (*BlueWakeImportProgress)(void* context, double fraction,
 // success, otherwise writes a sentence for the user into error.
 int bluewake_disc_check(const char* iso_path, char* error, size_t error_size);
 
+// Checks the header as bluewake_disc_check does, and then that the image holds
+// every byte its own file table names. A copy that ended early passes the header
+// check — that reads 0x440 bytes — and then sends the game reading past the end
+// of the file. Returns 0 on success, otherwise a sentence for the user.
+int bluewake_disc_check_complete(const char* iso_path, char* error,
+                                 size_t error_size);
 // Whether out_dir has room for an import that needs `needed` bytes, given
 // `available` free. Returns 0 when it does, -1 otherwise with a sentence naming
 // the folder, the size needed and the size free. Split out from

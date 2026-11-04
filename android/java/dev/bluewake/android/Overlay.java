@@ -92,11 +92,13 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     private int panelMaxHeight;
     private boolean fpsWasPaused;
     private long fpsPauseEnded;
+    private PerfPanelView perfPanel;
 
     private final Runnable fpsTick = new Runnable() {
         @Override
         public void run() {
             updateFPSLabel();
+            if (perfPanel.getVisibility() == VISIBLE) perfPanel.refresh();
             handler.postDelayed(this, 500);
         }
     };
@@ -134,6 +136,11 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         LayoutParams fpsParams = new LayoutParams(LayoutParams.WRAP_CONTENT, px(28));
         fpsParams.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         addView(fpsLabel, fpsParams);
+
+        // The performance bar: the desktop's F9 panel in the Android idiom (PerfPanelView), a row across the top.
+        perfPanel = new PerfPanelView(activity);
+        perfPanel.setVisibility(GONE);
+        addView(perfPanel, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
 
         menuButton = new MenuButton(activity);
         menuButton.setContentDescription("Menu");
@@ -429,6 +436,13 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
             fpsLabel.setLayoutParams(fpsParams);
         }
         fpsLabel.setMaxWidth(Math.max(px(120), Math.round(safe.width() - 140f * dp)));
+        // The performance bar lies across the picture's top edge, as the Steam Deck's overlay does: one row, the width
+        // of the picture, and clear of the ⋯ button where the picture reaches it. Over the game, under the menu.
+        final float perfInset = 8f * dp;
+        final float perfLeft = picture.left + perfInset;
+        final float perfRight = Math.min(picture.right, safe.right - 60f * dp) - perfInset;
+        place(perfPanel, perfLeft, Math.max(picture.top, safe.top) + perfInset,
+                Math.max(0f, perfRight - perfLeft), perfPanel.panelHeightPx());
         float panelWidth = Math.min(360f * dp, safe.width() - 32f * dp);
         panelMaxHeight = Math.round(Math.min(330f * dp, safe.height() - 72f * dp));
         place(settingsPanel, safe.right - panelWidth - 12f * dp, safe.top + 60f * dp, panelWidth,
@@ -441,9 +455,31 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
 
     private void applyFPSVisibility() {
         boolean on = settings.bool(Settings.SHOW_FPS, false);
-        fpsLabel.setVisibility(on ? VISIBLE : GONE);
+        final boolean panel = perfMode() == 2;
+        // The bar carries the rate, and would sit on the label's own row: with the panel on, the label goes.
+        fpsLabel.setVisibility(on && !panel ? VISIBLE : GONE);
+        perfPanel.setVisibility(panel ? VISIBLE : GONE);
+        try {
+            Shell.nativePerfMode(panel ? 2 : 0);
+        } catch (UnsatisfiedLinkError ignored) {
+            // Before libmain.so is loaded: the first tick after it applies the panel's numbers.
+        }
+        if (panel) perfPanel.refresh();
         handler.removeCallbacks(fpsTick);
-        if (on) fpsTick.run();
+        if (on || panel) fpsTick.run();
+        if (getWidth() > 0) arrange();
+    }
+
+    /** The performance panel's mode: 0 off, or 2 the full panel (perf_monitor.h). */
+    private int perfMode() {
+        return settings.integer(Settings.PERF_PANEL, 0) == 2 ? 2 : 0;
+    }
+
+    /** The menu's Performance Panel choice: stored, and shown at once. Full turns the frame rate on with it. */
+    private void setPerfPanel(int mode) {
+        settings.set(Settings.PERF_PANEL, mode);
+        if (mode == 2 && !settings.bool(Settings.SHOW_FPS, false)) settings.set(Settings.SHOW_FPS, true);
+        applyFPSVisibility();
     }
 
     /** Frames shown per second, game speed and the longest frame gap in the last second (touch_controls.cpp). */
@@ -674,6 +710,11 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
             settings.set(Settings.SHOW_FPS, !settings.bool(Settings.SHOW_FPS, false));
             applyFPSVisibility();
         }).checked(settings.bool(Settings.SHOW_FPS, false));
+        final int perf = perfMode();
+        MenuView.Item perfPanelItem = menu("Performance Panel",
+                action("Off", () -> setPerfPanel(0)).checked(perf == 0),
+                action("Full", () -> setPerfPanel(2)).checked(perf == 2))
+                .subtitle("A bar across the top: the frame rate and frame times, the CPU, memory and battery");
 
         final int smooth = settings.smoothMotion();
         List<MenuView.Item> smoothChoices = new ArrayList<>();
@@ -702,7 +743,7 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
         MenuView.Item aspectMenu = menu("Aspect Ratio",
                 aspectAction("Original 4:3", 0, aspect),
                 aspectAction("Fill Screen", 1, aspect));
-        return menu("Display", showFPS, smoothMotion, resolution, filtering, aspectMenu);
+        return menu("Display", showFPS, perfPanelItem, smoothMotion, resolution, filtering, aspectMenu);
     }
 
     private float maxRefreshRate() {

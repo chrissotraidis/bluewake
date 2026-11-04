@@ -204,14 +204,25 @@ static void reset_host(void) {
     bw_host_pi_mask = &s_pi_mask;
 }
 
-/* The module's can-skip observation: refuse every direct-call skip, so the
- * translation goes round the loop as the test's native reference does (the
- * pre-migration v1 handshake returned 0, keeping direct calls off). The test
- * compares a native run against the full-loop translation; direct-call skips
- * would change cycle accounting and break that comparison. */
+/* The module's can-skip observation, as the host's is: allow a direct-call skip
+ * where the host's interrupt sources are clean and no interrupt the guest would
+ * take is pending, so the translation runs the whole function instead of
+ * stopping at its first call. The test has no feature dispatch.
+ *
+ * This used to refuse every skip, because the v1 handshake returned 0 (direct
+ * calls off) and a skip changes cycle accounting. Measured against a module that
+ * allows it (#179): strcmp 200 cases, the four dStage_searchName entry points 200
+ * each, J3DMtxCalcBasic and J3DMtxCalcSoftimage 40 each, 0 mismatches each;
+ * J3DMtxCalcMaya still stops, at _restgpr_27, which the host really does name.
+ * The accounting did not move, and refusing the skip is what kept a function
+ * whose translation calls another chunk from running at all (issue #498). */
 static bool test_can_skip(void* user, const CPUState* cpu, u32 address) {
-    (void)user; (void)cpu; (void)address;
-    return false;
+    (void)user; (void)address;
+    if (s_sources_dirty)
+        return false;
+    if ((cpu->msr & PPC_MSR_EE) == 0u)
+        return true;
+    return !s_decrementer_pending && (s_pi_cause & s_pi_mask) == 0u;
 }
 
 enum { F_STRCMP, F_ENTRY, F_LOOP, F_RESULT, F_STEP, F_COUNT };
@@ -649,9 +660,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     /* The module as in play: quiet host flags, direct calls, its edge filter. */
-    static const bool clear = false;
-    static const u32 zero = 0u;
-    if (!direct(true, &clear, &clear, &zero, &zero, test_can_skip, NULL) || !filter(true)) {
+    if (!direct(true, &s_sources_dirty, &s_decrementer_pending, &s_pi_cause, &s_pi_mask,
+                test_can_skip, NULL) || !filter(true)) {
         fprintf(stderr, "the module's direct calls or edge filter are unavailable\n");
         return 1;
     }

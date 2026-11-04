@@ -93,7 +93,9 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/hd_look.c
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c
-    ${BLUEWAKE_HOST_SRC}/save_state.c)
+    ${BLUEWAKE_HOST_SRC}/save_state.c
+    ${BLUEWAKE_HOST_SRC}/perf_monitor.c
+    ${BLUEWAKE_HOST_SRC}/hd_look.c)
 # The shell (the touch controls and the ⋯ menu) is the iPhone app's, so the
 # desktop options menu (settings_menu.cpp) is left out, as on iOS.
 set(BLUEWAKE_IOS_SRC ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
@@ -106,6 +108,7 @@ add_library(main SHARED
     ${BLUEWAKE_IOS_SRC}/touch_controls.cpp
     ${BLUEWAKE_IOS_SRC}/controller_apply.cpp
     ${BLUEWAKE_IOS_SRC}/dolphin_save_import.c
+    ${BLUEWAKE_IOS_SRC}/disc_import.c
     ${BLUEWAKE_HOST_SOURCES})
 # The unchanged host keeps its own entry point under another name; the shim
 # owns SDL_main and hands over after setting the defaults.
