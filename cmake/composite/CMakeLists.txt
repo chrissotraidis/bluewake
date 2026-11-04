@@ -22,6 +22,7 @@ option(BLUEWAKE_NATIVE_ENTRIES "Use Wind Waker Recomp's certified native entries
 option(BLUEWAKE_NATIVE_GX "Use Wind Waker Recomp's GX FIFO writer natives (the fifth set)" OFF)
 option(BLUEWAKE_NATIVE_SET4 "Use Wind Waker Recomp's fourth native set (colour, animation, collision setup)" OFF)
 option(BLUEWAKE_DIRECT_CALLS "Use explicitly prepared direct-call chunks" OFF)
+option(BLUEWAKE_DIRECT_GATE_DEFAULT "The module asks the app to open the direct-call gate (#552)" OFF)
 option(BLUEWAKE_FIXED_CPU "Use explicitly prepared fixed-address guest CPU chunks" OFF)
 option(BLUEWAKE_FIXED_MEM1 "Use module-owned guest RAM (requires fixed CPU)" OFF)
 if(BLUEWAKE_FIXED_MEM1 AND NOT BLUEWAKE_FIXED_CPU)
@@ -238,6 +239,10 @@ if(BLUEWAKE_DIRECT_CALLS)
   target_sources(${MODULE_NAME} PRIVATE direct_calls.c)
   target_include_directories(${MODULE_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   target_compile_definitions(${MODULE_NAME} PRIVATE BLUEWAKE_DIRECT_CALLS=1 BLUEWAKE_EDGE_FILTER=1)
+endif()
+
+if(BLUEWAKE_DIRECT_GATE_DEFAULT)
+  target_compile_definitions(${MODULE_NAME} PRIVATE BLUEWAKE_DIRECT_GATE_DEFAULT=1)
 endif()
 
 if(BLUEWAKE_FIXED_CPU)

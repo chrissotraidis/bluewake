@@ -8320,14 +8320,21 @@ int main(int argc, char** argv) {
             g_skip_fast_on = enabled;
             host_skip_fast_refresh();
             // The gate (direct_skip.h): the module reads one word inline before a
-            // direct call instead of calling its check. Opt-in while it is
-            // measured: BLUEWAKE_DIRECT_GATE=1 hands the word over; otherwise
-            // the gate stays closed and every direct call takes the out-of-line
-            // check as before. A module without the export never reads it.
+            // direct call instead of calling its check. BLUEWAKE_DIRECT_GATE=1
+            // hands the word over and =0 keeps it closed; unset, the module
+            // decides (bluewake_composite_direct_gate_default: 1 when the
+            // builder made it with the gate on, its default). Closed, every
+            // direct call takes the out-of-line check as before. A module
+            // without the export never reads it.
             typedef int (*DirectGateFn)(const volatile u32*);
+            typedef int (*DirectGateDefaultFn)(void);
             DirectGateFn direct_gate = (DirectGateFn)dlsym(lib, "bluewake_composite_direct_gate");
+            DirectGateDefaultFn gate_default =
+                (DirectGateDefaultFn)dlsym(lib, "bluewake_composite_direct_gate_default");
             const char* gate_env = getenv("BLUEWAKE_DIRECT_GATE");
-            const bool want_gate = gate_env != NULL && strcmp(gate_env, "1") == 0;
+            const bool want_gate = gate_env != NULL && gate_env[0] != '\0'
+                                       ? strcmp(gate_env, "1") == 0
+                                       : gate_default != NULL && gate_default() == 1;
             host_direct_gate_pi();
             g_direct_gate_on = enabled && direct_gate != NULL &&
                                direct_gate(want_gate ? &g_direct_gate.word : NULL) == 1;
