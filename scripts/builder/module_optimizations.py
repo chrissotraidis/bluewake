@@ -37,15 +37,18 @@ def cmake_flags(mode):
     return [f"-DBLUEWAKE_{name}={'ON' if mode == 'combined-v1' else 'OFF'}" for name in FEATURES]
 
 
-def steps(lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=False):
+def steps(lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=False, fp_checks=False):
     """STEPS, with fast_blocks.py making Elliott Tate's lean copies when asked, as the
     Windows and Linux builders do by default (--lean-blocks), and his lean_memory.py
     after the direct calls, where the Windows builder runs it (--lean-memory), then
     lean_deadlines.py right after it (--lean-deadlines), and behaviour_timing.py last
-    (--behaviour-timing, a prototype)."""
+    (--behaviour-timing, a prototype). fp_checks.py (--fp-checks, #553) runs right
+    after the direct calls and before lean_memory.py, where the Linux builder runs it."""
     out = []
     for step in STEPS:
         out.append(step + ("--lean",) if lean and step[0] == "scripts/windows/fast_blocks.py" else step)
+        if fp_checks and step[0] == "scripts/windows/direct_calls.py":
+            out.append(("scripts/windows/fp_checks.py",))
         if lean_memory and step[0] == "scripts/windows/direct_calls.py":
             out.append(("scripts/windows/lean_memory.py",))
             if lean_deadlines:
@@ -55,7 +58,8 @@ def steps(lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=
     return tuple(out)
 
 
-def fingerprint(mode, lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=False):
+def fingerprint(mode, lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=False,
+                fp_checks=False):
     if mode == "none":
         return "none"
     digest = hashlib.sha256(mode.encode() + Path(__file__).read_bytes())
@@ -67,6 +71,8 @@ def fingerprint(mode, lean=False, lean_memory=False, lean_deadlines=False, behav
         digest.update(b"\0lean-deadlines")
     if behaviour_timing:
         digest.update(b"\0behaviour-timing")
+    if fp_checks:
+        digest.update(b"\0fp-checks")
     for folder in ("scripts/windows", "scripts/mods", "cmake/composite", "runtime/host/src", "windows/src"):
         for path in sorted((ROOT / folder).rglob("*")):
             if path.is_file() and path.suffix in (".py", ".c", ".h", ".cpp", ".mm", ".m"):
@@ -79,12 +85,13 @@ def tree_digest(path):
                                     str(path)], text=True).split()[0]
 
 
-def prepare(out, mode, lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=False):
+def prepare(out, mode, lean=False, lean_memory=False, lean_deadlines=False, behaviour_timing=False,
+            fp_checks=False):
     if mode == "none":
         return
     source = out / "composite-src"
     receipt = out / "module-optimizations.json"
-    key, before = fingerprint(mode, lean, lean_memory, lean_deadlines, behaviour_timing), tree_digest(source)
+    key, before = fingerprint(mode, lean, lean_memory, lean_deadlines, behaviour_timing, fp_checks), tree_digest(source)
     try:
         previous = json.loads(receipt.read_text())
     except (OSError, ValueError):
@@ -94,7 +101,7 @@ def prepare(out, mode, lean=False, lean_memory=False, lean_deadlines=False, beha
         return
     # A failed preparation never updates the final digest. The builder's next
     # source stage preserves the partial tree and regenerates the verified base.
-    for script, *flags in steps(lean, lean_memory, lean_deadlines, behaviour_timing):
+    for script, *flags in steps(lean, lean_memory, lean_deadlines, behaviour_timing, fp_checks):
         subprocess.run([sys.executable, str(ROOT / script), str(source), *flags], check=True)
     after = tree_digest(source)
     receipt.write_text(json.dumps({"mode": mode, "recipe": key, "digest": after}, indent=2) + "\n")
@@ -111,19 +118,23 @@ def main():
     parser.add_argument("--lean-deadlines", action="store_true", help="lean_deadlines.py after lean_memory.py")
     parser.add_argument("--behaviour-timing", action="store_true",
                         help="behaviour_timing.py --loop-checks last: every block prepaid, the budget checked at loops (a prototype)")
+    parser.add_argument("--fp-checks", action="store_true",
+                        help="fp_checks.py after the direct calls: one FP-available test per stretch of a prepaid copy (#553)")
     args = parser.parse_args()
     if args.lean_memory and not args.lean:
         parser.error("--lean-memory needs --lean")
     if args.lean_deadlines and not args.lean_memory:
         parser.error("--lean-deadlines needs --lean-memory")
     if args.action == "fingerprint":
-        print(fingerprint(args.mode, args.lean, args.lean_memory, args.lean_deadlines, args.behaviour_timing))
+        print(fingerprint(args.mode, args.lean, args.lean_memory, args.lean_deadlines, args.behaviour_timing,
+                          args.fp_checks))
     elif args.action == "flags":
         print("\n".join(cmake_flags(args.mode)))
     elif args.out is None:
         parser.error("prepare requires --out")
     else:
-        prepare(args.out, args.mode, args.lean, args.lean_memory, args.lean_deadlines, args.behaviour_timing)
+        prepare(args.out, args.mode, args.lean, args.lean_memory, args.lean_deadlines, args.behaviour_timing,
+                args.fp_checks)
 
 
 if __name__ == "__main__":

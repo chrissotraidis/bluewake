@@ -67,6 +67,47 @@ profile_generate
         self.assertTrue(any(p.read_text() == "synthetic interrupted preparation\n"
                             for p in self.out.glob("composite-previous.*/source/generated.h")))
 
+class MacPerfOptionsTest(unittest.TestCase):
+    """#552 and #553 on the Apple builder: fp_checks.py where Linux runs it, the
+    gate only in training's environment, and the builder's option checks."""
+
+    def test_fp_checks_runs_after_direct_calls_and_before_lean_memory(self):
+        names = [step[0] for step in optimizations.steps(True, True, True, True, fp_checks=True)]
+        at = names.index("scripts/windows/fp_checks.py")
+        self.assertEqual(names[at - 1], "scripts/windows/direct_calls.py")
+        self.assertEqual(names[at + 1], "scripts/windows/lean_memory.py")
+        self.assertNotIn("scripts/windows/fp_checks.py",
+                         [step[0] for step in optimizations.steps(True, True, True, True)])
+
+    def test_fp_checks_changes_the_recipe(self):
+        self.assertNotEqual(optimizations.fingerprint("combined-v1", True),
+                            optimizations.fingerprint("combined-v1", True, fp_checks=True))
+        self.assertEqual(optimizations.fingerprint("none", fp_checks=True), "none")
+
+    def test_training_opens_the_gate_only_when_asked(self):
+        text = (ROOT / "scripts/builder/train_local_pgo.py").read_text()
+        self.assertIn('environment["BLUEWAKE_DIRECT_GATE"] = "1" if args.direct_gate else "0"', text)
+        self.assertIn('digest.update(b"\\0direct-gate")', text)
+        self.assertIn("args+=(--direct-gate)", (ROOT / "scripts/builder/profiles/bluewake.sh").read_text())
+
+    def builder(self, *args):
+        with tempfile.TemporaryDirectory() as bin_dir:
+            stub = Path(bin_dir) / "sysctl"
+            stub.write_text("#!/bin/sh\necho 8\n")
+            stub.chmod(0o755)
+            env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
+            return subprocess.run(["bash", str(ROOT / "scripts/builder/build.sh"), *args],
+                                  capture_output=True, text=True, env=env)
+
+    def test_builder_option_checks(self):
+        for args, message in ((("--fp-checks", "--platform", "macos", "x.iso"), "--fp-checks needs --lean-blocks"),
+                              (("--conservative", "--fp-checks", "x.iso"), "--conservative builds without")):
+            result = self.builder(*args)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(message, result.stderr)
+        self.assertIn("--no-fp-checks", self.builder("--help").stdout)
+        self.assertIn("--direct-gate", self.builder("--help").stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
