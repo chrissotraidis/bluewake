@@ -19,44 +19,52 @@ SPEC.loader.exec_module(BUILD)
 class ToolchainPolicyTest(unittest.TestCase):
     """Protect the deliberate compiler split in the shared environment.
 
-    Clang 18 remains the reproducible default. Developers can explicitly test
-    the LLVM version used for current performance work without silently moving
-    CI or ordinary container builds to a new compiler.
+    Clang 22 is the default for CI and container builds (#437). Clang 18 stays
+    in the image as an explicit opt-out, and the two never mix silently.
     """
 
-    def test_clang_18_is_the_default_while_the_image_also_supplies_llvm_22(self):
-        """PATH selects LLVM 18 unless the builder handles --clang22."""
+    def test_clang_22_is_the_default_while_the_image_also_supplies_llvm_18(self):
+        """PATH selects LLVM 22 unless the builder handles --clang18."""
         dockerfile = (BUILD.ROOT / "scripts/linux/Dockerfile").read_text()
         workflow = (BUILD.ROOT / ".github/workflows/linux-host.yml").read_text()
 
         self.assertIn("ARG LLVM_VERSION=22", dockerfile)
-        self.assertLess(dockerfile.index("/usr/lib/llvm-18/bin"),
-                        dockerfile.index("/usr/lib/llvm-22/bin"))
-        self.assertIn("-DCMAKE_C_COMPILER=clang-18", workflow)
-        self.assertIn("-DCMAKE_CXX_COMPILER=clang++-18", workflow)
+        self.assertLess(dockerfile.index("/usr/lib/llvm-22/bin"),
+                        dockerfile.index("/usr/lib/llvm-18/bin"))
+        self.assertIn("-DCMAKE_C_COMPILER=clang-22", workflow)
+        self.assertIn("-DCMAKE_CXX_COMPILER=clang++-22", workflow)
+        self.assertNotIn("clang-18", workflow)
 
-    def test_clang_22_opt_in_prepends_its_tool_directory(self):
-        """The opt-in changes lookup only inside that builder process."""
-        args = argparse.Namespace(clang22=True)
+    def test_clang_18_opt_out_prepends_its_tool_directory(self):
+        """The opt-out changes lookup only inside that builder process."""
+        args = argparse.Namespace(clang18=True)
         with tempfile.TemporaryDirectory() as temporary, \
-                patch.object(BUILD, "LLVM22_BIN", Path(temporary)), \
+                patch.object(BUILD, "LLVM18_BIN", Path(temporary)), \
                 patch.dict(BUILD.os.environ, {"PATH": "/default/bin"}, clear=True):
             BUILD.select_container_toolchain(args)
             self.assertEqual(BUILD.os.environ["PATH"], f"{temporary}:/default/bin")
 
     def test_default_does_not_modify_the_tool_path(self):
-        """Omitting --clang22 preserves the image's Clang 18 selection."""
+        """Omitting --clang18 preserves the image's Clang 22 selection."""
         with patch.dict(BUILD.os.environ, {"PATH": "/default/bin"}, clear=True):
-            BUILD.select_container_toolchain(argparse.Namespace(clang22=False))
+            BUILD.select_container_toolchain(argparse.Namespace(clang18=False))
             self.assertEqual(BUILD.os.environ["PATH"], "/default/bin")
 
-    def test_clang_22_requires_the_container(self):
-        """The host toolchain cannot be changed implicitly by this option."""
+    def test_compiler_options_require_the_container(self):
+        """The host toolchain cannot be changed implicitly by these options."""
+        for option in ("--clang18", "--clang22"):
+            result = subprocess.run(
+                [sys.executable, SCRIPT, "/nonexistent/disc.iso", option],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(f"{option} requires --ci-container", result.stderr)
+
+    def test_compiler_options_are_exclusive(self):
         result = subprocess.run(
-            [sys.executable, SCRIPT, "/nonexistent/disc.iso", "--clang22"],
-            capture_output=True, text=True)
+            [sys.executable, SCRIPT, "/nonexistent/disc.iso", "--ci-container",
+             "--clang18", "--clang22"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("--clang22 requires --ci-container", result.stderr)
+        self.assertIn("mutually exclusive", result.stderr)
 
 
 class GatherAliasCachePolicyTest(unittest.TestCase):
@@ -129,7 +137,7 @@ class LinuxContainerRunTest(unittest.TestCase):
             context.mkdir(parents=True)
             disc.touch()
             args = argparse.Namespace(disc=disc, out=out)
-            original = [str(SCRIPT), str(disc), "--out", str(out), "--ci-container", "--clang22",
+            original = [str(SCRIPT), str(disc), "--out", str(out), "--ci-container", "--clang18",
                         "--appimage", "--no-train"]
             completed = [subprocess.CompletedProcess(["docker", "info"], 0),
                          subprocess.CompletedProcess(["docker", "build"], 0),
