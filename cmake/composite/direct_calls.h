@@ -59,17 +59,6 @@ void bw_host_skip_verify_check(const CPUState* cpu, u32 address, bool allowed);
 void bluewake_composite_direct_skip_counts(unsigned long long* unsafe,
                                            unsigned long long* conservative,
                                            unsigned long long* inline_answers);
-/* The host's gate word (direct_skip.h), or a closed one: closed until the host
- * hands it over, and whenever direct calls, the address-only answer or verify
- * change it (direct_calls.c). */
-extern const volatile u32* bw_direct_gate;
-int bluewake_composite_direct_gate(const volatile u32* gate);
-/* With verify on, every direct call takes the full check, which also asks what
- * the gate would have answered and counts disagreements. */
-void bw_direct_gate_verify(const CPUState* cpu, u32 address, bool exact);
-void bluewake_composite_direct_gate_counts(unsigned long long* unsafe,
-                                           unsigned long long* conservative,
-                                           unsigned long long* answers);
 int bluewake_composite_edge_filter(bool);
 
 /* The host's edge service has nothing to do at an address it does not watch:
@@ -87,7 +76,7 @@ static inline bool bw_host_quiet(const CPUState* cpu) {
 /* Both checks stay out of line and with the hot code, as the single check was:
  * inlined at every call site the chunks grow about 11% and run slower (#503,
  * Steam Deck), and the trained profile does not know these names. */
-static inline __attribute__((always_inline)) bool bw_direct_call_ready_exact(const CPUState* cpu, u32 address) {
+static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_full(const CPUState* cpu, u32 address) {
     if (!bw_direct_enabled || cpu == NULL || bw_host_can_skip == NULL ||
         bw_direct_depth >= BW_DIRECT_DEPTH_MAX)
         return false;
@@ -107,13 +96,6 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready_exact(con
         return allowed;
     }
     return bw_host_can_skip(bw_host_can_skip_user, cpu, address);
-}
-
-static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_full(const CPUState* cpu, u32 address) {
-    const bool exact = bw_direct_call_ready_exact(cpu, address);
-    if (__builtin_expect(bw_host_skip_verify, 0))
-        bw_direct_gate_verify(cpu, address, exact);
-    return exact;
 }
 
 /* The same answer for an address the build knows lies outside the host's two
@@ -137,35 +119,11 @@ static inline bool bw_skip_range_outside(u32 address) {
            (address < BW_SKIP_RANGE1_FIRST || address > BW_SKIP_RANGE1_LAST);
 }
 
-static inline bool bw_skip_main_code(u32 address) {
-    return address >= BW_GATE_MAIN_FIRST && address < BW_GATE_MAIN_END;
-}
-
-/* What remains of the plain check while the gate is open: the host-side tests
- * all hold (direct_skip.h), so only the depth, an exception and the budget. */
-static inline __attribute__((always_inline)) bool bw_direct_gate_ready(const CPUState* cpu) {
-    return bw_direct_depth < BW_DIRECT_DEPTH_MAX && cpu->exception == 0u &&
-           !(cpu->cycle_budget > 0 && cpu->downcount <= -cpu->cycle_budget);
-}
-
-/* A target in the main executable's code, outside both ranges: with the gate
- * open it stands for every host-side test, read inline without a call (#503
- * M5); closed, the plain check answers as before. */
-static inline __attribute__((always_inline)) bool bw_direct_call_ready_main(const CPUState* cpu, u32 address) {
-    if (__builtin_expect(*bw_direct_gate == 0u, 1))
-        return bw_direct_gate_ready(cpu);
-    return bw_direct_call_ready_plain(cpu, address);
-}
-
 /* At a call the translator wrote, the address is a constant: the range tests
- * are settled here, at build time, and so is whether the target is in the main
- * executable's code. */
+ * are settled here, at build time. */
 static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
-    if (__builtin_constant_p(address) && bw_skip_range_outside(address)) {
-        if (bw_skip_main_code(address))
-            return bw_direct_call_ready_main(cpu, address);
+    if (__builtin_constant_p(address) && bw_skip_range_outside(address))
         return bw_direct_call_ready_plain(cpu, address);
-    }
     return bw_direct_call_ready_full(cpu, address);
 }
 
