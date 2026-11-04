@@ -14,12 +14,12 @@ Their code is shared: the composite headers, `main.c` and `scripts/windows/fp_ch
 ## What changes for players
 
 - **Windows builds prepare fp_checks by default**, as Linux builds do.
-- **The gate stays opt-in at run time** (`BLUEWAKE_DIRECT_GATE=1`, or the menu row from #531), as on Linux.
+- **The gate is on by default**, as on Linux: the module asks the app to open it. `BLUEWAKE_DIRECT_GATE=0` turns it off for an A/B.
 
 ## Not in scope
 
 - macOS: its builder is a separate script with its own option set. It comes next, after a Windows measurement.
-- Making the gate a default.
+- Measuring on Windows before the defaults ship. That is M2 in the progress file.
 - #554's huge pages, which are Linux-only by nature.
 
 ## Success
