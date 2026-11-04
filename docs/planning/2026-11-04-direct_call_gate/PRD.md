@@ -1,6 +1,6 @@
 # PRD — Direct-call gate
 
-Status: In progress. The gate is implemented, opt-in and unit-tested; measurement is next.
+Status: **Done: kept, opt-in.** Steam Deck +5.5%, exact. Iteration 2 reverted. Not proposed as a default.
 Source: [#503](https://github.com/chrissotraidis/bluewake/pull/503)'s stack (`b53855071`). Measured on the [#437](https://github.com/chrissotraidis/bluewake/pull/437) recipe (`perf/clang-runtime-matrix@14c558d`: `main` with #503, #504 and #531, Clang 22.1.8, libc++).
 Scope: the cost of the check before each direct call between translated chunks. Excluded: what the check decides, which stays the same.
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
@@ -52,3 +52,4 @@ Answer the common case of the check inline, in a few instructions, without chang
 
 - **Opt-in (2026-11-04):** off unless `BLUEWAKE_DIRECT_GATE=1`, until it's measured. A Config → Performance switch comes once it has a result (the section lives in #531).
 - **Own PR, stacked on #503:** it builds on stack 1's plain check. **Merge #503 first.**
+- **Kept as opt-in, no default (2026-11-04):** measured +5.5% on the Deck and exact. It stays behind `BLUEWAKE_DIRECT_GATE=1` until it's played more widely.
