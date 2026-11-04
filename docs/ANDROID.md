@@ -207,6 +207,12 @@ same touch controls, the same settings under the same names.
 - The picture keeps the game's shape and renders at three times the GameCube's 480 lines by default; the mouse
   camera is off (touches would reach it as clicks).
 
+The picture is presented without waiting on the display. A phone's compositor holds the buffer the way
+Wayland's does, and a FIFO present waits on the game thread: a frame that misses the vsync it aimed for
+(33.3 ms at 60 Hz) waits for the next but one — 50 ms, 20 fps — so the display falls by a flat 10 on top of the speed the game has already lost.
+Mailbox returns at once and the compositor still times the display. `BLUEWAKE_VSYNC=1` in `launch.env`
+restores the blocking present.
+
 ## Measure
 
 ```bash
