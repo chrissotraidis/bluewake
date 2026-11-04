@@ -881,6 +881,58 @@ static void room_lights_load(void) {
 }
 
 // The light HD lights the room Link is in from (the direction toward it), or false for HD's sun by the clock.
+// A room change (Link through a door): the scenery's light, which the host takes from the room Link is in
+// (mStayNo: the palettes of sky_blend_state's scenery side, HD's brightness for them, the room's light), fades
+// from the room he left to the new one over kRoomFadeRetraces, as the game blends its own light from the floor's
+// palettes when he crosses (its mColPatBlend, 42 retraces in kindan). Changed at once, all of the picture jumped
+// when Forbidden Woods' door into its clearing (room 1 to 2) opened: HD's brightness 1.00 to 1.65, the shade's
+// ground and lit colours, the room light's direction. In HD each room's scenery keeps its own light throughout
+// (its tevstr), so there is no change at all there; the host has one light for the picture. The room light's
+// direction still changes at once (room_light): turned through the fade, the shadows swept across the clearing.
+enum { kRoomFadeRetraces = 42 };
+static struct {
+    char stage[8];
+    int from, to;  // the room left (-1: no fade) and the one Link is in
+    unsigned long long start;
+} g_room_fade = {{0}, -1, -1, 0};
+
+static void room_fade_update(CPUState* cpu) {
+    char stage[8];
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);  // play.mCurStage.mName
+    const int room = (s8)mem_read8(cpu, 0x803F6A78u);   // dStage_roomControl_c::mStayNo
+    if (memcmp(stage, g_room_fade.stage, sizeof stage) != 0 || room < 0 || g_room_fade.to < 0) {
+        memcpy(g_room_fade.stage, stage, sizeof stage);
+        g_room_fade.from = -1;
+        g_room_fade.to = room;
+        return;
+    }
+    if (room == g_room_fade.to)
+        return;
+    // Back through the door before the fade ended: the way back from where it got to.
+    const unsigned long long done = g_retrace - g_room_fade.start;
+    const unsigned long long back = room == g_room_fade.from && done < kRoomFadeRetraces ? kRoomFadeRetraces - done : 0u;
+    g_room_fade.from = g_room_fade.to;
+    g_room_fade.to = room;
+    g_room_fade.start = g_retrace - back;
+}
+
+// How far the fade into the room Link is in has got (1: done, *from -1), and the room it comes from;
+// none while held (the rooms' own palette entries, sky_linear).
+static bool g_room_fade_held;
+static float room_fade(int* from) {
+    *from = -1;
+    if (g_room_fade.from < 0 || g_room_fade_held)
+        return 1.0f;
+    const float t = (float)(g_retrace - g_room_fade.start) / (float)kRoomFadeRetraces;
+    if (t >= 1.0f) {
+        g_room_fade.from = -1;
+        return 1.0f;
+    }
+    *from = g_room_fade.from;
+    return t < 0.0f ? 0.0f : t;
+}
+
 static bool room_light(CPUState* cpu, float out[3]) {
     room_lights_load();
     char stage[9] = {0};
@@ -1837,16 +1889,23 @@ static bool sky_blend_state(CPUState* cpu, bool scenery, int pale[4], float* ab,
                 *ab = 1.0f;
         }
         u32 envr0 = mem_read8(cpu, kEnvEnvrPrev), envr1 = mem_read8(cpu, kEnvEnvrCurr);
+        u32 pat0 = mem_read8(cpu, kEnvColpatPrev);
+        const u32 pat1 = mem_read8(cpu, kEnvColpatCurr);
+        const float blend = read_float(cpu, kEnvColPatBlend);
+        *cb = blend < 0.0f ? 0.0f : blend > 1.0f ? 1.0f : blend;
         const s8 room = (s8)mem_read8(cpu, kStayRoom);
-        if (scenery && room >= 0)
-            envr0 = envr1 = (u32)room;
-        const u32 pat0 = mem_read8(cpu, kEnvColpatPrev), pat1 = mem_read8(cpu, kEnvColpatCurr);
+        if (scenery && room >= 0) {
+            // The room's palettes, faded in from the last room's through a room change (room_fade).
+            int from;
+            *cb = room_fade(&from);
+            envr0 = from >= 0 ? (u32)from : (u32)room;
+            envr1 = (u32)room;
+            pat0 = pat1;
+        }
         pale[0] = sky_palette(cpu, envr0, pat0, slot0);
         pale[1] = sky_palette(cpu, envr0, pat0, slot1);
         pale[2] = sky_palette(cpu, envr1, pat1, slot0);
         pale[3] = sky_palette(cpu, envr1, pat1, slot1);
-        const float blend = read_float(cpu, kEnvColPatBlend);
-        *cb = blend < 0.0f ? 0.0f : blend > 1.0f ? 1.0f : blend;
         return true;
     }
     return false;
@@ -2312,7 +2371,12 @@ static void sky_linear(CPUState* cpu, u32 pale_table, u32 virt_table, bool on, f
         return;
     // The game's light's palettes, then the scenery's where its room names
     // others (they win an entry both name: the scenery fills the screen).
+    // Each room's own entries, without a room change's fade: that is only for the host's one light (the sun's
+    // palette, HD's brightness); faded here, the clearing past Forbidden Woods' door took the dark room's colours
+    // into its own entries and went darker than either end halfway.
+    g_room_fade_held = true;
     const bool room = sky_weights(cpu, true, room_pale, room_w) && memcmp(room_pale, pale, sizeof pale) != 0;
+    g_room_fade_held = false;
     if (linear_on) {
         sky_linear_pale(cpu, pale_table, pale, w, s_written_pale);
         if (room)
@@ -2562,6 +2626,7 @@ void bluewake_hd_look_state_loaded(bool reapply) {
     sky_linear_forget();
     memset(s_shifted, 0, sizeof s_shifted);
     g_daynight.started = false;
+    g_room_fade.to = -1;  // no fade from the room before the load
     // The loaded RAM has its own collision bytes: forget what was kept, without writing it.
     for (u32 slot = 0; slot < kBgChkCount; ++slot)
         floor_colours_restore(NULL, slot, false);
@@ -2653,6 +2718,7 @@ void bluewake_hd_look_retrace(CPUState* cpu) {
     const unsigned long long retrace = ++g_retrace;
     if (cpu == NULL || cpu->ram == NULL)
         return;
+    room_fade_update(cpu);
     if (bluewake_hd_distant_islands || g_islands_were_on || g_trace)
         islands(cpu, bluewake_hd_distant_islands, retrace);
     g_islands_were_on = bluewake_hd_distant_islands;
