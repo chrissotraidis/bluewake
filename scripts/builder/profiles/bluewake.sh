@@ -67,8 +67,21 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Wind Waker HD's caster culling in its lit rooms (aurora_set_sun_caster_cull), and its lava glow there from the pack's version 2 room colours: patches/recompcore/0224 (pdale-boop).
 # Wind Waker HD's monotone at the game's grey composite (Frozen Hyrule's sepia; aurora_set_monotone_hd): patches/recompcore/0225 (pdale-boop).
 # Wind Waker HD's fog curve, the square of the GameCube's linear fog while the host has HD's distances in place (aurora_set_fog_hd), and HD's fog after the shade, from HD's start where the game clamps it at 0 (aurora_set_fog_hd_starts): patches/recompcore/0226 (pdale-boop).
+# Wind Waker HD's hemisphere per vertex on all smooth scenery, from its own normals blended across each triangle, not renormalized: patches/recompcore/0227 (pdale-boop).
+# Wind Waker HD's fog start before the camera on the draws' own fog too (characters, plants, objects): patches/recompcore/0228 (pdale-boop).
+# A texture pack's optional/ folders loaded or dropped while running (dol_aurora_set_texture_pack_optional), with the decode cache cleared when the replacements change: patches/recompcore/0229 (pdale-boop).
+# Dragon Roost Cavern's lava glow, HD's albedo x lava K x 4 x (1 - the vertex alpha) squared, on the GameCube's three-stage lava materials: patches/recompcore/0230 (pdale-boop).
+# The Tower of the Gods' water floor summed in linear light, as Wind Waker HD's shader for it (ShaderKey::hd_water): patches/recompcore/0231 (pdale-boop).
+# Wind Waker HD's fog mixed in linear light, on the draws and in the sun pass, from a copy of the scene taken just before it: patches/recompcore/0232 (pdale-boop).
+# Stable sun-shadow cascades as a switch (DOL_AURORA_SUN_SHADOW_CASCADES_STABLE): each cascade in the sun's frame, its box the square about the sphere round its slice of the view: patches/recompcore/0233 (pdale-boop).
+# Effects that write depth left out of the HD look's shading too: the game's particles and glow models (Dragon Roost Cavern's lava geysers, a door's dust): patches/recompcore/0234 (pdale-boop).
+# The heat haze in a monotone frame (Xboss0's sepia replays) samples the frame with Wind Waker HD's monotone in: patches/recompcore/0235 (pdale-boop).
+# Wind Waker HD's own cascade fit as a test switch (DOL_AURORA_SUN_SHADOW_CASCADES_HD=1 or 2, off), and the pre-pass shadow in the temporal debug view: patches/recompcore/0236 (pdale-boop).
+# The stable sun-shadow cascades by default (DOL_AURORA_SUN_SHADOW_CASCADES_STABLE=0 gives back HD's frame that turns with the camera): patches/recompcore/0237 (pdale-boop).
+# The lava geysers' core and a door's dust left unshaded too: glow models may take the rasterized colour when their textures only cut the shape, effects at their own depth keep their share near or far, and a blended effect's share by its opacity: patches/recompcore/0238 (pdale-boop).
+# Past the second sun-shadow cascade only the stage's BG lists cast, as in Wind Waker HD, from the host's mark in BP register 0x7A (DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all keeps every caster): patches/recompcore/0239 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=d1cbff7b45b8f9f6c1f4b2a758392e3182bfdff8
+RECOMPCORE_SHA=4b98e06c90c5888bf1814fe8610116ec2ffde07f
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

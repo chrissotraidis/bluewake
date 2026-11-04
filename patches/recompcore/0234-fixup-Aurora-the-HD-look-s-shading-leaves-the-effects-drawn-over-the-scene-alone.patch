@@ -1,0 +1,563 @@
+From d7900e6cd87394021dfa46946985c3d5989c098d Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 21:25:05 -0600
+Subject: [PATCH] fixup! Aurora: the HD look's shading leaves the effects drawn
+ over the scene alone
+
+Effects that write depth are effects too. Two kinds in Dragon Roost Cavern
+weren't, so the sun pass shaded them as scenery:
+
+- The lava geysers: blended, alpha-tested models that write depth, their
+  colour from the TEV's registers alone (no texture or rasterized colour).
+  In the room's shade they went blue (the shade's ambient over the sunlight).
+- The dust a shutting door raises: each particle drawn alpha-tested into the
+  depth alone, then in colour over it. The floor under it was shaded and
+  fogged at the dust's depth, so the dust showed as dark, sharp-edged holes
+  in the room's haze.
+
+Now a blended draw that writes depth is an effect when it is one of the
+game's particles (the host's tag) or a glow model (its colour from neither a
+texture nor the rasterized colour). A particle's colour draw over its own
+depth draw is drawn at its own depth into the effects' mask, as is an effect
+that writes depth. Such a pass's effects' mask tests against a copy of the
+sea mask's depth, which leaves those effects out: the others first, pushed
+back as before, then those at their own depth (a geyser's sparks on its
+surface, pushed back against the geyser's depth, kept its shade).
+
+Where such an effect covers a pixel, the occlusion, the sun shadows and the
+cloud shadows shade from the sea mask's depth (the scenery under it, which
+Wind Waker HD lights before it draws its effects): a small pass makes that
+depth only in frames with such effects. Other frames are unchanged (frame
+dumps from five save states match the build before within noise).
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  63 +++++--
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  51 ++++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   6 +
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 175 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |   6 +
+ 5 files changed, 274 insertions(+), 27 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 4907dd3e9b..9fc79f0cfd 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -659,7 +659,7 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+ static float g_softScale = 1.f;
+ 
+ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, const RenderPass& passInfo,
+-                        size_t first = 0, size_t last = SIZE_MAX, bool effectsOnly = false);
++                        size_t first = 0, size_t last = SIZE_MAX, bool effectsOnly = false, int effectPart = 0);
+ static void expire_cached_bind_groups();
+ static void push_command(CommandType type, const Command::Data& data);
+ 
+@@ -2367,13 +2367,22 @@ static void encode_effect_mask(const wgpu::CommandEncoder& cmd, FramePacket& fra
+       passInfo.targetSize.height != webgpu::g_frameBuffer.texture.GetHeight())
+     return;
+   bool any = false;
+-  for (size_t i = 0; i < end && i < passInfo.commands.size() && !any; ++i) {
++  bool ownDepth = false;
++  for (size_t i = 0; i < end && i < passInfo.commands.size() && !ownDepth; ++i) {
+     const auto& command = passInfo.commands[i];
+-    any = command.type == CommandType::Draw && command.data.draw.type == ShaderType::GXCore && !command.flat &&
+-          command.data.draw.gxcore.effect;
++    const bool effect = command.type == CommandType::Draw && command.data.draw.type == ShaderType::GXCore &&
++                        !command.flat && command.data.draw.gxcore.effect;
++    any = any || effect;
++    ownDepth = effect && command.data.draw.gxcore.effectOwnDepth;
+   }
+   if (!any)
+     return;
++  // With an effect drawn at its own depth (DrawData::effectOwnDepth: a lava geyser, a particle's dust), the
++  // effects test against the sea mask's depth, which leaves such effects out: the scenery's. The other effects
++  // first, pushed back against it, then those at their own depth: a geyser's sparks drawn on its surface, pushed
++  // back against the geyser's depth, failed, and kept its shade.
++  const wgpu::TextureView ownDepthView =
++      ownDepth ? post_fx::effect_mask_depth(cmd, passInfo.targetSize) : wgpu::TextureView{};
+   static uint64_t clearedFrame = UINT64_MAX;
+   const bool clear = clearedFrame != frameKey;
+   clearedFrame = frameKey;
+@@ -2385,8 +2394,9 @@ static void encode_effect_mask(const wgpu::CommandEncoder& cmd, FramePacket& fra
+       .clearValue = {0.0, 0.0, 0.0, 0.0},
+   }};
+   // The pass's depth as the scene left it: the effects test against it and write none.
++  const bool own = static_cast<bool>(ownDepthView) && !passInfo.hasStencil;
+   const wgpu::RenderPassDepthStencilAttachment depth{
+-      .view = passInfo.depthStencilView,
++      .view = own ? ownDepthView : passInfo.depthStencilView,
+       .depthLoadOp = wgpu::LoadOp::Load,
+       .depthStoreOp = wgpu::StoreOp::Store,
+       .stencilLoadOp = passInfo.hasStencil ? wgpu::LoadOp::Load : wgpu::LoadOp::Undefined,
+@@ -2400,7 +2410,12 @@ static void encode_effect_mask(const wgpu::CommandEncoder& cmd, FramePacket& fra
+       .timestampWrites = webgpu::gpu_prof::pass_writes("Effects mask"),
+   };
+   auto pass = cmd.BeginRenderPass(&descriptor);
+-  render_pass(pass, frame, passInfo, 0, end, true);
++  if (own) {
++    render_pass(pass, frame, passInfo, 0, end, true, 1);
++    render_pass(pass, frame, passInfo, 0, end, true, 2);
++  } else {
++    render_pass(pass, frame, passInfo, 0, end, true);
++  }
+   pass.End();
+ }
+ #endif
+@@ -3421,7 +3436,7 @@ static void apply_scissor(const wgpu::RenderPassEncoder& pass, const Command& co
+ }
+ 
+ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, const RenderPass& passInfo,
+-                        size_t first, size_t last, bool effectsOnly) {
++                        size_t first, size_t last, bool effectsOnly, int effectPart) {
+   ZoneScoped;
+   g_currentPipeline = UINTPTR_MAX;
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+@@ -3440,10 +3455,19 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+   // lies on a surface (the surf on a beach, a grass fringe, Link's eyes on his
+   // face) fails the depth test and keeps the surface's shade, and what stands
+   // clear of it (the spin attack's rings, a glow, sparks in the air) is marked.
++  // An effect that writes depth, or a particle's colour over its own depth (DrawData::effectOwnDepth), is drawn at
++  // its own depth, which the pass's holds: pushed back, it failed against itself.
+   const float depthScale = effectsOnly ? 1.f - post_fx::effect_mask_push() : 1.f;
++  float vpRect[4] = {0.f, 0.f, static_cast<float>(passInfo.targetSize.width),
++                     static_cast<float>(passInfo.targetSize.height)};
++  float vpDepth[2] = {0.f, 1.f};
++  float vpScale = depthScale;
++  const auto setViewport = [&](float scale) {
++    vpScale = scale;
++    pass.SetViewport(vpRect[0], vpRect[1], vpRect[2], vpRect[3], vpDepth[0] * scale, vpDepth[1] * scale);
++  };
+   if (effectsOnly)
+-    pass.SetViewport(0.f, 0.f, static_cast<float>(passInfo.targetSize.width),
+-                     static_cast<float>(passInfo.targetSize.height), 0.f, depthScale);
++    setViewport(depthScale);
+   // A pass drawn in two parts (post_fx: the scene, then the HUD) starts its
+   // second part with the viewport and scissor the first part left.
+   last = std::min(last, passInfo.commands.size());
+@@ -3458,9 +3482,10 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+     }
+     if (viewport != nullptr) {
+       const auto& vp = viewport->data.setViewport;
+-      const float minDepth = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
+-      const float maxDepth = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
+-      pass.SetViewport(vp.left, vp.top, vp.width, vp.height, minDepth * depthScale, maxDepth * depthScale);
++      vpRect[0] = vp.left, vpRect[1] = vp.top, vpRect[2] = vp.width, vpRect[3] = vp.height;
++      vpDepth[0] = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
++      vpDepth[1] = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
++      setViewport(depthScale);
+     }
+     if (scissor != nullptr)
+       apply_scissor(pass, *scissor, passInfo.targetSize);
+@@ -3496,9 +3521,10 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+     switch (cmd.type) {
+     case CommandType::SetViewport: {
+       const auto& vp = cmd.data.setViewport;
+-      const float minDepth = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
+-      const float maxDepth = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
+-      pass.SetViewport(vp.left, vp.top, vp.width, vp.height, minDepth * depthScale, maxDepth * depthScale);
++      vpRect[0] = vp.left, vpRect[1] = vp.top, vpRect[2] = vp.width, vpRect[3] = vp.height;
++      vpDepth[0] = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
++      vpDepth[1] = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
++      setViewport(vpScale);
+     } break;
+     case CommandType::SetScissor:
+       apply_scissor(pass, cmd, passInfo.targetSize);
+@@ -3509,6 +3535,13 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+       // The effects' mask (encode_effect_mask): their draws alone, nothing cleared.
+       if (effectsOnly && (draw.type != ShaderType::GXCore || cmd.flat || !draw.gxcore.effect))
+         break;
++      // In two parts (encode_effect_mask()): 1 the effects drawn pushed back, 2 those at their own depth.
++      if (effectsOnly && effectPart != 0 && draw.gxcore.effectOwnDepth != (effectPart == 2))
++        break;
++      if (effectsOnly && (draw.gxcore.effectOwnDepth ? 1.f : depthScale) != vpScale)
++        setViewport(draw.gxcore.effectOwnDepth ? 1.f : depthScale);
++      if (effectsOnly && draw.gxcore.effectDepth)
++        post_fx::note_effect_depth();
+ #endif
+       switch (draw.type) {
+       case ShaderType::Clear:
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index d8cdeb397f..93343c2c1e 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -18,6 +18,7 @@
+ #include <gxruntime/gxcore/texture_encode.hpp>
+ 
+ #include <absl/container/flat_hash_map.h>
++#include <absl/container/flat_hash_set.h>
+ 
+ #include <algorithm>
+ #include <array>
+@@ -652,11 +653,35 @@ bool sea_mask_draw(const gxc::DrawPlan& plan) {
+   return post_fx::sea_mask_wanted() && sea_draw(plan);
+ }
+ 
++// A glow model (Dragon Roost Cavern's lava geysers): blended, and its colour from none of the stages' rasterized or
++// texture colours, only the registers and constants (its textures give the alpha alone): what the game lights or
++// paints, it isn't.
++static bool glow_model(const gxc::PipelineKey& key) {
++  const auto& sh = key.shader;
++  if (sh.tev_valid == 0u || sh.num_tev_stages == 0u)
++    return false;
++  for (uint32_t i = 0; i < sh.num_tev_stages && i < gxc::kMaxTevStages; ++i) {
++    const auto& t = sh.tev_stages[i];
++    for (const uint8_t arg : {t.cc_a, t.cc_b, t.cc_c, t.cc_d})
++      if (arg == 8u || arg == 10u || arg == 11u) // TEXC, RASC, RASA
++        return false;
++  }
++  return true;
++}
++
+ // An effect, which the HD look's sun shadows, occlusion and cloud shadows leave
+ // as it is (post_fx.hpp effect_mask_target()): a draw blended over what is
+ // behind it that writes no depth (the spin attack's rings, the Master Sword's
+ // glow, sparks, smoke), so the depth buffer under it is the scenery's behind,
+ // whose shade it is not in. Wind Waker HD draws these after its lighting.
++// One that writes depth is an effect too when it is one of the game's particles (the host's tag: the dust a
++// shutting door raises, drawn alpha-tested into the depth and then in colour over it) or a glow model (glow_model());
++// its depth hides the scenery's under it, so the HD look shades there from the sea mask's depth, which it leaves out
++// (effect_depth_draw(), post_fx.hpp shading_depth()).
++static bool effect_draw_depth(const gxc::DrawPlan& plan) {
++  return plan.pipeline.depth_update == 0u || plan.draw_tag != 0u || glow_model(plan.pipeline);
++}
++
+ bool effect_draw(const gxc::DrawPlan& plan) {
+   const auto& key = plan.pipeline;
+   // Left out: the GameCube's own shadows (drawn through the frame buffer's
+@@ -665,7 +690,7 @@ bool effect_draw(const gxc::DrawPlan& plan) {
+   // are those the draws after it leave, which the mask, drawn against the
+   // finished depth, can't tell (the sky's clouds lit up shadows on the land
+   // drawn over them).
+-  if (key.blend_enable == 0u || key.blend_subtract != 0u || key.depth_update != 0u || key.depth_test == 0u ||
++  if (key.blend_enable == 0u || key.blend_subtract != 0u || !effect_draw_depth(plan) || key.depth_test == 0u ||
+       key.color_update == 0u || key.src_factor == 6u || key.src_factor == 7u ||
+       plan.constants.projection[3][3] == 1.f)
+     return false;
+@@ -680,6 +705,9 @@ bool effect_draw(const gxc::DrawPlan& plan) {
+     return false;
+   return true;
+ }
++
++// An effect that writes depth (effect_draw()).
++bool effect_depth_draw(const gxc::DrawPlan& plan) { return plan.pipeline.depth_update != 0u && effect_draw(plan); }
+ } // namespace
+ 
+ // Toon-shaded: a texgen from a lit colour (GX_TG_SRTG: Wind Waker's characters' ramp, Link's hair included).
+@@ -4384,6 +4412,23 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   // it, the marks of what stood behind (Link's character and HD light, a palm's green and normals) showed through
+   // the bush in the sun shadows. Only a shape the mask can draw: whole (no alpha test) or by its one texture's
+   // cutout. A card cut out by more textures, drawn whole, would hide the marks of what shows through its holes.
++  // An effect that writes depth (effect_draw()) is left out: the sea mask's depth keeps the scenery's under it.
++  const bool effectDepth = effect_depth_draw(plan);
++  // A particle drawn alpha-tested into the depth alone and then in colour over it (Dragon Roost Cavern's dust: the
++  // emitter's depth draws first, then their colour draws): its colour draw, an effect that writes no depth, is drawn
++  // at its own depth into the effects' mask too, where pushed back it failed against the depth draw's depth.
++  static uint64_t s_depthParticlesFrame = UINT64_MAX;
++  static absl::flat_hash_set<uint32_t> s_depthParticles;
++  if (plan.draw_tag != 0u) {
++    if (s_depthParticlesFrame != frame_interp::game_frame_number()) {
++      s_depthParticlesFrame = frame_interp::game_frame_number();
++      s_depthParticles.clear();
++    }
++    if (plan.pipeline.depth_update != 0u && plan.pipeline.color_update == 0u)
++      s_depthParticles.insert(plan.draw_tag);
++  }
++  const bool effectOwnDepth = effectDepth || (plan.draw_tag != 0u && plan.pipeline.depth_test != 0u &&
++                                              s_depthParticles.contains(plan.draw_tag) && effect_draw(plan));
+   const bool maskOccluderShape =
+       alpha_test_always_passes(plan.pipeline.shader) ||
+       (plan.texmap_mask == 0u && textureBindGroup != 0 && plan.pipeline.shader.textured != 0u);
+@@ -4392,7 +4437,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                             plan.constants.projection[3][3] != 1.f && maskOccluderShape &&
+                             !alpha_test_always_fails(plan.pipeline.shader) &&
+                             !((sun_caster(plan.pipeline) || clothCaster || blendedCaster) ||
+-                              alphaCaster || character_draw(plan.pipeline) || seaSurface);
++                              alphaCaster || character_draw(plan.pipeline) || seaSurface || effectDepth);
+   push_draw_command(DrawData{
+       .pipeline = pipeline,
+       .depthPipeline = depthPipeline,
+@@ -4427,6 +4472,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       .softWritesAlpha = plan.pipeline.alpha_update != 0,
+       .softPipeline = softPipeline,
+       .effect = effect_draw(plan),
++      .effectDepth = effectDepth,
++      .effectOwnDepth = effectOwnDepth,
+       .character = character_draw(plan.pipeline),
+       .smoothNormal = smoothNormal,
+       .maskCover = plan.pipeline.depth_update == 0u && plan.pipeline.color_update != 0u &&
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index daaf1f831c..a7f7cf7dce 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -95,6 +95,12 @@ struct DrawData {
+   // the HD look's shading from the depth buffer would take it for the scenery
+   // behind it; drawn again into the effects' mask (post_fx.hpp effect_mask_target()).
+   bool effect = false;
++  // An effect that writes depth (effect_draw(): one of the game's particles, a glow model): the effects' mask draws
++  // it at its own depth (not pushed back), and the sea mask leaves it out.
++  bool effectDepth = false;
++  // Drawn at its own depth into the effects' mask: an effect that writes depth, or a particle's colour draw over
++  // its own depth draw.
++  bool effectOwnDepth = false;
+   // A character's draw (the sea mask's green; the sun shadows' facing term leaves it out): toon-shaded, a
+   // texgen that reads a lit colour (GX_TG_SRTG, Wind Waker's characters' ramp), or skinned (per-vertex matrices).
+   bool character = false;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index d80ef7e226..9f68ae78cd 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -75,6 +75,15 @@ wgpu::TextureView g_effectMaskView;
+ bool g_effectMaskDrawn = false;
+ wgpu::Texture g_effectNone;
+ wgpu::TextureView g_effectNoneView;
++// The frame's effects' mask holds an effect that writes depth (note_effect_depth()), and the shading's depth made
++// for it (shading_depth()).
++bool g_effectDepthDrawn = false;
++wgpu::Texture g_shadeDepth;
++wgpu::TextureView g_shadeDepthView;
++wgpu::RenderPipeline g_shadeDepthPass;
++wgpu::BindGroupLayout g_shadeDepthLayout;
++wgpu::Texture g_effectMaskDepth;
++wgpu::TextureView g_effectMaskDepthView;
+ // DOL_AURORA_EFFECT_MASK_DEBUG=1: the effects the sun shadows leave alone, in
+ // red (multiplied in where the sun shadows would be, local debug).
+ bool g_effectDebug = false;
+@@ -5129,6 +5138,13 @@ void shutdown() {
+   g_effectMaskView = {};
+   g_effectMask = {};
+   g_effectMaskDrawn = false;
++  g_effectDepthDrawn = false;
++  g_shadeDepthView = {};
++  g_shadeDepth = {};
++  g_shadeDepthPass = {};
++  g_shadeDepthLayout = {};
++  g_effectMaskDepthView = {};
++  g_effectMaskDepth = {};
+   g_effectNoneView = {};
+   g_effectNone = {};
+   g_sunNormalView = {};
+@@ -5704,8 +5720,10 @@ wgpu::TextureView sea_mask_target(const wgpu::Extent3D& sceneSize) {
+     g_seaMaskView = g_seaMask.CreateView();
+     const wgpu::TextureDescriptor depthDescriptor{
+         .label = "Sea mask depth",
+-        // Read by the characters' shadow pre-pass (draw_actor_shadow()).
+-        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++        // Read by the characters' shadow pre-pass (draw_actor_shadow()); copied for the effects' mask
++        // (effect_mask_depth()).
++        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
++                 wgpu::TextureUsage::CopySrc,
+         .size = {sceneSize.width, sceneSize.height, 1},
+         .format = kSeaMaskDepthFormat,
+     };
+@@ -5739,6 +5757,138 @@ wgpu::TextureView effect_mask_target(const wgpu::Extent3D& sceneSize, wgpu::Text
+ 
+ float effect_mask_push() noexcept { return g_effectPush; }
+ 
++void note_effect_depth() noexcept { g_effectDepthDrawn = true; }
++
++wgpu::TextureView effect_mask_depth(const wgpu::CommandEncoder& cmd, const wgpu::Extent3D& size) {
++  if (!g_seaMaskDepth || g_seaMaskSize.width != size.width || g_seaMaskSize.height != size.height)
++    return {};
++  if (!g_effectMaskDepth || g_effectMaskDepth.GetWidth() != size.width || g_effectMaskDepth.GetHeight() != size.height) {
++    const wgpu::TextureDescriptor descriptor{
++        .label = "Effects mask depth",
++        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopyDst,
++        .size = {size.width, size.height, 1},
++        .format = kSeaMaskDepthFormat,
++    };
++    g_effectMaskDepth = g_device.CreateTexture(&descriptor);
++    g_effectMaskDepthView = g_effectMaskDepth.CreateView();
++  }
++  const wgpu::TexelCopyTextureInfo from{.texture = g_seaMaskDepth, .aspect = wgpu::TextureAspect::DepthOnly};
++  const wgpu::TexelCopyTextureInfo to{.texture = g_effectMaskDepth, .aspect = wgpu::TextureAspect::DepthOnly};
++  const wgpu::Extent3D extent{size.width, size.height, 1};
++  cmd.CopyTextureToTexture(&from, &to, &extent);
++  return g_effectMaskDepthView;
++}
++
++namespace {
++// The shading's depth (shading_depth()): the scene's, but where an effect that writes depth covers a pixel (the
++// effects' mask has it there, and the sea mask's depth, which leaves such effects out, is farther), the sea mask's:
++// the scenery's under the effect, which Wind Waker HD lights before it draws its effects.
++constexpr const char* kShadeDepthShader = R"""(
++@group(0) @binding(0) var scene_depth: texture_depth_2d;
++@group(0) @binding(1) var mask_depth: texture_depth_2d;
++@group(0) @binding(2) var effects: texture_2d<f32>;
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
++    let uv = vec2(f32((i << 1u) & 2u), f32(i & 2u));
++    return vec4(uv * 2.0 - 1.0, 0.0, 1.0);
++}
++
++@fragment
++fn fs_main(@builtin(position) pos: vec4<f32>) -> @builtin(frag_depth) f32 {
++    let p = vec2<i32>(pos.xy);
++    let d = textureLoad(scene_depth, p, 0);
++    let m = textureLoad(mask_depth, p, 0);
++    let e = textureLoad(effects, p, 0).rgb;
++    // Reversed Z: farther is less.
++    if (max(e.r, max(e.g, e.b)) > 0.5 / 255.0 && m < d * 0.9999) {
++        return m;
++    }
++    return d;
++}
++)""";
++
++wgpu::TextureView shading_depth(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
++                                const wgpu::Extent3D& size) {
++  if (!g_effectDepthDrawn || !g_effectMaskView || !g_seaMaskDepthView || g_seaMaskSize.width != size.width ||
++      g_seaMaskSize.height != size.height || !g_effectMask || g_effectMask.GetWidth() != size.width ||
++      g_effectMask.GetHeight() != size.height)
++    return depthView;
++  if (!g_shadeDepthPass) {
++    wgpu::ShaderSourceWGSL source{};
++    source.code = kShadeDepthShader;
++    const wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &source, .label = "Shading depth"};
++    const auto module = g_device.CreateShaderModule(&moduleDescriptor);
++    const std::array layoutEntries{
++        wgpu::BindGroupLayoutEntry{.binding = 0, .visibility = wgpu::ShaderStage::Fragment,
++                                   .texture = {.sampleType = wgpu::TextureSampleType::Depth}},
++        wgpu::BindGroupLayoutEntry{.binding = 1, .visibility = wgpu::ShaderStage::Fragment,
++                                   .texture = {.sampleType = wgpu::TextureSampleType::Depth}},
++        wgpu::BindGroupLayoutEntry{.binding = 2, .visibility = wgpu::ShaderStage::Fragment,
++                                   .texture = {.sampleType = wgpu::TextureSampleType::Float}},
++    };
++    const wgpu::BindGroupLayoutDescriptor layoutDescriptor{
++        .label = "Shading depth", .entryCount = layoutEntries.size(), .entries = layoutEntries.data()};
++    g_shadeDepthLayout = g_device.CreateBindGroupLayout(&layoutDescriptor);
++    const wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{
++        .label = "Shading depth", .bindGroupLayoutCount = 1, .bindGroupLayouts = &g_shadeDepthLayout};
++    const auto pipelineLayout = g_device.CreatePipelineLayout(&pipelineLayoutDescriptor);
++    const wgpu::DepthStencilState depth{
++        .format = kSeaMaskDepthFormat,
++        .depthWriteEnabled = true,
++        .depthCompare = wgpu::CompareFunction::Always,
++    };
++    const wgpu::FragmentState fragment{.module = module, .entryPoint = "fs_main", .targetCount = 0, .targets = nullptr};
++    const wgpu::RenderPipelineDescriptor descriptor{
++        .label = "Shading depth",
++        .layout = pipelineLayout,
++        .vertex = {.module = module, .entryPoint = "vs_main"},
++        .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++        .depthStencil = &depth,
++        .multisample = {.count = 1, .mask = UINT32_MAX},
++        .fragment = &fragment,
++    };
++    g_shadeDepthPass = g_device.CreateRenderPipeline(&descriptor);
++  }
++  if (!g_shadeDepth || g_shadeDepth.GetWidth() != size.width || g_shadeDepth.GetHeight() != size.height) {
++    const wgpu::TextureDescriptor descriptor{
++        .label = "Shading depth",
++        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++        .size = {size.width, size.height, 1},
++        .format = kSeaMaskDepthFormat,
++    };
++    g_shadeDepth = g_device.CreateTexture(&descriptor);
++    g_shadeDepthView = g_shadeDepth.CreateView();
++  }
++  const std::array entries{
++      wgpu::BindGroupEntry{.binding = 0, .textureView = depthView},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = g_seaMaskDepthView},
++      wgpu::BindGroupEntry{.binding = 2, .textureView = g_effectMaskView},
++  };
++  const wgpu::BindGroupDescriptor groupDescriptor{
++      .layout = g_shadeDepthLayout, .entryCount = entries.size(), .entries = entries.data()};
++  const auto group = g_device.CreateBindGroup(&groupDescriptor);
++  const wgpu::RenderPassDepthStencilAttachment depth{
++      .view = g_shadeDepthView,
++      .depthLoadOp = wgpu::LoadOp::Clear,
++      .depthStoreOp = wgpu::StoreOp::Store,
++      .depthClearValue = 0.f,
++  };
++  const wgpu::RenderPassDescriptor descriptor{
++      .label = "Shading depth",
++      .colorAttachmentCount = 0,
++      .depthStencilAttachment = &depth,
++      .timestampWrites = webgpu::gpu_prof::pass_writes("Shading depth"),
++  };
++  const auto pass = cmd.BeginRenderPass(&descriptor);
++  pass.SetPipeline(g_shadeDepthPass);
++  pass.SetBindGroup(0, group);
++  pass.Draw(3);
++  pass.End();
++  return g_shadeDepthView;
++}
++} // namespace
++
+ bool sun_normals_wanted() noexcept { return g_sunFacing && sun_shadow_map_enabled(); }
+ 
+ bool rim_hd_active() noexcept { return g_rimHd && webgpu::g_hasCoreFeatures; }
+@@ -5859,6 +6009,11 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+                        g_effectMask.GetHeight() == size.height;
+   g_effectMaskDrawn = false;
+   const wgpu::TextureView& effectView = effects ? g_effectMaskView : g_effectNoneView;
++  // With an effect that writes depth in the mask: the occlusion, the sun shadows and the cloud shadows shade from
++  // the scenery's depth under it (shading_depth()); the passes after them keep the scene's.
++  const wgpu::TextureView shadeDepthView =
++      effects && depthView && msaaSamples == 1 ? shading_depth(cmd, depthView, size) : depthView;
++  g_effectDepthDrawn = false;
+   // The sun shadow map's pass runs this frame: with HD's SSAO and the cloud shadows on HD's rule it makes them, in
+   // place of their own passes.
+   const bool sunMapPass = sun_shadows_enabled() && g_module && depthView && msaaSamples == 1 && camera.valid &&
+@@ -5871,13 +6026,13 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+       size.height >= 4) {
+     const webgpu::gpu_prof::Zone zone{cmd, "Ambient occlusion"};
+     ensure_targets(size, format, msaaSamples);
+-    draw_depth(cmd, "Ambient occlusion", g_aoPass, g_aoView[1], depthView, g_aoView[0], nullptr, false);
+-    draw_depth(cmd, "Ambient occlusion blur (horizontal)", g_aoBlurH, g_aoView[0], depthView, g_aoView[1], nullptr,
++    draw_depth(cmd, "Ambient occlusion", g_aoPass, g_aoView[1], shadeDepthView, g_aoView[0], nullptr, false);
++    draw_depth(cmd, "Ambient occlusion blur (horizontal)", g_aoBlurH, g_aoView[0], shadeDepthView, g_aoView[1], nullptr,
+                false);
+-    draw_depth(cmd, "Ambient occlusion blur (vertical)", g_aoBlurV, g_aoView[1], depthView, g_aoView[0], nullptr,
++    draw_depth(cmd, "Ambient occlusion blur (vertical)", g_aoBlurV, g_aoView[1], shadeDepthView, g_aoView[0], nullptr,
+                false);
+     // With DOL_AURORA_AO_DEBUG=1 the occlusion replaces the scene; with 2 it tints it.
+-    draw_depth(cmd, "Ambient occlusion apply", g_aoUpscale, g_aoView[0], depthView, dst, resolve, true, effectView);
++    draw_depth(cmd, "Ambient occlusion apply", g_aoUpscale, g_aoView[0], shadeDepthView, dst, resolve, true, effectView);
+   }
+   if (sun_shadows_enabled() && g_module && depthView && msaaSamples == 1) {
+     if (camera.valid) {
+@@ -5887,12 +6042,12 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+       // the scene's size; at a quarter of it, blurred as the screen's version
+       // is, Link's shadow was a blob.
+       if (sunMap != nullptr && sunMap->valid && g_sunMapView && !g_sunMapDebug) {
+-        draw_sun_map(cmd, camera, *sunMap, depthView, effectView, dst, true, size, resolve);
++        draw_sun_map(cmd, camera, *sunMap, shadeDepthView, effectView, dst, true, size, resolve);
+       } else {
+         if (sunMap != nullptr && sunMap->valid && g_sunMapView)
+-          draw_sun_map(cmd, camera, *sunMap, depthView, effectView, g_aoView[0], false, size);
++          draw_sun_map(cmd, camera, *sunMap, shadeDepthView, effectView, g_aoView[0], false, size);
+         else
+-          draw_with_view(cmd, "Sun shadows", g_sunPass, camera.view, depthView, g_aoView[0], nullptr, &effectView);
++          draw_with_view(cmd, "Sun shadows", g_sunPass, camera.view, shadeDepthView, g_aoView[0], nullptr, &effectView);
+         if (!g_sunMapDebug) {
+           draw(cmd, "Sun shadows blur (horizontal)", g_blurH, g_aoView[0], g_aoView[1], false);
+           draw(cmd, "Sun shadows blur (vertical)", g_blurV, g_aoView[1], g_aoView[0], false);
+@@ -5953,7 +6108,7 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+     if (camera.valid) {
+       const webgpu::gpu_prof::Zone zone{cmd, "Cloud shadows"};
+       ensure_targets(size, format, msaaSamples);
+-      draw_with_view(cmd, "Cloud shadows", g_cloudPass, camera.view, depthView, dst, resolve, &effectView);
++      draw_with_view(cmd, "Cloud shadows", g_cloudPass, camera.view, shadeDepthView, dst, resolve, &effectView);
+     }
+   }
+   // HD draws no far blur in a monotone frame (its DOF is the monotone's).
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 88d110f7d7..b7c02182c1 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -176,6 +176,12 @@ wgpu::TextureView effect_mask_target(const wgpu::Extent3D& sceneSize, wgpu::Text
+ // How far back the effects are drawn into it, a share of their distance
+ // (DOL_AURORA_EFFECT_MASK_PUSH, 0.05): what lies on a surface is left out.
+ float effect_mask_push() noexcept;
++// The effects' mask has an effect that writes depth this frame (common.cpp render_pass(), DrawData::effectDepth):
++// the occlusion, the sun shadows and the cloud shadows then shade from the scenery's depth under it, the sea mask's.
++void note_effect_depth() noexcept;
++// The effects' mask's depth for a pass with effects drawn at their own depth (common.cpp encode_effect_mask()): a
++// copy of the sea mask's depth (the scenery's, without such effects), or none when it isn't this size.
++wgpu::TextureView effect_mask_depth(const wgpu::CommandEncoder& cmd, const wgpu::Extent3D& size);
+ // The sun shadows' facing term is on: the scenery's smooth normals are wanted (made on the CPU for a draw
+ // without normals of its own, gxcore_draw.cpp, and drawn by the sea mask's pass into sun_normal_target()).
+ // Off, none of that work is done.
+-- 
+2.56.0
+

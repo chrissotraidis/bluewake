@@ -399,3 +399,75 @@ and puts HD's back in after the shade, as HD fogs after its light, so a room's f
 (`DOL_AURORA_SUN_FOG_HD=0` keeps it as drawn). Where HD's fog starts before the camera and the game's
 palette blend clamps the start at 0, the host gives HD's start with the game's end
 (`aurora_set_fog_hd_starts`) and the sun pass fogs the lit scenery from it.
+
+Patch 0227 gives all scenery with a smooth normal Wind Waker HD's hemisphere per vertex
+(`DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1`, which the HD look sets): the mask pass normalizes each vertex's normal
+and writes the blend across the triangle as it is, and the hemisphere (0.5 + 0.5 N.y between the ambient and the
+sky's light) takes its y without renormalizing, as HD's terrain shader does. Before, the ground took N.y from the
+depth's face (about 1: the sky's colour alone), bluer in the shade than HD's where its normals lean. Palms keep
+theirs; `=skinned` keeps the old rule.
+
+Patch 0228 fogs every draw with linear perspective fog from Wind Waker HD's start, not only the lit scenery: a
+draw fogged from the game's clamped start (C 0) to the end of the host's pair (`aurora_set_fog_hd_starts`; its end
+is the projection's near x B / A) takes GXSetFog's A and C for HD's start to that end. The characters, plants and
+objects now fog as HD's own shaders fog them; the sun pass's fog after the shade reads the same constants.
+
+Patch 0229 adds `dol_aurora_set_texture_pack_optional`: an optional/ folder can be loaded or dropped while the game
+runs, so a look that brings one (HD's sky clouds) can be turned off and on in a session; the start's
+`DOL_AURORA_TEXTURE_PACK_OPTIONAL` goes through the same call. Each change to the replacements bumps a generation,
+and gxcore's decode cache is cleared when it changes. A background decode is used only for the entry it was made for.
+
+Patch 0230 gives Dragon Roost Cavern's lava rooms Wind Waker HD's glow: its shaders for the konst2 materials add
+albedo x lava K x 4 x (1 - the vertex alpha) squared (read from the disc's model.sharcfb), which the importer gives
+as the glow. Their GameCube materials are three stages, the third the GameCube's own glow (PREV + C1 x APREV),
+which HD's programs don't have: the draw takes C1 black and the glow goes on after stage 1. Two-stage draws make
+the same WGSL as before.
+
+Patch 0231 draws the Tower of the Gods' water floor (Obj_Humi's Humi00_v, the only material of its kind) as Wind
+Waker HD does: KONST + C0 x texel, plus KONST x the second layer's texel x (1 - the vertex alpha x the first's), on
+the colours made linear, then back to gamma for the GX fog. `gxc::hd_water_floor_stage()` matches its three
+stages, and `ShaderKey::hd_water` flags it while HD's palettes are in place. On the GameCube's gamma colours the
+caustics came out twice HD's brightness.
+
+Patch 0232 mixes the fog in linear light while HD's fog curve is on, as Wind Waker HD's scenery shader ends with
+mix(lit, fog colour, f) on linear values: the draws' fog (`emit_fog` and the ubershader) is that mix by the sRGB
+curve, in place of the integer blend in the game's gamma. The sun pass reads the scene from a copy taken just
+before it (single-sampled), takes the draws' fog out in linear light, shades, and puts HD's radial fog back in
+linear light. Without the copy it works as before.
+
+Patch 0233 adds stable cascades: each cascade in the frame fixed to the sun, its box the square about the sphere
+round its slice of the view, held in the same steps with its centre moved by whole texels, so the grid doesn't
+move as the camera turns. The cost is texels: the square is coarser than the box fitted to the turned frame.
+
+Patch 0234 treats a blended draw that writes depth as an effect when it is one of the game's particles (the host's
+tag) or a glow model (its colour from neither a texture nor the rasterized colour). A particle's colour draw over
+its own depth draw, and an effect that writes depth, go into the effects' mask at their own depth, against a copy
+of the sea mask's depth. Where such an effect covers a pixel, the occlusion, sun shadows and cloud shadows shade
+from the sea mask's depth, the scenery under it, as Wind Waker HD lights before it draws its effects. A small pass
+makes that depth only in frames with such effects.
+
+Patch 0235 makes the copy the heat haze samples again after Wind Waker HD's monotone, into a second texture that
+the frame's later draws sample, so the haze over the lava in a sepia boss replay (Xboss0) is sepia too; it showed
+square quads of the colours before the monotone. The copy goes back in place at the frame's end, so the next
+frame's motion blur takes the colour as before.
+
+Patch 0236 adds `DOL_AURORA_SUN_SHADOW_CASCADES_HD=1`, off by default: Wind Waker HD's own fit, read from Cemu
+captures of a turn at Outset's pier (its first cascade the tight box round the view's slice from 30 units to the
+first split, in a frame whose y is the camera's forward made flat to the sun, refitted every frame); `=2` its frame
+only. `DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=2` shows debug view 12 unblurred, with the pre-pass shadow in red.
+
+Patch 0237 makes the stable cascades the default: turned with the camera as Wind Waker HD's are, every shadow near
+the camera was drawn on a new grid each frame of a turn. `DOL_AURORA_SUN_SHADOW_CASCADES_STABLE=0` gives HD's
+turning frame back (and `_TURN_STEP` applies only then); `_HD=1` or `2` turns it off as well.
+
+Patch 0238 finishes Dragon Roost Cavern's effects. A glow model may take the rasterized colour when its textures
+only cut its shape (the geysers' middle layer, C1 + 0.5 x RASC, was shaded as scenery); an effect drawn at its own
+depth keeps its share near or far (the cover's fade from 3,000 units went by the far wall's depth behind it). The
+effects are drawn into the mask a second time over white, so a blended effect's share is its opacity: a dark
+dust no longer lets the floor's shadows show through. `DOL_AURORA_EFFECT_MASK_OPACITY=0` keeps the colour alone.
+
+Patch 0239 draws only the stage's BG lists' casters into the sun map's cascades from 2 on, as Wind Waker HD's
+drawShadowCascade draws mpModelList into every cascade and the other lists into the first two. The host marks the
+game's draw list in BP register 0x7A (0 or never written: a BG list, 1: another), kept until written again; a game
+module that doesn't write it keeps the old rule. `DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all` keeps every caster in
+every cascade.

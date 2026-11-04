@@ -1,0 +1,173 @@
+From d4ea0729f2c5d2d9b3a08d13e73047d74a4e99a4 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 19:44:10 -0600
+Subject: [PATCH] fixup! Sun shadows: Wind Waker HD's normals and colours for
+ the objects and the rooms, and its light on the scenery
+
+Dragon Roost Cavern's lava glow. HD's shaders for its konst2 materials (the
+disc's model.sharcfb) add albedo x lava K x 4 x (1 - the vertex alpha)
+squared, which the importer now gives as the glow, by the same rule as
+Ganon's Tower's. Its _v_x materials are three stages on the GameCube, a
+third PREV + C1 x APREV (the GameCube's own glow), and HD's program for
+each is its plain material's: no such term. hd_lava_shape takes that form,
+the draw takes C1 black (hd_light_constants()), and the glow goes on after
+stage 1, on its texel (emit_hd_lava(); stage 2 has none). Two-stage draws
+make the same WGSL as before. Room 11's lit right wall goes from 0.71 of
+HD's red to 1.02 (Cemu, 12:00).
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 32 ++++++++++++++++---
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 26 ++++++++++-----
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 24 ++++++++++++++
+ 3 files changed, 69 insertions(+), 13 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 760dbcd90d..a4f5c26188 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -3248,11 +3248,14 @@ static bool hd_light_draw(const gxc::DrawPlan& plan) {
+   return false;
+ }
+ 
+-// Such a draw's pixel constants: C0's colour black.
+-static const gxc::PixelShaderConstants& hd_light_constants(const gxc::DrawPlan& plan) {
++// Such a draw's pixel constants: C0's colour black; C1's too for a lava draw with the GameCube's own glow
++// (hd_lava_gc_glow()), which HD's shaders for those materials haven't.
++static const gxc::PixelShaderConstants& hd_light_constants(const gxc::DrawPlan& plan, bool noGcGlow) {
+   static thread_local gxc::PixelShaderConstants pc;
+   pc = plan.pixel_constants;
+   pc.colors[1][0] = pc.colors[1][1] = pc.colors[1][2] = 0;
++  if (noGcGlow)
++    pc.colors[2][0] = pc.colors[2][1] = pc.colors[2][2] = 0;
+   return pc;
+ }
+ 
+@@ -3278,8 +3281,22 @@ static const gxc::PixelShaderConstants& hd_fog_constants(const gxc::PixelShaderC
+ // form (the light, then x the texture: every such material's) with HD's light buffer on takes it: its vertices'
+ // colour 1 (no stage reads it) carry the glow's light, linear, and in alpha -(1 + its share of the lit light), which
+ // the sea mask's pass puts in the normals' alpha so the sun pass leaves that share unshaded.
++// Dragon Roost Cavern's (M_NewD2 rooms 2, 7, 8, 10-13, 15; the disc's model.sharcfb) add lava K x 4 x (1 - the
++// vertex alpha) squared, the importer's glow there, by the same rule. Its _v_x materials are three stages on the
++// GameCube, a third PREV + C1 x APREV (the GameCube's own glow, hd_lava_gc_glow()); HD's shaders for them are their
++// plain materials' (the same program, no such term), so the draw takes C1 black (hd_light_constants()) and the glow
++// goes on after the texture's stage (gxcore_shader.cpp emit_hd_lava()).
++static bool hd_lava_gc_glow(const gxc::ShaderKey& s) {
++  if (s.num_tev_stages != 3u)
++    return false;
++  const gxc::TevStageKey& t = s.tev_stages[2];
++  // a ZERO, b C1, c APREV, d CPREV; add, no bias or scale, into PREV
++  return t.cc_a == 15u && t.cc_b == 4u && t.cc_c == 1u && t.cc_d == 0u && t.cc_bias == 0u && t.cc_op == 0u &&
++         t.cc_scale == 0u && t.cc_dest == 0u;
++}
++
+ static bool hd_lava_shape(const gxc::ShaderKey& s) {
+-  if (s.num_tev_stages != 2u || s.num_color_chans > 1u)
++  if ((s.num_tev_stages != 2u && !hd_lava_gc_glow(s)) || s.num_color_chans > 1u)
+     return false;
+   const gxc::TevStageKey& t = s.tev_stages[1];
+   return t.cc_a == 15u && t.cc_d == 15u && ((t.cc_b == 0u && t.cc_c == 8u) || (t.cc_b == 8u && t.cc_c == 0u)) &&
+@@ -4099,9 +4116,14 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                              !character_draw(plan.pipeline) && !seaSurface && !positions_written(plan);
+   const bool alphaCaster = cutoutBindGroup != 0 && (sun_caster_alpha(plan.pipeline) || blendedCutout);
+   const bool smoothNormal = smooth_normal_draw(plan, seaSurface);
+-  // A palm with Wind Waker HD's light (apply_hd_colours()): its shade colour black.
++  // A palm with Wind Waker HD's light (apply_hd_colours()): its shade colour black. A lava draw with the GameCube's
++  // own glow (hd_lava_gc_glow()) that takes HD's (t_hdLavaDraw below, the same tests): C1 black too.
++  const bool lightDraw = smoothNormal && hd_light_draw(plan);
++  const bool noGcGlow = lightDraw && tev && hd_lava_gc_glow(plan.pipeline.shader) &&
++                        post_fx::point_lights_hd_switch() && post_fx::actor_light_hd_switch() &&
++                        gxc::hd_point_light_stage(plan.pipeline.shader) && hd_lava_draw(plan);
+   const gxc::PixelShaderConstants& lightConstants =
+-      smoothNormal && hd_light_draw(plan) ? hd_light_constants(plan) : plan.pixel_constants;
++      lightDraw ? hd_light_constants(plan, noGcGlow) : plan.pixel_constants;
+   // Wind Waker HD's fog start before the camera (aurora_set_fog_hd_starts) on every draw fogged from the game's
+   // clamped start (C 0) to the same end: the characters, plants and objects as well as the lit scenery, all fogged
+   // from that start in HD's shaders. The lit scenery's fog the sun pass takes (note_scene_fog()) is these constants.
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 988ddb14e4..e429147a51 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -461,6 +461,20 @@ bool hd_scenery_lava(const ShaderKey& key, const ToonLightMatch& hd) {
+   return (key.hd_point_light & 4u) != 0u && hd_scenery_light(key, hd);
+ }
+ 
++// The glow, in linear on the stage's result, its texel the albedo. Dragon Roost Cavern's lava materials have a third
++// stage, PREV + C1 x APREV (the GameCube's own glow, which HD's shaders for them haven't; the host gives such a draw C1
++// black, gxcore_draw.cpp hd_light_constants()): there the glow goes on after stage 1, the texture's, whose texel is
++// the albedo (stage 2 has none); with two stages, after the last.
++void emit_hd_lava(std::string& out) {
++  emit(out, "    if (in.hd_em.a < -0.5) {\n"
++            "        let hd_alb = pow(vec3f(textemp.rgb & vec3i(255, 255, 255)) / 255.0, vec3f(2.2));\n"
++            "        let hd_glow = pow(clamp(vec3f(prev.rgb) / 255.0, vec3f(0.0), vec3f(1.0)), vec3f(2.2)) + "
++            "hd_alb * in.hd_em.rgb;\n"
++            "        prev = vec4i(vec3i(round(pow(clamp(hd_glow, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)) * "
++            "255.0)), prev.a);\n"
++            "    }\n");
++}
++
+ bool hd_scenery_vertex_normal(const ShaderKey& key) {
+   return hd_scenery_smooth_normal(key) ||
+          (key.lit_valid != 0u && key.has_vertex_normal != 0u && key.raw_tex_hi_in_nbt == 0u &&
+@@ -781,6 +795,8 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key, const ToonLightMa
+                 "        prev = vec4i(vec3i(round(pow(clamp(hd_lit, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)) * 255.0)), "
+                 "prev.a);\n"
+                 "    }\n");
++    if (n == 1u && key.num_tev_stages > 2u && hd_scenery_lava(key, hd))
++      emit_hd_lava(out);
+   }
+ 
+   // The last stage's destination register is what reaches the framebuffer.
+@@ -789,14 +805,8 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key, const ToonLightMa
+     emitf(out, "    prev = vec4i(%s.rgb, prev.a);\n", kTevOutput[last.cc_dest]);
+   if (last.ac_dest != 0)
+     emitf(out, "    prev = vec4i(prev.rgb, %s.a);\n", kTevOutput[last.ac_dest]);
+-  if (hd_scenery_lava(key, hd))
+-    emit(out, "    if (in.hd_em.a < -0.5) {\n"
+-              "        let hd_alb = pow(vec3f(textemp.rgb & vec3i(255, 255, 255)) / 255.0, vec3f(2.2));\n"
+-              "        let hd_glow = pow(clamp(vec3f(prev.rgb) / 255.0, vec3f(0.0), vec3f(1.0)), vec3f(2.2)) + "
+-              "hd_alb * in.hd_em.rgb;\n"
+-              "        prev = vec4i(vec3i(round(pow(clamp(hd_glow, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)) * "
+-              "255.0)), prev.a);\n"
+-              "    }\n");
++  if (key.num_tev_stages <= 2u && hd_scenery_lava(key, hd))
++    emit_hd_lava(out);
+ 
+   if (hd.matched && !hd_after_albedo(hd))
+     emit_hd_actor_light(out, key, hd);
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 56581c4384..b1a68dfcf3 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -1477,6 +1477,30 @@ void test_point_light_scenery() {
+   CHECK(glow_at != std::string::npos && last_at != std::string::npos && alpha_at != std::string::npos);
+   CHECK(last_at < glow_at && glow_at < alpha_at);
+   CHECK(wv.find("if (in.hd_em.a < -0.5) {") != std::string::npos);
++  // Dragon Roost Cavern's three stages (a third PREV + C1 x APREV, the GameCube's own glow, untextured): the glow
++  // once, after stage 1, on its texel, before stage 2 (whose texel is white).
++  auto lava3 = lava;
++  lava3.num_tev_stages = 3;
++  auto& s2 = lava3.tev_stages[2];
++  s2 = lava3.tev_stages[1];
++  s2.cc_a = 15;
++  s2.cc_b = 4;
++  s2.cc_c = 1;
++  s2.cc_d = 0;
++  s2.tevorders_enable = 0;
++  CHECK(gxc::hd_point_light_stage(lava3));
++  const std::string w3 = gxc::generate_wgsl(lava3);
++  if (std::getenv("GXCORE_PRINT_WGSL") != nullptr)
++    std::printf("%s\n", w3.c_str());
++  const auto glow3_at = w3.find("hd_alb * in.hd_em.rgb");
++  const auto s1_at = w3.find("// TEV stage 1");
++  const auto s2_at = w3.find("// TEV stage 2");
++  CHECK(glow3_at != std::string::npos && s1_at != std::string::npos && s2_at != std::string::npos);
++  CHECK(s1_at < glow3_at && glow3_at < s2_at);
++  CHECK(w3.find("hd_alb * in.hd_em.rgb", glow3_at + 1) == std::string::npos);
++  CHECK(w3.find("textemp = vec4i(255,255,255,255);", s2_at) != std::string::npos);
++  // Two stages: still after the last.
++  CHECK(wv.find("hd_alb * in.hd_em.rgb", glow_at + 1) == std::string::npos);
+ }
+ 
+ // Dolphin VertexShaderGen SourceRow::Normal: use the raw normal only when the
+-- 
+2.56.0
+

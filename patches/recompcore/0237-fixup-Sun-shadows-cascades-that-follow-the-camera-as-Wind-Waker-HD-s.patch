@@ -1,0 +1,85 @@
+From 7f53705d6dcac6f576f6614b0469943d28c65335 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 00:09:39 -0600
+Subject: [PATCH] fixup! Sun shadows: cascades that follow the camera, as Wind
+ Waker HD's
+
+The stable cascades are the default now: each cascade in the frame fixed
+to the sun, its box the square about the sphere round its slice of the
+view, so the grid doesn't move as the camera turns. Dale tried them in
+play (Nov 3: "the flicker isn't too bad"). Turned with the camera as HD's
+were, every shadow near the camera was drawn on a new grid each frame of a
+turn. DOL_AURORA_SUN_SHADOW_CASCADES_STABLE=0 gives HD's turning frame
+back (and _TURN_STEP applies only then); _HD=1 or 2 turns it off as well,
+since those test HD's own frame.
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 24 ++++++++++---------
+ 1 file changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 4e00c5e0a8..3a728ff627 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -267,26 +267,28 @@ std::atomic<float> g_sunHdLiveSplits[2]{0.f, 0.f};
+ // shadow casters' x axis is the camera's right turned flat to the sun, its first cascade a box fitted to the slice
+ // its first split makes): each cascade is fitted to the slice of the view between two splits, so all that is on
+ // screen is in one (the title's island far off was outside them all and grew its shade as the camera came near),
+-// turned with the camera. Unlike HD's, each one's size is held in steps (a quarter of a power of two, rounded up,
+-// shrinking only two steps down) and its centre moved by whole texels in its own turned frame, so its texels stay
++// turned with the camera as HD's with _STABLE=0 (by default the frame stays fixed to the sun: _STABLE below).
++// Unlike HD's, each one's size is held in steps (a quarter of a power of two, rounded up, shrinking only two steps
++// down) and its centre moved by whole texels in its own turned frame, so its texels stay
+ // where they were on the ground while the camera moves and doesn't turn: resized every frame with the live splits
+ // (since 9031051), every shadow near the camera was drawn on a new grid each frame and small ones flashed.
+ // _FAR: where the last ends (HD's 14000, the camera's far plane if nearer), its last seventh fading to lit as HD's
+ // pre-pass far fade does (12000 to 14000). _SPLIT3: where a fourth cascade starts (0: three; a third reaching
+ // 14000 across the whole view would have texels of 30 units): at least 1.5 times HD's far split.
+-// _TURN_STEP: degrees the frame turns in (0: with every turn of the camera, as HD's).
++// _TURN_STEP (with _STABLE=0): degrees the frame turns in (0: with every turn of the camera, as HD's).
+ bool g_follow = false;
+ float g_followFar = 14000.f;
+ float g_followSplit3 = 4500.f;
+ float g_followTurnStep = 0.f;
+-// _STABLE=1 (local test, off: HD's own turned frame): each cascade's
++// _STABLE (on by default; =0 for HD's own frame turned with the camera, and off when _HD is set): each cascade's
+ // frame is the one fixed to the sun, and its box the square about the sphere round its slice of the view, held in
+ // the same steps, its centre moved by whole texels. So nothing of the grid changes as the camera turns, only as the
+ // split moves a cascade's size a step: turned with the camera as HD's are, every shadow near the camera was drawn on
+ // a new grid each frame of a turn and edges and small shadows popped (I_TestR, Nov 3: 2.3x the changed pixels of the
+-// camera still, against 1.2x so). The cost is texels: the square about the sphere is coarser than the box HD fits
+-// (Outset's lookout from the sea: the second cascade 11.3 units against 9.5 x 4.8, and more crawl on the waves).
+-bool g_followStable = false;
++// camera still, against 1.2x so; Dale in play, Nov 3: "the flicker isn't too bad" with it). The cost is texels: the
++// square about the sphere is coarser than the box HD fits (Outset's lookout from the sea: the second cascade 11.3
++// units against 9.5 x 4.8, and more crawl on the waves).
++bool g_followStable = true;
+ // _HD (local test): 1, Wind Waker HD's own fit (Outset's pier at 10:00 turning, 4 pairs of consecutive Cemu frames,
+ // Nov 3: its first cascade is, to 0.01 unit, the tight box round the view's slice from 30 units to the first split,
+ // in a frame whose y is the camera's forward made flat to the sun, refitted every frame: no steps, no snap, no
+@@ -3143,10 +3145,10 @@ void apply_sun_quality(int level) {
+     g_followFar = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_FAR", g_followFar, 1000.f, 100000.f);
+     g_followSplit3 = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_SPLIT3", g_followSplit3, 0.f, 100000.f);
+     g_followTurnStep = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_TURN_STEP", g_followTurnStep, 0.f, 90.f);
+-    const char* stable = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_STABLE");
+-    g_followStable = stable != nullptr && stable[0] == '1';
+     const char* hd = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_HD");
+     g_followHd = hd != nullptr && (hd[0] == '1' || hd[0] == '2') ? hd[0] - '0' : 0;
++    const char* stable = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_STABLE");
++    g_followStable = stable != nullptr && stable[0] != '\0' ? stable[0] == '1' : g_followHd == 0;
+     g_followState = {};
+   }
+   if (const char* splits = std::getenv("DOL_AURORA_SUN_SHADOW_HD_SPLITS")) {
+@@ -5426,8 +5428,8 @@ float held_size(float want, float& held) noexcept {
+   return held;
+ }
+ 
+-// The cascades fitted to the view's slices, turned with the camera (g_follow, sun_map()): x0, y0 the frame fixed to
+-// the sun, from which the camera's is turned.
++// The cascades fitted to the view's slices (g_follow, sun_map()), in the frame fixed to the sun (g_followStable, the
++// default) or turned with the camera as HD's: x0, y0 the frame fixed to the sun, from which the camera's is turned.
+ void follow_cascades(SunMap& map, const Camera& camera, const float sun[3], const float x0[3], const float y0[3]) {
+   const float* v = camera.view.data();
+   FollowCascades& f = g_followState;
+-- 
+2.56.0
+

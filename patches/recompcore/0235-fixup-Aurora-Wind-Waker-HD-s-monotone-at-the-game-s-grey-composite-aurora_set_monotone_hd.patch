@@ -1,0 +1,175 @@
+From 79fccb94f22b91403856dd48ddacd1c446da4604 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 21:25:05 -0600
+Subject: [PATCH] fixup! Aurora: Wind Waker HD's monotone at the game's grey
+ composite (aurora_set_monotone_hd)
+
+The heat haze in a monotone frame (Xboss0, the boss replays in sepia) takes
+the frame as it is with HD's monotone in. Its particles sample the grey
+composite's copy, which keeps the colour for HD's monotone, and they are
+drawn after the monotone: each showed its quad of the unmonotoned colours
+over the sepia, square-edged, across the lava.
+
+The copy is made again from the frame after the monotone into a second
+texture, which the frame's draws after the copy sample (the game's grey
+quad is still left out). The copy itself goes back in place at the frame's
+end, so the next frame's motion blur, laid back under the monotone, takes
+the colour as before.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 32 ++++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |  4 ++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 31 +++++++++++++++++-
+ 3 files changed, 64 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 9fc79f0cfd..8796173180 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -220,6 +220,12 @@ struct RenderPass {
+   // Starts after it: the scene's effects and the monotone first, bloom after the player's lists.
+   bool monotonePoint = false;
+   post_fx::Monotone monotone;
++  // In the pass after the grey composite's copy (mark_monotone_copy()): the copy made again into this texture from
++  // the frame after the monotone, with the copy's uniform and format.
++  TextureHandle monotoneHaze;
++  Range monotoneHazeUniform;
++  GXTexFmt monotoneHazeFormat = GX_TF_I8;
++  ClipRect monotoneHazeRect;
+   bool sealed = false;
+   std::vector<tex_palette_conv::ConvRequest> paletteConvs;
+ };
+@@ -814,13 +820,15 @@ static bool g_nextDrawComposite = false;
+ void set_next_draw_composite(bool composite) noexcept { g_nextDrawComposite = composite; }
+ 
+ static post_fx::Monotone g_pendingMonotone; // the recording thread's, for the pass after a marked copy
++static TextureHandle g_pendingMonotoneHaze;
+ 
+-void mark_monotone_copy(const post_fx::Monotone& monotone) noexcept {
++void mark_monotone_copy(const post_fx::Monotone& monotone, TextureHandle haze) noexcept {
+   if (g_currentRenderPass == UINT32_MAX || g_inOffscreen)
+     return;
+   auto& pass = current_render_passes()[g_currentRenderPass];
+   pass.monotoneCopy = true;
+   g_pendingMonotone = monotone;
++  g_pendingMonotoneHaze = std::move(haze);
+ }
+ 
+ static inline void push_command(CommandType type, const Command::Data& data) {
+@@ -938,7 +946,12 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
+       .monotoneFrame = prevPass.monotoneFrame,
+       .monotonePoint = prevPass.monotoneCopy,
+       .monotone = prevPass.monotoneCopy ? g_pendingMonotone : post_fx::Monotone{},
++      .monotoneHaze = prevPass.monotoneCopy ? g_pendingMonotoneHaze : TextureHandle{},
++      .monotoneHazeUniform = prevPass.resolveUniformRange,
++      .monotoneHazeFormat = resolveFormat,
++      .monotoneHazeRect = rect,
+   };
++  g_pendingMonotoneHaze = {};
+   newPass.commands.reserve(2048);
+   current_render_passes().emplace_back(std::move(newPass));
+   ++g_currentRenderPass;
+@@ -2656,6 +2669,23 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+                     &passInfo.monotone);
+     if (lateLight)
+       post_fx::snapshot_monotone_depth(cmd, passInfo.copySourceDepthView, passInfo.targetSize);
++    // The grey composite's copy again, from the frame with HD's monotone in (the heat haze's): the copy keeps the
++    // colour (for the next frame's motion blur, laid back under the monotone), and the haze drawn from it after the
++    // monotone showed the colours in its quads over the sepia (Xboss0, the boss replays).
++    if (passInfo.monotoneHaze && passInfo.msaaSamples == 1) {
++      const auto& hazeSize = passInfo.monotoneHaze->size;
++      const bool scaled = hazeSize.width != static_cast<uint32_t>(passInfo.monotoneHazeRect.width) ||
++                          hazeSize.height != static_cast<uint32_t>(passInfo.monotoneHazeRect.height);
++      tex_copy_conv::run(cmd, tex_copy_conv::ConvRequest{
++                                  .fmt = passInfo.monotoneHazeFormat,
++                                  .srcView = passInfo.copySourceView,
++                                  .uniformRange = passInfo.monotoneHazeUniform,
++                                  .dst = passInfo.monotoneHaze,
++                                  .sampleFilter = scaled ? tex_copy_conv::SampleFilter::Linear
++                                                         : tex_copy_conv::SampleFilter::Nearest,
++                                  .keepColour = true,
++                              });
++    }
+   }
+   // DOL_AURORA_GPU_PROF_CHUNK=N (diagnostic): a pass of more than N commands is
+   // encoded as timed sub-passes of N commands, "EFB 1 @0", "EFB 1 @N", ...,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 3611aae235..f6351b2d63 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -386,7 +386,9 @@ struct Monotone;
+ // The copy that ends the current pass is the game's grey composite's frame copy in a monotone frame
+ // (gxcore_draw.cpp copy_efb_to_texture(), before it calls resolve_pass): the scene's effects and Wind Waker HD's
+ // monotone go in at the start of the pass after it, with these parameters, and its bloom after the player's lists.
+-void mark_monotone_copy(const post_fx::Monotone& monotone) noexcept;
++// haze: a second texture of the copy's size and format, which the copy is made into again from the frame after the
++// monotone (the draws after it that sample the copy, the heat haze, take it: the frame as it is then), or none.
++void mark_monotone_copy(const post_fx::Monotone& monotone, TextureHandle haze = {}) noexcept;
+ 
+ template <typename DrawData>
+ void push_draw_command(DrawData data);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 93343c2c1e..b98838fc6c 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -441,6 +441,15 @@ struct EfbCopyBinding {
+   bool memory_epoch_valid = false;
+ };
+ absl::flat_hash_map<uint32_t, EfbCopyBinding> g_efbCopyTextures;
++// The grey composite's copy's second texture while monotone, per copy (copy_efb_to_texture()), and the bindings it
++// stands in for until the frame's end (note_frame_presented()).
++absl::flat_hash_map<EfbCopyKey, TextureHandle> g_monotoneHazeTextures;
++struct MonotoneHazeRestore {
++  uint32_t address = 0;
++  EfbCopyBinding copy;
++  TextureHandle haze;
++};
++std::vector<MonotoneHazeRestore> g_monotoneHazeRestore;
+ 
+ } // namespace
+ 
+@@ -2324,6 +2333,13 @@ void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass)
+ }
+ 
+ void note_frame_presented() {
++  // The grey composite's copy back in place of its haze texture (copy_efb_to_texture()).
++  for (auto it = g_monotoneHazeRestore.rbegin(); it != g_monotoneHazeRestore.rend(); ++it) {
++    const auto found = g_efbCopyTextures.find(it->address);
++    if (found != g_efbCopyTextures.end() && found->second.handle == it->haze)
++      found->second = it->copy;
++  }
++  g_monotoneHazeRestore.clear();
+   g_textureVerifyFrame.fetch_add(1u, std::memory_order_relaxed);
+   frame_interp::end_game_frame();
+ }
+@@ -2334,6 +2350,8 @@ void reset_texture_cache() {
+   g_textureAddrKey.clear();
+   g_efbCopyCache.clear();
+   g_efbCopyTextures.clear();
++  g_monotoneHazeTextures.clear();
++  g_monotoneHazeRestore.clear();
+   g_textureCacheStats = {};
+ }
+ 
+@@ -2502,7 +2520,18 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+     const uint32_t dest = cmd.dest_address & 0x3FFFFFFFu;
+     if (monotone.on && monotone.frameCopy != 0 && fmt == GX_TF_I8 && (g_lastCopyFormat & _GX_TF_ZTF) != 0u &&
+         dest >= monotone.frameCopy && dest < monotone.frameCopy + 0x100000u) {
+-      gfx::mark_monotone_copy(monotone);
++      // What samples the copy after it this frame (the heat haze, drawn after HD's monotone) takes a second texture
++      // the copy is made into again from the frame with the monotone in (common.cpp render()); the next frame's
++      // motion blur, laid back under the monotone, the copy itself (restored at the frame's end).
++      auto& haze = g_monotoneHazeTextures[key];
++      if (!haze)
++        haze = gfx::new_conv_texture(dstWidth, dstHeight, fmt, "GXCore Copy Conv (monotone haze)");
++      gfx::mark_monotone_copy(monotone, haze);
++      if (haze) {
++        auto& binding = g_efbCopyTextures[cmd.dest_address];
++        g_monotoneHazeRestore.push_back(MonotoneHazeRestore{cmd.dest_address, binding, haze});
++        binding.handle = haze;
++      }
+       g_monotoneDrop = dest;
+       static bool s_logged = false;
+       if (!s_logged) {
+-- 
+2.56.0
+
