@@ -1,6 +1,7 @@
 #include "hd_look.h"
 
 #include <aurora/aurora.h>
+#include <gxruntime/aurora_backend.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -85,8 +86,9 @@ void bluewake_hd_look_defaults(void) {
     // HD's sky clouds (BLUEWAKE_HD_CLOUDS, off by default, not on with the
     // look): the importer keeps them in the pack's optional/hd-clouds, which
     // Aurora loads over the pack only when asked, so they come only with the
-    // HD textures and the look both on. Textures load once, so this holds
-    // until BlueWake starts again.
+    // HD textures and the look both on. Asked for here when BlueWake starts
+    // with both on; bluewake_hd_look_reload() then loads or drops them as the
+    // look is turned on and off.
     const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
     if (setting("BLUEWAKE_HD_CLOUDS") == 1 && setting("BLUEWAKE_HD_LOOK") == 1 && pack != NULL && pack[0] != '\0')
         setenv("DOL_AURORA_TEXTURE_PACK_OPTIONAL", "hd-clouds", 0);
@@ -199,6 +201,14 @@ void bluewake_hd_look_reload(void) {
     g_fog_curve = setting("BLUEWAKE_HD_FOG_CURVE") != 0;
     if (g_sky)
         sky_load();
+    // HD's sky clouds (the pack's optional/hd-clouds) go with the look at once: loaded over the pack while the look
+    // and BLUEWAKE_HD_CLOUDS are on, dropped when either goes (F2), so the GameCube's own clouds, the bank on the
+    // horizon included, come back. They loaded only at start before (bluewake_hd_look_defaults), and stayed.
+    {
+        const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
+        dol_aurora_set_texture_pack_optional(
+            "hd-clouds", all == 1 && setting("BLUEWAKE_HD_CLOUDS") == 1 && pack != NULL && pack[0] != '\0');
+    }
     if (bloom >= 0)
         aurora_set_bloom(bloom == 1);
     if (far_blur >= 0)
