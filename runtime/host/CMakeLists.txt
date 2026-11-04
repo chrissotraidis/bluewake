@@ -325,6 +325,15 @@ target_include_directories(bluewake_direct_calls_test PRIVATE
 target_compile_definitions(bluewake_direct_calls_test PRIVATE
     BLUEWAKE_EDGE_FILTER=1 BW_EDGE_WATCH_INCLUDE="direct_call_watch.inc")
 add_test(NAME bluewake_direct_calls_test COMMAND bluewake_direct_calls_test)
+# The same, from a module the builder made with the gate on by default.
+add_executable(bluewake_direct_calls_gate_default_test
+    ${BLUEWAKE_REPO_ROOT}/tests/direct_calls_test.c
+    ${BLUEWAKE_REPO_ROOT}/cmake/composite/direct_calls.c)
+target_include_directories(bluewake_direct_calls_gate_default_test PRIVATE
+    ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_REPO_ROOT}/tests)
+target_compile_definitions(bluewake_direct_calls_gate_default_test PRIVATE
+    BLUEWAKE_EDGE_FILTER=1 BW_EDGE_WATCH_INCLUDE="direct_call_watch.inc" BLUEWAKE_DIRECT_GATE_DEFAULT=1)
+add_test(NAME bluewake_direct_calls_gate_default_test COMMAND bluewake_direct_calls_gate_default_test)
 
 add_executable(bluewake_guest_checkpoint_test ${BLUEWAKE_REPO_ROOT}/tests/guest_checkpoint_test.c)
 target_include_directories(bluewake_guest_checkpoint_test PRIVATE
