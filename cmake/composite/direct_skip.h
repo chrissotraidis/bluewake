@@ -23,4 +23,35 @@ typedef struct BwHostSkipFast {
     uint32_t range_span[2];  /* an empty range is first 0xFFFFFFFF, span 0 */
 } BwHostSkipFast;
 
+/* v4 extends, rather than changes, the v3 ABI. `simple` keeps its meaning for
+ * v3 modules (non-zero: the inline path may answer), and a v4 module also reads
+ * the stage select's five fixed hooks from its bits 1..5 (BW_SKIP_KNOWN_*), so
+ * no direct call loads anything more: with the stage select off `simple` is 1
+ * and the hooks cost one compare on a value already loaded. Addresses are
+ * checked with the 0x40000000 code-mirror bit removed, matching the edge-watch
+ * table. The host sets the bits only through v4 (a module without v4 keeps the
+ * host query while the stage select is live; through v3, `simple` is 0 or 1),
+ * and a v4-capable module reads them whichever contract installed the struct.
+ * The host statically asserts its
+ * stage_select.h addresses match (main.c). A host that needs a watch the
+ * module doesn't know turns the inline path off (`simple` = 0): exact. */
+#define BW_SKIP_KNOWN_CHANGE 0x80029E6Cu       /* fopScnM_ChangeReq, bit 1 */
+#define BW_SKIP_KNOWN_DATA_SELECT 0x80181634u  /* dFile_select_c::dataSelect, bit 2 */
+#define BW_SKIP_KNOWN_EXECUTE 0x8022ED50u      /* dScnMenu_Execute, bit 3 */
+#define BW_SKIP_KNOWN_PLAY_EXECUTE 0x80234FD0u /* dScnPly_Execute, bit 4 */
+#define BW_SKIP_KNOWN_MENU_DELETE 0x8022F320u  /* dScnMenu_Delete, bit 5 */
+#define BW_SKIP_KNOWN_ALL 0x3Eu                /* all five, in `simple` */
+/* A first test that rules out most targets with one bit test: each hook's slot
+ * in a 64-entry table indexed by address bits 2..7 (unaffected by the mirror
+ * bit). The five hooks take five distinct slots; a target that hits one still
+ * goes through the exact compares. */
+#define BW_SKIP_KNOWN_SLOT(a) (1ull << (((a) >> 2) & 63u))
+#define BW_SKIP_KNOWN_SLOTS                                                                    \
+    (BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_CHANGE) | BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_DATA_SELECT) | \
+     BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_EXECUTE) | BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_PLAY_EXECUTE) | \
+     BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_MENU_DELETE))
+typedef struct BwHostSkipFastV4 {
+    BwHostSkipFast base;
+} BwHostSkipFastV4;
+
 #endif

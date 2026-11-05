@@ -2097,20 +2097,35 @@ static bool g_direct_call_trace;
 // Conservative by construction: `simple` is off whenever an address-independent
 // check could refuse, and the address lists always include Forest Water's and
 // the draw tags' addresses whether or not those features are on.
-static BwHostSkipFast g_skip_fast = {0u, {0u, 0u}, {0xFFFFFFFFu, 0xFFFFFFFFu}, {0u, 0u}};
+static BwHostSkipFastV4 g_skip_fast = {
+    {0u, {0u, 0u}, {0xFFFFFFFFu, 0xFFFFFFFFu}, {0u, 0u}}, 0u, {0u}
+};
 static bool g_skip_fast_on;
 static bool g_skip_verify; // BLUEWAKE_DIRECT_SKIP_VERIFY=1: the counts at exit
 static void host_skip_fast_refresh(void) {
     if (!g_skip_fast_on)
         return;
-    g_skip_fast.single[0] = g_module1_raw_base != 0u ? g_module1_raw_base + 0xD4u : 0u;
-    g_skip_fast.single[1] = bluewake_forest_water_tree_timer_check;
-    g_skip_fast.range_first[0] = BLUEWAKE_PARTICLE_DRAW_FIRST;
-    g_skip_fast.range_span[0] = BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST;
-    g_skip_fast.range_first[1] = BLUEWAKE_WAKE_DRAW_FIRST;
-    g_skip_fast.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
-    g_skip_fast.simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
-                         !g_overlap_watch_until_control;
+    g_skip_fast.base.single[0] = g_module1_raw_base != 0u ? g_module1_raw_base + 0xD4u : 0u;
+    g_skip_fast.base.single[1] = bluewake_forest_water_tree_timer_check;
+    g_skip_fast.base.range_first[0] = BLUEWAKE_PARTICLE_DRAW_FIRST;
+    g_skip_fast.base.range_span[0] = BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST;
+    g_skip_fast.base.range_first[1] = BLUEWAKE_WAKE_DRAW_FIRST;
+    g_skip_fast.base.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
+    // Bit 0: the inline path may answer; bits 1..5: the stage select's hooks,
+    // which only a v4 module reads (direct_skip.h). A v3 module never gets the
+    // fast path while the stage select is live, so it never sees them.
+    const bool simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
+                        !g_overlap_watch_until_control;
+    g_skip_fast.base.simple = simple ? 1u | (bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u) : 0u;
+    // The stage select's hooks are the module's known watches (direct_skip.h):
+    // one mask instead of a list every direct call walks (#524 2x2: the list
+    // cost the stage select's sessions ~20 M instructions a frame at Outset).
+    _Static_assert(BLUEWAKE_STAGE_SELECT_CHANGE == BW_SKIP_KNOWN_CHANGE &&
+                       BLUEWAKE_STAGE_SELECT_DATA_SELECT == BW_SKIP_KNOWN_DATA_SELECT &&
+                       BLUEWAKE_STAGE_SELECT_EXECUTE == BW_SKIP_KNOWN_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE == BW_SKIP_KNOWN_PLAY_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_MENU_DELETE == BW_SKIP_KNOWN_MENU_DELETE,
+                   "the module's known stage-select watches match stage_select.h");
 }
 static u64 g_direct_call_queries, g_direct_call_allowed;
 
@@ -8255,6 +8270,10 @@ int main(int argc, char** argv) {
                                        const u32*, CanSkipFn, void*, const BwHostSkipFast*, bool);
         DirectCallsV3Fn direct_calls_v3 = (DirectCallsV3Fn)
             dlsym(lib, "bluewake_composite_direct_calls_v3");
+        typedef int (*DirectCallsV4Fn)(bool, const bool*, const bool*, const u32*,
+                                       const u32*, CanSkipFn, void*, const BwHostSkipFastV4*, bool);
+        DirectCallsV4Fn direct_calls_v4 = (DirectCallsV4Fn)
+            dlsym(lib, "bluewake_composite_direct_calls_v4");
         const char* direct_env = getenv("BLUEWAKE_DIRECT_CALLS");
         const char* direct_trace = getenv("BLUEWAKE_DIRECT_CALL_TRACE");
         g_direct_call_trace = direct_trace != NULL && strcmp(direct_trace, "1") == 0;
@@ -8263,12 +8282,13 @@ int main(int argc, char** argv) {
                           getenv("BLUEWAKE_PER_BLOCK_TURNS") == NULL &&
                           dlsym(lib, "bluewake_set_edge_service") != NULL;
         // With the lazy overlap watch the host's answer depends on the address
-        // alone, so a module that can (v3) reads it inline instead of calling
-        // the host at every direct call. Not with the stage select, which has
-        // its own checks, or with the call trace, which counts the calls.
+        // alone, so a module that can reads it inline instead of calling the
+        // host at every direct call. v4 adds stage-select's fixed watches;
+        // older modules retain the v2 callback while stage selection is live.
         const char* verify_env = getenv("BLUEWAKE_DIRECT_SKIP_VERIFY");
-        bool want_fast = g_lazy_overlap && direct_calls_v3 != NULL && !bluewake_stage_select_live &&
-                         !g_direct_call_trace;
+        bool want_fast = g_lazy_overlap && !g_direct_call_trace &&
+                         (direct_calls_v4 != NULL ||
+                          (direct_calls_v3 != NULL && !bluewake_stage_select_live));
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
         want_fast = false;
 #endif
@@ -8278,10 +8298,18 @@ int main(int argc, char** argv) {
         if (want_fast) {
             g_skip_fast_on = true;
             host_skip_fast_refresh();
-            enabled = direct_calls_v3(
-                want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
-                &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL,
-                &g_skip_fast, verify);
+            if (direct_calls_v4 != NULL)
+                enabled = direct_calls_v4(
+                    want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
+                    &g_interrupts.pi_cause, &g_interrupts.pi_mask,
+                    bluewake_stage_select_live ? host_direct_can_skip_stage_select
+                                               : host_direct_can_skip,
+                    NULL, &g_skip_fast, verify);
+            else
+                enabled = direct_calls_v3(
+                    want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
+                    &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL,
+                    &g_skip_fast.base, verify);
             g_skip_fast_on = enabled;
         } else {
             enabled = direct_calls != NULL && direct_calls(

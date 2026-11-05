@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Benchmark one build, or build A against build B, rendered: speed, GPU time and pictures, scene by scene.
+"""Benchmark one or more builds rendered: speed, GPU time and pictures, scene by scene.
 
-  python3 scripts/render_bench.py collect OUT_DIR --app A=APP [--app B=APP] [--states DIR] [--card CARD]
+  python3 scripts/render_bench.py collect OUT_DIR --app A=APP [--app B=APP ...] [--states DIR] [--card CARD]
                                   [--pairs 2] [--runs 3] [--warmup 0] [--headless] [--retraces 1800] [--every 300]
                                   [--display auto|headless|desktop] [--size WxH] [--cache ~/bluewake-render]
-                                  [--cpu-profile]
+                                  [--cpu-profile] [--set-build A:KEY=VALUE ...]
   python3 scripts/render_bench.py make-state STATE.bwstate --app APP --warp stage:room:point [--card CARD]
                                   [--time noon] [--settle 180]
-  python3 scripts/render_bench.py analyze OUT_DIR --build A=PATH [--build B=PATH] [--into DIR]
+  python3 scripts/render_bench.py analyze OUT_DIR --build A=PATH [--build B=PATH ...] [--into DIR]
   python3 scripts/render_bench.py report OUT_DIR/summary.json
 
 scripts/render_bench runs `collect` on a Steam Deck (or any Linux machine) over SSH, or here, then copies the
@@ -20,17 +20,18 @@ Outset. That state is made once on the target with the stage select (from the ca
 logs 1-3 are tried) and kept in --cache. With --states DIR, each *.bwstate in DIR, in lexical order, is a scene
 named after its file (1-outset.bwstate is "1-outset"): a run loads it and plays --retraces retraces.
 
-Runs. With one build, --runs runs. With two, --pairs A/B/B/A pairs, so a slow drift (heat, battery) affects both
-alike; --warmup runs of each first are not measured. Every run is unpaced (as fast as it can), with the perf log,
+Runs. With one build, --runs runs. With multiple builds, each --pairs round runs them forward then in reverse
+(A/B/C/C/B/A), so a slow drift (heat, battery) affects them alike; --warmup runs of each first are not measured.
+Every run is unpaced (as fast as it can), with the perf log,
 guest checkpoints every 300 retraces and, rendered, Aurora's GPU profiler. Rendered (the default) runs under
 headless gamescope when there is one; --headless runs without a renderer (BLUEWAKE_RENDERER=headless), as
 scripts/bench_tour.py --mode headless does.
 
 Numbers, as scripts/bench_tour.py takes them: per scene, the first 300 retraces are skipped and the rest averaged
 (game frames a second are the [perf] rate halved). A build's number for a scene is the median over its runs; its
-overall number is the median of each run's geometric mean over the scenes. Changes are A against B.
+overall number is the median of each run's geometric mean over the scenes. The final build is the reference.
 
-Pictures (rendered, two builds): after the measured runs, one paced run of each build (not measured; unpaced,
+Pictures (rendered, multiple builds): after the measured runs, one paced run of each build (not measured; unpaced,
 captures land a moment apart from run to run) captures a frame every --every retraces after each scene's first 300. Scenes whose frames' SHA-256 match are identical; the rest are compared with
 scripts/frame_compare.py check (PSNR 40 or more is similar).
 
@@ -99,6 +100,18 @@ def is_deck():
         return Path("/sys/devices/virtual/dmi/id/product_name").read_text().strip() in ("Jupiter", "Galileo")
     except OSError:
         return False
+
+
+def per_build_settings(values, builds):
+    """Parse repeated BUILD:KEY=VALUE settings and reject unknown labels."""
+    result = {build: [] for build in builds}
+    for value in values:
+        build, colon, assignment = value.partition(":")
+        key, equals, _ = assignment.partition("=")
+        if not colon or not equals or build not in result or not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key):
+            raise ValueError(f"invalid --set-build {value!r}; expected an existing BUILD:KEY=VALUE")
+        result[build].append(assignment)
+    return result
 
 
 def launcher(app, folder, mode, size, name):
@@ -216,18 +229,32 @@ def scenes_and_states(args, env, maker):
 
 
 def plan(builds, args):
-    """[(build, measured)] in the order to run: one build's runs, or warm-ups then A/B/B/A pairs."""
+    """[(build, measured)]: one build's runs, or warm-ups then forward/reverse balanced rounds."""
     if len(builds) == 1:
         return [(builds[0], False)] * args.warmup + [(builds[0], True)] * args.runs
-    a, b = builds
-    return [(a, False), (b, False)] * args.warmup + [(x, True) for _ in range(args.pairs) for x in (a, b, b, a)]
+    return [(build, False) for _ in range(args.warmup) for build in builds] + [
+        (build, True) for _ in range(args.pairs) for build in (*builds, *reversed(builds))]
+
+
+def build_label(index):
+    """Spreadsheet-style positional label: A..Z, AA..; shared conceptually with the shell wrapper."""
+    out, number = "", index + 1
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        out = chr(ord("A") + remainder) + out
+    return out
 
 
 def collect(args):
     builds = [item.partition("=")[0] for item in args.app]
     apps = [(name, Path(item.partition("=")[2])) for name, item in zip(builds, args.app)]
-    if len(apps) not in (1, 2) or len(set(builds)) != len(builds):
-        print("render_bench: give one or two --app NAME=APP with different names", file=sys.stderr)
+    if not apps or len(set(builds)) != len(builds) or any(not name or not str(app) for name, app in apps):
+        print("render_bench: give one or more --app NAME=APP with different nonempty names", file=sys.stderr)
+        return 2
+    try:
+        build_settings = per_build_settings(args.set_build, builds)
+    except ValueError as error:
+        print(f"render_bench: {error}", file=sys.stderr)
         return 2
     missing = [str(app) for _, app in apps if not app.is_file()]
     if missing:
@@ -257,6 +284,7 @@ def collect(args):
                              "desktop": "a window" if sys.platform in ("darwin", "win32") else "desktop session",
                              "none": "no renderer"}[mode],
                  "builds": builds, "apps": {name: app.name for name, app in apps},
+                 "build_settings": build_settings,
                  "kind": "states" if args.states else "tour", "retraces": args.retraces, "every": args.every,
                  "tour_start": tour_start, "stops": [s._asdict() for s in stops] if tour_start else None,
                  "scenes": [], "states": {}, "runs": []}
@@ -276,7 +304,7 @@ def collect(args):
     if args.cpu_profile:
         # One separate profile pass per build. Sampling changes timing, so these runs never feed the FPS medians.
         order += [(build, "CPU profile") for build in builds]
-    if len(builds) == 2 and not args.headless and args.every > 0:
+    if len(builds) >= 2 and not args.headless and args.every > 0:
         # Pictures need a paced run: unpaced, a capture lands a retrace or two apart from run to run, a moment
         # later in the game. Paced from a state, runs are frame-exact. These are not measured.
         order += [(build, "pictures") for build in builds]
@@ -293,6 +321,8 @@ def collect(args):
             options = ["--state", state.resolve(), "--timeout", args.timeout,
                        "--set", "BLUEWAKE_PERF_LOG=1", "--set", "BLUEWAKE_GUEST_CHECKPOINT_INTERVAL=300",
                        "--set", "BLUEWAKE_LOOSE_REL_RETRACES=1"]
+            for setting in build_settings[build]:
+                options += ["--set", setting]
             if args.card:
                 options += ["--card", Path(args.card).resolve()]
             if tour_start:
@@ -321,7 +351,7 @@ def collect(args):
                                  "timed_out": result.get("timed_out", False),
                                  "safe_mode": result.get("safe_mode", False), "seconds": result.get("seconds")}
         collected["runs"].append(run)
-    if len(builds) == 2 and not args.headless and args.every > 0:
+    if len(builds) >= 2 and not args.headless and args.every > 0:
         file_frames(collected, out)
     (out / "collected.json").write_text(json.dumps(collected, indent=1))
     print(f"== wrote {out / 'collected.json'}", flush=True)
@@ -359,11 +389,11 @@ def slug(name):
 
 
 def differing(out):
-    """Scene folders under frames/ whose frames differ between the two builds: the frames to copy back."""
+    """Scene folders under frames/ whose frames differ between any builds: the frames to copy back."""
     names = []
     for hashes in sorted(Path(out).glob("frames/*/hashes.json")):
         found = list(json.loads(hashes.read_text()).values())
-        if len(found) == 2 and (found[0] != found[1] or not found[0]):
+        if len(found) >= 2 and (any(item != found[0] for item in found[1:]) or not found[0]):
             names.append(hashes.parent.name)
     return names
 
@@ -604,11 +634,16 @@ def analyze(out, build_paths, into=None):
     summary["overall"] = {b: {"fps": median(overall[b]),
                               "busy": median(row[b]["busy"] for row in summary["scenes"]),
                               "gpu_ms": median(row[b]["gpu_ms"] for row in summary["scenes"])} for b in builds}
-    if len(builds) == 2:
-        a, b = builds
+    if len(builds) >= 2:
+        reference = builds[-1]
+        summary["reference"] = reference
         for row in [*summary["scenes"], summary["overall"]]:
-            row["change"] = {k: change(row[a][k], row[b][k]) for k in ("fps", "busy", "gpu_ms")}
-        summary["pictures"] = judge_pictures(out, collected, builds)
+            row["changes"] = {b: {k: change(row[b][k], row[reference][k])
+                                   for k in ("fps", "busy", "gpu_ms")} for b in builds[:-1]}
+            if len(builds) == 2:  # Preserve the schema used by existing two-build report consumers.
+                row["change"] = row["changes"][builds[0]]
+        if summary["picture_runs"]:
+            summary["pictures"] = judge_pictures(out, collected, builds)
     for run in profiled:
         for scene in collected["scenes"]:
             found = cpu_profile(out / run["logs"][scene["log"]]["folder"], slug(scene["name"]))
@@ -618,7 +653,8 @@ def analyze(out, build_paths, into=None):
                 summary["cpu_profiles"].append({"build": run["build"], "scene": scene["name"], **found})
     for p in summary["pictures"]:
         if p.get("sheet"):
-            name = f"worst-{slug(p['name'])}.png"
+            name = (f"worst-{slug(p['name'])}.png" if len(builds) == 2 else
+                    f"worst-{slug(p['name'])}-{slug(p['candidate'])}-vs-{slug(p['reference'])}.png")
             shutil.copy(out / p["sheet"], into / name)
             p["sheet"] = name
     (into / "summary.json").write_text(json.dumps(summary, indent=1))
@@ -629,28 +665,33 @@ def analyze(out, build_paths, into=None):
 
 
 def judge_pictures(out, collected, builds):
-    """Each scene's frames, A against B: identical by their hashes, else frame_compare.py check."""
+    """Each scene's frames: compare every candidate against the final (reference) build."""
     pictures = []
     for scene in collected["scenes"]:
         folder = out / "frames" / slug(scene["name"])
         hashes = json.loads((folder / "hashes.json").read_text()) if (folder / "hashes.json").exists() else {}
-        a, b = (hashes.get(x, {}) for x in builds)
-        row = {"name": scene["name"], "images": len(a)}
-        if not a or not b:
-            row.update(verdict="failed", why="no frames")
-        elif a == b:
-            row.update(verdict="identical", why="")
-        elif not any((folder / builds[0]).glob("*.ppm")):
-            row.update(verdict="failed", why="frames differ but were not copied here")
-        else:
-            check = folder / "check.json"
-            subprocess.run([sys.executable, str(HERE / "frame_compare.py"), "check", str(folder / builds[0]),
-                            str(folder / builds[1]), "--json", str(check), "--sheet", str(folder / "worst.png"),
-                            "--region", "0,0.1,1,0.9"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-            found = json.loads(check.read_text()) if check.exists() else {"verdict": "failed", "why": "no check"}
-            row.update(verdict=found["verdict"], why=found.get("why", ""), min_psnr=found.get("min_psnr"),
-                       sheet=str((folder / "worst.png").relative_to(out)) if (folder / "worst.png").exists() else "")
-        pictures.append(row)
+        reference, reference_hashes = builds[-1], hashes.get(builds[-1], {})
+        for candidate in builds[:-1]:
+            candidate_hashes = hashes.get(candidate, {})
+            row = {"name": scene["name"], "candidate": candidate, "reference": reference,
+                   "images": len(candidate_hashes)}
+            if not candidate_hashes or not reference_hashes:
+                row.update(verdict="failed", why="no frames")
+            elif candidate_hashes == reference_hashes:
+                row.update(verdict="identical", why="")
+            elif not any((folder / candidate).glob("*.ppm")):
+                row.update(verdict="failed", why="frames differ but were not copied here")
+            else:
+                stem = f"worst-{slug(candidate)}-vs-{slug(reference)}"
+                check, sheet = folder / f"{stem}.json", folder / f"{stem}.png"
+                subprocess.run([sys.executable, str(HERE / "frame_compare.py"), "check", str(folder / candidate),
+                                str(folder / reference), "--json", str(check), "--sheet", str(sheet),
+                                "--region", "0,0.1,1,0.9"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                found = json.loads(check.read_text()) if check.exists() else {
+                    "verdict": "failed", "why": "no check"}
+                row.update(verdict=found["verdict"], why=found.get("why", ""), min_psnr=found.get("min_psnr"),
+                           sheet=str(sheet.relative_to(out)) if sheet.exists() else "")
+            pictures.append(row)
     return pictures
 
 
@@ -662,17 +703,19 @@ def report_blocks(summary):
     name = lambda b: f"`{info[b]['commit'] or 'unknown'}`" if b in info else b
     fmt = lambda v: "-" if v is None else f"{v:.3f}" if isinstance(v, float) else f"{v}"
     pct = lambda v: "-" if v is None else f"**{v:+.2f}%**"
-    two = len(builds) == 2
-    blocks = [("h2", f"BlueWake {'A/B ' if two else ''}benchmark, {summary['mode']}")]
-    blocks.append(("p", f"Compared {name(builds[0])} (A) against {name(builds[1])} (B, the reference) on "
-                        f"{summary['host']}." if two else f"Measured {name(builds[0])} on {summary['host']}."))
+    multiple = len(builds) >= 2
+    reference = builds[-1]
+    kind = "multi-build " if len(builds) > 2 else "A/B " if multiple else ""
+    blocks = [("h2", f"BlueWake {kind}benchmark, {summary['mode']}")]
+    blocks.append(("p", f"Compared {len(builds)} builds on {summary['host']}; {reference} ({name(reference)}) is "
+                        "the reference." if multiple else f"Measured {name(builds[0])} on {summary['host']}."))
     scenes = "the benchmark tour's five stops" if summary["kind"] == "tour" else \
         f"{len(summary['states'])} save state(s), {summary['retraces']} retraces each"
     method = [f"{summary['host']}: {summary['machine']}; GPU {summary['gpu'] or 'unknown'}",
               f"{summary['mode'].capitalize()} ({summary['display']}), unpaced, vsync off, {scenes}",
               f"{summary['measured']} measured runs"
               + (f" ({', '.join(f'{v} of {k}' for k, v in summary['runs_per_build'].items())}), "
-                 "interleaved A/B/B/A" if two else "")
+                 f"interleaved {'/'.join(builds)}/{'/'.join(reversed(builds))}" if multiple else "")
               + (f", {summary['warmups']} warm-up runs not measured" if summary["warmups"] else "")]
     if summary["picture_runs"]:
         method.append("Pictures from one paced run of each build, not measured")
@@ -682,7 +725,7 @@ def report_blocks(summary):
     if summary["checkpoint_differences"]:
         method.append(f"**Guest checkpoints differ**: {summary['checkpoint_differences'][0]}")
     else:
-        method.append("Guest checkpoints identical across every run" + (" of both builds" if two else "")
+        method.append("Guest checkpoints identical across every run" + (" of all builds" if multiple else "")
                       + f" ({', '.join(map(str, summary['checkpoint_counts']))} each)")
     for found in summary["states"].values():
         method.append(f"State `{found['file']}` at retrace {found['retrace']}, SHA-256 `{found['sha256'][:16]}…`")
@@ -690,32 +733,39 @@ def report_blocks(summary):
     rows = []
     for b in builds:
         o = summary["overall"][b]
-        row = [f"{b}{' (reference)' if two and b == builds[1] else ''}", name(b), fmt(o["fps"]), fmt(o["busy"]),
+        row = [f"{b}{' (reference)' if multiple and b == reference else ''}", name(b), fmt(o["fps"]), fmt(o["busy"]),
                fmt(o["gpu_ms"])]
-        if two:
-            row.append(pct(summary["overall"]["change"]["fps"]) if b == builds[0] else "")
+        if multiple:
+            row.append(pct(summary["overall"]["changes"][b]["fps"]) if b != reference else "")
         rows.append(row)
-    blocks.append(("table", ["Build", "Commit", "FPS", "Busy %", "GPU ms"] + (["FPS change"] if two else []), rows,
+    blocks.append(("table", ["Build", "Commit", "FPS", "Busy %", "GPU ms"] +
+                   ([f"FPS vs {reference}"] if multiple else []), rows,
                    {2, 3, 4, 5}))
     blocks += [("p", "FPS is game frames a second: each run's geometric mean over the scenes, the median over runs. "
                      "Busy and GPU ms are the median over the scenes."), ("h3", "Scenes")]
-    if two:
-        a, b = builds
-        rows = [[row["name"], fmt(row[b]["fps"]), fmt(row[a]["fps"]), pct(row["change"]["fps"]),
-                 fmt(row[b]["busy"]), fmt(row[a]["busy"]), pct(row["change"]["busy"]),
-                 fmt(row[b]["gpu_ms"]), fmt(row[a]["gpu_ms"]), pct(row["change"]["gpu_ms"]),
-                 f"{row[b]['loaded']}, {row[a]['loaded']}"] for row in summary["scenes"]]
-        blocks.append(("table", ["Scene", f"FPS {b}", f"FPS {a}", "FPS", f"Busy % {b}", f"Busy % {a}", "Busy",
-                                 f"GPU ms {b}", f"GPU ms {a}", "GPU", f"Loaded {b}, {a}"], rows, set(range(1, 10))))
+    if multiple:
+        rows = [[row["name"], *[fmt(row[b]["fps"]) for b in builds],
+                 *[pct(row["changes"][b]["fps"]) for b in builds[:-1]]] for row in summary["scenes"]]
+        blocks.append(("table", ["Scene", *[f"FPS {b}" for b in builds],
+                                 *[f"{b} vs {reference}" for b in builds[:-1]]], rows,
+                       set(range(1, 2 * len(builds)))))
+        pair_rows = [[candidate, *["-" if candidate == base else
+                      pct(change(summary["overall"][candidate]["fps"], summary["overall"][base]["fps"]))
+                      for base in builds]] for candidate in builds]
+        blocks += [("h3", "Pairwise overall FPS"),
+                   ("p", "Each cell is the row build's FPS change against the column build."),
+                   ("table", ["Build", *builds], pair_rows, set(range(1, len(builds) + 1)))]
     else:
         b = builds[0]
         rows = [[row["name"], fmt(row[b]["fps"]), fmt(row[b]["busy"]), fmt(row[b]["gpu_ms"]), row[b]["loaded"],
                  ", ".join(row[b]["dips"]) or "-"] for row in summary["scenes"]]
         blocks.append(("table", ["Scene", "FPS", "Busy %", "GPU ms", "Loaded", "Slowdowns"], rows, {1, 2, 3}))
     if summary["pictures"]:
-        rows = [[p["name"], p["verdict"], str(p["images"]), fmt(p.get("min_psnr")),
+        rows = [[p["name"], f"{p['candidate']} vs {p['reference']}", p["verdict"], str(p["images"]),
+                 fmt(p.get("min_psnr")),
                  (p["why"] or "-") + (f" (`{p['sheet']}`)" if p.get("sheet") else "")] for p in summary["pictures"]]
-        blocks += [("h3", "Pictures"), ("table", ["Scene", "Verdict", "Images", "Min PSNR", "Why"], rows, {2, 3})]
+        blocks += [("h3", "Pictures"),
+                   ("table", ["Scene", "Comparison", "Verdict", "Images", "Min PSNR", "Why"], rows, {3, 4})]
     if summary.get("cpu_profiles"):
         profiles = summary["cpu_profiles"]
         rows = [[p["scene"], p["build"], fmt(p["game"]["cycles_per_frame"]), fmt(p["game"]["instructions_per_frame"]),
@@ -769,7 +819,7 @@ def report_blocks(summary):
                          "busy % instead.")]
     if summary["problems"]:
         blocks += [("h3", "Problems"), ("ul", summary["problems"])]
-    if two and summary["overall"]["change"]["fps"] is not None:
+    if len(builds) == 2 and summary["overall"]["change"]["fps"] is not None:
         verdict = summary["overall"]["change"]["fps"]
         blocks += [("h3", "Conclusion"),
                    ("p", (f"{name(builds[0])} was {'faster' if verdict > 0 else 'slower'} overall by "
@@ -895,6 +945,8 @@ def main():
     p.add_argument("--headless", action="store_true")
     p.add_argument("--cpu-profile", action="store_true",
                    help="profile measured scenes with Linux perf; do not use their FPS as benchmark results")
+    p.add_argument("--set-build", action="append", default=[], metavar="BUILD:KEY=VALUE",
+                   help="set KEY only for one labeled build; repeatable")
     p.add_argument("--retraces", type=int, default=STOP_RETRACES)
     p.add_argument("--every", type=int, default=300)
     p.add_argument("--timeout", type=int, default=1200)

@@ -24,6 +24,7 @@ const u32* bw_host_pi_mask = &k_zero;
 BwHostCanSkipFn bw_host_can_skip;
 void* bw_host_can_skip_user;
 const volatile BwHostSkipFast* bw_host_skip_fast;
+const volatile BwHostSkipFastV4* bw_host_skip_fast_v4;
 bool bw_host_skip_verify;
 static unsigned long long s_skip_unsafe, s_skip_conservative, s_skip_inline;
 
@@ -124,6 +125,7 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v2(
     bw_host_can_skip = can_skip;
     bw_host_can_skip_user = user;
     bw_host_skip_fast = NULL;
+    bw_host_skip_fast_v4 = NULL;
     bw_direct_enabled = true;
     return 1;
 }
@@ -135,7 +137,19 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v3(
     const int on = bluewake_composite_direct_calls_v2(enabled, sources_dirty, decrementer_pending,
                                                       pi_cause, pi_mask, can_skip, user);
     bw_host_skip_fast = on ? fast : NULL;
+    bw_host_skip_fast_v4 = NULL;
     bw_host_skip_verify = on && fast != NULL && verify;
+    return on;
+}
+
+BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v4(
+    bool enabled, const bool* sources_dirty, const bool* decrementer_pending,
+    const u32* pi_cause, const u32* pi_mask, BwHostCanSkipFn can_skip, void* user,
+    const BwHostSkipFastV4* fast, bool verify) {
+    const int on = bluewake_composite_direct_calls_v3(
+        enabled, sources_dirty, decrementer_pending, pi_cause, pi_mask, can_skip, user,
+        fast != NULL ? &fast->base : NULL, verify);
+    bw_host_skip_fast_v4 = on ? fast : NULL;
     return on;
 }
 
