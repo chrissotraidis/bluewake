@@ -1,36 +1,65 @@
 # PRD — Stage-select direct-call cost
 
-Status: Implementation ready for build and hardware qualification
+Status: Deck-qualified through iteration 4 (2026-11-05); iteration 5 being measured
+Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e); discovery in [#503](https://github.com/chrissotraidis/bluewake/pull/503)
+[Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
+Scope: the speed cost of having the developer stage select enabled. Excluded: what the stage select does, game logic, and speed with it off.
 
-Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e); discovery in [#503](https://github.com/chrissotraidis/bluewake/pull/503) at `4806997`
-Scope: remove persistent direct-call overhead while stage selection or a benchmark warp is enabled; excluded: changing stage-select behavior, game logic, or unrelated Outset optimization
+## Overview
 
-## Motivation
+The stage select is BlueWake's warp menu between stages. It's off by default, but benchmarks and testers often enable it, and so does every warp-based measurement. Enabling it made the whole game slower, even when the menu was never opened: **−10 % on the Steam Deck**, the same build with it on against off.
 
-The developer stage select is off by default, but enabling it makes every translated direct call ask the BlueWake host whether the boundary may be skipped. On a Steam Deck in Outset, turning it off raised game speed from 23.6 to 26.1 FPS (**+10.9%**) while clock speed stayed unchanged. Warp-based benchmarks also enable the same path for the whole run, making absolute CPU results pessimistic.
+This PR keeps the stage select working exactly as before and removes most of that cost: **−10.0 % → −3.6 %**. With the stage select off, nothing changes.
 
-The useful outcome is not a faster default build: it is preserving stage selection and benchmark warps without paying a host round trip at unrelated guest addresses.
+## The story
 
-## Outcomes
+### What we started from
 
-- Keep the module's inline direct-call answer active while stage selection is enabled, except at addresses the stage-select integration observes.
-- Preserve menu entry, room warps, file selection, return music, save protection, and existing fallback behavior.
-- Make warp-based measurements representative after arrival, while recording the stage-select state in every comparison.
-- Retain the change only with matching guest checkpoints and an on/off gap within the contemporaneous A/A spread.
+[#503](https://github.com/chrissotraidis/bluewake/pull/503) found the cost. With the stage select on, the host switched off the module's inline answer for direct calls (one translated function calling another). Every one of those calls then asked the host whether it could go ahead: two host functions, 6.2 % of the game thread.
+
+### What we tried, and what we found
+
+| Step | What changed | Stage select's cost (same build, on vs off) | Kept? | Why |
+|---|---|---:|---|---|
+| Control | — | −10.0 % | — | — |
+| `f6bbf27a6` | The module learns the stage select's five hooks (v4), so the inline answer stays on | −6.4 % | Yes | +2.6 % with the stage select on, every launch ahead |
+| `cde980cc3` | Test the address inline before the host's per-edge stage-select calls | — | **No** | +0.3 %, launches overlap: the host was never the cost |
+| `8f7442ade` | Use v3 when the stage select is off | — | **No** | No effect |
+| `f9d926907` | The five hooks become constants in the module | −2.3 % | Yes | +3.1 % with the stage select on, every launch ahead |
+| `c48e83f0e` | The hooks ride in bits of a word every call already loads | −3.6 % | Yes | Keeps `f9d926907`'s gain without its cost with the stage select off |
+| `b7079abce` | One bit test rules out most targets before the hook compares | being measured | — | — |
+
+Three findings shaped the result:
+
+1. **The cost was in the game module, not the host.** After the first change, the profile showed the host's share of the game thread the same with the stage select on and off. The extra time was in the module, where every direct call walked the list of five watched addresses.
+2. **The direct-call check isn't inlined.** `bw_direct_call_ready` is a function of its own in the module, so nothing about a call's target folds away at build time. Every instruction the check runs, every direct call pays: millions a frame. The winning changes make the check do less, not move it.
+3. **Two builds trained separately differ by about 1.75 %.** Every round showed this PR about 1.5 % behind the control with the stage select **off**. Building the control's own source with this PR's optimization profile reproduced that gap (−1.7 %), and with the same profile this PR's code was level (+0.4 %). So it was training noise, not this PR.
+
+### Decision
+
+Keep `f6bbf27a6`, `f9d926907` and `c48e83f0e`. The stage select's five hooks are constants in the module, switched on by bits the host sets in the fast-path word every direct call already reads. There's no run-time watch list: a host that ever needs a watch the module doesn't know switches the inline path off, and every call asks it, which is exact.
+
+## Impact
+
+| Who | Before | After |
+|---|---|---|
+| Testers and benchmarks with the stage select on | −10.0 % for having it enabled | **−3.6 %** |
+| Players with it off (the default) | — | Unchanged; this PR's code costs nothing there |
+| Warp-based measurements | Pessimistic by ≈ 10 % | Pessimistic by ≈ 3.6 % |
+
+**Long term:**
+
+- **Measurements:** compare two builds only with the same optimization profile. Otherwise ≈ 1.75 % of training noise looks like a real gain or loss.
+- **New stage-select hooks:** a new hook needs a new constant and bit (`direct_skip.h`); the host's static assertion and `test_direct_calls.py` fail if one is missing.
+- **Other features:** the same pattern, fixed hooks carried in an already-loaded word, fits any feature that watches a few fixed guest addresses.
 
 ## Success and constraints
 
-| Metric | Baseline | Target | Validation |
-|---|---:|---:|---|
-| Outset, stage select on versus off | 23.6 / 26.1 FPS; 10.9% gap | Gap no larger than A/A spread | Interleaved Game Mode windows with [#522](https://github.com/chrissotraidis/bluewake/pull/522)'s measurement tool |
-| Stage-select host checks | `host_direct_can_skip_stage_select` 4.5%; `bluewake_stage_select_observes_body` 1.7% | Absent from unrelated direct calls; sampled only when an observed boundary is reached | Game-thread `perf record`, path counters, verification mode |
-| Guest-visible execution | Same build and state, feature setting apart | Identical checkpoints and rendered pictures outside intentional warps | Rendered warp tour and checkpoint comparison |
-| Compatibility | `v2`/`v3` modules can load | Older modules retain the conservative host-query path | Component test with missing newer export |
-| Stage-select behavior | Menu and warps work today | No functional regression | File-select R entry, F7 return, warp arrival and music checks |
-
-## Clarifications
-
-- Default players do not pay this cost because the stage select is off by default.
-- The measured result is historical evidence from #503, not proof that a proposed fix works.
-- The implementation uses a new `v4` export. It does not alter the existing `v2`/`v3` ABI and falls back conservatively when either side lacks `v4`.
-
+| Metric | Target | Status |
+|---|---|---|
+| Stage select's cost (same build, on vs off) | Well below the control's −10 % | **−3.6 %** (iteration 4) |
+| Stage select off | No loss with the same profile | **+0.4 %**, within noise |
+| Guest-visible execution | Identical checkpoints | Identical in every run of every round |
+| Kept changes | Ahead in every one of six interleaved launches | Yes for all three |
+| Older modules | Keep working | A module without v4 keeps the host query while the stage select is live |
+| Stage-select behaviour | No regression | Hooks still return to the host; the rendered warp tour is still to run |

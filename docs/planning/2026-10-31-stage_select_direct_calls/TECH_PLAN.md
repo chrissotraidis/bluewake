@@ -1,105 +1,123 @@
 # TECH_PLAN — Stage-select direct-call cost
 
-Status: Implemented locally; full build and Deck qualification pending
-
-Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e); measured control recorded by [#503](https://github.com/chrissotraidis/bluewake/pull/503)
+Status: Implemented and Deck-measured through iteration 4; iteration 5 (`b7079abce`) being measured
+Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e)
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
-## Inspected facts
+## How a direct call is checked
 
-- The module normally answers the host's address-only direct-call predicate inline through `bluewake_composite_direct_calls_v3`; see [`direct_calls.c`](../../../cmake/composite/direct_calls.c) and the [translated dispatch model](../../architecture/GameThread.md#translated-dispatch).
-- [`main.c`](../../../runtime/host/src/main.c) disables that inline answer whenever `bluewake_stage_select_live` is true, then uses `host_direct_can_skip_stage_select` for every direct call.
-- [`stage_select.h`](../../../runtime/host/src/stage_select.h) sets the live flag for the menu toggle, a requested warp, or pending file selection and does not clear it after arrival.
-- The stage-select observer acts at five fixed guest-code addresses under changing state. The generated edge-watch list already discovers literal host addresses, but that alone is not a safe compatibility contract for a module built before a host hook was added.
-- #503 measured 23.6 versus 26.1 FPS in the same Outset state; the two stage-select host functions accounted for 6.2% of sampled game-thread time. These are discovery measurements, not implementation results.
+Before one translated function calls another directly, [`bw_direct_call_ready`](../../../cmake/composite/direct_calls.h) decides whether the call may stay inside the game module or must go back to the host, which has hooks at some guest addresses. The host publishes what it watches in [`BwHostSkipFast`](../../../cmake/composite/direct_skip.h): two single addresses, two ranges, and `simple`, which says whether the module may answer by itself.
 
-## Runtime contract
+### Before: the stage select switched the inline answer off
 
 ```mermaid
 flowchart TD
-    Call["Translated direct call"]
-    Quiet{"Interrupts and budget quiet?"}
-    Watched{"Target or return watched<br/>by host contract?"}
-    Inline["Continue inside game module"]
-    Host["Return to BlueWake host"]
-    Stage["Run stage-select hook<br/>when its state requires it"]
-
-    Call --> Quiet
-    Quiet -->|"no"| Host
-    Quiet -->|"yes"| Watched
-    Watched -->|"no"| Inline
-    Watched -->|"yes"| Host --> Stage
+    A["Direct call"] --> B{"Stage select enabled?"}
+    B -->|"no"| C["Module answers inline<br/>(v3 fields)"]
+    B -->|"yes"| D["Ask the host:<br/>host_direct_can_skip_stage_select"]
+    D --> E["Stage-select observer<br/>(5 fixed addresses)"]
+    C --> F["Call stays in the module"]
+    E --> F
 ```
 
-The safe optimization is selective: stage selection must not globally disable the inline answer, but every address it can observe must still return to the host. A versioned handshake must fall back to `v2`/`v3` when either side lacks the new contract.
+Every direct call paid a round trip into the host: about 10 % of the Deck's speed.
 
-Selected `v4` shape:
+### After: the module knows the five hooks
+
+```mermaid
+flowchart TD
+    A["Direct call"] --> B["Load simple<br/>(already loaded today)"]
+    B --> C{"simple > 1?<br/>(stage select on)"}
+    C -->|"no"| F["Call stays in the module"]
+    C -->|"yes"| D{"Target's slot is a hook's?<br/>(one bit test)"}
+    D -->|"no, 59 in 64"| F
+    D -->|"yes"| E{"Target is a hook<br/>and its bit is set?"}
+    E -->|"no"| F
+    E -->|"yes"| H["Back to the host:<br/>the stage-select hook runs"]
+```
 
 ```c
-/* Proposed v4 contract; do not change the v3 struct in place. */
-typedef struct BwHostSkipFastV4 {
-    BwHostSkipFast base; /* unchanged v3 contract */
-    u32 watched_count;
-    u32 watched[5];
-} BwHostSkipFastV4;
+/* direct_skip.h: v4 is v3 plus meaning in simple's bits */
+#define BW_SKIP_KNOWN_CHANGE       0x80029E6Cu /* bit 1 */
+#define BW_SKIP_KNOWN_DATA_SELECT  0x80181634u /* bit 2 */
+#define BW_SKIP_KNOWN_EXECUTE      0x8022ED50u /* bit 3 */
+#define BW_SKIP_KNOWN_PLAY_EXECUTE 0x80234FD0u /* bit 4 */
+#define BW_SKIP_KNOWN_MENU_DELETE  0x8022F320u /* bit 5 */
+
+/* main.c, host_skip_fast_refresh */
+g_skip_fast.base.simple = simple ? 1u | (bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u) : 0u;
 ```
 
-| Stage-select watch | Guest address | Purpose |
-|---|---:|---|
-| `CHANGE` | `0x80029E6C` | Scene-change interception used by stage selection and warps |
-| `DATA_SELECT` | `0x80181634` | Automated file selection |
-| `EXECUTE` | `0x8022ED50` | Stage-select menu input and execution |
-| `PLAY_EXECUTE` | `0x80234FD0` | F7/warp arrival handling |
-| `MENU_DELETE` | `0x8022F320` | Return from the stage-select menu |
+| Case | What a direct call does |
+|---|---|
+| Stage select off | One compare on `simple`, already in a register |
+| Stage select on, ordinary target | One shift and bit test (iteration 5) |
+| Stage select on, target in a hook's slot | Five immediate compares, then the bit |
+| Module without v4 | Never gets the bits: the host keeps the query while the stage select is live |
+| A watch the module doesn't know | The host sets `simple = 0`; every call asks the host (exact) |
 
-The module canonicalizes the `0x40000000` code-mirror bit before comparing
-these watches. An invalid count declines the inline path. A host paired with an
-older module uses the existing `v2` callback while stage selection is live;
-`v3` remains available when it is not.
+## What we found, step by step
+
+All on the Steam Deck: `render_bench`, 5 save states, 6 interleaved launches per build after a warm-up, CPU profile. Guest checkpoints were identical in every run.
+
+### 1. The first fix worked, but left most of the cost
+
+`f6bbf27a6` added the v4 contract: the five hook addresses as a list the module walks.
+
+| Same build, stage select on vs off | Cost |
+|---|---:|
+| Control | −10.0 % |
+| `f6bbf27a6` | −6.4 % |
+
+Instructions per game frame at Outset: the stage select still added 20.5 M (241.7 M vs 221.2 M).
+
+### 2. The remaining cost was in the module, not the host
+
+The host's share of the game thread was the same on and off (7.14 % vs 7.12 %); the module's wasn't (58.0 % vs 56.5 %). The edge-service change aimed at the host (`cde980cc3`) gained +0.3 % with overlapping launches: reverted, as was `8f7442ade` (v3 when off), which had no effect.
+
+### 3. The check isn't inlined, so every instruction counts
+
+`bw_direct_call_ready` shows in the profile as its own symbol: nothing about a target folds at build time. Making the hooks constants (`f9d926907`) gained **+3.1 %** with the stage select on, every launch ahead, but cost more with it off, because every call now loaded the v4 pointer and mask. Moving the hook bits into `simple` (`c48e83f0e`), which every call already loads, kept the gain and removed that extra cost.
+
+| Iteration | Stage select on, against the previous | Every launch ahead? |
+|---|---:|---|
+| `f9d926907` against `f6bbf27a6` | **+3.2 %** (+2.9 to +3.6) | Yes |
+| `c48e83f0e` against `f9d926907` | 0.0 % | — (kept for the off case) |
+
+### 4. The "loss with the stage select off" was the optimization profile
+
+| All with stage select off, against the control | Change |
+|---|---:|
+| Control's own source, built with this PR's profile | −1.7 % |
+| This PR, same profile | −1.3 % |
+| This PR against the control's code, same profile | **+0.4 %** (within noise) |
+
+Each build records its own profile in training, and two trainings differ by about 1.75 %. Comparisons between builds must use the same profile; comparing a build with itself (on vs off) is unaffected.
 
 ## Changes
 
-| Status | File / symbol | Practical edit | Milestone | Architecture |
-|---|---|---|---|---|
-| Done | [`stage_select.h`](../../../runtime/host/src/stage_select.h) observer predicates | Enumerate the complete fixed-address contract and distinguish menu/warp lifecycle state | M0–M1 | [Host observations](../../architecture/GameThread.md#translated-dispatch) |
-| Done | [`direct_skip.h`](../../../cmake/composite/direct_skip.h), [`direct_calls.h`](../../../cmake/composite/direct_calls.h), [`direct_calls.c`](../../../cmake/composite/direct_calls.c) | Add a versioned fast contract; preserve conservative fallback for older modules | M1 | [Module boundary](../../architecture/GameModule.md#translated-code-dispatch) |
-| Done | [`main.c`](../../../runtime/host/src/main.c) direct-call setup | Supply stage-select watches and allow the inline answer when the new contract is available | M1 | [Host lifecycle](../../architecture/Host.md#main-loop-execution) |
-| Done | [`direct_calls_test.c`](../../../tests/direct_calls_test.c), [`test_direct_calls.py`](../../../tests/test_direct_calls.py) | Cover watched stage addresses, mirrors, fallback and contract completeness | M2 | [Compiled tests](../../architecture/Testing.md#compiled-component-tests) |
-| Modify after #522 lands | [`PROFILING.md`](../../../docs/PROFILING.md) and measurement guidance | Record stage-select/warp state and distinguish absolute warp numbers from normal play | M2 | [Hardware validation](../../architecture/Testing.md#private-and-hardware-validation) |
+| File / symbol | Change |
+|---|---|
+| [`direct_skip.h`](../../../cmake/composite/direct_skip.h) | `BW_SKIP_KNOWN_*` hooks, their bits in `simple`, the slot filter `BW_SKIP_KNOWN_SLOTS` |
+| [`direct_calls.h`](../../../cmake/composite/direct_calls.h) `bw_direct_call_ready` | Reads `simple` once; hook test only when `simple > 1` |
+| [`direct_calls.c`](../../../cmake/composite/direct_calls.c) | `bluewake_composite_direct_calls_v4` export |
+| [`main.c`](../../../runtime/host/src/main.c) | Sets the bits while the stage select is live; static assertion that its addresses match; v4 when available, v3 otherwise |
+| [`direct_calls_test.c`](../../../tests/direct_calls_test.c) | Each bit, mirrors, run-time targets, slot neighbours, `simple` = 0 and 1, v3 fallback, at -O0 and -O2 |
+| [`test_direct_calls.py`](../../../tests/test_direct_calls.py) | The stage select's observed set equals the module's known set |
 
 ## Verification
 
-| Layer | Input / command | Required evidence | Failure / skip |
-|---|---|---|---|
-| Source contract | `python3 tests/test_direct_calls.py` | Every observed stage address is represented; generated transformations retain hooks | Missing address fails |
-| Component | CTest `bluewake_direct_calls_test` | v4 inline answer, watched decline, mirror handling, old-module fallback, zero unsafe verification mismatches | Any mismatch fails |
-| Stage-select function | File-select R, F7 open/return, one named warp and `BLUEWAKE_WARP_FILE` | Correct room, music, return and save refusal | Any behavioral difference fails |
-| Game Mode performance | Same build/state, ≥5 interleaved windows per mode after warm-up | On/off FPS gap within A/A spread; target functions leave unrelated hot path | Missing path activation is inconclusive |
-| Rendered warp tour | Existing fixed scenes, same settings and build | All scenes load; pictures and checkpoints match; absolute FPS recorded | Missing scene/checkpoint fails |
-
-Private states, logs and `perf.data` stay outside the repository; publish hashes, settings, commands and aggregate results only.
-
-## Implementation order
-
-| Milestone | Depends | Can run with | Deliverable / integration gate |
-|---|---|---|---|
-| M0 | — | — | Freeze the address/lifecycle contract, current verification run, A/A baseline and versioned representation |
-| M1 | M0 | M2 | Implement the host/module v4 handshake with conservative fallback |
-| M2 | M0 | M1 | Add public contract coverage and benchmark-state documentation; owns tests/docs, not production files |
-| M3 | M1, M2 | — | Integrate and qualify with CI, stage-select function, Game Mode A/B and rendered warp evidence |
-
-Critical path: M0 → M1 → M3. M2 can proceed beside M1 after the address contract is frozen.  
-Concurrency limits: M0 owns the shared ABI decision; M1 alone edits the host/module handshake. Hardware runs serialize on one Deck and one fixed state.
-
-## Decisions / gaps
-
-- Prefer a new versioned export over changing `BwHostSkipFast` in place; silent host/module layout disagreement is unacceptable.
-- Clearing `bluewake_stage_select_live` after a warp can reduce benchmark cost but cannot serve the always-available F7 menu by itself.
-- #522 is still open. If its measurement tool is unavailable, M3 remains incomplete rather than substituting an undocumented command.
+| Layer | Evidence | Status |
+|---|---|---|
+| Unit | `direct_calls_test` at -O0 and -O2 | Pass |
+| Source contract | `python3 tests/test_direct_calls.py` | Pass |
+| Deck speed | 4-way `render_bench` per iteration | Through iteration 4; iteration 5 running |
+| Guest state | Checkpoints in every run | Identical |
+| Stage-select behaviour | Rendered warp tour, menu open and return | To run |
+| CI | Linux and Windows host jobs, audit | On the latest head |
 
 ## References
 
-- [#503](https://github.com/chrissotraidis/bluewake/pull/503) — discovery measurements and Outset CPU investigation.
-- [#522](https://github.com/chrissotraidis/bluewake/pull/522) — proposed repeatable Game Mode measurement tooling.
-- [`GameThread.md`](../../architecture/GameThread.md#performance-model) — game-thread performance model.
-
+- [#503](https://github.com/chrissotraidis/bluewake/pull/503): discovery.
+- [#522](https://github.com/chrissotraidis/bluewake/pull/522): measurement tooling.
+- [`GameThread.md`](../../architecture/GameThread.md#translated-dispatch): translated dispatch.

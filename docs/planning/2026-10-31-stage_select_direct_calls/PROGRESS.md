@@ -1,6 +1,6 @@
 # PROGRESS — Stage-select direct-call cost
 
-Status: Deck-qualified (2026-11-05): stage select on −10.0 % → −3.6 % against the control; stage select off unchanged within noise; checkpoints identical in every run
+Status: Deck-qualified through iteration 4: stage select's cost −10.0 % → −3.6 % (same build, on vs off); off unchanged with the same profile. Iteration 5 (`b7079abce`, slot filter) and the stage-select-on profile check running. Open: rendered warp tour, CI on the latest head
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -36,6 +36,8 @@ Parallel with M1; owns tests and documentation; integrates at M3.
 - [ ] M3-T02: Exercise menu entry/return, warp arrival/music and file selection on the candidate.
 - [x] M3-T03: Run on/off windows on the Deck with `render_bench` (2x2 and three iterations, below); checkpoints identical in every run. The rendered warp tour is still to run.
 - [x] M3-T05: Iterate on the profile: keep what is ahead in every launch, revert the rest (below).
+- [ ] M3-T06: Iteration 5 (`b7079abce`): one bit test before the hook compares.
+- [ ] M3-T07: Stage-select-on profile check: control source with this PR's profile against this PR, both on.
 - [ ] M3-T04: Record retain/reject findings and update #503 with the corrected benchmark interpretation.
 
 ## Evidence ledger
