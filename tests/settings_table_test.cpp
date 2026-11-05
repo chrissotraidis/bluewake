@@ -21,7 +21,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "DOL_AURORA_SHOW_FPS",
     "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES",
     "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST", "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE",
-    "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
+    "DOL_AURORA_BATCH_STAGING_COPIES", "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
     "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO",
     "BLUEWAKE_MODS", "BLUEWAKE_OPTIONS", "BLUEWAKE_STAGE_SELECT_TOGGLE", "BLUEWAKE_FOREST_WATER_KEEP_TREES",
     "BLUEWAKE_FOREST_WATER_30_MINUTES", "BLUEWAKE_FADE_FRAMES", "BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS",
@@ -114,6 +114,9 @@ int main() {
     const Setting* pacing = find("DOL_AURORA_FRAME_INTERP_PACING");
     assert(pacing != nullptr && pacing->kind == Kind::Choice && pacing->control == Control::Chooser);
     assert(std::strcmp(fallback_for(*pacing), "") == 0 && next_launch_on(*pacing));
+    const Setting* staging = find("DOL_AURORA_BATCH_STAGING_COPIES");
+    assert(staging != nullptr && staging->kind == Kind::Bool && staging->control == Control::Switch);
+    assert(!default_on(*staging) && next_launch_on(*staging) && staging->experimental != nullptr);
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

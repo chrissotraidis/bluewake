@@ -68,6 +68,9 @@ There is no separate BlueWake PR. #563 owns this plan, the RecompCore pin and ex
 | `scripts/builder/profiles/bluewake.sh` | Pin the qualified RecompCore stack in #563 |
 | `config/dependencies.lock.json` | Record the exact RecompCore revision and evidence |
 | `patches/recompcore/` | Export the RecompCore commit required by the repository workflow |
+| `runtime/host/src/settings_table.h` | Add an experimental, off-by-default GUI switch that persists the Aurora environment key and applies next launch |
+| `tests/settings_table_test.cpp`, `tests/settings_state_test.cpp` | Cover default-off metadata, next-launch behavior, and persistence of the enabled value in existing Linux/Windows CI |
+| RecompCore `.github/workflows/staging-copy-plan.yml` | Compile and run the default/opt-in ordering-plan test on pull requests and `bluewake-next` pushes |
 
 ## Implementation order
 
@@ -84,6 +87,8 @@ Critical path: M1 → M2 → M3 → M4. M2b was inspected alongside attribution 
 ## Qualification plan
 
 Build baseline and candidate from the same BlueWake stack and reuse the same build directory/profile so PGO variation does not masquerade as a rendering win. Baseline is RecompCore #49 at `a4dbaaa8`; candidate adds #53 at `d72f71b9` and enables `DOL_AURORA_BATCH_STAGING_COPIES=1`.
+
+The BlueWake build profile pins #53's tested head and exports patches 0197-0207, so Linux, Windows, Apple, and Android recipes consume the same runtime revision. The GUI does not need a platform-specific code path: the shared settings table writes the environment key before Aurora starts. The switch is experimental, off on every platform, and marked next-launch because Aurora selects the copy plan during renderer initialization.
 
 Run at least six interleaved baseline/candidate launches on the Deck with the same five save states, 4x render scale, and Smooth Motion enabled. Keep the change only if the candidate is ahead in every launch and all guest checkpoints match. Then compare pictures with Smooth Motion disabled; they must be identical. Restore the Deck's GPU clock range and governor after the run.
 

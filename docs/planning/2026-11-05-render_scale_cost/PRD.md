@@ -40,7 +40,7 @@ The measurements now identify the missing link: the Deck's CPU and GPU share an 
 
 - Keep the diagnosis, implementation, dependency pin, and validation together in BlueWake PR #563.
 - Stack RecompCore #53 on #49. #53 keeps ordered texture uploads in place and batches only vertex, uniform, index, and storage-buffer staging copies into a command buffer submitted before the already-encoded render work.
-- Expose the experiment only through `DOL_AURORA_BATCH_STAGING_COPIES=1` while it is being qualified.
+- Expose the experiment as an experimental GUI switch backed by `DOL_AURORA_BATCH_STAGING_COPIES=1`. It is off by default, persists through the shared settings file, and takes effect on the next launch while it is being qualified.
 - Keep the source change only if it wins every one of at least six interleaved Deck launches, preserves guest checkpoints, and produces identical pictures with Smooth Motion off. Otherwise revert the pin/change in #563 and record the no-go result.
 
 ## Success and constraints
@@ -53,3 +53,4 @@ The measurements now identify the missing link: the Deck's CPU and GPU share an 
 | Exactness of the source change | Identical guest checkpoints; identical pictures with Smooth Motion off |
 | Picture | No change to what is drawn |
 | Rollout | Experiment remains opt-in until it passes the performance and exactness gates |
+| Product access | Experimental GUI switch on every desktop platform; default off and next-launch behavior covered by Linux and Windows CI settings tests |
