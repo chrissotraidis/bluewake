@@ -84,15 +84,46 @@ int main(void) {
     assert(!bw_edge_unwatched(0x80004000u)); /* Corrupt/full table cannot hang. */
 
     /* v3: the host's address-only answer, read inline without a call. */
-    BwHostSkipFast fast = {1u, {0x80004000u, 0u}, {0x80008000u, 0xFFFFFFFFu}, {0x100u, 0u}};
+    /* The ranges are always direct_skip.h's (main.c checks the host's agree). */
+    BwHostSkipFast fast = {1u, {0x80004000u, 0u}, {BW_SKIP_RANGE0_FIRST, BW_SKIP_RANGE1_FIRST},
+                           {BW_SKIP_RANGE0_LAST - BW_SKIP_RANGE0_FIRST,
+                            BW_SKIP_RANGE1_LAST - BW_SKIP_RANGE1_FIRST}};
     assert(bluewake_composite_direct_calls_v3(true, &attention, &decrementer, &cause, &mask,
                                              can_skip, &allow, &fast, false));
     before = queries;
     assert(!bw_direct_call_ready(&cpu, 0x80004000u)); /* a listed address */
-    assert(!bw_direct_call_ready(&cpu, 0x80008000u)); /* a range's first address */
-    assert(!bw_direct_call_ready(&cpu, 0x80008100u)); /* and its last */
-    assert(bw_direct_call_ready(&cpu, 0x80007FFCu));
-    assert(bw_direct_call_ready(&cpu, 0x80008104u));
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_FIRST)); /* a range's first address */
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_LAST)); /* and its last */
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_RANGE1_FIRST + 0x10u));
+    assert(bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_FIRST - 4u));
+    assert(bw_direct_call_ready(&cpu, BW_SKIP_RANGE0_LAST + 4u));
+    /* A constant address outside both ranges takes the plain check: the same
+     * answer as the full one in every host and CPU state. */
+    {
+        static const u32 outside[] = {0x80004000u, 0x80009000u, BW_SKIP_RANGE0_FIRST - 4u,
+                                      BW_SKIP_RANGE1_LAST + 4u, 0xC0400000u, 0xC13B1850u};
+        const unsigned saved_queries = queries;
+        for (unsigned state = 0; state < 256u; ++state) {
+            attention = state & 1u;
+            decrementer = (state >> 1) & 1u;
+            cause = (state >> 2) & 1u;
+            mask = (state >> 3) & 1u;
+            cpu.msr = (state >> 4) & 1u ? PPC_MSR_EE : 0u;
+            cpu.exception = (state >> 5) & 1u;
+            cpu.downcount = (state >> 6) & 1u ? -20 : 0;
+            bw_direct_depth = (state >> 7) & 1u ? BW_DIRECT_DEPTH_MAX : 0u;
+            for (unsigned i = 0; i < sizeof outside / sizeof outside[0]; ++i)
+                assert(bw_direct_call_ready_plain(&cpu, outside[i]) ==
+                       bw_direct_call_ready_full(&cpu, outside[i]));
+        }
+        assert(queries == saved_queries); /* neither asked the host */
+        attention = decrementer = false;
+        cause = mask = 0u;
+        cpu.msr = 0u;
+        cpu.exception = 0u;
+        cpu.downcount = 0;
+        bw_direct_depth = 0u;
+    }
     allow = false; /* The inline answer does not ask the host... */
     assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
     attention = true; /* ...but the interrupt sources still come first. */
@@ -124,6 +155,6 @@ int main(void) {
 
     assert(!bluewake_composite_direct_calls_v2(false, NULL, NULL, NULL, NULL, NULL, NULL));
     assert(!bw_edge_filter_enabled && !bw_direct_call_ready(&cpu, 0x80004000u));
-    puts("Direct calls: host contract, inline answer, interrupts, budget, watches, mirrors and depth pass");
+    puts("Direct calls: host contract, inline answer, plain check, interrupts, budget, watches, mirrors and depth pass");
     return 0;
 }

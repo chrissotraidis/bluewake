@@ -103,6 +103,7 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls(bool enabled, const bool* s
     bw_edge_filter_enabled = false;
     bw_host_can_skip = NULL;
     bw_host_can_skip_user = NULL;
+    bw_host_skip_fast = NULL; /* set only while direct calls are on (direct_calls.h) */
     return 0;
 }
 
@@ -115,6 +116,7 @@ BW_DIRECT_EXPORT int bluewake_composite_direct_calls_v2(
         bw_edge_filter_enabled = false;
         bw_host_can_skip = NULL;
         bw_host_can_skip_user = NULL;
+        bw_host_skip_fast = NULL; /* set only while direct calls are on (direct_calls.h) */
         return 0;
     }
     bw_host_sources_dirty = sources_dirty;

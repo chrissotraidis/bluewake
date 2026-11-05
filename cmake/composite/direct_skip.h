@@ -23,4 +23,12 @@ typedef struct BwHostSkipFast {
     uint32_t range_span[2];  /* an empty range is first 0xFFFFFFFF, span 0 */
 } BwHostSkipFast;
 
+/* The two ranges, fixed guest addresses (the host's draw_tags.h; main.c checks
+ * they agree). A direct call whose target the build knows lies outside both
+ * reads only the singles (direct_calls.h, bw_direct_call_ready_plain). */
+#define BW_SKIP_RANGE0_FIRST 0x80260BACu /* particle draws */
+#define BW_SKIP_RANGE0_LAST 0x80264C4Cu
+#define BW_SKIP_RANGE1_FIRST 0x8007E484u /* wake draws */
+#define BW_SKIP_RANGE1_LAST 0x8007F3BCu
+
 #endif
