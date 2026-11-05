@@ -77,6 +77,12 @@ class GatherAliasCachePolicyTest(unittest.TestCase):
     def test_normal_linux_build_enables_the_cache(self):
         self.assertIn("gather_alias_cache", BUILD.LINUX_DEFAULT_OPTIMIZATIONS)
 
+    def test_normal_linux_build_has_one_fp_test_per_stretch(self):
+        """#553: fp_checks.py runs by default; --no-fp-checks keeps every test."""
+        self.assertIn("fp_checks", BUILD.LINUX_DEFAULT_OPTIMIZATIONS)
+        result = subprocess.run([sys.executable, SCRIPT, "--help"], capture_output=True, text=True)
+        self.assertIn("--no-fp-checks", result.stdout)
+
     def test_builder_exposes_an_explicit_control_opt_out(self):
         result = subprocess.run(
             [sys.executable, SCRIPT, "--help"], capture_output=True, text=True)
