@@ -471,3 +471,10 @@ drawShadowCascade draws mpModelList into every cascade and the other lists into 
 game's draw list in BP register 0x7A (0 or never written: a BG list, 1: another), kept until written again; a game
 module that doesn't write it keeps the old rule. `DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all` keeps every caster in
 every cascade.
+
+Patch 0240 keeps the sun shadows' smooth normals and Wind Waker HD's vertex colours per draw from frame to frame
+(`smooth_normal_cache.hpp`). They were made again for every lit scenery draw every frame, a weld map and a lookup
+per vertex in HD's tables: 66 draws and 47,000 vertices a game frame in Hyrule Castle's hall. A draw that comes
+again with the same bytes and the same tables and light colours takes the vertices made the first time; it is
+compared in full, so the picture is the same. Lava draws always make them. Entries unused for 120 game frames go.
+`DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0` makes them every frame, as before.

@@ -112,12 +112,12 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "4b98e06c90c5888bf1814fe8610116ec2ffde07f",
+      "sha": "89fb4b8590c19f007eb5613043a56badbcd1bd9a",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
-      "verified": "2026-11-04",
+      "verified": "2026-11-05",
       "upstream": {
         "url": "https://github.com/ExpansionPak/RecompCore",
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
@@ -943,6 +943,13 @@
             "patches/recompcore/0239-fixup-Sun-shadows-cascades-that-follow-the-camera-as-Wind-Waker-HD-s.patch"
           ],
           "evidence": "pdale-boop's: the Tower of the Gods' six pillars no longer shade its far face, which HD leaves lit (room 0, 12:00, with a rebuilt game module); Link's and the near objects' shadows unchanged; Outset at 10:00 as before."
+        },
+        "smooth_normal_cache": {
+          "runtime": "89fb4b8590c19f007eb5613043a56badbcd1bd9a",
+          "tracked_patches": [
+            "patches/recompcore/0240-fixup-Sun-shadows-Wind-Waker-HD-s-normals-and-colours-for-the-objects-and-the-rooms-and-its-light-on-the-scenery.patch"
+          ],
+          "evidence": "pdale-boop's: Debian i5-6500 / GTX 1660 SUPER, Hyrule Castle layer 2: 22.2 to 15.0 ms CPU per game frame, frames over 34 ms at 30 FPS 5.8% to 0.1% (still, turning and walking); the frozen hall -0.35 ms still and -1.3 turning (the emulation thread's); frames at the same retrace match the cache off; smooth_normal_cache_tests."
         }
       }
     },

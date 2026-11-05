@@ -80,8 +80,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The stable sun-shadow cascades by default (DOL_AURORA_SUN_SHADOW_CASCADES_STABLE=0 gives back HD's frame that turns with the camera): patches/recompcore/0237 (pdale-boop).
 # The lava geysers' core and a door's dust left unshaded too: glow models may take the rasterized colour when their textures only cut the shape, effects at their own depth keep their share near or far, and a blended effect's share by its opacity: patches/recompcore/0238 (pdale-boop).
 # Past the second sun-shadow cascade only the stage's BG lists cast, as in Wind Waker HD, from the host's mark in BP register 0x7A (DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all keeps every caster): patches/recompcore/0239 (pdale-boop).
+# The sun shadows' smooth normals and HD colours kept per draw from frame to frame, compared in full (DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0 makes them every frame): patches/recompcore/0240 (pdale-boop).
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=4b98e06c90c5888bf1814fe8610116ec2ffde07f
+RECOMPCORE_SHA=89fb4b8590c19f007eb5613043a56badbcd1bd9a
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
