@@ -122,23 +122,19 @@ int main(void) {
     assert(!bluewake_composite_direct_calls_v3(true, NULL, NULL, NULL, NULL, NULL, NULL, &fast, true));
     assert(bw_host_skip_fast == NULL && !bw_host_skip_verify);
 
-    /* v4: fixed host watches decline both ordinary and mirrored addresses. */
-    BwHostSkipFastV4 fast_v4 = {fast, 2u, {0x80029E6Cu, 0x8022ED50u}};
+    /* v4: the known watches decline exactly their own hooks (and mirrors),
+     * whether the target is a constant or a run-time value. */
+    BwHostSkipFastV4 fast_v4 = {fast};
     fast_v4.base.simple = 1u;
     assert(bluewake_composite_direct_calls_v4(true, &attention, &decrementer, &cause, &mask,
                                              can_skip, &allow, &fast_v4, false));
     before = queries;
-    assert(!bw_direct_call_ready(&cpu, 0x80029E6Cu));
-    assert(!bw_direct_call_ready(&cpu, 0xC0029E6Cu));
-    assert(!bw_direct_call_ready(&cpu, 0x8022ED50u));
-    assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
-    /* Known watches: each bit declines exactly its own hook (and its mirror),
-     * whether the target is a constant or a run-time value. */
-    fast_v4.watched_count = 0u;
     const u32 hooks[5] = {BW_SKIP_KNOWN_CHANGE, BW_SKIP_KNOWN_DATA_SELECT, BW_SKIP_KNOWN_EXECUTE,
                           BW_SKIP_KNOWN_PLAY_EXECUTE, BW_SKIP_KNOWN_MENU_DELETE};
+    for (u32 h = 0u; h < 5u; ++h) /* no bits: every hook is an ordinary target */
+        assert(bw_direct_call_ready(&cpu, hooks[h]));
     for (u32 on = 0u; on < 5u; ++on) {
-        fast_v4.known = 1u << on;
+        fast_v4.base.simple = 1u | (2u << on);
         for (u32 h = 0u; h < 5u; ++h) {
             volatile u32 target = hooks[h]; /* not folded: the run-time path */
             assert(bw_direct_call_ready(&cpu, target) == (h != on));
@@ -146,15 +142,16 @@ int main(void) {
         }
         assert(bw_direct_call_ready(&cpu, 0x80009000u));
     }
-    fast_v4.known = BW_SKIP_KNOWN_ALL;
-    assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_CHANGE) && !bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_MENU_DELETE));
+    fast_v4.base.simple = 1u | BW_SKIP_KNOWN_ALL;
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_CHANGE) && !bw_direct_call_ready(&cpu, 0xC0029E6Cu));
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_MENU_DELETE));
     assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
-    fast_v4.known = 0u;
+    fast_v4.base.simple = 1u; /* stage select off: the hooks are ordinary targets */
     assert(bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_PLAY_EXECUTE));
-    /* A malformed count stays bounded by the ABI's fixed capacity. */
-    fast_v4.watched_count = BW_HOST_SKIP_WATCH_MAX + 1u;
-    assert(!bw_direct_call_ready(&cpu, 0x80029E6Cu));
-    assert(!bw_direct_call_ready(&cpu, 0x80009000u));
+    fast_v4.base.simple = 0u; /* inline path off: the host answers every call */
+    before = queries;
+    assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before + 1u);
+    fast_v4.base.simple = 1u | BW_SKIP_KNOWN_ALL;
     /* Falling back to v3 removes the v4-only watches. */
     assert(bluewake_composite_direct_calls_v3(true, &attention, &decrementer, &cause, &mask,
                                              can_skip, &allow, &fast_v4.base, false));

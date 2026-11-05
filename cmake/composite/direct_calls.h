@@ -89,35 +89,22 @@ static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
     /* The host's answer read inline when only the address matters (direct_skip.h),
      * instead of a call into the host for every direct call. */
     const volatile BwHostSkipFast* fast = bw_host_skip_fast;
-    if (fast != NULL && fast->simple) {
+    const u32 simple = fast != NULL ? fast->simple : 0u;
+    if (simple != 0u) {
         bool allowed = address != fast->single[0] && address != fast->single[1] &&
                              address - fast->range_first[0] > fast->range_span[0] &&
                              address - fast->range_first[1] > fast->range_span[1];
-        const volatile BwHostSkipFastV4* fast_v4 = bw_host_skip_fast_v4;
-        if (allowed && fast_v4 != NULL) {
+        /* v4's known hooks, in simple's bits 1..5 (direct_skip.h): with the
+         * stage select off simple is 1 and this is one compare. */
+        if (__builtin_expect(simple > 1u, 0) && allowed) {
             const u32 canonical = address & ~0x40000000u;
-            /* Constant targets fold these to nothing but at the five hooks. */
-            if (canonical == BW_SKIP_KNOWN_CHANGE || canonical == BW_SKIP_KNOWN_DATA_SELECT ||
-                canonical == BW_SKIP_KNOWN_EXECUTE || canonical == BW_SKIP_KNOWN_PLAY_EXECUTE ||
-                canonical == BW_SKIP_KNOWN_MENU_DELETE) {
-                const u32 known = fast_v4->known;
-                const u32 bit = canonical == BW_SKIP_KNOWN_CHANGE ? 1u
-                              : canonical == BW_SKIP_KNOWN_DATA_SELECT ? 2u
-                              : canonical == BW_SKIP_KNOWN_EXECUTE ? 4u
-                              : canonical == BW_SKIP_KNOWN_PLAY_EXECUTE ? 8u : 16u;
-                if ((known & bit) != 0u)
-                    allowed = false;
-            }
-            const u32 count = fast_v4->watched_count;
-            /* An invalid future/partial contract must decline, not silently
-             * ignore addresses the current module cannot represent. */
-            if (count > BW_HOST_SKIP_WATCH_MAX)
+            const u32 bit = canonical == BW_SKIP_KNOWN_CHANGE ? 2u
+                          : canonical == BW_SKIP_KNOWN_DATA_SELECT ? 4u
+                          : canonical == BW_SKIP_KNOWN_EXECUTE ? 8u
+                          : canonical == BW_SKIP_KNOWN_PLAY_EXECUTE ? 16u
+                          : canonical == BW_SKIP_KNOWN_MENU_DELETE ? 32u : 0u;
+            if ((simple & bit) != 0u)
                 allowed = false;
-            for (u32 i = 0; allowed && i < count; ++i)
-                if (canonical == (fast_v4->watched[i] & ~0x40000000u)) {
-                    allowed = false;
-                    break;
-                }
         }
         if (__builtin_expect(bw_host_skip_verify, 0))
             bw_host_skip_verify_check(cpu, address, allowed);

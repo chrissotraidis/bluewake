@@ -2111,13 +2111,15 @@ static void host_skip_fast_refresh(void) {
     g_skip_fast.base.range_span[0] = BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST;
     g_skip_fast.base.range_first[1] = BLUEWAKE_WAKE_DRAW_FIRST;
     g_skip_fast.base.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
-    g_skip_fast.base.simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
-                              !g_overlap_watch_until_control;
+    // Bit 0: the inline path may answer; bits 1..5: the stage select's hooks,
+    // which only a v4 module reads (direct_skip.h). A v3 module never gets the
+    // fast path while the stage select is live, so it never sees them.
+    const bool simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
+                        !g_overlap_watch_until_control;
+    g_skip_fast.base.simple = simple ? 1u | (bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u) : 0u;
     // The stage select's hooks are the module's known watches (direct_skip.h):
     // one mask instead of a list every direct call walks (#524 2x2: the list
     // cost the stage select's sessions ~20 M instructions a frame at Outset).
-    g_skip_fast.known = bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u;
-    g_skip_fast.watched_count = 0u;
     _Static_assert(BLUEWAKE_STAGE_SELECT_CHANGE == BW_SKIP_KNOWN_CHANGE &&
                        BLUEWAKE_STAGE_SELECT_DATA_SELECT == BW_SKIP_KNOWN_DATA_SELECT &&
                        BLUEWAKE_STAGE_SELECT_EXECUTE == BW_SKIP_KNOWN_EXECUTE &&
