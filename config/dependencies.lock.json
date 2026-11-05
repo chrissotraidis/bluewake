@@ -113,7 +113,7 @@
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
       "ref": "refs/pull/53/head",
-      "sha": "05b2493f206bd75bd9d0c32781bad42a58065782",
+      "sha": "05b2493f20e94fd09e5da5da9e7159383dab1367",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
@@ -727,7 +727,7 @@
           "evidence": "RecompCore #49 adds opt-in counters, ablations, per-pass/chunk timing and draw selection used to attribute Smooth Motion work, plus an opt-in half-size intermediate for haze and smoke. The diagnostic paths default off. The render-scale investigation in BlueWake #563 used the exact a4dbaaa8 stack; its Deck results are recorded in docs/planning/2026-11-05-render_scale_cost."
         },
         "staging_copy_batch": {
-          "runtime": "05b2493f206bd75bd9d0c32781bad42a58065782",
+          "runtime": "05b2493f20e94fd09e5da5da9e7159383dab1367",
           "tracked_patches": [
             "patches/recompcore/0206-Aurora-optionally-batch-frame-staging-copies.patch",
             "patches/recompcore/0207-Aurora-test-staging-copy-ordering.patch"

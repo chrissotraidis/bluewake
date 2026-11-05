@@ -52,7 +52,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # still checked after fetch, so a changed PR head cannot silently enter a build.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
 RECOMPCORE_REF=refs/pull/53/head
-RECOMPCORE_SHA=05b2493f206bd75bd9d0c32781bad42a58065782
+RECOMPCORE_SHA=05b2493f20e94fd09e5da5da9e7159383dab1367
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
