@@ -739,6 +739,9 @@ int main(void) {
             inputs.update((ROOT / "scripts/windows/behaviour_timing.py").read_bytes())
         if getattr(self.args, "cache_ops", False):
             inputs.update((ROOT / "scripts/windows/cache_ops.py").read_bytes())
+        if getattr(self.args, "fp_checks", False):
+            inputs.update(b"fp_checks\n")
+            inputs.update((ROOT / "scripts/windows/fp_checks.py").read_bytes())
         if getattr(self.args, "native_entries", False):
             for name in seventh_native_sources():
                 inputs.update((ROOT / "cmake/composite" / name).read_bytes())
@@ -926,6 +929,10 @@ int main(void) {
         # can prove: lean_memory.py needs the prepaid copies' deadline test, and
         # native_entries.py hooks a native only where the translation hashes to the
         # one its comparison test was run on (it reports the rest as not hooked).
+        # One FP-available test per stretch of a prepaid copy (fp_checks.py, #553;
+        # on by default): before lean-memory, which can then make the FP accesses lean.
+        if getattr(self.args, "fp_checks", False):
+            self.run("fp-checks", [sys.executable, ROOT / "scripts/windows/fp_checks.py", o / "composite-src"])
         if self.args.lean_memory:
             self.run("lean-memory", [sys.executable, ROOT / "scripts/windows/lean_memory.py",
                                       o / "composite-src"])
@@ -973,6 +980,7 @@ int main(void) {
                    "lean_deadlines": getattr(self.args, "lean_deadlines", False),
                    "behaviour_timing": getattr(self.args, "behaviour_timing", False),
                    "lean_blocks": getattr(self.args, "lean_blocks", False),
+                   "fp_checks": getattr(self.args, "fp_checks", False),
                    "native_entries": self.args.native_entries,
                    "cache_ops": getattr(self.args, "cache_ops", False),
                    "native_gx": getattr(self.args, "native_gx", False),
@@ -1180,6 +1188,8 @@ int main(void) {
                                **({"lean_deadlines": True} if getattr(self.args, "lean_deadlines", False) else {}),
                                **({"behaviour_timing": True} if getattr(self.args, "behaviour_timing", False) else {}),
                                **({"cache_ops": True} if getattr(self.args, "cache_ops", False) else {}),
+                               **({"fp_checks": True} if getattr(self.args, "fp_checks", False) else {}),
+                               **({"direct_gate": True} if getattr(self.args, "direct_gate", False) else {}),
                                **({"native_gx": True} if getattr(self.args, "native_gx", False) else {}),
                                **({"native_set4": True} if getattr(self.args, "native_set4", False) else {}),
                                "runtime": self.git("-C", str(self.recompcore), "rev-parse", "HEAD"),
@@ -1310,6 +1320,8 @@ int main(void) {
                              ("native_skin", "BLUEWAKE_NATIVE_SKIN"),
                              ("native_game_math", "BLUEWAKE_NATIVE_GAME_MATH")):
             env[name] = "1" if getattr(self.args, option) else "0"
+        # Training plays the path it measures: the gate open only with --direct-gate (#552).
+        env["BLUEWAKE_DIRECT_GATE"] = "1" if getattr(self.args, "direct_gate", False) else "0"
         if warps:
             env["BLUEWAKE_TEST_WARP"] = ",".join(warps)
         if headless:
@@ -1456,8 +1468,10 @@ int main(void) {
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
             "gather_alias_cache": self.args.gather_alias_cache,
+            "direct_gate_training": getattr(self.args, "direct_gate", False),
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
+            "fp_checks": getattr(self.args, "fp_checks", False),
             "native_j3d": self.args.native_j3d,
             "native_vec": self.args.native_vec,
             "native_math": self.args.native_math,
@@ -1610,7 +1624,7 @@ WINDOWS_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather
                                  "inline_gpr",
                                  "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                  "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
-                                 "behaviour_timing")
+                                 "behaviour_timing", "fp_checks")
 
 
 def main():
@@ -1699,6 +1713,14 @@ def main():
                              "a smaller module and a quicker build (on by default; needs --prepared-blocks)")
     parser.add_argument("--no-behaviour-timing", action="store_true",
                         help="check the turn's budget after every block, as before behaviour timing: about 9%% slower")
+    parser.add_argument("--fp-checks", action="store_true",
+                        help="one FP-available test per stretch of a prepaid copy, so lean memory can "
+                             "make FP loads and stores lean (fp_checks.py; on by default, #553)")
+    parser.add_argument("--no-fp-checks", action="store_true",
+                        help="keep every FP-available test in the prepaid copies, as before #553")
+    parser.add_argument("--direct-gate", action="store_true",
+                        help="train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1, #552), "
+                             "for a build that measures it; the module is the same either way")
     parser.add_argument("--native-entries", action="store_true",
                         help="Wind Waker Recomp's certified native entries, the second, third and seventh sets "
                              "(off by default; needs --direct-calls, --gather-pipe and --native-vec)")
@@ -1745,6 +1767,8 @@ def main():
         args.lean_deadlines = False
     if args.no_behaviour_timing:
         args.behaviour_timing = False
+    if args.no_fp_checks:
+        args.fp_checks = False
     if args.host_only and (args.retrain or args.no_train or args.no_pgo):
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:
@@ -1761,6 +1785,8 @@ def main():
         parser.error("--lean-memory requires --gather-pipe (its accesses call gather_pipe.h's helpers)")
     if getattr(args, "behaviour_timing", False) and not args.prepared_blocks:
         parser.error("--behaviour-timing requires --prepared-blocks")
+    if args.fp_checks and not args.prepared_blocks:
+        parser.error("--fp-checks requires --prepared-blocks")
     if args.lean_deadlines and not args.lean_memory:
         parser.error("--lean-deadlines requires --lean-memory")
     if args.native_entries and not (args.direct_calls and args.gather_pipe and args.native_vec):
