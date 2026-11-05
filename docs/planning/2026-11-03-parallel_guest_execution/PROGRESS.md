@@ -1,6 +1,6 @@
 # PROGRESS — Parallel guest execution
 
-Status: In progress (audit done, Track A chosen; `entry()` narrows the async window to opaque, non-envmap materials; pose job ≈ 1–3 % after #541's Deck counts; next: audio lead)
+Status: Stopped 2026-11-04 (measured; no-go for now) (audit done, Track A chosen; `entry()` narrows the async window to opaque, non-envmap materials; pose job ≈ 1–3 % after #541's Deck counts; next: audio lead)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -60,6 +60,7 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 | 2026-11-03 | Async audio, if built, is opt-in (`BLUEWAKE_ASYNC_AUDIO=1`), off by default; serial audio stays the default and the oracle |
 | 2026-11-03 | Host DSP excluded (HLE by default, ≈ 1 %). Audio lead is the guest `JASystem` thread; gated on a per-thread measurement |
 | 2026-11-03 | Skinning dropped from this plan: #541 measured it (≈ 1.5 % of the Deck game thread, threading ≈ +0.5–1 %). Estimates lowered to Deck cycle counts: serial widening ≈ 1–2 %, async pose job ≈ 1–3 %. Next lead: audio |
+| 2026-11-04 | **Stopped (no-go for now).** At these shares a second thread can't reliably pay for itself: ≤ +6.5 % for the audio thread before synchronization, after weeks of reentrant codegen. Reopen if a scene's audio or another separable guest thread measures well above 8 % on the Deck, or once Track A's natives make an async job cheap |
 | 2026-11-04 | Measured on the Deck: audio thread 6.1 % of Outset, translated code ≈ 90 % of the game host thread. Overlapping audio is worth at most ≈ +6.5 % and needs translated code on a second thread (Track B: reentrant codegen). Host-side offload is worth at most ≈ 9 %. Any multi-threaded path must beat the serial build (full stack, opt-ins on) in every one of ≥ 6 interleaved Deck launches with identical checkpoints, or it's reverted |
 | 2026-11-03 | Native widening comes before any async job. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms and large-model skinning. |
 | 2026-11-03 | Async pose job eligibility adds: every material in a material-sorted or non-sorted buffer, no env/proj-map texture matrix |
