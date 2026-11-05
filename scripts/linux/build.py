@@ -52,7 +52,7 @@ MODULE = "gGZLE01_recomp.so"
 GC_MAGIC = 0xC2339F3D
 CI_CONTAINER_IMAGE = "bluewake-linux-ci:local"
 CI_CONTAINER_ENV = "BLUEWAKE_CI_CONTAINER"
-LLVM22_BIN = Path("/usr/lib/llvm-22/bin")
+LLVM18_BIN = Path("/usr/lib/llvm-18/bin")
 
 
 class BuildError(Exception):
@@ -297,12 +297,12 @@ def run_in_ci_container(args):
 
 
 def select_container_toolchain(args):
-    """Opt into LLVM 22 inside the shared image; Clang 18 stays the default."""
-    if not args.clang22:
+    """The shared image puts LLVM 22 first (#437); --clang18 opts back into LLVM 18."""
+    if not args.clang18:
         return
-    if not LLVM22_BIN.is_dir():
-        die(f"--clang22 requested, but {LLVM22_BIN} is missing from the container")
-    os.environ["PATH"] = f"{LLVM22_BIN}{os.pathsep}{os.environ.get('PATH', '')}"
+    if not LLVM18_BIN.is_dir():
+        die(f"--clang18 requested, but {LLVM18_BIN} is missing from the container")
+    os.environ["PATH"] = f"{LLVM18_BIN}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 class Builder:
@@ -1560,8 +1560,10 @@ def main():
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
     parser.add_argument("--ci-container", action="store_true",
                         help="run this same build inside the Ubuntu 24.04 Linux CI container")
+    parser.add_argument("--clang18", action="store_true",
+                        help="use Clang 18 instead of the default Clang 22 (requires --ci-container)")
     parser.add_argument("--clang22", action="store_true",
-                        help="use Clang 22 instead of Clang 18 (requires --ci-container)")
+                        help="the default compiler for container builds; kept so older commands still work")
     parser.add_argument("--portable", action="store_true",
                         help="put portable.txt in the app folder, so saves, settings and logs stay in a user "
                              "folder beside the app (a rebuild leaves user/ alone)")
@@ -1570,8 +1572,10 @@ def main():
     args = parser.parse_args()
     if args.module_sources and (args.source_only or args.host_only or args.check_only):
         parser.error("--module-sources cannot be combined with --source-only, --host-only or --check-only")
-    if args.clang22 and not args.ci_container:
-        parser.error("--clang22 requires --ci-container")
+    if args.clang18 and args.clang22:
+        parser.error("--clang18 and --clang22 are mutually exclusive")
+    if (args.clang18 or args.clang22) and not args.ci_container:
+        parser.error(f"--clang{18 if args.clang18 else 22} requires --ci-container")
     if args.ci_container and os.environ.get(CI_CONTAINER_ENV) != "1":
         try:
             sys.exit(run_in_ci_container(args))
