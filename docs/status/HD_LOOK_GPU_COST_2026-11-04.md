@@ -104,3 +104,57 @@ Compare B with C: both use the module built without PGO, which by itself makes t
   window. I used `busy_ms`. Its per-pass list also gives the fourth cascade more time than it costs (its timer starts
   while earlier work is still running), which is why the parts above come from switching each one off.
 - Not measured: Windows, Mac, the Steam Deck.
+
+## Both modules trained, look off (Arch, update)
+
+The #533 module above had no PGO training. With #533's module built by the release recipe (the CI container, clang
+18, the builder's own training), and the look off on both builds:
+
+- **CPU:** #533 costs +0.04 to +0.23 ms per game frame more than 0.10.0 (+0.5 to +2.5%, mean +1.7%, 9 places × 3
+  rounds). The earlier gap of +0.5 to +2.0 ms was mostly the untrained module.
+- **GPU:** +0.04 to +0.09 ms, the same as before. The module doesn't change GPU time.
+- The look's own cost (look on against look off) is unchanged, including Hyrule's +2.4 ms of CPU.
+
+## A weaker PC: i5-6500 and GTX 1660 SUPER (Debian 13, November 4)
+
+The same comparison on a weaker machine: an i5-6500 (4 cores, 4 threads), a GTX 1660 SUPER (NVIDIA 550.163.01),
+Debian 13, Vulkan, a 1280x720 window with the render scale on "Window" (720 lines). Both builds are AppImages from the
+release recipe: 0.10.0, and #533 at 58b72a43 with its own trained module. Headless, the two are within 0.4–2% of each
+other on the CPU. 3 unpaced rounds per place, then 1 paced round at 30 FPS, as players run it.
+
+**Paced, 30 FPS (what you'd feel):** every build holds 29.97 FPS at every place, #533 included, and no frame took over
+50 ms anywhere. Share of frames over 34 ms:
+
+| Place | main | #533 | #533, look off |
+|---|---|---|---|
+| Outset dock, 10:00 | 2.0% | 2.0% | 1.9% |
+| Outset hilltop, evening | 1.5% | 1.9% | 2.1% |
+| Windfall, open sea, Dragon Roost Cavern | 0–0.1% | 0–0.2% | 0% |
+| Forbidden Woods | 0.8% | 0.8% | 0% |
+| Tower of the Gods | 4.0% | 4.6% | 4.2% |
+| Ganon's Tower | 1.1% | 1.7% | 1.0% |
+| **Hyrule Castle (layer 2)** | 0% | **5.9%** (p99 34.7 ms, worst 38.6) | 0% |
+
+**CPU, unpaced, ms per game frame:**
+
+| Place | main | #533 | #533, look off | look's cost |
+|---|---|---|---|---|
+| Outset dock | 24.8 | 25.9 | 24.7 | +1.2 |
+| Outset hilltop | 29.4 | 30.4 | 29.2 | +1.2 |
+| Windfall pier | 24.0 | 25.1 | 23.8 | +1.3 |
+| Open sea | 13.8 | 14.1 | 13.3 | +0.8 |
+| Dragon Roost Cavern | 17.6 | 18.4 | 17.7 | +0.8 |
+| Forbidden Woods | 17.1 | 17.9 | 17.1 | +0.8 |
+| Tower of the Gods | 32.0 | 33.0 | 32.1 | +0.9 |
+| Ganon's Tower | 18.9 | 19.7 | 19.0 | +0.7 |
+| **Hyrule Castle** | 13.9 | **22.2** | 14.0 | **+8.3** |
+
+- **Where it lands:** from each thread's CPU time, the game's emulation thread carries only +0.6 to +1.3 ms of the
+  look. The rest, about +11 to +14 ms of CPU time per game frame summed over threads, is on the rendering and driver
+  threads. So the look mostly stays off the game thread, but in Hyrule the rendering side holds the frame back.
+- **GPU:** this card moves between power states during the runs (graphics 600–1250 MHz, memory 810–7000 MHz), so the
+  raw GPU milliseconds jump around. Normalised to one clock, the look costs about 0.2–1.3 ms per frame, and #533
+  against main mostly lands within ±0.7 ms.
+- **The one thing to fix:** Hyrule's sun shadows, at +8.3 ms of CPU per game frame on this machine (+2.4 ms on the
+  9900X). It still holds 30 FPS, with about 6% of frames slightly late.
+- Not covered here: other render scales and Smooth Motion. Those runs are next.
