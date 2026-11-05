@@ -8296,12 +8296,7 @@ int main(int argc, char** argv) {
         if (want_fast) {
             g_skip_fast_on = true;
             host_skip_fast_refresh();
-            // v4 only while the stage select is live: with no fixed watches, v3
-            // leaves the module's v4 pointer NULL, so a direct call tests one
-            // pointer instead of loading the watch count and setting up its
-            // loop (B vs D in the #524 2x2: +6.3 M instructions a frame, -1.4 %).
-            // Every v4 module exports v3 too (v4 is built on it).
-            if (direct_calls_v4 != NULL && (bluewake_stage_select_live || direct_calls_v3 == NULL))
+            if (direct_calls_v4 != NULL)
                 enabled = direct_calls_v4(
                     want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
                     &g_interrupts.pi_cause, &g_interrupts.pi_mask,
