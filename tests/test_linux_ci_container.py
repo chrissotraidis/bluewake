@@ -76,6 +76,35 @@ class GatherAliasCachePolicyTest(unittest.TestCase):
         self.assertIn("--no-gather-alias-cache", result.stdout)
 
 
+class GatherPipeProfilePolicyTest(unittest.TestCase):
+    """Keep GX attribution explicit and out of normal optimized builds."""
+
+    def test_builder_exposes_the_diagnostic_option(self):
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "--help"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--gather-pipe-profile", result.stdout)
+
+    def test_profile_requires_the_gather_pipe_path(self):
+        result = subprocess.run(
+            [sys.executable, SCRIPT, "/nonexistent/disc.iso", "--conservative",
+             "--gather-pipe-profile"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--gather-pipe-profile requires --gather-pipe", result.stderr)
+
+    def test_profile_build_trains_its_own_profile(self):
+        # The retained stages change the module's code, so a normal build's
+        # counts must not be reused for it (the training fingerprint).
+        source = (BUILD.ROOT / "scripts/linux/build.py").read_text()
+        fingerprint = source[source.index("def training_fingerprint"):source.index("def train(")]
+        self.assertIn('"gather_pipe_profile": True', fingerprint)
+
+    def test_profile_stages_are_not_retained_by_default(self):
+        header = (BUILD.ROOT / "cmake/composite/gather_pipe.h").read_text()
+        self.assertIn("#if defined(BLUEWAKE_GATHER_PIPE_PROFILE)", header)
+        self.assertIn("#define BW_GATHER_PIPE_STAGE static inline", header)
+
+
 class LinuxContainerMountTest(unittest.TestCase):
     """The wrapper exposes only the paths the unchanged builder needs.
 

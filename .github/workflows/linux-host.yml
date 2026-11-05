@@ -73,7 +73,7 @@ jobs:
                 bluewake_native_work_pool_lifecycle_test \
                 bluewake_fast_blocks_test bluewake_cycle_domain_test \
                 bluewake_interrupt_sources_test bluewake_delivery_digest_test \
-                bluewake_composite_dispatch_loop_test bluewake_edge_intercepts_test \
+                bluewake_composite_dispatch_loop_test bluewake_edge_intercepts_test bluewake_gather_host_test \
                 bluewake_direct_calls_test \
                 bluewake_gather_memory_plain_test bluewake_gather_memory_global_test \
                 bluewake_gather_memory_cache_test \

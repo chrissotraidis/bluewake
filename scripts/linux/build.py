@@ -602,7 +602,7 @@ int main(void) {{
         # the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(getattr(self.args, 'gather_pipe_profile', False))}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
                        f"{int(self.args.gather_alias_cache)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
@@ -844,6 +844,8 @@ int main(void) {{
     # --- 9 compile -----------------------------------------------------------
     def compile_module(self):
         flags = []
+        if getattr(self.args, "gather_pipe_profile", False):
+            flags.append("-gline-tables-only")
         if self.profile is not None:
             # The profile is a compiler input but not a header dependency: its
             # hash in the file name makes Ninja recompile when the counts change.
@@ -949,6 +951,7 @@ int main(void) {{
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_PIPE_PROFILE={'ON' if getattr(self.args, 'gather_pipe_profile', False) else 'OFF'}",
             f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
@@ -1059,6 +1062,7 @@ int main(void) {{
                                             "gather_pipe", "direct_calls", "inline_gpr", "native_j3d",
                                             "native_vec", "native_math", "native_skin", "native_game_math",
                                             "lean_memory", "native_entries", "lean_blocks")},
+                               **({"gather_pipe_profile": True} if getattr(self.args, "gather_pipe_profile", False) else {}),
                                **({"lean_deadlines": True} if getattr(self.args, "lean_deadlines", False) else {}),
                                **({"behaviour_timing": True} if getattr(self.args, "behaviour_timing", False) else {}),
                                **({"cache_ops": True} if getattr(self.args, "cache_ops", False) else {}),
@@ -1271,6 +1275,7 @@ int main(void) {{
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
+            "gather_pipe_profile": getattr(self.args, "gather_pipe_profile", False),
             "gather_alias_cache": self.args.gather_alias_cache,
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
@@ -1483,6 +1488,8 @@ def main():
                         help="opt into experimental inline floating-point helpers (off by default)")
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
+    parser.add_argument("--gather-pipe-profile", action="store_true",
+                        help="retain gather-pipe stages and module line tables for profiler attribution (diagnostic only; requires --gather-pipe)")
     parser.add_argument("--gather-alias-cache", action="store_true",
                         help="cache gather-pipe alias-window overlap by registry generation (on by default; requires --gather-pipe)")
     parser.add_argument("--no-gather-alias-cache", action="store_true",
@@ -1605,6 +1612,8 @@ def main():
         parser.error("--lean-memory requires --gather-pipe (its accesses call gather_pipe.h's helpers)")
     if args.gather_alias_cache and not args.gather_pipe:
         parser.error("--gather-alias-cache requires --gather-pipe")
+    if args.gather_pipe_profile and not args.gather_pipe:
+        parser.error("--gather-pipe-profile requires --gather-pipe")
     if getattr(args, "behaviour_timing", False) and not args.prepared_blocks:
         parser.error("--behaviour-timing requires --prepared-blocks")
     if args.lean_deadlines and not args.lean_memory:
