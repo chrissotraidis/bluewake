@@ -45,6 +45,7 @@ int main() {
     // The defaults, on every platform.
     assert(std::string(fallback("DOL_AURORA_FRAME_INTERP")) == "0" &&
            bw_smooth_requested(fallback("DOL_AURORA_FRAME_INTERP_STEPS")) == 1);
+    assert(std::string(fallback("DOL_AURORA_BATCH_STAGING_COPIES")) == "0");
     assert(std::string(fallback("BLUEWAKE_STICK_ZOOM")) == "0" &&
            std::string(fallback("BLUEWAKE_STICK_ZOOM_SPEED")) == "1.275");
     assert(std::string(fallback("BLUEWAKE_HAPTICS")) == "enhanced" &&
@@ -64,7 +65,7 @@ int main() {
     const std::string path = std::string(temp != nullptr ? temp : "/tmp") + "/bluewake_settings_state_test.ini";
     {
         std::ofstream file(path);
-        file << "DOL_AURORA_RENDER_SCALE=0\nDOL_AURORA_FPS_POSITION=top-left\nDOL_AURORA_SHOW_FPS=0\nUNRELATED=kept\n"
+        file << "DOL_AURORA_RENDER_SCALE=0\nDOL_AURORA_BATCH_STAGING_COPIES=0\nDOL_AURORA_FPS_POSITION=top-left\nDOL_AURORA_SHOW_FPS=0\nUNRELATED=kept\n"
              // Two old pairs, each held half on.
              << "BLUEWAKE_FAST_FORWARD=0\nBLUEWAKE_FADE_FRAMES=6\nBLUEWAKE_JUMP_BUTTON=0\nBLUEWAKE_SPRINT_SPEED=1.84\n";
     }
@@ -80,9 +81,11 @@ int main() {
     assert(bw_desktop::env("BLUEWAKE_FAST_FORWARD") == "0" && bw_desktop::env("BLUEWAKE_FADE_FRAMES") == "0");
     assert(bw_desktop::env("BLUEWAKE_JUMP_BUTTON") == "0" && bw_desktop::env("BLUEWAKE_SPRINT_SPEED") == "1");
     bw_desktop::set_env("DOL_AURORA_SHOW_FPS", "1");
+    bw_desktop::set_env("DOL_AURORA_BATCH_STAGING_COPIES", "1");
     bw_desktop::save();
     std::string saved = read_file(path);
     assert(has(saved, "DOL_AURORA_SHOW_FPS=1\n") && has(saved, "DOL_AURORA_RENDER_SCALE=0\n"));
+    assert(has(saved, "DOL_AURORA_BATCH_STAGING_COPIES=1\n"));
     assert(has(saved, "DOL_AURORA_FPS_POSITION=top-left\n") && has(saved, "UNRELATED=kept\n"));
     bw_desktop::set_env("DOL_AURORA_FPS_POSITION", "top-right");
     bw_desktop::save();

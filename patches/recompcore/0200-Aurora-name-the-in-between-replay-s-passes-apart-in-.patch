@@ -1,0 +1,119 @@
+From ff56a15e2921e2c84842d296687a627435a1eba4 Mon Sep 17 00:00:00 2001
+From: irregularthanis <343663069+irregularthanis@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 12:55:31 -0500
+Subject: [PATCH 200/205] Aurora: name the in-between replay's passes apart in
+ [gpu-prof]
+
+gpu_prof::set_name_prefix prefixes the passes and zones recorded while the
+replay is encoded ("IB EFB" beside the real frame's "EFB"), so each pass's
+GPU time is reported for the replay and the real frame separately. The
+[gpu-prof] line lists up to 24 kinds. Measurement only.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp   |  4 ++++
+ .../graphics/aurora/lib/webgpu/gpu_prof.cpp    | 18 +++++++++++++++---
+ .../graphics/aurora/lib/webgpu/gpu_prof.hpp    |  4 ++++
+ 3 files changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 87eda79205..a005b11755 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -2490,6 +2490,7 @@ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::
+   std::optional<webgpu::gpu_prof::Zone> replayZone;
+   if (!(dump && dumpPasses))
+     replayZone.emplace(between, "In-between replay");
++  webgpu::gpu_prof::set_name_prefix("IB ");
+   frame_interp::set_encoding_interpolated(true);
+   for (size_t i = 0; i < frame.ops.size(); ++i) {
+     replay_op(between, frame, frame.ops[i]);
+@@ -2507,6 +2508,7 @@ static void present_with_in_between(FramePacket& frame, size_t frameSlot, wgpu::
+     }
+   }
+   frame_interp::set_encoding_interpolated(false);
++  webgpu::gpu_prof::set_name_prefix({});
+   replayZone.reset();
+   log_present("in-between", frame.gameFrame, 0, {});
+   callback(between);
+@@ -2578,8 +2580,10 @@ static void present_steps(FramePacket& frame, size_t frameSlot, wgpu::CommandEnc
+     frame_interp::set_encoding_interpolated(true);
+     {
+       const webgpu::gpu_prof::Zone zone{between, "In-between replay"};
++      webgpu::gpu_prof::set_name_prefix("IB ");
+       for (const auto& op : frame.ops)
+         replay_op(between, frame, op);
++      webgpu::gpu_prof::set_name_prefix({});
+     }
+     frame_interp::set_encoding_interpolated(false);
+     keep(between, held[step]);
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp
+index bc1db2dd34..6e5860f3e0 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp
+@@ -234,7 +234,7 @@ void log_frame(const Slot& slot, const uint64_t* ts, uint64_t frameBegin, uint64
+                double(g_logBytes[0]) / 1024.0 / frames, double(g_logBytes[1]) / 1024.0 / frames,
+                double(g_logBytes[2]) / 1024.0 / frames, double(g_logBytes[3]) / 1024.0 / frames,
+                double(g_logBytes[4]) / 1024.0 / frames);
+-  for (size_t i = 0; i < kinds.size() && i < 12; ++i) {
++  for (size_t i = 0; i < kinds.size() && i < 24; ++i) {
+     std::fprintf(stderr, " | %s %.3f x%.1f", kinds[i].first.c_str(), kinds[i].second.ms / frames,
+                  double(kinds[i].second.count) / frames);
+   }
+@@ -373,6 +373,16 @@ void emit_frame(Slot& slot) {
+ 
+ Slot& record_slot() { return g_slots[g_recordSlot]; }
+ 
++std::string g_namePrefix; // set_name_prefix (render worker)
++
++const char* prefixed_name(std::string_view name) {
++  if (g_namePrefix.empty())
++    return intern_name(name);
++  std::string full = g_namePrefix;
++  full += name;
++  return intern_name(full);
++}
++
+ uint32_t alloc_zone() {
+   if (!g_frameActive || g_zoneCount >= MaxZones) {
+     return UINT32_MAX;
+@@ -515,7 +525,7 @@ const wgpu::PassTimestampWrites* pass_writes(std::string_view name) {
+     return nullptr;
+   }
+   auto& slot = record_slot();
+-  slot.events.push_back({intern_name(name), index * 2, EventKind::PassBegin});
++  slot.events.push_back({prefixed_name(name), index * 2, EventKind::PassBegin});
+   slot.events.push_back({nullptr, index * 2 + 1, EventKind::End});
+   ++slot.passCount;
+ 
+@@ -530,6 +540,8 @@ const wgpu::PassTimestampWrites* pass_writes(std::string_view name) {
+   return &out;
+ }
+ 
++void set_name_prefix(std::string_view prefix) { g_namePrefix.assign(prefix); }
++
+ void count_copy(CopyKind kind, uint64_t bytes) {
+   if (g_log) {
+     g_logBytes[static_cast<size_t>(kind)] += bytes;
+@@ -544,7 +556,7 @@ Zone::Zone(const wgpu::CommandEncoder& encoder, std::string_view name) {
+   if (index == UINT32_MAX) {
+     return;
+   }
+-  record_slot().events.push_back({intern_name(name), index * 2, EventKind::ZoneBegin});
++  record_slot().events.push_back({prefixed_name(name), index * 2, EventKind::ZoneBegin});
+   encoder.WriteTimestamp(g_querySet, index * 2);
+   m_encoder = &encoder;
+   m_endQuery = index * 2 + 1;
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.hpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.hpp
+index ade3b8173b..2ffd61a43e 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.hpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.hpp
+@@ -13,6 +13,10 @@ void frame_begin(const wgpu::CommandEncoder& encoder);
+ void frame_end(const wgpu::CommandEncoder& encoder);
+ void after_submit();
+ const wgpu::PassTimestampWrites* pass_writes(std::string_view name);
++// Prefixes the names of the passes and zones recorded until it is cleared (an
++// empty prefix), so [gpu-prof] tells apart work of the same name ("EFB" in a
++// real frame and in an in-between frame's replay). Render worker only.
++void set_name_prefix(std::string_view prefix);
+ 
+ // Bytes the frame's staging copies move, by kind, for DOL_AURORA_GPU_PROF's
+ // [gpu-prof] lines (KB per frame).

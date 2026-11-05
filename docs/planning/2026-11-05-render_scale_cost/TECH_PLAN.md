@@ -47,13 +47,7 @@ RecompCore #53, stacked on #49, therefore implements only the safe subset behind
 4. Submit the copy buffer before the already-encoded render command buffer.
 5. Preserve profiler event order with a deferred timestamp zone.
 
-The default path remained unchanged. The experiment did not clear the performance gate and has been removed from BlueWake integration. The next source target is the work rerun for Smooth Motion's in-between frame, not broader or unsafe copy reordering.
-
-## First experiment result
-
-The same `a555c3aed7f4` build ran with batching enabled for A and disabled for B: 12 measured launches of each, interleaved A/B/B/A, five states, 4x and Smooth Motion one step. All 24 runs loaded every scene and their guest checkpoints were identical.
-
-Batching reduced the median reported GPU work from 26.627 to 22.188 ms, but overall FPS was unchanged within noise (+0.03 %). It was slower at Outset (−1.23 %), lava (−0.69 %), Hyrule Castle (−0.93 %) and shipwreck (−0.37 %), with only butterfly ahead (+0.34 %). It therefore fails the all-launch performance gate. No picture run is warranted for a rejected candidate.
+The default path remains unchanged. If this experiment does not clear the performance gate, the next source target is the work rerun for Smooth Motion's in-between frame, not broader or unsafe copy reordering.
 
 ## PR and dependency structure
 
@@ -63,16 +57,20 @@ flowchart LR
     B --> C["BlueWake #563<br/>pin, exported patch,<br/>build and Deck qualification"]
 ```
 
-There is no separate BlueWake PR. #563 owns the result and records the rejection. The temporary RecompCore pin, exported patches, GUI setting and PR-ref build recipe were removed after qualification failed.
+There is no separate BlueWake PR. #563 owns this plan, the RecompCore pin and exported patch, the matched build, and the final keep/reject decision.
 
 ## Implementation surfaces
 
-| Explored surface | Result |
+| Surface | Change |
 |---|---|
-| RecompCore/Aurora `GXRuntime/graphics/aurora/lib/gfx/common.cpp` | #53 remains as the measured experiment; not pinned by BlueWake |
-| RecompCore/Aurora `lib/webgpu/gpu_prof.*` | Deferred timestamp support was mechanically valid but did not lead to a product win |
-| BlueWake pin, dependency lock and `patches/recompcore/` | Restored to the pre-experiment runtime |
-| BlueWake GUI and settings tests | Experimental switch removed because the candidate was rejected |
+| RecompCore/Aurora `GXRuntime/graphics/aurora/lib/gfx/common.cpp` | Opt-in batching for non-texture staging buffers |
+| RecompCore/Aurora `lib/webgpu/gpu_prof.*` | Deferred timestamp zone so profiling order remains valid |
+| `scripts/builder/profiles/bluewake.sh` | Pin the qualified RecompCore stack in #563 |
+| `config/dependencies.lock.json` | Record the exact RecompCore revision and evidence |
+| `patches/recompcore/` | Export the RecompCore commit required by the repository workflow |
+| `runtime/host/src/settings_table.h` | Add an experimental, off-by-default GUI switch that persists the Aurora environment key and applies next launch |
+| `tests/settings_table_test.cpp`, `tests/settings_state_test.cpp` | Cover default-off metadata, next-launch behavior, and persistence of the enabled value in existing Linux/Windows CI |
+| RecompCore `.github/workflows/staging-copy-plan.yml` | Compile and run the default/opt-in ordering-plan test on pull requests and `bluewake-next` pushes |
 
 ## Implementation order
 
@@ -90,9 +88,9 @@ Critical path: M1 → M2 → M3 → M4. M2b was inspected alongside attribution 
 
 Build baseline and candidate from the same BlueWake stack and reuse the same build directory/profile so PGO variation does not masquerade as a rendering win. Baseline is RecompCore #49 at `a4dbaaa8`; candidate adds #53 at `d72f71b9` and enables `DOL_AURORA_BATCH_STAGING_COPIES=1`.
 
-The qualification build temporarily pinned #53's upstream draft ref and exact tested SHA. After the failed result, BlueWake returned to its pre-experiment RecompCore pin and normal SHA fetch recipe; no rejected setting remains in the GUI.
+The BlueWake build profile pins #53's upstream draft ref (`refs/pull/53/head`) and exact tested SHA, and exports patches 0197-0207, so Linux, Windows, Apple, and Android recipes consume the same runtime revision before the commit exists in `bluewake-next`. Each fetch checks the ref's resolved SHA, preventing a later PR-head update from silently entering a build. The temporary ref is removed after #53 merges. The GUI does not need a platform-specific code path: the shared settings table writes the environment key before Aurora starts. The switch is experimental, off on every platform, and marked next-launch because Aurora selects the copy plan during renderer initialization.
 
-The completed run exceeded the minimum with 12 launches per setting. The candidate failed performance acceptance, so the conditional Smooth-Motion-off picture comparison was skipped.
+Run at least six interleaved baseline/candidate launches on the Deck with the same five save states, 4x render scale, and Smooth Motion enabled. Keep the change only if the candidate is ahead in every launch and all guest checkpoints match. Then compare pictures with Smooth Motion disabled; they must be identical. Restore the Deck's GPU clock range and governor after the run.
 
 ## Measurements
 

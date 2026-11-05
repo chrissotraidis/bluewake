@@ -1,6 +1,6 @@
 # PROGRESS — Why higher render settings slow the game when the GPU has room
 
-Status: In progress. Cause confirmed: CPU/GPU power sharing. The first source experiment, non-texture staging-copy batching, was measured and rejected; BlueWake integration has been removed. Next target: Smooth Motion's repeated render/EFB work.
+Status: In progress. Cause confirmed for the render scale: CPU/GPU power sharing. Data collection has stopped; RecompCore #53 now carries the first opt-in source experiment, and BlueWake #563 will own its pin, exported patch, matched build, Deck qualification, and keep/reject decision.
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -26,13 +26,13 @@ Status: In progress. Cause confirmed: CPU/GPU power sharing. The first source ex
 - [x] M3-T01: Implement opt-in non-texture staging-copy batching in RecompCore #53, stacked on #49; default path and texture order unchanged; evidence: artifact=RecompCore d72f71b9; method=source diff and commit inspection; result=flag-gated buffer-copy command buffer with ordered texture uploads unchanged
 - [x] M3-T02: Compile the modified Aurora translation units; `git diff --check` clean; evidence: artifact=common.cpp and gpu_prof.cpp objects; method=host Clang 22 using existing BlueWake defines and includes plus symbol check; result=compiled with one pre-existing shader-type warning and matching DeferredZone symbols, with no registered CTest tests
 - [x] M3-T03: Update #563's RecompCore pin, dependency lock, exported patches, opt-in GUI setting, and tests; evidence: artifact=BlueWake #563 pin 05b2493f via upstream draft refs/pull/53/head and patches 0197-0207; method=profile/lock inspection, exact RecompCore format-patches, settings-table/state tests, and RecompCore PR CI workflow; result=#49/#53 are pinned to the upstream draft and exact SHA before merge, the GUI defaults off and persists its next-launch value, and both copy plans have executable coverage
-- [x] M3-T04: Produce a matched build with baseline and candidate selected only by the opt-in environment key; evidence: artifact=BlueWake a555c3aed7f4 executable 77754f5e58d7 and module 717a582e5661; method=same executable and game module for A and B; result=only DOL_AURORA_BATCH_STAGING_COPIES differed
-- [x] M3-T05: Run 12 interleaved Deck launches per setting; evidence: artifact=render-power-batch/report.txt; method=24 measured runs, A/B/B/A, five states, 4x, Smooth Motion one step; result=+0.03% overall, slower in four scenes including Outset −1.23%, all scenes loaded and checkpoints identical; performance gate failed
-- [!] M3-T06: Blocked by M3-T05 failing the required performance gate; a picture result cannot qualify a rejected candidate
+- [ ] M3-T04: Produce matched baseline (#49) and candidate (#49 + #53) builds with the same build directory/profile
+- [ ] M3-T05: Run at least six interleaved Deck launches; require candidate ahead in every launch and identical checkpoints
+- [ ] M3-T06: Compare pictures with Smooth Motion off; require identical output
 
 ### M4: Decide (depends: M3)
 - [x] M4-T01: Name the render-scale cause with ≥ 90 % of the Outset frame-rate loss attributed: shared APU power lowers the game-thread clock; evidence: artifact=uncapped and 1100-MHz capped Deck profiles; method=compare game-thread work, effective clock, and FPS; result=7.0 % uncapped clock loss accounts for the 6.3 % FPS loss and the cap reverses the result
-- [x] M4-T02: Reject #53's product integration, restore BlueWake's prior RecompCore pin/build recipe, remove the GUI setting and exported experimental patches, and record the result; evidence: artifact=render-power-batch/report.txt and #563; method=acceptance comparison plus repository diff; result=measured no-go retained without shipping the experiment
+- [ ] M4-T02: If #53 passes every gate, keep its pin in #563; otherwise revert it and record the no-go result
 - [ ] M4-T03: If batching is insufficient, plan the next isolated experiment around work rerun for Smooth Motion's in-between frame
 
 ## Evidence ledger
@@ -44,7 +44,6 @@ Status: In progress. Cause confirmed: CPU/GPU power sharing. The first source ex
 | M2-T05 | same build | Same 3x/4x run with the Deck GPU fixed at 1100 MHz; six measured launches per setting plus one CPU-profile launch | Steam Deck, headless gamescope, Smooth Motion 1 step | 4x vs 3x: Outset +6.4 % (median 29.38 vs 27.61 FPS; ranges 29.14–30.15 vs 27.08–28.19), lava +3.1 %, Hyrule 0.0 %, butterfly +0.1 %, shipwreck −4.3 %, overall +0.6 %. Every 4x Outset launch beat every 3x launch. Effective game-thread clock 3.34 vs 3.30 GHz; instructions/frame −0.4 %. The profile also has −5.3 % cycles/frame and +5.2 % IPC at 4x, so do not attribute the reversal's exact size to clock alone. All 12 runs loaded every state; guest checkpoints identical. Picture results ignored because Smooth Motion was on. Deck restored to 200–1600 MHz and `auto` |
 | M2b-T02, M2b-T03 | RecompCore #49 head `a4dbaaa8` | Read Aurora operation replay and staging upload paths | RecompCore source | Smooth Motion replay skips ordinary staging-copy operations and reruns render/EFB work. Texture uploads cannot be moved wholesale without changing overwrite/sample order; buffer arenas can be isolated for an opt-in experiment |
 | M3-T01, M3-T02 | RecompCore #53, `d72f71b9` | `git diff --check`; compile modified `common.cpp` and `gpu_prof.cpp`; symbol check | Host Clang 22, existing BlueWake build defines/includes | Opt-in `DOL_AURORA_BATCH_STAGING_COPIES=1` batches only vertex/uniform/index/storage copies before render submission. Default path and texture order remain unchanged. Compilation passed with one pre-existing shader-type warning; no CTest tests were registered in the available build |
-| M3-T04, M3-T05 | BlueWake `a555c3aed7f4`; `render-power-batch/report.txt` | Same executable, A=batching on, B=off; 12 measured launches each, interleaved A/B/B/A | Steam Deck, headless gamescope 1280x800, five states, 4x, Smooth Motion one step | A vs B: overall +0.03%; Outset −1.23%, lava −0.69%, Hyrule −0.93%, butterfly +0.34%, shipwreck −0.37%. Median reported GPU work 26.627 to 22.188 ms. All 24 runs loaded all scenes; checkpoints identical. Rejected |
 
 ## Decisions
 
@@ -57,7 +56,6 @@ Status: In progress. Cause confirmed: CPU/GPU power sharing. The first source ex
 | 2026-11-05 | Source inspection narrows copy batching: Smooth Motion does not replay ordinary staging copies, and texture uploads must retain operation order. #53 batches only non-texture buffer arenas behind an opt-in flag |
 | 2026-11-05 | Use BlueWake #563 for the RecompCore pin, exported patch, build, and Deck qualification. Do not open a separate BlueWake PR |
 | 2026-11-05 | Accept #53 only if it is ahead in every one of at least six interleaved Deck launches, checkpoints match, and pictures are identical with Smooth Motion off; otherwise revert it in #563 and record the result |
-| 2026-11-05 | Reject #53's staging-copy batching for BlueWake: 12 launches per setting were performance-neutral overall (+0.03%) and slower in four of five scenes, including Outset (−1.23%), despite lower reported GPU work. Remove the pin, patches, recipe and GUI integration; skip pictures because performance already failed |
 | 2026-11-05 | Superseded: cause for the render scale was attributed to Smooth Motion halving the GPU's time budget. `[gpu-prof]` busy cannot be read as elapsed frame occupancy and exceeds frame time with Smooth Motion off |
 | 2026-11-05 | Superseded: H4 (GPU full) led based on `[gpu-prof]` busy per presented frame. The effective game-thread clock instead identifies shared APU power as the mechanism |
 | 2026-11-05 | Started as a follow-up to #524: the render scale and the HD look slow the game on the Deck while the GPU reports idle time |

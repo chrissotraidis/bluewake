@@ -40,9 +40,11 @@ jobs:
               lock=config/dependencies.lock.json
               url=$(python3 -c "import json;print([d[\"url\"] for d in json.load(open(\"$lock\"))[\"dependencies\"] if d[\"id\"]==\"recompcore\"][0])")
               sha=$(python3 -c "import json;print([d[\"sha\"] for d in json.load(open(\"$lock\"))[\"dependencies\"] if d[\"id\"]==\"recompcore\"][0])")
+              ref=$(python3 -c "import json;print([d[\"ref\"] for d in json.load(open(\"$lock\"))[\"dependencies\"] if d[\"id\"]==\"recompcore\"][0])")
               git init ref/recompcore
-              git -C ref/recompcore fetch --depth 1 --no-tags --recurse-submodules=no "$url" "$sha"
+              git -C ref/recompcore fetch --depth 1 --no-tags --recurse-submodules=no "$url" "$ref"
               git -C ref/recompcore checkout --detach FETCH_HEAD
+              test "$(git -C ref/recompcore rev-parse HEAD)" = "$sha"
             '
       - name: Compile and test the host without game data
         run: |
