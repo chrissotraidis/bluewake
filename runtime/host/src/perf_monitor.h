@@ -24,7 +24,10 @@ typedef struct {
     float frame_ms[BW_PERF_HISTORY];
     // The machine, sampled twice a second while the overlay is on.
     char cpu_name[64], gpu_name[96];
-    float cpu_total_pct, cpu_game_pct, cpu_temp_c;
+    float cpu_total_pct, cpu_temp_c;
+    // This process's share of all the machine's processors: 100% is every core
+    // busy, so a game on two of eight cores reads 25%, never 200%.
+    float cpu_game_pct;
     // The mean clock of the cores and the fastest a core can go: what a platform that will not say how busy it
     // is (a phone: /proc/stat is denied to apps) does say about the same thing.
     float cpu_clock_mhz, cpu_clock_max_mhz;

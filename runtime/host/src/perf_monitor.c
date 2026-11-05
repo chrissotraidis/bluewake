@@ -57,6 +57,19 @@ float bw_perf_percent(unsigned long long current, unsigned long long previous, u
     return (float)(100.0 * (double)(current - previous) * 1000.0 / (double)wall_ns);
 }
 
+// The same reading as a share of the whole machine: the per-core percentage
+// divided by how many processors are online, so nine cores at 236% of one core
+// reads 26% of the phone. It cannot go above 100% by construction, and the
+// clamp keeps a rounding overshoot at 100.
+static float bw_perf_machine_percent(unsigned long long current, unsigned long long previous,
+                                     unsigned long long wall_ns) {
+    float pct = bw_perf_percent(current, previous, wall_ns);
+    const long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if (cpus > 0)
+        pct /= (float)cpus;
+    return pct > 100.f ? 100.f : pct;
+}
+
 int bw_perf_mode_of(const char* value) {
     if (value == NULL)
         return BW_PERF_OFF;
@@ -543,7 +556,7 @@ static void sample_machine(unsigned long long now_ns) {
     machine.cpu_busy = busy;
     const unsigned long long process_us = process_cpu_us();
     if (machine.at_ns != 0ull && wall != 0ull)
-        s->cpu_game_pct = bw_perf_percent(process_us, machine.cpu_process_us, wall);
+        s->cpu_game_pct = bw_perf_machine_percent(process_us, machine.cpu_process_us, wall);
     machine.cpu_process_us = process_us;
     machine.at_ns = now_ns;
 
@@ -724,7 +737,7 @@ static void sample_machine(unsigned long long now_ns) {
     }
     const unsigned long long process_us = process_cpu_us();
     if (machine.at_ns != 0ull && wall != 0ull)
-        s->cpu_game_pct = bw_perf_percent(process_us, machine.cpu_process_us, wall);
+        s->cpu_game_pct = bw_perf_machine_percent(process_us, machine.cpu_process_us, wall);
     machine.cpu_process_us = process_us;
     MEMORYSTATUSEX status;
     memset(&status, 0, sizeof status);
