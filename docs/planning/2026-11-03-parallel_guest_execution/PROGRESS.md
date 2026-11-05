@@ -38,7 +38,7 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 ### M6: Audio lead
 - [x] M6-T00: Source and sampler survey (PRD, *Audio lead*)
 - [x] M6-T01a: Sampler counts per guest thread (`PATH.threads`); standalone check of the sampler block
-- [ ] M6-T01: Idle-machine run: audio thread share on Outset and the other tour stops
+- [x] M6-T01: Steam Deck run (idle, rendered): the audio thread is **6.1 %** of Outset's guest samples; the game thread is 93.7 %. Upper bound for overlapping it: ≈ +6.5 %. Other tour stops not yet measured
 - [ ] M6-T03: Any async audio path: opt-in behind `BLUEWAKE_ASYNC_AUDIO=1`, off by default; serial audio is the default and the oracle
 - [ ] M6-T02: If ≥ 8 %: port the `JASChannel` natives from `--native-entries`; measure the game thread's first audio-state access after each wake
 
@@ -49,6 +49,8 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 | M0-T01 | `main` `ee991d3`, RecompCore `0fe472a`, generated source of `m437-a` | Source reading | — | Translated code bound to one global CPU and RAM; see PRD |
 | M0-T03 | `m437-a-14c558d62d1c` | `bench_tour.py --mode headless`, `BLUEWAKE_PC_SAMPLE` 2700–4200, tww `symbols.txt` | Desktop, **concurrent build running** | J3D 21.9 %, collision 14.1 %, audio 9.3 %; FPS figures invalid |
 | M0-T03 | same | `[native-*]` exit counters | same | `key-s` 77 % declined, `transform-simple` 76 %, skinning 9 % |
+| M6-T01 | stack `afb6c35d8805` + this branch's sampler host (`531706966`, module byte-identical) | `render_bench --runs 1`, `BLUEWAKE_PC_SAMPLE` over the whole run, `1-outset.bwstate`, render scale 3, Smooth Motion | Steam Deck, desktop session, nothing else running | Threads: `803A2960` 212,470 (93.7 %), `803E9260` 13,785 (**6.1 %**), `803A7320` 481, `804211E0` 63. `803E9260`'s pcs: 54.5 % in `0x8027xxxx`–`0x8028xxxx` (JAudio), 44.3 % in `0x8030xxxx`–`0x8032xxxx` (SDK, math): the audio thread |
+| M6-T01 | stack `afb6c35d8805`, gate and huge pages on | `render_bench --cpu-profile`, Outset | Steam Deck | Game host thread: translated code ≈ 90 % (`[JIT]` 38.7 % is the module on huge pages, which perf can't name, plus `gGZLE01_recomp.so` 7.0 %, of 50.9 % of all samples), `bluewake` 4.6 % (≈ 9 %), libc 0.7 %. Host-side offload is worth at most ≈ 9 % |
 
 ## Decisions
 
@@ -58,5 +60,6 @@ Status: In progress (audit done, Track A chosen; `entry()` narrows the async win
 | 2026-11-03 | Async audio, if built, is opt-in (`BLUEWAKE_ASYNC_AUDIO=1`), off by default; serial audio stays the default and the oracle |
 | 2026-11-03 | Host DSP excluded (HLE by default, ≈ 1 %). Audio lead is the guest `JASystem` thread; gated on a per-thread measurement |
 | 2026-11-03 | Skinning dropped from this plan: #541 measured it (≈ 1.5 % of the Deck game thread, threading ≈ +0.5–1 %). Estimates lowered to Deck cycle counts: serial widening ≈ 1–2 %, async pose job ≈ 1–3 %. Next lead: audio |
+| 2026-11-04 | Measured on the Deck: audio thread 6.1 % of Outset, translated code ≈ 90 % of the game host thread. Overlapping audio is worth at most ≈ +6.5 % and needs translated code on a second thread (Track B: reentrant codegen). Host-side offload is worth at most ≈ 9 %. Any multi-threaded path must beat the serial build (full stack, opt-ins on) in every one of ≥ 6 interleaved Deck launches with identical checkpoints, or it's reverted |
 | 2026-11-03 | Native widening comes before any async job. An async pose job is all-or-nothing per model: one declining joint keeps the whole model serial, so M4 is gated on M2 covering multi-key transforms and large-model skinning. |
 | 2026-11-03 | Async pose job eligibility adds: every material in a material-sorted or non-sorted buffer, no env/proj-map texture matrix |
