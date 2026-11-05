@@ -43,6 +43,10 @@ The measurements now identify the missing link: the Deck's CPU and GPU share an 
 - Expose the experiment as an experimental GUI switch backed by `DOL_AURORA_BATCH_STAGING_COPIES=1`. It is off by default, persists through the shared settings file, and takes effect on the next launch while it is being qualified.
 - Keep the source change only if it wins every one of at least six interleaved Deck launches, preserves guest checkpoints, and produces identical pictures with Smooth Motion off. Otherwise revert the pin/change in #563 and record the no-go result.
 
+## First experiment result
+
+The staging-copy candidate was measured with 12 launches per setting. It reduced median reported GPU work from 26.627 to 22.188 ms, but overall FPS was effectively unchanged (+0.03 %) and four of five scenes were slower, including Outset (−1.23 %). All 24 measured runs loaded every scene and guest checkpoints matched. This records the data only; the experiment and its opt-in integration remain in the PR pending an explicit disposition decision.
+
 ## Success and constraints
 
 | Measure | Target |

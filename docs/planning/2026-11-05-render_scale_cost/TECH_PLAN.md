@@ -49,6 +49,12 @@ RecompCore #53, stacked on #49, therefore implements only the safe subset behind
 
 The default path remains unchanged. If this experiment does not clear the performance gate, the next source target is the work rerun for Smooth Motion's in-between frame, not broader or unsafe copy reordering.
 
+## First experiment result
+
+The same `a555c3aed7f4` build ran with batching enabled for A and disabled for B: 12 measured launches of each, interleaved A/B/B/A, five states, 4x and Smooth Motion one step. All 24 runs loaded every scene and their guest checkpoints were identical.
+
+Batching reduced median reported GPU work from 26.627 to 22.188 ms. Overall FPS was +0.03 %; Outset −1.23 %, lava −0.69 %, Hyrule Castle −0.93 %, butterfly +0.34 %, and shipwreck −0.37 %. It does not meet the stated all-launch performance gate. The pin, patches, GUI and build recipe remain present; this plan records the result without making the disposition decision.
+
 ## PR and dependency structure
 
 ```mermaid
