@@ -89,6 +89,8 @@ def fingerprint(args, compiler):
     digest.update(Path(__file__).read_bytes())
     digest.update((ROOT / "scripts/builder/module_optimizations.py").read_bytes())
     digest.update(args.module_optimizations.encode())
+    if args.direct_gate:
+        digest.update(b"\0direct-gate")
     if args.instrumented_opt_level:
         digest.update(f"\0instrumented-O{args.instrumented_opt_level}".encode())
     digest.update((ROOT / "apple/ios/src/dsp_common_shim.cpp").read_bytes())
@@ -110,6 +112,8 @@ def main():
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--save", type=Path, help="optional personal BlueWake .card container; only a copy is used")
     parser.add_argument("--module-optimizations", choices=MODES, default="none")
+    parser.add_argument("--direct-gate", action="store_true",
+                        help="train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1, #552)")
     parser.add_argument("--instrumented-opt-level", type=int, choices=(0, 1), default=0,
                         help="optimization level of the instrumented module (default 0, the fastest to compile; "
                              "1 for a module too large for Apple's linker at 0, as lean memory makes it)")
@@ -196,6 +200,8 @@ def main():
     })
     if args.module_optimizations == "combined-v1":
         environment.update(HOST_DEFAULTS)
+    # Training plays the path it measures: the gate open only with --direct-gate.
+    environment["BLUEWAKE_DIRECT_GATE"] = "1" if args.direct_gate else "0"
     run([host_build / "host/bluewake_host", module_build / "gGZLE01_recomp.dylib"],
         logs / "playback.log", env=environment, timeout=3600)
     playback = (logs / "playback.log").read_text(errors="replace")

@@ -44,6 +44,11 @@
 #   --behaviour-timing        with --combined-optimizations: every block prepaid, a timer or
 #                             interrupt lands at the next block's start, the budget checked at loops
 #                             (behaviour_timing.py --loop-checks)
+#   --fp-checks               with --lean-blocks: one FP-available test per stretch of a prepaid
+#                             copy (fp_checks.py, #553); part of the default set
+#   --no-fp-checks            the default set without fp_checks.py
+#   --direct-gate             train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1,
+#                             #552), for a build that measures it; the module is the same either way
 #   --identity NAME           codesign identity, e.g. "Apple Development: You (TEAMID)"
 #   --profile FILE            device provisioning profile (with --identity)
 #   --install DEVICE          install with devicectl after signing (needs --identity)
@@ -79,6 +84,7 @@ composite_pgo=()
 # -O2 always: -O1 compiled in 47 min instead of 80 but held only 26 FPS
 # on an iPad Pro (M2) at Outset (docs/BUILDER.md), so there is no quick option.
 device_cpu=apple-a13 opt_level=2 mods=1 accept_new=0 source_only=0 use_pgo=1 tiered=1 lean_arg="" lean_memory=0 lean_deadlines=0 behaviour_timing=0
+fp_checks=auto direct_gate=0
 
 die() { echo "builder: $*" >&2; exit 1; }
 step() { echo; echo "==> $*"; }
@@ -102,6 +108,9 @@ while [ $# -gt 0 ]; do
         --lean-memory) lean_memory=1; module_options_named=1; shift ;;
         --lean-deadlines) lean_deadlines=1; module_options_named=1; shift ;;
         --behaviour-timing) behaviour_timing=1; module_options_named=1; shift ;;
+        --fp-checks) fp_checks=1; module_options_named=1; shift ;;
+        --no-fp-checks) fp_checks=0; shift ;;
+        --direct-gate) direct_gate=1; shift ;;
         --conservative) conservative=1; shift ;;
         --identity) identity=$2; shift 2 ;;
         --profile) profile=$2; shift 2 ;;
@@ -130,12 +139,17 @@ if [ "$conservative" -eq 1 ]; then
     [ "$module_options_named" -eq 0 ] || die "--conservative builds without the module preparations; leave out the others"
 elif [ "$module_options_named" -eq 0 ] && [ "$app_only" -eq 0 ] && { [ "$platform" = macos ] || [ "$platform" = ios ]; }; then
     module_optimizations=combined-v1 lean_arg=--lean lean_memory=1 lean_deadlines=1 behaviour_timing=1
+    [ "$fp_checks" = 0 ] || fp_checks=1
 fi
+[ "$fp_checks" = 1 ] || fp_checks=0
 if [ "$module_optimizations" != none ]; then
     [ "$platform" = macos ] || [ "$platform" = ios ] || die "--combined-optimizations is for --platform macos or ios"
     [ "$app_only" -eq 0 ] || die "--combined-optimizations needs a personal build (it changes the game module)"
 fi
 [ -z "$lean_arg" ] || [ "$module_optimizations" != none ] || die "--lean-blocks needs --combined-optimizations"
+if [ "$fp_checks" -eq 1 ]; then
+    [ -n "$lean_arg" ] || die "--fp-checks needs --lean-blocks"
+fi
 if [ "$lean_memory" -eq 1 ]; then
     [ -n "$lean_arg" ] || die "--lean-memory needs --lean-blocks"
     lean_arg="$lean_arg --lean-memory"
@@ -148,6 +162,7 @@ if [ "$behaviour_timing" -eq 1 ]; then
     [ "$module_optimizations" != none ] || die "--behaviour-timing needs --combined-optimizations"
     lean_arg="$lean_arg --behaviour-timing"
 fi
+[ "$fp_checks" -eq 0 ] || lean_arg="$lean_arg --fp-checks"
 if [ "$platform" = macos ]; then
     [ -z "$ipa$published_app$profile$install_device" ] || die "macOS produces a local .app; --ipa, --app, --profile and --install are device-only"
 fi
