@@ -145,14 +145,22 @@ int main(void) {
     fast_v4.base.simple = 1u | BW_SKIP_KNOWN_ALL;
     assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_CHANGE) && !bw_direct_call_ready(&cpu, 0xC0029E6Cu));
     assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_MENU_DELETE));
+    /* The slot filter only narrows: an ordinary target in a hook's slot (same
+     * address bits 2..7) still gets the exact compares and stays allowed. */
+    for (u32 h = 0u; h < 5u; ++h) {
+        volatile u32 neighbour = hooks[h] ^ 0x100u;
+        assert((BW_SKIP_KNOWN_SLOTS & BW_SKIP_KNOWN_SLOT(neighbour)) != 0u);
+        assert(bw_direct_call_ready(&cpu, neighbour));
+    }
     assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
     fast_v4.base.simple = 1u; /* stage select off: the hooks are ordinary targets */
     assert(bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_PLAY_EXECUTE));
     fast_v4.base.simple = 0u; /* inline path off: the host answers every call */
     before = queries;
     assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before + 1u);
-    fast_v4.base.simple = 1u | BW_SKIP_KNOWN_ALL;
-    /* Falling back to v3 removes the v4-only watches. */
+    /* Falling back to v3: the host sets no hook bits there (direct_skip.h), so
+     * the hooks are ordinary targets. */
+    fast_v4.base.simple = 1u;
     assert(bluewake_composite_direct_calls_v3(true, &attention, &decrementer, &cause, &mask,
                                              can_skip, &allow, &fast_v4.base, false));
     assert(bw_host_skip_fast_v4 == NULL);
