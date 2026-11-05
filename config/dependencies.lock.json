@@ -111,7 +111,8 @@
     },
     {
       "id": "recompcore",
-      "url": "https://github.com/irregularthanis/RecompCore",
+      "url": "https://github.com/chrissotraidis/RecompCore",
+      "ref": "refs/pull/53/head",
       "sha": "05b2493f206bd75bd9d0c32781bad42a58065782",
       "branch": "bluewake-next",
       "license": "GPL-3.0",

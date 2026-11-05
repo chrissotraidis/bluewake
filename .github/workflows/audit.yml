@@ -9,6 +9,8 @@ jobs:
         run: bash scripts/audit_repo.sh
       - name: Validate dependency lock
         run: python3 -c "import json; d=json.load(open('config/dependencies.lock.json')); assert len(d['dependencies']) > 0"
+      - name: Pin RecompCore candidates through their upstream draft
+        run: python3 tests/test_recompcore_pr_pin.py
       - name: Preserve platform signing identities
         run: python3 tests/test_signing_entitlements.py
       - name: Check synthetic profiling fixtures
