@@ -1,6 +1,6 @@
 # TECH_PLAN — Why higher render settings slow the game when the GPU has room
 
-Status: Planning
+Status: In progress — render-scale mechanism confirmed; source work next
 Source base: BlueWake `main` at `ee991d3`
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -30,6 +30,10 @@ At the draw-done commit the game thread waits until the render worker has draine
 | H6 | CPU/GPU power budget shared by the Deck APU | More GPU work moves power from the CPU and lowers its clock | Effective game-thread clock: cycles/frame × frames/second; then cap the GPU clock and test whether the CPU holds its clock at 4x |
 
 H5 and H6 matter on the Deck in particular. The CPU and GPU share memory and power, so a GPU with idle time can still slow a CPU-bound game. The first profile distinguishes them: more cycles per frame and cache misses point to bandwidth, while the same cycles per frame at fewer frames per second means the CPU is executing those cycles at a lower effective clock. A GPU clock cap then tests the power explanation directly.
+
+## Render-scale result
+
+H6 is confirmed for Outset with Smooth Motion. Uncapped, 4x lowers the game thread's effective clock by 7.0 % and frame rate by 6.3 %. Fixing the GPU at 1100 MHz restores the 4x game-thread clock to 3.34 GHz and reverses the frame-rate result to +6.4 %, with every 4x launch ahead of every 3x launch. Lowering the GPU ceiling would worsen a GPU-time limit; the reversal instead identifies shared APU power and governor behavior. No more render-scale measurements are planned before source work.
 
 ## Measurements
 
