@@ -15,6 +15,9 @@ On an RTX 5070 Ti at 2560x1080 (21:9):
 - **The one real cost is on the CPU, in Hyrule.** Sun shadows add 2.4 ms per game frame there (7.82 ms with them,
   5.46 without). Elsewhere the look adds 0.27–0.79 ms of CPU per game frame. Hyrule's is worth a look: probably the
   shadow casters being re-encoded per cascade, or the lit room's caster culling.
+  - **Update, November 5:** it wasn't the casters. The GX worker made the sun shadows' smooth normals for the hall's
+    66 lit draws (47,000 vertices) again every frame. RecompCore patch 0240 keeps them per draw, and I measured it on
+    the i5-6500 below.
 
 The GPU is mostly idle either way: unpaced, the game is CPU-bound at roughly 80–200 FPS here, and GPU busy time stays
 under 1.4 ms per frame everywhere.
@@ -157,4 +160,8 @@ other on the CPU. 3 unpaced rounds per place, then 1 paced round at 30 FPS, as p
   against main mostly lands within ±0.7 ms.
 - **The one thing to fix:** Hyrule's sun shadows, at +8.3 ms of CPU per game frame on this machine (+2.4 ms on the
   9900X). It still holds 30 FPS, with about 6% of frames slightly late.
+  - **Update, November 5:** with the smooth-normals cache (patch 0240), Hyrule Castle layer 2 goes from 22.2 to 15.0 ms
+    of CPU per game frame, and paced late frames from 5.8% to 0.1%, the same while turning the camera or walking. The
+    frozen castle is still held back by the emulation thread: −0.35 ms still, −1.3 ms turning, and walking is still
+    emulation-bound. The picture doesn't change.
 - Not covered here: other render scales and Smooth Motion. Those runs are next.
