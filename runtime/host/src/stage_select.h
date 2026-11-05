@@ -935,33 +935,16 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
 }
 
 
-// The per-block entry points: only the flag and address tests are inline in the
-// hot path; the bodies stay out of line so they don't add to
-// host_chassis_edge_service's size. bluewake_stage_select_live is true for the
-// whole session once the stage select is on, so the flag alone sent every edge
-// (about 390,000 a retrace) through three calls that answer "not mine". The
-// bodies only ever act at these five addresses (observes_body tests nothing
-// else, dispatch_body returns unless observes_body is true, redirect_body
-// returns unless the address is PLAY_EXECUTE), so testing the address first
-// gives the same answers without the calls.
-static inline bool bluewake_stage_select_watched(u32 address) {
-    return address == BLUEWAKE_STAGE_SELECT_CHANGE || address == BLUEWAKE_STAGE_SELECT_EXECUTE ||
-           address == BLUEWAKE_STAGE_SELECT_MENU_DELETE || address == BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE ||
-           address == BLUEWAKE_STAGE_SELECT_DATA_SELECT;
-}
+// The per-block entry points: only the flag test is inline in the hot path; the
+// bodies stay out of line so they don't add to host_chassis_edge_service's size.
 static inline bool bluewake_stage_select_observes(u32 address) {
-    return __builtin_expect(bluewake_stage_select_live, 0) &&
-           __builtin_expect(bluewake_stage_select_watched(address), 0) &&
-           bluewake_stage_select_observes_body(address);
+    return __builtin_expect(bluewake_stage_select_live, 0) && bluewake_stage_select_observes_body(address);
 }
 static inline bool bluewake_stage_select_redirect(CPUState* cpu, u32 address) {
-    return __builtin_expect(bluewake_stage_select_live, 0) &&
-           __builtin_expect(address == BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE, 0) &&
-           bluewake_stage_select_redirect_body(cpu, address);
+    return __builtin_expect(bluewake_stage_select_live, 0) && bluewake_stage_select_redirect_body(cpu, address);
 }
 static inline void bluewake_stage_select_dispatch(CPUState* cpu, u32 address) {
-    if (__builtin_expect(bluewake_stage_select_live, 0) &&
-        __builtin_expect(bluewake_stage_select_watched(address), 0))
+    if (__builtin_expect(bluewake_stage_select_live, 0))
         bluewake_stage_select_dispatch_body(cpu, address);
 }
 

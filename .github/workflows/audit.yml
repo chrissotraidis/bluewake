@@ -45,7 +45,6 @@ jobs:
       - name: Preserve direct-call host boundaries and preparation
         run: |
           python3 tests/test_direct_calls.py
-          python3 tests/test_stage_select_watch.py
           python3 tests/test_inline_gpr.py
           python3 tests/test_lean_deadlines.py
           python3 tests/native_j3d_source_test.py
