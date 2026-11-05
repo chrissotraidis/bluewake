@@ -96,8 +96,7 @@ static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
                              address - fast->range_first[1] > fast->range_span[1];
         /* v4's known hooks, in simple's bits 1..5 (direct_skip.h): with the
          * stage select off simple is 1 and this is one compare. */
-        if (__builtin_expect(simple > 1u, 0) && allowed &&
-            (BW_SKIP_KNOWN_SLOTS & BW_SKIP_KNOWN_SLOT(address)) != 0u) {
+        if (__builtin_expect(simple > 1u, 0) && allowed) {
             const u32 canonical = address & ~0x40000000u;
             const u32 bit = canonical == BW_SKIP_KNOWN_CHANGE ? 2u
                           : canonical == BW_SKIP_KNOWN_DATA_SELECT ? 4u

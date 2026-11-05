@@ -145,13 +145,6 @@ int main(void) {
     fast_v4.base.simple = 1u | BW_SKIP_KNOWN_ALL;
     assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_CHANGE) && !bw_direct_call_ready(&cpu, 0xC0029E6Cu));
     assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_MENU_DELETE));
-    /* The slot filter only narrows: an ordinary target in a hook's slot (same
-     * address bits 2..7) still gets the exact compares and stays allowed. */
-    for (u32 h = 0u; h < 5u; ++h) {
-        volatile u32 neighbour = hooks[h] ^ 0x100u;
-        assert((BW_SKIP_KNOWN_SLOTS & BW_SKIP_KNOWN_SLOT(neighbour)) != 0u);
-        assert(bw_direct_call_ready(&cpu, neighbour));
-    }
     assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
     fast_v4.base.simple = 1u; /* stage select off: the hooks are ordinary targets */
     assert(bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_PLAY_EXECUTE));

@@ -41,15 +41,6 @@ typedef struct BwHostSkipFast {
 #define BW_SKIP_KNOWN_PLAY_EXECUTE 0x80234FD0u /* dScnPly_Execute, bit 4 */
 #define BW_SKIP_KNOWN_MENU_DELETE 0x8022F320u  /* dScnMenu_Delete, bit 5 */
 #define BW_SKIP_KNOWN_ALL 0x3Eu                /* all five, in `simple` */
-/* A first test that rules out most targets with one bit test: each hook's slot
- * in a 64-entry table indexed by address bits 2..7 (unaffected by the mirror
- * bit). The five hooks take five distinct slots; a target that hits one still
- * goes through the exact compares. */
-#define BW_SKIP_KNOWN_SLOT(a) (1ull << (((a) >> 2) & 63u))
-#define BW_SKIP_KNOWN_SLOTS                                                                    \
-    (BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_CHANGE) | BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_DATA_SELECT) | \
-     BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_EXECUTE) | BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_PLAY_EXECUTE) | \
-     BW_SKIP_KNOWN_SLOT(BW_SKIP_KNOWN_MENU_DELETE))
 typedef struct BwHostSkipFastV4 {
     BwHostSkipFast base;
 } BwHostSkipFastV4;

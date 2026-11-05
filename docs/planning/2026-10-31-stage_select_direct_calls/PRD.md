@@ -1,6 +1,6 @@
 # PRD — Stage-select direct-call cost
 
-Status: Deck-qualified through iteration 4 (2026-11-05); iteration 5 being measured
+Status: Done (2026-11-05). Deck-qualified; the remaining work is in the follow-up draft PR
 Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e); discovery in [#503](https://github.com/chrissotraidis/bluewake/pull/503)
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 Scope: the speed cost of having the developer stage select enabled. Excluded: what the stage select does, game logic, and speed with it off.
@@ -27,7 +27,7 @@ This PR keeps the stage select working exactly as before and removes most of tha
 | `8f7442ade` | Use v3 when the stage select is off | — | **No** | No effect |
 | `f9d926907` | The five hooks become constants in the module | −2.3 % | Yes | +3.1 % with the stage select on, every launch ahead |
 | `c48e83f0e` | The hooks ride in bits of a word every call already loads | −3.6 % | Yes | Keeps `f9d926907`'s gain without its cost with the stage select off |
-| `b7079abce` | One bit test rules out most targets before the hook compares | being measured | — | — |
+| `b7079abce` | One bit test rules out most targets before the hook compares | not measured | Moved | To the follow-up PR, with the other remaining work |
 
 Three findings shaped the result:
 

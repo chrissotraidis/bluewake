@@ -1,6 +1,6 @@
 # TECH_PLAN — Stage-select direct-call cost
 
-Status: Implemented and Deck-measured through iteration 4; iteration 5 (`b7079abce`) being measured
+Status: Done (2026-11-05). This PR ships iteration 4; iteration 5 and the remaining checks are in the follow-up draft PR
 Source base: BlueWake [`ee991d3`](https://github.com/chrissotraidis/bluewake/commit/ee991d312d97e1c3e23168e00f1c67443465623e)
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -29,9 +29,7 @@ flowchart TD
     A["Direct call"] --> B["Load simple<br/>(already loaded today)"]
     B --> C{"simple > 1?<br/>(stage select on)"}
     C -->|"no"| F["Call stays in the module"]
-    C -->|"yes"| D{"Target's slot is a hook's?<br/>(one bit test)"}
-    D -->|"no, 59 in 64"| F
-    D -->|"yes"| E{"Target is a hook<br/>and its bit is set?"}
+    C -->|"yes"| E{"Target is a hook<br/>and its bit is set?<br/>(five immediate compares)"}
     E -->|"no"| F
     E -->|"yes"| H["Back to the host:<br/>the stage-select hook runs"]
 ```
@@ -51,8 +49,7 @@ g_skip_fast.base.simple = simple ? 1u | (bluewake_stage_select_live ? BW_SKIP_KN
 | Case | What a direct call does |
 |---|---|
 | Stage select off | One compare on `simple`, already in a register |
-| Stage select on, ordinary target | One shift and bit test (iteration 5) |
-| Stage select on, target in a hook's slot | Five immediate compares, then the bit |
+| Stage select on | Five immediate compares, then the hook's bit (the follow-up tries a one-bit filter first) |
 | Module without v4 | Never gets the bits: the host keeps the query while the stage select is live |
 | A watch the module doesn't know | The host sets `simple = 0`; every call asks the host (exact) |
 
@@ -98,11 +95,11 @@ Each build records its own profile in training, and two trainings differ by abou
 
 | File / symbol | Change |
 |---|---|
-| [`direct_skip.h`](../../../cmake/composite/direct_skip.h) | `BW_SKIP_KNOWN_*` hooks, their bits in `simple`, the slot filter `BW_SKIP_KNOWN_SLOTS` |
+| [`direct_skip.h`](../../../cmake/composite/direct_skip.h) | `BW_SKIP_KNOWN_*` hooks and their bits in `simple` |
 | [`direct_calls.h`](../../../cmake/composite/direct_calls.h) `bw_direct_call_ready` | Reads `simple` once; hook test only when `simple > 1` |
 | [`direct_calls.c`](../../../cmake/composite/direct_calls.c) | `bluewake_composite_direct_calls_v4` export |
 | [`main.c`](../../../runtime/host/src/main.c) | Sets the bits while the stage select is live; static assertion that its addresses match; v4 when available, v3 otherwise |
-| [`direct_calls_test.c`](../../../tests/direct_calls_test.c) | Each bit, mirrors, run-time targets, slot neighbours, `simple` = 0 and 1, v3 fallback, at -O0 and -O2 |
+| [`direct_calls_test.c`](../../../tests/direct_calls_test.c) | Each bit, mirrors, run-time targets, `simple` = 0 and 1, v3 fallback, at -O0 and -O2 |
 | [`test_direct_calls.py`](../../../tests/test_direct_calls.py) | The stage select's observed set equals the module's known set |
 
 ## Verification
@@ -111,9 +108,9 @@ Each build records its own profile in training, and two trainings differ by abou
 |---|---|---|
 | Unit | `direct_calls_test` at -O0 and -O2 | Pass |
 | Source contract | `python3 tests/test_direct_calls.py` | Pass |
-| Deck speed | 4-way `render_bench` per iteration | Through iteration 4; iteration 5 running |
+| Deck speed | 4-way `render_bench` per iteration | Done through iteration 4 (shipped) |
 | Guest state | Checkpoints in every run | Identical |
-| Stage-select behaviour | Rendered warp tour, menu open and return | To run |
+| Stage-select behaviour | Rendered warp tour, menu open and return | In the follow-up |
 | CI | Linux and Windows host jobs, audit | On the latest head |
 
 ## References
