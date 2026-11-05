@@ -55,5 +55,15 @@ class StageSelectWatch(unittest.TestCase):
         self.assertIn("bluewake_stage_select_watched(address)", wrapper)
 
 
+class DirectCallContract(unittest.TestCase):
+    def test_v4_only_while_stage_select_is_live(self):
+        # With the stage select off the host hands over v3, so the module's v4
+        # pointer stays NULL and a direct call skips the watch loop entirely.
+        main = (HEADER.parent / "main.c").read_text()
+        self.assertIn(
+            "if (direct_calls_v4 != NULL && (bluewake_stage_select_live || direct_calls_v3 == NULL))",
+            main)
+
+
 if __name__ == "__main__":
     unittest.main()
