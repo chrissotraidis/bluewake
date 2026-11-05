@@ -180,6 +180,10 @@ inline constexpr Setting kSettings[] = {
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_FORCE_ANISO", .old_windows = "anisotropy", .kind = Kind::Int, .fallback = "1", .low = 1.f,
      .high = 16.f, .label = "Texture filtering", .control = Control::Chooser, .fill = Os::None},
+    // RecompCore #49's soft-effects buffer (aurora_set_efficient_effects), applied live.
+    {.key = "DOL_AURORA_EFFICIENT_EFFECTS", .kind = Kind::Bool, .label = "Efficient soft effects",
+     .control = Control::Switch,
+     .note = "Experimental. Draws soft see-through effects, such as haze, smoke, fog and clouds, at lower resolution and blends them in once. Much faster at high render resolutions, slightly softer effects. Off by default; measured on a Steam Deck, not yet on Windows or a Mac."},
     {.key = "BLUEWAKE_MODS", .old_windows = "betterww", .label = "Better Wind Waker", .tab = Tab::Mods,
      .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_OPTIONS", .tab = Tab::Mods, .next_launch = Os::All}, // Windows: option.NAME
