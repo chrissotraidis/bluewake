@@ -96,6 +96,18 @@ static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
         const volatile BwHostSkipFastV4* fast_v4 = bw_host_skip_fast_v4;
         if (allowed && fast_v4 != NULL) {
             const u32 canonical = address & ~0x40000000u;
+            /* Constant targets fold these to nothing but at the five hooks. */
+            if (canonical == BW_SKIP_KNOWN_CHANGE || canonical == BW_SKIP_KNOWN_DATA_SELECT ||
+                canonical == BW_SKIP_KNOWN_EXECUTE || canonical == BW_SKIP_KNOWN_PLAY_EXECUTE ||
+                canonical == BW_SKIP_KNOWN_MENU_DELETE) {
+                const u32 known = fast_v4->known;
+                const u32 bit = canonical == BW_SKIP_KNOWN_CHANGE ? 1u
+                              : canonical == BW_SKIP_KNOWN_DATA_SELECT ? 2u
+                              : canonical == BW_SKIP_KNOWN_EXECUTE ? 4u
+                              : canonical == BW_SKIP_KNOWN_PLAY_EXECUTE ? 8u : 16u;
+                if ((known & bit) != 0u)
+                    allowed = false;
+            }
             const u32 count = fast_v4->watched_count;
             /* An invalid future/partial contract must decline, not silently
              * ignore addresses the current module cannot represent. */

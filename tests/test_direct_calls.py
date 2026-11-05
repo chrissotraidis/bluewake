@@ -111,13 +111,16 @@ class DirectPreparationTests(unittest.TestCase):
         self.assertIsNotNone(observer)
         observed = set(re.findall(r'address == (BLUEWAKE_STAGE_SELECT_[A-Z_]+)',
                                   observer.group(1)))
-        supplied = set(re.findall(r'g_skip_fast\.watched\[\d+\] = '
-                                  r'(BLUEWAKE_STAGE_SELECT_[A-Z_]+);', host))
+        # Each observed address is one of the module's known watches (the host's
+        # static assertion ties the two lists), and the host turns all of them on
+        # while the stage select is live.
+        supplied = set(re.findall(r'(BLUEWAKE_STAGE_SELECT_[A-Z_]+) == BW_SKIP_KNOWN_[A-Z_]+', host))
         self.assertEqual(supplied, observed)
-        count = re.search(r'g_skip_fast\.watched_count = bluewake_stage_select_live \? (\d+)u',
-                          host)
-        self.assertIsNotNone(count)
-        self.assertEqual(int(count.group(1)), len(observed))
+        self.assertIn('g_skip_fast.known = bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u;', host)
+        skip = (ROOT / 'cmake/composite/direct_skip.h').read_text()
+        known = re.findall(r'#define BW_SKIP_KNOWN_(?!ALL)[A-Z_]+ 0x', skip)
+        self.assertEqual(len(known), len(observed))
+        self.assertIn(f'#define BW_SKIP_KNOWN_ALL 0x{(1 << len(observed)) - 1:X}u', skip)
 
     def test_direct_and_fixed_cpu_calls_keep_both_boundary_queries(self):
         for source in (CALL, CALL.replace('CPUState* ctx)', 'CPUState* ctx_param)')):

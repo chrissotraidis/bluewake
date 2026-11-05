@@ -132,6 +132,25 @@ int main(void) {
     assert(!bw_direct_call_ready(&cpu, 0xC0029E6Cu));
     assert(!bw_direct_call_ready(&cpu, 0x8022ED50u));
     assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
+    /* Known watches: each bit declines exactly its own hook (and its mirror),
+     * whether the target is a constant or a run-time value. */
+    fast_v4.watched_count = 0u;
+    const u32 hooks[5] = {BW_SKIP_KNOWN_CHANGE, BW_SKIP_KNOWN_DATA_SELECT, BW_SKIP_KNOWN_EXECUTE,
+                          BW_SKIP_KNOWN_PLAY_EXECUTE, BW_SKIP_KNOWN_MENU_DELETE};
+    for (u32 on = 0u; on < 5u; ++on) {
+        fast_v4.known = 1u << on;
+        for (u32 h = 0u; h < 5u; ++h) {
+            volatile u32 target = hooks[h]; /* not folded: the run-time path */
+            assert(bw_direct_call_ready(&cpu, target) == (h != on));
+            assert(bw_direct_call_ready(&cpu, target | 0x40000000u) == (h != on));
+        }
+        assert(bw_direct_call_ready(&cpu, 0x80009000u));
+    }
+    fast_v4.known = BW_SKIP_KNOWN_ALL;
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_CHANGE) && !bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_MENU_DELETE));
+    assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
+    fast_v4.known = 0u;
+    assert(bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_PLAY_EXECUTE));
     /* A malformed count stays bounded by the ABI's fixed capacity. */
     fast_v4.watched_count = BW_HOST_SKIP_WATCH_MAX + 1u;
     assert(!bw_direct_call_ready(&cpu, 0x80029E6Cu));

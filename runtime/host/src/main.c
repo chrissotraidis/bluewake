@@ -2113,12 +2113,17 @@ static void host_skip_fast_refresh(void) {
     g_skip_fast.base.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
     g_skip_fast.base.simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
                               !g_overlap_watch_until_control;
-    g_skip_fast.watched_count = bluewake_stage_select_live ? 5u : 0u;
-    g_skip_fast.watched[0] = BLUEWAKE_STAGE_SELECT_CHANGE;
-    g_skip_fast.watched[1] = BLUEWAKE_STAGE_SELECT_DATA_SELECT;
-    g_skip_fast.watched[2] = BLUEWAKE_STAGE_SELECT_EXECUTE;
-    g_skip_fast.watched[3] = BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE;
-    g_skip_fast.watched[4] = BLUEWAKE_STAGE_SELECT_MENU_DELETE;
+    // The stage select's hooks are the module's known watches (direct_skip.h):
+    // one mask instead of a list every direct call walks (#524 2x2: the list
+    // cost the stage select's sessions ~20 M instructions a frame at Outset).
+    g_skip_fast.known = bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u;
+    g_skip_fast.watched_count = 0u;
+    _Static_assert(BLUEWAKE_STAGE_SELECT_CHANGE == BW_SKIP_KNOWN_CHANGE &&
+                       BLUEWAKE_STAGE_SELECT_DATA_SELECT == BW_SKIP_KNOWN_DATA_SELECT &&
+                       BLUEWAKE_STAGE_SELECT_EXECUTE == BW_SKIP_KNOWN_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE == BW_SKIP_KNOWN_PLAY_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_MENU_DELETE == BW_SKIP_KNOWN_MENU_DELETE,
+                   "the module's known stage-select watches match stage_select.h");
 }
 static u64 g_direct_call_queries, g_direct_call_allowed;
 
