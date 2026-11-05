@@ -57,6 +57,19 @@ float bw_perf_percent(unsigned long long current, unsigned long long previous, u
     return (float)(100.0 * (double)(current - previous) * 1000.0 / (double)wall_ns);
 }
 
+// How many processors are online: the divisor that turns a share of one core into a
+// share of the whole machine. Windows answers from its own API — there is no sysconf
+// there — and the POSIX hosts from sysconf.
+static long online_cpus(void) {
+#if defined(_WIN32)
+    const DWORD count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    return count > 0 ? (long)count : 1L;
+#else
+    const long count = sysconf(_SC_NPROCESSORS_ONLN);
+    return count > 0 ? count : 1L;
+#endif
+}
+
 // The same reading as a share of the whole machine: the per-core percentage
 // divided by how many processors are online, so nine cores at 236% of one core
 // reads 26% of the phone. It cannot go above 100% by construction, and the
@@ -64,9 +77,7 @@ float bw_perf_percent(unsigned long long current, unsigned long long previous, u
 static float bw_perf_machine_percent(unsigned long long current, unsigned long long previous,
                                      unsigned long long wall_ns) {
     float pct = bw_perf_percent(current, previous, wall_ns);
-    const long cpus = sysconf(_SC_NPROCESSORS_ONLN);
-    if (cpus > 0)
-        pct /= (float)cpus;
+    pct /= (float)online_cpus();
     return pct > 100.f ? 100.f : pct;
 }
 
