@@ -48,7 +48,8 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # 0.10.0 pins the bluewake-next commit that merges #45, #48 and 0186-0192.
 # Smooth Motion overload/replay diagnostics and the opt-in efficient soft-effects buffer (RecompCore #49): patches/recompcore/0197-0205 (irregularthanis).
 # Opt-in non-texture staging-copy batching and its ordering/CI tests (RecompCore #53): patches/recompcore/0206-0207 (irregularthanis).
-RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
+# #53's public candidate fork until its commits land on chrissotraidis/bluewake-next.
+RECOMPCORE_URL=https://github.com/irregularthanis/RecompCore.git
 RECOMPCORE_SHA=05b2493f206bd75bd9d0c32781bad42a58065782
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
