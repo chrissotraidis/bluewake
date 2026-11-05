@@ -54,8 +54,9 @@ class Work(unittest.TestCase):
             (self.dir / 'cache').mkdir(exist_ok=True)
             if not (self.dir / 'cache' / 'tour.bwstate').exists():
                 write_state(self.dir / 'cache' / 'tour.bwstate', 2391)
-        apps = {name: self.app(build, commit, file) for name, build, commit in
-                zip('AB', builds, ('aaaaaaaaaaaa', 'bbbbbbbbbbbb'))}
+        names = [render_bench.build_label(i) for i in range(len(builds))]
+        commits = ['aaaaaaaaaaaa', 'bbbbbbbbbbbb'] + [f'{i:012x}' for i in range(2, len(builds))]
+        apps = {name: self.app(build, commits[i], file) for i, (name, build) in enumerate(zip(names, builds))}
         cmd = [sys.executable, str(SCRIPTS / 'render_bench.py'), 'collect', str(out), '--card', str(self.dir / 'card'),
                '--cache', str(self.dir / 'cache'), '--display', 'desktop', *extra]
         for name, app in apps.items():
@@ -76,6 +77,21 @@ class Plan(unittest.TestCase):
         self.assertEqual([b for b, measured in render_bench.plan(['A', 'B'], args) if measured],
                          ['A', 'B', 'B', 'A', 'A', 'B', 'B', 'A'])
         self.assertEqual(render_bench.plan(['A', 'B'], args)[:2], [('A', False), ('B', False)])
+        self.assertEqual([b for b, measured in render_bench.plan(['A', 'B', 'C', 'D'], args) if measured],
+                         ['A', 'B', 'C', 'D', 'D', 'C', 'B', 'A'] * 2)
+        self.assertEqual(render_bench.plan(['A', 'B', 'C'], args)[:3],
+                         [('A', False), ('B', False), ('C', False)])
+
+    def test_per_build_settings_are_labeled_and_repeatable(self):
+        self.assertEqual(
+            render_bench.per_build_settings(
+                ['A:BLUEWAKE_STAGE_SELECT=1', 'A:EXTRA=on', 'D:BLUEWAKE_STAGE_SELECT=0'],
+                ['A', 'B', 'C', 'D']),
+            {'A': ['BLUEWAKE_STAGE_SELECT=1', 'EXTRA=on'], 'B': [], 'C': [],
+             'D': ['BLUEWAKE_STAGE_SELECT=0']})
+        for value in ('E:OPTION=1', 'A:nope=1', 'A:OPTION'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                render_bench.per_build_settings([value], ['A', 'B'])
 
     def test_the_commit_comes_from_build_script_paths(self):
         with tempfile.TemporaryDirectory() as d:
@@ -184,6 +200,16 @@ class Runs(Work):
 
 @unittest.skipUnless(HAVE_IMAGES, 'needs numpy and Pillow')
 class Tour(Work):
+    def test_per_build_settings_reach_only_the_named_builds(self):
+        code, summary, report = self.bench(
+            'plain', 'plain', 'plain', 'plain',
+            extra=('--pairs', '1', '--every', '0',
+                   '--set-build', 'A:BLUEWAKE_TEST_RATE=80',
+                   '--set-build', 'C:BLUEWAKE_TEST_RATE=100'))
+        self.assertEqual(code, 0, report)
+        self.assertEqual({name: summary['overall'][name]['fps'] for name in ('A', 'B', 'C', 'D')},
+                         {'A': 40.0, 'B': 60.0, 'C': 50.0, 'D': 60.0})
+
     def test_a_against_b_scene_by_scene(self):
         code, summary, report = self.bench('plain', 'plain-slow', extra=('--pairs', '1'))
         self.assertEqual(code, 0, report)
@@ -198,13 +224,13 @@ class Tour(Work):
         self.assertEqual({p['verdict'] for p in summary['pictures']}, {'identical'})
         self.assertEqual({p['images'] for p in summary['pictures']}, {5})
         self.assertEqual(summary['info']['A']['commit'], 'aaaaaaaaaaaa')
-        for text in ('`aaaaaaaaaaaa` (A) against `bbbbbbbbbbbb` (B, the reference)', '| Outset | 25.000 | 60.000 |',
+        for text in ('Compared 2 builds', 'B (`bbbbbbbbbbbb`) is the reference', '| Outset | 60.000 | 25.000 |',
                      '**+140.00%**', 'Guest checkpoints identical', 'faster overall by **140.00%**'):
             self.assertIn(text, report)
         out = self.dir / 'out-plain-plain-slow'
         text = (out / 'report.txt').read_text()
         self.assertIn('aaaaaaaaaaaa was faster overall by 140.00%.', text)
-        self.assertRegex(text, r'Outset +25\.000 +60\.000 +\+140\.00%')
+        self.assertRegex(text, r'Outset +60\.000 +25\.000 +\+140\.00%')
         self.assertNotIn('**', text)
         page = (out / 'report.html').read_text()
         self.assertIn('<td class=num><strong>+140.00%</strong></td>', page)
@@ -234,6 +260,18 @@ class Tour(Work):
         self.assertIn('| Outset | 60.000 |', report)
         self.assertNotIn('Conclusion', report)
         self.assertIn('FPS is at 60 in Outset', report)  # the fake runs at 60: as a display's refresh would hold it
+
+    def test_four_builds_share_one_balanced_run_and_pairwise_report(self):
+        code, summary, report = self.bench('plain', 'plain-slow', 'plain', 'plain-slow',
+                                           extra=('--pairs', '1', '--headless', '--every', '0'))
+        self.assertEqual(code, 0, report)
+        self.assertEqual(summary['runs_per_build'], {'A': 2, 'B': 2, 'C': 2, 'D': 2})
+        self.assertEqual(summary['reference'], 'D')
+        self.assertEqual(summary['pictures'], [])
+        self.assertIn('BlueWake multi-build benchmark', report)
+        self.assertIn('interleaved A/B/C/D/D/C/B/A', report)
+        self.assertIn('## Pairwise overall FPS', report)
+        self.assertIn('| Build | A | B | C | D |', report)
 
     def test_the_state_is_made_from_the_first_quest_log_with_a_save(self):
         code, summary, _ = self.bench('empty12', extra=('--runs', '1'), cache=False)
@@ -363,10 +401,11 @@ class Arguments(unittest.TestCase):
     def test_help_and_bad_arguments(self):
         script = SCRIPTS / 'render_bench'
         self.assertEqual(subprocess.run(['bash', str(script), '--help'], capture_output=True).returncode, 0)
-        for bad in (['a', 'b', 'c'], ['a', '--pairs', 'x'], ['a', '--colour']):
+        for bad in ([], ['a', '--pairs', 'x'], ['a', '--colour']):
             self.assertEqual(subprocess.run(['bash', str(script), *bad], capture_output=True).returncode, 2, bad)
         help_text = subprocess.run(['bash', str(script), '--help'], capture_output=True, text=True).stdout
         self.assertIn('--cpu-profile', help_text)
+        self.assertIn('--set-build', help_text)
 
 
 if __name__ == '__main__':
