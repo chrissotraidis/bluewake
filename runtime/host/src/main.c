@@ -2210,6 +2210,14 @@ static inline __attribute__((always_inline)) bool host_chassis_edge_service_with
     }
     if (bluewake_jump_button_dispatch(cpu, address))
         return true;
+    // The HD look's room culling (J3DUClipper::clipByBox's entry, called only
+    // by the room draw). Here, before the full service, which only sees the
+    // intercept table's addresses; when it has culled, the guest is at the return.
+    if (__builtin_expect(bluewake_hd_room_clip, 0) && address == 0x80256CB8u) {
+        bluewake_hd_look_room_clip(cpu, address);
+        if (cpu->pc != address)
+            return true;
+    }
     if (host_chassis_requires_full(cpu, address))
         return host_chassis_edge_service_full(user, cpu, address);
     if (address == BW_SEARCH_JUDGE_FILTER && g_actor_search_native)
@@ -2217,12 +2225,16 @@ static inline __attribute__((always_inline)) bool host_chassis_edge_service_with
     return false;
 }
 
+static BluewakeTurnEntry g_turn_entry = {BLUEWAKE_TURN_ENTRY_NONE};
+
 static bool host_chassis_edge_service(void* user, CPUState* cpu, u32 address) {
-    return host_chassis_edge_service_with(user, cpu, address, false);
+    return bluewake_turn_entry_edge(&g_turn_entry, address,
+                                    host_chassis_edge_service_with(user, cpu, address, false));
 }
 
 static bool host_chassis_edge_service_stage_select(void* user, CPUState* cpu, u32 address) {
-    return host_chassis_edge_service_with(user, cpu, address, true);
+    return bluewake_turn_entry_edge(&g_turn_entry, address,
+                                    host_chassis_edge_service_with(user, cpu, address, true));
 }
 
 // Host-only CPU state has no representation in the retail OSContext image.
@@ -6369,8 +6381,12 @@ static bool host_bundle_defaults(char* module, size_t module_size) {
     host_apply_default_env("BLUEWAKE_DSP_IROM", contents, "Resources/DSP/dsp_rom.bin");
     host_apply_default_env("BLUEWAKE_DSP_COEF", contents, "Resources/DSP/dsp_coef.bin");
     // A player launch follows real time and uses the same HLE audio path as
-    // the desktop qualification routes. Explicit diagnostic choices win.
+    // the desktop qualification routes. Explicit diagnostic choices win. The
+    // clock paces the game, so the audio queue's own waits are turned off, as
+    // on Windows, Linux, iPhone and Android (#509): paced by both, the waits
+    // added up whenever the device drained a buffer.
     if (getenv("BLUEWAKE_WALL_PACE") == NULL) setenv("BLUEWAKE_WALL_PACE", "1", 0);
+    if (getenv("DOL_AUDIO_NO_THROTTLE") == NULL) setenv("DOL_AUDIO_NO_THROTTLE", "1", 0);
     if (getenv("BLUEWAKE_DSP_MODE") == NULL) setenv("BLUEWAKE_DSP_MODE", "hle", 0);
     // Only a builder-selected personal candidate opts in. Existing module
     // compatibility/readiness checks still govern each fast path, and explicit
@@ -14137,6 +14153,7 @@ int main(int argc, char** argv) {
             g_turn_edge_hit = false;
             g_turn_downcount_before_last_block = cpu.downcount;
         }
+        bluewake_turn_entry_begin(&g_turn_entry, &cpu, cpu.pc);
         int dispatched = mod->dispatch(&cpu, cpu.pc);
         if (turn_census)
             host_turn_exit_classify(&cpu, dispatched);
@@ -16068,6 +16085,16 @@ int main(int argc, char** argv) {
 
     printf("[run] stopped: %s after %llu blocks at pc=%#010x\n",
            stop_reason ? stop_reason : "normal", blocks, cpu.pc);
+    if (getenv("BLUEWAKE_TRACE_ALIAS_COST") != NULL) {
+        // The game module's resolver is the one translated code calls; its census
+        // is printed from that library's atexit, which runs only on some exits.
+        // RecompCore without the export (older pins) just prints nothing here.
+        typedef void (*AliasCostReportFn)(void);
+        AliasCostReportFn alias_cost_report =
+            (AliasCostReportFn)dlsym(lib, "ppc_guest_alias_cost_report_now");
+        if (alias_cost_report != NULL)
+            alias_cost_report();
+    }
     if (g_skip_fast_on && g_skip_verify) {
         typedef void (*SkipCountsFn)(unsigned long long*, unsigned long long*, unsigned long long*);
         SkipCountsFn skip_counts = (SkipCountsFn)dlsym(lib, "bluewake_composite_direct_skip_counts");

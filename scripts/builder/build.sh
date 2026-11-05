@@ -28,17 +28,22 @@
 #   --jobs N                  parallel compile jobs (default: all cores)
 #   --game NAME               profile to use (default bluewake)
 #   --platform ios|tvos|macos Apple target (default ios)
-#   --combined-optimizations opt into the PC builds' module preparations (direct calls, natives,
-#                             prepaid blocks): a personal Mac, iPhone or iPad build
-#   --lean-blocks             with --combined-optimizations: Elliott Tate's lean block copies,
-#                             as the Windows and Linux builders use by default
+#                             A personal Mac, iPhone or iPad build gets the Windows and Linux
+#                             builders' module preparations by default: the five options below
+#                             together (64 to 81% faster on the benchmark tour, a smaller module
+#                             and a shorter compile; docs/status/APPLE_RECIPE_TOUR_2026-10-20.md).
+#                             Naming any of them builds exactly the ones named instead.
+#   --conservative            the plain translation, without the module preparations (slower)
+#   --combined-optimizations the PC builds' module preparations (direct calls, natives,
+#                             prepaid blocks)
+#   --lean-blocks             with --combined-optimizations: Elliott Tate's lean block copies
 #   --lean-memory             with --lean-blocks: memory instructions store their pc and cycle
 #                             suffix only on the way out of RAM (Elliott Tate's lean_memory.py)
 #   --lean-deadlines          with --lean-memory: the deadline test after a load or store only on
 #                             its way out of RAM, where the deadline can move (lean_deadlines.py)
 #   --behaviour-timing        with --combined-optimizations: every block prepaid, a timer or
 #                             interrupt lands at the next block's start, the budget checked at loops
-#                             (a prototype, behaviour_timing.py --loop-checks)
+#                             (behaviour_timing.py --loop-checks)
 #   --identity NAME           codesign identity, e.g. "Apple Development: You (TEAMID)"
 #   --profile FILE            device provisioning profile (with --identity)
 #   --install DEVICE          install with devicectl after signing (needs --identity)
@@ -69,7 +74,7 @@ iso="" game=bluewake platform=ios out="" ipa="" published_app="" app_only=0
 jobs=$(sysctl -n hw.ncpu)
 identity="" profile="" install_device="" host_pgo=""
 train_pgo=auto training_save=""
-module_optimizations=none
+module_optimizations=none module_options_named=0 conservative=0
 composite_pgo=()
 # -O2 always: -O1 compiled in 47 min instead of 80 but held only 26 FPS
 # on an iPad Pro (M2) at Outset (docs/BUILDER.md), so there is no quick option.
@@ -92,11 +97,12 @@ while [ $# -gt 0 ]; do
         --jobs) jobs=$2; shift 2 ;;
         --game) game=$2; shift 2 ;;
         --platform) platform=$2; shift 2 ;;
-        --combined-optimizations) module_optimizations=combined-v1; shift ;;
-        --lean-blocks) lean_arg=--lean; shift ;;
-        --lean-memory) lean_memory=1; shift ;;
-        --lean-deadlines) lean_deadlines=1; shift ;;
-        --behaviour-timing) behaviour_timing=1; shift ;;
+        --combined-optimizations) module_optimizations=combined-v1; module_options_named=1; shift ;;
+        --lean-blocks) lean_arg=--lean; module_options_named=1; shift ;;
+        --lean-memory) lean_memory=1; module_options_named=1; shift ;;
+        --lean-deadlines) lean_deadlines=1; module_options_named=1; shift ;;
+        --behaviour-timing) behaviour_timing=1; module_options_named=1; shift ;;
+        --conservative) conservative=1; shift ;;
         --identity) identity=$2; shift 2 ;;
         --profile) profile=$2; shift 2 ;;
         --install) install_device=$2; shift 2 ;;
@@ -118,6 +124,13 @@ done
 
 [[ "$game" =~ ^[a-z][a-z0-9_-]*$ ]] || die "invalid game profile name: $game"
 [[ "$platform" = ios || "$platform" = tvos || "$platform" = macos ]] || die "--platform must be ios, tvos or macos"
+# The default: every module preparation, as the Windows and Linux builders, for a personal Mac,
+# iPhone or iPad build. The app-only build has no module, and tvOS keeps the plain translation.
+if [ "$conservative" -eq 1 ]; then
+    [ "$module_options_named" -eq 0 ] || die "--conservative builds without the module preparations; leave out the others"
+elif [ "$module_options_named" -eq 0 ] && [ "$app_only" -eq 0 ] && { [ "$platform" = macos ] || [ "$platform" = ios ]; }; then
+    module_optimizations=combined-v1 lean_arg=--lean lean_memory=1 lean_deadlines=1 behaviour_timing=1
+fi
 if [ "$module_optimizations" != none ]; then
     [ "$platform" = macos ] || [ "$platform" = ios ] || die "--combined-optimizations is for --platform macos or ios"
     [ "$app_only" -eq 0 ] || die "--combined-optimizations needs a personal build (it changes the game module)"

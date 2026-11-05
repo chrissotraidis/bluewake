@@ -4,6 +4,7 @@
 //
 //   dolphin_save_import_cli show FILE                  (.gci, .raw or .card)
 //   dolphin_save_import_cli inject CARD SRC SRC_SLOT DST_SLOT OUT_CARD
+//   dolphin_save_import_cli export CARD OUT_GCI
 #include "../apple/ios/src/dolphin_save_import.h"
 
 #include <stdio.h>
@@ -83,6 +84,27 @@ int main(int argc, char** argv) {
         free(source);
         return 0;
     }
-    fprintf(stderr, "usage: %s show FILE | inject CARD SRC SRC_SLOT DST_SLOT OUT\n", argv[0]);
+    if (argc == 4 && strcmp(argv[1], "export") == 0) {
+        uint8_t* card = slurp(argv[2], &size);
+        if (card == NULL)
+            return perror(argv[2]), 1;
+        uint8_t* out = NULL;
+        size_t out_size = 0;
+        const char* error = bw_card_export(card, size, &out, &out_size);
+        if (error != NULL) {
+            fprintf(stderr, "%s\n", error);
+            free(card);
+            return 1;
+        }
+        FILE* f = fopen(argv[3], "wb");
+        if (f == NULL || fwrite(out, 1, out_size, f) != out_size || fclose(f) != 0)
+            return perror(argv[3]), 1;
+        printf("wrote %s (%zu bytes)\n", argv[3], out_size);
+        free(out);
+        free(card);
+        return 0;
+    }
+    fprintf(stderr, "usage: %s show FILE | inject CARD SRC SRC_SLOT DST_SLOT OUT | export CARD OUT_GCI\n",
+            argv[0]);
     return 2;
 }

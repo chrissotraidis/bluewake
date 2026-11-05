@@ -64,7 +64,7 @@ hosts use Docker's `linux/amd64` emulation, which is substantially slower.
 - **"failed to extract layer", "content digest ... not found" or another image error:** Docker's build cache is
   damaged, often after a run with `sudo`. Your disc image is fine. Run `docker builder prune -af` and build again.
 - **Bazzite, Fedora Atomic and other read-only systems:** build inside a Distrobox (for example Ubuntu 24.04) with the
-  native steps below, or use the ready-made AppImage once it is published.
+  native steps below, or use the ready-made AppImage from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest).
 
 ## Native build
 
@@ -153,6 +153,12 @@ folder buttons use SDL's native dialog through an XDG
 portal or Zenity. Dragging an ISO/GCM onto the setup window and entering paths
 directly also work.
 
+A first import measures the files it is about to write (main.dol and the 415
+`.rel` modules, about 10 MB) and checks the data folder has that much room
+before it starts, so a folder with no space is named as such, with the size
+needed and the size free, instead of one of the extracted files failing. The
+data folder is `~/.local/share/BlueWake`; `BLUEWAKE_DATA_DIR` moves it.
+
 Later AppImage launches start the game directly. Use `--setup` to reopen the
 populated setup window, or `--iso` to replace the remembered disc using only
 the native file picker. A development-folder build keeps the simple picker as
@@ -202,8 +208,8 @@ waits for the compositor on the game thread, and on KWin 6.8 that wait held the 
 Mailbox doesn't tear. `BLUEWAKE_VSYNC=1` brings back FIFO. Checked on KWin 6.8; GNOME and the Steam Deck's
 gamescope haven't been checked yet.
 
-**Safe mode:** if the last launch never reached a clean exit (it crashed or was killed), the next one starts
-in safe mode, as on Windows: Fast sound, 4:3, in a window, with the mods, Better Wind Waker's settings, the
+**Safe mode:** if the last launch crashed or was closed before it had drawn about ten seconds of frames, the next
+one starts in safe mode, as on Windows: Fast sound, 4:3, in a window, with the mods, Better Wind Waker's settings, the
 texture pack, the HD look, the gameplay extras and the stage select off. Your earlier `settings.ini` is copied beside it
 first (`settings.ini.before-safe-mode-...`), and a note says so for fifteen seconds. Turn things back
 on in the settings menu. `--safe-mode` starts in safe mode on purpose.
@@ -288,7 +294,8 @@ it under the Linux release exception, after it passes the release asset check:
 
 ### Run the AppImage
 
-No ready-made Linux AppImage has been published yet; these steps work for one you built.
+The [latest release](https://github.com/chrissotraidis/bluewake/releases/latest) has a ready-made AppImage
+(`BlueWake-v0.10.0-linux-x86_64.AppImage` since 0.10.0); these steps work for it and for one you built.
 
 1. Make the AppImage executable (you only need to do this once):
 

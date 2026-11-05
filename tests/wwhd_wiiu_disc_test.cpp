@@ -122,23 +122,34 @@ void run(const fs::path& root) {
     const DiscKey title = synthetic("SYNTHETIC-TITLE!");
     const DiscKey common = synthetic("SYNTHETIC-COMMON");
     const DiscKey wrong = synthetic("SYNTHETIC-WRONG!");
-    check(wwhd::read_disc_key((root / "SYNTHETIC-disc.key").string()) == disc, "binary disc key");
-    check(wwhd::read_disc_key((root / "SYNTHETIC-title.key").string()) == title, "binary title key");
-    check(wwhd::read_disc_key((root / "SYNTHETIC-common.key").string()) == common, "binary common key");
-    check(wwhd::read_disc_key((root / "SYNTHETIC-title-hex.key").string()) == title, "hex title key");
-    const WiiUDiscKeys title_keys{disc, title, std::nullopt};
-    const WiiUDiscKeys common_keys{disc, std::nullopt, common};
-    const WiiUDiscKeys override_keys{disc, title, wrong};
+    check(wwhd::read_disc_keys((root / "SYNTHETIC-disc.key").string()) == std::vector<DiscKey>{disc},
+          "binary disc key");
+    check(wwhd::read_disc_keys((root / "SYNTHETIC-title.key").string()) == std::vector<DiscKey>{title},
+          "binary title key");
+    check(wwhd::read_disc_keys((root / "SYNTHETIC-common.key").string()) == std::vector<DiscKey>{common},
+          "binary common key");
+    check(wwhd::read_disc_keys((root / "SYNTHETIC-title-hex.key").string()) == std::vector<DiscKey>{title},
+          "hex title key");
+    const WiiUDiscKeys title_keys{{disc}, {title}, {}};
+    const WiiUDiscKeys common_keys{{disc}, {}, {common}};
+    const WiiUDiscKeys override_keys{{disc}, {title}, {wrong}};
+    // A keys file holds every title's key: lists that start with keys for other
+    // discs must still find this disc's own.
+    const WiiUDiscKeys mixed_keys{{wrong, disc}, {wrong, title}, {}};
+    const WiiUDiscKeys mixed_common{{wrong, disc}, {}, {wrong, common}};
     for (const char* image : {"valid.wud", "mapped.wux"}) {
         positive(root, image, title_keys);
         positive(root, image, common_keys);
         positive(root, image, override_keys);
+        positive(root, image, mixed_keys);
+        positive(root, image, mixed_common);
         for (const WiiUDiscKeys& keys : {
-                 WiiUDiscKeys{wrong, title, std::nullopt},
-                 WiiUDiscKeys{disc, wrong, std::nullopt},
-                 WiiUDiscKeys{disc, std::nullopt, wrong},
-                 WiiUDiscKeys{disc, std::nullopt, std::nullopt},
-                 WiiUDiscKeys{disc, wrong, common}}) {
+                 WiiUDiscKeys{{wrong}, {title}, {}},
+                 WiiUDiscKeys{{disc}, {wrong}, {}},
+                 WiiUDiscKeys{{disc}, {}, {wrong}},
+                 WiiUDiscKeys{{disc}, {}, {}},
+                 WiiUDiscKeys{{disc}, {wrong}, {common}},
+                 WiiUDiscKeys{{wrong, wrong}, {title}, {}}}) {
             rejected([&] { WiiUDisc bad((root / image).string(), keys); },
                      std::string(image) + ": wrong/missing key or ignored title override");
         }

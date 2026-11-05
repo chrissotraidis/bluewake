@@ -108,7 +108,8 @@ goes straight to a place:
 | --- | --- |
 | `BLUEWAKE_WARP` | `stage:room:point[:layer]` (the game's own codes, for example `Siren:0:0`), a menu line and room (`6.0`), or a name from the names files (`Valoo roars`). A name that fits several rooms lists them and goes nowhere. |
 | `BLUEWAKE_WARP_FILE` | `1`, `2` or `3`: press A for you until that quest log starts. An empty log stops it. |
-| `BLUEWAKE_WARP_TIME` | `0`–`23`, or `morning`, `noon`, `evening`, `night` |
+| `BLUEWAKE_WARP_TIME` | `0`–`23` or `HH:MM` (to the game's nearest degree, four minutes), or `morning`, `noon`, `evening`, `night`. On islands where time stands still the clock still runs on at dawn and dusk to the next settled time, so capture soon after arriving |
+| `BLUEWAKE_WARP_DATE` | The save's day, `0`–`65535`: the day of the week and the moon's phase (the day mod 7; until noon, the day before) |
 | `BLUEWAKE_WARP_STOP_AFTER` | End the run that many play frames after Link appears (for sweeping many places) |
 
 Every place in the menu was warped to this way, headless, on Windows, from a late-game file: 451 of 468

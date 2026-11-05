@@ -77,6 +77,8 @@ bool ImportJob::start(const std::string& hd_picked, const std::string& gc_disc, 
             const ImportResult r = import_pack(options);
             done.output = options.output;
             done.replacements = r.replacements;
+            done.conflicts = r.conflicts;
+            done.unsupported = r.errors.size();
             done.message = "Imported " + std::to_string(r.replacements) + " textures from Wind Waker HD.";
         } catch (const std::exception& ex) {
             done.failed = true;

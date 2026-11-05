@@ -160,6 +160,10 @@ pending callbacks or interrupts, and resumes at the guest program counter.
 The sequence is conceptual: host hooks access guest state only at relevant
 integration points, not on every dispatch.
 
+The [game-thread architecture](GameThread.md) expands this loop, distinguishes
+native execution from guest OS threads, and documents its concurrency and
+performance boundaries.
+
 Testing follows the same boundaries. Source-only component tests isolate host,
 guest-state, service, and renderer contracts with synthetic data; integration
 tests link those components through a platform graph; private module and

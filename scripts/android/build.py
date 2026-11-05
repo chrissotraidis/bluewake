@@ -53,7 +53,10 @@ MODULE = "libgGZLE01_recomp.so"
 # The Java activity (android/java); the application id and the label are options.
 ACTIVITY = "dev.bluewake.android.BlueWakeActivity"
 DEFAULT_LABEL = "BlueWake"
-MIN_SDK = 33  # execinfo backtrace() (the GX stall watchdog)
+# Android 10 (API 29) or newer: the manifest's Vulkan 1.1 feature is mandatory on 64-bit devices from
+# there, and Android 10 has everything else the app needs (Dawn's prebuilt is API 28, SDL3's is 21).
+# Below 33 bionic has no backtrace() (the GX stall watchdog), which android/include/execinfo.h stands in for.
+MIN_SDK = 29
 TARGET_SDK = 35
 # What shapes a compiled game module: the source preparations, the mods compiled into it, and its compile.
 # OUT/composite/module.json records them when the module is compiled; --app-only reuses the module only

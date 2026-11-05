@@ -24,12 +24,12 @@
 
 | You play on | What to do |
 | --- | --- |
-| **Windows** 10 or 11 | [Download the ready-made build](#windows) and choose your disc image |
-| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it |
+| **Windows** 10 or 11 | [Download the ready-made build](#windows): nothing to build, just choose your disc image |
+| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it; building on Windows comes with the next release (experimental) |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/TVOS_BUILD.md) (experimental) |
 | **Linux** (x86-64) | [Build the native version](docs/LINUX.md); a ready-made download is not published yet |
-| **Android** (arm64) | [Build your own APK](docs/ANDROID.md) on a Windows PC (experimental) |
+| **Android** (arm64) | [Build your own APK](docs/ANDROID.md) on a Windows PC or a Mac (experimental) |
 
 On Mac, iPhone, iPad, Linux and Android, the app you build contains code translated from your disc. **It is yours
 alone: never share or upload it.**
@@ -42,7 +42,7 @@ alone: never share or upload it.**
 Wind Waker Recomp has moved here. Its creator, [Elliott](https://github.com/elliotttate), now
 maintains BlueWake together with Chris, and his work is part of BlueWake with his authorship kept.
 
-- **Windows:** BlueWake 0.8.0, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
+- **Windows:** BlueWake's Windows build, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
   is built from BlueWake itself and replaces Wind Waker Recomp 0.4.0. Smooth
   Motion is off by default (press **F10** to turn it on), and 0.4.0's experimental 60 FPS game logic
   is gone.
@@ -56,8 +56,9 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download `BlueWake-v0.8.0-windows-x64.zip` from the
-   [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest).
+1. Download [`BlueWake-v0.10.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-windows-x64.zip)
+   from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play:
+   you don't need PadMint or a Mac.
 2. Unpack the whole ZIP and run `BlueWake.exe`.
 3. On first launch, choose your disc image (`.iso` or `.gcm`). A Dolphin `.rvz` must first be
    converted to ISO in Dolphin: right-click the game and choose **Convert File**.
@@ -68,11 +69,14 @@ GPU gets Direct3D 11 instead of a black screen (not yet checked on such a PC). I
 
 ### Linux
 
-The native x86-64 Linux source build is available now; a ready-made AppImage has
-not been published yet. Build it from your disc, optionally package the
-AppImage, and open its graphical setup with `--setup`. See
-[BlueWake on Linux](docs/LINUX.md) for the commands, dependencies and AppImage
-instructions.
+1. Download [`BlueWake-v0.10.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-linux-x86_64.AppImage)
+   from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play,
+   and built to run on SteamOS too.
+2. Make it executable (`chmod +x`, or Properties › Permissions in the Deck's desktop mode) and run it.
+3. On first launch, **BlueWake Setup** asks for your disc image (`.iso` or `.gcm`). `--setup` opens it again later.
+
+You need an x86-64 CPU with AVX2, a Vulkan driver, and a system with glibc 2.38 or newer, which SteamOS and current
+distributions have. To build it yourself from your disc instead, see [BlueWake on Linux](docs/LINUX.md).
 
 ### iPhone and iPad
 
@@ -82,6 +86,10 @@ You need:
 - your `GZLE01` revision 0 disc image
 - an A13 or newer iPhone or iPad on iOS/iPadOS 17 or later, with Developer Mode on
 - an Apple ID for signing (a free one works, but its apps expire after seven days)
+
+PadMint's GitHub Cloud Build, which makes some other games without a Mac, can't make BlueWake: the
+build turns code from your own disc into the app, so it has to run on your own Mac. Without one, you
+can play the [Windows](#windows) or [Linux](#linux) version.
 
 Then:
 
@@ -95,10 +103,11 @@ Then:
    ~~~
 
    Expect a first build of well over an hour. Add `--source-only` first to check your tools and
-   disc in a few minutes.
-2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode.
-3. **Copy the same disc image to your device:** in Finder, select the device, open **Files** and
-   drag it onto **BlueWake**. The app imports it on first launch.
+   disc in a few minutes. From the next release PadMint can also build it on a Windows PC, experimentally; see [On a Windows PC](docs/BUILD_YOUR_OWN.md#on-a-windows-pc-experimental).
+2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode. On Windows, Sideloadly.
+3. **Copy the same disc image to your device:** in Finder on a Mac, or the Apple Devices app on
+   Windows, select the device, open **Files** and drag it onto **BlueWake**. The app imports it on
+   first launch.
 
 Step by step, with updating and troubleshooting: [Build your own BlueWake](docs/BUILD_YOUR_OWN.md).
 If you used PadMint, please tell us how it went in
@@ -176,9 +185,8 @@ Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.m
 <details>
 <summary><strong>Can I download it?</strong></summary>
 
-On Windows, yes: the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest) has a
-ready-made build that needs your own disc image. The native Linux source build is available, but a
-ready-made Linux download has not been published yet. On Mac, iPhone and iPad, you build your own app
+On Windows and Linux, yes: the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest) has a
+ready-made Windows build and a Linux AppImage, both needing your own disc image. On Mac, iPhone and iPad, you build your own app
 from your disc (see [Install](#install)); if an app-only download says "Translated game code:
 Missing", add your game with PadMint.
 
@@ -256,7 +264,8 @@ scenes dip below 30 FPS on an iPhone 14.
 
 Yes. The native x86-64 Linux port was merged in
 [#107](https://github.com/chrissotraidis/bluewake/pull/107) and can be built from your own disc by
-following [the Linux guide](docs/LINUX.md). A ready-made Linux download has not been published yet.
+following [the Linux guide](docs/LINUX.md). Since 0.10.0 the [Releases page](https://github.com/chrissotraidis/bluewake/releases/latest)
+also has a ready-made AppImage, built to run on SteamOS too.
 
 </details>
 
@@ -314,11 +323,13 @@ Dolphin's **Tools › Memory Card Manager**.
 
 - **iPhone and iPad:** copy the save to your device and open
   **⋯ › Game Data & Saves › Import Dolphin Save…**. Pick the quest log and the BlueWake slot to put it
-  in; the app backs up your current card first. Dolphin `.raw` cards work too.
-- **Windows:** there is no import screen yet, and renaming a `.gci` to `.card` will not work.
-  Source users can use the [save-import helper](tests/dolphin_save_import_cli.c), which uses the same
-  importer as iOS. Close BlueWake, work on a copy of your card, then put the result at
-  `%APPDATA%\BlueWake\GZLE01.card`.
+  in; the app backs up your current card first. Dolphin `.raw` cards work too. **Export Dolphin Save…**, in
+  the same menu, goes the other way: it writes all three of your quest logs out as a `.gci` Dolphin can open,
+  and only reads your card.
+- **Windows:** there is no import or export screen yet, and renaming a `.gci` to `.card` will not work.
+  Source users can use the [save helper](tests/dolphin_save_import_cli.c), which uses the same code as
+  iOS: `inject` puts a Dolphin save into your card and `export` writes your card out as a `.gci`. Close
+  BlueWake, work on a copy of your card, then put the result at `%APPDATA%\BlueWake\GZLE01.card`.
 
 </details>
 
