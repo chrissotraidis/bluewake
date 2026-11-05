@@ -803,6 +803,20 @@ static u64 g_async_draw_done_commits;
    second one arriving while one is uncommitted takes the drain. Off by default
    because it changes when the guest observes the GPU finish, so it is measured
    first (issue #539). */
+/* Patch 0197 adds the FIFO stream position to GXRuntime. CI builds the host
+   against the pinned RecompCore, not the patch series, so a host can be
+   compiled without those functions: keep the drain path then, and let a
+   prepared build - which does apply 0197 - have the overlap. */
+#if defined(DOL_PLATFORM_GX_STREAM_POSITION)
+#define bw_gx_stream_position() dol_platform_gx_position()
+#define bw_gx_stream_parsed()   dol_platform_gx_parsed()
+#define bw_gx_stream_service()  dol_platform_gx_service()
+#else
+#define bw_gx_stream_position() 0u
+#define bw_gx_stream_parsed()   0u
+#define bw_gx_stream_service()  false
+#endif
+
 static bool g_draw_done_overlap;
 static bool g_draw_done_pending;
 static u64 g_draw_done_target;
@@ -7204,7 +7218,7 @@ unsigned bluewake_status_read(char* text, size_t size) {
    position instead and commits when the worker reaches it, and the guest
    spends those microseconds on its own next frame. */
 static bool draw_done_position(void) {
-    g_draw_done_target = dol_platform_gx_position();
+    g_draw_done_target = bw_gx_stream_position();
     // No position from the backend (no translation worker, a traced frame, a
     // headless build): there is nothing to defer to, and the caller keeps the
     // drain it would have taken. Without this the finish would simply never be
@@ -7262,11 +7276,11 @@ static void draw_done_force(const char* why) {
 static void draw_done_service(void) {
     if (!g_draw_done_overlap)
         return;
-    if (dol_platform_gx_service())
+    if (bw_gx_stream_service())
         ++g_draw_done_presents;
     if (!g_draw_done_pending)
         return;
-    if (dol_platform_gx_parsed() < g_draw_done_target)
+    if (bw_gx_stream_parsed() < g_draw_done_target)
         return;
     draw_done_commit();
     if (g_draw_done_deferred == 1u || g_draw_done_deferred % 600u == 0u)

@@ -109,7 +109,8 @@ diff --git a/GXRuntime/include/gxruntime/platform.h b/GXRuntime/include/gxruntim
 index 80fe015..f932495 100644
 --- a/GXRuntime/include/gxruntime/platform.h
 +++ b/GXRuntime/include/gxruntime/platform.h
-@@ -37,6 +37,16 @@ typedef struct DolPlatformOps {
+@@ -37,6 +37,17 @@ typedef struct DolPlatformOps {
++#define DOL_PLATFORM_GX_STREAM_POSITION 1
      // matter to it). NULL where they do: the host then sends writes one by one.
      void (*gx_write_bytes)(const u8* bytes, u32 size);
      void (*gx_flush)(void);
