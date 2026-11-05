@@ -1068,6 +1068,7 @@ int main(void) {{
                                **({"cache_ops": True} if getattr(self.args, "cache_ops", False) else {}),
                                **({"native_gx": True} if getattr(self.args, "native_gx", False) else {}),
                                **({"native_set4": True} if getattr(self.args, "native_set4", False) else {}),
+                               **({"direct_gate": True} if getattr(self.args, "direct_gate", False) else {}),
                                "runtime": self.git("-C", str(self.recompcore), "rev-parse", "HEAD"),
                                "source": tree_digest(self.out / "composite-src")},
                               sort_keys=True).encode())
@@ -1195,6 +1196,8 @@ int main(void) {{
                              ("native_skin", "BLUEWAKE_NATIVE_SKIN"),
                              ("native_game_math", "BLUEWAKE_NATIVE_GAME_MATH")):
             env[name] = "1" if getattr(self.args, option) else "0"
+        # Training plays the path it measures: the gate open only with --direct-gate.
+        env["BLUEWAKE_DIRECT_GATE"] = "1" if getattr(self.args, "direct_gate", False) else "0"
         if warps:
             env["BLUEWAKE_TEST_WARP"] = ",".join(warps)
         if headless:
@@ -1277,6 +1280,7 @@ int main(void) {{
             "gather_pipe": self.args.gather_pipe,
             "gather_pipe_profile": getattr(self.args, "gather_pipe_profile", False),
             "gather_alias_cache": self.args.gather_alias_cache,
+            "direct_gate_training": getattr(self.args, "direct_gate", False),
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
             "native_j3d": self.args.native_j3d,
@@ -1506,6 +1510,9 @@ def main():
                         help="certify optional native game-math entry hooks (off by default)")
     parser.add_argument("--native-skin", action="store_true",
                         help="certify and enable optional native skinning preparation (off by default)")
+    parser.add_argument("--direct-gate", action="store_true",
+                        help="train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1), "
+                             "for a build that measures it; the module is the same either way")
     parser.add_argument("--native-math", action="store_true",
                         help="prepare certified native matrix functions; off by default, compatible host opt-in required")
     parser.add_argument("--lean-blocks", action="store_true",
