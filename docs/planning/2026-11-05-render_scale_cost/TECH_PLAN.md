@@ -35,20 +35,72 @@ H5 and H6 matter on the Deck in particular. The CPU and GPU share memory and pow
 
 H6 is confirmed for Outset with Smooth Motion. Uncapped, 4x lowers the game thread's effective clock by 7.0 % and frame rate by 6.3 %. Fixing the GPU at 1100 MHz restores the 4x game-thread clock to 3.34 GHz and reverses the frame-rate result to +6.4 %, with every 4x launch ahead of every 3x launch. Lowering the GPU ceiling would worsen a GPU-time limit; the reversal instead identifies shared APU power and governor behavior. No more render-scale measurements are planned before source work.
 
+## Source findings and first experiment
+
+Source inspection changes the initial staging-copy idea in one important way. Smooth Motion's replay path skips ordinary staging-copy operations and reruns render passes and EFB work, so copy batching does not directly remove duplicated copies from the in-between frame. On a real frame, however, Aurora currently emits completed staging-buffer arenas incrementally as passes are sealed. Texture uploads must remain in operation order because a later upload can overwrite data sampled by an earlier pass.
+
+RecompCore #53, stacked on #49, therefore implements only the safe subset behind `DOL_AURORA_BATCH_STAGING_COPIES=1`:
+
+1. Keep texture staging copies in their existing operation order.
+2. Collect completed vertex, uniform, index, and storage-buffer arenas.
+3. Encode those copies in a separate command buffer at frame end.
+4. Submit the copy buffer before the already-encoded render command buffer.
+5. Preserve profiler event order with a deferred timestamp zone.
+
+The default path remains unchanged. If this experiment does not clear the performance gate, the next source target is the work rerun for Smooth Motion's in-between frame, not broader or unsafe copy reordering.
+
+## PR and dependency structure
+
+```mermaid
+flowchart LR
+    A["RecompCore #49<br/>diagnostics and efficient effects<br/>a4dbaaa8"] --> B["RecompCore #53<br/>opt-in copy batching<br/>d72f71b9"]
+    B --> C["BlueWake #563<br/>pin, exported patch,<br/>build and Deck qualification"]
+```
+
+There is no separate BlueWake PR. #563 owns this plan, the RecompCore pin and exported patch, the matched build, and the final keep/reject decision.
+
+## Implementation surfaces
+
+| Surface | Change |
+|---|---|
+| RecompCore/Aurora `GXRuntime/graphics/aurora/lib/gfx/common.cpp` | Opt-in batching for non-texture staging buffers |
+| RecompCore/Aurora `lib/webgpu/gpu_prof.*` | Deferred timestamp zone so profiling order remains valid |
+| `scripts/builder/profiles/bluewake.sh` | Pin the qualified RecompCore stack in #563 |
+| `config/dependencies.lock.json` | Record the exact RecompCore revision and evidence |
+| `patches/recompcore/` | Export the RecompCore commit required by the repository workflow |
+
+## Implementation order
+
+| Milestone | Depends | Can run with | Deliverable / integration gate |
+|---|---|---|---|
+| M1 | — | — | Reproducible 3x/4x and Smooth Motion on/off baseline |
+| M2 | M1 | — | Shared-power attribution and GPU-cap confirmation |
+| M2b | M1 | M2 | Source-level map of staging copies and Smooth Motion replay |
+| M3 | M2, M2b | — | Opt-in RecompCore experiment, BlueWake integration, and matched qualification |
+| M4 | M3 | — | Evidence-backed keep/reject decision and next target |
+
+Critical path: M1 → M2 → M3 → M4. M2b was inspected alongside attribution work but must be complete before M3 integration. Deck qualification is serial because baseline and candidate must use the same device state and build profile.
+
+## Qualification plan
+
+Build baseline and candidate from the same BlueWake stack and reuse the same build directory/profile so PGO variation does not masquerade as a rendering win. Baseline is RecompCore #49 at `a4dbaaa8`; candidate adds #53 at `d72f71b9` and enables `DOL_AURORA_BATCH_STAGING_COPIES=1`.
+
+Run at least six interleaved baseline/candidate launches on the Deck with the same five save states, 4x render scale, and Smooth Motion enabled. Keep the change only if the candidate is ahead in every launch and all guest checkpoints match. Then compare pictures with Smooth Motion disabled; they must be identical. Restore the Deck's GPU clock range and governor after the run.
+
 ## Measurements
 
 All on the Steam Deck with render_bench, five save states, six interleaved launches per setting, the same build.
 
 | Step | Settings compared | What it records | Answers |
 |---|---|---|---|
-| M1 | Render scale 3 vs 4 | Game FPS, game thread busy %, GPU busy ms (mean, p95, max) | How big the slowdown is, and whether GPU busy ever reaches the frame budget (H4) |
-| M2 | Same, `--cpu-profile` | Per-thread cycles and instructions per frame; effective game-thread clock from cycles/frame × frames/second; the game thread's and render worker's hottest functions | Whether the game thread's instructions grow (its own work), its cycles grow (H5), or the same cycles run at a lower clock (H6), and what grows on the render worker (H1) |
-| M3 | Same, `BLUEWAKE_GX_FLUSH_CENSUS=1` | Draw-done wait per call, per frame, max | H1 |
-| M4 | Same, timers around present | Time per frame in present | H2 |
-| M5 | Same, readback counters | Number and time of synchronous readbacks | H3 |
-| M6 | HD look on vs off, scale 3 | M1 to M3 again | Whether the HD look's slowdown has the same cause |
+| Q1 | Render scale 3 vs 4 | Game FPS, game thread busy %, GPU busy ms (mean, p95, max) | How big the slowdown is, and whether GPU busy ever reaches the frame budget (H4) |
+| Q2 | Same, `--cpu-profile` | Per-thread cycles and instructions per frame; effective game-thread clock from cycles/frame × frames/second; the game thread's and render worker's hottest functions | Whether the game thread's instructions grow (its own work), its cycles grow (H5), or the same cycles run at a lower clock (H6), and what grows on the render worker (H1) |
+| Q3 | Same, `BLUEWAKE_GX_FLUSH_CENSUS=1` | Draw-done wait per call, per frame, max | H1 |
+| Q4 | Same, timers around present | Time per frame in present | H2 |
+| Q5 | Same, readback counters | Number and time of synchronous readbacks | H3 |
+| Q6 | HD look on vs off, scale 3 | Q1 to Q3 again | Whether the HD look's slowdown has the same cause |
 
-M1 to M3 need no code change. M4 and M5 may need small opt-in diagnostics in the host, off by default and kept to a few lines, each a separate commit in this PR.
+The diagnostic sequence stops after Q6 because it established the mechanism. Q3 to Q5 and the HD-look comparison are deferred rather than treated as prerequisites for source work.
 
 ## How the result is used
 
@@ -64,11 +116,11 @@ M1 to M3 need no code change. M4 and M5 may need small opt-in diagnostics in the
 ## Commands
 
 ```sh
-# M1/M2: render scale 3 against 4, same build
+# Q1/Q2: render scale 3 against 4, same build
 scripts/render_bench deck@DECK BUILD BUILD --states test_render/states --pairs 3 --warmup 1 \
   --set-build A:DOL_AURORA_RENDER_SCALE=3 --set-build B:DOL_AURORA_RENDER_SCALE=4 --cpu-profile --out render-scale-3v4
 
-# M3: add the flush census
+# Q3: add the flush census
   --set-build A:BLUEWAKE_GX_FLUSH_CENSUS=1 --set-build B:BLUEWAKE_GX_FLUSH_CENSUS=1
 ```
 
