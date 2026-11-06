@@ -17,6 +17,14 @@ interpreter table layout under the Microsoft ABI, so Exact/LLE audio no longer c
 on Windows), with the same DolRecomp. The Builder fetches it at the commit pinned in
 `scripts/builder/profiles/bluewake.sh`; see docs/DEVICE_BUILD.md.
 
+Patches 0197-0205 are RecompCore #49's opt-in Smooth Motion diagnostics and
+efficient soft-effects experiment. They count and time the in-between replay,
+name and split its GPU-profiler passes, select draws for attribution, and offer
+a half-size haze/smoke intermediate. Patches 0206-0207 are RecompCore #53's
+opt-in batching of vertex, uniform, index and storage staging copies and its
+ordering test/CI; texture uploads stay in operation order. BlueWake #563 owns
+the matched Deck qualification and keeps the new paths off unless enabled.
+
 Patches 0115-0125 add the ordered save, shutdown and audio fixes, opt-in display
 timing, and a render-worker identity fix reproduced with ThreadSanitizer. The stability baseline
 pin was `99e4748002d42c1a86fdcb33a47cd0e97292acff`. Tests and hardware limits are in

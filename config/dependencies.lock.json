@@ -112,14 +112,20 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "78c266d20059560fa5efe68be16062c36623af6a",
+      "ref": "refs/pull/53/head",
+      "sha": "05b2493f20e94fd09e5da5da9e7159383dab1367",
       "branch": "bluewake-next",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
-      "verified": "2026-10-31",
+      "verified": "2026-11-05",
       "upstream": {
         "url": "https://github.com/ExpansionPak/RecompCore",
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
+      },
+      "pull_request_base": {
+        "url": "https://github.com/chrissotraidis/RecompCore",
+        "branch": "bluewake-next",
+        "pull_request": 53
       },
       "fork_contents": "the 80 BlueWake commits after the upstream base, including the former unpublished head 3476998bdb5b57a21a9b51daf6aaf5bbdf463f7d and the patches/recompcore series through 0097 (0085-0091 in commit 0f642d4, the iPad device session of 2026-09-26; 0092, HD texture packs and the aspect override, in 7952fa2; 0093, background decoding of HD textures, in 594807d), plus the previously uncommitted GXRuntime core cpu.h/cpu.c and DSPIntTables sources, with .gitmodules pointing DolRecomp at chrissotraidis/DolRecomp branch bluewake (chrissotraidis/RecompCore 2d60636); elliotttate/RecompCore's copy adds patches/recompcore 0098-0113 (bluewake 8ab24da, then windows-release 9618e9d) and points DolRecomp at elliotttate/DolRecomp; chrissotraidis/RecompCore bluewake-next is 9618e9d plus patches 0114-0127 (Windows DSP layout, save safety, pipeline shutdown, audio recovery/capture opt-in display timing the reproduced worker-identity race post-publication card consistency and full-queue audio recovery)",
       "superseded_local_patch": {
@@ -704,6 +710,29 @@
             "patches/recompcore/0196-GXRuntime-the-remembered-alias-also-builds-with-MSVC.patch"
           ],
           "evidence": "irregularthanis's RecompCore #45 (ppc_guest_alias_range_overlaps and an alias registry generation, used by BlueWake #495's gather-pipe alias cache) and #48 (ppc_guest_alias_resolve finds an alias from the last hit, then a 4 KiB page index, with the same results; differential test guest_alias_lookup_test.c, run by BlueWake's Linux and Windows host CI). Steam Deck, rendered, interleaved against 0.9.0 with BlueWake #480 and #495: 31.86 to 36.38 game FPS (+14.2%) over five scenes, the lava room +33%, guest checkpoints identical (BlueWake #501). Merged into bluewake-next with pdale-boop's 0186-0192 for 0.10.0."
+        },
+        "smooth_motion_diagnostics": {
+          "runtime": "a4dbaaa811c280938000ab0e34f08df22366f668",
+          "tracked_patches": [
+            "patches/recompcore/0197-Aurora-count-Smooth-Motion-s-overloads-by-cause-and-.patch",
+            "patches/recompcore/0198-Aurora-DOL_AURORA_FRAME_INTERP_ABLATE-to-attribute-S.patch",
+            "patches/recompcore/0199-Aurora-count-Smooth-Motion-s-per-draw-jobs-constants.patch",
+            "patches/recompcore/0200-Aurora-name-the-in-between-replay-s-passes-apart-in-.patch",
+            "patches/recompcore/0201-Aurora-DOL_AURORA_GPU_PROF-2-reports-each-pass-apart.patch",
+            "patches/recompcore/0202-Aurora-DOL_AURORA_GPU_PROF-2-also-asks-for-timestamp.patch",
+            "patches/recompcore/0203-Aurora-DOL_AURORA_GPU_PROF_CHUNK-times-a-pass-in-chu.patch",
+            "patches/recompcore/0204-Aurora-DOL_AURORA_SKIP_DRAWS-and-DOL_AURORA_DRAW_LOG.patch",
+            "patches/recompcore/0205-Aurora-efficient-soft-effects-an-opt-in-half-size-bu.patch"
+          ],
+          "evidence": "RecompCore #49 adds opt-in counters, ablations, per-pass/chunk timing and draw selection used to attribute Smooth Motion work, plus an opt-in half-size intermediate for haze and smoke. The diagnostic paths default off. The render-scale investigation in BlueWake #563 used the exact a4dbaaa8 stack; its Deck results are recorded in docs/planning/2026-11-05-render_scale_cost."
+        },
+        "staging_copy_batch": {
+          "runtime": "05b2493f20e94fd09e5da5da9e7159383dab1367",
+          "tracked_patches": [
+            "patches/recompcore/0206-Aurora-optionally-batch-frame-staging-copies.patch",
+            "patches/recompcore/0207-Aurora-test-staging-copy-ordering.patch"
+          ],
+          "evidence": "RecompCore #53, stacked on #49: DOL_AURORA_BATCH_STAGING_COPIES=1 batches completed vertex, uniform, index and storage-buffer arenas into a command buffer submitted before render work. Texture uploads retain operation order and the default path is unchanged. A standalone ordering-plan test covers both paths and runs in #53's pull-request CI. BlueWake exposes the setting off by default through its experimental GUI; matched Deck performance and picture qualification remain required in #563."
         }
       }
     },

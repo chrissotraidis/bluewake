@@ -24,10 +24,12 @@ jobs:
           if (-not $runtime -or $runtime.sha -notmatch '^[0-9a-f]{40}$') { throw 'Missing runtime pin' }
           git init ref/recompcore
           if ($LASTEXITCODE) { throw 'Runtime init failed' }
-          git -C ref/recompcore fetch --depth 1 --no-tags --recurse-submodules=no $runtime.url $runtime.sha
+          if (-not $runtime.ref -or $runtime.ref -notmatch '^refs/pull/[0-9]+/head$') { throw 'Missing runtime pull-request ref' }
+          git -C ref/recompcore fetch --depth 1 --no-tags --recurse-submodules=no $runtime.url $runtime.ref
           if ($LASTEXITCODE) { throw 'Runtime fetch failed' }
           git -C ref/recompcore checkout --detach FETCH_HEAD
           if ($LASTEXITCODE) { throw 'Runtime checkout failed' }
+          if ((git -C ref/recompcore rev-parse HEAD) -ne $runtime.sha) { throw 'Runtime ref does not match pinned SHA' }
           $translator = $lock.dependencies | Where-Object id -eq 'dolrecomp'
           if (-not $translator -or $translator.sha -notmatch '^[0-9a-f]{40}$') { throw 'Missing translator pin' }
           git init ref/recompcore/DolRecomp

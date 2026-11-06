@@ -467,6 +467,7 @@ int main(void) {{
         sha = profile_value("RECOMPCORE_SHA")
         dolrecomp_sha = profile_value("DOLRECOMP_SHA")
         url = profile_value("RECOMPCORE_URL")
+        ref = profile_value("RECOMPCORE_REF")
         rc = self.recompcore
         if not (rc / ".git").exists():
             if rc.exists() and any(rc.iterdir()):
@@ -481,7 +482,7 @@ int main(void) {{
             subprocess.run(["git", "remote", "remove", "bluewake"], cwd=rc, capture_output=True)
             subprocess.check_call(["git", "remote", "add", "bluewake", url], cwd=rc)
             self.run("recompcore-fetch", ["git", "-C", rc, "fetch", "--recurse-submodules=no", "--depth", "1",
-                                          "bluewake", sha])
+                                          "bluewake", ref])
             subprocess.check_call(["git", "checkout", "-q", "--detach", "FETCH_HEAD"], cwd=rc)
         if self.git("rev-parse", "HEAD", cwd=rc) != sha:
             die(f"{rc} is not at {sha}")
