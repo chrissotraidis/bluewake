@@ -78,8 +78,21 @@ void bluewake_sprint_reload(void) {
     }
 }
 
+// The parameters as the disc has them: read once, from the game's data before
+// it runs (a save state loaded later may hold them scaled, by a sprint under
+// way where it was taken), or else at the first retrace they look right.
+static void read_base(CPUState* cpu) {
+    const float speed = read_f32(cpu, kMaxSpeed), rate = read_f32(cpu, kRunAnimRate);
+    if (!(speed > 1.0f && speed < 100.0f && rate > 0.1f && rate < 20.0f))
+        return;
+    g_base_speed = speed;
+    g_base_rate = rate;
+    g_have_base = true;
+}
+
 void bluewake_sprint_attach(CPUState* cpu) {
     g_cpu = cpu;
+    read_base(cpu);
     read_factor();
     const char* trace = getenv("BLUEWAKE_SPRINT_TRACE");
     g_trace = trace != NULL && trace[0] == '1';
@@ -144,6 +157,19 @@ static bool pad_sprint(void) {
     return g_pad_sprint;
 }
 
+// A save state was loaded: its game holds Link's speed as the run that took it
+// left it, sprinting or not. It goes back to the disc's, and a sprint still
+// held starts again at the next retrace.
+void bluewake_sprint_state_loaded(CPUState* cpu, bool reapply) {
+    if (reapply && g_have_base) {
+        write_f32(cpu, kMaxSpeed, g_base_speed);
+        write_f32(cpu, kRunAnimRate, g_base_rate);
+    }
+    g_sprinting = false;
+    g_pad_sprint = false;
+    g_stick_idle = 0;
+}
+
 void bluewake_sprint_retrace(void) {
     ++g_retrace;
     CPUState* cpu = g_cpu;
@@ -153,15 +179,10 @@ void bluewake_sprint_retrace(void) {
         g_pad_sprint = false;
         return;
     }
-    if (!g_have_base) {
-        // The parameters as the disc has them (once the game is loaded).
-        const float speed = read_f32(cpu, kMaxSpeed), rate = read_f32(cpu, kRunAnimRate);
-        if (!(speed > 1.0f && speed < 100.0f && rate > 0.1f && rate < 20.0f))
-            return;
-        g_base_speed = speed;
-        g_base_rate = rate;
-        g_have_base = true;
-    }
+    if (!g_have_base)
+        read_base(cpu);
+    if (!g_have_base)
+        return;
     const bool pad = pad_sprint();
     const bool sprint = shift_held() || pad;
     if (sprint != g_sprinting) {

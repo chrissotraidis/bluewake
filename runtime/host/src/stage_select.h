@@ -303,6 +303,23 @@ static inline const BluewakeStageSelectName* bluewake_stage_select_find(const ch
     return NULL;
 }
 
+// BLUEWAKE_STAGE_SELECT_KEY_TEST=retrace[,retrace...] (testing only): F7 is
+// pressed at those retraces, and the log says what came of it.
+static unsigned long long bluewake_stage_select_key_test_at[8];
+static unsigned bluewake_stage_select_key_test_count;
+
+static inline void bluewake_stage_select_key_test_attach(void) {
+    const char* at = getenv("BLUEWAKE_STAGE_SELECT_KEY_TEST");
+    for (char* end = NULL; at != NULL && *at != '\0' && bluewake_stage_select_key_test_count < 8u; at = end) {
+        const unsigned long long retrace = strtoull(at, &end, 10);
+        if (end == at)
+            break;
+        bluewake_stage_select_key_test_at[bluewake_stage_select_key_test_count++] = retrace;
+        if (*end == ',')
+            ++end;
+    }
+}
+
 static inline void bluewake_stage_select_attach(void) {
     // On from the launch environment, or from the settings toggle (Mac and Linux save it under its
     // own key, so a saved setting never overrides BLUEWAKE_STAGE_SELECT=1 on the command line).
@@ -384,6 +401,7 @@ static inline void bluewake_stage_select_attach(void) {
     }
     if (bluewake_stage_select_armed && !bluewake_warp_set)
         fprintf(stderr, "[stage-select] hold R while starting a file to open the developers' stage select\n");
+    bluewake_stage_select_key_test_attach();
     bluewake_stage_select_live = bluewake_stage_select_armed || warp_asked || bluewake_warp_file_pending;
 }
 
@@ -499,6 +517,22 @@ int bluewake_stage_select_state(void) {
 bool bluewake_stage_select_saving_off(void) { return bluewake_card_runtime_writes_refused(); }
 
 bool bluewake_stage_select_saving_kept(void) { return bluewake_card_runtime_saving_kept(); }
+
+static inline void bluewake_stage_select_key_test(unsigned long long retrace) {
+    for (unsigned k = 0; k < bluewake_stage_select_key_test_count; ++k) {
+        if (bluewake_stage_select_key_test_at[k] != retrace)
+            continue;
+        char before[128] = {0}, after[128] = {0};
+        const unsigned seq = bluewake_status_read(before, sizeof before);
+        bluewake_stage_select_hotkey();
+        const bool said = bluewake_status_read(after, sizeof after) != seq;
+        static const char* const kStates[] = {"off", "no file", "in play", "in the menu, way back kept", "in the menu, pick only"};
+        const int state = bluewake_stage_select_state();
+        fprintf(stderr, "[stage-select] test: F7 at retrace %llu: %s%s%s\n", retrace,
+                state >= 0 && state < 5 ? kStates[state] : "?", said ? ", the status line says: " : "",
+                said ? after : "");
+    }
+}
 
 static inline bool bluewake_stage_select_key_pending(void) {
     return atomic_load_explicit(&bluewake_stage_select_key_presses, memory_order_relaxed) != 0u;
@@ -934,6 +968,39 @@ static __attribute__((noinline)) void bluewake_stage_select_dispatch_body(CPUSta
     told = true;
 }
 
+
+// A save state was loaded: the game in memory may be another run's, at the
+// title or in play, and nothing above has seen its file start. What the state
+// carries (main.c's HOSTVARS: in_game, the kept place, used) is restored after
+// this and wins; a state from before those were saved keeps what is read here
+// from the game: a file is going while a stage other than the title's sea
+// (sea_T, which the title and the file select both run in) is loaded with Link
+// in it. The menu's lines are named again and its fixed lines put in English
+// again, whatever this run had done to its own copy.
+static inline void bluewake_stage_select_state_loaded(CPUState* cpu) {
+    char stage[9] = {0};
+    for (u32 i = 0; i < 8u; ++i)
+        stage[i] = (char)mem_read8(cpu, BLUEWAKE_STAGE_SELECT_CUR_STAGE + i);
+    const u32 link = mem_read32(cpu, BLUEWAKE_STAGE_SELECT_LINK);
+    bluewake_stage_select_in_game =
+        stage[0] != '\0' && strcmp(stage, "sea_T") != 0 && link >= 0x80000000u && link < 0x81800000u;
+    bluewake_stage_select_kept = false;
+    bluewake_stage_select_going_back = false;
+    bluewake_stage_select_restore_time = false;
+    bluewake_stage_select_used = bluewake_card_runtime_writes_refused();
+    bluewake_stage_select_key_take();
+    atomic_store_explicit(&bluewake_stage_select_menu_open, false, memory_order_relaxed);
+    bluewake_stage_select_named_list = 0u;
+    bluewake_stage_select_texts_done = false;
+}
+
+// After the state's own values (if it has them) are in.
+static inline void bluewake_stage_select_state_report(void) {
+    if (bluewake_stage_select_live)
+        fprintf(stderr, "[stage-select] state loaded: %s%s\n",
+                bluewake_stage_select_in_game ? "a file is going, F7 opens the stage select" : "no file started yet",
+                bluewake_stage_select_kept ? " (in the menu, with the way back)" : "");
+}
 
 // The per-block entry points: only the flag test is inline in the hot path; the
 // bodies stay out of line so they don't add to host_chassis_edge_service's size.

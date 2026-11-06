@@ -91,6 +91,17 @@ void bluewake_climb_reload(void) {
     }
 }
 
+// A save state was loaded: Link starts it with full stamina, as he would
+// after a rest, not with what he had left before the load.
+void bluewake_climb_state_loaded(void) {
+    g_stamina = 1.0;
+    g_exhausted = false;
+    g_candidate = false;
+    g_ground_frames = 0;
+    atomic_store(&g_hud_stamina, 1.0f);
+    atomic_store(&g_hud_exhausted, false);
+}
+
 void bluewake_climb_attach(CPUState* cpu) {
     (void)cpu;
     read_settings();

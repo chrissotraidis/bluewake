@@ -292,7 +292,10 @@ def collect(args):
             start = state_retrace(state)
             options = ["--state", state.resolve(), "--timeout", args.timeout,
                        "--set", "BLUEWAKE_PERF_LOG=1", "--set", "BLUEWAKE_GUEST_CHECKPOINT_INTERVAL=300",
-                       "--set", "BLUEWAKE_LOOSE_REL_RETRACES=1"]
+                       "--set", "BLUEWAKE_LOOSE_REL_RETRACES=1",
+                       # The state's game as saved (guest checkpoints agree between builds); BLUEWAKE_STATE_REAPPLY=1
+                       # in the environment loads it as a player would.
+                       "--set", f"BLUEWAKE_STATE_REAPPLY={os.environ.get('BLUEWAKE_STATE_REAPPLY', '0')}"]
             if args.card:
                 options += ["--card", Path(args.card).resolve()]
             if tour_start:

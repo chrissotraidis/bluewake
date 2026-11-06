@@ -29,6 +29,10 @@ void bluewake_hd_look_reload(void);
 void bluewake_hd_look_defaults(void);
 // Once per retrace.
 void bluewake_hd_look_retrace(CPUState* cpu);
+// A save state was loaded: HD's sky is found again in it at the next retrace.
+// Without `reapply`, a state's tables are taken only as the GameCube's, as
+// they were before this was added, so the state's game is left as saved.
+void bluewake_hd_look_state_loaded(bool reapply);
 
 extern bool bluewake_hd_distant_islands;
 

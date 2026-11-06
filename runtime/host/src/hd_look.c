@@ -796,16 +796,52 @@ static void sky_load(void) {
 
 static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size);
 
-// The stage whose GameCube Pale table the game's holds (the first entry, then
-// all of it), made the one in play; false if none. Several stages share the
-// GameCube's tables where HD retuned them apart (the fairy fountains, the
-// title's and the epilogue's sea against the sea's, two Triforce caves), so
-// the stage of that name is taken first (play.mCurStage, 0x803C9D3C).
+// The bytes of an entry the host rewrites in place while it keeps a table (bit
+// n: byte n): a Pale entry's colours (0x00-0x20, the linear blend) and a Virt
+// entry's (kVirtColours below: the sky's gain, and the blend). Each retrace it
+// rewrites the four entries the game is blending.
+#define SKY_PALE_LOOSE 0x1FFFFFFFFull
+#define SKY_VIRT_LOOSE 0x1FF770000ull
+#define SKY_LOOSE_ENTRIES 4u
+// Whether a table that holds HD's already is taken as the stage's
+// (BLUEWAKE_STATE_REAPPLY=0 after a load turns it off).
+static bool s_sky_adopt = true;
+
+// Whether the game's table at `table` (count entries of `entry` bytes) holds
+// `want`: every entry to the byte, but for at most `loose_entries` entries
+// that may differ in the bytes `loose` marks. A save state taken while the
+// host kept a table holds it so, whatever the table's size.
+static bool guest_table_is(CPUState* cpu, u32 table, const u8* want, u32 count, u32 entry, u64 loose,
+                           u32 loose_entries) {
+    u32 differ = 0u;
+    for (u32 i = 0; i < count; ++i) {
+        bool same = true;
+        for (u32 b = 0; b < entry; ++b) {
+            if (mem_read8(cpu, table + i * entry + b) == want[i * entry + b])
+                continue;
+            if (b >= 64u || (loose & (1ull << b)) == 0u)
+                return false;
+            same = false;
+        }
+        if (!same && ++differ > loose_entries)
+            return false;
+    }
+    return true;
+}
+
+// The stage whose GameCube Pale table the game's holds, made the one in play;
+// false if none. A save state made with HD's palettes in holds HD's instead,
+// with the host's changes in a few entries (guest_table_is), and is the stage's
+// too. Several stages share the GameCube's tables where HD retuned them apart
+// (the fairy fountains, the title's and the epilogue's sea against the sea's,
+// two Triforce caves), so the stage of that name is taken first
+// (play.mCurStage, 0x803C9D3C), then one that matches to the byte.
 static bool sky_pick(CPUState* cpu, u32 table) {
     char current[9] = {0};
     for (u32 i = 0; i < 8u; ++i)
         current[i] = (char)mem_read8(cpu, 0x803C9D3Cu + i);
     int found = -1;
+    bool found_exact = false;
     // Frozen Hyrule (Hyroom, Hyrule) is sepia in Wind Waker HD, and that look
     // isn't in its palettes: with HD's alone, the room stayed grey and Link's
     // hair turned green-yellow. Kept the GameCube's until the sepia is done.
@@ -813,11 +849,18 @@ static bool sky_pick(CPUState* cpu, u32 table) {
         return false;
     for (u32 i = 0; i < g_sky_count; ++i) {
         const SkyStage* stage = &g_skies[i];
-        if (!guest_equals(cpu, table, stage->data, 0x2Cu) || !guest_equals(cpu, table, stage->data, stage->pale * 0x2Cu))
+        const u8* hd = stage->data + stage->pale * 0x2Cu;
+        const bool exact = guest_table_is(cpu, table, stage->data, stage->pale, 0x2Cu, 0u, 0u) ||
+                           (s_sky_adopt && guest_table_is(cpu, table, hd, stage->pale, 0x2Cu, 0u, 0u));
+        if (!exact && !(s_sky_adopt && guest_table_is(cpu, table, hd, stage->pale, 0x2Cu, SKY_PALE_LOOSE,
+                                                      SKY_LOOSE_ENTRIES)))
             continue;
-        if (found < 0 || strncmp(stage->name, current, 8) == 0)
+        const bool named = strncmp(stage->name, current, 8) == 0;
+        if (found < 0 || named || (exact && !found_exact)) {
             found = (int)i;
-        if (strncmp(stage->name, current, 8) == 0)
+            found_exact = exact;
+        }
+        if (named)
             break;
     }
     if (found < 0)
@@ -845,13 +888,27 @@ static bool guest_equals(CPUState* cpu, u32 address, const u8* bytes, u32 size) 
 // With HD's no longer wanted the GameCube's go back. A stage that loads again
 // over it puts the GameCube's back by itself, and is taken again. Returns the
 // table while the host keeps it, else 0.
-static u32 sky_table(CPUState* cpu, u32 pointer, u32 count, u32 entry, const u8* gc, const u8* hd, u32* owned) {
+// A table that holds HD's already, which the host does not keep yet, is from a
+// save state made with HD's palettes in: the host keeps it too, with HD's own
+// colours back in the entries the state holds blended (or, with HD's no longer
+// wanted, the GameCube's go back as above).
+static u32 sky_table(CPUState* cpu, u32 pointer, u32 count, u32 entry, const u8* gc, const u8* hd, u64 loose,
+                     u32* owned) {
     const u32 table = mem_read32(cpu, pointer);
     if (!guest_pointer(table)) {
         *owned = 0u;
         return 0u;
     }
     const bool is_gc = guest_equals(cpu, table, gc, entry) && guest_equals(cpu, table, gc, count * entry);
+    if (s_sky_adopt && !is_gc && *owned != table &&
+        guest_table_is(cpu, table, hd, count, entry, loose, SKY_LOOSE_ENTRIES)) {
+        if (g_sky)
+            for (u32 i = 0; i < count * entry; ++i)
+                mem_write8(cpu, table + i, hd[i]);
+        *owned = table;
+        if (g_trace)
+            fprintf(stderr, "[hd-look] sky table at 0x%08X: HD already (a save state)\n", table);
+    }
     if (g_sky && is_gc) {
         for (u32 i = 0; i < count * entry; ++i)
             mem_write8(cpu, table + i, hd[i]);
@@ -1005,7 +1062,10 @@ static void sky_layer_dl(CPUState* cpu, u32 material, bool hd) {
 // shifted is kept, to put the 0.2 back.
 static u32 s_shifted[8];  // cleared while no sky actor is there (a stage change makes the models again)
 
-static void sky_layer_shift(CPUState* cpu, u32 mtx, bool hd) {
+// A layer whose material holds HD's stages already (`was_hd`) but whose
+// matrix isn't kept was shifted by a run before (a save state made with HD's
+// sky models): it is kept as it is, not shifted again.
+static void sky_layer_shift(CPUState* cpu, u32 mtx, bool hd, bool was_hd) {
     int at = -1, free_slot = -1;
     for (int i = 0; i < 8; ++i) {
         if (s_shifted[i] == mtx)
@@ -1014,7 +1074,8 @@ static void sky_layer_shift(CPUState* cpu, u32 mtx, bool hd) {
             free_slot = i;
     }
     if (hd && at < 0 && free_slot >= 0) {
-        write_float(cpu, mtx + 0x1Cu, read_float(cpu, mtx + 0x1Cu) - 0.2f);
+        if (!was_hd)
+            write_float(cpu, mtx + 0x1Cu, read_float(cpu, mtx + 0x1Cu) - 0.2f);
         s_shifted[free_slot] = mtx;
     } else if (!hd && at >= 0) {
         write_float(cpu, mtx + 0x1Cu, read_float(cpu, mtx + 0x1Cu) + 0.2f);
@@ -1030,7 +1091,7 @@ static void sky_layer_shift(CPUState* cpu, u32 mtx, bool hd) {
 // rebuilt each frame from these) is scaled to a quarter across. The material's
 // texture matrices are found among its texgen block's pointers by their
 // centre (0.5, 0.5).
-static void sky_layer_wrap(CPUState* cpu, u32 material, u32 m, bool hd) {
+static void sky_layer_wrap(CPUState* cpu, u32 material, u32 m, bool hd, bool was_hd) {
     const u32 texgen = mem_read32(cpu, material + 0x28u);
     if (!guest_pointer(texgen))
         return;
@@ -1041,7 +1102,7 @@ static void sky_layer_wrap(CPUState* cpu, u32 material, u32 m, bool hd) {
             continue;
         if (found++ != 1u)
             continue;
-        sky_layer_shift(cpu, mtx, hd);
+        sky_layer_shift(cpu, mtx, hd, was_hd);
         if (m != 1u)
             return;
         const float now = read_float(cpu, mtx + 0x10u), want = hd ? 0.25f : 1.0f;
@@ -1070,8 +1131,6 @@ static void sky_layer_material(CPUState* cpu, u32 data, bool hd) {
                 s0 = tev + o;
         if (s0 == 0u)
             continue;
-        sky_layer_dl(cpu, material, hd);
-        sky_layer_wrap(cpu, material, m, hd);
         const u32 s1 = s0 + 8u, s3 = s0 + 24u;
         // Stage 1 colour: a, b | c, d. GameCube: CPREV, ZERO | TEXC, TEXC (screen); HD: ZERO, ZERO | ZERO, TEXC.
         const u8 ab = mem_read8(cpu, s1 + 2u), cd = mem_read8(cpu, s1 + 3u);
@@ -1080,6 +1139,8 @@ static void sky_layer_material(CPUState* cpu, u32 data, bool hd) {
         const u8 aab = mem_read8(cpu, s3 + 6u), sw = mem_read8(cpu, s3 + 7u);
         const bool gc = ab == 0x0Fu && cd == 0x88u && aab == 0xE2u && (sw & 0xF0u) == 0x70u;
         const bool is_hd = ab == 0xFFu && cd == 0xF8u && aab == 0xFFu && (sw & 0xF0u) == 0xC0u;
+        sky_layer_dl(cpu, material, hd);
+        sky_layer_wrap(cpu, material, m, hd, is_hd);
         if (g_trace && !gc && !is_hd) {
             static unsigned s_told;
             if (s_told++ < 3u)
@@ -1346,10 +1407,11 @@ static bool sky_kept(CPUState* cpu, u32 table) {
     return true;
 }
 
+static u32 s_pale, s_virt;  // the tables the host keeps
+
 static void sky(CPUState* cpu) {
     if (g_sky_count == 0u)
         return;
-    static u32 s_pale, s_virt;  // the tables the host keeps
     const u32 pale_now = mem_read32(cpu, kPaletInfo);
     if (s_pale != 0u && (pale_now != s_pale || g_sky_data == NULL || !sky_kept(cpu, s_pale))) {
         s_pale = s_virt = 0u;
@@ -1366,9 +1428,9 @@ static void sky(CPUState* cpu) {
         // Last retrace's linear blend comes out before the GameCube's go back.
         if (!g_sky && s_pale != 0u)
             sky_linear(cpu, s_pale, s_virt, false, 1.0f);
-        pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, gc_pale, hd_pale, &s_pale);
+        pale = sky_table(cpu, kPaletInfo, g_sky_pale, 0x2Cu, gc_pale, hd_pale, SKY_PALE_LOOSE, &s_pale);
         if (g_sky_virt != 0u)
-            virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, &s_virt);
+            virt = sky_table(cpu, kVrboxInfo, g_sky_virt, 0x24u, gc_virt, hd_virt, SKY_VIRT_LOOSE, &s_virt);
     }
     g_sky_shown = g_sky && pale != 0u;
     // HD's brightness goes with its palettes: only while they are in place.
@@ -1386,6 +1448,20 @@ static void sky(CPUState* cpu) {
             fprintf(stderr, "[hd-look] HD brightness %.3f at %.1f\n", exposure, read_float(cpu, kEnvTime));
         g_sky_exposure = exposure;
     }
+}
+
+// A save state was loaded: the tables and layers the host kept are this run's,
+// not the state's, so each is found again at the next retrace (sky_pick,
+// sky_table and sky_layer_shift know HD's as a state holds it). With HD's sky
+// off, a state taken with it on holds HD's palettes: they are read from the
+// pack too, so the GameCube's go back over them.
+void bluewake_hd_look_state_loaded(bool reapply) {
+    s_sky_adopt = reapply;
+    if (reapply)
+        sky_load();
+    s_pale = s_virt = 0u;
+    sky_linear_forget();
+    memset(s_shifted, 0, sizeof s_shifted);
 }
 
 void bluewake_hd_look_retrace(CPUState* cpu) {

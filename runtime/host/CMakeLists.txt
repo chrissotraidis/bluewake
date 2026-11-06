@@ -503,6 +503,16 @@ target_include_directories(bluewake_card_runtime_test PRIVATE
 )
 add_test(NAME bluewake_card_runtime_test COMMAND bluewake_card_runtime_test)
 
+add_executable(bluewake_card_state_loaded_test ../../tests/card_state_loaded_test.c)
+target_link_libraries(bluewake_card_state_loaded_test PRIVATE gxruntime)
+target_include_directories(bluewake_card_state_loaded_test PRIVATE
+    ${GXRUNTIME_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+foreach(_case marker saved kept)
+    add_test(NAME bluewake_card_state_loaded_${_case}_test COMMAND bluewake_card_state_loaded_test ${_case})
+endforeach()
+
 add_executable(bluewake_edge_intercepts_test
     ../../tests/edge_intercepts_test.c
     src/edge_intercepts.c

@@ -1296,6 +1296,19 @@ void bluewake_mouse_camera_hook(CPUState* cpu, u32 address) {
     }
 }
 
+// A save state was loaded: the camera in it is where the run that took it
+// left it, so the angles held from before the load would swing it round to
+// this run's last view. The game's camera leads again until the mouse or the
+// stick next turns it, and the wheel's distance eases in from the game's own.
+void bluewake_mouse_camera_state_loaded(void) {
+    g_held = false;
+    g_sum_x = g_sum_y = g_wheel = 0.0;
+    g_zoom_live = 1.0;
+    g_aim_ran = false;
+    g_aim_wait = 0;
+    g_aim_yaw_rest = 0.0;
+}
+
 void bluewake_mouse_camera_retrace(void) {
     ++g_retrace;
     for (unsigned i = 0; i < g_test_count; ++i) {
