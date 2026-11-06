@@ -327,10 +327,10 @@ inline constexpr Setting kSettings[] = {
      .next_launch = Os::All},
     // The direct-call gate (#552): one host word read inline before a direct
     // call between translated chunks, instead of a call into the check. On by
-    // default on Windows and Linux, where it was measured (+12% on Windows and
-    // Linux desktops, +5.5% on a Steam Deck, exact); main.c reads an unset value
-    // the same way. Read when the module is set up.
-    {.key = "BLUEWAKE_DIRECT_GATE", .kind = Kind::Bool, .on = Os::Windows | Os::Linux,
+    // default on Windows, Linux and the Mac, where it was measured (+12% on
+    // Windows and Linux desktops, +5.5% on a Steam Deck, +12.9% on an M3 Max,
+    // exact); main.c reads an unset value the same way. Read when the module is set up.
+    {.key = "BLUEWAKE_DIRECT_GATE", .kind = Kind::Bool, .on = Os::Windows | Os::Linux | Os::Mac,
      .label = "Faster calls inside the game's code", .tab = Tab::Config, .control = Control::Switch,
      .note = "Checks, without a call, whether the game's code can call its next function "
              "directly. The game plays the same either way; turn it off if you suspect it. Takes "

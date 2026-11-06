@@ -80,6 +80,7 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <TargetConditionals.h>
 #endif
 #if defined(_WIN32)
 #include <SDL3/SDL_video.h>
@@ -8715,14 +8716,16 @@ int main(int argc, char** argv) {
             // direct call instead of calling its check. BLUEWAKE_DIRECT_GATE=1
             // hands the word over and 0 keeps it closed, so every direct call
             // takes the out-of-line check as before. Unset, it is open on
-            // Windows and Linux, where it was measured (+12% on Windows and
-            // Linux desktops, +5.5% on a Steam Deck, checkpoints identical), and
-            // closed elsewhere until it is measured there. A module without the
+            // Windows, Linux and the Mac, where it was measured (+12% on Windows
+            // and Linux desktops, +5.5% on a Steam Deck, +12.9% on an M3 Max,
+            // checkpoints identical), and closed on iPhone, iPad and Android
+            // until it is measured there. A module without the
             // export never reads it.
             typedef int (*DirectGateFn)(const volatile u32*);
             DirectGateFn direct_gate = (DirectGateFn)dlsym(lib, "bluewake_composite_direct_gate");
             const char* gate_env = getenv("BLUEWAKE_DIRECT_GATE");
-#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
+#if ((defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)) || \
+    (defined(__APPLE__) && TARGET_OS_OSX)
             const bool gate_default = true;
 #else
             const bool gate_default = false;
