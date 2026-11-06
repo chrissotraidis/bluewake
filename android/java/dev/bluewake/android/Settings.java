@@ -30,6 +30,7 @@ final class Settings {
     static final String HIDE_ON_CONTROLLER = "BlueWake.HideOnController";
     static final String SHOW_TOUCH = "BlueWake.ShowTouchControls";
     static final String SHOW_FPS = "BlueWake.ShowFPS";
+    static final String PERF_PANEL = "BlueWake.PerfPanel";       // 0 off, 2 full (perf_monitor.h)
     static final String MOVEMENT_EXTRAS = "BlueWake.MovementExtras";
     static final String FAST_TRANSITIONS = "BlueWake.FastTransitions";
     static final String QUICK_DOORS = "BlueWake.QuickDoors";

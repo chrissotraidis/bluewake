@@ -24,12 +24,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 
 extern "C" {
 #include "atomic_file.h"
 #include "card_runtime.h"
 #include "gxruntime/memory_card.h"
+#include "perf_monitor.h"
 #include "process_close.h"
 }
 #include "controller_settings.h"
@@ -68,7 +70,23 @@ static BWSettingsSnapshot g_pending = {0u, 3, 0, false, false,
                                         SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_GAMEPAD_BUTTON_START},
                                        false, 0};
 static std::atomic<int> g_thermal{0};
+// The performance panel's mode (perf_monitor.c): off, or the full panel. The
+// Java menu sets it, and touch_controls.cpp's frame tick — once per presented
+// frame, where the presents are already counted for the FPS numbers — feeds it
+// through bluewake_perf_frame below.
+static std::atomic<int> g_perf_mode{BW_PERF_OFF};
 static std::atomic<bool> g_shell_ready{false};
+
+// Called by touch_controls.cpp's frame tick on every presented frame. That file
+// is the iPhone app's, built unchanged here, so it declares this weakly and the
+// iPhone build — which has no perf_monitor.c — leaves it null.
+extern "C" void bluewake_perf_frame(void) {
+    if (g_perf_mode.load(std::memory_order_relaxed) == BW_PERF_OFF)
+        return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    bw_perf_present((unsigned long long)now.tv_sec * 1000000000ull + (unsigned long long)now.tv_nsec);
+}
 
 BWSettingsSnapshot g_bw_settings = {1u, 3, 0, false, false, {0}, false, 0};
 
@@ -171,6 +189,54 @@ JNIEXPORT void SHELL(nativeFps)(JNIEnv* env, jclass, jfloatArray out) {
     v[5] = bluewake_fps_smooth_paused() ? 1.0f : 0.0f;
     if (out != nullptr && env->GetArrayLength(out) >= 6)
         env->SetFloatArrayRegion(out, 0, 6, v);
+}
+
+// The performance panel: off, or the full panel (perf_monitor.h). A change starts
+// the frame times again, so the graph never begins with frames from before.
+JNIEXPORT void SHELL(nativePerfMode)(JNIEnv*, jclass, jint mode) {
+    const int wanted = mode == BW_PERF_FULL ? BW_PERF_FULL : BW_PERF_OFF;
+    if (g_perf_mode.exchange(wanted) != wanted)
+        bw_perf_reset();
+}
+
+// The panel's numbers for PerfPanelView: fps, the average and longest frame, the
+// machine's shares, [15] how many frame times are kept, then the frame times
+// themselves; names[0] is the processor, names[1] the graphics card.
+JNIEXPORT void SHELL(nativePerfSnapshot)(JNIEnv* env, jclass, jfloatArray values, jobjectArray names) {
+    BwPerfStats stats;
+    bw_perf_snapshot(&stats);
+    if (values != nullptr && env->GetArrayLength(values) >= 18 + BW_PERF_HISTORY) {
+        float out[18 + BW_PERF_HISTORY];
+        int kept = 0;
+        for (int i = 0; i < BW_PERF_HISTORY; ++i) {
+            out[18 + i] = stats.frame_ms[i];
+            if (stats.frame_ms[i] > 0.f)
+                kept = i + 1;
+        }
+        out[0] = stats.fps;
+        out[1] = stats.frame_ms_avg;
+        out[2] = stats.frame_ms_max;
+        out[3] = stats.cpu_total_pct;
+        out[4] = stats.cpu_game_pct;
+        out[5] = stats.cpu_temp_c;
+        out[6] = stats.ram_used_mb;
+        out[7] = stats.ram_total_mb;
+        out[8] = stats.ram_game_mb;
+        out[9] = stats.gpu_pct;
+        out[10] = stats.gpu_temp_c;
+        out[11] = stats.gpu_power_w;
+        out[12] = stats.gpu_clock_mhz;
+        out[13] = stats.vram_used_mb;
+        out[14] = stats.vram_total_mb;
+        out[15] = (float)kept;
+        out[16] = stats.cpu_clock_mhz;
+        out[17] = stats.cpu_clock_max_mhz;
+        env->SetFloatArrayRegion(values, 0, 18 + BW_PERF_HISTORY, out);
+    }
+    if (names != nullptr && env->GetArrayLength(names) >= 2) {
+        env->SetObjectArrayElement(names, 0, env->NewStringUTF(stats.cpu_name));
+        env->SetObjectArrayElement(names, 1, env->NewStringUTF(stats.gpu_name));
+    }
 }
 
 // natives is the GameCube A, B, X, Y, Z, Start mapping (SDL gamepad buttons),

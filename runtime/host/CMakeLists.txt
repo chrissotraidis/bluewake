@@ -44,6 +44,7 @@ add_executable(bluewake_host
     src/audio_watch.c
     src/fast_load.c
     src/fps_watch.c
+    src/perf_monitor.c
     src/dpad_menus.c
     src/jump_button.c
     src/climb.c
@@ -171,6 +172,22 @@ add_executable(bluewake_fps_watch_test ../../tests/fps_watch_test.c src/fps_watc
 target_link_libraries(bluewake_fps_watch_test PRIVATE gxruntime)
 target_include_directories(bluewake_fps_watch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME bluewake_fps_watch_test COMMAND bluewake_fps_watch_test)
+
+add_executable(bluewake_perf_monitor_test ../../tests/perf_monitor_test.c src/perf_monitor.c)
+target_include_directories(bluewake_perf_monitor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME bluewake_perf_monitor_test COMMAND bluewake_perf_monitor_test)
+set_tests_properties(bluewake_perf_monitor_test PROPERTIES TIMEOUT 30)
+
+# The panel's hand-written Vulkan structures against the real header, where the build
+# has one (the renderer's pinned headers do): a moved field would otherwise show as a
+# garbled card name rather than a build error.
+add_executable(bluewake_perf_monitor_vk_layout_test ../../tests/perf_monitor_vk_layout_test.c)
+target_include_directories(bluewake_perf_monitor_vk_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(EXISTS ${GXRUNTIME_DIR}/Externals/Vulkan-Headers/include/vulkan/vulkan.h)
+    target_include_directories(bluewake_perf_monitor_vk_layout_test
+        PRIVATE ${GXRUNTIME_DIR}/Externals/Vulkan-Headers/include)
+endif()
+add_test(NAME bluewake_perf_monitor_vk_layout_test COMMAND bluewake_perf_monitor_vk_layout_test)
 
 add_executable(bluewake_bmg_patch_test ../../tests/bmg_patch_test.c)
 target_include_directories(bluewake_bmg_patch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

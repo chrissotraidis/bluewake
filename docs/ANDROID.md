@@ -222,6 +222,18 @@ build first; `--headless` measures without drawing or pacing; `--env` adds launc
 player's display settings). `--probe` also logs the player's position, to check the spot; since #297 it keeps
 the full overlap watch on from a card save, so measure speed without it. The card is only read.
 
+The same numbers are on the phone: **⋯ → Display → Performance Panel → Full** draws a panel in the
+picture's top right corner — the frame rate, the average and longest frame with a graph of them, the game's share
+of the processor, and the memory in use against the whole, with a thin bar under each share. It is the desktop's F9
+panel (`runtime/host/src/perf_monitor.c`) drawn in the Android shell's own idiom, refreshed twice a second, and it
+is remembered with the other display settings. An Android app is not given everything a desktop is: `/proc/stat` is
+denied to it, so the machine-wide processor share is not shown, only the game's own; and a phone publishes no
+graphics card counters or temperatures to apps, so those rows are left out rather than drawn as permanent dashes.
+What the platform does say is used instead: the processors' mean clock and the fastest core (from `cpufreq`), the
+thermal status in place of a temperature, and the SoC's and the card's names from the build and from the driver's
+own GL renderer, as the panel's last lines.
+The one-time `[perf] panel (android)` line in the log says which of them the phone would give.
+
 ## Files
 
 | | |

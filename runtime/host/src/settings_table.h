@@ -144,6 +144,12 @@ inline constexpr Setting kSettings[] = {
      .control = Control::Chooser, .needs = "BLUEWAKE_HD_SUN_SHADOWS", .pane = "Wind Waker HD look settings"},
     {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
      .label = "Show the frame rate   (F9)", .control = Control::Switch},
+    {.key = "BLUEWAKE_PERF_OVERLAY", .kind = Kind::Choice, .fallback = "off", .label = "Performance panel",
+     .control = Control::Chooser,
+     .note = "Off, the frame rate alone. Full adds a panel in the corner: the frame times and a graph of them, the "
+             "machine's CPU, memory and graphics card load, temperatures, power and clocks, and how the picture is "
+             "scaled. F9 cycles all three.",
+     .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_ASPECT_FIT", .old_windows = "keep_aspect", .kind = Kind::Bool, .on = Os::Windows,
      .label = "Keep the picture's shape (black bars rather than stretching)", .control = Control::Custom,
      .next_launch = Os::All},

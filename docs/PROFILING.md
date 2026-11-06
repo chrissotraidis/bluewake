@@ -259,3 +259,32 @@ A CPU-bound game thread shows three signatures together:
 
 That pattern means the translated game itself is too much work for one Zen 2 core. It is
 not a GPU problem, not a GX-worker problem, and not throttling.
+
+## The performance panel (F9)
+
+F9 walks the frame rate setting through its three modes, and the same choice is on the
+Display tab under "Show the frame rate":
+
+- **Off** – nothing is counted or drawn.
+- **Frame rate** – the counter Aurora draws, where "FPS position" puts it.
+- **Full panel** – a panel in the top right corner, drawn by the host, with the frame rate,
+  the frame times and a graph of them, the machine's CPU, memory and graphics card load,
+  temperatures, power and clocks, and how the picture is being made (`DOL_AURORA_RENDER_SCALE`
+  as a multiple of the game's 640x480 frame buffer, the frame limit from Smooth Motion, the
+  window's size).
+
+Everything the panel shows is read while it is on and nothing while it is off, so an A/B run
+with the panel off and the panel as the only difference is a fair comparison. A value the
+machine or the renderer does not report is a dash, never a zero:
+
+- The graphics card's load, memory, temperature, power and clock come from the driver's own
+  counters in `sysfs` (`gpu_busy_percent`, `mem_info_vram_*`, the `hwmon` beside the card).
+  A driver that reports none of them — NVIDIA on Linux, or a driver with no such counters —
+  leaves those lines at "-".
+- The panel's per-frame renderer lines (GPU busy time, pipeline and shader waits, texture
+  uploads) are not in it yet: the host cannot read them, and they need a query from the
+  renderer (issue #536).
+- A Mac has the rate and the frame times, and dashes for the machine.
+
+The numbers come from `runtime/host/src/perf_monitor.c` (rate, frame times, the machine) and
+the panel's drawing from `runtime/host/src/perf_overlay.h`.
