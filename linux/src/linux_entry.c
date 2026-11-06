@@ -9,9 +9,11 @@
 // contains code translated from your disc, never share it):
 //   bluewake, libSDL3.so.*, libwebgpu_dawn.so    the host and its runtime
 //   gGZLE01_recomp.so                           the translated game module
-//   game/GZLE01.iso                              the disc image the game reads
-//   game/main.dol, game/rels/                    prepared from that disc
+//   stage_select/                                the stage select's English names
 //   dsp/dsp_rom.bin, dsp/dsp_coef.bin            only for BLUEWAKE_DSP_MODE=lle
+// No part of the player's disc is in it: the first launch's setup window checks
+// the disc, prepares main.dol and the RELs from it into the install folder, and
+// the game reads the disc image where the player keeps it.
 // Player data, kept outside the app folder so a rebuild never touches it:
 //   ~/.local/share/BlueWake/GZLE01.card          the memory card (saves)
 //   ~/.local/share/BlueWake/sram.bin             the console's settings
@@ -154,11 +156,16 @@ static void resolve_dirs(void) {
     const char* home = getenv("HOME");
     char portable[4096];
     snprintf(portable, sizeof portable, "%sportable.txt", g_exe_dir);
+    char remembered_install[4096] = "";
     if (override != NULL && override[0] != '\0') {
         snprintf(g_data_dir, sizeof g_data_dir, "%s/", override);
     } else if (file_exists(portable)) {
         snprintf(g_data_dir, sizeof g_data_dir, "%suser/", g_exe_dir);
         g_portable = 1;
+    } else if (bw_setup_remembered_install_dir(remembered_install, sizeof remembered_install)) {
+        // The player chose where the game is installed in the setup window; that
+        // choice outlives this launch, unless BLUEWAKE_DATA_DIR says otherwise.
+        snprintf(g_data_dir, sizeof g_data_dir, "%s/", remembered_install);
     } else if (data_home != NULL && data_home[0] != '\0') {
         snprintf(g_data_dir, sizeof g_data_dir, "%s/BlueWake/", data_home);
     } else if (home != NULL && home[0] != '\0') {
@@ -443,24 +450,39 @@ int main(int argc, char** argv) {
     if (mods[0] != '\0')
         setenv("BLUEWAKE_MODS", mods, 1);
 
-    const char* appimage = getenv("APPIMAGE");
     const char* explicit_disc = getenv("BLUEWAKE_DISC");
     const int has_explicit_disc = explicit_disc != NULL && explicit_disc[0] != '\0';
-    // A downloaded AppImage guides a first-time player through disc selection,
-    // optional textures and shortcut installation. Once its remembered disc is
-    // usable, an ordinary launch goes straight to the game. --setup always
-    // reopens the populated window; --iso preserves the former simple picker.
+    // The setup window guides a first-time player through disc selection, the
+    // install folder, optional textures and shortcut installation. Any build
+    // opens it on the first launch, because no build carries the files prepared
+    // from a disc; once a remembered disc's preparation is usable an ordinary
+    // launch goes straight to the game. --setup always reopens the populated
+    // window; --iso preserves the former simple picker.
     const int use_setup = setup_requested ||
-        (!iso_picker_requested && !has_explicit_disc && appimage != NULL && appimage[0] != '\0' &&
+        (!iso_picker_requested && !has_explicit_disc &&
          !bw_disc_has_usable_source(g_exe_dir, g_data_dir));
     const int use_iso_picker = iso_picker_requested && !use_setup;
     if (use_setup) {
         char selected_disc[4096] = "";
         if (explicit_disc != NULL)
             snprintf(selected_disc, sizeof selected_disc, "%s", explicit_disc);
-        const int setup = bw_linux_setup(g_data_dir, selected_disc, sizeof selected_disc);
+        char chosen_install[4096] = "";
+        const int setup = bw_linux_setup(g_data_dir, chosen_install, sizeof chosen_install,
+                                         selected_disc, sizeof selected_disc);
         if (setup <= 0)
             return setup < 0 ? 1 : 0;
+        // The window may have moved the install folder; everything below (saves,
+        // card, caches, logs) follows it.
+        if (chosen_install[0] != '\0') {
+            snprintf(g_data_dir, sizeof g_data_dir, "%s/", chosen_install);
+            make_dirs(g_data_dir);
+            char logs[4096], states[4096];
+            snprintf(logs, sizeof logs, "%slogs", g_data_dir);
+            mkdir(logs, 0755);
+            snprintf(states, sizeof states, "%sstates", g_data_dir);
+            mkdir(states, 0755);
+        }
+        setenv("BLUEWAKE_DATA_DIR", g_data_dir, 1);
         setenv("BLUEWAKE_DISC", selected_disc, 1);
     }
 

@@ -159,7 +159,7 @@ pipeline.
 | Prepare inputs | Fetches pinned dependencies, validates the disc, and extracts `main.dol` plus 415 RELs. | Verified source inputs | `ROOT/ref/recompcore/` and `OUT/game/` | [`dependencies`](../../scripts/linux/build.py), [`disc` and `extract`](../../scripts/linux/build.py) |
 | Generate source | Builds DolRecomp, translates DOL/REL code, verifies the composite digest, and applies selected mods and guarded preparations. | Compilable prepared composite | `OUT/translated/` and `OUT/composite-src/` | [`build_dolrecomp` through `generate`](../../scripts/linux/build.py), [`build_mods` and preparation](../../scripts/linux/build.py) |
 | Train | Builds an instrumented module, runs headless playbacks, and merges profiles unless training is skipped or reused. | Local optimization profile | `OUT/pgo-local/composite.profdata` | [`train`](../../scripts/linux/build.py) |
-| Compile and assemble | Compiles the game module and host, then copies game inputs, DSP data, and provenance into the app folder. | Runnable Linux folder | `OUT/BlueWake/bluewake` and `OUT/BlueWake/gGZLE01_recomp.so` | [`compile_module`](../../scripts/linux/build.py), [`build_app` and `package`](../../scripts/linux/build.py) |
+| Compile and assemble | Compiles the game module and host, then copies the module, the DSP data, the stage names and provenance into the app folder. No game input is copied: the first run prepares `main.dol` and the RELs from the player's disc. | Runnable Linux folder | `OUT/BlueWake/bluewake` and `OUT/BlueWake/gGZLE01_recomp.so` | [`compile_module`](../../scripts/linux/build.py), [`build_app` and `package`](../../scripts/linux/build.py) |
 | Package AppImage | With `--appimage`, packages and audits the assembled outputs. | Portable Linux package | `OUT/BlueWake-x86_64.AppImage` | [`package_appimage`](../../scripts/linux/build.py) |
 
 ### Windows builder
@@ -371,8 +371,10 @@ exact-count gates in [Linux](../../scripts/linux/build.py) (`extract`),
 | Verify module count | Each builder requires exactly 415 extracted RELs before translation begins. | Consistent input set on every platform | Successful extraction-stage log | [Linux](../../scripts/linux/build.py) (`extract`), [Windows](../../scripts/windows/build.py) (`extract`), [Apple](../../scripts/builder/profiles/bluewake.sh) (`profile_extract`) |
 
 These paths are private build intermediates under the caller-selected `OUT`.
-Linux and Windows also copy them into `OUT/BlueWake/game/` for the runnable
-folder. The AppImage packager does not embed the DOL, RELs, or disc image.
+Windows also copies them into `OUT/BlueWake/game/` for the runnable folder.
+The Linux app folder does not: its first run prepares the DOL and the RELs from
+the player's own disc, as the AppImage does. The AppImage packager embeds
+neither the DOL, the RELs, nor the disc image.
 
 The extracted DOL and RELs are game-derived private inputs. They remain in the
 local build tree; the original disc continues to provide runtime assets. See
@@ -590,7 +592,7 @@ signing then diverge by target.
 | --- | --- | --- | --- | --- |
 | Compile module | Uses Clang and LLD with the selected CPU, PGO, tiering, and optimization flags. | Native translated game library | `OUT/composite/gGZLE01_recomp.so` | [`compile_module`](../../scripts/linux/build.py), [`cmake/composite`](../../cmake/composite) |
 | Build host | Compiles the Linux entry, RecompCore runtime, Aurora/Dawn renderer, SDL input/audio, and settings UI. | Native Linux executable | `OUT/app/bluewake` | [`configure_app`](../../scripts/linux/build.py), [`build_app`](../../scripts/linux/build.py), [`linux/CMakeLists.txt`](../../linux/CMakeLists.txt) |
-| Assemble folder | Copies the host, module, DSP data, game inputs, provenance, and optional portable marker into one runnable tree. | Personal runnable Linux build | `OUT/BlueWake/` | [`package`](../../scripts/linux/build.py) |
+| Assemble folder | Copies the host, module, DSP data, the stage names, provenance, and optional portable marker into one runnable tree; the game files are prepared from the player's disc on the first run. | Personal runnable Linux build | `OUT/BlueWake/` | [`package`](../../scripts/linux/build.py) |
 | Package AppImage | With `--appimage`, packages the assembled folder, creates update metadata, and enforces the declared glibc ceiling. | Portable Linux package | `OUT/BlueWake-x86_64.AppImage` and `.zsync` | [`package_appimage`](../../scripts/linux/build.py), [`make_appimage.sh`](../../scripts/linux/make_appimage.sh), [`check_appimage_abi.py`](../../scripts/linux/check_appimage_abi.py) |
 
 `--ci-container` runs the same builder inside

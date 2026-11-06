@@ -131,6 +131,7 @@ add_executable(BlueWake
     src/win_entry.c
     src/win_disc.c
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c
     src/win_settings.cpp
     src/win_crash.cpp
     src/bluewake.rc
@@ -428,7 +429,8 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         endif()
         add_test(NAME bluewake_guest_alias_lookup_${_variant}_test COMMAND bluewake_guest_alias_lookup_${_variant}_test)
     endforeach()
-    add_executable(bluewake_windows_disc_test ${BLUEWAKE_REPO_ROOT}/tests/windows_disc_test.c)
+    add_executable(bluewake_windows_disc_test ${BLUEWAKE_REPO_ROOT}/tests/windows_disc_test.c
+        ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c)
     target_include_directories(bluewake_windows_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_compile_options(bluewake_windows_disc_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
     target_link_libraries(bluewake_windows_disc_test PRIVATE bluewake_posix_compat comctl32 comdlg32)

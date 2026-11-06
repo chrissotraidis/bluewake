@@ -104,7 +104,7 @@ final outputs are:
 
 | Output | Created by | Host path | Contents |
 | --- | --- | --- | --- |
-| Playable app folder | Every complete build | `build/linux/BlueWake/` | `bluewake`, the translated module, DSP files and your disc under `game/` |
+| Playable app folder | Every complete build | `build/linux/BlueWake/` | `bluewake`, the translated module, the DSP files and the stage names; the game files are prepared from your disc on the first run |
 | AppImage | A build with `--appimage` | `build/linux/BlueWake-x86_64.AppImage` | Portable Linux app and translated module; the disc itself is excluded |
 | Update metadata | A build with `--appimage` | `build/linux/BlueWake-x86_64.AppImage.zsync` | Delta-update metadata for that AppImage |
 | Build logs | Every build step | `build/linux/logs/` | Compiler, training, packaging and ABI-audit logs |
@@ -144,14 +144,37 @@ build it updates.
 
     build/linux/BlueWake/bluewake
 
-On an AppImage's first launch, **BlueWake Setup** opens automatically when no
-usable disc has been remembered. Choose the USA revision-0 disc image and,
+On the first launch of either kind of build, **BlueWake Setup** opens
+automatically when no usable disc has been remembered: no build carries the
+game files, so the window checks your disc and prepares them. Choose the USA
+revision-0 disc image and,
 optionally, a Dolphin-format HD texture-pack folder, then press **Start
 BlueWake**. Display, gameplay, controls and other preferences remain in the
 shared F1/Esc settings menu used on every desktop platform. The setup file and
 folder buttons use SDL's native dialog through an XDG
 portal or Zenity. Dragging an ISO/GCM onto the setup window and entering paths
 directly also work.
+
+**Install folder** is where the game goes: the prepared game files, and with them
+your saved games, the memory card, the caches and the logs. It starts at
+`~/.local/share/BlueWake` (or whatever `BLUEWAKE_DATA_DIR` names) and can be
+browsed to another folder; the line under it says how much room the game files
+need and how much the folder has. Setup creates the folder when it does not
+exist yet, and remembers the choice in `install.txt` beside the settings file, so
+later launches use it without `BLUEWAKE_DATA_DIR`. Moving it later does not move
+the saves already in the old folder: copy them across, or keep using the old one.
+
+**Start** opens the preparation screen, which lists the four stages BlueWake
+runs there: checking the disc image, reading the disc, unpacking the 415 game
+modules, and saving the settings. Each stage shows a tick when it is done and a
+mark while it is running, above a progress bar and the importer's own words for
+the current task, with the free space in the data folder underneath. **Show
+log** lists what happened with a timestamp. When the last stage finishes the
+window shows **Ready** and starts the game from there. A failure stays on the
+stage that failed with the importer's sentence, **Show log**, and **Back** to
+the form. Closing the window during the preparation lets it finish first (a few
+seconds): the importer has no abort hook yet, and a half-written preparation
+would have to be redone anyway.
 
 A first import measures the files it is about to write (main.dol and the 415
 `.rel` modules, about 10 MB) and checks the data folder has that much room
@@ -231,8 +254,9 @@ leaves the `user` folder and `portable.txt` alone.
 ## The app folder
 
 `build/linux/BlueWake/` is a personal build: `gGZLE01_recomp.so` is code
-translated from your disc and `game/` holds your disc image. Never share or
-upload it.
+translated from your disc. Never share or upload it. It holds no part of the
+disc: the first launch's setup asks for your disc image and prepares the game
+files from it into the install folder.
 
 ## The AppImage
 
@@ -242,9 +266,11 @@ for delta-capable update tools). It bundles the host, the translated game
 module, the DSP roms and every shared library the host links except the
 glibc/libstdc++ baseline. Build release artifacts on a suitably conservative
 Linux system: like other AppImages, compatibility is limited by the glibc and
-CPU baseline of the build host. The player's disc is not bundled: on first run
-the launcher asks for it and prepares it into the data dir (a disc and files
-extracted from it are never distributed).
+CPU baseline of the build host. The player's disc is not bundled, and neither
+are the files prepared from one: the first run asks for the disc and prepares
+them into the install folder (a disc and files extracted from it are never
+distributed). A folder build's app folder carries neither either, so both
+kinds of build are clean.
 
 ### Build the AppImage
 
@@ -310,14 +336,19 @@ The [latest release](https://github.com/chrissotraidis/bluewake/releases/latest)
 
    - Select your USA GZLE01 revision-0 `.iso` or `.gcm` with **Browse disc...**,
      by typing its path, or by dragging it onto the window.
+   - **Install folder** is where the game is installed; browse to another folder
+     if the default one is on a small or full filesystem. Setup creates it and
+     remembers it for later launches.
    - To use an HD texture pack, enable it and select the pack's `GZL` or
      `GZLE01` folder with **Browse textures...**.
    - Leave **Add or update application-menu and Desktop shortcuts** enabled if
      you want both launchers. The application-menu entry also gets a
      **Configure BlueWake** action that reopens this window.
-   - Once every enabled selection validates, select **Start BlueWake** to save
-     the choices, install the requested launchers, and start the game. The
-     launchers point to this AppImage, so keep it at the same path afterward.
+   - Once every enabled selection validates, select **Start**. The preparation
+     screen checks the disc and writes its game files the first time, then saves
+     the choices and installs the requested launchers; **Start BlueWake** on the
+     **Ready** screen starts the game. The launchers point to this AppImage, so
+     keep it at the same path afterward.
 
 4. **Start BlueWake later.** Selecting **Start BlueWake** records the original
    disc path in `$XDG_DATA_HOME/BlueWake/disc.txt` (normally

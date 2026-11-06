@@ -1,0 +1,2 @@
+/* Made by linux/CMakeLists.txt from version.json, for the setup window. */
+#define BLUEWAKE_VERSION_STRING "@BLUEWAKE_VERSION@"
