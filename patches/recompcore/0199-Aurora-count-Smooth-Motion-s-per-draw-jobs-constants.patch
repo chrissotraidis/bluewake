@@ -1,0 +1,225 @@
+From 55c88c227182dd1dc7086ce217f5a6c4e9eb4450 Mon Sep 17 00:00:00 2001
+From: irregularthanis <343663069+irregularthanis@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 11:37:24 -0500
+Subject: [PATCH 199/205] Aurora: count Smooth Motion's per-draw jobs,
+ constants copies, pooled and blended blocks
+
+[interp-stats] adds jobs (draws queued to the helper), copied (jobs that
+carried their own 2.8 KB constants block), pooled (blocks kept for the next
+frame's matching) and blended (draws that produced a blended block), to size
+the per-draw copies before changing them. Measurement only.
+---
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 41 ++++++++++++++-----
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  7 ++++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  1 +
+ .../aurora/tests/frame_interp_test.cpp        | 30 ++++++++++++++
+ 4 files changed, 68 insertions(+), 11 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 2e0d6bf36e..2013328733 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -50,8 +50,9 @@ std::atomic<int> g_overloadWhy{-1}; // the latest overload's cause, for the log
+ constexpr size_t kCauses = static_cast<size_t>(OverloadCause::Count);
+ std::array<std::atomic<uint64_t>, kCauses> g_overloadCount{};
+ std::array<std::atomic<uint64_t>, kCauses> g_overloadWaitUs{};
++std::atomic<uint64_t> g_jobs{0}, g_copied{0}, g_pooled{0}, g_blendedBlocks{0};
+ std::atomic<uint64_t> g_unstaged{0}, g_delivered{0}, g_skipped{0}, g_cut{0}, g_rejected{0}, g_idle{0}, g_drops{0}, g_raises{0};
+-void count(std::atomic<uint64_t>& counter) noexcept { counter.fetch_add(1, std::memory_order_relaxed); }
++void bump(std::atomic<uint64_t>& counter) noexcept { counter.fetch_add(1, std::memory_order_relaxed); }
+ bool g_frameSkipped = false; // the recording frame has none (recording thread)
+ struct Pacing {
+   uint64_t frame = 0;
+@@ -1620,8 +1621,10 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+   // one put its block there, the caller's comparison says whether this is it.
+   const bool lastPooled = !frame.pool.empty() && g_pooledSerial + 1 == serial;
+   if (frame.pool.empty() ||
+-      (lastPooled ? !repeatsLastDraw : std::memcmp(&frame.pool.back(), &current, sizeof(current)) != 0))
++      (lastPooled ? !repeatsLastDraw : std::memcmp(&frame.pool.back(), &current, sizeof(current)) != 0)) {
+     frame.pool.push_back(current);
++    bump(g_pooled);
++  }
+   g_pooledSerial = serial;
+   // An in-between block made the way the draw before this one's was (same
+   // path, same previous block, same motion, same matrices) from the same
+@@ -2159,6 +2162,8 @@ const gxc::VertexShaderConstants* blend_draw(const DrawInput& input, const gxc::
+                                                         input.haveSamples ? &input.samples : nullptr,
+                                                         input.screenSpace ? &input : nullptr,
+                                                         input.haveCentre ? &input : nullptr, pixel);
++  if (result != nullptr)
++    bump(g_blendedBlocks);
+   g_currentTagged = false;
+   g_currentAge = 0;
+   if (pixel != nullptr)
+@@ -2340,14 +2345,20 @@ void note_overload(OverloadCause cause, double waitMs) noexcept {
+   const auto i = static_cast<size_t>(cause);
+   if (i >= kCauses)
+     return;
+-  count(g_overloadCount[i]);
++  bump(g_overloadCount[i]);
+   g_overloadWaitUs[i].fetch_add(static_cast<uint64_t>(std::max(waitMs, 0.0) * 1000.0), std::memory_order_relaxed);
+   g_overloadWhy.store(static_cast<int>(i), std::memory_order_relaxed);
+   g_overloaded.store(true, std::memory_order_relaxed);
+ }
+ 
+ // Paused frames get no staging (acquire_interp_staging): they count as skipped.
+-void note_unstaged() noexcept { count(g_frameSkipped ? g_skipped : g_unstaged); }
++void note_job(bool copiedConstants) noexcept {
++  bump(g_jobs);
++  if (copiedConstants)
++    bump(g_copied);
++}
++
++void note_unstaged() noexcept { bump(g_frameSkipped ? g_skipped : g_unstaged); }
+ 
+ Stats stats() noexcept {
+   Stats out{};
+@@ -2361,6 +2372,10 @@ Stats stats() noexcept {
+   out.rejected = g_rejected.load(std::memory_order_relaxed);
+   out.idle = g_idle.load(std::memory_order_relaxed);
+   out.unstaged = g_unstaged.load(std::memory_order_relaxed);
++  out.jobs = g_jobs.load(std::memory_order_relaxed);
++  out.copied = g_copied.load(std::memory_order_relaxed);
++  out.pooled = g_pooled.load(std::memory_order_relaxed);
++  out.blended = g_blendedBlocks.load(std::memory_order_relaxed);
+   out.drops = g_drops.load(std::memory_order_relaxed);
+   out.raises = g_raises.load(std::memory_order_relaxed);
+   return out;
+@@ -2396,6 +2411,10 @@ static void log_stats() {
+     std::fprintf(stderr, " %s=%llu/%.0fms", kNames[i],
+                  static_cast<unsigned long long>(now.overloads[i] - last.overloads[i]),
+                  now.waitMs[i] - last.waitMs[i]);
++  std::fprintf(stderr, " jobs=%llu copied=%llu pooled=%llu blended=%llu", static_cast<unsigned long long>(now.jobs - last.jobs),
++               static_cast<unsigned long long>(now.copied - last.copied),
++               static_cast<unsigned long long>(now.pooled - last.pooled),
++               static_cast<unsigned long long>(now.blended - last.blended));
+   std::fputc('\n', stderr);
+   last = now;
+ }
+@@ -2501,7 +2520,7 @@ static void pace_steps() {
+       p.lastDrop = p.frame;
+       p.recent = 0;
+       const int why = g_overloadWhy.load(std::memory_order_relaxed);
+-      count(g_drops);
++      bump(g_drops);
+       if (slow) {
+         std::fprintf(stderr,
+                      "[interp-pace] in-between frames %d -> %d (the game ran below full speed, %.1f game "
+@@ -2522,7 +2541,7 @@ static void pace_steps() {
+       p.budget = p.budget == 0 ? 1 : wanted;
+       p.calm = 0;
+       p.lastRaise = p.frame;
+-      count(g_raises);
++      bump(g_raises);
+       std::fprintf(stderr, "[interp-pace] in-between frames %d -> %d\n", before, p.budget);
+     }
+   } else if (p.lastRaise != 0 && p.frame - p.lastRaise >= kSoon) {
+@@ -2540,15 +2559,15 @@ bool last_blend_repeated() noexcept { return g_blendRepeated; }
+ bool frame_verdict() noexcept {
+   g_lastVerdict = false;
+   if (g_cutRequested.exchange(false, std::memory_order_acq_rel)) {
+-    count(g_cut);
++    bump(g_cut);
+     return false;
+   }
+   if (enabled() && g_frameSkipped) {
+-    count(g_skipped);
++    bump(g_skipped);
+     return false;
+   }
+   if (!enabled() || !g_havePrevious || g_frameCounts.blended == 0) {
+-    count(g_idle);
++    bump(g_idle);
+     return false;
+   }
+   // A cut: most draws have a counterpart that is not plausibly the same thing.
+@@ -2559,10 +2578,10 @@ bool frame_verdict() noexcept {
+       g_frameCounts.rejected - (camera_motion() != nullptr ? g_frameCounts.fresh : 0u);
+   const uint64_t considered = g_frameCounts.matched + rejected;
+   if (considered >= 16 && rejected * 10 > considered * 4) {
+-    count(g_rejected);
++    bump(g_rejected);
+     return false;
+   }
+-  count(g_delivered);
++  bump(g_delivered);
+   g_lastVerdict = true;
+   return true;
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index 7f4b0e1fe2..447638de4a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -71,9 +71,16 @@ struct Stats {
+   uint64_t delivered, skipped, cut, rejected, idle;
+   uint64_t unstaged; // presenting frames with no in-between staging (or it overflowed)
+   uint64_t drops, raises; // pacing budget changes
++  // Per-draw work: jobs queued to the helper, jobs that copied the whole
++  // constants block, blocks pooled for the next frame's matching, and draws
++  // that produced a blended block.
++  uint64_t jobs, copied, pooled, blended;
+ };
+ Stats stats() noexcept;
+ void note_unstaged() noexcept;
++// Recording thread: a job queued for the helper, and whether it carried its own
++// copy of the constants block.
++void note_job(bool copiedConstants) noexcept;
+ // A save state was loaded: the next game frame gets no in-between frames, as
+ // the frame before it is not the one it follows.
+ void request_cut() noexcept;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index d15929c0db..9d4480f689 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -1746,6 +1746,7 @@ uint32_t queue_interp_job(const gxc::DrawPlan& plan, bool repeatsLastDraw, bool
+   // are those of this packet's job before (the helper's copy). The first job
+   // of a packet carries its own.
+   job.constantsCopied = !repeatsLastDraw || h->jobs == 0u;
++  frame_interp::note_job(job.constantsCopied);
+   if (job.constantsCopied)
+     std::memcpy(&job.constants, &plan.constants, sizeof(plan.constants));
+   // pixelRepeats: the pixel constants are those last pushed in this frame
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index d47ffb1847..397881c1e5 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -1498,6 +1498,36 @@ int main() {
+     CHECK(fi::stats().unstaged - after.unstaged == 1);
+   }
+ 
++  // Per-draw work: a job's own copy of the constants is counted apart from
++  // jobs that repeat them; a block is pooled once per run of identical ones,
++  // and a moving draw's blended block is counted.
++  {
++    const fi::Stats before = fi::stats();
++    fi::note_job(true);
++    fi::note_job(false);
++    fi::note_job(false);
++    fi::Stats after = fi::stats();
++    CHECK(after.jobs - before.jobs == 3);
++    CHECK(after.copied - before.copied == 1);
++    fi::set_steps(1);
++    fi::end_game_frame();
++    for (int i = 0; i < 90; ++i)
++      fi::end_game_frame();
++    gxc::DrawPlan plan;
++    const uint8_t payload[] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
++    plan.match_payload = payload;
++    plan.match_payload_size = sizeof(payload);
++    plan.match_primitive = 0x90;
++    plan.vertex_count = 3;
++    const fi::Stats start = fi::stats();
++    blend_plan(plan, draw_at(0.f, 0.f, -10.f));
++    fi::end_game_frame();
++    blend_plan(plan, draw_at(1.f, 0.f, -10.f));
++    after = fi::stats();
++    CHECK(after.pooled - start.pooled == 2);
++    CHECK(after.blended - start.blended == 1);
++  }
++
+   if (g_failures == 0)
+     std::puts("frame_interp_test: all checks passed");
+   return g_failures == 0 ? 0 : 1;
+-- 
+2.46.0
+

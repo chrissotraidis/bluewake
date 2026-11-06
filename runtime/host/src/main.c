@@ -7764,8 +7764,9 @@ int main(int argc, char** argv) {
 
     GetModuleFn get_module = (GetModuleFn)dlsym(lib, "staticrecomp_get_module");
     if (!get_module) { fprintf(stderr, "dlsym: %s\n", dlerror()); return 1; }
-#if defined(__linux__)
-    // The module's code on 2 MB pages (module_hugepages.h; opt-in), before any
+#if defined(__linux__) && !defined(__ANDROID__)
+    // The module's code on 2 MB pages (not on Android: the APK keeps the module
+    // uncompressed inside itself, and SELinux may refuse the remap; #558) (module_hugepages.h; opt-in), before any
     // of it runs.
     {
         const char* huge_env = getenv("BLUEWAKE_MODULE_HUGEPAGES");
