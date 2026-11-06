@@ -1,11 +1,11 @@
 # Gather-pipe alias cache — technical basis
 
 This is the M2 gather-pipe section of the
-[runtime CPU optimization tech plan](https://github.com/irregularthanis/bluewake/blob/9cb28e3785e187c95a7ac62a45f967b43779851b/docs/planning/2026-10-27-runtime_cpu_optimization/TECH_PLAN.md#m2--split-fp-and-gather-pipe-costs),
+[runtime CPU optimization tech plan](https://github.com/chrissotraidis/bluewake/blob/9cb28e3785e187c95a7ac62a45f967b43779851b/docs/planning/2026-10-27-runtime_cpu_optimization/TECH_PLAN.md#m2--split-fp-and-gather-pipe-costs),
 carried with PR [#495](https://github.com/chrissotraidis/bluewake/pull/495) so
 the change is reviewable with its measurements.
 
-Control: upstream [`v0.9.0`](https://github.com/chrissotraidis/bluewake/releases/tag/v0.9.0) at [`211abfd`](https://github.com/chrissotraidis/bluewake/commit/211abfdecf13beb5b9f2120459a1a3cde50dd84e). Measurement tooling: [`d1bb41b`](https://github.com/irregularthanis/bluewake/commit/d1bb41b).
+Control: upstream [`v0.9.0`](https://github.com/chrissotraidis/bluewake/releases/tag/v0.9.0) at [`211abfd`](https://github.com/chrissotraidis/bluewake/commit/211abfdecf13beb5b9f2120459a1a3cde50dd84e). Measurement tooling: [`d1bb41b`](https://github.com/chrissotraidis/bluewake/commit/d1bb41b).
 
 | Surface | Measurement | Safety gate | Output |
 | --- | --- | --- | --- |
@@ -36,7 +36,7 @@ advances to M3.
 ## Diagnostic stage split
 
 Artifact: AppImage SHA-256 `b188e84d…`; module `9cfce5bd…`; source
-[`70b8ee5`](https://github.com/irregularthanis/bluewake/commit/70b8ee5).
+[`70b8ee5`](https://github.com/chrissotraidis/bluewake/commit/70b8ee5).
 The same 120-second, 99 Hz worst-view capture recorded 18,617 samples.
 
 | Stage | Process cycles | Decision |
@@ -119,7 +119,7 @@ build rather than isolating one generated instruction sequence.
 | Role | BlueWake source | RecompCore | AppImage SHA-256 | Difference |
 | --- | --- | --- | --- | --- |
 | Control | [`73ef48e`](https://github.com/chrissotraidis/bluewake/commit/73ef48e1fe3d3ef128ff8a5ee67a2705bc74d4a3) | `47a5229` | `77b734f8…` | PR #480 foundation |
-| Candidate | [`8d8587b`](https://github.com/irregularthanis/bluewake/commit/8d8587b37c360ee91f6947c40118e646a9faf4d8) | `caeedd8` | `5723637a…` | Same foundation plus generation-keyed gather alias cache |
+| Candidate | [`8d8587b`](https://github.com/chrissotraidis/bluewake/commit/8d8587b37c360ee91f6947c40118e646a9faf4d8) | `caeedd8` | `5723637a…` | Same foundation plus generation-keyed gather alias cache |
 
 The same Steam Deck, Game Mode launcher, disabled interpolation pacing, save,
 camera positions and 20-second `perf stat` interval were used for both builds.
