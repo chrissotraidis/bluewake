@@ -26,8 +26,9 @@ int bluewake_disc_check(const char* path, char* error, size_t capacity) {
     return check_failed ? -1 : 0;
 }
 int bluewake_disc_prepare(const char* disc, const char* out, BlueWakeImportProgress progress,
-                          void* user, char* error, size_t capacity) {
-    (void)disc; (void)progress; (void)user;
+                          void* user, BlueWakeImportCancelled cancelled, void* cancel_context,
+                          char* error, size_t capacity) {
+    (void)disc; (void)progress; (void)user; (void)cancelled; (void)cancel_context;
     ++preparations;
     char path[MAX_PATH * 4]; snprintf(path, sizeof path, "%s\\main.dol", out);
     put(path, "synthetic executable");
