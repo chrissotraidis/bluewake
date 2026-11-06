@@ -71,5 +71,10 @@ const char* heart_name(const std::string& filename);
 
 // matches.py: 1 when this HD texture is the audited choice for its name.
 int candidate_priority(const std::string& hd_name, const std::string& hd_resource);
+// HD's own sky clouds (the sea's), which the importer keeps apart from the pack
+// in kHdCloudsFolder for the HD look's "HD's clouds in the sky" switch, in HD's
+// own colour and alpha (scripts/wwhd/matches.py's HD_CLOUDS).
+inline constexpr const char* kHdCloudsFolder = "optional/hd-clouds";
+bool is_hd_cloud(const std::string& hd_name, const std::string& hd_resource);
 
 } // namespace wwhd

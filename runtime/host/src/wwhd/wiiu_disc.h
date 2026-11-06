@@ -2,13 +2,15 @@
 #pragma once
 #include "disc_image.h"
 #include "disc_crypto.h"
-#include <optional>
 #include <memory>
+#include <vector>
 namespace wwhd {
 struct WiiUDiscKeys {
-    DiscKey disc{};
-    std::optional<DiscKey> title;
-    std::optional<DiscKey> common;
+    // A keys file holds every title's key, and a WUD/WUX does not name its own,
+    // so each role is a list of candidates: the image keeps the one that fits.
+    std::vector<DiscKey> disc;   // one of these decrypts the partition table
+    std::vector<DiscKey> title;  // one of these is the disc's title key
+    std::vector<DiscKey> common; // otherwise one of these decrypts its ticket
 };
 struct WiiUDiscEntry {
     std::string path;

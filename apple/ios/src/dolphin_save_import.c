@@ -1,4 +1,4 @@
-// Import Wind Waker saves made by Dolphin; see dolphin_save_import.h.
+// Move Wind Waker saves between Dolphin and BlueWake's card; see dolphin_save_import.h.
 #include "dolphin_save_import.h"
 
 #include <stdlib.h>
@@ -15,6 +15,25 @@
 #define CARD_RECORD 68u
 #define CARD_MAX_FILES 127u
 #define CARD_SYSTEM_BLOCKS 5u
+
+// Offsets in a GameCube directory entry (.gci's 64-byte header, Dolphin's
+// DEntry): 0x06 is reserved and always 0xff, and 0x07 is the image key, whose
+// low two bits are the banner format. That key is what the container keeps as
+// its banner_format, so it goes back into 0x07 rather than 0x06.
+#define ENTRY_GAME 0x00u
+#define ENTRY_RESERVED 0x06u
+#define ENTRY_IMAGE_KEY 0x07u
+#define ENTRY_NAME 0x08u
+#define ENTRY_TIME 0x28u
+#define ENTRY_IMAGE 0x2Cu
+#define ENTRY_ICON_FORMAT 0x30u
+#define ENTRY_ANIMATION 0x32u
+#define ENTRY_PERMISSION 0x34u
+#define ENTRY_COPY_COUNTER 0x35u
+#define ENTRY_FIRST_BLOCK 0x36u
+#define ENTRY_BLOCK_COUNT 0x38u
+#define ENTRY_UNUSED 0x3Au
+#define ENTRY_COMMENTS 0x3Cu
 
 static uint32_t be16(const uint8_t* p) { return (uint32_t)p[0] << 8 | p[1]; }
 static uint32_t be32(const uint8_t* p) { return be16(p) << 16 | be16(p + 2); }
@@ -272,5 +291,42 @@ const char* bw_card_import(const uint8_t* card, size_t size, const BWDolphinSave
     put32(result + 36, fnv1a(result + CARD_HEADER, result_size - CARD_HEADER));
     *out = result;
     *out_size = result_size;
+    return NULL;
+}
+
+const char* bw_card_export(const uint8_t* card, size_t size, uint8_t** out, size_t* out_size) {
+    *out = NULL;
+    *out_size = 0;
+    size_t record;
+    unsigned free_index, used;
+    const char* error = scan_card(card, size, &record, &free_index, &used);
+    if (error != NULL)
+        return error;
+    if (record == 0)
+        return "BlueWake's memory card has no save to export yet.";
+    const uint8_t* r = card + record;
+    if (be32(r + 64) != fnv1a(r + CARD_RECORD, GCZELDA_LENGTH))
+        return "The Wind Waker save on BlueWake's card is damaged.";
+    size_t total = ENTRY + GCZELDA_LENGTH;
+    uint8_t* gci = (uint8_t*)calloc(1, total);
+    if (gci == NULL)
+        return "Out of memory.";
+    memcpy(gci + ENTRY_GAME, r + 44, 6); // game code and company
+    gci[ENTRY_RESERVED] = 0xFFu;
+    gci[ENTRY_IMAGE_KEY] = r[50]; // banner format and icon animation
+    memcpy(gci + ENTRY_NAME, r + 12, 32);
+    put32(gci + ENTRY_TIME, be32(r + 8));
+    put32(gci + ENTRY_IMAGE, be32(r + 52));
+    put16(gci + ENTRY_ICON_FORMAT, be16(r + 56));
+    put16(gci + ENTRY_ANIMATION, be16(r + 58));
+    gci[ENTRY_PERMISSION] = r[51];
+    gci[ENTRY_COPY_COUNTER] = 0;
+    put16(gci + ENTRY_FIRST_BLOCK, CARD_SYSTEM_BLOCKS);
+    put16(gci + ENTRY_BLOCK_COUNT, GCZELDA_LENGTH / BLOCK);
+    put16(gci + ENTRY_UNUSED, 0xFFFFu);
+    put32(gci + ENTRY_COMMENTS, be32(r + 60));
+    memcpy(gci + ENTRY, r + CARD_RECORD, GCZELDA_LENGTH);
+    *out = gci;
+    *out_size = total;
     return NULL;
 }

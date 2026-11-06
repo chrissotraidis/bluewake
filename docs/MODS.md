@@ -10,7 +10,7 @@ effect the next time BlueWake starts, and none of them changes your saves.
 | Widescreen 16:10 | The same code with its aspect-dependent values recomputed for 16:10 (Mac displays, most iPads' shape is closer to it); one widescreen mod at a time | Nothing; it is built in |
 | Widescreen 21:9 | The same code recomputed for 21:9 ultrawide desktop displays (Windows, Linux, Mac) | Nothing; it is built in |
 | HD Textures | Replaces the game's textures with a Dolphin-format pack, such as [Hypatia's HD pack](https://forums.dolphin-emu.org/Thread-hypatia-s-tloz-the-wind-waker-hd-pack-v2-0001a) or [the textures from your own Wind Waker HD disc](WWHD_TEXTURES.md) | The pack's `tex1_…` images: on iPhone and iPad in `Documents/BlueWake/Load/Textures/GZLE01` (Install Texture Pack… copies them there); on the desktop, any folder picked with Choose texture pack folder… |
-| Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart | Nothing; it is built in |
+| Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart. With them, BlueWake's own sea compass switch: on, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD | Nothing; it is built in |
 
 On the iPad, `Documents/BlueWake` is **On My iPad › BlueWake › BlueWake** in the Files app.
 
@@ -47,9 +47,11 @@ Settings** and restart. Each of Better Wind Waker's settings is a switch of its 
 Wind Waker's defaults until you change it: instant text (and holding B to advance), Swift Sail (or Brisk
 Sail, which brakes harder), faster rolling, grappling, block pushing and climbing, Tingle Chests without
 the Tingle Tuner, turning while swinging, no song replays and a faster Ballad of Gales start on;
-an unrestricted boat, skipping the opening movie, an inverted camera and revealing the sea chart start
-off. No patched disc is needed. Swift Sail's new sail texture and icons are Wind Waker HD's art and are
-not included (an HD texture pack can supply them); its name stays "Sail". On the Mac host,
+an unrestricted boat, skipping the opening movie, an inverted camera, revealing the sea chart
+and correcting the sea compass start off. The sea compass switch is BlueWake's own, not Better Wind
+Waker's. On, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD. Off,
+it points north. The switch nops the negation at `0x801FD37C`. No patched disc is needed. Swift
+Sail's new sail texture and icons are Wind Waker HD's art and are not included (an HD texture pack can supply them); its name stays "Sail". On the Mac host,
 `BLUEWAKE_MODS=betterww` turns the settings on and `BLUEWAKE_OPTIONS=name,-name,...` changes them
 (`none` first turns them all off); `scripts/mac/run_host.sh` takes `BWW=1` and `OPTIONS=`.
 
@@ -79,7 +81,7 @@ values and changed message data. BlueWake does the same things at runtime, from
 - **Option sites.** The instructions a setting changes (a `nop`, a branch made unconditional, a
   different constant) are listed with the setting's switch. DolRecomp's `--option-sites` translates each
   site both ways and picks one by `dolrecomp_option_flags[switch]` at run time, so the game is translated
-  once for every combination of settings. Only the 15 chunks that hold a site differ from the base
+  once for every combination of settings. Only the 16 chunks that hold a site differ from the base
   translation; they are the `betterww` mod's variants (3 more combine with a widescreen mod).
 - **Native code.** What Better Wind Waker's added assembly did is C in `runtime/host/src/game_options.c`,
   called from hook sites: turning with the stick while swinging on a rope, negating the camera's

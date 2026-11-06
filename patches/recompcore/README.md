@@ -151,3 +151,118 @@ Patch 0182 is RecompCore #41: the HD look's cloud shadows take the sea's place f
 depth far out on the sea made straight-edged steps (the "square" shadows on Vulkan, a hard band on Metal), with gradient
 noise turned per octave. The cloud, sun-shadow, ambient-occlusion and bloom passes add half an 8-bit step of dither so
 their smooth shades don't band on the sea. 0181 is taken by draft #342.
+
+Patch 0179 is pdale-boop's RecompCore #40, for BlueWake #136: Smooth Motion without the flicker in the HD look, the
+clouds and the wave crests. Every in-between frame gets the HD look's effects (only the first of three at 120 FPS did,
+and the first of five at 180); their shadows and lights come from the in-between frame's camera, moved as
+`frame_interp` moves the scenery, instead of the latest one the game set; and copies drawn with the view matrix and
+their own world positions (the sky's clouds, the wave crests at sea) are paired by the centre of their vertices
+instead of their place in the list, which shifted whenever one faded or came into view and blended a cloud toward its
+neighbour's alpha, with their colours counting too (each cloud is drawn twice, once with alpha 1). The water around a
+swimming Link follows him as well: a ripple's growing rings, the trail of rings behind him and his wake, which stepped
+at 30 FPS or jumped back a ring whenever a new one was born. It sits on `bluewake-next` after #41, so this pin carries
+#37, #38 and #41 as well.
+
+Patch 0183 is pdale-boop's sun shadow map (`aurora_set_sun_shadow_map`). BlueWake turns it on with its sun shadows
+(`BLUEWAKE_HD_SUN_SHADOWS=1`, still off by default); `DOL_AURORA_SUN_SHADOW_MAP=0` keeps the screen's version alone. The HD look's sun shadows came from the screen, so something off screen cast nothing.
+With the map, each EFB pass's solid draws are drawn again from the sun into a depth map before the pass, with two
+fixed pipelines and each draw's own constants (no pipeline per draw), and each pixel's place in the world is looked up
+in it with a turned disc of lookups, at full resolution and without the screen's steps. Alpha-tested scenery (leaves,
+fences) casts its texture's cutout, the sail and flags cast, and blended furniture casts when its vertices stand still;
+the game's own shadows are left out while the map is on (`DOL_AURORA_GAME_SHADOWS=1` keeps them). In an in-between
+frame the draws take their blended constants and the map that frame's camera. The map is four cascades (1,250 to
+80,000 units; 4096 texels each on the high shadow quality, the default, 2048 on medium and low), with a bias for a low sun that grows with the surface's angle to it and nothing at
+the sea's height shading the water. Its long shadows hold until the sun is 3 degrees up, and at night it is drawn
+from the moon (opposite the sun) at half strength, from 12 degrees up. It keeps debug tools for testers, each off
+unless its variable is set (the F3 frame dump, `_DEBUG` views, `DOL_AURORA_SUN_SHADOW_MAP_ALL`,
+`DOL_AURORA_SUN_CASTER_LOG`, `DOL_AURORA_GAME_SHADOW_LOG`); docs/HD_SUN_SHADOW_MAP.md lists them.
+
+Patch 0184 preserves jslay88's RecompCore #43: vendored Dawn advances to `1155e0ed`, whose bundled
+Abseil includes `immintrin.h` correctly when the Linux AppImage builder enables BMI2 through
+`-march=x86-64-v3`. Cache callbacks use Dawn's setters; the prebuilt package tag stays unchanged.
+Patch 0185 keeps those callbacks compatible with the pinned Apple headers by omitting `noexcept`
+on their lambdas (RecompCore #44). The existing header's callback traits do not accept that qualifier.
+Focused Mac, iOS, tvOS and Android NDK source checks and a callback-forwarding fixture pass; full application
+builds and the Sunday gameplay/visual checks are separate. 0183 is reserved for #398's sun shadows.
+
+Patch 0186 is pdale-boop's RecompCore #47, the HD look's fixes for #491, in one commit. The ambient occlusion is
+blurred and stretched back to the scene's size only along each surface. Both steps mixed in neighbours whatever their
+distance, so Link's own shade (under his hat, around his shield) spread about 30 pixels onto the sea behind him, a
+dark outline around him. Each neighbour now counts by how near its distance is to the pixel's, and where there is no
+depth the scene is left as it is. Sun shadows keep the shared blur and apply. It also fades out from 1,000 to 2,500
+units away (`DOL_AURORA_AO_FADE_START`, `_FADE_END`): further away its ring is a few pixels across, and the sea's
+swells darkened a band from about 1,500 to 8,000 units, right up to Link's outline on Outset's pier.
+
+The bloom is screened onto the scene (glow * (1 - scene) + scene) instead of added. Added, it pushed Wind Waker's
+near-white clouds past white: at Outset's pier a fifth of the clouds were flat white, with no shading left. Screened,
+it brightens what is darker as before and tends to white without clipping.
+
+Two fixes go with the HD look's sky left sharp under the far blur. The far blur eases off within 24 pixels of the
+sky, where it stopped at the horizon's edge in a hard band. A lightning strike's invisible model (depth only, about
+100,000 units out) writes no depth while the HD look's effects are on: in the sky it turned the far blur and cloud
+shadows into grey columns from the sea to the clouds.
+
+The HD look's effects go in before a copy of the frame laid back over the scene. Wind Waker does that while the
+camera shakes (`motionBlure`, as when Link's sword hits a tree): the previous frame's copy, which already holds the
+effects, is blended over the scene, and post_fx ran after it, so the shadows, ambient occlusion and cloud shadows
+were multiplied in a second time. Shadowed ground went from 0.65 of its unshadowed brightness down to 0.41 and back
+with each game frame of the blur (#491). A flat draw that samples an EFB copy is marked as such, and the effects go
+in before the first one after the scene's perspective draws.
+
+The ambient occlusion is limited to what is within reach in the scene. Each pair of samples around a pixel occluded
+it when their average was nearer, with the radius measured on screen; across a floor seen at a low angle a short step
+on screen is a long way along the floor, so Link's legs darkened a wide patch of floor in front of him in a test
+room, and long grass at Outset left a dark halo (#491). Each sample now gets a place in the scene from the depth, and
+the pixel a surface normal from the depth around it; a sample shades the pixel only when it is above that surface and
+within the radius of it, each read at a whole texel of the depth so a sample never mixes two distances across an edge
+(bands across the screen otherwise). `DOL_AURORA_AO_DEBUG=2` tints what the occlusion darkens red over the scene
+instead of showing it alone.
+
+The sun shadow map gets the same bias near the camera as far off: two texels along the surface's normal and ten of
+its slope, where near had half a texel and one. On a rock wall the sun only grazes (Outset), the map's texels showed
+through as light and dark vertical stripes that shifted with the camera (#491). And it reads each pixel's distance
+from the depth with the camera's far plane (`aurora_set_world_view_far`, from `hd_look.c`): read as if it were
+infinitely far, an island 8,000 units ahead came out hundreds of units too far, and shaded itself in blocks from the
+waterline up.
+
+Patch 0187 leaves a texture pack's top-level `optional/` folder out of the pack and loads the folders that
+`DOL_AURORA_TEXTURE_PACK_OPTIONAL` names (comma-separated) over it, at a higher priority. The HD importers put Wind
+Waker HD's own sky clouds there (`optional/hd-clouds`), for the HD look's **HD's clouds in the sky** switch. A
+missing folder is reported in the log and not created.
+
+Patch 0188 times the sun shadow map's shadows as Wind Waker HD does. It keeps the sun's shadows while the game draws
+its sun disk (they had stopped well before the sun set) and starts the moon's from 25 degrees up, and keeps the
+moon's shadows at dawn until it is down to 8 degrees, where they had gone as soon as the sun's began.
+
+Patch 0189 is sun shadows on the sea, as in Wind Waker HD. It leaves the sea's surface out of the sun shadow map (it
+takes shadows and casts none): a swell's crest had shaded the trough behind it, specks along the horizon, and a tower
+standing in the sea lost the foot of its shadow. It drops the slope and normal bias on the sea, which can't shade
+itself, so the far platforms' legs meet their shadows. And the gap fill counts only what the map holds, one-sided, so
+wave crests no longer cast through it (sunrise specks, the bow spray's wings).
+
+Patch 0190 shapes sun shadows as Wind Waker HD's. It holds the sun at 24 degrees, its direction too, below which HD's
+shadows stop growing, and thins them out from there to half by -7 degrees and none by -8 (measured in Cemu at the
+Private Oasis). It softens long shadows toward their tips by the caster's distance, adds two debug views
+(DOL_AURORA_SUN_SHADOW_MAP_DEBUG=7, how surfaces face the sun; 8, the shadow in pink), and makes the shadow a colour,
+the shade lit by the sky: HD's on Windfall's dock is about (0.21, 0.39, 0.56) of what is lit. The map has three
+cascades, out to 20,000 units: a fourth held only islands deep in the haze, and shaded Windfall in light-blue blocks
+from across the sea. aurora_set_sun_shadow_strength sets how dark its shadows are (BlueWake's menu), and the slope's
+share of the bias far off is 20 texels, against acne on walls edge-on to the sun.
+
+Patch 0191 draws the three vertices left over at the end of a GX_QUADS draw as a triangle, as the hardware does. The
+frontend dropped quads with fewer than four vertices, and the game draws each night star as a three-vertex quad
+(dKyr_drawStar), so no stars showed at night. It also keeps them steady in Smooth Motion: each star stands at the
+camera's eye plus its place on a small dome, and the in-between frames paired stars by their places in the world, so
+they jumped with the camera or half way to a neighbour; a three-vertex quad is now paired from the camera's eye and
+moved with each in-between camera's eye.
+
+Patch 0192 adds aurora_set_exposure: the scene brightened by the game's factor after the HD look's effects and before
+its bloom, where there is depth and not the sea. BlueWake sends Wind Waker HD's own factor for the hour's palettes,
+its sunlight 3 times at noon on actors and scenery, 1.65 after gamma. HD brightens the sun's light, not the sea or the
+sky. The sea is a mask, from the scene's draws drawn again: those that sample the sea's textures (d_a_sea's water,
+the island rooms' ring of sea and their beaches' surf, by the texture packs' hash) and the sea rooms' untextured
+square of sea, covered by what writes depth in front of them. A height band above the sea had left beaches below a
+swell's height unlit and lit the swells' crests. Pools, rivers and falls count as the sea, and the brightness fades out
+from 10,000 to 25,000 units away (`DOL_AURORA_EXPOSURE_FAR`), where islands are the haze's colour, and tapers off on what is already bright
+(`DOL_AURORA_EXPOSURE_HIGHLIGHTS`, ice and white rock). `DOL_AURORA_SEA_MASK_DEBUG=1`
+shows the mask.

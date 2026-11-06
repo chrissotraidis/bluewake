@@ -4,6 +4,8 @@ $root = Join-Path ([System.IO.Path]::GetTempPath()) ("bluewake-crash-test-" + [g
 New-Item -ItemType Directory (Join-Path $root 'logs') | Out-Null
 try {
     foreach ($mode in @('null', 'abort', 'terminate')) {
+        # Says which crash is running, so a timeout shows where it stopped.
+        Write-Host "crash test: $mode"
         $env:BLUEWAKE_CRASH_TEST = $mode
         $process = Start-Process -FilePath $Driver -ArgumentList ($root + '\') -Wait -PassThru -NoNewWindow
         if ($process.ExitCode -eq 0) { throw "$mode unexpectedly succeeded" }

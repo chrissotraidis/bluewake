@@ -34,6 +34,16 @@ inline size_t count(const std::string& folder) {
     fs::recursive_directory_iterator it(fs::path(folder), fs::directory_options::skip_permission_denied, ec);
     for (const fs::recursive_directory_iterator end; !ec && it != end; it.increment(ec)) {
         std::error_code type;
+        // optional/ holds alternatives the renderer loads over the pack only
+        // when asked (HD's sky clouds), so they are not counted.
+        if (it.depth() == 0 && it->is_directory(type)) {
+            std::string name = it->path().filename().string();
+            for (char& c : name)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (name == "optional")
+                it.disable_recursion_pending();
+            continue;
+        }
         if (!it->is_regular_file(type))
             continue;
         std::string ext = it->path().extension().string();
@@ -87,6 +97,11 @@ inline PackState state_of(size_t textures, bool on) {
         return PackState::Off;
     return textures > 0 ? PackState::Ready : PackState::Empty;
 }
+
+// What an import left out: textures whose name already had a replacement, and
+// HD resources that could not be read. Amber, between the green of a pack that
+// loaded and the red of one that did not.
+inline ImVec4 skipped_color() { return ImVec4(1.f, 0.78f, 0.33f, 1.f); }
 
 inline ImVec4 state_color(PackState s) {
     switch (s) {

@@ -20,9 +20,13 @@ struct ImportProgress {
 
 struct ImportOptions {
     std::string hd_folder; // decrypted content folder, or a USA WUD/WUX image
-    std::string disc_key_file; // image input: defaults to game.key beside it
-    std::string title_key_file; // optional decrypted disc title key
-    std::string common_key_file; // otherwise common.key decrypts the image ticket
+    // Each of these is a key file (one key, or a keys.txt with one per line),
+    // or a key typed or pasted into the import form. An empty disc key file
+    // defaults to game.key beside the image, and an empty common key file to
+    // common.key beside it.
+    std::string disc_key_file;
+    std::string title_key_file;  // optional decrypted disc title key
+    std::string common_key_file; // otherwise the common key decrypts the ticket
     std::string gc_disc;   // the GameCube GZLE01 rev 0 .iso/.gcm
     std::string output;    // a new folder for the pack
     std::function<void(const ImportProgress&)> progress;

@@ -26,11 +26,13 @@ Android integration is in [draft #347](https://github.com/chrissotraidis/bluewak
 
 1. Choose **Folder…** for your decrypted Wind Waker HD dump: the folder that
    holds `code`, `content` and `meta` (as Cemu uses it), or its `content` folder.
-   Alternatively, choose **WUD/WUX Image…**, then your disc key and either a
-   common key or a decrypted title key. Key files are 16-byte binary files or
-   text containing 32 hexadecimal digits. The menus show filenames, never key
-   values; key selections are used only for this import and are not saved in
-   settings. Cancelling a key picker returns to key selection. On iPhone/iPad,
+   Alternatively, choose **WUD/WUX Image…**, then the disc key and either a
+   common key or a decrypted title key. Each key can be 32 hexadecimal digits
+   typed or pasted into the form, or a key file. A keys file for the emulators
+   (`keys.txt`: one key per line, `#` comments, for every title) works as it is:
+   BlueWake tries its keys and keeps the one that decrypts this disc, so there
+   is no line to pick. Key selections are used only for this import and are not
+   saved in settings. Cancelling a key picker returns to key selection. On iPhone/iPad,
    cancelling the initial folder/image picker ends the flow; reopen **Import
    from Wind Waker HD…** to start again.
 2. BlueWake reads it with the GameCube disc it already plays and makes the pack
@@ -97,8 +99,11 @@ and use `build\wwhd-tools\Scripts\python.exe` wherever the commands below say
 ## Import your discs
 
 For a WUX/WUD image, supply your disc key and a common key file. Keys are
-16-byte binary files or text files containing 32 hexadecimal digits. The
-importer decrypts the disc's own embedded ticket to obtain its title key.
+16-byte binary files or text files containing 32 hexadecimal digits. The app
+also takes a `keys.txt` for the emulators, with every title's key in it, and
+picks the one that decrypts your disc; this script reads one key per file, so
+give it that disc's own line. The importer decrypts the disc's own embedded
+ticket to obtain its title key.
 
 ```sh
 build/wwhd-tools/bin/python scripts/import_wwhd_textures.py WindWakerHD.wux \
@@ -182,6 +187,13 @@ Texture Pack…**, turn on **HD Textures**, and restart.
 
 The pack contains PNG textures, `_mipN` mipmaps and `import-report.json` with
 source checksums, tool/dependency records, matches and skipped conflicts.
+Each skipped conflict (`conflicts`) lists its GameCube originals and every HD
+texture that disagreed (HD has two or more under one name), for choosing one
+by eye. The one chosen for a texture file goes in
+`runtime/host/src/wwhd/picked.inc`, which both importers read and prefer over
+`PREFERRED` (`scripts/wwhd/matches.py`, `candidate_priority()` in
+`runtime/host/src/wwhd/ui.cpp`, which choose by name); a conflict not there
+keeps the GameCube texture.
 When a fallback is supplied, its selected keys and file checksums are also
 recorded in the report. Unsupported fallback filenames are listed there.
 The detailed report is local game-derived metadata; keep it with your private
@@ -210,7 +222,16 @@ expects. Missing levels down to 1x1 are generated. Conflicting artwork for the s
 texture key is skipped, except for explicitly audited shared-artwork variants.
 Those choices preserve the original UV composition instead of HD debug-room,
 figurine or photographic-cloud variants. Selected alternatives are recorded
-in the report. Tiny placeholders and shader ramp textures stay
+in the report. HD's own sky clouds (the sea's `ws_naka06`, `ws_mae08`, `ws_mae09` and `cloudtx_01`-`03`) are written
+apart, in the pack's `optional/hd-clouds`, in HD's own colour and alpha: two of them are GameCube intensity
+bands that HD draws from colour with the cloud in alpha, so the GameCube's intensity would turn them into a grey
+haze. HD's `ws_naka06` is written for the GameCube's `ws_naka07` too: HD draws each cloud layer from one
+texture, its own colour and alpha, and the HD look's sky draws the GameCube's layers the same way. The pack
+leaves that folder out; the HD look's **HD's clouds in the sky** switch loads it over the pack
+([WWHD_LOOK.md](WWHD_LOOK.md)), and the report lists them under `optional`. HD's sky and light palettes for
+every stage on both discs (each stage's Pale and Virt tables, 130 stages) go in `optional/hd-sky/stages.bin`
+for the HD look's `BLUEWAKE_HD_SKY`; the report gives their count under `optional.hd-sky`. Both importers make
+the same bytes (`scripts/wwhd/sky.py`, `runtime/host/src/wwhd/sky.h`). Tiny placeholders and shader ramp textures stay
 original. Different UV layouts or changed names need separate, verified
 mappings and are not guessed.
 
@@ -237,6 +258,8 @@ including splitting HD's panorama into the two original sprite planes.
 RGBA8 and BC1-5 layout surfaces preserve color, luminance and alpha;
 unmapped redesigned HUD images and JPA particle textures remain
 unsupported. Unsupported resources and textures are listed in the report.
+A GameCube material file (`.bmt`) that counts a chunk it doesn't hold is read
+to its end: it holds no textures, and isn't listed.
 
 ## Source and verification
 

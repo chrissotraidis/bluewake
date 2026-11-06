@@ -49,6 +49,8 @@ final class Shell {
     static native byte[] nativeCardImport(byte[] card, byte[] save, int source, int destination, String[] error);
     /** Extract main.dol and rels/ from the disc into the game dir; null = success, else the reason. */
     static native String nativeDiscPrepare(String iso, String gameDir);
+    /** The card written out as a Dolphin .gci, or null with error[0] set. The card is only read. */
+    static native byte[] nativeCardExport(byte[] card, String[] error);
 
     static void log(String line) {
         try {
