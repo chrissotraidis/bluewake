@@ -155,6 +155,17 @@ CPU cycles the app's two busy threads spend per frame (the game thread, about 70
 `libmain.so` is linked with `-Bsymbolic-functions`: its exported functions (the host's, Dawn's and SDL's C entry
 points) were called through the PLT even from within libmain.
 
+### Speed options from the Linux build
+
+The builder prepares the floating-point work from #553 (`fp_checks`) by default, as the Windows and Linux builders do. `--no-fp-checks` builds without it, and `--conservative` leaves it out with the rest.
+
+The direct-call gate from #552 is built into every module but stays closed unless you open it. To try it:
+
+1. Build with `--direct-gate` (and `--device SERIAL`), so the module's training on the phone runs with the gate open.
+2. Install with the gate open: `python scripts/android/install.py --env BLUEWAKE_DIRECT_GATE=1`. That writes the setting to `files/launch.env`, which the app reads when it starts. Install again with `--env ''` to clear it.
+
+Neither has been measured on Android yet.
+
 ## Install
 
 ```bash

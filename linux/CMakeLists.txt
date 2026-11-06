@@ -220,6 +220,17 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
 
+    # The direct-call check (cmake/composite/direct_calls.h): in this optimized
+    # build the constant addresses take the plain check, as in the game module.
+    add_executable(bluewake_direct_calls_test
+        ${BLUEWAKE_REPO_ROOT}/tests/direct_calls_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/direct_calls.c)
+    target_include_directories(bluewake_direct_calls_test PRIVATE
+        ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_REPO_ROOT}/tests)
+    target_compile_definitions(bluewake_direct_calls_test PRIVATE
+        BLUEWAKE_EDGE_FILTER=1 BW_EDGE_WATCH_INCLUDE="direct_call_watch.inc")
+    add_test(NAME bluewake_direct_calls_test COMMAND bluewake_direct_calls_test)
+
     # Source-only contracts for helpers awaiting whole-module qualification.
     foreach(_variant plain global cache)
         set(TEST_TARGET bluewake_gather_memory_${_variant}_test)
@@ -252,6 +263,28 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
         endif()
         add_test(NAME ${TEST_TARGET} COMMAND ${TEST_TARGET})
     endforeach()
+
+    # The host's gather-writer selection, including Linux's batching default (#531).
+    add_executable(bluewake_gather_host_test
+        ${BLUEWAKE_REPO_ROOT}/tests/gather_host_test.c
+        ${BLUEWAKE_REPO_ROOT}/cmake/composite/gather_pipe.c)
+    target_include_directories(bluewake_gather_host_test PRIVATE
+        ${GXRUNTIME_DIR}/include ${BLUEWAKE_REPO_ROOT}/cmake/composite ${BLUEWAKE_HOST_SRC})
+    target_link_libraries(bluewake_gather_host_test PRIVATE gxruntime)
+    set_target_properties(bluewake_gather_host_test PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME bluewake_gather_host_test COMMAND bluewake_gather_host_test)
+    # Smooth Motion: blending, verdicts, pacing and its overload/verdict counts.
+    add_executable(bluewake_frame_interp_test ${GXRUNTIME_DIR}/graphics/aurora/tests/frame_interp_test.cpp)
+    target_link_libraries(bluewake_frame_interp_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)
+    add_test(NAME bluewake_frame_interp_test COMMAND bluewake_frame_interp_test)
+    set_tests_properties(bluewake_frame_interp_test PROPERTIES TIMEOUT 30)
+
+    # Efficient soft effects: which draws take the half-size buffer, their runs,
+    # and that the buffer blended once equals each quad blended in turn.
+    add_executable(bluewake_soft_effects_test ${GXRUNTIME_DIR}/graphics/aurora/tests/soft_effects_test.cpp)
+    target_link_libraries(bluewake_soft_effects_test PRIVATE GXRuntime::gxcore)
+    add_test(NAME bluewake_soft_effects_test COMMAND bluewake_soft_effects_test)
+    set_tests_properties(bluewake_soft_effects_test PROPERTIES TIMEOUT 30)
 
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)

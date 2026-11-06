@@ -27,10 +27,14 @@ jobs:
         run: python3 tests/test_mac_sqlite.py
       - name: Preserve explicit Windows optimization cache selection
         run: python3 tests/test_windows_prepared_cache.py
+      - name: Windows builder prepares fp_checks by default and keeps the direct-call gate opt-in
+        run: python3 tests/test_windows_perf_options.py
       - name: Android --app-only reuses only the module it was compiled as
         run: python3 tests/test_android_app_only.py
       - name: Android training requires player control before accepting a profile
         run: python3 tests/test_android_training.py
+      - name: Android builder prepares fp_checks by default and keeps the direct-call gate opt-in
+        run: python3 tests/test_android_perf_options.py
       - name: Linux builder contracts
         run: python3 tests/test_linux_ci_container.py
       - name: Require complete guest checkpoint comparison coverage
@@ -47,6 +51,7 @@ jobs:
           python3 tests/test_direct_calls.py
           python3 tests/test_inline_gpr.py
           python3 tests/test_lean_deadlines.py
+          python3 tests/test_fp_checks.py
           python3 tests/native_j3d_source_test.py
           # Match the Apple Python used by PadMint.command.
           /usr/bin/python3 --version

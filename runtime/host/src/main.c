@@ -38,6 +38,7 @@
 #include "fps_watch.h"
 #include "dpad_menus.h"
 #include "jump_button.h"
+#include "module_hugepages.h"
 #include "settings_menu.h"
 #include "sprint.h"
 #include "quick_doors.h"
@@ -1569,7 +1570,14 @@ static unsigned g_guest_clock_reports;
 static unsigned g_decrementer_context_reports;
 static unsigned g_interrupt_delivery_reports;
 BLUEWAKE_TRACE_STORAGE(g_guest_clock_trace);
-static bool g_guest_decrementer_pending;
+// The direct-call gate (cmake/composite/direct_skip.h, #503 M5). The decrementer
+// and interrupt-source flags live in its word, so every write to either also
+// updates what the module reads inline before a direct call; closed and
+// pi_pending are set by host_skip_fast_refresh and host_direct_gate_pi. Closed
+// until the inline answer is on.
+static BwHostGate g_direct_gate = {.bits = {.sources_dirty = true, .closed = 1u}};
+static bool g_direct_gate_on;
+#define g_guest_decrementer_pending (g_direct_gate.bits.decrementer_pending)
 // Opt-in census for W1 (docs/archive/status/REORGANIZATION_2026-09-17.md). The external
 // interrupt is delivered only when bluewake_scheduler_interrupt_safe() says the
 // pc is an architectural interrupt boundary; the decrementer has no such test.
@@ -1697,8 +1705,9 @@ static void deliver_decrementer_exception(CPUState* cpu);
 static u32 host_canonical_linked_pc(u32 pc);
 // Interrupt-source recomputation gate; see the block comment at its definition.
 // Declared here because the chassis edge service, which runs once per block
-// boundary, tests it to skip a call that would return immediately.
-static bool g_interrupt_sources_dirty = true;
+// boundary, tests it to skip a call that would return immediately. Its storage
+// is the direct-call gate's first byte (initially true).
+#define g_interrupt_sources_dirty (g_direct_gate.bits.sources_dirty)
 
 static u64 host_cycle_min_source(u64 current, u64 candidate, int tag,
                                  int* source) {
@@ -2227,7 +2236,9 @@ static bool g_actor_search_native = true;
 static u64 g_actor_search_native_nodes;
 static u64 g_actor_search_native_runs;
 
-static inline const u8* bw_search_word(CPUState* cpu, u32 address) {
+// Inline: out of line, the call and its three saved registers were most of its
+// cost (#503, Steam Deck: every word took the plain-RAM path); seven call sites.
+static inline __attribute__((always_inline)) const u8* bw_search_word(CPUState* cpu, u32 address) {
     if ((address & 3u) != 0u)
         return NULL;
     return get_ram_ptr(cpu, address, 4u, NULL);
@@ -2370,21 +2381,50 @@ static bool g_direct_call_trace;
 // Conservative by construction: `simple` is off whenever an address-independent
 // check could refuse, and the address lists always include Forest Water's and
 // the draw tags' addresses whether or not those features are on.
-static BwHostSkipFast g_skip_fast = {0u, {0u, 0u}, {0xFFFFFFFFu, 0xFFFFFFFFu}, {0u, 0u}};
+static BwHostSkipFastV4 g_skip_fast = {{0u, {0u, 0u}, {0xFFFFFFFFu, 0xFFFFFFFFu}, {0u, 0u}}};
 static bool g_skip_fast_on;
 static bool g_skip_verify; // BLUEWAKE_DIRECT_SKIP_VERIFY=1: the counts at exit
-static void host_skip_fast_refresh(void) {
-    if (!g_skip_fast_on)
-        return;
-    g_skip_fast.single[0] = g_module1_raw_base != 0u ? g_module1_raw_base + 0xD4u : 0u;
-    g_skip_fast.single[1] = bluewake_forest_water_tree_timer_check;
-    g_skip_fast.range_first[0] = BLUEWAKE_PARTICLE_DRAW_FIRST;
-    g_skip_fast.range_span[0] = BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST;
-    g_skip_fast.range_first[1] = BLUEWAKE_WAKE_DRAW_FIRST;
-    g_skip_fast.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
-    g_skip_fast.simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
-                         !g_overlap_watch_until_control;
+// A single address the module could meet as a constant target in the main
+// executable's code; the gate cannot stand for the singles test then.
+static bool host_skip_single_in_main_code(u32 address) {
+    return address >= BW_GATE_MAIN_FIRST && address < BW_GATE_MAIN_END;
 }
+static void host_skip_fast_refresh(void) {
+    if (!g_skip_fast_on) {
+        g_direct_gate.bits.closed = 1u;
+        return;
+    }
+    g_skip_fast.base.single[0] = g_module1_raw_base != 0u ? g_module1_raw_base + 0xD4u : 0u;
+    g_skip_fast.base.single[1] = bluewake_forest_water_tree_timer_check;
+    g_skip_fast.base.range_first[0] = BLUEWAKE_PARTICLE_DRAW_FIRST;
+    g_skip_fast.base.range_span[0] = BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST;
+    g_skip_fast.base.range_first[1] = BLUEWAKE_WAKE_DRAW_FIRST;
+    g_skip_fast.base.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
+    // Bit 0: the inline path may answer; bits 1..5: the stage select's hooks,
+    // which only a v4 module reads (direct_skip.h, #524). A v3 module never gets
+    // the fast path while the stage select is live, so it never sees them.
+    const bool simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
+                        !g_overlap_watch_until_control;
+    g_skip_fast.base.simple = simple ? 1u | (bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u) : 0u;
+    // The gate (#552) answers constant targets in the main executable's code
+    // without the address test, and all five stage-select hooks are there: keep
+    // it closed while the stage select is live, so those calls take the
+    // address test and its hook bits (exact; the gate's gain then waits).
+    g_direct_gate.bits.closed = !simple || bluewake_stage_select_live ||
+                                host_skip_single_in_main_code(g_skip_fast.base.single[0]) ||
+                                host_skip_single_in_main_code(g_skip_fast.base.single[1]);
+    _Static_assert(BLUEWAKE_STAGE_SELECT_CHANGE == BW_SKIP_KNOWN_CHANGE &&
+                       BLUEWAKE_STAGE_SELECT_DATA_SELECT == BW_SKIP_KNOWN_DATA_SELECT &&
+                       BLUEWAKE_STAGE_SELECT_EXECUTE == BW_SKIP_KNOWN_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE == BW_SKIP_KNOWN_PLAY_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_MENU_DELETE == BW_SKIP_KNOWN_MENU_DELETE,
+                   "the module's known stage-select watches match stage_select.h");
+}
+_Static_assert(BW_SKIP_RANGE0_FIRST == BLUEWAKE_PARTICLE_DRAW_FIRST &&
+               BW_SKIP_RANGE0_LAST == BLUEWAKE_PARTICLE_DRAW_LAST &&
+               BW_SKIP_RANGE1_FIRST == BLUEWAKE_WAKE_DRAW_FIRST &&
+               BW_SKIP_RANGE1_LAST == BLUEWAKE_WAKE_DRAW_LAST,
+               "direct_skip.h's ranges are the ones host_skip_fast_refresh hands over");
 static u64 g_direct_call_queries, g_direct_call_allowed;
 
 /* Read-only handshake for direct calls. Use the same dynamic predicate as
@@ -3811,6 +3851,14 @@ static inline bool host_publish_changed_sources(
     return true;
 }
 
+// The gate's pi_pending byte: what the plain check reads as
+// *bw_host_pi_cause & *bw_host_pi_mask. The PI registers change only while the
+// sources are dirty (#503 M4-T02) or in the main loop between turns (the PE
+// commits), so it is taken where the dirty flag clears and before each dispatch.
+static void host_direct_gate_pi(void) {
+    g_direct_gate.bits.pi_pending = (g_interrupts.pi_cause & g_interrupts.pi_mask) != 0u;
+}
+
 static void host_refresh_interrupt_sources(CPUState* cpu) {
     if (!g_interrupt_sources_dirty)
         return;
@@ -3824,7 +3872,9 @@ static void host_refresh_interrupt_sources(CPUState* cpu) {
     // the distances invariant: the sync and the deadline both measure the same
     // cycle-domain lag, so a sync that advances a device cursor by n also
     // advances the elapsed term behind that device's deadline by n.
-    if (!host_publish_changed_sources(&sources))
+    const bool changed = host_publish_changed_sources(&sources);
+    host_direct_gate_pi();
+    if (!changed)
         return;
     bluewake_cycle_domain_rebudget(&g_cycle_domain, cpu);
 }
@@ -7714,6 +7764,24 @@ int main(int argc, char** argv) {
 
     GetModuleFn get_module = (GetModuleFn)dlsym(lib, "staticrecomp_get_module");
     if (!get_module) { fprintf(stderr, "dlsym: %s\n", dlerror()); return 1; }
+#if defined(__linux__)
+    // The module's code on 2 MB pages (module_hugepages.h; opt-in), before any
+    // of it runs.
+    {
+        const char* huge_env = getenv("BLUEWAKE_MODULE_HUGEPAGES");
+        if (huge_env != NULL && strcmp(huge_env, "1") == 0) {
+            uintptr_t moved_start = 0;
+            size_t moved = 0;
+            const char* why = "";
+            if (bluewake_module_text_hugepages(dylib_path, &moved_start, &moved, &why)) {
+                fprintf(stderr, "[module] huge pages: %zu MB of code copied, %zu MB on huge pages\n",
+                        moved >> 20, bluewake_module_text_huge_kb((const void*)moved_start) >> 10);
+            } else {
+                fprintf(stderr, "[module] huge pages: off (%s)\n", why);
+            }
+        }
+    }
+#endif
 
     const StaticRecompModuleDesc* mod = get_module();
     if (!bluewake_guest_checkpoint_interval(
@@ -8600,6 +8668,10 @@ int main(int argc, char** argv) {
                                        const u32*, CanSkipFn, void*, const BwHostSkipFast*, bool);
         DirectCallsV3Fn direct_calls_v3 = (DirectCallsV3Fn)
             dlsym(lib, "bluewake_composite_direct_calls_v3");
+        typedef int (*DirectCallsV4Fn)(bool, const bool*, const bool*, const u32*,
+                                       const u32*, CanSkipFn, void*, const BwHostSkipFastV4*, bool);
+        DirectCallsV4Fn direct_calls_v4 = (DirectCallsV4Fn)
+            dlsym(lib, "bluewake_composite_direct_calls_v4");
         const char* direct_env = getenv("BLUEWAKE_DIRECT_CALLS");
         const char* direct_trace = getenv("BLUEWAKE_DIRECT_CALL_TRACE");
         g_direct_call_trace = direct_trace != NULL && strcmp(direct_trace, "1") == 0;
@@ -8608,12 +8680,13 @@ int main(int argc, char** argv) {
                           getenv("BLUEWAKE_PER_BLOCK_TURNS") == NULL &&
                           dlsym(lib, "bluewake_set_edge_service") != NULL;
         // With the lazy overlap watch the host's answer depends on the address
-        // alone, so a module that can (v3) reads it inline instead of calling
-        // the host at every direct call. Not with the stage select, which has
-        // its own checks, or with the call trace, which counts the calls.
+        // alone, so a module that can reads it inline instead of calling the
+        // host at every direct call. v4 adds stage-select's fixed watches;
+        // older modules retain the v2 callback while stage selection is live.
         const char* verify_env = getenv("BLUEWAKE_DIRECT_SKIP_VERIFY");
-        bool want_fast = g_lazy_overlap && direct_calls_v3 != NULL && !bluewake_stage_select_live &&
-                         !g_direct_call_trace;
+        bool want_fast = g_lazy_overlap && !g_direct_call_trace &&
+                         (direct_calls_v4 != NULL ||
+                          (direct_calls_v3 != NULL && !bluewake_stage_select_live));
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
         want_fast = false;
 #endif
@@ -8623,11 +8696,32 @@ int main(int argc, char** argv) {
         if (want_fast) {
             g_skip_fast_on = true;
             host_skip_fast_refresh();
-            enabled = direct_calls_v3(
-                want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
-                &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL,
-                &g_skip_fast, verify);
+            if (direct_calls_v4 != NULL)
+                enabled = direct_calls_v4(
+                    want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
+                    &g_interrupts.pi_cause, &g_interrupts.pi_mask,
+                    bluewake_stage_select_live ? host_direct_can_skip_stage_select
+                                               : host_direct_can_skip,
+                    NULL, &g_skip_fast, verify);
+            else
+                enabled = direct_calls_v3(
+                    want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
+                    &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL,
+                    &g_skip_fast.base, verify);
             g_skip_fast_on = enabled;
+            host_skip_fast_refresh();
+            // The gate (direct_skip.h): the module reads one word inline before a
+            // direct call instead of calling its check. Opt-in while it is
+            // measured: BLUEWAKE_DIRECT_GATE=1 hands the word over; otherwise
+            // the gate stays closed and every direct call takes the out-of-line
+            // check as before. A module without the export never reads it.
+            typedef int (*DirectGateFn)(const volatile u32*);
+            DirectGateFn direct_gate = (DirectGateFn)dlsym(lib, "bluewake_composite_direct_gate");
+            const char* gate_env = getenv("BLUEWAKE_DIRECT_GATE");
+            const bool want_gate = gate_env != NULL && strcmp(gate_env, "1") == 0;
+            host_direct_gate_pi();
+            g_direct_gate_on = enabled && direct_gate != NULL &&
+                               direct_gate(want_gate ? &g_direct_gate.word : NULL) == 1;
         } else {
             enabled = direct_calls != NULL && direct_calls(
                 want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
@@ -8639,8 +8733,9 @@ int main(int argc, char** argv) {
             dlsym(lib, "bluewake_composite_edge_filter");
         if (edge_filter != NULL)
             edge_filter(enabled);
-        fprintf(stderr, "[chassis] direct-calls=%s inline-answer=%s%s\n", enabled ? "on" : "off",
-                g_skip_fast_on ? "on" : "off", g_skip_fast_on && verify ? " (verify)" : "");
+        fprintf(stderr, "[chassis] direct-calls=%s inline-answer=%s%s gate=%s\n", enabled ? "on" : "off",
+                g_skip_fast_on ? "on" : "off", g_skip_fast_on && verify ? " (verify)" : "",
+                g_direct_gate_on ? "on" : "off");
     }
     {
         typedef int (*NativeJ3DFn)(bool, bool (*)(void*, const CPUState*, u32), void*);
@@ -8684,7 +8779,8 @@ int main(int argc, char** argv) {
     const BluewakeGatherMode gather_mode = bluewake_gather_pipe_configure(
         set_gather_word, set_gather_bytes, dol_platform_gx_write,
         dol_platform_gx_write_bytes_available() ? dol_platform_gx_write_bytes : NULL,
-        host_feature_wanted("BLUEWAKE_GATHER_PIPE") ? "1" : "0", getenv("BLUEWAKE_GATHER_PIPE_BATCH"),
+        host_feature_wanted("BLUEWAKE_GATHER_PIPE") ? "1" : "0",
+        bluewake_gather_pipe_batch_option(getenv("BLUEWAKE_GATHER_PIPE_BATCH")),
         g_gx_fifo_trace || BLUEWAKE_EDGE_CENSUS);
     fprintf(stderr, "[chassis] gather-pipe=%s\n",
             gather_mode == BLUEWAKE_GATHER_BATCH ? "batch" :
@@ -14500,6 +14596,7 @@ int main(int argc, char** argv) {
             g_turn_downcount_before_last_block = cpu.downcount;
         }
         bluewake_turn_entry_begin(&g_turn_entry, &cpu, cpu.pc);
+        host_direct_gate_pi(); // the main loop's PE commits change the PI cause
         int dispatched = mod->dispatch(&cpu, cpu.pc);
         if (turn_census)
             host_turn_exit_classify(&cpu, dispatched);
@@ -16459,6 +16556,13 @@ int main(int argc, char** argv) {
             skip_counts(&unsafe, &conservative, &inline_answers);
         fprintf(stderr, "[direct-skip] verify: inline=%llu unsafe=%llu conservative=%llu\n", inline_answers,
                 unsafe, conservative);
+        SkipCountsFn gate_counts = (SkipCountsFn)dlsym(lib, "bluewake_composite_direct_gate_counts");
+        if (gate_counts != NULL) {
+            unsafe = conservative = inline_answers = 0ull;
+            gate_counts(&unsafe, &conservative, &inline_answers);
+            fprintf(stderr, "[direct-gate] verify: answers=%llu unsafe=%llu conservative=%llu\n",
+                    inline_answers, unsafe, conservative);
+        }
     }
     fprintf(stderr,
             "[collision-provenance] summary ground_cross_returns=%llu "

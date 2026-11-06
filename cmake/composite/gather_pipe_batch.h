@@ -20,9 +20,17 @@ extern u8 bw_gather_pipe_buffer[BW_GATHER_PIPE_BATCH + 8u];
 extern u32 bw_gather_pipe_length;
 void bw_gather_pipe_flush(void);
 
-static inline void bw_gather_pipe_drain(void) {
+#if defined(BLUEWAKE_GATHER_PIPE_PROFILE)
+#define BW_GATHER_PIPE_DRAIN static __attribute__((noinline))
+#else
+#define BW_GATHER_PIPE_DRAIN static inline
+#endif
+
+BW_GATHER_PIPE_DRAIN void bw_gather_pipe_drain(void) {
     if (__builtin_expect(bw_gather_pipe_length != 0u, 0))
         bw_gather_pipe_flush();
 }
+
+#undef BW_GATHER_PIPE_DRAIN
 
 #endif
