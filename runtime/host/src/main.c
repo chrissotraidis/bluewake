@@ -14593,8 +14593,13 @@ int main(int argc, char** argv) {
         if (g_runqueue_trace &&
             late_worker_callback_trace_reports < 48u &&
             blocks >= 31000000ull &&
+// bluewake-unwatched-begin
+            /* diagnostic only: a trace on refuses every skip (host_direct_can_skip),
+             * and a bare literal here would make the save routine a watch entry, one
+             * the inliner and the direct-call rewrite both refuse (#565). */
             ((dispatch_input_pc == 0x80328F40u &&
               dispatch_input_lr == 0x802B09C4u) ||
+// bluewake-unwatched-end
              dispatch_input_pc == 0x802B09C4u)) {
             fprintf(stderr,
                     "[sched] late-worker-callback #%u input=0x%08X "
@@ -14660,8 +14665,13 @@ int main(int argc, char** argv) {
         if (g_runqueue_trace &&
             late_scheduler_callback_trace_reports < 48u &&
             blocks >= 31000000ull &&
+// bluewake-unwatched-begin
+            /* diagnostic only: a trace on refuses every skip (host_direct_can_skip),
+             * and a bare literal here would make the save routine a watch entry, one
+             * the inliner and the direct-call rewrite both refuse (#565). */
             ((dispatch_input_pc == 0x80328F40u &&
               dispatch_input_lr == 0x802B4100u) ||
+// bluewake-unwatched-end
              dispatch_input_pc == 0x802B4100u)) {
             fprintf(stderr,
                     "[sched] late-scheduler-callback #%u input=0x%08X "
