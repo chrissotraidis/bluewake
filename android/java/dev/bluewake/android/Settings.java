@@ -43,6 +43,7 @@ final class Settings {
     static final String MOD_WIDESCREEN = "BlueWake.Mod.Widescreen";
     static final String MOD_WIDESCREEN_1610 = "BlueWake.Mod.Widescreen1610";
     static final String MOD_HD_TEXTURES = "BlueWake.Mod.HDTextures";
+    static final String TEXTURE_PACK_FOLDER = "BlueWake.TexturePackFolder";
     static final String MOD_BETTERWW = "BlueWake.Mod.BetterWW";
     static final String HD_LOOK = "BlueWake.HDLook";           // applies at launch (runtime/host/src/hd_look.h)
     static final String DPAD_MENUS = "BlueWake.DpadMenus";     // applies at once (runtime/host/src/dpad_menus.h)
@@ -157,7 +158,32 @@ final class Settings {
 
     // ------------------------------------------------------------ at launch
 
-    File texturePackDirectory() { return new File(dataDir, "Load/Textures/GZLE01"); }
+    File installedTexturePackDirectory() { return new File(dataDir, "Load/Textures/GZLE01"); }
+
+    File texturePackDirectory() {
+        String relative = prefs.getString(TEXTURE_PACK_FOLDER, "Load/Textures/GZLE01");
+        File folder = new File(dataDir, relative);
+        return validTexturePack(folder) ? folder : installedTexturePackDirectory();
+    }
+
+    private boolean validTexturePack(File folder) {
+        try {
+            String root = new File(dataDir, "Load/Textures").getCanonicalPath() + File.separator;
+            return folder.getCanonicalPath().startsWith(root);
+        } catch (IOException ex) {
+            return false;
+        }
+    }
+
+    boolean selectTexturePack(File folder) {
+        if (!folder.isDirectory() || !validTexturePack(folder)) return false;
+        try {
+            String relative = folder.getCanonicalPath().substring(dataDir.getCanonicalPath().length() + 1);
+            return prefs.edit().putString(TEXTURE_PACK_FOLDER, relative).commit();
+        } catch (IOException ex) {
+            return false;
+        }
+    }
 
     /**
      * The launch-time settings as environment variables (apple/ios/src/ios_entry.m's), set before the game
