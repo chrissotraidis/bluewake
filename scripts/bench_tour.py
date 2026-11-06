@@ -3,6 +3,7 @@
 
     scripts/bench_tour.py CARD APP [--stop-retraces N] [--untrained]
         [--mode rendered|headless|both] [--state FILE]
+        [--setup-state FILE]
     scripts/bench_tour.py compare A.json B.json
 
 The card is copied with scripts/card_set_restart.py into a scratch folder,
@@ -10,6 +11,18 @@ and quest log 1 is placed on Outset (sea 44 0). A card continue is not the
 measurement: two continues of one build already diverge before the save
 loads. One headless setup plays that card and saves a state at retrace
 2390. Each measured mode loads the state and warps.
+
+--setup-state FILE keeps that state: the setup pass writes it to FILE, and a
+later run that names the same FILE loads it instead of playing the card route
+again. Two runs are only comparable when they load the same guest state, and
+the card continue is not reproducible (the same build booted twice from the
+same card differs from retrace 300), so this is what the "two runs of the same
+build: identical checkpoints" check needs. Write it outside the repository: it
+holds guest memory. Without the option the state stays in a temporary directory
+and each run makes its own. The pass has to reach gameplay: when its log has no
+[boot-milestone] play-scene line, the tour stops and names the last milestone it
+did reach, because a card with no save in quest log 1 starts a new file, ends on
+the name-entry screen, and still exits 0.
 
 Default stops, from retrace 2400, one every --stop-retraces (default 1800).
 The run ends at 11400:
@@ -82,6 +95,11 @@ CHECKPOINT = re.compile(
 )
 FAILED_CHECKPOINT = re.compile(r"\[guest-checkpoint\] failed retrace=(?P<retrace>\d+)")
 STATE_LOADED = re.compile(r"\[state\] loaded \S+ retrace=(?P<retrace>\d+)")
+# The host prints one of these per boot step ("play-scene", "file-select", …) and a
+# summary line whose fields are name=value, which this does not match.
+MILESTONE = re.compile(r"\[boot-milestone\] (?P<name>[a-z][a-z-]*) retrace=(?P<retrace>\d+)")
+GAMEPLAY_MILESTONE = "play-scene"
+SUMMARY_GAMEPLAY = re.compile(r"\[boot-milestone\] summary\b.*\bplay_scene=1\b")
 
 
 class Stop(NamedTuple):
@@ -193,6 +211,41 @@ def setup_environment(base, *, scratch, card, state_path) -> dict[str, str]:
     })
     _isolate(env, scratch, card)
     return env
+
+
+def setup_milestones(text: str) -> list[tuple[int, str]]:
+    """The [boot-milestone] lines a run printed, in the order it printed them."""
+    found = []
+    for line in text.splitlines():
+        match = MILESTONE.search(line)
+        if match:
+            found.append((int(match["retrace"]), match["name"]))
+    return found
+
+
+def setup_verdict(code: int, state_path: Path, log_text: str) -> tuple[int, str]:
+    """Whether a setup pass may be measured from, and why not when it may not.
+
+    An empty message means the state is usable: the pass exited 0, it wrote the
+    state, and a [boot-milestone] line says the route reached gameplay. A card
+    whose quest log 1 holds no save does not continue; it starts a new file,
+    stops at the name-entry screen, and still exits 0 with a state written, so
+    the exit code and the file alone accept a state that was never in play
+    (#458).
+    """
+    if code != 0:
+        return code, f"setup failed ({code})"
+    if not state_path.is_file():
+        return 1, f"setup wrote no state to {state_path}"
+    milestones = setup_milestones(log_text)
+    if any(name == GAMEPLAY_MILESTONE for _retrace, name in milestones):
+        return 0, ""
+    if SUMMARY_GAMEPLAY.search(log_text):
+        return 0, ""
+    last = milestones[-1][1] if milestones else "none"
+    return 1, (f"setup never reached gameplay: its last [boot-milestone] is {last}, "
+               f"so the state at {state_path} is not a play state. A card whose quest "
+               f"log 1 holds no save starts a new file instead of continuing")
 
 
 def _mean(values: list[float]):
@@ -421,7 +474,8 @@ def _modes(mode: str) -> list[str]:
     return [mode]
 
 
-def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state) -> int:
+def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state,
+              setup_state=None) -> int:
     stops = UNTRAINED_STOPS if untrained else DEFAULT_STOPS
     end = tour_end(stops, stop_retraces)
     warp = warp_string(stops, stop_retraces)
@@ -437,20 +491,33 @@ def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state
         cap = end if origin is None else origin + stop_retraces
         warp_value = None
     else:
-        print(" ".join(card_restart_argv(card, card_out)))
-        restarted = subprocess.run(card_restart_argv(card, card_out))
-        if restarted.returncode != 0:
-            return restarted.returncode
-        state_path = scratch / "tour.bwstate"
-        setup = setup_environment(base, scratch=scratch, card=card_out, state_path=state_path)
-        setup_log = scratch / "setup.log"
-        setup_code = _run_app(app, setup, setup_log)
-        if setup_code != 0 or not state_path.is_file():
-            print(f"setup failed ({setup_code}); log {setup_log}", file=sys.stderr)
-            return setup_code or 1
-        load_state = state_path
+        kept_state = Path(setup_state) if setup_state else None
         cap = end
         warp_value = warp
+        if kept_state is not None and kept_state.is_file():
+            print(f"reusing the setup state {kept_state}", file=sys.stderr)
+            load_state = kept_state
+        else:
+            print(" ".join(card_restart_argv(card, card_out)))
+            restarted = subprocess.run(card_restart_argv(card, card_out))
+            if restarted.returncode != 0:
+                return restarted.returncode
+            state_path = kept_state if kept_state is not None else scratch / "tour.bwstate"
+            if kept_state is not None:
+                kept_state.parent.mkdir(parents=True, exist_ok=True)
+            setup = setup_environment(base, scratch=scratch, card=card_out, state_path=state_path)
+            setup_log = scratch / "setup.log"
+            setup_code = _run_app(app, setup, setup_log)
+            setup_text = setup_log.read_text(encoding="utf-8", errors="replace")
+            code, problem = setup_verdict(setup_code, state_path, setup_text)
+            if problem:
+                print(f"{problem}; log {setup_log}", file=sys.stderr)
+                if kept_state is not None:
+                    state_path.unlink(missing_ok=True)
+                return code or 1
+            if kept_state is not None:
+                print(f"wrote the setup state {kept_state}", file=sys.stderr)
+            load_state = state_path
     modes = {}
     for mode_name in _modes(mode):
         env = measurement_environment(
@@ -518,7 +585,8 @@ def _run_main(argv: list[str]) -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("card", help="memory card. Unused when --state is set; the player's card is never modified.")
+    parser.add_argument("card", help="memory card. Unused when --state is set or --setup-state names an "
+                                     "existing file; the player's card is never modified.")
     parser.add_argument("app", help="BlueWake executable")
     parser.add_argument("--stop-retraces", type=int, default=1800,
                         help="retraces at each stop (default 1800)")
@@ -530,6 +598,10 @@ def _run_main(argv: list[str]) -> int:
                              "if headless does not run, use rendered.")
     parser.add_argument("--state", metavar="FILE",
                         help="load this state instead of the card route; does not set BLUEWAKE_TEST_WARP")
+    parser.add_argument("--setup-state", metavar="FILE",
+                        help="keep the card route's state in FILE and reuse it when it exists, "
+                             "so repeated runs measure the same guest state. Keep it out of the "
+                             "repository")
     args = parser.parse_args(argv)
     if args.stop_retraces <= 0:
         parser.error("--stop-retraces must be positive")
@@ -540,6 +612,7 @@ def _run_main(argv: list[str]) -> int:
         untrained=args.untrained,
         mode=args.mode,
         state=args.state,
+        setup_state=args.setup_state,
     )
 
 

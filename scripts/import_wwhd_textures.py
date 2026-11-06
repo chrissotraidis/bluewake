@@ -24,8 +24,9 @@ from wwhd.formats import FormatError, HDTexture, MAX_FILE, bfres, bflim, for_gc_
 from wwhd.fallback import add_fallback
 from wwhd.title import title_image
 from wwhd.layout import HEARTS, SWIM_ICONS, heart_image, inventory_names
-from wwhd.matches import candidate_priority
+from wwhd.matches import HD_CLOUDS, HD_CLOUDS_FOLDER, HD_CLOUDS_SOURCE, candidate_priority, picked_priority
 from wwhd.font import BitmapFont
+from wwhd.sky import HD_SKY_FILE, HD_SKY_FOLDER, find_dzs, pack_all
 from wwhd.ui import LAYOUT_SPRITES, OPENING_PANELS, fit_sprite, font_sprites, opening_sprite
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -196,7 +197,13 @@ def source_textures(data: bytes, path: str, targets, layout=None):
                 yield hd, [t for t in candidates if (t.width, t.height) == (w, h)]
 
 
-def index_gc(path: Path, errors: list):
+# A stage's file: the GameCube's res/Stage/STAGE/Stage.arc's dzs/stage.dzs, HD's STAGE_Stage.szs's Stage.bfres.
+GC_STAGE = re.compile(r"(?:^|/)res/Stage/([^/]+)/Stage\.arc/.*stage\.dzs$", re.IGNORECASE)
+HD_STAGE = re.compile(r"(?:^|/)([^/]+)_Stage\.szs/Stage\.bfres$")
+
+
+def index_gc(path: Path, errors: list, stages: dict | None = None):
+    """The GameCube disc's textures; with `stages`, each stage's dzs into it by name (for HD's palettes)."""
     textures = []
     with path.open("rb") as f:
         header = validate_disc_header(f)
@@ -211,6 +218,10 @@ def index_gc(path: Path, errors: list):
             f.seek(e["offset"])
             try:
                 for name, data in leaves(f.read(e["size"]), e["path"]):
+                    stage = GC_STAGE.search(name) if stages is not None else None
+                    if stage:
+                        stages[stage.group(1)] = data
+                        continue
                     try:
                         textures.extend(gc_textures(data, name))
                     except (FormatError, UnicodeError) as ex:
@@ -287,7 +298,8 @@ def build(args) -> dict:
     if output.is_relative_to(ROOT) and output.relative_to(ROOT).parts[0] not in ("build", "local-research", "game", "generated"):
         raise FormatError("inside the checkout, extracted art must stay in ignored build/ or local-research/")
     errors = []
-    originals = index_gc(args.gc_disc, errors)
+    gc_stages, hd_stages = {}, {}
+    originals = index_gc(args.gc_disc, errors, gc_stages)
     targets = defaultdict(list)
     for t in originals:
         targets[(resource(t.source), t.name.lower())].append(t)
@@ -295,6 +307,7 @@ def build(args) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix="." + output.name + "-", dir=output.parent))
     matches, conflicts, unmatched = {}, set(), []
+    optional_clouds = {}
     scanned, decoded = 0, 0
     try:
         for source, archive in hd_files(args.hd_source, args):
@@ -313,6 +326,11 @@ def build(args) -> dict:
                             p = PurePosixPath(path)
                             layouts[str(p.parent)][p.name] = data
                 for path, data in members:
+                    stage = HD_STAGE.search(path)
+                    if stage and stage.group(1) in gc_stages and stage.group(1) not in hd_stages:
+                        at = find_dzs(data)
+                        if at is not None:
+                            hd_stages[stage.group(1)] = data[at:]
                     layout = layouts.get(str(PurePosixPath(path).parent))
                     for hd, candidates in source_textures(data, path, targets, layout):
                         gc = [t for t in candidates if compatible(t, hd)]
@@ -333,10 +351,24 @@ def build(args) -> dict:
                             digests = {fmt: hashlib.sha256(b"".join(im.tobytes() for im in variant)).hexdigest()
                                        for fmt, variant in variants.items()}
                             decoded += 1
+                            if hd.name.lower() in HD_CLOUDS and resource(hd.source) == HD_CLOUDS_SOURCE:
+                                # The cirrus layer's colour (naka07) is HD's naka06 too: HD draws each cloud layer
+                                # as one texture, its own colour and alpha (the host's one-sheet layers).
+                                also = (targets.get((resource(hd.source), "ws_naka07"), [])
+                                        if hd.name.lower() == "ws_naka06" else [])
+                                for original in gc + also:
+                                    key = original.filename()
+                                    if key in optional_clouds:
+                                        continue
+                                    folder = staging / HD_CLOUDS_FOLDER
+                                    folder.mkdir(parents=True, exist_ok=True)
+                                    for i, image in enumerate(images):
+                                        image.save(folder / (key if not i else key.removesuffix(".png") + f"_mip{i}.png"))
+                                    optional_clouds[key] = {"file": key, "hd": hd.source, "original": original.source}
                             for original in gc:
                                 variant, digest = variants[original.format], digests[original.format]
                                 key = original.filename()
-                                priority = candidate_priority(hd, resource(hd.source))
+                                priority = max(candidate_priority(hd, resource(hd.source)), picked_priority(key, hd.source))
                                 originals_for_key, alternatives = [original.source], []
                                 if key in matches:
                                     previous = matches[key]
@@ -379,8 +411,9 @@ def build(args) -> dict:
         if not accepted:
             raise FormatError("no compatible textures matched; nothing installed")
         for texture in accepted:
-            if texture.pop("priority"):
-                texture["selection"] = "audited shared-artwork variant"
+            priority = texture.pop("priority")
+            if priority:
+                texture["selection"] = "chosen by eye" if priority == 2 else "audited shared-artwork variant"
             texture["alternatives"] = sorted(set(texture["alternatives"]))
             texture["originals"] = sorted(set(texture["originals"]))
             texture["files_sha256"] = {name: file_sha256(staging / name)
@@ -405,9 +438,22 @@ def build(args) -> dict:
                   "original_texture_count": len(originals), "replacement_count": len(accepted),
                   "fallback": fallback,
                   "combined_replacement_count": len(accepted) + (fallback["texture_count"] if fallback else 0),
-                  "conflicts_skipped": sorted(conflicts), "unsupported": errors,
+                  "conflicts_skipped": sorted(conflicts),
+                  # For checking by eye: each skipped texture's GameCube originals and the HD textures that disagree.
+                  "conflicts": [{"file": key, "hd": sorted({matches[key]["hd"], *matches[key]["alternatives"]}),
+                                 "originals": sorted(set(matches[key]["originals"]))} for key in sorted(conflicts)],
+                  "unsupported": errors,
                   "unmatched": unmatched, "textures": accepted,
+                  "optional": {"hd-clouds": [optional_clouds[k] for k in sorted(optional_clouds)]},
                   "limits": "Compatible BFRES artwork, audited shared-artwork variants, inventory/collection/chart icons, HUD hearts and swimming meter, adapted English title/opening layouts, font-derived English action/menu text, counters and A/B/X/Y symbols, and adapted key/cursor sprites; HD shaders, models, lighting and other redesigned HUD are not imported."}
+        # HD's sky and light palettes for every stage on both discs (BLUEWAKE_HD_SKY).
+        # Written only with stages to write, as the clouds are only with clouds.
+        sky, sky_skipped = pack_all({n: (gc_stages[n], hd_stages[n]) for n in hd_stages})
+        if hd_stages:
+            (staging / HD_SKY_FOLDER).mkdir(parents=True, exist_ok=True)
+            (staging / HD_SKY_FOLDER / HD_SKY_FILE).write_bytes(sky)
+        report["optional"]["hd-sky"] = {"file": HD_SKY_FILE, "stages": int.from_bytes(sky[4:8], "big"),
+                                        "skipped": [{"stage": n, "reason": r} for n, r in sky_skipped]}
         (staging / "import-report.json").write_text(json.dumps(report, indent=2) + "\n")
         (staging / "README.txt").write_text("Private artwork extracted from your own Wind Waker HD disc.\n"
                                           "Choose this folder in Mods > Wind Waker HD textures, then restart.\n"
