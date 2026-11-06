@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("windows_builder", REPO / "scripts/windows/build.py")
 bw = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bw)
-OPTIONS = ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "direct_calls",
+OPTIONS = ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe", "gather_alias_cache", "direct_calls",
            "inline_gpr", "native_j3d", "native_vec", "native_math", "native_skin", "native_game_math",
            "lean_memory", "native_entries")
 
@@ -56,6 +56,24 @@ class TrainingTest(unittest.TestCase):
         flags = next(x for x in config if x.startswith("-DCMAKE_C_FLAGS="))
         self.assertIn('"-fprofile-instr-use=', flags)
         self.assertNotIn("-fprofile-instr-generate", " ".join(config))
+
+    def test_gather_alias_cache_is_a_windows_default_and_reaches_cmake(self):
+        self.assertIn("gather_alias_cache", bw.WINDOWS_DEFAULT_OPTIMIZATIONS)
+        calls = []
+        self.b.args.gather_pipe = True
+        self.b.args.gather_alias_cache = True
+
+        def run(name, argv, **kwargs):
+            calls.append([str(a) for a in argv])
+            if name.endswith("-build"):
+                folder = Path(argv[2])
+                folder.mkdir(parents=True, exist_ok=True)
+                (folder / bw.MODULE).write_bytes(b"synthetic module")
+
+        self.b.run = run
+        self.b.compile_composite(self.root / "alias-cache/composite", "2", [], [], "alias-cache")
+        self.assertIn("-DBLUEWAKE_GATHER_PIPE=ON", calls[0])
+        self.assertIn("-DBLUEWAKE_GATHER_ALIAS_CACHE=ON", calls[0])
 
     def test_app_configure_has_no_training_linker_flags(self):
         # The app may use its own committed profile and ThinLTO, never the module's training flags.

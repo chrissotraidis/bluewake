@@ -13,8 +13,12 @@ bool bluewake_forest_water_enabled;
 u32 bluewake_forest_water_tree_timer_check;
 static unsigned calls[6];
 static unsigned order;
+static u32 camera_seen[8];
+static unsigned camera_seen_count;
 void bluewake_mouse_camera_hook(CPUState* cpu, u32 address) {
-    (void)cpu; (void)address; ++calls[0]; order = order * 6 + 1;
+    (void)cpu; ++calls[0]; order = order * 6 + 1;
+    if (camera_seen_count < 8)
+        camera_seen[camera_seen_count++] = address;
 }
 void bluewake_climb_hook(CPUState* cpu, u32 address) {
     (void)cpu; (void)address; ++calls[1]; order = order * 6 + 2;
@@ -51,6 +55,61 @@ static void compare_dispatch(u32 address) {
     bluewake_feature_dispatch(NULL, address);
     assert(memcmp(expected, calls, sizeof calls) == 0);
     assert(order == expected_order);
+    /* The turn-entry form is the same less Forest Water, which the host
+     * dispatches at turn start itself. Forest Water runs first and adds no
+     * digit to the order, so the order is unchanged. */
+    memset(calls, 0, sizeof calls);
+    order = 0;
+    bluewake_feature_dispatch_turn_entry(NULL, address);
+    expected[4] = 0;
+    assert(memcmp(expected, calls, sizeof calls) == 0);
+    assert(order == expected_order);
+}
+
+/* main.c's edge service: the features first, then whether it returns to the host. */
+static bool edge_service(BluewakeTurnEntry* entry, u32 address, bool returns) {
+    bluewake_feature_dispatch(NULL, address);
+    return bluewake_turn_entry_edge(entry, address, returns);
+}
+
+static void check_turn_entry_handoff(void) {
+    const u32 bump = BLUEWAKE_MOUSE_CAMERA_BUMP;
+    const u32 draw = BLUEWAKE_MOUSE_CAMERA_DRAW;
+    BluewakeTurnEntry entry = {BLUEWAKE_TURN_ENTRY_NONE};
+
+    /* A turn starts at a hooked block no edge saw (the last turn's budget ran
+     * out just before it): observed once. */
+    camera_seen_count = 0;
+    bluewake_turn_entry_begin(&entry, NULL, bump);
+    assert(camera_seen_count == 1 && camera_seen[0] == bump);
+
+    /* An edge observed it and returned to the host without dispatching it: the
+     * turn that dispatches it does not observe it again. */
+    camera_seen_count = 0;
+    assert(edge_service(&entry, bump, true));
+    bluewake_turn_entry_begin(&entry, NULL, bump);
+    assert(camera_seen_count == 1 && camera_seen[0] == bump);
+
+    /* Returned to the host, which sent the turn elsewhere: the new pc is observed. */
+    camera_seen_count = 0;
+    assert(edge_service(&entry, bump, true));
+    bluewake_turn_entry_begin(&entry, NULL, draw);
+    assert(camera_seen_count == 2 && camera_seen[0] == bump && camera_seen[1] == draw);
+
+    /* The mark lasts one turn: the next turn at the same pc is observed. */
+    camera_seen_count = 0;
+    assert(edge_service(&entry, bump, true));
+    bluewake_turn_entry_begin(&entry, NULL, bump);
+    bluewake_turn_entry_begin(&entry, NULL, bump);
+    assert(camera_seen_count == 2);
+    assert(entry.edge_returned_pc == BLUEWAKE_TURN_ENTRY_NONE);
+
+    /* An edge that let the chassis go on leaves no mark. */
+    camera_seen_count = 0;
+    assert(!edge_service(&entry, bump, false));
+    assert(entry.edge_returned_pc == BLUEWAKE_TURN_ENTRY_NONE);
+    bluewake_turn_entry_begin(&entry, NULL, bump);
+    assert(camera_seen_count == 2);
 }
 
 int main(void) {
@@ -75,6 +134,7 @@ int main(void) {
         for (size_t i = 0; i < sizeof edges / sizeof edges[0]; ++i)
             compare_dispatch(edges[i]);
     }
+    check_turn_entry_handoff();
     puts("Feature dispatch: all aligned MEM1 addresses and sixteen flag combinations agree");
     return 0;
 }

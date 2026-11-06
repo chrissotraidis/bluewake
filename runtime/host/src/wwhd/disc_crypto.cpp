@@ -6,10 +6,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 
 namespace wwhd {
 namespace {
+// A keys file holds hundreds of keys; a disc image or a mistyped pick does not.
+constexpr size_t kMaxKeyFile = 1024 * 1024;
+constexpr size_t kMaxKeys = 4096;
+
 int hex_digit(unsigned char c) {
   if (c >= '0' && c <= '9')
     return c - '0';
@@ -19,45 +24,83 @@ int hex_digit(unsigned char c) {
     return c - 'A' + 10;
   return -1;
 }
+
+// One line of a keys file or pasted text: an optional "name =", then the key,
+// then an optional "# comment". False when the line holds no single key.
+bool key_on_line(std::string line, DiscKey &key) {
+  const size_t comment = line.find('#');
+  if (comment != std::string::npos)
+    line.resize(comment);
+  const size_t equals = line.find('=');
+  if (equals != std::string::npos)
+    line.erase(0, equals + 1);
+  std::string digits;
+  for (const unsigned char c : line)
+    if (!std::isspace(c))
+      digits.push_back(static_cast<char>(c));
+  if (digits.size() != key.size() * 2)
+    return false;
+  for (size_t i = 0; i < key.size(); ++i) {
+    const int hi = hex_digit(digits[2 * i]), lo = hex_digit(digits[2 * i + 1]);
+    if (hi < 0 || lo < 0)
+      return false;
+    key[i] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+  return true;
+}
+
+std::vector<DiscKey> keys_in(const std::string &text) {
+  std::vector<DiscKey> keys;
+  if (text.size() == DiscKey{}.size()) {
+    DiscKey key{};
+    std::copy(text.begin(), text.end(), key.begin());
+    keys.push_back(key);
+    return keys;
+  }
+  size_t at = 0;
+  while (at <= text.size() && keys.size() < kMaxKeys) {
+    check_cancel();
+    const size_t end = text.find('\n', at);
+    DiscKey key{};
+    if (key_on_line(text.substr(at, end == std::string::npos ? std::string::npos : end - at), key))
+      keys.push_back(key);
+    if (end == std::string::npos)
+      break;
+    at = end + 1;
+  }
+  return keys;
+}
 } // namespace
 
-DiscKey read_disc_key(const std::string &path) {
+std::vector<DiscKey> read_disc_keys(const std::string &path) {
   check_cancel();
   std::ifstream file(path, std::ios::binary | std::ios::ate);
   if (!file)
     throw FormatError("could not open the selected key file");
   const std::streamoff length = file.tellg();
-  if (length < 0 || length > 1024)
-    throw FormatError(
-        "key files must contain 16 binary bytes or 32 hex digits");
-  Bytes bytes(static_cast<size_t>(length));
+  if (length <= 0)
+    throw FormatError("the selected key file is empty");
+  if (static_cast<size_t>(length) > kMaxKeyFile)
+    throw FormatError("key files must be under 1 MiB");
+  std::string text(static_cast<size_t>(length), '\0');
   file.seekg(0);
-  if (!bytes.empty())
-    file.read(reinterpret_cast<char *>(bytes.data()),
-              static_cast<std::streamsize>(bytes.size()));
+  file.read(text.data(), static_cast<std::streamsize>(text.size()));
   if (!file)
     throw FormatError("could not read the selected key file");
   check_cancel();
-  DiscKey key{};
-  if (bytes.size() == key.size()) {
-    std::copy(bytes.begin(), bytes.end(), key.begin());
-    return key;
-  }
-  // Text key files commonly have a final newline or spaces between bytes.
-  bytes.erase(std::remove_if(bytes.begin(), bytes.end(),
-                             [](unsigned char c) { return std::isspace(c); }),
-              bytes.end());
-  if (bytes.size() != key.size() * 2)
-    throw FormatError(
-        "key files must contain 16 binary bytes or 32 hex digits");
-  for (size_t i = 0; i < key.size(); ++i) {
-    const int hi = hex_digit(bytes[2 * i]), lo = hex_digit(bytes[2 * i + 1]);
-    if (hi < 0 || lo < 0)
-      throw FormatError(
-          "key files must contain 16 binary bytes or 32 hex digits");
-    key[i] = static_cast<uint8_t>((hi << 4) | lo);
-  }
-  return key;
+  std::vector<DiscKey> keys = keys_in(text);
+  if (keys.empty())
+    throw FormatError("this key file holds no 32-digit hex key");
+  return keys;
+}
+
+std::vector<DiscKey> parse_disc_keys(const std::string &text) { return keys_in(text); }
+
+std::vector<DiscKey> key_candidates(const std::string &source) {
+  std::error_code ec;
+  if (!source.empty() && std::filesystem::is_regular_file(source, ec))
+    return read_disc_keys(source);
+  return parse_disc_keys(source);
 }
 
 Bytes disc_aes_cbc_decrypt(const DiscKey &key, const DiscKey &iv,

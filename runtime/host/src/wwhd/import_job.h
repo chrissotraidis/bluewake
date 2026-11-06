@@ -12,7 +12,8 @@
 
 namespace wwhd {
 
-// File paths only, kept for this import; key values are never menu state.
+// What the player chose for each key: a key file, or a key they pasted into
+// the form. Kept for this import only, never in settings.
 struct ImportKeyFiles {
     std::string disc, title, common;
 };
@@ -28,6 +29,9 @@ class ImportJob {
         std::string message;   // progress, or the result in plain words
         std::string output;    // the new pack folder, on success
         size_t files_read = 0, files_total = 0, replacements = 0;
+        // On success, what did not make it into the pack: textures whose name
+        // already had a replacement, and HD resources that could not be read.
+        size_t conflicts = 0, unsupported = 0;
     };
 
     // Starts an import of the Wind Waker HD dump at hd_picked (its folder or its

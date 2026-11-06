@@ -84,16 +84,42 @@ int main() {
               hex("da39a3ee5e6b4b0d3255bfef95601890afd80709"),
           "SHA-1 empty mismatch");
     Fixture fixture;
-    check(wwhd::read_disc_key(fixture.write(Bytes(k.begin(), k.end()))) == k,
+    const std::vector<wwhd::DiscKey> one{k};
+    check(wwhd::read_disc_keys(fixture.write(Bytes(k.begin(), k.end()))) == one,
           "binary key mismatch");
     const std::string text = "  2B7E151628AED2A6ABF7158809CF4F3C\r\n";
-    check(wwhd::read_disc_key(fixture.write(Bytes(text.begin(), text.end()))) ==
-              k,
+    check(wwhd::read_disc_keys(fixture.write(Bytes(text.begin(), text.end()))) ==
+              one,
           "hex key mismatch");
     for (const Bytes &invalid :
-         {Bytes{}, Bytes(15), Bytes(17), Bytes(32, 'g'), Bytes(1025, '0')})
-      rejects([&] { wwhd::read_disc_key(fixture.write(invalid)); });
-    rejects([&] { wwhd::read_disc_key((fixture.dir / "absent").string()); });
+         {Bytes{}, Bytes(15), Bytes(17), Bytes(32, 'g'), Bytes(1025, '0'),
+          Bytes(1024 * 1024 + 1, '0')})
+      rejects([&] { wwhd::read_disc_keys(fixture.write(invalid)); });
+    rejects([&] { wwhd::read_disc_keys((fixture.dir / "absent").string()); });
+    // A keys file as the emulators write it: one key per line, '#' comments,
+    // blank lines and "name = key" lines. Both keys have to come back, in
+    // order, so the image can pick the one that fits.
+    const auto second = key("0f0e0d0c0b0a09080706050403020100");
+    const std::string keys_file =
+        "# keys needed for decryption of file system data (WUD/WUX)\n"
+        "# 1 key per line, any text after a '#' character is a comment\n"
+        "\n"
+        "Common = 2b7e151628aed2a6abf7158809cf4f3c # the common key\n"
+        "0f0e0d0c0b0a09080706050403020100\n"
+        "not a key\n";
+    const std::string path =
+        fixture.write(Bytes(keys_file.begin(), keys_file.end()));
+    check(wwhd::read_disc_keys(path) ==
+              (std::vector<wwhd::DiscKey>{k, second}),
+          "keys file mismatch");
+    check(wwhd::key_candidates(path) ==
+              (std::vector<wwhd::DiscKey>{k, second}),
+          "key file path mismatch");
+    check(wwhd::key_candidates("0F0E0D0C0B0A09080706050403020100") ==
+              (std::vector<wwhd::DiscKey>{second}),
+          "pasted key mismatch");
+    check(wwhd::key_candidates("not a key").empty(),
+          "pasted non-key accepted");
     std::puts("Disc AES, SHA-1 and synthetic key-file checks passed");
     return 0;
   } catch (const std::exception &e) {

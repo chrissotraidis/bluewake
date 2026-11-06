@@ -177,6 +177,7 @@ static CGRect BWFrameAtNormalizedCenter(CGRect safe, CGFloat x, CGFloat y, CGFlo
 // The ellipsis button; the game is held while its menu is on screen.
 @interface BWMenuButton : UIButton
 @property(nonatomic, copy) void (^willShowMenu)(void);
+@property(nonatomic, copy) void (^didEndMenu)(void);
 @end
 @implementation BWMenuButton
 - (void)contextMenuInteraction:(UIContextMenuInteraction*)interaction
@@ -192,6 +193,8 @@ static CGRect BWFrameAtNormalizedCenter(CGRect safe, CGFloat x, CGFloat y, CGFlo
                       animator:(id<UIContextMenuInteractionAnimating>)animator {
     [super contextMenuInteraction:interaction willEndForConfiguration:configuration animator:animator];
     bluewake_pause_set(BLUEWAKE_PAUSE_MENU, false);
+    if (self.didEndMenu)
+        self.didEndMenu();
 }
 @end
 
@@ -359,6 +362,7 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
 
 @implementation BWGameOverlay {
     BWMenuButton* _menuButton;
+    BOOL _menuStale; // a switch changed while the menu stayed open
     BWStickView* _moveStick;
     BWStickView* _cStick;
     UIView* _dpadGroup;
@@ -504,6 +508,13 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
     _menuButton = [BWMenuButton buttonWithType:UIButtonTypeCustom];
     __weak BWGameOverlay* weakSelf = self;
     _menuButton.willShowMenu = ^{ [weakSelf clearTouchInput]; };
+    _menuButton.didEndMenu = ^{
+        BWGameOverlay* overlay = weakSelf;
+        if (overlay != nil && overlay->_menuStale) {
+            overlay->_menuStale = NO;
+            [overlay refreshMenu];
+        }
+    };
     UIImageSymbolConfiguration* symbol =
         [UIImageSymbolConfiguration configurationWithPointSize:19.0 weight:UIImageSymbolWeightBold];
     [_menuButton setImage:[UIImage systemImageNamed:@"ellipsis" withConfiguration:symbol]
@@ -542,6 +553,30 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
 
 - (void)refreshMenu {
     _menuButton.menu = [self buildMenu];
+}
+
+// Switches that keep the menu open (#104): the open submenu keeps its identity
+// and only its items are swapped, so its checkmarks move without the menu
+// closing, and the whole menu is rebuilt once it closes. Returning a new UIMenu
+// instead makes iOS pop back to the top level after every tap.
+- (UIAction*)keepMenuOpen:(UIAction*)action {
+    action.attributes |= UIMenuElementAttributesKeepsMenuPresented;
+    return action;
+}
+
+- (void)updateOpenMenu:(UIMenu* (^)(void))build {
+    _menuStale = YES;
+    UIContextMenuInteraction* interaction = _menuButton.contextMenuInteraction;
+    if (interaction == nil) {
+        [self refreshMenu];
+        return;
+    }
+    [interaction updateVisibleMenuWithBlock:^UIMenu*(UIMenu* visible) {
+        UIMenu* fresh = build();
+        if (fresh == nil || ![visible.title isEqualToString:fresh.title])
+            return visible;
+        return [visible menuByReplacingChildren:fresh.children];
+    }];
 }
 
 - (UIMenu*)buildMenu {
@@ -733,6 +768,9 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
                            identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf chooseSavesToRestore]; }],
             [UIAction actionWithTitle:@"Import Dolphin Save…" image:[UIImage systemImageNamed:@"square.and.arrow.down"]
                            identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf chooseDolphinSave]; }],
+            [UIAction actionWithTitle:@"Export Dolphin Save…"
+                                image:[UIImage systemImageNamed:@"square.and.arrow.up.on.square"]
+                           identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf exportDolphinSave]; }],
             [UIAction actionWithTitle:@"Where Are My Files?" image:[UIImage systemImageNamed:@"folder"]
                            identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf explainFiles]; }],
         ]],
@@ -753,26 +791,9 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
     ]];
 
     // These guest changes apply at the next launch, like the code mods.
-    UIAction* (^gameplayAction)(NSString*, NSString*) = ^UIAction*(NSString* title, NSString* key) {
-        UIAction* action = [UIAction actionWithTitle:title image:nil identifier:nil handler:^(__kindof UIAction* a) {
-            (void)a;
-            [NSUserDefaults.standardUserDefaults setBool:!BWBoolDefault(key, NO) forKey:key];
-            [weakSelf clearTouchInput];
-            [weakSelf setNeedsLayout];
-            [weakSelf refreshMenu];
-        }];
-        action.subtitle = @"Applies when BlueWake restarts";
-        action.state = BWBoolDefault(key, NO) ? UIMenuElementStateOn : UIMenuElementStateOff;
-        return action;
-    };
-    UIMenu* gameplayMenu = [UIMenu menuWithTitle:@"Gameplay" children:@[
-        gameplayAction(@"Jump & Sprint", kMovementExtrasKey),
-        gameplayAction(@"Fast Transitions", @"BlueWake.FastTransitions"),
-        gameplayAction(@"Quick Doors", @"BlueWake.QuickDoors"),
-    ]];
     UIMenu* root = [UIMenu menuWithTitle:@"BlueWake" children:@[
         displayMenu,
-        gameplayMenu,
+        [self gameplayMenu],
         [self modsMenu],
         controllerMenu,
         touchMenu,
@@ -837,18 +858,13 @@ static NSUInteger g_packFiles = NSNotFound;
             };
             if ([d boolForKey:key] && other[key] != nil)
                 [d setBool:NO forKey:other[key]];
-            [weakSelf refreshMenu];
-            UIAlertController* alert = [UIAlertController
-                alertControllerWithTitle:@"Applies Next Launch"
-                                 message:@"Mods take effect the next time BlueWake starts. Your saves are not changed."
-                          preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[weakSelf actionTitled:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-            [weakSelf presentAlert:alert];
+            // The subtitle says "On at next launch", so the menu stays open.
+            [weakSelf updateOpenMenu:^UIMenu* { return [weakSelf modsMenu]; }];
         }];
         action.subtitle = [NSString stringWithFormat:@"%@ · %@", detail, [weakSelf modState:key]];
         action.state = [[NSUserDefaults standardUserDefaults] boolForKey:key] ? UIMenuElementStateOn
                                                                               : UIMenuElementStateOff;
-        return action;
+        return [weakSelf keepMenuOpen:action];
     };
     if (g_packFiles == NSNotFound) {
         g_packFiles = 0;
@@ -905,6 +921,29 @@ static NSUInteger g_packFiles = NSNotFound;
                         children:children];
 }
 
+// Gameplay: guest changes that apply at the next launch, like the code mods.
+// The switches keep the menu open.
+- (UIMenu*)gameplayMenu {
+    __weak BWGameOverlay* weakSelf = self;
+    UIAction* (^gameplayAction)(NSString*, NSString*) = ^UIAction*(NSString* title, NSString* key) {
+        UIAction* action = [UIAction actionWithTitle:title image:nil identifier:nil handler:^(__kindof UIAction* a) {
+            (void)a;
+            [NSUserDefaults.standardUserDefaults setBool:!BWBoolDefault(key, NO) forKey:key];
+            [weakSelf clearTouchInput];
+            [weakSelf setNeedsLayout];
+            [weakSelf updateOpenMenu:^UIMenu* { return [weakSelf gameplayMenu]; }];
+        }];
+        action.subtitle = @"Applies when BlueWake restarts";
+        action.state = BWBoolDefault(key, NO) ? UIMenuElementStateOn : UIMenuElementStateOff;
+        return [weakSelf keepMenuOpen:action];
+    };
+    return [UIMenu menuWithTitle:@"Gameplay" children:@[
+        gameplayAction(@"Jump & Sprint", kMovementExtrasKey),
+        gameplayAction(@"Fast Transitions", @"BlueWake.FastTransitions"),
+        gameplayAction(@"Quick Doors", @"BlueWake.QuickDoors"),
+    ]];
+}
+
 // Better Wind Waker's settings, one switch each, from the game module's
 // option table. A switch the player changes is stored under
 // BW_OPTION_KEY_PREFIX + its name and applies at the next launch (ios_entry.m
@@ -933,12 +972,12 @@ static NSUInteger g_packFiles = NSNotFound;
                                                           @"brisk_sail" : @"swift_sail"};
             if (!on && other[name] != nil)
                 [defaults setBool:NO forKey:[@BW_OPTION_KEY_PREFIX stringByAppendingString:other[name]]];
-            [weakSelf refreshMenu];
+            [weakSelf updateOpenMenu:^UIMenu* { return [weakSelf betterWWSettingsMenu]; }];
         }];
         action.state = on ? UIMenuElementStateOn : UIMenuElementStateOff;
         if (modOn && on != running)
             action.subtitle = on ? @"On at next launch" : @"Off at next launch";
-        [items addObject:action];
+        [items addObject:[self keepMenuOpen:action]];
     }
     if (items.count == 0)
         return nil;
@@ -1461,6 +1500,42 @@ static NSString* BWDateStamp(NSString* format) {
     }];
 }
 
+// BlueWake's save written out as a Dolphin .gci, on demand: the card is only
+// read, and the file goes wherever the player sends it.
+- (void)exportDolphinSave {
+    __weak BWGameOverlay* weakSelf = self;
+    NSData* card = [NSData dataWithContentsOfFile:[self cardPath]];
+    if (card == nil) {
+        [self showMessage:@"No Saves Yet" text:@"BlueWake has no memory card yet. Save in the game first."];
+        return;
+    }
+    uint8_t* bytes = NULL;
+    size_t size = 0;
+    const char* error = bw_card_export((const uint8_t*)card.bytes, card.length, &bytes, &size);
+    if (error != NULL) {
+        [self showMessage:@"Could Not Export" text:@(error)];
+        return;
+    }
+    NSData* gci = [NSData dataWithBytes:bytes length:size];
+    free(bytes);
+    NSString* name = [NSString stringWithFormat:@"GZLE01-%@.gci", BWDateStamp(@"yyyy-MM-dd")];
+    NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    if (![gci writeToFile:path atomically:YES]) {
+        [self showMessage:@"Could Not Export" text:@"The file could not be written."];
+        return;
+    }
+    UIDocumentPickerViewController* picker =
+        [[UIDocumentPickerViewController alloc] initForExportingURLs:@[ [NSURL fileURLWithPath:path] ] asCopy:YES];
+    [self presentPicker:picker handler:^(NSArray<NSURL*>* urls) {
+        (void)urls;
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        [weakSelf showMessage:@"Save Exported"
+                         text:[NSString stringWithFormat:@"%@ holds all three quest logs and opens in Dolphin's "
+                                                         @"Memory Card Manager. Your own saves are unchanged.", name]];
+    }];
+}
+
 - (void)chooseSavesToRestore {
     __weak BWGameOverlay* weakSelf = self;
     UIDocumentPickerViewController* picker =
@@ -1736,7 +1811,8 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
                          message:@"In the Files app, open On My iPad › BlueWake › BlueWake.\n\n"
                                   "Your live saves are protected in BlueWake’s private storage. Back Up Saves makes a copy you can keep anywhere, "
                                   "and Restore Saves brings one back; earlier cards are kept in Backups. "
-                                  "Import Dolphin Save brings in a quest log from a Dolphin .gci or memory card file. "
+                                  "Import Dolphin Save brings in a quest log from a Dolphin .gci or memory card file, "
+                                  "and Export Dolphin Save writes one out as a .gci. "
                                   "GZLE01.iso is your disc image, and main.dol and rels are made from it. "
                                   "Mods and texture packs live in Mods and Load."
                   preferredStyle:UIAlertControllerStyleAlert];

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <stdexcept>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -96,6 +97,9 @@ struct ImportError {
 
 // Every texture on a GameCube GZLE01 revision 0 disc image (.iso/.gcm), in
 // file-table order. Unreadable resources are added to the error list.
-std::vector<GCTexture> index_gc(const std::string& iso_path, std::vector<ImportError>& errors);
+// With `stages`, each stage's dzs (res/Stage/STAGE/Stage.arc's stage.dzs)
+// goes into it by name too, for HD's palettes.
+std::vector<GCTexture> index_gc(const std::string& iso_path, std::vector<ImportError>& errors,
+                                std::map<std::string, Bytes>* stages = nullptr);
 
 } // namespace wwhd

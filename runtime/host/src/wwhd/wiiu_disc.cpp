@@ -229,7 +229,7 @@ struct WiiUDisc::Impl {
         return out;
     }
 
-    explicit Impl(const std::string& path, const WiiUDiscKeys& keys) : image(path), disc_key(keys.disc) {
+    explicit Impl(const std::string& path, const WiiUDiscKeys& keys) : image(path) {
         const Bytes identity = image.read(0, 64);
         const auto identity_end = std::find(identity.begin(), identity.end(), 0);
         const std::string identifier(identity.begin(), identity_end);
@@ -237,10 +237,26 @@ struct WiiUDisc::Impl {
             std::any_of(identifier.begin(), identifier.end(), [](unsigned char c) { return c < 32 || c > 126; }))
             throw FormatError("expected Wind Waker HD USA disc (BCZE)");
 
-        const Bytes toc_bytes = metadata({0x18000, image.size()}, 0x8000, disc_key);
-        const Reader toc(toc_bytes);
-        if (toc.u32(0) != 0xCCA6E67B)
+        // Every key in a keys file is tried: only this disc's own decrypts its
+        // partition table, which names the partitions below.
+        const Bytes toc_raw = read_region({0x18000, image.size()}, 0, 0x8000);
+        Bytes toc_bytes;
+        for (const DiscKey& candidate : keys.disc) {
+            check_cancel();
+            Bytes plain = disc_aes_cbc_decrypt(candidate, DiscKey{}, toc_raw);
+            if (Reader(plain).u32(0) == 0xCCA6E67B) {
+                disc_key = candidate;
+                toc_bytes = std::move(plain);
+                break;
+            }
+        }
+        if (toc_bytes.empty()) {
+            if (keys.disc.size() > 1)
+                throw FormatError("none of the " + std::to_string(keys.disc.size()) +
+                                  " keys in the disc key file decrypt this disc");
             throw FormatError("incorrect WUD disc key");
+        }
+        const Reader toc(toc_bytes);
         const uint32_t count = toc.u32(28);
         if (!count || count > (toc.size() - 0x800) / 0x80)
             throw FormatError("invalid Wii U partition count");
@@ -299,10 +315,11 @@ struct WiiUDisc::Impl {
         if (tmd_bytes.empty())
             throw FormatError("Wind Waker HD title metadata not found");
 
-        if (keys.title) {
-            title_key = *keys.title;
-        } else {
-            if (!keys.common)
+        // The same for the title: each title key given, or each common key's
+        // ticket, is tried until the game file table's checksum matches.
+        std::vector<DiscKey> title_keys = keys.title;
+        if (title_keys.empty()) {
+            if (keys.common.empty())
                 throw FormatError("provide the disc title key, or a common key to decrypt its ticket");
             const std::string ticket_path = tmd_path.substr(0, tmd_path.size() - 4) + ".tik";
             const auto ticket_entry = std::find_if(system_files.entries.begin(), system_files.entries.end(),
@@ -316,8 +333,13 @@ struct WiiUDisc::Impl {
             DiscKey iv{};
             std::copy_n(ticket.take(0x1DC, 8), 8, iv.begin());
             const uint8_t* encrypted = ticket.take(0x1BF, 16);
-            const Bytes key = disc_aes_cbc_decrypt(*keys.common, iv, Bytes(encrypted, encrypted + 16));
-            std::copy_n(Reader(key).take(0, 16), 16, title_key.begin());
+            for (const DiscKey& common : keys.common) {
+                const Bytes key = disc_aes_cbc_decrypt(common, iv, Bytes(encrypted, encrypted + 16));
+                DiscKey derived{};
+                std::copy_n(Reader(key).take(0, 16), 16, derived.begin());
+                if (std::find(title_keys.begin(), title_keys.end(), derived) == title_keys.end())
+                    title_keys.push_back(derived);
+            }
         }
 
         const Reader tmd(tmd_bytes);
@@ -345,9 +367,22 @@ struct WiiUDisc::Impl {
         const Content& fst = fst_content->second;
         if (fst.size < game.fst_size)
             throw FormatError("Wii U game file table size does not match title metadata");
-        Bytes raw = metadata(game.data, fst.size, title_key);
-        if (disc_sha1(raw) != fst.digest)
+        Bytes raw;
+        for (const DiscKey& candidate : title_keys) {
+            check_cancel();
+            Bytes plain = metadata(game.data, fst.size, candidate);
+            if (disc_sha1(plain) == fst.digest) {
+                title_key = candidate;
+                raw = std::move(plain);
+                break;
+            }
+        }
+        if (raw.empty()) {
+            if (title_keys.size() > 1)
+                throw FormatError("none of the " + std::to_string(title_keys.size()) +
+                                  " keys supplied for the title key match this disc");
             throw FormatError("title key or game file table checksum is incorrect");
+        }
         raw.resize(game.fst_size);
         files = file_table(raw);
         // Validate every file against its content before exposing the table.

@@ -1,6 +1,6 @@
 # What we're doing
 
-The dated plan, and the five-step loop every session follows. Owner: Chris. Updated October 20, 2026. The ranked
+The dated plan, and the five-step loop every session follows. Owner: Chris. Updated October 29, 2026. The ranked
 backlog is [PRIORITIES.md](PRIORITIES.md), the speed strategy and its runbook are [PERFORMANCE.md](PERFORMANCE.md),
 and the standards everything is held to are in [DIRECTION.md](DIRECTION.md). The daily sections from October 11 to
 15, with every measurement, are kept in [status/GOAL_LOOP_2026-10-15.md](status/GOAL_LOOP_2026-10-15.md).
@@ -31,39 +31,50 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
 | 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
 
-## Where things stand on October 20
+## October 29: PadMint's Python 3.9 build failure
 
-No release this week. Chris reviews around Sunday, October 25, and 0.9.0 follows that review; the Windows build is
-made once, then, from the frozen commit. Until then `main` keeps moving and stays releasable: every pull request
-passes CI, and anything that changes gameplay, timing or rendering is played on the platform it changes before it
-merges.
+[#499](https://github.com/chrissotraidis/bluewake/pull/499) fixes the default game-math and skin preparation
+writes reported in [#496](https://github.com/chrissotraidis/bluewake/issues/496). BlueWake `830449af` passed
+PadMint current-main `d6f0f59`'s full fresh-player iOS check with Apple's Python 3.9.6, including local training
+through the player-control checkpoint, final compilation, signing and private package checks. The recorded
+build time was 8,775.93 seconds; all PR checks passed. The [dated validation record](status/PADMINT_PYTHON39_2026-10-29.md)
+separates the public app audit from the personal IPA's expected publication-gate failure. Private artifacts
+remain local. Public 0.9.0 is unchanged; reporter confirmation and physical-device/gameplay/performance
+acceptance remain outstanding. The October 24 plan below is retained as its dated record.
 
-**Merged on October 20:** one desktop menu for Mac, Linux and Windows (#384 to #388, pdale-boop; the Mac host and
-the settings tests built and passed on the M3 Max), the native work pool tests (#397, irregularthanis), and the Mac
-and iPad benchmark-tour results (#425, #428).
+## Where things stand on October 24
 
-**Waiting on Chris's review:**
+**0.9.0 is scoped** in [status/RELEASE_0.9.0.md](status/RELEASE_0.9.0.md): the camera fix (#455), Smooth Motion without
+the flicker (#371), the HD look's sun shadows (#398), the Dawn fix that lets Linux build at the player's CPU target
+again (#446), and the Apple speed defaults (#431), on top of the one desktop menu and the HD importer already in
+`main`. A test candidate holding all of them (`f55ffba5`) is built for the Mac and the iPad for Chris's review on
+Sunday, October 25. Nothing is published until Chris decides after that review.
 
-- **Smooth Motion without the flicker** (#371, RecompCore#40) and **sun shadows from a shadow map** (#398,
-  RecompCore#42): a look on the Mac, then the two RecompCore pull requests merge into `bluewake-next`, then #371, then
-  #398 rebased on it.
-- **The Mac and iOS speed default** (draft #431): the Windows and Linux preparations made the game 64 to 81% faster on
-  the M3 Max and the iPad Pro ([record](status/APPLE_RECIPE_TOUR_2026-10-20.md)). It merges after Chris plays the test
-  builds by hand on the Mac and the iPad.
-- **The menu stack's hands-on pass** on the Mac with a controller, before the release.
+**Done since October 23:** the Deck game-thread plan (#421), the HD importer's key handling (#444) and the Outset draw
+record (#454) are merged. Every open issue and pull request is assigned to Chris.
 
-**Waiting on contributors:** #424 rebased on #397 (irregularthanis); #398 rebased on `main` (pdale-boop); whether
-#392's slow-chunk flags still help on top of #431 (jslay88).
+| Next, in order | Evidence and scope | Done when |
+| --- | --- | --- |
+| Sunday's review of the test candidate | [RELEASE_0.9.0.md](status/RELEASE_0.9.0.md#checks-before-publishing) lists each check, with the iPad and Mac results from October 24 | #455, #371, #398, #446 and #431 are played or looked at on the Mac and the iPad; then they merge in the record's order and the freeze pull request sets 0.9.0 |
+| Keep one guest state in the tour | [#450](https://github.com/chrissotraidis/bluewake/pull/450) is reviewed and needs a rebase onto `main` (`PERFORMANCE.md`); [#459](https://github.com/chrissotraidis/bluewake/pull/459) then becomes one commit and fixes #458 | Both merged; a setup run that never reaches gameplay fails instead of being measured |
+| Word the sea compass switch | [#456](https://github.com/chrissotraidis/bluewake/pull/456) works on and off at all four headings (Linux screenshots); its note has to say what players see | Reworded, with an HD reference if there is one; then it merges, off by default |
+| Android's first run and its log | [#460](https://github.com/chrissotraidis/bluewake/pull/460) adds a first-run disc import and a log a crash leaves; reviewed | Split into the screen and the log, the disc image in the ready check, a visible message kept; then a phone run: a fresh install, a killed import and the Share Its Log offer |
+| Restore native generation before asking for more hashes | [#451](https://github.com/chrissotraidis/bluewake/issues/451) reports unsupported `_ato` accesses and missing block leaders with the current preparations. Rounds 4, 5 and 7 remain opt-in. | Reproduce with recorded preparation flags and pinned tools, generate without bypassing the accounting/decline guards, then pass guest-state comparisons before a matched performance test. No game-derived output goes in GitHub. |
+| Measure Android builds that players actually use | #445 is merged; old cached profiles are not re-certified by it. One Fold 7 Outset comparison is not a result for every phone. | A fresh `--retrain` comparison with device/SoC, host/module build, training choices, scene/settings and cold versus sustained warm measurements, app PGO (`--train-app`) kept separate from game-module training. |
 
-**0.9.0, after the review:** freeze `version.json` and the candidate commit; overnight on the Mac, the app-only IPA,
-PadMint's `player-check.sh` before tagging, the benchmark tour against 0.8.0 and the 468-place sweep; then the Windows
-build and its play checks on Chris's PC, a Linux AppImage if a contributor has built one, publishing and
-`player-check.sh` after publishing.
+**Other checks that need hardware or player input:** #347's Android HD-import phone/lifecycle pass, #316's iPad
+menu tap test, #342 / RecompCore#39's cold Picto photo, and #444's Windows menu import and an iPhone or iPad import
+with a `keys.txt`. Windows-specific follow-up stays in [WINDOWS_TASKS.md](WINDOWS_TASKS.md).
 
-After 0.9.0: #347 (the Android HD import, which needs a phone), #342, and natives round 7 on the benchmark tour, which
-needs one extra Windows build.
+After the review, the release checks in [RELEASE_0.9.0.md](status/RELEASE_0.9.0.md) apply: the frozen version and
+commit, the benchmark and stage sweep, platform play checks, the artifact audit and PadMint's player checks. Sunday
+is a review, not an automatic publication date.
+
 
 ## Where things stood on October 17
+
+Historical record, including notes added around the 0.8.0 release. Use the October 24 section above for current
+actions; the old download and pending-release rows below are not today's instructions.
 
 **The latest download is 0.8.0** (published October 18 from `f2611b1`): the Windows zip, the iPhone and iPad app for
 PadMint, the recipe and the source. [Its release record](status/RELEASE_0.8.0.md) lists what it contains and every

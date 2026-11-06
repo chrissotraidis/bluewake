@@ -160,6 +160,10 @@ and a concrete contributing PR: [host data](Host.md#artifact-to-game-examples),
 [service data](Services.md#artifact-to-game-examples), and
 [graphics data](Graphics.md#artifact-to-game-examples).
 
+The [game-thread chapter](GameThread.md) follows the execution path across
+those entities, from each host turn through translated dispatch and back to
+service, graphics, and timing boundaries.
+
 For the complete component map, interaction boundaries, and links to each
 entity's internals, continue to [Runtime](Runtime.md).
 

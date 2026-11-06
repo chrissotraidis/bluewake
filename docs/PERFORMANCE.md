@@ -1,7 +1,7 @@
 # Making BlueWake faster
 
 How BlueWake gets faster, in three steps of growing size, and how to prove each step. [GOAL_LOOP.md](GOAL_LOOP.md)
-says which step is being done on which day. Owner: Chris. Updated October 17, 2026; add every result to "Results".
+says which step is being done on which day. Owner: Chris. Updated October 23, 2026; add every result to "Results".
 
 **Current defaults:** #335 is merged with Chris's approval: new Windows/Linux builds use behaviour timing;
 `--no-behaviour-timing` opts out and `--conservative` keeps the plain translation. Mac/iOS remain opt-in.
@@ -9,10 +9,39 @@ The Deck and Windows play checks below support that decision. Android's October 
 comparison now reaches full speed at Outset on the Fold 7. The Android builder (#93, merged October 17) inherits
 the timing default and has the same opt-out. Earlier measurements below retain their original dates.
 
+## The next measurement
+
+The October 23 review narrows the immediate work:
+
+- **Make the current native sets generate first.** [#451](https://github.com/chrissotraidis/bluewake/issues/451)
+  reports unsupported lean-deadline access forms and missing block leaders. Rounds 4, 5 and 7 have been brought
+  over, but generation, accounting/fallback correctness and translated/native comparisons must pass before new
+  hashes or performance claims. They stay opt-in.
+- **Qualify the workload and identify the artifacts.** Pending PR #450 retains one guest state across comparisons, but its
+  setup qualification follow-up must reject a successful process that never reaches gameplay. Require loaded
+  scenes before accepting rates. Record source/dependency/compiler options, final host/module hashes, and
+  training/profile identity; matching one source digest does not identify the complete build. Start with A/A,
+  then alternate A/B from the same state. Compare whole recipes if the training inputs cannot be held fixed.
+- **Keep the negative results.** #436's partial GroundCross path and #438's matched module-only `-mtune=znver2`
+  trial do not justify a new default. #448 found the dispatch cache already present and vector batches below the
+  worker threshold. The #433 author [withdrew the 25–27% host-flag slowdown](https://github.com/chrissotraidis/bluewake/issues/433#issuecomment-6355891120) after interleaved runs. The Dawn PR
+  still repairs the documented build; there is no measured speedup to claim from that flag.
+- **Measure Android separately.** #445 fixes incomplete training acceptance, not speed. Use a fresh `--retrain`
+  baseline and distinguish game-module training from app PGO (`--train-app`). Record device/SoC, build, scene,
+  settings and cold versus sustained warm conditions. Android already inherits lean/behaviour-timing defaults;
+  the Apple-default change is not a missing Android optimization.
+
+The merged Deck cache-flush record (#452) found no measurable cost in two scenes; keep the correctness fallback.
+The GX-worker record (#453) identifies work without making it the limiting thread in that capture. #454's draw
+census is still under review: upstream plans are dumped before existing batching, so their count alone cannot
+establish additional GPU-call savings, visual equivalence or a proportional speedup. Sunday retains the hands-on
+gameplay and rendering checks. [GOAL_LOOP.md](GOAL_LOOP.md#where-things-stand-on-october-23) tracks the handoffs.
+
 ## The plan
 
-Almost every slow second in players' logs is the **game thread**: the translated game code plus the bookkeeping
-around it. Resolution and GPU settings don't change it. On the same phone at the same spot on Outset, Wind Waker
+Many measured slow scenes are limited by the **game thread**: the translated game code plus the bookkeeping
+around it. Resolution and GPU settings do not remove that CPU work. Check the actual limiting thread in each
+scene; the [Deck GX profile](PROFILING.md#the-gx-workers-own-profile-at-outset) separates game, GX and render work. On the same phone at the same spot on Outset, Wind Waker
 Recomp's translation runs at 100% speed with 110 M instructions a retrace, and BlueWake 0.6.0 at 69% with 173 M.
 Turning on every other BlueWake option moved that by nothing. By October 10 two changes are measured: lean block
 copies take 9.9% of the instructions off and hidden symbols on Linux 7.8% ("Results"), and Elliott's work since
@@ -33,16 +62,16 @@ four E-cores, the slow-CPU stand-in. It is the cheapest speed BlueWake can get, 
 | Change | Where | His result | In BlueWake |
 | --- | --- | --- | --- |
 | Draw fusion: a display list's strips as one draw | RecompCore `d687c69` | 8.8 M draws to 0.87 M over Outset; Forest Haven 30.6 → 40.5 game FPS, the Earth Temple's boss 40.6 → 59.1, Hyrule 45.7 → 59.8 (the game thread stopped waiting for the GX worker) | Pinned in #225 (patch 0166): on for Windows and Linux (#247); Mac remains off pending play checks |
-| Faster single loads (`lfs`), early return dispatch, fifth natives round (the GX SDK's FIFO writers) | builder `7aca42a`, `56dcd70`, `5edeacc` | Game thread 4.5 to 7% faster at six places | `lfs` in #228; early return dispatch and watch-list fix in #234/#235; fifth natives round still to port |
-| Fourth natives round (animation, collision setup, colour) | builder, October 4 | 1 to 3%, 6% in Hyrule Castle's room | Not yet: port |
-| Seventh natives round (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py` | builder `95f1db7`, `a5ecd96` | About 3.8 points of the game thread at Forest Haven | Not yet: port |
+| Faster single loads (`lfs`), early return dispatch, fifth natives round (the GX SDK's FIFO writers) | builder `7aca42a`, `56dcd70`, `5edeacc` | Game thread 4.5 to 7% faster at six places | `lfs` in #228; early return dispatch and watch-list fix in #234/#235; fifth set ported in #381, opt-in; current generation blocked by #451 |
+| Fourth natives round (animation, collision setup, colour) | builder, October 4 | 1 to 3%, 6% in Hyrule Castle's room | Ported in #381, opt-in; current generation needs #451 resolved |
+| Seventh natives round (libm, collision blocks, rotations, geometry, JASystem) and `cache_ops.py` | builder `95f1db7`, `a5ecd96` | About 3.8 points of the game thread at Forest Haven | Ported in #361, opt-in; current generation blocked by #451 |
 | Sixth natives round (particle draws, the sea's waves) | builder `a8bda26` | About 5% at the sea, but he took it back out of the default | Skip for now |
-| Compact vertex layout, vertex decode fast path, vertices the GPU holds not re-sent, constants as immediate data | RecompCore `6f52a68` to `400728a` | Upload 87 to 93% smaller; render encoding 14 to 30% faster | Not yet: conflicts with patch 0157 (the dungeon map fix); a careful merge |
+| Compact vertex layout, vertex decode fast path, vertices the GPU holds not re-sent, constants as immediate data | RecompCore `6f52a68` to `400728a` | Upload 87 to 93% smaller; render encoding 14 to 30% faster | Merged with patch 0157 retained; dungeon-map, HD-pack and lava checks recorded in the October 17 plan |
 
 His builder work can't be cherry-picked: the two repositories share no history (BlueWake imported his work as
 patches), so it is ported file by file, 103 commits and 186 files since `74cb4c3`, mostly generated native code. His
-natives are certified against his lean block copies, which BlueWake now builds by default, so they should certify
-here too. The order is in [GOAL_LOOP.md](GOAL_LOOP.md).
+natives were certified against his prepared translation. That does not establish certification against today's
+BlueWake pipeline; #451 must be resolved before those comparisons can run on the current defaults. The order is in [GOAL_LOOP.md](GOAL_LOOP.md).
 
 **The decompilation, three ways.** The Wind Waker decompilation ([zeldaret/tww](https://github.com/zeldaret/tww)) has
 79.1% of its code matched (October 9) and keeps growing.
@@ -81,6 +110,7 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | Draw fusion (RecompCore patch 0166) on by default | **On for Windows** (Elliott tested it there) **and Linux** (jkoehler11 on a Steam Deck, #215: a tenth of the draws, the GX worker from 45% to 24%, nothing missing on screen; the Deck's frame rate is set by the game thread, so it stays about 27); off on Mac and iPhone until played on each, and on Android, where it halves the draws but not the game thread's work (#93). `DOL_GX_FUSE` overrides it. | Chris, October 10; Linux October 11 |
 | Lean memory, lean deadlines and the lazy overlap watch | **Defaults since #277** in the Windows/Linux builders and host. #297 is merged: training keeps the full watch only until opening player control, then profiles the lazy path. Apple preparations remain opt-in. | Chris, October 12 |
 | Behaviour timing as the Windows/Linux default | **Approved by Chris; #335 merged.** Benchmarks plus Deck cutscene/music/sailing and Windows menu, stage, Picto and general-play checks. `--no-behaviour-timing` disables it; `--conservative` keeps plain translation. Mac/iOS remain opt-in. Android #93 inherits this default; its Fold 7 cool-start comparison now passes. | Chris, October 15 (JST) |
+| The same preparations and behaviour timing as the Mac and iOS default | **Proposed (draft pull request), waiting on Chris's play on the Mac and the iPad.** 64 to 77% faster on the M3 Max and 75 to 81% on the iPad Pro on the benchmark tour ([record](status/APPLE_RECIPE_TOUR_2026-10-20.md)). `build.sh --conservative` keeps the plain translation. | Chris |
 
 ## Results
 
@@ -180,9 +210,27 @@ phases. Each one ends in a pull request, a row in "Results" above, and the row m
 
 ### Phase 1: the benchmark tour (`scripts/bench_tour.py`)
 
-**Written, not yet run on a disc** (jslay88's #360, merged October 17): `scripts/bench_tour.py` does what this
-section describes, and `tests/test_bench_tour.py` checks it with made-up log lines. The first run on a real build is
-due with the next release candidate; then replace this line with the stops that ran and their numbers.
+**Run on a real build** (jslay88's #360, merged October 17). The first run is jkoehler11's, October 22, on an
+own-disc build of `main` at `7382708`, Linux (Ryzen 9 5900X), headless and unpaced: all five stops load, no `[fps-dip]`
+cause at any of them, busy 99% throughout (the game thread is the limit, as expected). Game frames a second, two runs
+from one state: Outset 64.64 / 64.93, Windfall 64.97 / 65.46, Dragon Roost Cavern 88.44 / 89.32, Forest Haven
+56.88 / 58.08, the sea by the Fortress 75.09 / 76.15, within 2.1% at every stop, checkpoints identical.
+
+Two runs only agree when they load the same guest state, and the card route the tour plays to make that state is not
+reproducible: the same build booted twice from the same card differs in CPU and MEM1 from retrace 300 (boot milestones
+identical), and its stop speeds moved by up to 7.5% with them. `--setup-state FILE` keeps the state one run made and
+loads it in the next, which is what the two-run check needs; keep the file out of the repository.
+
+The same build on a Steam Deck (VanGogh, 4 c / 8 t, SteamOS, headless and unpaced) gives, game frames a second:
+Outset 41.31 / 42.40, Windfall 41.25 / 42.60, Dragon Roost Cavern 54.48 / 55.74, Forest Haven 37.99 / 38.25, the sea by
+the Fortress 48.88 / 48.36, checkpoints identical: the two runs differ by 0.7 to 3.3% across the five stops (+2.6, +3.3,
++2.3, +0.7 and -1.1%), which is the Deck's own run-to-run noise. The card has to hold a save in quest log 1: with the
+Deck's own card the route starts a new file (`name-input-complete` at retrace 632 where a continue reaches `play-scene`
+at 609), the setup pass saves a state on the name-entry screen, and the tour then reports 300 to 430 game frames a
+second with no stop loaded. A card copied from a machine whose log 1 has a save works.
+
+The five-stop Mac/iPad runs are recorded in [the October 20 results](status/APPLE_RECIPE_TOUR_2026-10-20.md) and the
+table above.
 
 *Goal:* one command that measures a build's speed in several places and proves two builds behave the same. Every
 later phase uses it.

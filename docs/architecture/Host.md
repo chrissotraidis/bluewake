@@ -315,6 +315,9 @@ condition was set. MMIO and edge services can also run while translated code
 is dispatching, so the diagram summarizes control flow rather than exact call
 order.
 
+For the complete ownership, dispatch, service, graphics, worker, and profiling
+view of this execution path, see the [game-thread architecture](GameThread.md).
+
 | Component | What it does |
 | --- | --- |
 | Turn setup | Applies save-state and other ready host work, begins the cycle-domain turn, checks quit conditions, and services pending card callbacks. [Source](../../runtime/host/src/main.c#L8651-L8662) |

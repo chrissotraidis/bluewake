@@ -68,14 +68,16 @@ def prepare(root):
     for path, text in prepared.items():
         if path.read_text() != text:
             temporary = path.with_suffix('.c.tmp')
-            temporary.write_text(text, newline='\n')
+            with temporary.open('w', encoding='utf-8', newline='\n') as stream:
+                stream.write(text)
             temporary.replace(path)
         files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     manifest = root / 'native_skin.json'
     data = json.dumps({'abi': 1, 'files': files}, indent=2) + '\n'
     if not manifest.exists() or manifest.read_text() != data:
         temporary = manifest.with_suffix('.json.tmp')
-        temporary.write_text(data, newline='\n')
+        with temporary.open('w', encoding='utf-8', newline='\n') as stream:
+            stream.write(data)
         temporary.replace(manifest)
     if MARKER not in header.read_text():
         header.write_text(header.read_text() + '\n' + MARKER)
