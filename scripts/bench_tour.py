@@ -3,7 +3,7 @@
 
     scripts/bench_tour.py CARD APP [--stop-retraces N] [--untrained]
         [--mode rendered|headless|both] [--state FILE]
-        [--setup-state FILE]
+        [--setup-state FILE] [--env KEY=VALUE ...]
     scripts/bench_tour.py compare A.json B.json
 
 The card is copied with scripts/card_set_restart.py into a scratch folder,
@@ -23,6 +23,12 @@ and each run makes its own. The pass has to reach gameplay: when its log has no
 [boot-milestone] play-scene line, the tour stops and names the last milestone it
 did reach, because a card with no save in quest log 1 starts a new file, ends on
 the name-entry screen, and still exits 0.
+
+The tour clears every BLUEWAKE_ and DOL_ variable it inherits, so a run is not
+changed by whatever the shell had set. --env KEY=VALUE (repeatable) gives one
+to the measured runs on purpose, for an A/B of one setting in the same build:
+--env BLUEWAKE_DIRECT_GATE=0 against --env BLUEWAKE_DIRECT_GATE=1. The setup
+pass never gets them, so both sides load the same state.
 
 Default stops, from retrace 2400, one every --stop-retraces (default 1800).
 The run ends at 11400:
@@ -478,7 +484,7 @@ def _modes(mode: str) -> list[str]:
 
 
 def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state,
-              setup_state=None) -> int:
+              setup_state=None, settings=()) -> int:
     stops = UNTRAINED_STOPS if untrained else DEFAULT_STOPS
     end = tour_end(stops, stop_retraces)
     warp = warp_string(stops, stop_retraces)
@@ -532,6 +538,7 @@ def run_tour(card, app, *, stop_retraces: int, untrained: bool, mode: str, state
             warp=warp_value,
             max_retraces=cap,
         )
+        env.update(dict(settings))
         log_path = scratch / f"{mode_name}.log"
         code = _run_app(app, env, log_path)
         text = log_path.read_text(encoding="utf-8", errors="replace")
@@ -605,9 +612,18 @@ def _run_main(argv: list[str]) -> int:
                         help="keep the card route's state in FILE and reuse it when it exists, "
                              "so repeated runs measure the same guest state. Keep it out of the "
                              "repository")
+    parser.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                        help="give the measured runs this setting (repeatable); the tour otherwise "
+                             "clears every BLUEWAKE_ and DOL_ variable it inherits")
     args = parser.parse_args(argv)
     if args.stop_retraces <= 0:
         parser.error("--stop-retraces must be positive")
+    settings = []
+    for item in args.env:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            parser.error(f"--env takes KEY=VALUE, not {item!r}")
+        settings.append((key, value))
     return run_tour(
         args.card,
         args.app,
@@ -616,6 +632,7 @@ def _run_main(argv: list[str]) -> int:
         mode=args.mode,
         state=args.state,
         setup_state=args.setup_state,
+        settings=settings,
     )
 
 
