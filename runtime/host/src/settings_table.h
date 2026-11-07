@@ -326,13 +326,15 @@ inline constexpr Setting kSettings[] = {
              "Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
     // The direct-call gate (#552): one host word read inline before a direct
-    // call between translated chunks, instead of a call into the check. Opt-in:
-    // measured +5.5% on a Steam Deck, exact; read when the module is set up.
-    {.key = "BLUEWAKE_DIRECT_GATE", .kind = Kind::Bool,
+    // call between translated chunks, instead of a call into the check. On by
+    // default on Windows, Linux and the Mac, where it was measured (+12% on
+    // Windows and Linux desktops, +5.5% on a Steam Deck, +12.9% on an M3 Max,
+    // exact); main.c reads an unset value the same way. Read when the module is set up.
+    {.key = "BLUEWAKE_DIRECT_GATE", .kind = Kind::Bool, .on = Os::Windows | Os::Linux | Os::Mac,
      .label = "Faster calls inside the game's code", .tab = Tab::Config, .control = Control::Switch,
-     .note = "Experimental. Checks, without a call, whether the game's code can call its next "
-             "function directly. Off by default; measured on a Steam Deck. Takes effect when "
-             "BlueWake starts again.",
+     .note = "Checks, without a call, whether the game's code can call its next function "
+             "directly. The game plays the same either way; turn it off if you suspect it. Takes "
+             "effect when BlueWake starts again.",
      .next_launch = Os::All},
     // The game module's code on 2 MB pages (#554, module_hugepages.h), copied
     // right after the module loads. Opt-in: measured +4.5% on a Steam Deck,

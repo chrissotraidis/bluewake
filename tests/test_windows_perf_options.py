@@ -46,10 +46,13 @@ class WindowsPerfOptionsTest(unittest.TestCase):
         self.assertTrue(parse().fp_checks)
         self.assertFalse(parse("--no-fp-checks").fp_checks)
 
-    def test_direct_gate_is_opt_in(self):
+    def test_direct_gate_trains_open_by_default(self):
+        # Not a module default: Android takes those, and keeps the gate opt-in.
         self.assertNotIn("direct_gate", bw.WINDOWS_DEFAULT_OPTIMIZATIONS)
-        self.assertFalse(parse().direct_gate)
+        self.assertTrue(parse().direct_gate)
         self.assertTrue(parse("--direct-gate").direct_gate)
+        self.assertFalse(parse("--no-direct-gate").direct_gate)
+        self.assertFalse(parse("--conservative").direct_gate)
 
     def test_conservative_drops_fp_checks(self):
         self.assertFalse(parse("--conservative").fp_checks)

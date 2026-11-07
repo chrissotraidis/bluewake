@@ -1520,8 +1520,11 @@ def main():
     parser.add_argument("--native-skin", action="store_true",
                         help="certify and enable optional native skinning preparation (off by default)")
     parser.add_argument("--direct-gate", action="store_true",
-                        help="train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1), "
-                             "for a build that measures it; the module is the same either way")
+                        help="train with the direct-call gate open (BLUEWAKE_DIRECT_GATE=1, #552); the default "
+                             "whenever direct calls are on, kept for older scripts")
+    parser.add_argument("--no-direct-gate", action="store_true",
+                        help="train with the direct-call gate closed, as before 0.11.0; the module is the same "
+                             "either way, only its optimization profile differs")
     parser.add_argument("--native-math", action="store_true",
                         help="prepare certified native matrix functions; off by default, compatible host opt-in required")
     parser.add_argument("--lean-blocks", action="store_true",
@@ -1626,6 +1629,12 @@ def main():
         args.behaviour_timing = False
     if args.no_fp_checks:
         args.fp_checks = False
+    # The game opens the direct-call gate by default on Windows and Linux (#552),
+    # so training opens it too; --no-direct-gate trains with it closed.
+    if args.no_direct_gate:
+        args.direct_gate = False
+    elif args.direct_calls:
+        args.direct_gate = True
     if args.host_only and (args.retrain or args.no_train or args.no_pgo):
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:

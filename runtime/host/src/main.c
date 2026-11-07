@@ -80,6 +80,7 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <TargetConditionals.h>
 #endif
 #if defined(_WIN32)
 #include <SDL3/SDL_video.h>
@@ -8712,14 +8713,25 @@ int main(int argc, char** argv) {
             g_skip_fast_on = enabled;
             host_skip_fast_refresh();
             // The gate (direct_skip.h): the module reads one word inline before a
-            // direct call instead of calling its check. Opt-in while it is
-            // measured: BLUEWAKE_DIRECT_GATE=1 hands the word over; otherwise
-            // the gate stays closed and every direct call takes the out-of-line
-            // check as before. A module without the export never reads it.
+            // direct call instead of calling its check. BLUEWAKE_DIRECT_GATE=1
+            // hands the word over and 0 keeps it closed, so every direct call
+            // takes the out-of-line check as before. Unset, it is open on
+            // Windows, Linux and the Mac, where it was measured (+12% on Windows
+            // and Linux desktops, +5.5% on a Steam Deck, +12.9% on an M3 Max,
+            // checkpoints identical), and closed on iPhone, iPad and Android
+            // until it is measured there. A module without the
+            // export never reads it.
             typedef int (*DirectGateFn)(const volatile u32*);
             DirectGateFn direct_gate = (DirectGateFn)dlsym(lib, "bluewake_composite_direct_gate");
             const char* gate_env = getenv("BLUEWAKE_DIRECT_GATE");
-            const bool want_gate = gate_env != NULL && strcmp(gate_env, "1") == 0;
+#if ((defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)) || \
+    (defined(__APPLE__) && TARGET_OS_OSX)
+            const bool gate_default = true;
+#else
+            const bool gate_default = false;
+#endif
+            const bool want_gate = gate_env == NULL || gate_env[0] == '\0' ? gate_default
+                                                                            : strcmp(gate_env, "1") == 0;
             host_direct_gate_pi();
             g_direct_gate_on = enabled && direct_gate != NULL &&
                                direct_gate(want_gate ? &g_direct_gate.word : NULL) == 1;

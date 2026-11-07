@@ -124,11 +124,13 @@ int main() {
     const Setting* batch = find("BLUEWAKE_GATHER_PIPE_BATCH");
     assert(batch != nullptr && batch->tab == Tab::Config && batch->group == nullptr && batch == efficient_effects + 1);
     assert(efficient_effects->experimental == nullptr);
-    // Then the direct-call gate (#552) and the module on huge pages (#554): off by
-    // default, read when the module loads (huge pages: the host acts on Linux only).
+    // Then the direct-call gate (#552), on by default on every desktop where it was
+    // measured (#567), and the module on huge pages (#554), off by default; both
+    // read when the module loads (huge pages: the host acts on Linux only).
     const Setting* gate = find("BLUEWAKE_DIRECT_GATE");
     assert(gate != nullptr && gate == batch + 1 && gate->tab == Tab::Config && gate->group == nullptr);
-    assert(!default_on(*gate) && next_launch_on(*gate));
+    for (const Os os : {Os::Windows, Os::Linux, Os::Mac})
+        assert(default_on(*gate, os) && next_launch_on(*gate, os));
     const Setting* huge = find("BLUEWAKE_MODULE_HUGEPAGES");
     assert(huge != nullptr && huge == gate + 1 && huge->tab == Tab::Config && huge->group == nullptr);
     assert(!default_on(*huge) && next_launch_on(*huge));
