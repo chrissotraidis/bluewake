@@ -26,7 +26,10 @@ from wwhd.title import title_image
 from wwhd.layout import HEARTS, SWIM_ICONS, heart_image, inventory_names
 from wwhd.matches import HD_CLOUDS, HD_CLOUDS_FOLDER, HD_CLOUDS_SOURCE, candidate_priority, picked_priority
 from wwhd.font import BitmapFont
-from wwhd.sky import HD_SKY_FILE, HD_SKY_FOLDER, find_dzs, pack_all
+from wwhd.cloud_shadow import (GX2_BC4_UNORM, HD_CLOUD_SHADOW_FILE, HD_CLOUD_SHADOW_FOLDER, HD_CLOUD_SHADOW_NAME,
+                               dds_bc4, is_source as cloud_shadow_source)
+from wwhd.normals import Builder as NormalsBuilder
+from wwhd.sky import HD_ROOM_LIGHTS_FILE, HD_SKY_FILE, HD_SKY_FOLDER, find_dzs, pack_all, pack_room_lights, room_lights
 from wwhd.ui import LAYOUT_SPRITES, OPENING_PANELS, fit_sprite, font_sprites, opening_sprite
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -298,7 +301,7 @@ def build(args) -> dict:
     if output.is_relative_to(ROOT) and output.relative_to(ROOT).parts[0] not in ("build", "local-research", "game", "generated"):
         raise FormatError("inside the checkout, extracted art must stay in ignored build/ or local-research/")
     errors = []
-    gc_stages, hd_stages = {}, {}
+    gc_stages, hd_stages, hd_room_lights = {}, {}, {}
     originals = index_gc(args.gc_disc, errors, gc_stages)
     targets = defaultdict(list)
     for t in originals:
@@ -308,7 +311,13 @@ def build(args) -> dict:
     staging = Path(tempfile.mkdtemp(prefix="." + output.name + "-", dir=output.parent))
     matches, conflicts, unmatched = {}, set(), []
     optional_clouds = {}
+    cloud_shadow = None
     scanned, decoded = 0, 0
+    # HD's normals and vertex colours by the GameCube's positions (the HD look's sun shadows): each GameCube arc is
+    # read from its disc as its HD archive turns up.
+    gc_file = args.gc_disc.open("rb")
+    gc_header = validate_disc_header(gc_file)
+    normals = NormalsBuilder(gc_file, read_fst(gc_file, gc_header["fst_offset"], gc_header["fst_size"]))
     try:
         for source, archive in hd_files(args.hd_source, args):
             if args.only and not any(s.lower() in source.lower() for s in args.only):
@@ -331,6 +340,23 @@ def build(args) -> dict:
                         at = find_dzs(data)
                         if at is not None:
                             hd_stages[stage.group(1)] = data[at:]
+                        lights = room_lights(data)
+                        if lights is not None:
+                            hd_room_lights[stage.group(1)] = lights
+                    # HD's cloud shadow texture (the HD look's cloud shadows on HD's rule), its blocks as they are.
+                    if cloud_shadow is None and cloud_shadow_source(path) and data[:4] == b"FRES":
+                        try:
+                            for tex in bfres(data, path, {HD_CLOUD_SHADOW_NAME}):
+                                if tex.format != GX2_BC4_UNORM:
+                                    raise FormatError(f"{HD_CLOUD_SHADOW_NAME} is format 0x{tex.format:x}, not BC4")
+                                (staging / HD_CLOUD_SHADOW_FOLDER).mkdir(parents=True, exist_ok=True)
+                                (staging / HD_CLOUD_SHADOW_FOLDER / HD_CLOUD_SHADOW_FILE).write_bytes(
+                                    dds_bc4(tex.width, tex.height, tex.levels))
+                                cloud_shadow = {"file": HD_CLOUD_SHADOW_FILE, "hd": tex.source,
+                                                "size": [tex.width, tex.height], "mipmaps": len(tex.levels)}
+                        except FormatError as ex:
+                            errors.append({"source": path + "#" + HD_CLOUD_SHADOW_NAME, "reason": str(ex)})
+                    normals.feed(path, data)
                     layout = layouts.get(str(PurePosixPath(path).parent))
                     for hd, candidates in source_textures(data, path, targets, layout):
                         gc = [t for t in candidates if compatible(t, hd)]
@@ -404,6 +430,17 @@ def build(args) -> dict:
                             errors.append({"source": hd.source, "reason": str(ex)})
             except (FormatError, UnicodeError, OSError) as ex:
                 errors.append({"source": source, "reason": str(ex)})
+            normals.flush()
+        normal_tables, normals_report = normals.tables()
+        gc_file.close()
+        # The shading tables count as files too, as the in-app importer's progress counts them.
+        for written, (name, table) in enumerate(normal_tables.items(), 1):
+            (staging / name).parent.mkdir(parents=True, exist_ok=True)
+            (staging / name).write_bytes(table)
+            if written % 20 == 0 or written == len(normal_tables):
+                print(f"Wrote {written} of {len(normal_tables)} shading tables "
+                      f"({scanned + written} files with the HD resources)", flush=True)
+        errors.extend(normals_report.pop("errors"))
         for key in conflicts:
             for name in matches[key]["generated_files"]:
                 (staging / name).unlink()
@@ -452,8 +489,16 @@ def build(args) -> dict:
         if hd_stages:
             (staging / HD_SKY_FOLDER).mkdir(parents=True, exist_ok=True)
             (staging / HD_SKY_FOLDER / HD_SKY_FILE).write_bytes(sky)
+        if hd_room_lights:  # HD's dungeon and interior room lights, beside the palettes
+            (staging / HD_SKY_FOLDER).mkdir(parents=True, exist_ok=True)
+            (staging / HD_SKY_FOLDER / HD_ROOM_LIGHTS_FILE).write_bytes(pack_room_lights(hd_room_lights))
         report["optional"]["hd-sky"] = {"file": HD_SKY_FILE, "stages": int.from_bytes(sky[4:8], "big"),
-                                        "skipped": [{"stage": n, "reason": r} for n, r in sky_skipped]}
+                                        "skipped": [{"stage": n, "reason": r} for n, r in sky_skipped],
+                                        "room_lights": {"file": HD_ROOM_LIGHTS_FILE, "stages": len(hd_room_lights)}}
+        # HD's cloud shadow texture, when the HD disc has the sea stage (written above as it was read).
+        report["optional"]["hd-cloud-shadow"] = cloud_shadow
+        # HD's normals (each stage's, the objects') and the objects' vertex colours, written above.
+        report["optional"]["hd-normals"] = normals_report
         (staging / "import-report.json").write_text(json.dumps(report, indent=2) + "\n")
         (staging / "README.txt").write_text("Private artwork extracted from your own Wind Waker HD disc.\n"
                                           "Choose this folder in Mods > Wind Waker HD textures, then restart.\n"
@@ -463,6 +508,7 @@ def build(args) -> dict:
             install(output, args.settings)
         return report
     except BaseException:
+        gc_file.close()
         shutil.rmtree(staging, ignore_errors=True)
         raise
 

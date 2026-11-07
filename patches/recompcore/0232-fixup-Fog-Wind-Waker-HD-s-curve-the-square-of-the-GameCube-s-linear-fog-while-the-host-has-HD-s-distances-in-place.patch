@@ -1,0 +1,326 @@
+From f4cba74560a255702cd8f3d5999bb0ead4da867f Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 20:11:43 -0600
+Subject: [PATCH] fixup! Fog: Wind Waker HD's curve, the square of the
+ GameCube's linear fog, while the host has HD's distances in place
+
+Wind Waker HD mixes its fog in linear light: its scenery shader ends with
+mix(lit, fog colour, f), both linear, and the frame goes out through an
+sRGB output. GX mixes in the game's gamma, so a dark wall deep in a
+room's fog kept half of HD's fog or less. Read from the captures:
+GanonB far wall at 6561 units, f 0.682, HD red 0.229 where a gamma mix
+gives 0.169; Tower of the Gods at 6024 units, f 0.609, HD 0.099 against
+0.047.
+
+With HD's curve, the draws' fog (emit_fog and the ubershader) is now
+that mix in linear light by the sRGB curve, in place of the integer
+blend. The sun pass reads the scene from a copy taken just before it
+(the frame buffer only, single-sampled). On the lit scenery it takes
+the draws' fog out in linear light, shades as before, and puts HD's
+radial fog back in linear light. Without the copy it works as before.
+
+Far half of the dungeon stops against Cemu, linear luminance before ->
+after (Cemu): Forbidden Woods R05 0.056 -> 0.065 (0.064), with its hue
+back from orange; Earth Temple R00 0.027 -> 0.039 (0.037); Wind Temple
+R02 0.059 -> 0.074 (0.073); GanonB 0.110 -> 0.118 (0.123).
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 78 ++++++++++++++++++-
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 23 +++++-
+ GXRuntime/graphics/gxcore/src/gxcore_uber.cpp | 12 ++-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 23 ++++--
+ 4 files changed, 125 insertions(+), 11 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 595eb462ba..b4953c5ed7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -2302,7 +2302,21 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+ // depth: the pass takes their fog out and puts HD's in, (scene - F fs) / (1 - fs) x shade x (1 - fh) + F fh, in the
+ // scene's gamma, as GX fogs. Without it a shaded wall's fog was shaded too, and the far walls of a dungeon room
+ // (most of them fog in HD) came out at under half HD's.
++// With the scene's copy (view.fog_x.w, copy_sun_fog_scene()): HD's mix in linear light, as HD's shaders fog (their
++// lit colour and fog colour both linear, shown through an sRGB output; the draws' own fog is the same mix with HD's
++// curve, gxcore emit_fog()): the draws' fog out, lit = (S - F fs) / (1 - fs), shaded as before (x the shade in the
++// scene's gamma), then shaded x (1 - fh) + F fh, linear by the sRGB curve, written whole.
+ constexpr const char* kSunMapFogEntry = R"""(
++@group(0) @binding(11) var scene_copy: texture_2d<f32>;
++
++fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
++    return select(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, c <= vec3(0.04045));
++}
++
++fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
++    return select(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3(0.0031308));
++}
++
+ struct SunFogOut {
+     @location(0) @blend_src(0) add: vec4<f32>,
+     @location(0) @blend_src(1) mul: vec4<f32>,
+@@ -2366,6 +2380,16 @@ fn fs_sun_map_fog(in: VertexOutput) -> SunFogOut {
+         fs = fs * fs;
+         fh = fh * fh;
+     }
++    if (view.fog_x.w > 0.5) {
++        let f_lin = srgb_to_linear(view.fog_colour.rgb);
++        let lit = max((srgb_to_linear(textureLoad(scene_copy, p, 0).rgb) - f_lin * fs) / max(1.0 - fs, 1.0 / 256.0),
++                      vec3(0.0));
++        // The shade as it multiplies the unfogged scene (in its gamma), then HD's fog over it in linear light.
++        let shaded = srgb_to_linear(clamp(linear_to_srgb(lit) * m.rgb, vec3(0.0), vec3(1.0)));
++        out.mul = vec4(0.0, 0.0, 0.0, 1.0);
++        out.add = vec4(linear_to_srgb(shaded * (1.0 - fh) + f_lin * fh), 0.0);
++        return out;
++    }
+     let keep = clamp(m.rgb * (1.0 - fh) / max(1.0 - fs, 1.0 / 256.0), vec3(0.0), vec3(1.0));
+     out.mul = vec4(keep, 1.0);
+     out.add = vec4(max(view.fog_colour.rgb * (fh - fs * keep), vec3(0.0)), 0.0);
+@@ -2377,6 +2401,8 @@ wgpu::BindGroupLayout g_sunMapLayout;
+ wgpu::PipelineLayout g_sunMapPipelineLayout;
+ wgpu::RenderPipeline g_sunMapPass;
+ wgpu::RenderPipeline g_sunMapDirect; // multiplied straight into the scene
++wgpu::Texture g_sunFogScene;          // the scene before the pass, for HD's fog in linear light (copy_sun_fog_scene())
++wgpu::TextureView g_sunFogSceneView;
+ wgpu::Sampler g_sunMapCompare;
+ wgpu::Texture g_sunMapTex;
+ wgpu::TextureView g_sunMapView;
+@@ -3699,10 +3725,12 @@ struct SunMapInputs {
+   wgpu::Buffer buffer;
+   bool mask = false;
+   bool normals = false;
++  bool scene = false;  // the scene's copy is bound (copy_sun_fog_scene()), for HD's fog in linear light
+   float farTerm = 0.f; // near / (far - near)
+ };
+ 
+-SunMapInputs sun_map_inputs(const Camera& camera, const SunMap& sunMap, bool actor) {
++// scene: the scene was copied for the pass (copy_sun_fog_scene()): the lit scenery's fog is HD's mix in linear light.
++SunMapInputs sun_map_inputs(const Camera& camera, const SunMap& sunMap, bool actor, bool scene = false) {
+   std::array<float, kSunMapUniformFloats> uniform{};
+   std::memcpy(uniform.data(), camera.view.data(), sizeof(camera.view));
+   for (uint32_t cascade = 0; cascade < kSunMapCascades; ++cascade)
+@@ -3791,6 +3819,7 @@ SunMapInputs sun_map_inputs(const Camera& camera, const SunMap& sunMap, bool act
+       uniform[f + 8] = g_sceneFog.range ? 1.f : 0.f;
+       uniform[f + 9] = g_sceneFog.centre;
+       uniform[f + 10] = g_sceneFog.width;
++      uniform[f + 11] = scene ? 1.f : 0.f;
+       for (int i = 0; i < 12; ++i)
+         uniform[f + 12 + i] = g_sceneFog.table[i];
+       for (int i = 0; i < 16; ++i)
+@@ -3818,7 +3847,7 @@ SunMapInputs sun_map_inputs(const Camera& camera, const SunMap& sunMap, bool act
+   const auto buffer = g_device.CreateBuffer(&bufferDescriptor);
+   std::memcpy(buffer.GetMappedRange(0, sizeof(uniform)), uniform.data(), sizeof(uniform));
+   buffer.Unmap();
+-  return {.buffer = buffer, .mask = mask, .normals = normals, .farTerm = uniform[71]};
++  return {.buffer = buffer, .mask = mask, .normals = normals, .scene = scene, .farTerm = uniform[71]};
+ }
+ 
+ // effects: the effects' mask (effect_mask_target()), whose effects the shade leaves.
+@@ -3837,6 +3866,7 @@ wgpu::BindGroup sun_map_group(const SunMapInputs& in, const wgpu::TextureView& d
+       wgpu::BindGroupEntry{.binding = 8, .textureView = g_cloudTexView ? g_cloudTexView : g_farView[0]},
+       wgpu::BindGroupEntry{.binding = 9, .sampler = g_cloudSampler},
+       wgpu::BindGroupEntry{.binding = 10, .textureView = effects},
++      wgpu::BindGroupEntry{.binding = 11, .textureView = in.scene ? g_sunFogSceneView : g_farView[0]},
+   };
+   const wgpu::BindGroupDescriptor bindGroupDescriptor{
+       .layout = g_sunMapLayout,
+@@ -3846,12 +3876,43 @@ wgpu::BindGroup sun_map_group(const SunMapInputs& in, const wgpu::TextureView& d
+   return g_device.CreateBindGroup(&bindGroupDescriptor);
+ }
+ 
++// Wind Waker HD fogs its scenery in linear light, mix(lit, fog, f); the sun pass's blend works in the scene's gamma,
++// where a dark far wall kept about half of HD's fog. So the pass reads the scene from a copy taken just before it
++// (the frame buffer only, single-sampled) and writes HD's mix itself (fs_sun_map_fog).
++// The direct sun pass fogs the lit scenery after its shade (make_sun_map_pipeline(): fs_sun_map_fog).
++bool sun_fog_pipeline() { return g_sunFogHd && webgpu::g_dualSourceBlendingSupported; }
++
++bool copy_sun_fog_scene(const wgpu::CommandEncoder& cmd, const wgpu::Extent3D& size, const wgpu::TextureView& dst) {
++  const auto& frame = webgpu::g_frameBuffer;
++  if (!frame.texture || dst.Get() != frame.view.Get() || frame.texture.GetWidth() != size.width ||
++      frame.texture.GetHeight() != size.height || frame.texture.GetSampleCount() != 1)
++    return false;
++  if (!g_sunFogScene || g_sunFogScene.GetWidth() != size.width || g_sunFogScene.GetHeight() != size.height ||
++      g_sunFogScene.GetFormat() != frame.texture.GetFormat()) {
++    const wgpu::TextureDescriptor descriptor{
++        .label = "Sun pass scene (HD fog)",
++        .usage = wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::TextureBinding,
++        .size = {size.width, size.height, 1},
++        .format = frame.texture.GetFormat(),
++    };
++    g_sunFogScene = g_device.CreateTexture(&descriptor);
++    g_sunFogSceneView = g_sunFogScene.CreateView();
++  }
++  const wgpu::TexelCopyTextureInfo from{.texture = frame.texture};
++  const wgpu::TexelCopyTextureInfo to{.texture = g_sunFogScene};
++  const wgpu::Extent3D extent{size.width, size.height, 1};
++  cmd.CopyTextureToTexture(&from, &to, &extent);
++  return true;
++}
++
+ // effects: the effects' mask (effect_mask_target()), whose effects it leaves.
+ void draw_sun_map(const wgpu::CommandEncoder& cmd, const Camera& camera, const SunMap& sunMap,
+                   const wgpu::TextureView& depthView, const wgpu::TextureView& effects,
+                   const wgpu::TextureView& target, bool direct, const wgpu::Extent3D& size,
+                   const wgpu::TextureView& resolve = nullptr) {
+-  const SunMapInputs inputs = sun_map_inputs(camera, sunMap, false);
++  // With HD's fog after the shade, the scene as it is now, for the pass to fog in linear light.
++  const bool scene = direct && resolve == nullptr && sun_fog_pipeline() && copy_sun_fog_scene(cmd, size, target);
++  const SunMapInputs inputs = sun_map_inputs(camera, sunMap, false, scene);
+   const auto sun_group = [&](const wgpu::TextureView& blurred) {
+     return sun_map_group(inputs, depthView, blurred, effects);
+   };
+@@ -4895,7 +4956,7 @@ void initialize() {
+       .visibility = wgpu::ShaderStage::Fragment,
+       .sampler = {.type = wgpu::SamplerBindingType::Filtering},
+   };
+-  std::array<wgpu::BindGroupLayoutEntry, 11> sunMapEntries{
++  std::array<wgpu::BindGroupLayoutEntry, 12> sunMapEntries{
+       cloudEntries[0],
+       cloudEntries[1],
+       cloudEntries[2],
+@@ -4911,6 +4972,13 @@ void initialize() {
+           .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
+                       .viewDimension = wgpu::TextureViewDimension::e2D},
+       },
++      // The scene as it was before the pass (copy_sun_fog_scene()), for HD's fog in linear light (fs_sun_map_fog).
++      wgpu::BindGroupLayoutEntry{
++          .binding = 11,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                      .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
+       wgpu::BindGroupLayoutEntry{
+           .binding = 4,
+           .visibility = wgpu::ShaderStage::Fragment,
+@@ -4991,6 +5059,8 @@ void shutdown() {
+   g_sunMapPass = {};
+   g_sunMapDirect = {};
+   g_sunMapLow = {};
++  g_sunFogScene = {};
++  g_sunFogSceneView = {};
+   g_sunCopy = {};
+   g_actorLowView = {};
+   g_actorLow = {};
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index d8e49df48c..860789a5cc 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -213,6 +213,16 @@ std::string tev_compare(bool vec, std::uint8_t comparison,
+   return "(" + d + " + select(" + zero + ", " + cval + ", " + cond + "))";
+ }
+ 
++// Wind Waker HD's fog mix, in linear light by the sRGB curve (emit_fog() with HD's curve; the ubershader's alike).
++constexpr const char* kHdFogLinearMix =
++    "    let fog_p = vec3f(clamp(prev.rgb, vec3i(0), vec3i(255))) / 255.0;\n"
++    "    let fog_c = vec3f(psc.fogcolor.rgb) / 255.0;\n"
++    "    let fog_lin = mix(select(pow((fog_p + 0.055) / 1.055, vec3f(2.4)), fog_p / 12.92, fog_p <= vec3f(0.04045)),\n"
++    "                      select(pow((fog_c + 0.055) / 1.055, vec3f(2.4)), fog_c / 12.92, fog_c <= vec3f(0.04045)),\n"
++    "                      fogv); // Wind Waker HD: in linear light\n"
++    "    let fog_out = select(1.055 * pow(fog_lin, vec3f(1.0 / 2.4)) - 0.055, fog_lin * 12.92, fog_lin <= vec3f(0.0031308));\n"
++    "    prev = vec4i(vec3i(round(fog_out * 255.0)), prev.a);\n";
++
+ // Fog (Dolphin PixelShaderGen WriteFog + PixelShaderManager fog constants).
+ // Applied to prev.rgb after the alpha test, exactly Dolphin's order. GC zCoord
+ // is the 24-bit screen depth (0=near, 0xFFFFFF=far); our substrate runs
+@@ -247,6 +257,7 @@ void emit_fog(std::string& out, const ShaderKey& key) {
+          "    ze = ze * x_adjust;\n");
+   }
+   emit(out, "    var fogv = clamp(ze - psc.fogf.y, 0.0, 1.0);\n");
++  bool hd_curve = false;
+   switch (fsel) {
+   case FogType::Exp:
+     emit(out, "    fogv = 1.0 - exp2(-8.0 * fogv);\n");
+@@ -265,10 +276,20 @@ void emit_fog(std::string& out, const ShaderKey& key) {
+   default:
+     // linear: fogv unchanged, or Wind Waker HD's curve, its square (HD's own
+     // fog distances, retuned for it, are what the game then holds).
+-    if (key.hd_fog != 0u)
++    if (key.hd_fog != 0u) {
+       emit(out, "    fogv = fogv * fogv; // Wind Waker HD's fog curve\n");
++      hd_curve = true;
++    }
+     break;
+   }
++  // Wind Waker HD mixes its fog in linear light (its shaders: mix(lit colour, fog colour, f), both linear, shown
++  // through an sRGB output); in the game's gamma a dark wall far in the fog kept about half of HD's fog. The same mix,
++  // in linear light by the sRGB curve (the frame's colours are HD's linear light, sRGB-encoded, as HD's sRGB textures
++  // are read by the GameCube's TEV).
++  if (hd_curve) {
++    emit(out, kHdFogLinearMix);
++    return;
++  }
+   // Integer blend: prev.rgb = (prev.rgb*(256-ifog) + fogcolor*ifog) >> 8.
+   emit(out, "    let ifog = i32(round(fogv * 256.0));\n"
+             "    prev = vec4i((prev.rgb * (256 - ifog) + psc.fogcolor.rgb * "
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp b/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp
+index c65d6bd12e..a34c741a06 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_uber.cpp
+@@ -855,7 +855,17 @@ fn fog(prev: vec4i, in: VertexOut) -> vec4i {
+     else if (fsel == 5u) { fogv = 1.0 - exp2(-8.0 * fogv * fogv); }
+     else if (fsel == 6u) { fogv = exp2(-8.0 * (1.0 - fogv)); }
+     else if (fsel == 7u) { fogv = 1.0 - fogv; fogv = exp2(-8.0 * fogv * fogv); }
+-    else if (kb(K_hd_fog) != 0u) { fogv = fogv * fogv; }
++    else if (kb(K_hd_fog) != 0u) {
++        // Wind Waker HD's curve, mixed in linear light by the sRGB curve as HD's shaders fog (emit_fog()).
++        fogv = fogv * fogv;
++        let fog_p = vec3f(clamp(prev.rgb, vec3i(0), vec3i(255))) / 255.0;
++        let fog_c = vec3f(psc.fogcolor.rgb) / 255.0;
++        let fog_lin = mix(select(pow((fog_p + 0.055) / 1.055, vec3f(2.4)), fog_p / 12.92, fog_p <= vec3f(0.04045)),
++                          select(pow((fog_c + 0.055) / 1.055, vec3f(2.4)), fog_c / 12.92, fog_c <= vec3f(0.04045)),
++                          fogv);
++        let fog_out = select(1.055 * pow(fog_lin, vec3f(1.0 / 2.4)) - 0.055, fog_lin * 12.92, fog_lin <= vec3f(0.0031308));
++        return vec4i(vec3i(round(fog_out * 255.0)), prev.a);
++    }
+     let ifog = i32(round(fogv * 256.0));
+     return vec4i((prev.rgb * (256 - ifog) + psc.fogcolor.rgb * ifog) >> vec3u(8u), prev.a);
+ }
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 66abb9ce9f..ce6315a96a 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -2934,8 +2934,8 @@ void test_fog() {
+             .find("// Fog (Dolphin WriteFog)") == std::string::npos);
+ 
+   // Wind Waker HD's fog curve (hd_fog): linear fog squared after the clamp,
+-  // before the integer blend; unflagged, the module is as it was; the other
+-  // curves keep theirs.
++  // then mixed in linear light in place of the integer blend; unflagged, the
++  // module is as it was; the other curves keep theirs.
+   {
+     auto key = fog_key(gxc::FogType::Linear, gxc::FogProjection::Perspective, true);
+     const std::string gc = gxc::generate_wgsl(key);
+@@ -2947,9 +2947,19 @@ void test_fog() {
+     const auto clamp_at = hd.find("var fogv = clamp(ze - psc.fogf.y, 0.0, 1.0);");
+     const auto square_at = hd.find(square);
+     CHECK(clamp_at != std::string::npos && square_at != std::string::npos && clamp_at < square_at);
+-    CHECK(square_at < hd.find("let ifog = i32(round(fogv * 256.0));"));
+-    // Only that line differs.
++    const char* mix_lin = "    let fog_p = vec3f(clamp(prev.rgb, vec3i(0), vec3i(255))) / 255.0;\n";
++    const char* mix_end = "    prev = vec4i(vec3i(round(fog_out * 255.0)), prev.a);\n";
++    const char* blend = "    let ifog = i32(round(fogv * 256.0));\n"
++                        "    prev = vec4i((prev.rgb * (256 - ifog) + psc.fogcolor.rgb * ifog) >> vec3u(8u), prev.a);\n";
++    const auto mix_at = hd.find(mix_lin);
++    const auto end_at = hd.find(mix_end);
++    CHECK(mix_at != std::string::npos && square_at < mix_at && mix_at < end_at && end_at != std::string::npos);
++    CHECK(hd.find("let fog_lin = mix(select(pow((fog_p + 0.055) / 1.055, vec3f(2.4))", mix_at) < end_at);
++    CHECK(hd.find("1.055 * pow(fog_lin, vec3f(1.0 / 2.4)) - 0.055", mix_at) < end_at);
++    CHECK(hd.find("let ifog = i32(round(fogv * 256.0));") == std::string::npos);
++    // Only those lines differ: the square, and the linear mix in place of the integer blend.
+     std::string back = hd;
++    back.replace(mix_at, end_at + std::strlen(mix_end) - mix_at, blend);
+     back.erase(square_at, std::strlen(square));
+     CHECK(back == gc);
+     auto exp = fog_key(gxc::FogType::Exp, gxc::FogProjection::Perspective, false);
+@@ -2959,7 +2969,10 @@ void test_fog() {
+     // The ubershader reads the bit from the key.
+     const std::string uber = gxc::generate_uber_wgsl(false);
+     CHECK(uber.find("const K_hd_fog: u32 = ") != std::string::npos);
+-    CHECK(uber.find("else if (kb(K_hd_fog) != 0u) { fogv = fogv * fogv; }") != std::string::npos);
++    const auto uber_hd = uber.find("else if (kb(K_hd_fog) != 0u) {");
++    CHECK(uber_hd != std::string::npos);
++    CHECK(uber.find("fogv = fogv * fogv;", uber_hd) < uber.find("let fog_lin = mix(", uber_hd));
++    CHECK(uber.find("return vec4i(vec3i(round(fog_out * 255.0)), prev.a);", uber_hd) != std::string::npos);
+   }
+ 
+   // --- Plan uniforms decoded from BP fog registers (state path) ------------
+-- 
+2.56.0
+

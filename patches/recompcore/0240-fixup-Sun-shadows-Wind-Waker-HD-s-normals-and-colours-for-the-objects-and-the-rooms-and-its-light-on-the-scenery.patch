@@ -1,0 +1,425 @@
+From 89fb4b8590c19f007eb5613043a56badbcd1bd9a Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Thu, 5 Nov 2026 09:50:24 -0600
+Subject: [PATCH] fixup! Sun shadows: Wind Waker HD's normals and colours for
+ the objects and the rooms, and its light on the scenery
+
+The smooth normals and HD's colours kept from frame to frame. with_smooth_normals() made them again for every lit
+scenery draw every frame: a weld map over the draw's positions, its faces' normals, and a lookup per vertex in HD's
+normals and colours. Hyrule Castle's hall is 66 such draws and 47,000 vertices a game frame, the same every frame, and
+on an i5-6500 that was 7 ms of the GX worker's 20 and the 6% late frames there at 30 FPS.
+
+Now a draw that comes again with the same bytes and the same inputs (the stage's and the objects' tables, and for HD's
+light its shade and light colours) takes the vertices made the first time. The hash only picks the entry; the draw is
+compared in full, so the vertices are the very ones the old path makes. Lava draws (their glow follows the game frame)
+always take the old path. Entries not used for 120 game frames go, and past 1024 entries a new draw isn't kept.
+
+- The cache is smooth_normal_cache.hpp, with tests (smooth_normal_cache_tests): a hit is the uncached bytes, any
+  changed float, index or input misses, unused entries go, a full cache makes new draws uncached.
+- DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0 makes them every frame, as before. _CACHE_LOG=1 prints the draws, vertices and
+  hits a game frame.
+- Debian i5-6500 + GTX 1660 SUPER, Hyrule Castle layer 2: 22.2 to 15.0 ms CPU per game frame unpaced; frames over 34
+  ms at 30 FPS 5.8% to 0.1%, and the same turning the camera or walking (100% hits after the arrival). The frozen hall
+  is the emulation thread's: -0.35 ms still, -1.3 turning. The pictures are the same.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  59 ++++++-
+ .../aurora/lib/gfx/smooth_normal_cache.hpp    | 125 ++++++++++++++
+ .../graphics/aurora/tests/CMakeLists.txt      |   6 +
+ .../aurora/tests/smooth_normal_cache_test.cpp | 154 ++++++++++++++++++
+ 4 files changed, 343 insertions(+), 1 deletion(-)
+ create mode 100644 GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp
+ create mode 100644 GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index da94560def..f7d8bb5762 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -8,6 +8,7 @@
+ #include "pipeline_cache.hpp"
+ #include "post_fx.hpp" // the sun shadow map
+ #include "soft_effects.hpp"
++#include "smooth_normal_cache.hpp"
+ #include "thread_cpu.hpp"
+ #include "texture.hpp"
+ #include "tex_copy_conv.hpp" // EFB-copy format conversion (63/S16)
+@@ -3449,7 +3450,7 @@ static void apply_hd_colours(const gxc::DrawPlan& plan, std::vector<float>& vert
+                  hits, count, c[0], c[1], c[2], k[0], k[1], k[2]);
+ }
+ 
+-static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan) {
++static const std::vector<float>& smooth_normals_uncached(const gxc::DrawPlan& plan) {
+   using Vec = std::array<float, 3>;
+   static thread_local std::vector<float> vertices;
+   static thread_local std::vector<uint32_t> group;       // each vertex's position
+@@ -3572,6 +3573,62 @@ static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan)
+   return vertices;
+ }
+ 
++// What smooth_normals_uncached() reads besides the draw's vertices and indices, for SmoothNormalCache's compare: the
++// stage's and the objects' tables (a new table is a new pointer; the entries hold the old one), and whether the draw
++// takes HD's light, with apply_hd_colours()'s shade and light colours if so.
++struct SmoothNormalInputs {
++  std::shared_ptr<const HdNormals> normals, objectNormals;
++  std::shared_ptr<const HdColours> colours, stageColours;
++  bool light = false;
++  std::array<int, 3> k{}, c{};
++  bool operator==(const SmoothNormalInputs& o) const {
++    return normals == o.normals && objectNormals == o.objectNormals && colours == o.colours &&
++           stageColours == o.stageColours && light == o.light && k == o.k && c == o.c;
++  }
++};
++
++// The draw's vertices with smooth normals, made once while the draw stays the same (smooth_normal_cache.hpp): a
++// still room's lit scenery made them every frame, Hyrule Castle's hall 66 draws and 47,000 vertices a game frame
++// (on an i5-6500, 7 ms of the GX worker's 20). Not for a lava draw (its glow follows the game frame).
++// DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0: made every frame, as before.
++// DOL_AURORA_SUN_SHADOW_NORMAL_CACHE_LOG=1 (local debug): draws, vertices and hits a game frame, every 600 frames.
++static const std::vector<float>& with_smooth_normals(const gxc::DrawPlan& plan) {
++  static const bool cacheOn = [] {
++    const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_NORMAL_CACHE");
++    return env == nullptr || env[0] != '0';
++  }();
++  if (!cacheOn || t_hdLavaDraw)
++    return smooth_normals_uncached(plan);
++  static thread_local SmoothNormalCache<SmoothNormalInputs> cache;
++  const uint64_t frame = frame_interp::game_frame_number();
++  SmoothNormalInputs inputs{hd_normals(), hd_object_normals(), hd_colours(),
++                            hd_terrain_light() ? hd_stage_colours() : nullptr};
++  // apply_hd_colours()'s own tests and colours.
++  if ((inputs.colours != nullptr || inputs.stageColours != nullptr) && hd_light_draw(plan)) {
++    inputs.light = true;
++    const gxc::TevStageKey& s = plan.pipeline.shader.tev_stages[0];
++    inputs.k = konst_rgb(plan.pixel_constants, s.ksel_kc);
++    inputs.c = {plan.pixel_constants.colors[1][0], plan.pixel_constants.colors[1][1],
++                plan.pixel_constants.colors[1][2]};
++  }
++  static const bool log = std::getenv("DOL_AURORA_SUN_SHADOW_NORMAL_CACHE_LOG") != nullptr;
++  if (log) {
++    static thread_local uint64_t s_vertices = 0, s_frames = 0, s_logFrame = 0;
++    s_vertices += plan.vertices.size() / gxc::kVertexFloats;
++    if (frame != s_logFrame) {
++      s_logFrame = frame;
++      if (++s_frames % 600 == 0) {
++        const auto [draws, hits] = cache.take_counts();
++        std::fprintf(stderr, "[sun-normals] a game frame: %.0f draws, %.0f vertices, %.1f%% cache hits, %zu cached\n",
++                     draws / 600.0, s_vertices / 600.0, draws ? 100.0 * hits / draws : 0.0, cache.size());
++        s_vertices = 0;
++      }
++    }
++  }
++  return cache.get(plan.vertices, plan.indices, std::move(inputs), frame,
++                   [&]() -> const std::vector<float>& { return smooth_normals_uncached(plan); });
++}
++
+ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   if (!plan.ok || plan.vertex_count == 0 || plan.indices.empty()) {
+     return false;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp b/GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp
+new file mode 100644
+index 0000000000..3dc1469abe
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/lib/gfx/smooth_normal_cache.hpp
+@@ -0,0 +1,125 @@
++#pragma once
++
++#include <gxruntime/gxcore/shader.hpp> // the vertex layout
++
++#include <absl/container/flat_hash_map.h>
++#include <xxhash.h>
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <utility>
++#include <vector>
++
++namespace aurora::gfx::gxcore {
++
++// The sun shadows' smooth normals (gxcore_draw.cpp with_smooth_normals()) kept from frame to frame. A draw's smooth
++// normals and HD colours are a function of its vertices and indices and of `Inputs` (the stage's and the objects'
++// tables, and for HD's light the draw's shade and light colours), so a still room's draws (Hyrule Castle's hall: 66
++// draws and 47,000 welded, looked-up vertices a frame) make them once. A hit is the same bytes in and the same inputs,
++// compared in full (the hash only picks the entry), so the vertices out are the very ones make() made for them.
++// make() may change only colour 0 and the normal (smooth_normals_uncached() writes nothing else but a lava draw's
++// colour 1, and lava draws don't come here): an entry keeps the rest of the draw's vertices in `out` and only those two
++// of its own beside it, so the cache holds about one copy of the room's vertices, not two. Were make() to change
++// anything else, the draw would never match again and would be made every frame, as without the cache.
++// Entries not used for 120 game frames go (looked at every 60); past 1024 entries a new draw isn't kept.
++template <typename Inputs>
++class SmoothNormalCache {
++public:
++  static constexpr uint64_t kSweepFrames = 60;
++  static constexpr uint64_t kKeepFrames = 120;
++  static constexpr size_t kMaxEntries = 1024;
++
++  template <typename Make>
++  const std::vector<float>& get(const std::vector<float>& vertices, const std::vector<uint16_t>& indices,
++                                Inputs inputs, uint64_t frame, Make&& make) {
++    ++draws_;
++    if (frame - lastSweep_ >= kSweepFrames) {
++      lastSweep_ = frame;
++      absl::erase_if(entries_, [&](const auto& kv) { return frame - kv.second.used > kKeepFrames; });
++    }
++    const uint64_t key = key_of(vertices, indices);
++    auto it = entries_.find(key);
++    if (it != entries_.end() && it->second.inputs == inputs && same_draw(it->second, vertices, indices)) {
++      it->second.used = frame;
++      ++hits_;
++      return it->second.out;
++    }
++    if (it == entries_.end()) {
++      if (entries_.size() >= kMaxEntries)
++        return make();
++      it = entries_.try_emplace(key).first;
++    }
++    Entry& entry = it->second;
++    entry.out = make();
++    const size_t count = vertices.size() / gxruntime::gxcore::kVertexFloats;
++    entry.own.resize(count * kOwnFloats);
++    for (size_t v = 0; v < count; ++v) {
++      const float* in = &vertices[v * gxruntime::gxcore::kVertexFloats];
++      std::memcpy(&entry.own[v * kOwnFloats], in + kColor0Float, kColor0Floats * sizeof(float));
++      std::memcpy(&entry.own[v * kOwnFloats + kColor0Floats], in + kNormalFloat, kNormalFloats * sizeof(float));
++    }
++    entry.indices.assign(indices.begin(), indices.end());
++    entry.inputs = std::move(inputs);
++    entry.used = frame;
++    return entry.out;
++  }
++
++  size_t size() const { return entries_.size(); }
++  // Draws asked for and draws found, since the last take_counts().
++  std::pair<uint64_t, uint64_t> take_counts() { return {std::exchange(draws_, 0), std::exchange(hits_, 0)}; }
++
++private:
++  static constexpr size_t kColor0Float = gxruntime::gxcore::kVertexColor0Offset / sizeof(float);
++  static constexpr size_t kColor0Floats = 4;
++  static constexpr size_t kNormalFloat = gxruntime::gxcore::kVertexNormalOffset / sizeof(float);
++  static constexpr size_t kNormalFloats = 3;
++  static constexpr size_t kOwnFloats = kColor0Floats + kNormalFloats;
++  static_assert(kColor0Float + kColor0Floats <= kNormalFloat &&
++                kNormalFloat + kNormalFloats <= gxruntime::gxcore::kVertexFloats);
++
++  struct Entry {
++    std::vector<float> out; // the vertices made: the draw's own but for colour 0 and the normal
++    std::vector<float> own; // the draw's own colour 0 and normal, kOwnFloats a vertex
++    std::vector<uint16_t> indices;
++    Inputs inputs{};
++    uint64_t used = 0;
++  };
++
++  // Only picks the entry (same_draw() compares it all): the indices, the size and the vertices' two ends.
++  static uint64_t key_of(const std::vector<float>& vertices, const std::vector<uint16_t>& indices) {
++    const size_t bytes = vertices.size() * sizeof(float);
++    const size_t ends = std::min<size_t>(bytes, 1024);
++    const auto* data = reinterpret_cast<const uint8_t*>(vertices.data());
++    return XXH3_64bits_withSeed(indices.data(), indices.size() * sizeof(uint16_t), bytes) ^
++           XXH3_64bits(data, ends) * 0x9E3779B97F4A7C15ull ^ XXH3_64bits(data + bytes - ends, ends);
++  }
++
++  // Whether `vertices` and `indices` are the draw `entry` was made from.
++  static bool same_draw(const Entry& entry, const std::vector<float>& vertices, const std::vector<uint16_t>& indices) {
++    constexpr size_t F = gxruntime::gxcore::kVertexFloats;
++    if (entry.out.size() != vertices.size() || entry.indices.size() != indices.size() ||
++        std::memcmp(entry.indices.data(), indices.data(), indices.size() * sizeof(uint16_t)) != 0)
++      return false;
++    const size_t count = vertices.size() / F;
++    const float* in = vertices.data();
++    const float* out = entry.out.data();
++    const float* own = entry.own.data();
++    constexpr size_t afterColor0 = kColor0Float + kColor0Floats, afterNormal = kNormalFloat + kNormalFloats;
++    for (size_t v = 0; v < count; ++v, in += F, out += F, own += kOwnFloats) {
++      if (std::memcmp(in, out, kColor0Float * sizeof(float)) != 0 ||
++          std::memcmp(in + afterColor0, out + afterColor0, (kNormalFloat - afterColor0) * sizeof(float)) != 0 ||
++          std::memcmp(in + afterNormal, out + afterNormal, (F - afterNormal) * sizeof(float)) != 0 ||
++          std::memcmp(in + kColor0Float, own, kColor0Floats * sizeof(float)) != 0 ||
++          std::memcmp(in + kNormalFloat, own + kColor0Floats, kNormalFloats * sizeof(float)) != 0)
++        return false;
++    }
++    return true;
++  }
++
++  absl::flat_hash_map<uint64_t, Entry> entries_;
++  uint64_t lastSweep_ = 0, draws_ = 0, hits_ = 0;
++};
++
++} // namespace aurora::gfx::gxcore
+diff --git a/GXRuntime/graphics/aurora/tests/CMakeLists.txt b/GXRuntime/graphics/aurora/tests/CMakeLists.txt
+index eac9cb7828..de9ae266c1 100644
+--- a/GXRuntime/graphics/aurora/tests/CMakeLists.txt
++++ b/GXRuntime/graphics/aurora/tests/CMakeLists.txt
+@@ -125,4 +125,10 @@ if (TARGET GXRuntime::gxcore)
+   target_link_libraries(gxcore_viewport_tests PRIVATE GXRuntime::gxcore gtest gtest_main
+     fmt::fmt xxhash absl::flat_hash_map dawn::dawncpp_headers TracyClient ${AURORA_SDL3_TARGET})
+   gtest_discover_tests(gxcore_viewport_tests)
++
++  add_executable(smooth_normal_cache_tests smooth_normal_cache_test.cpp)
++  target_include_directories(smooth_normal_cache_tests PRIVATE ../lib)
++  target_link_libraries(smooth_normal_cache_tests PRIVATE GXRuntime::gxcore gtest gtest_main xxhash
++    absl::flat_hash_map)
++  gtest_discover_tests(smooth_normal_cache_tests)
+ endif()
+diff --git a/GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp b/GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp
+new file mode 100644
+index 0000000000..6770255a8b
+--- /dev/null
++++ b/GXRuntime/graphics/aurora/tests/smooth_normal_cache_test.cpp
+@@ -0,0 +1,154 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++#include <gtest/gtest.h>
++#include "gfx/smooth_normal_cache.hpp"
++
++#include <cstring>
++#include <vector>
++
++namespace {
++
++namespace gxc = gxruntime::gxcore;
++using aurora::gfx::gxcore::SmoothNormalCache;
++
++constexpr size_t F = gxc::kVertexFloats;
++constexpr size_t kColor0 = gxc::kVertexColor0Offset / sizeof(float);
++constexpr size_t kNormal = gxc::kVertexNormalOffset / sizeof(float);
++constexpr size_t kUv0 = gxc::kVertexUvOffset / sizeof(float);
++
++// A draw of `count` vertices, every float its own value.
++std::vector<float> make_vertices(size_t count, float seed = 0.f) {
++  std::vector<float> v(count * F);
++  for (size_t i = 0; i < v.size(); ++i)
++    v[i] = seed + 0.25f * static_cast<float>(i);
++  return v;
++}
++
++// smooth_normals_uncached()'s stand-in: only colour 0 and the normal change, from the draw's positions and the input.
++struct Maker {
++  int calls = 0;
++  std::vector<float> out;
++  const std::vector<float>& operator()(const std::vector<float>& in, int input) {
++    ++calls;
++    out = in;
++    for (size_t v = 0; v < in.size() / F; ++v) {
++      float* vert = &out[v * F];
++      for (int k = 0; k < 3; ++k) {
++        vert[kNormal + k] = vert[k] * 0.5f + static_cast<float>(input);
++        vert[kColor0 + k] = vert[k] * 0.125f;
++      }
++    }
++    return out;
++  }
++};
++
++const std::vector<float>& get(SmoothNormalCache<int>& cache, Maker& maker, const std::vector<float>& vertices,
++                              const std::vector<uint16_t>& indices, int input, uint64_t frame) {
++  return cache.get(vertices, indices, input, frame,
++                   [&]() -> const std::vector<float>& { return maker(vertices, input); });
++}
++
++TEST(SmoothNormalCache, HitIsTheUncachedBytes) {
++  SmoothNormalCache<int> cache;
++  Maker maker;
++  const auto vertices = make_vertices(40);
++  const std::vector<uint16_t> indices{0, 1, 2, 2, 3, 0, 4, 5, 6};
++  const std::vector<float> first = get(cache, maker, vertices, indices, 1, 10);
++  const std::vector<float> uncached = Maker{}(vertices, 1);
++  ASSERT_EQ(first.size(), uncached.size());
++  EXPECT_EQ(std::memcmp(first.data(), uncached.data(), first.size() * sizeof(float)), 0);
++  for (uint64_t frame = 11; frame < 400; ++frame) {
++    const std::vector<float>& again = get(cache, maker, vertices, indices, 1, frame);
++    ASSERT_EQ(std::memcmp(again.data(), uncached.data(), again.size() * sizeof(float)), 0) << frame;
++  }
++  EXPECT_EQ(maker.calls, 1);
++  EXPECT_EQ(cache.size(), 1u);
++  const auto [draws, hits] = cache.take_counts();
++  EXPECT_EQ(draws, 390u);
++  EXPECT_EQ(hits, 389u);
++}
++
++TEST(SmoothNormalCache, AnyChangedFloatMisses) {
++  const auto base = make_vertices(40);
++  const std::vector<uint16_t> indices{0, 1, 2, 3, 4, 5};
++  // A position, colour 0 (made over by make(), but its own value is kept), colour 1, a texture coordinate, the normal
++  // and the last float, in the middle vertex and in the last.
++  for (const size_t vertex : {size_t{20}, size_t{39}}) {
++    for (const size_t f : {size_t{1}, kColor0 + 1, kColor0 + 3, kColor0 + 5, kUv0 + 1, kNormal + 2, F - 1}) {
++      SmoothNormalCache<int> cache;
++      Maker maker;
++      get(cache, maker, base, indices, 1, 5);
++      auto changed = base;
++      changed[vertex * F + f] += 1.f;
++      const std::vector<float>& out = get(cache, maker, changed, indices, 1, 6);
++      EXPECT_EQ(maker.calls, 2) << "vertex " << vertex << " float " << f;
++      const std::vector<float> uncached = Maker{}(changed, 1);
++      EXPECT_EQ(std::memcmp(out.data(), uncached.data(), out.size() * sizeof(float)), 0);
++      // And the first draw again: its own vertices, whether its entry was the changed one's (the same key) or not.
++      const std::vector<float>& back = get(cache, maker, base, indices, 1, 7);
++      const std::vector<float> baseUncached = Maker{}(base, 1);
++      EXPECT_EQ(std::memcmp(back.data(), baseUncached.data(), back.size() * sizeof(float)), 0);
++    }
++  }
++}
++
++TEST(SmoothNormalCache, ChangedIndicesOrInputsMiss) {
++  SmoothNormalCache<int> cache;
++  Maker maker;
++  const auto vertices = make_vertices(16);
++  get(cache, maker, vertices, {0, 1, 2, 3, 4, 5}, 1, 1);
++  get(cache, maker, vertices, {0, 1, 2, 3, 5, 4}, 1, 2);
++  EXPECT_EQ(maker.calls, 2);
++  const std::vector<float>& out = get(cache, maker, vertices, {0, 1, 2, 3, 5, 4}, 2, 3);
++  EXPECT_EQ(maker.calls, 3);
++  const std::vector<float> uncached = Maker{}(vertices, 2);
++  EXPECT_EQ(std::memcmp(out.data(), uncached.data(), out.size() * sizeof(float)), 0);
++  get(cache, maker, vertices, {0, 1, 2, 3, 5, 4}, 2, 4);
++  EXPECT_EQ(maker.calls, 3);
++}
++
++TEST(SmoothNormalCache, UnusedEntriesGoAfter120Frames) {
++  SmoothNormalCache<int> cache;
++  Maker maker;
++  const auto a = make_vertices(8, 1.f), b = make_vertices(8, 2.f), c = make_vertices(8, 3.f);
++  const std::vector<uint16_t> indices{0, 1, 2};
++  get(cache, maker, a, indices, 1, 0);
++  get(cache, maker, b, indices, 1, 0);
++  // b is drawn every frame, a isn't: at frame 120 (a sweep) a is 120 frames unused, so it stays.
++  for (uint64_t frame = 1; frame <= 120; ++frame)
++    get(cache, maker, b, indices, 1, frame);
++  EXPECT_EQ(cache.size(), 2u);
++  get(cache, maker, a, indices, 1, 120);
++  EXPECT_EQ(maker.calls, 2);
++  // Unused from 120 on: the sweeps at 180 and 240 keep it (60, 120 frames), the one at 300 drops it (180).
++  for (uint64_t frame = 121; frame <= 300; ++frame)
++    get(cache, maker, b, indices, 1, frame);
++  EXPECT_EQ(cache.size(), 1u);
++  get(cache, maker, a, indices, 1, 301);
++  EXPECT_EQ(maker.calls, 3);
++  // A frame count that goes back (a new game) drops them all at the next draw.
++  get(cache, maker, c, indices, 1, 5);
++  EXPECT_EQ(cache.size(), 1u);
++  EXPECT_EQ(maker.calls, 4);
++}
++
++TEST(SmoothNormalCache, FullCacheMakesNewDrawsUncached) {
++  using Cache = SmoothNormalCache<int>;
++  Cache cache;
++  Maker maker;
++  const std::vector<uint16_t> indices{0, 1, 2};
++  for (size_t i = 0; i < Cache::kMaxEntries; ++i)
++    get(cache, maker, make_vertices(4, static_cast<float>(i)), indices, 1, 1);
++  EXPECT_EQ(cache.size(), Cache::kMaxEntries);
++  const auto extra = make_vertices(4, -7.f);
++  const std::vector<float>& out = get(cache, maker, extra, indices, 1, 1);
++  EXPECT_EQ(cache.size(), Cache::kMaxEntries);
++  const std::vector<float> uncached = Maker{}(extra, 1);
++  EXPECT_EQ(std::memcmp(out.data(), uncached.data(), out.size() * sizeof(float)), 0);
++  const int calls = maker.calls;
++  get(cache, maker, extra, indices, 1, 1);
++  EXPECT_EQ(maker.calls, calls + 1);
++  get(cache, maker, make_vertices(4, 0.f), indices, 1, 1);
++  EXPECT_EQ(maker.calls, calls + 1);
++}
++
++} // namespace
+-- 
+2.56.0
+

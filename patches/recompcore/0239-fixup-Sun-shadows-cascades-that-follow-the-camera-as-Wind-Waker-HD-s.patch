@@ -1,0 +1,183 @@
+From 4b98e06c90c5888bf1814fe8610116ec2ffde07f Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 18:25:51 -0600
+Subject: [PATCH] fixup! Sun shadows: cascades that follow the camera, as Wind
+ Waker HD's
+
+Past the second cascade only the stage's BG lists cast, as in Wind Waker
+HD: its drawShadowCascade (hd_layer_shadow.cpp) draws mpModelList into every
+cascade and the actor, effect and other lists only into the first two. The
+host marks the game's draw list in BP register 0x7A (0 or never written: a BG
+list, 1: another), kept until written again; the plan carries it as
+far_caster and the sun map's cascades from 2 on skip the others' casters.
+The Tower of the Gods' six pillars no longer shade its far face, which HD
+leaves lit; Link's and the near objects' shadows are unchanged.
+DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all keeps every caster in every cascade.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  | 24 +++++++++++--------
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  3 ++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  3 +++
+ .../include/gxruntime/gxcore/gxcore.hpp       |  3 +++
+ .../include/gxruntime/gxcore/shader.hpp       |  3 +++
+ GXRuntime/graphics/gxcore/src/gxcore.cpp      |  3 ++-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         |  9 +++++++
+ 7 files changed, 36 insertions(+), 12 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 65f3baf905..853d4c18c3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -2116,9 +2116,19 @@ static void encode_sun_map(const wgpu::CommandEncoder& cmd, const RenderPass& pa
+     };
+     auto pass = cmd.BeginRenderPass(&descriptor);
+     if (casters != 0) {
++      // Past the second cascade only the stage's BG lists cast (gxcore::DrawData::farCaster), as in Wind Waker HD
++      // (hd_layer_shadow.cpp drawShadowCascade: from cascade 2 on only mpModelList). The objects and characters'
++      // shadows there (the Tower of the Gods' pillars on its far face) are HD's to leave out.
++      // DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all: every caster in every cascade, as before.
++      static const bool allFar = [] {
++        const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_FAR_CASTERS");
++        return env != nullptr && std::strcmp(env, "all") == 0;
++      }();
++      const bool bgOnly = cascade >= 2 && !allFar;
+       gxcore::begin_sun_casters(pass, map.caster[cascade].data());
+       for (const auto& command : passInfo.commands)
+-        if (command.type == CommandType::Draw && command.data.draw.type == ShaderType::GXCore && !command.flat)
++        if (command.type == CommandType::Draw && command.data.draw.type == ShaderType::GXCore && !command.flat &&
++            (!bgOnly || command.data.draw.gxcore.farCaster))
+           gxcore::render_sun_caster(command.data.draw.gxcore, pass);
+     }
+     pass.End();
+@@ -3473,14 +3483,6 @@ float calculate_fps() noexcept {
+   return static_cast<float>(g_presentTimes.size() - 1) / elapsed;
+ }
+ 
+-static void apply_viewport(const wgpu::RenderPassEncoder& pass, const Command& command) {
+-  const auto& vp = command.data.setViewport;
+-  const float minDepth = gx::UseReversedZ ? 1.f - vp.zfar : vp.znear;
+-  const float maxDepth = gx::UseReversedZ ? 1.f - vp.znear : vp.zfar;
+-  const float k = g_softScale;
+-  pass.SetViewport(vp.left * k, vp.top * k, vp.width * k, vp.height * k, minDepth, maxDepth);
+-}
+-
+ static void apply_scissor(const wgpu::RenderPassEncoder& pass, const Command& command, const wgpu::Extent3D& size) {
+   const auto& sc = command.data.setScissor;
+   const auto x = std::clamp(static_cast<uint32_t>(sc.x), 0u, size.width);
+@@ -3530,7 +3532,9 @@ static void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame,
+   float vpScale = depthScale;
+   const auto setViewport = [&](float scale) {
+     vpScale = scale;
+-    pass.SetViewport(vpRect[0], vpRect[1], vpRect[2], vpRect[3], vpDepth[0] * scale, vpDepth[1] * scale);
++    // A run of soft effects in the half-size buffer (g_softScale) draws its rectangle there.
++    const float k = g_softScale;
++    pass.SetViewport(vpRect[0] * k, vpRect[1] * k, vpRect[2] * k, vpRect[3] * k, vpDepth[0] * scale, vpDepth[1] * scale);
+   };
+   if (effectsOnly)
+     setViewport(depthScale);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 0f8855b73c..da94560def 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -4385,7 +4385,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+         last->uniformRange.offset == uniformRange.offset && last->tev == tev &&
+         (!tev || last->pixelUniformRange.offset == pixelUniformRange.offset) &&
+         last->textureBindGroup == textureBindGroup && last->ownVertices == ownVertices &&
+-        last->smoothNormal == smoothNormal &&
++        last->smoothNormal == smoothNormal && last->farCaster == plan.far_caster &&
+         last->interpUniformRange.size == 0 && last->interpVertRange.size == 0 &&
+         (interpolating ? last->interpJob != UINT32_MAX && last->interpJob + last->batchSize == next_interp_job()
+                        : last->interpJob == UINT32_MAX) &&
+@@ -4495,6 +4495,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                    !(sun_caster(plan.pipeline) && post_fx::sun_shadow_map_enabled() && sea_surface(plan)),
+       .posMtxIdx = plan.pipeline.shader.has_pos_mtx_idx != 0,
+       .sunCasterCull = plan.pipeline.cull_mode,
++      .farCaster = plan.far_caster,
+       // DOL_AURORA_SUN_CASTER_LOG=1: why a cloth's or wake's draw (a scope)
+       // does or does not cast, once per distinct state (local debug).
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index a7f7cf7dce..106f1ac767 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -76,6 +76,9 @@ struct DrawData {
+   bool posMtxIdx = false;
+   // The draw's own cull mode (gxc::CullMode), for the map's casters while post_fx::sun_caster_cull() is on.
+   uint8_t sunCasterCull = 0;
++  // It casts in the cascades past the second too (gxc::DrawPlan::far_caster: the stage's BG lists, as Wind Waker
++  // HD's far cascades draw only its BG model list).
++  bool farCaster = true;
+   // Alpha-tested solid scenery (a roof, an awning, leaves, a fence): drawn
+   // into the map with its texture's cutout (sun_caster_alpha()).
+   bool sunCasterAlpha = false;
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+index 4248397e86..0e42484018 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/gxcore.hpp
+@@ -138,6 +138,9 @@ public:
+   static constexpr std::uint8_t kDrawTagAgeRegister = 0x7Du;
+   static constexpr std::uint8_t kDrawScopeRegister = 0x7Cu;
+   static constexpr std::uint8_t kDrawScopeCountRegister = 0x7Bu;
++  // The host's mark of the game's draw list the next draws are in: 0 (or never written) one of the stage's BG
++  // lists, 1 another (DrawPlan::far_caster). Kept until written again, so not forgotten with the tag.
++  static constexpr std::uint8_t kDrawListRegister = 0x7Au;
+   // A register state put back from a save state takes a version no draw has
+   // been derived from in this run (the saved one belongs to the run that saved
+   // it).
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 491054e0d1..c42b691b54 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -585,6 +585,9 @@ struct DrawPlanFields {
+   // the draw's place among them (from 1). 0: none.
+   std::uint32_t draw_scope = 0;
+   std::uint32_t draw_scope_part = 0;
++  // Drawn from one of the stage's BG lists, or unmarked (GxCoreState::kDrawListRegister): the sun shadows' cascades
++  // past the second take only these casters, as Wind Waker HD's take only its BG model list there.
++  bool far_caster = true;
+   // Viewport, raw XF values (wd/2, -ht/2, zmax*2^24, xorig+342, yorig+342,
+   // farz*2^24) — the submission layer maps these through the substrate's
+   // logical-viewport scaling.
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore.cpp b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+index b6a3300203..7816c49bda 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore.cpp
+@@ -147,7 +147,7 @@ void GxCoreState::apply(const ar::RenderStatePacket& state) {
+     if (state.index < 256u) {
+       // The draw tag registers change at nearly every particle draw and feed
+       // no derived state, so they leave the version alone.
+-      const bool tag = state.index >= kDrawScopeCountRegister && state.index <= kDrawTagRegister;
++      const bool tag = state.index >= kDrawListRegister && state.index <= kDrawTagRegister;
+       if (!tag && (!bp_valid_[state.index] || bp_regs_[state.index] != state.value))
+         version_ = next_version();
+       bp_regs_[state.index] = state.value;
+@@ -652,6 +652,7 @@ void GxCoreState::build_draw_plan_into(const ar::ConsumedDraw& draw,
+   // the sky) and found that particle's tag, a different particle every frame,
+   // so it never had a counterpart and moved at 30 FPS.
+   constexpr std::uint32_t kParticleVertices = 8;
++  plan.far_caster = !bp_valid_[kDrawListRegister] || (bp_regs_[kDrawListRegister] & 1u) == 0u;
+   if (bp_valid_[kDrawTagRegister] && draw.vertex_count <= kParticleVertices) {
+     plan.draw_tag = bp_regs_[kDrawTagRegister];
+     plan.draw_tag_age = bp_valid_[kDrawTagAgeRegister] ? bp_regs_[kDrawTagAgeRegister] : 0u;
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index ce6315a96a..ea1b390926 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -3065,6 +3065,15 @@ void test_fog() {
+   CHECK(plan.pixel_constants.fogrange[0][1] == 8.0f);
+   CHECK(plan.pixel_constants.fogrange[2][1] == 8.0f); // index 9 (K[4].HI)
+   CHECK(counters.fog_ignored == 0);
++  // The host's draw list mark (kDrawListRegister): unmarked and BG lists cast in every sun cascade, any other list
++  // only in the first two; the mark stays until written again.
++  CHECK(plan.far_caster);
++  state.apply(bp(gxc::GxCoreState::kDrawListRegister, 1u));
++  CHECK(!state.build_draw_plan(draw, counters).far_caster);
++  state.forget_draw_tag();
++  CHECK(!state.build_draw_plan(draw, counters).far_caster);
++  state.apply(bp(gxc::GxCoreState::kDrawListRegister, 0u));
++  CHECK(state.build_draw_plan(draw, counters).far_caster);
+ }
+ 
+ // Wind Waker HD's fog start before the camera (gxc::fog_start_before_camera()): a draw fogged from a start of 0 to
+-- 
+2.56.0
+

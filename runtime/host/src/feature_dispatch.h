@@ -24,7 +24,7 @@ static inline void bluewake_feature_dispatch_turn_entry(CPUState* cpu, u32 addre
     // The audio watch's hooks are outside the interval below.
     bluewake_audio_watch_dispatch(cpu, address);
     if (address - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE >
-        BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE)
+        BLUEWAKE_DRAW_LIST_TAIL - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE)
         return;
     bluewake_mouse_camera_dispatch(cpu, address);
     bluewake_climb_dispatch(cpu, address);

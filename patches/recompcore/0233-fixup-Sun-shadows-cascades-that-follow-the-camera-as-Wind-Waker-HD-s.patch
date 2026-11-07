@@ -1,0 +1,79 @@
+From ec57295979ff608bb2764a612bf5d9f5aebc9653 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 21:20:37 -0600
+Subject: [PATCH] fixup! Sun shadows: cascades that follow the camera, as Wind
+ Waker HD's
+
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 34 +++++++++++++++++--
+ 1 file changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index b4953c5ed7..d80ef7e226 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -270,6 +270,14 @@ bool g_follow = false;
+ float g_followFar = 14000.f;
+ float g_followSplit3 = 4500.f;
+ float g_followTurnStep = 0.f;
++// _STABLE=1 (local test, off: HD's own turned frame): each cascade's
++// frame is the one fixed to the sun, and its box the square about the sphere round its slice of the view, held in
++// the same steps, its centre moved by whole texels. So nothing of the grid changes as the camera turns, only as the
++// split moves a cascade's size a step: turned with the camera as HD's are, every shadow near the camera was drawn on
++// a new grid each frame of a turn and edges and small shadows popped (I_TestR, Nov 3: 2.3x the changed pixels of the
++// camera still, against 1.2x so). The cost is texels: the square about the sphere is coarser than the box HD fits
++// (Outset's lookout from the sea: the second cascade 11.3 units against 9.5 x 4.8, and more crawl on the waves).
++bool g_followStable = false;
+ struct FollowCascades {
+   float held[kSunMapCascades][2]{}; // each cascade's half sizes across (x, y), held between steps
+   float turn = 0.f;                 // the frame's turn about the sun (radians) as held
+@@ -3117,6 +3125,8 @@ void apply_sun_quality(int level) {
+     g_followFar = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_FAR", g_followFar, 1000.f, 100000.f);
+     g_followSplit3 = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_SPLIT3", g_followSplit3, 0.f, 100000.f);
+     g_followTurnStep = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_TURN_STEP", g_followTurnStep, 0.f, 90.f);
++    const char* stable = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_STABLE");
++    g_followStable = stable != nullptr && stable[0] == '1';
+     g_followState = {};
+   }
+   if (const char* splits = std::getenv("DOL_AURORA_SUN_SHADOW_HD_SPLITS")) {
+@@ -5398,7 +5408,7 @@ void follow_cascades(SunMap& map, const Camera& camera, const float sun[3], cons
+   const float fp[3] = {forward[0] - fs * sun[0], forward[1] - fs * sun[1], forward[2] - fs * sun[2]};
+   const float fx[3] = {fp[1] * sun[2] - fp[2] * sun[1], fp[2] * sun[0] - fp[0] * sun[2], fp[0] * sun[1] - fp[1] * sun[0]};
+   const float along[3] = {rp[0] + fx[0], rp[1] + fx[1], rp[2] + fx[2]};
+-  float turn = std::atan2(dot3(along, y0), dot3(along, x0));
++  float turn = g_followStable ? 0.f : std::atan2(dot3(along, y0), dot3(along, x0));
+   if (!std::isfinite(turn))
+     turn = 0.f;
+   // In steps (g_followTurnStep), held until the camera has turned three quarters of a step past one.
+@@ -5461,8 +5471,26 @@ void follow_cascades(SunMap& map, const Camera& camera, const float sun[3], cons
+     // Room for HD's lookup moved out along the normal (20 units) and the centre's snap and the filter (2 texels).
+     const float pad = 1.f / (1.f - 4.f / size);
+     const float before[2] = {f.held[k][0], f.held[k][1]};
+-    const float rx = held_size((0.5f * (hi[0] - lo[0]) + 24.f) * pad, f.held[k][0]);
+-    const float ry = held_size((0.5f * (hi[1] - lo[1]) + 24.f) * pad, f.held[k][1]);
++    if (g_followStable) {
++      // The sphere round the slice: its centre on the view's axis where the near and far corners are as far
++      // (at the far end if that is nearer), the same whichever way the camera turns.
++      const float n = bounds[k], fa = bounds[k + 1], q = tx * tx + ty * ty;
++      const float at = std::min(0.5f * (n + fa) * (1.f + q), fa);
++      const float radius = std::sqrt(std::max((at - n) * (at - n) + n * n * q, (fa - at) * (fa - at) + fa * fa * q));
++      float w[3];
++      for (int row = 0; row < 3; ++row)
++        w[row] = v[row * 4 + 3] - v[row * 4 + 2] * at;
++      const float m[3] = {dot3(x, w), dot3(y, w), dot3(sun, w)};
++      const float r = held_size((radius + 24.f) * pad, f.held[k][0]);
++      f.held[k][1] = r;
++      const float reach[3] = {r, r, std::max(radius, 0.5f * (hi[2] - lo[2]))};
++      for (int i = 0; i < 3; ++i) {
++        lo[i] = m[i] - reach[i];
++        hi[i] = m[i] + reach[i];
++      }
++    }
++    const float rx = g_followStable ? f.held[k][0] : held_size((0.5f * (hi[0] - lo[0]) + 24.f) * pad, f.held[k][0]);
++    const float ry = g_followStable ? f.held[k][1] : held_size((0.5f * (hi[1] - lo[1]) + 24.f) * pad, f.held[k][1]);
+     if (trace && (before[0] != rx || before[1] != ry))
+       std::fprintf(stderr, "[cascades] %u resized %.0f x %.0f -> %.0f x %.0f (slice %.0f-%.0f)\n", k, 2.f * before[0],
+                    2.f * before[1], 2.f * rx, 2.f * ry, bounds[k], bounds[k + 1]);
+-- 
+2.56.0
+

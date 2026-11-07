@@ -1,0 +1,459 @@
+From a98e18522186483c9bb8b4972c64f3fa718f9a3c Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Mon, 2 Nov 2026 22:32:41 -0600
+Subject: [PATCH] Sun shadows: alpha-tested casters cut out by the texture
+ their alpha is from, the game's blended grass too
+
+Sun shadows: alpha-tested draws of more than one texture cast with the cutout of the texture their alpha is from
+
+A Windfall girl's body is alpha-tested (GEQUAL and LEQUAL) and samples two textures: its colour and alpha from texmap
+0 and its toon ramp from texmap 1. The solid caster rule refuses an alpha test that can drop pixels, and the cutout
+rule bound only a single-texmap draw's own texture, so neither took her and she cast no shadow (the game's own under
+her is left out while the map is on). gxc::cutout_alpha_texmap() finds the texmap the TEV stages read the texture's
+alpha from: one texmap, read through a regular texgen from TEX0 (the coordinate the cutout casters carry) and not
+warped; else none. Such a draw gets a single-texmap group of that texture (DrawData::cutoutBindGroup), which the sun
+map's cutout casters and the sea mask's cutout bind in place of the draw's own. Single-texmap draws use their own
+group as before, and the solid path is unchanged.
+
+From a save state at Windfall: the girl casts her shadow with her cutout. Over ten save states (sailing, Forest
+Haven, Windfall and seven more) the cutout path takes 0 to 7 more draws a frame, all characters' bodies of this material;
+what it still refuses is one water draw at Forest Haven whose alpha mixes three textures and a small floating draw
+with an indirect warp. gxcore_cutout_tests covers the rule.
+
+Sun shadows: still scenery the game blends and alpha-tests casts with its cutout (Outset's grass)
+
+The GameCube draws its grass and bushes alpha-tested and blended (so they fade as the camera nears) and writing
+depth. The sun map took no blended draw but cloth and still furniture with no alpha test, so Outset's grass
+(texture 0037EE00, 18 draws of 45 to 70 vertices in two save states) cast nothing. Wind Waker HD draws
+the same tufts opaque and alpha-tested and casts them cut out in all of its cascades: in bridge_frame14789 (Outset,
+10:00) its sun map has 764 tuft instances x 3 cascades, each reading the tuft's BC1 texture, and the main pass draws
+them with blending off.
+
+sun_caster_blended_cutout(): a draw blended SRCALPHA / INVSRCALPHA, writing depth and colour, textured, with an
+alpha test that can drop pixels. With the furniture rule's checks (indexed positions that stood still, no scope),
+in 3D, not a character's and not the sea's, it casts through the cutout path (62304c983f's cutoutBindGroup, made
+for a multi-texmap draw too), and so marks the sea mask with its cutout as before. Additive glows, what writes no
+depth, and what the game writes each frame (the sea's crests, the wake) are still left out.
+DOL_AURORA_SUN_SHADOW_MAP_BLENDED_CUTOUT=0 leaves them all out, to compare.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  68 +++++++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   4 +
+ GXRuntime/graphics/gxcore/CMakeLists.txt      |   4 +
+ .../include/gxruntime/gxcore/shader.hpp       |  39 +++++
+ .../gxcore/tests/gxcore_cutout_test.cpp       | 156 ++++++++++++++++++
+ 5 files changed, 264 insertions(+), 7 deletions(-)
+ create mode 100644 GXRuntime/graphics/gxcore/tests/gxcore_cutout_test.cpp
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 9a16451164..b40473e455 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -504,6 +504,27 @@ bool sun_caster_alpha(const gxc::PipelineKey& key) {
+          !alpha_test_always_passes(key.shader) && !alpha_test_always_fails(key.shader);
+ }
+ 
++// A blended draw that casts with its texture's cutout all the same (part of
++// DrawData::sunCasterAlpha, with submit_draw_plan()'s checks that its positions
++// stand still and it is no character): alpha blended (SRCALPHA, INVSRCALPHA),
++// writing depth and alpha-tested, as the GameCube draws its grass and bushes so
++// they fade near the camera (Outset's tufts, texture 0037EE00). Wind Waker HD
++// draws the same tufts opaque and alpha-tested and casts them, cut out, in all
++// of its cascades (bridge_frame14789: 764 instances x 3 cascades). Additive
++// glows (ONE), what writes no depth, and what moves (the sea's crests and the
++// wake, which the game writes each frame) are left out.
++// DOL_AURORA_SUN_SHADOW_MAP_BLENDED_CUTOUT=0 leaves them all out, to compare.
++bool sun_caster_blended_cutout(const gxc::PipelineKey& key) {
++  static const bool s_on = [] {
++    const char* value = std::getenv("DOL_AURORA_SUN_SHADOW_MAP_BLENDED_CUTOUT");
++    return value == nullptr || value[0] != '0';
++  }();
++  return s_on && key.depth_test != 0u && key.depth_update != 0u && key.color_update != 0u && key.blend_enable != 0u &&
++         key.blend_subtract == 0u && key.src_factor == static_cast<uint8_t>(gxc::SrcBlendFactor::SrcAlpha) &&
++         key.dst_factor == static_cast<uint8_t>(gxc::DstBlendFactor::InvSrcAlpha) && key.primitive_topology == 0u &&
++         key.shader.textured != 0u && !alpha_test_always_passes(key.shader) && !alpha_test_always_fails(key.shader);
++}
++
+ // The sea's surface, which the solid caster rule takes (it is opaque and
+ // writes depth): strips the game lays around the player in world space, about
+ // 51,000 units across, and flat quads out to 450,000 for the distance, flat
+@@ -1733,7 +1754,7 @@ void draw_parts(const DrawData& data, const wgpu::RenderPassEncoder& pass, SunCa
+ } // namespace
+ 
+ void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+-  const bool alpha = data.sunCasterAlpha && data.textureBindGroup != 0;
++  const bool alpha = data.sunCasterAlpha && data.cutoutBindGroup != 0;
+   if (!data.sunCaster && !alpha)
+     return;
+   SunCasterState& state = g_sunCasterState;
+@@ -1746,7 +1767,7 @@ void render_sun_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass
+     state.pipeline = pipeline;
+   }
+   if (alpha) {
+-    const auto& group = find_bind_group(data.textureBindGroup);
++    const auto& group = find_bind_group(data.cutoutBindGroup);
+     if (group.Get() != state.group2) {
+       pass.SetBindGroup(2, group);
+       state.group2 = group.Get();
+@@ -2147,7 +2168,7 @@ void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass)
+   // What covers the sea is what the sun map takes as solid: a blended draw
+   // doesn't, and an alpha-tested one only where its texture is solid (a wave's
+   // crest whole covered a box of sea, which was then brightened).
+-  const bool cutout = !data.seaSurface && !data.sunCaster && data.textureBindGroup != 0 &&
++  const bool cutout = !data.seaSurface && !data.sunCaster && data.cutoutBindGroup != 0 &&
+                       (data.sunCasterAlpha || data.maskOccluderCutout);
+   // A skinned draw that writes depth is a character (Link, the islanders), whether or not it casts in the sun
+   // map (Link's own draws don't all): the sun shadows' facing term leaves it out.
+@@ -2181,7 +2202,7 @@ void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass)
+     g_seaMaskPipeline = pipeline;
+   }
+   if (cutout) {
+-    const auto& group = find_bind_group(data.textureBindGroup);
++    const auto& group = find_bind_group(data.cutoutBindGroup);
+     if (group.Get() != g_seaMaskState.group2) {
+       pass.SetBindGroup(2, group);
+       g_seaMaskState.group2 = group.Get();
+@@ -3586,6 +3607,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   };
+ 
+   BindGroupRef textureBindGroup = 0;
++  BindGroupRef cutoutBindGroup = 0; // DrawData::cutoutBindGroup
+   if (plan.pipeline.shader.textured != 0) {
+     if (plan.texmap_mask == 0u) {
+       // Single-texmap fast path: primary texture at binding 0/1 (unchanged).
+@@ -3632,6 +3654,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+             textureBindGroup = bind_group_ref(descriptor);
+             s_last = LastBind{view, samplerState, frame, generation, textureBindGroup};
+           }
++          cutoutBindGroup = textureBindGroup;
+         }
+       }
+     } else {
+@@ -3643,6 +3666,9 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       std::array<TextureHandle, 8> held{};
+       std::array<wgpu::Sampler, 8> heldSamplers{};
+       std::array<WGPUBindGroupEntry, 16> entries{};
++      // Each texmap's view and sampler, for the cutout's own group below.
++      std::array<WGPUTextureView, 8> mapViews{};
++      std::array<WGPUSampler, 8> mapSamplers{};
+       size_t heldCount = 0;
+       size_t entryCount = 0;
+       bool complete = true;
+@@ -3666,6 +3692,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+             .binding = 2u * t, .textureView = bound->sampleTextureView.Get()};
+         entries[entryCount++] = WGPUBindGroupEntry{
+             .binding = 2u * t + 1u, .sampler = heldSamplers[heldCount].Get()};
++        mapViews[t] = bound->sampleTextureView.Get();
++        mapSamplers[t] = heldSamplers[heldCount].Get();
+         ++heldCount;
+       }
+       if (!complete)
+@@ -3677,6 +3705,26 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+           .entries = entries.data(),
+       };
+       textureBindGroup = bind_group_ref(descriptor);
++      // An alpha-tested draw of more than one texmap (a Windfall girl's body: its colour and alpha from texmap 0, its
++      // toon ramp from texmap 1) casts in the sun map with the cutout of the texmap its alpha is read from, bound
++      // alone as the single-texmap casters' texture is. Without it neither caster rule took the draw, and the
++      // character cast no shadow (the game's own under her is left out while the map is on).
++      if (sun_caster_alpha(plan.pipeline) || sun_caster_blended_cutout(plan.pipeline)) {
++        const int cutoutMap = gxc::cutout_alpha_texmap(plan.pipeline.shader);
++        if (cutoutMap >= 0 && mapViews[cutoutMap] != nullptr) {
++          const std::array cutoutEntries{
++              WGPUBindGroupEntry{.binding = 0, .textureView = mapViews[cutoutMap]},
++              WGPUBindGroupEntry{.binding = 1, .sampler = mapSamplers[cutoutMap]},
++          };
++          const WGPUBindGroupDescriptor cutoutDescriptor{
++              .label = {"GXCore Cutout Bind Group", WGPU_STRLEN},
++              .layout = texture_bind_group_layout(1u).Get(),
++              .entryCount = cutoutEntries.size(),
++              .entries = cutoutEntries.data(),
++          };
++          cutoutBindGroup = bind_group_ref(cutoutDescriptor);
++        }
++      }
+     }
+   }
+ 
+@@ -3810,6 +3858,12 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       sizeof(plan.constants), repeatsLast ? 1 : 0);
+   g_pushedConstantsId = plan.constants_id;
+   const bool seaSurface = sea_mask_draw(plan);
++  // Still scenery the game blends and alpha-tests (its grass and bushes, sun_caster_blended_cutout()) casts with its
++  // texture's cutout, as Wind Waker HD casts its grass.
++  const bool blendedCutout = !plan.match_direct_position && plan.draw_scope_part == 0 &&
++                             plan.constants.projection[3][3] != 1.f && sun_caster_blended_cutout(plan.pipeline) &&
++                             !character_draw(plan.pipeline) && !seaSurface && !positions_written(plan);
++  const bool alphaCaster = cutoutBindGroup != 0 && (sun_caster_alpha(plan.pipeline) || blendedCutout);
+   const bool smoothNormal = smooth_normal_draw(plan, seaSurface);
+   // A palm with Wind Waker HD's light (apply_hd_colours()): its shade colour black.
+   const gxc::PixelShaderConstants& pixelConstants =
+@@ -4040,8 +4094,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+                             plan.constants.projection[3][3] != 1.f && maskOccluderShape &&
+                             !alpha_test_always_fails(plan.pipeline.shader) &&
+                             !((sun_caster(plan.pipeline) || clothCaster || blendedCaster) ||
+-                              (plan.texmap_mask == 0u && textureBindGroup != 0 && sun_caster_alpha(plan.pipeline)) ||
+-                              character_draw(plan.pipeline) || seaSurface);
++                              alphaCaster || character_draw(plan.pipeline) || seaSurface);
+   push_draw_command(DrawData{
+       .pipeline = pipeline,
+       .depthPipeline = depthPipeline,
+@@ -4054,6 +4107,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       .pixelUniformRange = pixelUniformRange,
+       .indexCount = indexCount,
+       .textureBindGroup = textureBindGroup,
++      .cutoutBindGroup = cutoutBindGroup,
+       .tev = tev,
+       .ownVertices = ownVertices,
+       .uberPipeline = uberPipeline,
+@@ -4067,7 +4121,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+ 
+       // The cutout pipeline binds one texture and sampler at group 2, the
+       // single-texmap layout: a multi-texmap material keeps the screen's steps.
+-      .sunCasterAlpha = plan.texmap_mask == 0u && textureBindGroup != 0 && sun_caster_alpha(plan.pipeline),
++      .sunCasterAlpha = alphaCaster,
+       .seaSurface = seaSurface,
+       .depthWrite = plan.pipeline.depth_test != 0u && plan.pipeline.depth_update != 0u,
+       .softEffect = softEffect,
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index f8d73240f6..c6fd3d11d6 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -48,6 +48,10 @@ struct DrawData {
+   Range pixelUniformRange;  // PixelShaderConstants (group 2), TEV path only
+   uint32_t indexCount;
+   BindGroupRef textureBindGroup; // 0 when untextured
++  // The one texture an alpha-tested draw's cutout comes from, in the single-texmap layout (the sun map's cutout
++  // casters and the sea mask's cutout bind it at group 2): the draw's own group when it has one texmap, else a
++  // group of the texmap its alpha is read from (gxc::cutout_alpha_texmap()); 0 when there is none.
++  BindGroupRef cutoutBindGroup = 0;
+   bool tev = false; // TEV path: PS uniform at group 2, texture at group 3
+   // A tagged particle's, whose in-between vertices are its own (interpVertRange).
+   bool ownVertices = false;
+diff --git a/GXRuntime/graphics/gxcore/CMakeLists.txt b/GXRuntime/graphics/gxcore/CMakeLists.txt
+index f9fb7c60f7..63f71d9a02 100644
+--- a/GXRuntime/graphics/gxcore/CMakeLists.txt
++++ b/GXRuntime/graphics/gxcore/CMakeLists.txt
+@@ -33,4 +33,8 @@ if(BUILD_TESTING)
+     )
+     target_link_libraries(gxcore_texture_decode_tests PRIVATE GXRuntime::gxcore)
+     add_test(NAME gxcore_texture_decode_tests COMMAND gxcore_texture_decode_tests)
++
++    add_executable(gxcore_cutout_tests tests/gxcore_cutout_test.cpp)
++    target_link_libraries(gxcore_cutout_tests PRIVATE GXRuntime::gxcore)
++    add_test(NAME gxcore_cutout_tests COMMAND gxcore_cutout_tests)
+ endif()
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 2fe334250d..93bb4a4a2e 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -434,6 +434,45 @@ inline std::uint32_t used_texmap_mask(const ShaderKey& key) {
+   return mask != 0u ? mask : 1u;
+ }
+ 
++// The texmap an alpha-tested draw's cutout comes from, for a caster that draws
++// it again with that one texture (the HD look's sun shadow map): the texmap of
++// the TEV stages whose alpha reads the texture's alpha (TEXA), when they all
++// read the same one through a texcoord made from the vertex's first texture
++// coordinate (a regular texgen from TEX0, the coordinate such a caster has),
++// else -1. A Windfall girl's body samples its colour and alpha from texmap 0
++// and its toon ramp from texmap 1: 0. Without TEV stages a textured draw
++// samples texmap 0 through texcoord 0.
++inline int cutout_alpha_texmap(const ShaderKey& key) {
++  constexpr std::uint8_t kTexA = 4u; // TevAlphaArg TexAlpha
++  const auto from_first_uv = [&key](std::uint32_t texcoord) {
++    if (texcoord >= key.num_tex_gens || texcoord >= kMaxTexGens)
++      return false;
++    const TexGenKey& g = key.tex_gens[texcoord];
++    return g.texgentype == static_cast<std::uint8_t>(TexGenType::Regular) &&
++           g.sourcerow == static_cast<std::uint8_t>(TexSourceRow::Tex0) && g.projection == 0u;
++  };
++  if (key.textured == 0u)
++    return -1;
++  if (key.tev_valid == 0u)
++    return from_first_uv(0u) ? 0 : -1;
++  int texmap = -1;
++  for (std::uint32_t n = 0; n < key.num_tev_stages && n < kMaxTevStages; ++n) {
++    const TevStageKey& s = key.tev_stages[n];
++    if (s.ac_a != kTexA && s.ac_b != kTexA && s.ac_c != kTexA && s.ac_d != kTexA)
++      continue;
++    // A stage reading TEXA with no texture enabled reads nothing usable; a
++    // warped (indirect) lookup isn't the vertex's coordinate.
++    if (s.tevorders_enable == 0u || !from_first_uv(s.tevorders_texcoord & 7u) ||
++        (s.ind_stage < key.num_ind_stages && s.ind_matrix_index != 0u))
++      return -1;
++    const int map = static_cast<int>(s.tevorders_texmap & 7u);
++    if (texmap >= 0 && texmap != map)
++      return -1;
++    texmap = map;
++  }
++  return texmap;
++}
++
+ // One bound texture for a specific TEV texmap slot (63/Mfin multi-texmap). The
+ // single-texmap fast path uses DrawPlan's flat tex_*/tlut_* fields; when more
+ // than one distinct texmap is sampled (e.g. a THP YUV movie draws Y/U/V on
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_cutout_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_cutout_test.cpp
+new file mode 100644
+index 0000000000..d294d148d7
+--- /dev/null
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_cutout_test.cpp
+@@ -0,0 +1,156 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// cutout_alpha_texmap(): the texmap an alpha-tested draw's cutout comes from,
++// for the HD look's sun map casters (aurora gxcore_draw.cpp submit_draw_plan).
++
++#include "gxruntime/gxcore/shader.hpp"
++
++#include <cstdio>
++
++namespace gxc = gxruntime::gxcore;
++
++static int g_failures = 0;
++
++#define CHECK(cond)                                                           \
++  do {                                                                        \
++    if (!(cond)) {                                                            \
++      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
++      ++g_failures;                                                           \
++    }                                                                         \
++  } while (0)
++
++namespace {
++
++constexpr std::uint8_t kZero = 7, kKonst = 6, kTexA = 4, kAPrev = 0;
++
++gxc::TexGenKey texgen(gxc::TexGenType type, gxc::TexSourceRow row) {
++  gxc::TexGenKey g{};
++  g.enabled = 1;
++  g.texgentype = static_cast<std::uint8_t>(type);
++  g.sourcerow = static_cast<std::uint8_t>(row);
++  return g;
++}
++
++gxc::TevStageKey stage(std::uint8_t texcoord, std::uint8_t texmap, bool enable, std::uint8_t a, std::uint8_t b,
++                       std::uint8_t c, std::uint8_t d) {
++  gxc::TevStageKey s{};
++  s.tevorders_texcoord = texcoord;
++  s.tevorders_texmap = texmap;
++  s.tevorders_enable = enable ? 1 : 0;
++  s.ac_a = a;
++  s.ac_b = b;
++  s.ac_c = c;
++  s.ac_d = d;
++  return s;
++}
++
++// The Windfall girl's body as dumped from the game (s6248): texgen 0 regular
++// from TEX0, texgen 1 the toon ramp from colour 0 (SRTG); stage 0 the ramp
++// (texmap 1, no alpha read), stage 1 konst x TEXA from texmap 0, stage 2 APREV.
++gxc::ShaderKey windfall_girl() {
++  gxc::ShaderKey k{};
++  k.textured = 1;
++  k.tev_valid = 1;
++  k.num_tex_gens = 2;
++  k.tex_gens[0] = texgen(gxc::TexGenType::Regular, gxc::TexSourceRow::Tex0);
++  k.tex_gens[1] = texgen(gxc::TexGenType::Color0, gxc::TexSourceRow::Colors);
++  k.num_tev_stages = 3;
++  k.tev_stages[0] = stage(1, 1, true, kZero, kZero, kZero, kZero);
++  k.tev_stages[1] = stage(0, 0, true, kZero, kKonst, kTexA, kZero);
++  k.tev_stages[2] = stage(1, 1, true, kAPrev, kZero, kZero, kZero);
++  k.alpha_comp0 = 6; // GEQUAL
++  k.alpha_comp1 = 3; // LEQUAL
++  k.alpha_logic = 0; // AND
++  return k;
++}
++
++void test_girl_takes_texmap0() { CHECK(gxc::cutout_alpha_texmap(windfall_girl()) == 0); }
++
++void test_alpha_from_second_texmap() {
++  // The same, with the cutout texture on texmap 2.
++  gxc::ShaderKey k = windfall_girl();
++  k.tev_stages[1].tevorders_texmap = 2;
++  CHECK(gxc::cutout_alpha_texmap(k) == 2);
++}
++
++void test_two_alpha_textures_refused() {
++  gxc::ShaderKey k = windfall_girl();
++  k.tev_stages[2] = stage(0, 1, true, kAPrev, kZero, kTexA, kZero);
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++}
++
++void test_same_texture_twice_kept() {
++  gxc::ShaderKey k = windfall_girl();
++  k.tev_stages[2] = stage(0, 0, true, kAPrev, kZero, kTexA, kZero);
++  CHECK(gxc::cutout_alpha_texmap(k) == 0);
++}
++
++void test_alpha_not_from_texture_refused() {
++  // Alpha from konst and the raster only: no texture to cut by.
++  gxc::ShaderKey k = windfall_girl();
++  k.tev_stages[1].ac_c = kZero;
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++}
++
++void test_texcoord_not_from_tex0_refused() {
++  // The alpha texture's coordinate from TEX1 (a caster carries TEX0 only) or a
++  // non-regular texgen.
++  gxc::ShaderKey k = windfall_girl();
++  k.tex_gens[0].sourcerow = static_cast<std::uint8_t>(gxc::TexSourceRow::Tex0) + 1;
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++  k = windfall_girl();
++  k.tev_stages[1].tevorders_texcoord = 1; // the ramp's SRTG coordinate
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++  k = windfall_girl();
++  k.tex_gens[0].projection = 1; // STQ
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++}
++
++void test_texcoord_out_of_range_refused() {
++  gxc::ShaderKey k = windfall_girl();
++  k.num_tex_gens = 0;
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++}
++
++void test_disabled_texture_stage_refused() {
++  gxc::ShaderKey k = windfall_girl();
++  k.tev_stages[1].tevorders_enable = 0;
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++}
++
++void test_indirect_warp_refused() {
++  gxc::ShaderKey k = windfall_girl();
++  k.num_ind_stages = 1;
++  k.tev_stages[1].ind_stage = 0;
++  k.tev_stages[1].ind_matrix_index = 1;
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++}
++
++void test_untextured_and_passthrough() {
++  gxc::ShaderKey k{};
++  CHECK(gxc::cutout_alpha_texmap(k) == -1);
++  k.textured = 1; // no TEV: texmap 0 through texcoord 0
++  k.num_tex_gens = 1;
++  k.tex_gens[0] = texgen(gxc::TexGenType::Regular, gxc::TexSourceRow::Tex0);
++  CHECK(gxc::cutout_alpha_texmap(k) == 0);
++}
++
++} // namespace
++
++int main() {
++  test_girl_takes_texmap0();
++  test_alpha_from_second_texmap();
++  test_two_alpha_textures_refused();
++  test_same_texture_twice_kept();
++  test_alpha_not_from_texture_refused();
++  test_texcoord_not_from_tex0_refused();
++  test_texcoord_out_of_range_refused();
++  test_disabled_texture_stage_refused();
++  test_indirect_warp_refused();
++  test_untextured_and_passthrough();
++  if (g_failures != 0) {
++    std::fprintf(stderr, "%d failure(s)\n", g_failures);
++    return 1;
++  }
++  std::printf("gxcore_cutout_tests: ok\n");
++  return 0;
++}
+-- 
+2.56.0
+

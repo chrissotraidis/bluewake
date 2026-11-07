@@ -1,0 +1,524 @@
+From 7a159f88521cb78f940a3de6fca640c0912ad556 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Mon, 2 Nov 2026 21:27:27 -0600
+Subject: [PATCH] Characters: Wind Waker HD's clouds on the characters' light,
+ and its cloud floor from the clock
+
+Characters: Wind Waker HD's clouds on the characters' light, and its cloud floor at night
+
+Wind Waker HD dims the characters' sunlight under its cloud shadows: the light is mix(shade, lit, ramp x cloud),
+cloud = clamp(its cloud texture at the pixel's world position + the floor). The characters now read the same
+texture, drift and floor as the scenery's cloud shadows on HD's rule (post_fx::actor_cloud_source,
+post_fx::cloud_hd_floor), so both darken under the same cloud; with HD's cloud shadows off or no HD cloud texture
+the characters take 1. The floor is now HD's, 1 - max(0.25, 0.9 x the sun's height), for scenery and characters
+(0.364 at 10:00, 0.131 at noon, 0.75 at night: clouds still dim lit places a little at night, as in HD).
+DOL_AURORA_ACTOR_LIGHT_DEBUG=6 shows the characters' cloud term.
+
+gxcore tests: cloud = 1 reproduces the traced HD pixels exactly; cloud = 0 gives the hemisphere colour. In game at
+Outset's pier with the clouds repeated finely, Link takes the texture's average (0.91) and the scenery dims with him.
+
+Aurora: Wind Waker HD's cloud floor from the host's clock (aurora_set_cloud_hd_floor)
+
+The cloud shadows on HD's rule take clamp(texel + floor), and HD works the floor out from the clock in setSunpos:
+1 - max(0.25, -0.9 cos(time - 15 degrees)). cloud_hd_floor() worked it out from the shadow light's height
+instead, which is the same thing only for the true sun. With HD's light rule (aurora_set_sun_hd_light) the light
+is held at 40,000 high before 09:00 and after 17:00, so the floor came out 0.596 at 07:30, 18:30 and 20:00 where
+HD's is 0.75 (uf[2].y in an HD capture, at all three hours), and 0.248 at noon against HD's 0.131: at dawn
+and dusk a cloud took about 1.6 times HD's light from Link and the scenery.
+
+aurora_set_cloud_hd_floor(floor): the host's floor from the clock, used by the scenery and the characters while
+it is set; a negative value goes back to the light's height. DOL_AURORA_CLOUD_SHADOWS_HD_POWER still overrides
+both. The comments that gave 0.364 and 0.1307 as the light-height rule's now say where they hold.
+
+The post_fx modules compile with Dawn (Vulkan, core and compatibility); the gxcore and runtime tests pass.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  7 +++
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 32 +++++++++--
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |  3 +-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 49 +++++++++++++++--
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  9 +++
+ .../include/gxruntime/gxcore/shader.hpp       | 23 +++++---
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 29 +++++++++-
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 55 ++++++++++++++++++-
+ 8 files changed, 182 insertions(+), 25 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index 1827b9dd7d..bc8c134b14 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -223,6 +223,13 @@ void aurora_set_actor_light_hd(int on, const float c0[3], const float shadow[3],
+    HD holds it), `night` says which, and `fade` (0 to 1) is HD's day/night switch fade, which takes the lit side
+    down to the shade before the light changes sides. `on` 0 goes back to BlueWake's own rule. */
+ void aurora_set_sun_hd_light(int on, int night, float fade);
++/* Wind Waker HD's cloud shadow floor (cCloudShadowPower, cloud = clamp(texel + floor)) from the game's clock, as HD
++   works it out in setSunpos: 1 - max(0.25, -0.9 cos(time - 15 degrees)), 0.364 at 10:00, 0.131 at noon, 0.75 from
++   a low sun through the night. Used by the cloud shadows on HD's rule, on the scenery and the characters. A negative
++   value, the default, goes back to the renderer's own (from the shadow light's height), which is HD's only for a
++   true sun: with HD's light rule the light is held at 40,000 high at dawn and dusk. DOL_AURORA_CLOUD_SHADOWS_HD_POWER
++   still overrides both. Takes effect at the next frame. */
++void aurora_set_cloud_hd_floor(float floor);
+ /* Wind Waker HD's own normals for the stage in play (the HD pack's optional/hd-normals/<stage>.bin, made by the
+    importer from the player's HD dump), for the sun shadows' facing term; NULL or a missing file: none, and
+    the facing term makes its own. Loaded at once; call it as the stage changes. */
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 257fc53d4e..9a16451164 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -268,7 +268,8 @@ wgpu::BindGroupLayout texture_bind_group_layout(uint32_t used_mask = 1u) {
+ 
+ // Wind Waker HD's character light (gxc ShaderKey::hd_actor_light): a flagged pipeline's group 0 is the pass's
+ // static group (its two storage buffers, bindings 0 and 1, which the shader doesn't read) and HD's light: its
+-// uniform (gxc::HdActorLightConstants), the shadow pre-pass and its sampler (bindings 2 to 4). Made on first use by
++// uniform (gxc::HdActorLightConstants), the shadow pre-pass and its sampler (bindings 2 to 4), HD's cloud shadow
++// texture and its sampler (5 and 6; post_fx::actor_cloud_source(), else a white texel). Made on first use by
+ // the pipeline compiler or the render thread, under the texture layouts' lock.
+ wgpu::BindGroupLayout g_actorLightLayout;
+ wgpu::Device g_actorLightLayoutOwner;
+@@ -305,6 +306,17 @@ wgpu::BindGroupLayout actor_light_group_layout() {
+           .visibility = wgpu::ShaderStage::Fragment,
+           .sampler = wgpu::SamplerBindingLayout{.type = wgpu::SamplerBindingType::Filtering},
+       },
++      wgpu::BindGroupLayoutEntry{
++          .binding = 5,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = wgpu::TextureBindingLayout{.sampleType = wgpu::TextureSampleType::Float,
++                                                .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
++      wgpu::BindGroupLayoutEntry{
++          .binding = 6,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .sampler = wgpu::SamplerBindingLayout{.type = wgpu::SamplerBindingType::Filtering},
++      },
+   };
+   const wgpu::BindGroupLayoutDescriptor descriptor{
+       .label = "GXCore actor light (HD) group",
+@@ -1103,11 +1115,12 @@ wgpu::BindGroup g_actorPassGroup;
+ wgpu::BindGroup g_actorOffGroup;
+ wgpu::Sampler g_actorSampler;
+ 
+-// DOL_AURORA_ACTOR_LIGHT_DEBUG: 1 the ramp coordinate s, 2 the shadow, 3 the ramp, 4 the hemisphere, 5 the rim.
++// DOL_AURORA_ACTOR_LIGHT_DEBUG: 1 the ramp coordinate s, 2 the shadow, 3 the ramp, 4 the hemisphere, 5 the rim,
++// 6 the cloud.
+ float actor_light_debug() {
+   static const float value = [] {
+     const char* env = std::getenv("DOL_AURORA_ACTOR_LIGHT_DEBUG");
+-    return env != nullptr ? static_cast<float>(std::clamp(std::atoi(env), 0, 5)) : 0.f;
++    return env != nullptr ? static_cast<float>(std::clamp(std::atoi(env), 0, 6)) : 0.f;
+   }();
+   return value;
+ }
+@@ -1126,7 +1139,8 @@ const std::array<float, 3>& actor_light_rim() {
+   return value;
+ }
+ 
+-wgpu::BindGroup make_actor_group(const gxc::HdActorLightConstants& constants, const wgpu::TextureView& shadow) {
++wgpu::BindGroup make_actor_group(const gxc::HdActorLightConstants& constants, const wgpu::TextureView& shadow,
++                                 const wgpu::TextureView& cloud = {}, const wgpu::Sampler& cloudSampler = {}) {
+   if (!g_actorSampler) {
+     const wgpu::SamplerDescriptor sampler{
+         .label = "GXCore actor light (HD) shadow",
+@@ -1153,6 +1167,8 @@ wgpu::BindGroup make_actor_group(const gxc::HdActorLightConstants& constants, co
+       wgpu::BindGroupEntry{.binding = 2, .buffer = buffer, .offset = 0, .size = sizeof(constants)},
+       wgpu::BindGroupEntry{.binding = 3, .textureView = shadow},
+       wgpu::BindGroupEntry{.binding = 4, .sampler = g_actorSampler},
++      wgpu::BindGroupEntry{.binding = 5, .textureView = cloud ? cloud : empty_texmap_view()},
++      wgpu::BindGroupEntry{.binding = 6, .sampler = cloudSampler ? cloudSampler : g_actorSampler},
+   };
+   const wgpu::BindGroupDescriptor descriptor{
+       .label = "GXCore actor light (HD) group",
+@@ -1219,10 +1235,14 @@ bool begin_actor_light_pass(const post_fx::Camera* camera, const post_fx::SunMap
+   c.rim[0] = rim[0];
+   c.rim[1] = rim[1];
+   c.rim[2] = rim[2];
+-  c.rim[3] = 1.f; // the cloud (HD's cloud shadow on characters: later)
++  // HD's cloud shadow, from the scenery's (post_fx::actor_cloud_source()); none: the cloud is 1 (rim.w 0).
++  wgpu::TextureView cloud;
++  wgpu::Sampler cloudSampler;
++  const bool haveCloud = post_fx::actor_cloud_source(*camera, c.cloud, cloud, cloudSampler);
++  c.rim[3] = haveCloud ? 1.f : 0.f;
+   c.screen[0] = 1.f / static_cast<float>(size.width);
+   c.screen[1] = 1.f / static_cast<float>(size.height);
+-  g_actorPassGroup = make_actor_group(c, haveShadow ? shadow : empty_texmap_view());
++  g_actorPassGroup = make_actor_group(c, haveShadow ? shadow : empty_texmap_view(), cloud, cloudSampler);
+   return true;
+ }
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index 92fa70c0f3..f8d73240f6 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -139,7 +139,8 @@ DrawData* last_recorded_draw() noexcept;
+ // v14: softTarget, a soft effect's pipeline for the reduced-size buffer.
+ // v15: Wind Waker HD's character light (ShaderKey::hd_actor_light: a longer key, and a flagged key's WGSL and group
+ // 0 layout).
+-constexpr uint32_t GXCorePipelineConfigVersion = 15;
++// v16: its cloud term (HD's cloud shadow texture and sampler at group 0 bindings 5 and 6, a longer uniform).
++constexpr uint32_t GXCorePipelineConfigVersion = 16;
+ 
+ struct PipelineConfig {
+   uint32_t version = GXCorePipelineConfigVersion;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index a2f2bc89df..7cc851708f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -271,9 +271,12 @@ bool g_aoHdDebug = false;
+ // DOL_AURORA_CLOUD_SHADOWS_HD=1 (local test; with the sun shadow map and the cloud shadows on): the cloud shadows
+ // on Wind Waker HD's rule, in the sun shadows' pass in place of their own: they take away the sun's light (HD's
+ // shadow term x clamp(cloud + floor)), so they don't darken shade, and are lighter at a low sun.
+-// DOL_AURORA_CLOUD_SHADOWS_HD_POWER sets the floor (HD's cCloudShadowPower, else 1 - 0.9 x the sun's height).
++// DOL_AURORA_CLOUD_SHADOWS_HD_POWER sets the floor (HD's cCloudShadowPower, else HD's from the game's clock as the
++// host gives it, or 1 - max(0.25, 0.9 x the sun's height): cloud_hd_floor()).
+ bool g_cloudHd = false;
+ float g_cloudHdPower = -1.f;
++// The floor from the host's clock (aurora_set_cloud_hd_floor), negative while unset.
++std::atomic<float> g_cloudHdFloor{-1.f};
+ // DOL_AURORA_CLOUD_SHADOWS_HD_TEXTURE=path to a BC4 DDS of Wind Waker HD's ww_shadow_clouds (the sea stage's
+ // Stage.bfres, 4096 x 4096): with it, the clouds are HD's as a RenderDoc capture and Cemu's memory show them, the
+ // texture seen from above, a repeat every 15,000 units (cCloudProjMtx: u = -x / 15000 + u0, v = -z / 15000 + 0.5),
+@@ -2002,8 +2005,8 @@ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+     }
+     }
+     // The cloud shadows on Wind Waker HD's rule (g_cloudHd): its shadow term times clamp(cloud + floor), the floor
+-    // 1 - 0.9 x the sun's height (cCloudShadowPower), so they darken only what the sun lights, and are lighter at a
+-    // low sun. The cloud is BlueWake's own drifting noise (kCloudNoise), 1 clear, 0 under a cloud.
++    // 1 - max(0.25, -0.9 cos(the hour's sun angle)) (cCloudShadowPower, cloud_hd_floor()), so they darken only what the sun
++    // lights, and are lighter at a low sun (0.75 at night). The cloud is BlueWake's own drifting noise (kCloudNoise), 1 clear, 0 under a cloud.
+     if (view.shade.w > 0.5) {
+         if (view.lit.w > 0.5) {
+             // HD's: its texture from above, its mip from how much ground a pixel spans (after an early return, so
+@@ -3288,6 +3291,22 @@ bool ao_hd_on() noexcept { return g_aoHd && hd_mix_on() && ambient_occlusion_ena
+ // The cloud shadows on HD's rule run this frame, in the sun shadows' pass in place of their own.
+ bool clouds_hd_on() noexcept { return g_cloudHd && cloud_shadows_enabled() && sun_shadow_map_enabled(); }
+ 
++// The cloud shadows' floor on HD's rule (cCloudShadowPower; cloud = clamp(texel + floor)): DOL_AURORA_CLOUD_SHADOWS_HD_
++// POWER, else the host's from the game's clock (aurora_set_cloud_hd_floor: hd/d/d_kankyo_3.cpp setSunpos's
++// 1 - max(0.25, -0.9 cos(t - 15 deg)), 0.364 at 10:00, 0.1307 at noon, and 0.75 from a low sun through the night,
++// when HD's clouds still take a quarter of the light), else 1 - max(0.25, 0.9 x the light's height). That last is
++// HD's only with the true sun's height: with HD's light rule (aurora_set_sun_hd_light) the light is held at 40,000
++// high before 09:00 and after 17:00, and gave 0.596 at 07:30 and 18:30 where HD has 0.75. The scenery (uniform[87])
++// and the characters (actor_cloud_source()) both take it from here.
++float cloud_hd_floor(const Camera& camera) noexcept {
++  if (g_cloudHdPower >= 0.f)
++    return g_cloudHdPower;
++  const float host = g_cloudHdFloor.load(std::memory_order_relaxed);
++  if (host >= 0.f)
++    return host;
++  return 1.f - std::max(0.25f, 0.9f * std::clamp(camera.view[18], 0.f, 1.f));
++}
++
+ // A black texel in the effects' mask's place (no effects), made on first use.
+ const wgpu::TextureView& effect_none_view() {
+   if (!g_effectNone) {
+@@ -3416,8 +3435,7 @@ SunMapInputs sun_map_inputs(const Camera& camera, const SunMap& sunMap, bool act
+   // HD's splits this frame, as its first two cascades are sized (cascade_range).
+   uniform[92] = g_sunHdPrepass ? hd_split(0) : g_sunHdSplits[0];
+   uniform[93] = g_sunHdPrepass ? hd_split(1) : g_sunHdSplits[1];
+-  uniform[87] = g_cloudHdPower >= 0.f ? g_cloudHdPower
+-                                      : 1.f - 0.9f * std::clamp(camera.view[18], 0.f, 1.f); // the sun's height
++  uniform[87] = cloud_hd_floor(camera);
+   // The scenery's smooth normals (sun_normal_target()), drawn with the mask while the facing term is on.
+   const bool normals = mask && g_sunNormalView && sun_normals_wanted();
+   uniform[78] = normals ? 1.f : 0.f;
+@@ -4314,6 +4332,10 @@ bool far_blur_enabled() noexcept { return g_farBlur.load(std::memory_order_relax
+ 
+ void set_far_blur(bool enabled) noexcept { g_farBlur.store(enabled, std::memory_order_relaxed); }
+ 
++void set_cloud_hd_floor(float floor) noexcept {
++  g_cloudHdFloor.store(floor >= 0.f ? std::min(floor, 1.f) : -1.f, std::memory_order_relaxed);
++}
++
+ bool ambient_occlusion_enabled() noexcept { return g_ao.load(std::memory_order_relaxed) && webgpu::g_hasCoreFeatures; }
+ 
+ void set_ambient_occlusion(bool enabled) noexcept { g_ao.store(enabled, std::memory_order_relaxed); }
+@@ -4424,6 +4446,21 @@ bool actor_shadow_source(wgpu::TextureView& view, float& lod, bool& sameFrame) n
+   return true;
+ }
+ 
++bool actor_cloud_source(const Camera& camera, float cloud[4], wgpu::TextureView& view, wgpu::Sampler& sampler) noexcept {
++  if (!clouds_hd_on() || !g_cloudTexView || !g_cloudSampler)
++    return false;
++  // fs_sun_map's uv: (-x / cloud_repeat + time x cloud_speed, -z / cloud_repeat + 0.5). u0 is taken modulo 1 (the
++  // sampler repeats) so a long session's seconds keep their precision.
++  const double u0 = static_cast<double>(camera.view[16]) * static_cast<double>(g_cloudHdSpeed);
++  cloud[0] = static_cast<float>(u0 - std::floor(u0));
++  cloud[1] = 0.5f;
++  cloud[2] = 1.f / g_cloudHdRepeat;
++  cloud[3] = cloud_hd_floor(camera);
++  view = g_cloudTexView;
++  sampler = g_cloudSampler;
++  return true;
++}
++
+ void set_actor_light_applied(bool applied) noexcept { g_actorLightApplied.store(applied, std::memory_order_relaxed); }
+ 
+ bool actor_light_applied() noexcept { return g_actorLightApplied.load(std::memory_order_relaxed); }
+@@ -4951,6 +4988,8 @@ void aurora_set_sun_hd_light(int on, int night, float fade) {
+   aurora::gfx::post_fx::set_sun_hd_light(on != 0, night != 0, fade);
+ }
+ 
++void aurora_set_cloud_hd_floor(float floor) { aurora::gfx::post_fx::set_cloud_hd_floor(floor); }
++
+ void aurora_set_edge_light(bool enabled) { aurora::gfx::post_fx::set_edge_light(enabled); }
+ 
+ void aurora_set_torch_light(bool enabled) { aurora::gfx::post_fx::set_torch_light(enabled); }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index ec4dd15542..ba7a039cea 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -95,8 +95,17 @@ bool actor_light_applied() noexcept;
+ // Wind Waker HD's cloud shadow texture (aurora_set_hd_cloud_texture): a BC4 DDS, loaded by the render thread; null
+ // or empty: none (BlueWake's noise).
+ void set_hd_cloud_texture(const char* path) noexcept;
++// The characters' cloud term (Wind Waker HD's character light, gxc::HdActorLightConstants::cloud): the scenery's
++// cloud shadows on HD's rule as fs_sun_map applies them, from the same values (the texture and its repeating
++// sampler, the repeat, the drift from camera.view[16]'s seconds, v0 0.5, the floor uniform[87] has). `cloud` gets
++// (u0, v0, 1 / repeat, floor). False, and the characters' cloud 1, while the cloud shadows on HD's rule are off this
++// frame or no HD cloud texture is loaded (the scenery's noise fallback isn't HD's, so characters don't take it).
++struct Camera;
++bool actor_cloud_source(const Camera& camera, float cloud[4], wgpu::TextureView& view, wgpu::Sampler& sampler) noexcept;
+ // Wind Waker HD's light rule (aurora_set_sun_hd_light).
+ void set_sun_hd_light(bool on, bool night, float fade) noexcept;
++// Wind Waker HD's cloud floor from the host's clock (aurora_set_cloud_hd_floor), negative while unset.
++void set_cloud_hd_floor(float floor) noexcept;
+ void set_sun_direction(float x, float y, float z) noexcept;
+ void set_exposure(float gain) noexcept;
+ // The scene is brightened this frame (the game's gain over 1): the sea's draws
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 0309520799..2fe334250d 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -663,10 +663,11 @@ ToonLightMatch toon_light_stage(const ShaderKey& key);
+ 
+ // The uniform a ShaderKey::hd_actor_light shader reads at group(0) binding(2)
+ // (binding 0 and 1 are the pass's static storage buffers; binding 3 the shadow
+-// texture, 4 its sampler). All colours linear. vec4-aligned.
++// texture, 4 its sampler; 5 HD's cloud shadow texture, 6 its sampler). All
++// colours linear. vec4-aligned.
+ struct HdActorLightConstants {
+   // x: 1 = HD's light, 0 = the GameCube result unchanged; y: debug view
+-  // (DOL_AURORA_ACTOR_LIGHT_DEBUG: 1 s, 2 shadow, 3 ramp, 4 hemi, 5 rim);
++  // (DOL_AURORA_ACTOR_LIGHT_DEBUG: 1 s, 2 shadow, 3 ramp, 4 hemi, 5 rim, 6 cloud);
+   // z: the shadow texture's LOD; w: how strongly the shadow shows (0 to 1).
+   float params[4]{};
+   float c0[4]{};     // the hemisphere's lower colour (actor_c0); w: 1 when a shadow texture is bound
+@@ -674,18 +675,25 @@ struct HdActorLightConstants {
+   float k[4]{};      // the lit colour (actor_k0 x its factor, 2.75 at noon)
+   float light[4]{};  // the direction to the light (the shadow map's sun or moon), view space
+   float rows[3][4]{}; // the inverse view matrix (view to world), by rows
+-  float rim[4]{};    // HD's rim: intensity (2), exponent (5), back-light share (0.75), cloud (1)
++  // HD's rim: intensity (2), exponent (5), back-light share (0.75); w: 1 when the
++  // cloud term is on (HD's cloud shadow texture bound at binding 5), else cloud = 1.
++  float rim[4]{};
+   float screen[4]{}; // 1 / the target's width and height: a fragment's uv in the shadow texture
++  // HD's cloud shadow (ww_shadow_clouds seen from above), at world (X, Z):
++  // uv = (-X, -Z) * cloud.z + cloud.xy. x u0 (drifting with the wind), y v0
++  // (0.5), z 1 / the repeat (1 / 15000), w the floor: cloud = clamp(texel + w).
++  float cloud[4]{};
+ };
+-static_assert(sizeof(HdActorLightConstants) == 10 * 16);
++static_assert(sizeof(HdActorLightConstants) == 11 * 16);
+ 
+ // HD's light for one pixel, the formula the WGSL implements (for tests and
+ // reference): s the lit channel (the ramp's u), sh the shadow (1 lit), fade
+ // the shadow's strength, ramp(u) supplied by the caller, n_up the world
+ // normal's y, n_dot_e = dot(N_view, normalize(P_view)), l_dot_e = dot(the
+ // direction to the light, normalize(P_view)); albedo_gamma the albedo texel
+-// (0..1, the GX texture's own gamma). Returns the gamma-space colour, clipped
+-// before the gamma as HD's UNORM target clips.
++// (0..1, the GX texture's own gamma); cloud HD's cloud term (clamp(texel +
++// floor, 0, 1); 1 clear), which multiplies the ramp's value. Returns the
++// gamma-space colour, clipped before the gamma as HD's UNORM target clips.
+ struct HdActorLightPixel {
+   float out[3]{};
+   float ramp = 0.f;
+@@ -694,7 +702,8 @@ struct HdActorLightPixel {
+   float rim = 0.f;
+ };
+ HdActorLightPixel hd_actor_light_reference(const HdActorLightConstants& c, float s, float sh, float (*ramp)(float u),
+-                                           float n_up, float n_dot_e, float l_dot_e, const float albedo_gamma[3]);
++                                           float n_up, float n_dot_e, float l_dot_e, const float albedo_gamma[3],
++                                           float cloud = 1.f);
+ 
+ // The ubershader (gxcore_uber.cpp): one module for any key, which it reads
+ // from the pixel uniform (UberPixelConstants), for a draw whose own pipeline
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 137e3546f5..3480b2036c 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -274,6 +274,8 @@ void emit_fog(std::string& out, const ShaderKey& key) {
+ // drafts/hd-actor-light/LINK-LIGHT.md has the formula from a RenderDoc
+ // capture of Cemu). It replaces stage 0's mix(C0, K, ramp) x albedo with
+ //   L   = mix(hemi, K, ramp(s x mix(1, shadow, fade)) x cloud)
++// cloud = clamp(HD's cloud shadow texel at the world position + floor), or 1
++// with the cloud term off (rim.w 0),
+ //   out = pow(clamp(L x (albedo^2.2 + hemi x 2 x rim)), 1 / 2.2)
+ // hemi = mix(c0, shadow colour, 0.5 + 0.5 N_world.y), rim = (1 + N.E)^5 x
+ // mix(1, clamp(L_dir.E), 0.75), all from group 0's HdActorLightConstants. s is
+@@ -313,7 +315,12 @@ void emit_hd_actor_light(std::string& out, const ShaderKey& key, const ToonLight
+        "        let hd_e = normalize(in.hd_pv);\n"
+        "        let hd_up = dot(hdl.rows[1].xyz, hd_n);\n"
+        "        let hd_hemi = mix(hdl.c0.rgb, hdl.shadow.rgb, 0.5 + 0.5 * hd_up);\n"
+-       "        let hd_l = mix(hd_hemi, hdl.k.rgb, hd_ramp * hdl.rim.w);\n"
++       "        var hd_cloud = 1.0;\n"
++       "        if (hdl.rim.w > 0.5) {\n"
++       "            hd_cloud = clamp(textureSampleLevel(hdl_cloud, hdl_cloud_samp, hd_cloud_uv, hd_cloud_lod).r + "
++       "hdl.cloud.w, 0.0, 1.0);\n"
++       "        }\n"
++       "        let hd_l = mix(hd_hemi, hdl.k.rgb, hd_ramp * hd_cloud);\n"
+        "        let hd_rev = mix(1.0, clamp(dot(hdl.light.xyz, hd_e), 0.0, 1.0), hdl.rim.z);\n"
+        "        let hd_rim = pow(clamp(1.0 + dot(hd_n, hd_e), 0.0, 1.0), hdl.rim.y) * hd_rev;\n"
+        "        let hd_alb = pow(vec3f(hd_albedo) / 255.0, vec3f(2.2));\n"
+@@ -326,6 +333,7 @@ void emit_hd_actor_light(std::string& out, const ShaderKey& key, const ToonLight
+        "        if (hd_debug == 3) { hd_out = hd_ramp; }\n"
+        "        if (hd_debug == 4) { hd_out = pow(clamp(hd_hemi, vec3f(0.0), vec3f(1.0)), vec3f(1.0 / 2.2)); }\n"
+        "        if (hd_debug == 5) { hd_out = vec3f(clamp(hd_rim, 0.0, 1.0)); }\n"
++       "        if (hd_debug == 6) { hd_out = vec3f(hd_cloud); }\n"
+        "        prev = vec4i(vec3i(round(clamp(hd_out, vec3f(0.0), vec3f(1.0)) * 255.0)), prev.a);\n"
+        "    }\n");
+ }
+@@ -352,6 +360,17 @@ void emit_tev_fragment(std::string& out, const ShaderKey& key, const ToonLightMa
+   if (indirect_enabled)
+     emit(out, "    var alphabump = 0;\n"
+               "    var tevcoord = vec2i(0,0);\n");
++  // Wind Waker HD's cloud shadow on the characters: the world position seen
++  // from above, and its mip from the uv's screen derivatives, here, before any
++  // branch (derivatives need uniform control flow; the sample is in the HD
++  // block, textureSampleLevel).
++  if (hd.matched)
++    emit(out, "    let hd_cloud_p = vec4f(in.hd_pv, 1.0);\n"
++              "    let hd_cloud_uv = vec2f(-dot(hdl.rows[0], hd_cloud_p), -dot(hdl.rows[2], hd_cloud_p)) * "
++              "hdl.cloud.z + hdl.cloud.xy;\n"
++              "    let hd_cloud_texels = hd_cloud_uv * vec2f(textureDimensions(hdl_cloud));\n"
++              "    let hd_cloud_span = max(length(dpdx(hd_cloud_texels)), length(dpdy(hd_cloud_texels)));\n"
++              "    let hd_cloud_lod = log2(max(hd_cloud_span, 1.0));\n");
+   emit(out,
+             "    let col0i = vec4i(round(in.color0 * 255.0));\n"
+             "    let col1i = vec4i(round(in.color1 * 255.0));\n");
+@@ -857,7 +876,8 @@ ToonLightMatch toon_light_stage(const ShaderKey& key) {
+ }
+ 
+ HdActorLightPixel hd_actor_light_reference(const HdActorLightConstants& c, float s, float sh, float (*ramp)(float u),
+-                                           float n_up, float n_dot_e, float l_dot_e, const float albedo_gamma[3]) {
++                                           float n_up, float n_dot_e, float l_dot_e, const float albedo_gamma[3],
++                                           float cloud) {
+   const auto clamp01 = [](float v) { return v < 0.f ? 0.f : v > 1.f ? 1.f : v; };
+   const auto mix = [](float a, float b, float t) { return a + (b - a) * t; };
+   HdActorLightPixel px;
+@@ -866,7 +886,7 @@ HdActorLightPixel hd_actor_light_reference(const HdActorLightConstants& c, float
+   px.rim = std::pow(clamp01(1.f + n_dot_e), c.rim[1]) * rev;
+   for (int i = 0; i < 3; ++i) {
+     px.hemi[i] = mix(c.c0[i], c.shadow[i], 0.5f + 0.5f * n_up);
+-    px.light[i] = mix(px.hemi[i], c.k[i], px.ramp * c.rim[3]);
++    px.light[i] = mix(px.hemi[i], c.k[i], px.ramp * cloud);
+     const float albedo = std::pow(albedo_gamma[i], 2.2f);
+     px.out[i] = std::pow(clamp01(px.light[i] * (albedo + px.hemi[i] * c.rim[0] * px.rim)), 1.f / 2.2f);
+   }
+@@ -1038,10 +1058,13 @@ std::string generate_wgsl(const ShaderKey& key) {
+               "    rows: array<vec4f, 3>,\n"
+               "    rim: vec4f,\n"
+               "    screen: vec4f,\n"
++              "    cloud: vec4f,\n"
+               "};\n"
+               "@group(0) @binding(2) var<uniform> hdl: HdActorLight;\n"
+               "@group(0) @binding(3) var hdl_shadow: texture_2d<f32>;\n"
+               "@group(0) @binding(4) var hdl_samp: sampler;\n"
++              "@group(0) @binding(5) var hdl_cloud: texture_2d<f32>;\n"
++              "@group(0) @binding(6) var hdl_cloud_samp: sampler;\n"
+               "fn hd_ramp_sample(t: texture_2d<f32>, uv: vec2f) -> vec4f {\n"
+               "    let size = vec2i(textureDimensions(t));\n"
+               "    let p = uv * vec2f(size) - 0.5;\n"
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 5ab670e378..532ca37695 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -835,6 +835,32 @@ void test_toon_light_wgsl() {
+         std::string::npos);
+   // Without the HD block, the flagged module is the GX one plus the declarations and varyings.
+   CHECK(w.find("hd_hl_k") == std::string::npos);
++  // The cloud term: HD's cloud shadow texture and its sampler at bindings 5 and 6, the uniform's last vec4.
++  CHECK(w.find("@group(0) @binding(5) var hdl_cloud: texture_2d<f32>;") != std::string::npos);
++  CHECK(w.find("@group(0) @binding(6) var hdl_cloud_samp: sampler;") != std::string::npos);
++  CHECK(w.find("    screen: vec4f,\n    cloud: vec4f,\n};") != std::string::npos);
++  // Its uv is the world position from above (the inverse view's x and z rows), its mip from the uv's derivatives,
++  // worked out at the top of fs_main, before any branch or discard (uniform control flow).
++  const auto main_at = w.find("fn fs_main(");
++  const auto uv_at = w.find("let hd_cloud_uv = vec2f(-dot(hdl.rows[0], hd_cloud_p), -dot(hdl.rows[2], hd_cloud_p)) * "
++                            "hdl.cloud.z + hdl.cloud.xy;");
++  const auto dpdx_at = w.find("let hd_cloud_span = max(length(dpdx(hd_cloud_texels)), length(dpdy(hd_cloud_texels)));");
++  CHECK(w.find("let hd_cloud_p = vec4f(in.hd_pv, 1.0);") != std::string::npos);
++  CHECK(w.find("let hd_cloud_lod = log2(max(hd_cloud_span, 1.0));") != std::string::npos);
++  CHECK(main_at != std::string::npos && uv_at != std::string::npos && dpdx_at != std::string::npos);
++  CHECK(main_at < uv_at && uv_at < dpdx_at && dpdx_at < hd_at);
++  {
++    const std::string head = w.substr(main_at, dpdx_at - main_at);
++    CHECK(head.find("if (") == std::string::npos && head.find("discard") == std::string::npos);
++  }
++  // Sampled at that mip, only with the term on (rim.w), clamp(texel + floor); it multiplies the ramp's value.
++  CHECK(w.find("        if (hdl.rim.w > 0.5) {\n"
++               "            hd_cloud = clamp(textureSampleLevel(hdl_cloud, hdl_cloud_samp, hd_cloud_uv, hd_cloud_lod).r "
++               "+ hdl.cloud.w, 0.0, 1.0);\n") != std::string::npos);
++  CHECK(w.find("let hd_l = mix(hd_hemi, hdl.k.rgb, hd_ramp * hd_cloud);") != std::string::npos);
++  CHECK(w.find("hdl.rim.w)") == std::string::npos);
++  CHECK(w.find("if (hd_debug == 6) { hd_out = vec3f(hd_cloud); }") != std::string::npos);
++  CHECK(gx.find("dpdx") == std::string::npos);
+   // The effect-light stage (PREV + K1 x the ramp) is matched but left out of HD's light, as HD drops it.
+   auto hl = toon_key(true);
+   hl.hd_actor_light = 1;
+@@ -866,13 +892,13 @@ void test_toon_light_reference() {
+   // The world normal's y that puts the hemisphere at `t` between C0 and the shadow colour.
+   const auto up_for = [](float t) { return 2.f * t - 1.f; };
+   const auto run = [](const gxc::HdActorLightConstants& c, float s, float sh, float (*ramp)(float), float up,
+-                      float rim, const float albedo_linear[3]) {
++                      float rim, const float albedo_linear[3], float cloud = 1.f) {
+     // rim = (1 + N.E)^5 x rev with rev 1 (the light straight ahead).
+     const float n_dot_e = std::pow(rim, 1.f / 5.f) - 1.f;
+     float gamma[3];
+     for (int i = 0; i < 3; ++i)
+       gamma[i] = std::pow(albedo_linear[i], 1.f / 2.2f);
+-    auto px = gxc::hd_actor_light_reference(c, s, sh, ramp, up, n_dot_e, 1.f, gamma);
++    auto px = gxc::hd_actor_light_reference(c, s, sh, ramp, up, n_dot_e, 1.f, gamma, cloud);
+     for (float& v : px.out)
+       v = std::pow(v, 2.2f); // back to linear, as the traces are
+     return px;
+@@ -890,7 +916,7 @@ void test_toon_light_reference() {
+   day.rim[0] = 2.f;
+   day.rim[1] = 5.f;
+   day.rim[2] = 0.75f;
+-  day.rim[3] = 1.f;
++  day.rim[3] = 1.f; // the cloud term on (the shader's switch; the reference takes the cloud itself)
+   // 2500,1300 shirt back in shade: s 0.196 x sh 0.246 off the ramp, rim 0: hemi x albedo exactly.
+   {
+     const float shirt[3] = {0.063f, 0.175f, 0.387f};
+@@ -913,6 +939,29 @@ void test_toon_light_reference() {
+     CHECK(near(px.out[2], 0.725f, 0.01f));
+     // The table's ramp at s x sh = 0.514 is in the same band (the capture's 0.387 is the filtered texel).
+     CHECK(near(hd_ramp_table(0.643f * 0.8f), 0.387f, 0.03f));
++    // The cloud term: 1 (clear) is the traced pixel bit for bit; it scales the ramp's value, not s, so under a full
++    // cloud the light is hemi alone, and the noon floor (0.1307) leaves that share of the ramp.
++    const auto clear = run(day, 0.643f, 0.8f, traced_ramp, up_for(t), 0.517f, hair, 1.f);
++    for (int i = 0; i < 3; ++i)
++      CHECK(clear.out[i] == px.out[i] && clear.light[i] == px.light[i]);
++    const auto dark = run(day, 0.643f, 0.8f, traced_ramp, up_for(t), 0.517f, hair, 0.f);
++    CHECK(dark.ramp == px.ramp);
++    for (int i = 0; i < 3; ++i)
++      CHECK(dark.light[i] == dark.hemi[i]);
++    const float floor_noon = 0.1307f;
++    const auto noon = run(day, 0.643f, 0.8f, traced_ramp, up_for(t), 0.517f, hair, floor_noon);
++    for (int i = 0; i < 3; ++i)
++      CHECK(near(noon.light[i], noon.hemi[i] + (day.k[i] - noon.hemi[i]) * 0.387f * floor_noon, 1e-5f));
++    CHECK(noon.out[2] < px.out[2]);
++  }
++  // In shade (ramp 0) the cloud changes nothing: HD's clouds take away only the sun's light.
++  {
++    const float shirt[3] = {0.063f, 0.175f, 0.387f};
++    const float t = (0.291f - 0.494f) / (0.106f - 0.494f);
++    const auto lit = run(day, 0.196f, 0.246f, hd_ramp_table, up_for(t), 0.f, shirt, 1.f);
++    const auto cloudy = run(day, 0.196f, 0.246f, hd_ramp_table, up_for(t), 0.f, shirt, 0.364f);
++    for (int i = 0; i < 3; ++i)
++      CHECK(lit.out[i] == cloudy.out[i]);
+   }
+   // 2610,1140 hair underside: no light at all, the normal facing down (hemi toward C0).
+   {
+-- 
+2.56.0
+

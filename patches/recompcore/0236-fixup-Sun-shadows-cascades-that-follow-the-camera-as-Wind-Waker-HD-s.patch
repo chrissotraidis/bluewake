@@ -1,0 +1,128 @@
+From 1d61a991872588e1f7da90d46a6b7dde2c84d6b9 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 23:07:58 -0600
+Subject: [PATCH] fixup! Sun shadows: cascades that follow the camera, as Wind
+ Waker HD's
+
+DOL_AURORA_SUN_SHADOW_CASCADES_HD=1 (local test, off): Wind Waker HD's own
+fit, read from Cemu captures of Outset's pier turning (its first cascade is
+the tight box round the view's slice from 30 units to the first split, in a
+frame whose y is the camera's forward made flat to the sun, refitted every
+frame with no steps or snap); =2 its frame only. Neither steadied the turn,
+so the default is unchanged.
+
+DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=2: debug view 12 unblurred; the view
+now also carries the pre-pass shadow in red.
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 41 +++++++++++++++----
+ 1 file changed, 32 insertions(+), 9 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index 9f68ae78cd..4e00c5e0a8 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -287,6 +287,13 @@ float g_followTurnStep = 0.f;
+ // camera still, against 1.2x so). The cost is texels: the square about the sphere is coarser than the box HD fits
+ // (Outset's lookout from the sea: the second cascade 11.3 units against 9.5 x 4.8, and more crawl on the waves).
+ bool g_followStable = false;
++// _HD (local test): 1, Wind Waker HD's own fit (Outset's pier at 10:00 turning, 4 pairs of consecutive Cemu frames,
++// Nov 3: its first cascade is, to 0.01 unit, the tight box round the view's slice from 30 units to the first split,
++// in a frame whose y is the camera's forward made flat to the sun, refitted every frame: no steps, no snap, no
++// padding): every cascade so, as boxes (HD's second and third are perspective-warped, which this doesn't do).
++// It didn't steady anything (Outset's turn: the same changes as without it) and at sea a cascade popped whole on
++// three frames, so it stays off. 2: HD's frame only, the sizes held and the centre snapped as without it.
++int g_followHd = 0;
+ struct FollowCascades {
+   float held[kSunMapCascades][2]{}; // each cascade's half sizes across (x, y), held between steps
+   float turn = 0.f;                 // the frame's turn about the sun (radians) as held
+@@ -2108,7 +2115,9 @@ fn sun_map_shade(in: VertexOutput) -> vec4<f32> {
+     // 12: with DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=1, how much the pre-pass's shadow changed since the last
+     // frame at the same place in the world (black: from lit to full shadow or back).
+     if (debug_view > 11.5) {
+-        return vec4(vec3(textureSampleLevel(shadow_blur, samp, in.uv, 0.0).g), 1.0);
++        // red: the pre-pass shadow itself (with TEMPORAL_DEBUG=2, unblurred), so a frame shows both.
++        let d12 = textureSampleLevel(shadow_blur, samp, in.uv, 0.0);
++        return vec4(d12.r, d12.g, d12.g, 1.0);
+     }
+     // 10: the facing term alone (white facing the sun, black turned away; green where it came from the
+     // scenery's smooth normals). 11: the shadow map alone, before the facing term.
+@@ -3136,6 +3145,8 @@ void apply_sun_quality(int level) {
+     g_followTurnStep = env_float("DOL_AURORA_SUN_SHADOW_CASCADES_TURN_STEP", g_followTurnStep, 0.f, 90.f);
+     const char* stable = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_STABLE");
+     g_followStable = stable != nullptr && stable[0] == '1';
++    const char* hd = std::getenv("DOL_AURORA_SUN_SHADOW_CASCADES_HD");
++    g_followHd = hd != nullptr && (hd[0] == '1' || hd[0] == '2') ? hd[0] - '0' : 0;
+     g_followState = {};
+   }
+   if (const char* splits = std::getenv("DOL_AURORA_SUN_SHADOW_HD_SPLITS")) {
+@@ -3566,7 +3577,7 @@ void make_sun_temporal_pipeline() {
+   const wgpu::ColorTargetState target{.format = kSunLowFormat, .writeMask = wgpu::ColorWriteMask::All};
+   static const bool debugDiff = [] {
+     const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG");
+-    return env != nullptr && env[0] == '1';
++    return env != nullptr && (env[0] == '1' || env[0] == '2');
+   }();
+   const wgpu::ConstantEntry constant{.key = "debug_diff", .value = debugDiff ? 1.0 : 0.0};
+   const wgpu::FragmentState fragment{.module = g_sunTemporalModule,
+@@ -3960,7 +3971,12 @@ void draw_sun_map(const wgpu::CommandEncoder& cmd, const Camera& camera, const S
+           .layout = g_sunBlurLayout, .entryCount = entries.size(), .entries = entries.data()};
+       return g_device.CreateBindGroup(&descriptor);
+     };
+-    for (int i = 0; i < g_sunHdMixBlurs; ++i) {
++    // DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=2 (local test): debug view 12 unblurred, the change per pre-pass texel.
++    static const bool rawDiff = [] {
++      const char* env = std::getenv("DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG");
++      return env != nullptr && env[0] == '2';
++    }();
++    for (int i = 0; i < (rawDiff ? 0 : g_sunHdMixBlurs); ++i) {
+       draw_into(cmd, "Sun shadows' blur (X)", g_sunBlurX, blur_group(g_sunLowMipView[0][0]), g_sunLowMipView[1][0]);
+       draw_into(cmd, "Sun shadows' blur (Y)", g_sunBlurY, blur_group(g_sunLowMipView[1][0]), g_sunLowMipView[0][0]);
+     }
+@@ -5423,7 +5439,11 @@ void follow_cascades(SunMap& map, const Camera& camera, const float sun[3], cons
+   const float rp[3] = {right[0] - rs * sun[0], right[1] - rs * sun[1], right[2] - rs * sun[2]};
+   const float fp[3] = {forward[0] - fs * sun[0], forward[1] - fs * sun[1], forward[2] - fs * sun[2]};
+   const float fx[3] = {fp[1] * sun[2] - fp[2] * sun[1], fp[2] * sun[0] - fp[0] * sun[2], fp[0] * sun[1] - fp[1] * sun[0]};
+-  const float along[3] = {rp[0] + fx[0], rp[1] + fx[1], rp[2] + fx[2]};
++  float along[3] = {rp[0] + fx[0], rp[1] + fx[1], rp[2] + fx[2]};
++  // HD's: x = (forward flat to the sun) x sun, so its y is the forward made flat.
++  if (g_followHd != 0 && dot3(fp, fp) > 1e-6f)
++    for (int i = 0; i < 3; ++i)
++      along[i] = fx[i];
+   float turn = g_followStable ? 0.f : std::atan2(dot3(along, y0), dot3(along, x0));
+   if (!std::isfinite(turn))
+     turn = 0.f;
+@@ -5444,7 +5464,7 @@ void follow_cascades(SunMap& map, const Camera& camera, const float sun[3], cons
+   const float x[3] = {c * x0[0] + s * y0[0], c * x0[1] + s * y0[1], c * x0[2] + s * y0[2]};
+   const float y[3] = {sun[1] * x[2] - sun[2] * x[1], sun[2] * x[0] - sun[0] * x[2], sun[0] * x[1] - sun[1] * x[0]};
+   // The slices: from the near plane to HD's first split, to its second, (to the fourth's start,) to the far end.
+-  const float nearPlane = std::max(v[14], 1.f);
++  const float nearPlane = g_followHd == 1 ? std::max(v[14], 30.f) : std::max(v[14], 1.f);
+   float far = g_followFar;
+   if (camera.farPlane > nearPlane)
+     far = std::min(far, camera.farPlane);
+@@ -5505,15 +5525,18 @@ void follow_cascades(SunMap& map, const Camera& camera, const float sun[3], cons
+         hi[i] = m[i] + reach[i];
+       }
+     }
+-    const float rx = g_followStable ? f.held[k][0] : held_size((0.5f * (hi[0] - lo[0]) + 24.f) * pad, f.held[k][0]);
+-    const float ry = g_followStable ? f.held[k][1] : held_size((0.5f * (hi[1] - lo[1]) + 24.f) * pad, f.held[k][1]);
++    const bool exact = g_followHd == 1;
++    const float rx = exact ? std::max(0.5f * (hi[0] - lo[0]), 1.f)
++                     : g_followStable ? f.held[k][0] : held_size((0.5f * (hi[0] - lo[0]) + 24.f) * pad, f.held[k][0]);
++    const float ry = exact ? std::max(0.5f * (hi[1] - lo[1]), 1.f)
++                     : g_followStable ? f.held[k][1] : held_size((0.5f * (hi[1] - lo[1]) + 24.f) * pad, f.held[k][1]);
+     if (trace && (before[0] != rx || before[1] != ry))
+       std::fprintf(stderr, "[cascades] %u resized %.0f x %.0f -> %.0f x %.0f (slice %.0f-%.0f)\n", k, 2.f * before[0],
+                    2.f * before[1], 2.f * rx, 2.f * ry, bounds[k], bounds[k + 1]);
+     // The centre moved by whole texels in this frame's turned frame.
+     const float texelX = 2.f * rx / size, texelY = 2.f * ry / size;
+-    const float cx = std::round(0.5f * (lo[0] + hi[0]) / texelX) * texelX;
+-    const float cy = std::round(0.5f * (lo[1] + hi[1]) / texelY) * texelY;
++    const float cx = exact ? 0.5f * (lo[0] + hi[0]) : std::round(0.5f * (lo[0] + hi[0]) / texelX) * texelX;
++    const float cy = exact ? 0.5f * (lo[1] + hi[1]) : std::round(0.5f * (lo[1] + hi[1]) / texelY) * texelY;
+     const float cz = 0.5f * (lo[2] + hi[2]);
+     const float range = std::max(rx, ry);
+     const float depth = std::max(cascade_depth(range), 0.5f * (hi[2] - lo[2]) + 0.5f * g_sunMapDepth);
+-- 
+2.56.0
+

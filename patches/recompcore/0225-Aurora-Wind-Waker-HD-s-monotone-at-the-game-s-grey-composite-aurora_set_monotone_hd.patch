@@ -1,0 +1,914 @@
+From b4462d4391fbc0387303aef51ba89f0390e3e75f Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 08:00:44 -0600
+Subject: [PATCH] Aurora: Wind Waker HD's monotone at the game's grey composite
+ (aurora_set_monotone_hd)
+
+Frozen Hyrule is sepia in Wind Waker HD: while the game's mMonotone is set it
+draws its DOF pass with its monotone presets, then the player's lists (Link
+and his things), then bloom over all of it. The GameCube's grey is one quad
+in drawDepth that lays an I8 copy of the frame back over the scene, before
+the player's lists.
+
+With the host's monotone on, the I8 copy to mFrameBufferTex that follows the
+depth copy marks the point: its quad is left out, and at the start of the
+pass after it (its sun map already has that pass's casters, Link's) the
+scene's effects run (no far blur, as HD; no bloom) and then HD's pass: a 2x2
+box of the scene at half size, its grey by HD's weights, saturate of the way,
+times HD's multiply, laid over the scene by clamp(level x clamp((distance -
+start) / (end - start))), in linear light, as pixel shader 40716 in the
+Hyroom capture. After the pass's last perspective draw, what was drawn there
+writing depth and lit by no HD light of its own (an arrow, a bomb) gets the
+lighting on a copy, laid back where it is nearer than the depth at the
+point, then bloom goes over everything. No other effect goes in before the
+point in such a frame (a copy laid back earlier is the game's motion blur,
+under the sepia). The I8 copy keeps its colour beside the intensity, as HD's
+does, for what samples it (the heat haze, the motion blur). The parameters
+ride on the frame's passes, so each in-between frame draws the same.
+
+Off by default; single-sampled only (aurora_monotone_hd_supported());
+DOL_AURORA_MONOTONE_HD=0 turns it off. DOL_AURORA_PASS_TRACE takes a frame
+number and prints each pass's monotone marks.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  11 +
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  90 +++-
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |   7 +
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  46 +++
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 384 +++++++++++++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  34 +-
+ .../graphics/aurora/lib/gfx/tex_copy_conv.cpp |  20 +
+ .../graphics/aurora/lib/gfx/tex_copy_conv.hpp |   1 +
+ 8 files changed, 572 insertions(+), 21 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index eb800e0b1a..3b3112ea1d 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -246,6 +246,17 @@ void aurora_set_cloud_hd_floor(float floor);
+    room's ceiling seen from below. Characters keep their own. `on` 0, the default, draws every caster's both sides.
+    DOL_AURORA_SUN_SHADOW_CASTER_CULL=1 or 0 (local test) overrides it. Takes effect at the next frame. */
+ void aurora_set_sun_caster_cull(int on);
++/* Wind Waker HD's monotone (Frozen Hyrule's sepia, its DOF pass while the game's mMonotone is set). With `on`, at the
++   game's grey composite (its I8 copy of the frame to `frame_copy`, mDoGph_gInf_c::mFrameBufferTex, and the quad that
++   lays it back, which is left out), the scene's effects run and then HD's pass: the scene's grey (HD's weights) at
++   half size, `saturate` of the way, times `mul`, over the scene by clamp(level x clamp((distance - start) / (end -
++   start))), all of it beyond `start` when start == end; what the game draws after the composite (the player's
++   lists, Link and his things) stays in colour, and bloom goes over all of it, as in HD. `on` 0, the default, leaves
++   the game's own grey. Single-sampled only (aurora_monotone_hd_supported()); DOL_AURORA_MONOTONE_HD=0 turns it off.
++   Takes effect at the next frame the game records. */
++void aurora_set_monotone_hd(int on, float level, float start, float end, const float mul[3], float saturate,
++                            uint32_t frame_copy);
++int aurora_monotone_hd_supported(void);
+ /* Wind Waker HD's own normals for the stage in play (the HD pack's optional/hd-normals/<stage>.bin, made by the
+    importer from the player's HD dump), for the sun shadows' facing term; NULL or a missing file: none, and
+    the facing term makes its own. Loaded at once; call it as the stage changes. */
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 30509ab452..4907dd3e9b 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -212,6 +212,14 @@ struct RenderPass {
+   bool offscreen = false;
+   bool observable = false;
+   bool captureDepthSnapshot = false;
++  // Recorded while the host's monotone was on (post_fx::monotone_params()): the frame's effects wait for its grey
++  // composite, and none goes in before a copy of the frame laid back over it.
++  bool monotoneFrame = false;
++  // Ends with the grey composite's frame copy (mark_monotone_copy()): no effects before the copy.
++  bool monotoneCopy = false;
++  // Starts after it: the scene's effects and the monotone first, bloom after the player's lists.
++  bool monotonePoint = false;
++  post_fx::Monotone monotone;
+   bool sealed = false;
+   std::vector<tex_palette_conv::ConvRequest> paletteConvs;
+ };
+@@ -574,6 +582,7 @@ static void set_efb_targets(RenderPass& pass) {
+   pass.copySourceView =
+       webgpu::g_graphicsConfig.msaaSamples > 1 ? webgpu::g_frameBufferResolved.view : webgpu::g_frameBuffer.view;
+   pass.copySourceDepthView = webgpu::g_depthBuffer.view;
++  pass.monotoneFrame = post_fx::monotone_params().on;
+   pass.targetSize = webgpu::g_frameBuffer.size;
+   pass.msaaSamples = webgpu::g_graphicsConfig.msaaSamples;
+   pass.hasDepth = true;
+@@ -804,6 +813,16 @@ static bool g_nextDrawComposite = false;
+ 
+ void set_next_draw_composite(bool composite) noexcept { g_nextDrawComposite = composite; }
+ 
++static post_fx::Monotone g_pendingMonotone; // the recording thread's, for the pass after a marked copy
++
++void mark_monotone_copy(const post_fx::Monotone& monotone) noexcept {
++  if (g_currentRenderPass == UINT32_MAX || g_inOffscreen)
++    return;
++  auto& pass = current_render_passes()[g_currentRenderPass];
++  pass.monotoneCopy = true;
++  g_pendingMonotone = monotone;
++}
++
+ static inline void push_command(CommandType type, const Command::Data& data) {
+   if (g_currentRenderPass == UINT32_MAX)
+     UNLIKELY {
+@@ -916,6 +935,9 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
+       .clearDepth = clearDepth,
+       .hasDepth = prevPass.hasDepth,
+       .hasStencil = prevPass.hasStencil,
++      .monotoneFrame = prevPass.monotoneFrame,
++      .monotonePoint = prevPass.monotoneCopy,
++      .monotone = prevPass.monotoneCopy ? g_pendingMonotone : post_fx::Monotone{},
+   };
+   newPass.commands.reserve(2048);
+   current_render_passes().emplace_back(std::move(newPass));
+@@ -2441,24 +2463,31 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+       .timestampWrites = webgpu::gpu_prof::pass_writes(label),
+   };
+ 
+-  // DOL_AURORA_PASS_TRACE=1: the passes of one frame (the 300th) and their draws.
+-  static const bool passTrace = std::getenv("DOL_AURORA_PASS_TRACE") != nullptr;
+-  if (passTrace) {
++  // DOL_AURORA_PASS_TRACE=1: the passes of one frame (the 300th, or the frame given: =1500) and their draws.
++  static const uint32_t passTrace = [] {
++    const char* value = std::getenv("DOL_AURORA_PASS_TRACE");
++    if (value == nullptr)
++      return 0u;
++    const int frame = std::atoi(value);
++    return frame > 1 ? static_cast<uint32_t>(frame) : 300u;
++  }();
++  if (passTrace != 0) {
+     static uint32_t frames = 0;
+     if (passIndex == 0)
+       frames++;
+-    if (frames == 300) {
++    if (frames == passTrace) {
+       size_t draws = 0, flat = 0;
+       for (const auto& command : passInfo.commands)
+         if (command.type == CommandType::Draw && command.data.draw.type != ShaderType::Clear) {
+           draws++;
+           flat += command.flat;
+         }
+-      std::fprintf(stderr, "[pass] %u: %zu draws (%zu flat), efb=%d observable=%d offscreen=%d resolve=%s %dx%d at %d,%d fmt=%d\n",
++      std::fprintf(stderr, "[pass] %u: %zu draws (%zu flat), efb=%d observable=%d offscreen=%d resolve=%s %dx%d at %d,%d fmt=%d monotone=%d%d%d\n",
+                    passIndex, draws, flat, passInfo.colorView.Get() == webgpu::g_frameBuffer.view.Get(),
+                    passInfo.observable, passInfo.offscreen, passInfo.resolveTarget ? "yes" : "no",
+                    passInfo.resolveRect.width, passInfo.resolveRect.height, passInfo.resolveRect.x, passInfo.resolveRect.y,
+-                   static_cast<int>(passInfo.resolveFormat));
++                   static_cast<int>(passInfo.resolveFormat), passInfo.monotoneFrame, passInfo.monotoneCopy,
++                   passInfo.monotonePoint);
+     }
+   }
+   // Bloom (post_fx), once a frame, on the EFB before the HUD. The game copies
+@@ -2477,8 +2506,10 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+   // effects from the frame it was copied from: they go in before it. After it,
+   // they were multiplied into the copy a second time, and shadows went darker
+   // and lighter again with every frame of the blur (bluewake #491).
++  // In a monotone frame the effects wait for the game's grey composite (below): a copy laid back before it is
++  // the game's own (its motion blur), drawn under the monotone, and its copy holds no effects.
+   size_t composite = SIZE_MAX;
+-  if (post_fx::any_enabled() && efbPass && bloomedFrame != frameKey) {
++  if (post_fx::any_enabled() && efbPass && bloomedFrame != frameKey && !passInfo.monotoneFrame) {
+     bool scene = false;
+     for (size_t i = 0; i < passInfo.commands.size() && composite == SIZE_MAX; ++i) {
+       const auto& command = passInfo.commands[i];
+@@ -2489,14 +2520,20 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+       scene = scene || !command.flat;
+     }
+   }
++  // Wind Waker HD's monotone (post_fx::Monotone): the pass after the game's grey composite's frame copy holds what
++  // the game draws after it (the player's lists, Link and his things). The scene's effects and the monotone go in
++  // at its start, before any of its draws; its bloom after its last perspective draw, over all of it, as HD's.
++  // (Its quad is left out, so the monotone is drawn whichever effects are on.)
++  const bool monotonePoint = passInfo.monotonePoint && efbPass && passInfo.msaaSamples == 1;
+   const bool bloomBeforeCopy = composite == SIZE_MAX && post_fx::any_enabled() && efbPass && bloomedFrame != frameKey &&
+-                               passInfo.resolveTarget && !gx::is_depth_format(passInfo.resolveFormat) &&
++                               !passInfo.monotoneCopy && passInfo.resolveTarget &&
++                               !gx::is_depth_format(passInfo.resolveFormat) &&
+                                passInfo.resolveRect.x == 0 && passInfo.resolveRect.y == 0 &&
+                                static_cast<uint32_t>(passInfo.resolveRect.width) == passInfo.targetSize.width &&
+                                static_cast<uint32_t>(passInfo.resolveRect.height) == passInfo.targetSize.height;
+   size_t split = composite;
+-  if (split == SIZE_MAX && post_fx::any_enabled() && efbPass && passInfo.observable && bloomedFrame != frameKey &&
+-      !bloomBeforeCopy) {
++  if (split == SIZE_MAX && efbPass && (post_fx::any_enabled() || monotonePoint) &&
++      (passInfo.observable || monotonePoint) && bloomedFrame != frameKey && !bloomBeforeCopy) {
+     for (size_t i = passInfo.commands.size(); i-- > 0;) {
+       const auto& command = passInfo.commands[i];
+       if (command.type == CommandType::Draw && command.data.draw.type != ShaderType::Clear && !command.flat) {
+@@ -2504,6 +2541,18 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+         break;
+       }
+     }
++    if (split == SIZE_MAX && monotonePoint)
++      split = 0;
++  }
++  // The late lighting (post_fx::encode_late()): what the pass draws before the split that writes depth and takes
++  // no Wind Waker HD light of its own (Link takes his in his draws).
++  bool lateLight = false;
++  if (monotonePoint && split != SIZE_MAX) {
++    for (size_t i = 0; i < split && !lateLight; ++i) {
++      const auto& command = passInfo.commands[i];
++      lateLight = command.type == CommandType::Draw && command.data.draw.type == ShaderType::GXCore &&
++                  !command.flat && command.data.draw.gxcore.depthWrite && !command.data.draw.gxcore.actorLight;
++    }
+   }
+ 
+   // The sun shadow map, before each pass of the EFB (the HD look's effects
+@@ -2584,6 +2633,15 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+   }
+ #endif
+ 
++  if (monotonePoint) {
++    // The scene as the game left it at the composite, its sun map with this pass's casters (Link's) already in.
++    post_fx::encode(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
++                    webgpu::g_frameBuffer.texture.GetFormat(), passInfo.colorView, passInfo.resolveView,
++                    passInfo.msaaSamples, frame_camera(frame, frameKey), frameSunMap, post_fx::Phase::Scene,
++                    &passInfo.monotone);
++    if (lateLight)
++      post_fx::snapshot_monotone_depth(cmd, passInfo.copySourceDepthView, passInfo.targetSize);
++  }
+   // DOL_AURORA_GPU_PROF_CHUNK=N (diagnostic): a pass of more than N commands is
+   // encoded as timed sub-passes of N commands, "EFB 1 @0", "EFB 1 @N", ...,
+   // each loading what the one before stored, the last resolving. The same
+@@ -2746,9 +2804,14 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+     bloomedFrame = frameKey;
+   }
+   if (split != SIZE_MAX) {
+-    post_fx::encode(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
+-                    webgpu::g_frameBuffer.texture.GetFormat(), passInfo.colorView, passInfo.resolveView,
+-                    passInfo.msaaSamples, frame_camera(frame, frameKey), frameSunMap);
++    if (monotonePoint)
++      post_fx::encode_late(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
++                           webgpu::g_frameBuffer.texture.GetFormat(), passInfo.colorView, passInfo.resolveView,
++                           passInfo.msaaSamples, frame_camera(frame, frameKey), frameSunMap, lateLight);
++    else
++      post_fx::encode(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
++                      webgpu::g_frameBuffer.texture.GetFormat(), passInfo.colorView, passInfo.resolveView,
++                      passInfo.msaaSamples, frame_camera(frame, frameKey), frameSunMap);
+     bloomedFrame = frameKey;
+     if (split < passInfo.commands.size()) {
+       auto attachmentsAfter = attachments;
+@@ -2797,6 +2860,7 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+         .uniformRange = passInfo.resolveUniformRange,
+         .dst = passInfo.resolveTarget,
+         .sampleFilter = needsScaling ? tex_copy_conv::SampleFilter::Linear : tex_copy_conv::SampleFilter::Nearest,
++        .keepColour = passInfo.monotoneCopy,
+     };
+     if (needsConversion) {
+       tex_copy_conv::run(cmd, convReq);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 0ed46f3c53..3611aae235 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -380,6 +380,13 @@ const State& get_state();
+ void set_next_draw_flat(bool flat) noexcept;
+ // Whether the next draw lays a copy of the frame back over it (gxcore_draw).
+ void set_next_draw_composite(bool composite) noexcept;
++namespace post_fx {
++struct Monotone;
++}
++// The copy that ends the current pass is the game's grey composite's frame copy in a monotone frame
++// (gxcore_draw.cpp copy_efb_to_texture(), before it calls resolve_pass): the scene's effects and Wind Waker HD's
++// monotone go in at the start of the pass after it, with these parameters, and its bloom after the player's lists.
++void mark_monotone_copy(const post_fx::Monotone& monotone) noexcept;
+ 
+ template <typename DrawData>
+ void push_draw_command(DrawData data);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index fa04596cc9..d073903b4b 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -2378,6 +2378,11 @@ std::vector<uint8_t> read_efb_copy(const gxc::EfbCopyCommand& cmd) {
+       cmd.destination_height, rgba, texture->size.width, texture->size.height);
+ }
+ 
++// The grey composite's frame copy while monotone (copy_efb_to_texture()), whose quad is left out; 0: none.
++static uint32_t g_monotoneDrop = 0;
++// The format of the frame's last EFB copy.
++static uint32_t g_lastCopyFormat = 0;
++
+ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   // Mirror the copy-clear color/Z (BP 0x4F-0x51 at this copy) into the gx
+   // state GXSetCopyClear would have written: begin_frame's pass-0 EFB clear
+@@ -2395,6 +2400,8 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   if (cmd.format == 0xFu) {
+     // Display copy (GXCopyDisp): no texture destination; its requested clear
+     // becomes the next frame's EFB clear via the state mirrored above.
++    g_monotoneDrop = 0;
++    g_lastCopyFormat = 0;
+     return;
+   }
+   const auto fmt = static_cast<GXTexFmt>(cmd.format);
+@@ -2453,6 +2460,28 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   g_efbCopyTextures.insert_or_assign(
+       cmd.dest_address,
+       EfbCopyBinding{it->second, cmd.byte_size, memoryEpoch, memoryEpochValid});
++  // Wind Waker HD's monotone (post_fx::Monotone): Wind Waker's grey composite (m_Do_graphic.cpp drawDepth) copies
++  // the depth (asked for as Z16; the copy's register reads Z24X8), then the frame as I8 to mDoGph_gInf_c::mFrameBufferTex while monotone, and lays that copy back
++  // over the scene in one flat quad, before the player's lists. That copy marks the point (the scene's effects and
++  // HD's monotone go in after it) and the quad is left out (submit_draw_plan()). A copy at an offset in it (the
++  // frame's y below 0) is the same copy.
++  g_monotoneDrop = 0;
++  {
++    const auto monotone = post_fx::monotone_params();
++    const uint32_t dest = cmd.dest_address & 0x3FFFFFFFu;
++    if (monotone.on && monotone.frameCopy != 0 && fmt == GX_TF_I8 && (g_lastCopyFormat & _GX_TF_ZTF) != 0u &&
++        dest >= monotone.frameCopy && dest < monotone.frameCopy + 0x100000u) {
++      gfx::mark_monotone_copy(monotone);
++      g_monotoneDrop = dest;
++      static bool s_logged = false;
++      if (!s_logged) {
++        s_logged = true;
++        std::fprintf(stderr, "[monotone] the grey composite's copy (I8 to %08X): Wind Waker HD's monotone from here\n",
++                     dest);
++      }
++    }
++  }
++  g_lastCopyFormat = cmd.format;
+   float clearDepthValue = static_cast<float>(cmd.clear_z) / 16777215.f;
+   if (gx::UseReversedZ) {
+     clearDepthValue = 1.f - clearDepthValue;
+@@ -3509,6 +3538,23 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       plan.tex_address != 0 && plan.pipeline.blend_enable != 0u && plan.constants.projection[3][2] != 0.f &&
+       post_fx::sun_shadow_map_enabled())
+     return true;
++  // The quad that lays the grey composite's frame copy back while monotone (copy_efb_to_texture()): Wind Waker HD's
++  // monotone replaces it. The first flat draw that samples the copy, once.
++  if (g_monotoneDrop != 0 && plan.constants.projection[3][3] == 1.f && plan.pipeline.shader.textured != 0) {
++    bool samples = plan.texmap_mask == 0u && plan.has_texture && (plan.tex_address & 0x3FFFFFFFu) == g_monotoneDrop;
++    for (uint32_t t = 0; t < 8u && !samples; ++t)
++      samples = (plan.texmap_mask & (1u << t)) != 0u && plan.textures[t].valid &&
++                (plan.textures[t].address & 0x3FFFFFFFu) == g_monotoneDrop;
++    if (samples) {
++      g_monotoneDrop = 0;
++      static bool s_logged = false;
++      if (!s_logged) {
++        s_logged = true;
++        std::fprintf(stderr, "[monotone] the game's grey quad left out\n");
++      }
++      return true;
++    }
++  }
+   // The rest of the game's own shadows: every one, real or simple (the blob
+   // under a pot, a rupee or a character, and the shadow-volume passes),
+   // indexes its positions from one of two fixed arrays (d_drawlist's
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index ef58fa93ef..634b998540 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -281,6 +281,7 @@ float hd_split(int k) noexcept {
+ // camera still, and stood still with the clock held). Last frame's place comes from its camera and the depth the
+ // blend keeps in alpha; a place that was hidden then (another depth there) takes this frame's alone.
+ bool g_sunTemporal = false;
++bool g_sunTemporalHeld = false; // encode_late()'s lighting: no blend with the last frame, no new history
+ // DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY=1 (local test): only the toon-shaded draws (the mask's green 1: Link, the
+ // islanders) are characters to the sun pass; the skinned-only (green 0.6: a palm's swaying leaves) are scenery.
+ // Wind Waker HD lights Outset's palms with its terrain shader (a RenderDoc capture at the bridge: the scenery's
+@@ -3713,12 +3714,14 @@ void draw_sun_map(const wgpu::CommandEncoder& cmd, const Camera& camera, const S
+       make_sun_blur_pipelines();
+     if (!g_sunMapLow)
+       g_sunMapLow = make_sun_map_pipeline(kSunLowFormat, false, true);
+-    // With the blend, the pre-pass goes to g_sunLow[1] first and the blend writes g_sunLow[0].
++    // With the blend, the pre-pass goes to g_sunLow[1] first and the blend writes g_sunLow[0]. A monotone frame's
++    // second lighting (encode_late()) takes none: the frame's blend is done, and its history stays the frame's.
++    const bool temporal = g_sunTemporal && !g_sunTemporalHeld;
+     draw_into(cmd, "Sun shadows (quarter size)", g_sunMapLow, sun_group(g_farView[0]),
+-              g_sunLowMipView[g_sunTemporal ? 1 : 0][0]);
+-    if (g_sunTemporal)
++              g_sunLowMipView[temporal ? 1 : 0][0]);
++    if (temporal)
+       draw_sun_temporal(cmd, camera, depthView, inputs.farTerm);
+-    else
++    else if (!g_sunTemporalHeld)
+       g_sunHistValid = false;
+     const auto blur_group = [&](const wgpu::TextureView& view) {
+       const std::array entries{wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
+@@ -4049,6 +4052,354 @@ bool draw_actor_shadow(const wgpu::CommandEncoder& cmd, const Camera& camera, co
+ 
+ void end_actor_shadow() noexcept { g_actorLowReady = false; }
+ 
++// --- Wind Waker HD's monotone (Frozen Hyrule) -------------------------------------------------------------------
++//
++// HD's DOF pass while monotone (pixel shader 40716 in the Hyroom capture), on HD's linear scene: a 2x2 box of the
++// scene at half its size, its grey (HD's weights) tinted by the colour multiply, laid over the scene by
++// clamp(level x clamp((distance - start) / (end - start))); nearer than start it is left out (colour). The frame
++// buffer holds what HD's sRGB target ends with, so the pass takes it to linear and back.
++namespace {
++constexpr const char* kMonotoneShader = R"""(
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var half_scene: texture_2d<f32>;
++@group(0) @binding(2) var depth: texture_depth_2d;
++@group(0) @binding(3) var<uniform> u: Mono;
++@group(0) @binding(4) var scene: texture_2d<f32>;
++
++struct Mono {
++    a: vec4<f32>, // near, start, end, level
++    b: vec4<f32>, // the colour multiply, saturate
++};
++
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++
++fn to_linear(c: vec3<f32>) -> vec3<f32> {
++    return select(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, c <= vec3(0.04045));
++}
++
++fn to_srgb(c: vec3<f32>) -> vec3<f32> {
++    return select(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3(0.0031308));
++}
++
++// HD's half-size copy (7019): one bilinear tap at each half-size texel's centre, the 2x2 box under it.
++@fragment
++fn fs_half(in: VertexOutput) -> @location(0) vec4<f32> {
++    return vec4(textureSampleLevel(half_scene, samp, in.uv, 0.0).rgb, 1.0);
++}
++
++@fragment
++fn fs_monotone(in: VertexOutput) -> @location(0) vec4<f32> {
++    let p = vec2<i32>(in.pos.xy);
++    let d = textureLoad(depth, p, 0);
++    // No depth (the sky): as far as can be, sepia.
++    let dist = select(u.a.x / d, 3.0e38, d <= 0.0);
++    // HD's ramp; with start and end the same (MonotoneOut), all of it beyond start.
++    var b = select(0.0, 1.0, dist > u.a.y);
++    if (u.a.z > u.a.y) {
++        b = clamp((dist - u.a.y) / (u.a.z - u.a.y), 0.0, 1.0);
++    }
++    if (b <= 0.0) {
++        discard;
++    }
++    let a = clamp(u.a.w * b, 0.0, 1.0);
++    var c = to_linear(textureSampleLevel(half_scene, samp, in.uv, 0.0).rgb);
++    c = mix(c, vec3(dot(c, vec3(0.298912, 0.586611, 0.114478))), u.b.w);
++    // HD's target is UNORM: the tinted grey is clamped before it is blended.
++    c = clamp(c * u.b.xyz, vec3(0.0), vec3(1.0));
++    let s = to_linear(textureLoad(scene, p, 0).rgb);
++    return vec4(to_srgb(c * a + s * (1.0 - a)), 1.0);
++}
++
++// The EFB's depth at the grey composite, for encode_late().
++@fragment
++fn fs_depth(in: VertexOutput) -> @location(0) vec4<f32> {
++    return vec4(textureLoad(depth, vec2<i32>(in.pos.xy), 0), 0.0, 0.0, 0.0);
++}
++
++// After the player's lists: the lit copy where something was drawn nearer than the snapshot's depth.
++@fragment
++fn fs_late(in: VertexOutput) -> @location(0) vec4<f32> {
++    let p = vec2<i32>(in.pos.xy);
++    let d = textureLoad(depth, p, 0);
++    let before = textureLoad(scene, p, 0).r;
++    // Reversed Z: nearer is larger.
++    if (d <= before * 1.0001 + 1.0e-7) {
++        discard;
++    }
++    return vec4(textureLoad(half_scene, p, 0).rgb, 1.0);
++}
++)""";
++
++std::mutex g_monotoneMutex;
++Monotone g_monotone;
++wgpu::ShaderModule g_monoModule;
++wgpu::BindGroupLayout g_monoLayout; // the far blur composite's, with the monotone's 32-byte uniform
++wgpu::PipelineLayout g_monoPipelineLayout;
++wgpu::RenderPipeline g_monoHalfPass, g_monoPass, g_monoDepthPass, g_monoLatePass;
++wgpu::TextureFormat g_monoFormat = wgpu::TextureFormat::Undefined;
++wgpu::Texture g_monoHalf, g_monoCopy, g_monoDepth;
++wgpu::TextureView g_monoHalfView, g_monoCopyView, g_monoDepthView;
++bool g_monoDepthValid = false;
++
++wgpu::RenderPipeline make_monotone_pipeline(const char* label, const char* entry, wgpu::TextureFormat format,
++                                            bool colourOnly) {
++  const std::array targets{wgpu::ColorTargetState{
++      .format = format,
++      .writeMask = colourOnly ? wgpu::ColorWriteMask::Red | wgpu::ColorWriteMask::Green | wgpu::ColorWriteMask::Blue
++                              : wgpu::ColorWriteMask::All}};
++  const wgpu::FragmentState fragment{
++      .module = g_monoModule,
++      .entryPoint = entry,
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = label,
++      .layout = g_monoPipelineLayout,
++      .vertex = {.module = g_monoModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = 1, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
++wgpu::Texture make_monotone_texture(const char* label, uint32_t width, uint32_t height, wgpu::TextureFormat format,
++                                    wgpu::TextureUsage usage, wgpu::TextureView& view) {
++  const wgpu::TextureDescriptor descriptor{
++      .label = label,
++      .usage = usage,
++      .size = {width, height, 1},
++      .format = format,
++  };
++  auto texture = g_device.CreateTexture(&descriptor);
++  view = texture.CreateView();
++  return texture;
++}
++
++// Its pipelines and targets at the scene's size and format.
++void ensure_monotone(const wgpu::Extent3D& size, wgpu::TextureFormat format) {
++  if (!g_monoModule) {
++    wgpu::ShaderSourceWGSL source{};
++    source.code = kMonotoneShader;
++    const wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &source, .label = "Monotone (HD)"};
++    g_monoModule = g_device.CreateShaderModule(&moduleDescriptor);
++    const std::array entries{
++        wgpu::BindGroupLayoutEntry{
++            .binding = 0,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .sampler = {.type = wgpu::SamplerBindingType::Filtering},
++        },
++        wgpu::BindGroupLayoutEntry{
++            .binding = 1,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .texture = {.sampleType = wgpu::TextureSampleType::Float, .viewDimension = wgpu::TextureViewDimension::e2D},
++        },
++        wgpu::BindGroupLayoutEntry{
++            .binding = 2,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .texture = {.sampleType = wgpu::TextureSampleType::Depth, .viewDimension = wgpu::TextureViewDimension::e2D},
++        },
++        wgpu::BindGroupLayoutEntry{
++            .binding = 3,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = 32},
++        },
++        wgpu::BindGroupLayoutEntry{
++            .binding = 4,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                        .viewDimension = wgpu::TextureViewDimension::e2D},
++        },
++    };
++    const wgpu::BindGroupLayoutDescriptor layoutDescriptor{
++        .label = "Monotone (HD)",
++        .entryCount = entries.size(),
++        .entries = entries.data(),
++    };
++    g_monoLayout = g_device.CreateBindGroupLayout(&layoutDescriptor);
++    const wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
++                                                                  .bindGroupLayouts = &g_monoLayout};
++    g_monoPipelineLayout = g_device.CreatePipelineLayout(&pipelineLayoutDescriptor);
++  }
++  if (g_monoFormat != format || !g_monoPass) {
++    g_monoHalfPass = make_monotone_pipeline("Monotone half size (HD)", "fs_half", format, false);
++    g_monoPass = make_monotone_pipeline("Monotone (HD)", "fs_monotone", format, true);
++    g_monoLatePass = make_monotone_pipeline("Monotone, after the player (HD)", "fs_late", format, true);
++    g_monoDepthPass =
++        make_monotone_pipeline("Monotone depth (HD)", "fs_depth", wgpu::TextureFormat::R32Float, false);
++    g_monoFormat = format;
++    g_monoHalf = g_monoCopy = {};
++  }
++  const uint32_t halfW = (size.width + 1) / 2, halfH = (size.height + 1) / 2;
++  if (!g_monoHalf || g_monoHalf.GetWidth() != halfW || g_monoHalf.GetHeight() != halfH)
++    g_monoHalf = make_monotone_texture("Monotone half size (HD)", halfW, halfH, format,
++                                       wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++                                       g_monoHalfView);
++  if (!g_monoCopy || g_monoCopy.GetWidth() != size.width || g_monoCopy.GetHeight() != size.height)
++    g_monoCopy = make_monotone_texture("Monotone scene copy (HD)", size.width, size.height, format,
++                                       wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::TextureBinding |
++                                           wgpu::TextureUsage::RenderAttachment,
++                                       g_monoCopyView);
++  if (!g_monoDepth || g_monoDepth.GetWidth() != size.width || g_monoDepth.GetHeight() != size.height) {
++    g_monoDepth = make_monotone_texture("Monotone depth (HD)", size.width, size.height,
++                                        wgpu::TextureFormat::R32Float,
++                                        wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++                                        g_monoDepthView);
++    g_monoDepthValid = false;
++  }
++}
++
++// The frame buffer into g_monoCopy; false where the target isn't the frame buffer.
++bool copy_monotone_scene(const wgpu::CommandEncoder& cmd, const wgpu::Extent3D& size, const wgpu::TextureView& dst) {
++  const auto& frame = webgpu::g_frameBuffer;
++  if (!frame.texture || dst.Get() != frame.view.Get() || frame.texture.GetWidth() != size.width ||
++      frame.texture.GetHeight() != size.height)
++    return false;
++  const wgpu::TexelCopyTextureInfo from{.texture = frame.texture};
++  const wgpu::TexelCopyTextureInfo to{.texture = g_monoCopy};
++  const wgpu::Extent3D extent{size.width, size.height, 1};
++  cmd.CopyTextureToTexture(&from, &to, &extent);
++  return true;
++}
++
++void draw_monotone_into(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
++                        const wgpu::TextureView& target, bool load, const wgpu::TextureView& texture,
++                        const wgpu::TextureView& depthView, const wgpu::TextureView& scene, const void* uniform,
++                        size_t uniformSize) {
++  const wgpu::BufferDescriptor bufferDescriptor{
++      .label = "Monotone (HD)",
++      .usage = wgpu::BufferUsage::Uniform,
++      .size = uniformSize,
++      .mappedAtCreation = true,
++  };
++  const auto buffer = g_device.CreateBuffer(&bufferDescriptor);
++  std::memcpy(buffer.GetMappedRange(0, uniformSize), uniform, uniformSize);
++  buffer.Unmap();
++  const std::array entries{
++      wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = texture},
++      wgpu::BindGroupEntry{.binding = 2, .textureView = depthView},
++      wgpu::BindGroupEntry{.binding = 3, .buffer = buffer, .offset = 0, .size = uniformSize},
++      wgpu::BindGroupEntry{.binding = 4, .textureView = scene},
++  };
++  const wgpu::BindGroupDescriptor bindGroupDescriptor{
++      .layout = g_monoLayout,
++      .entryCount = entries.size(),
++      .entries = entries.data(),
++  };
++  const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
++  const std::array attachments{wgpu::RenderPassColorAttachment{
++      .view = target,
++      .loadOp = load ? wgpu::LoadOp::Load : wgpu::LoadOp::Clear,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  }};
++  const wgpu::RenderPassDescriptor descriptor{
++      .label = label,
++      .colorAttachmentCount = attachments.size(),
++      .colorAttachments = attachments.data(),
++      .timestampWrites = webgpu::gpu_prof::pass_writes(label),
++  };
++  const auto pass = cmd.BeginRenderPass(&descriptor);
++  pass.SetPipeline(pipeline);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.Draw(3);
++  pass.End();
++}
++
++// The monotone over the frame buffer `dst` (single-sampled), as HD's DOF pass.
++void draw_monotone(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
++                   const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
++                   const Camera& camera, const Monotone& mono) {
++  ensure_monotone(size, format);
++  if (!copy_monotone_scene(cmd, size, dst))
++    return;
++  const webgpu::gpu_prof::Zone zone{cmd, "Monotone (HD)"};
++  const std::array<float, 8> uniform{camera.view[14], mono.start,  mono.end,    mono.level,
++                                     mono.mul[0],     mono.mul[1], mono.mul[2], mono.saturate};
++  draw_monotone_into(cmd, "Monotone half size (HD)", g_monoHalfPass, g_monoHalfView, false, scene, depthView,
++                     g_monoCopyView, uniform.data(), sizeof uniform);
++  draw_monotone_into(cmd, "Monotone (HD)", g_monoPass, dst, true, g_monoHalfView, depthView, g_monoCopyView,
++                     uniform.data(), sizeof uniform);
++}
++} // namespace
++
++void set_monotone(bool on, float level, float start, float end, const float mul[3], float saturate,
++                  uint32_t frameCopy) noexcept {
++  std::lock_guard lock{g_monotoneMutex};
++  g_monotone.on = on;
++  g_monotone.level = std::clamp(level, 0.f, 1.f);
++  g_monotone.start = start;
++  g_monotone.end = end;
++  for (int i = 0; i < 3; ++i)
++    g_monotone.mul[i] = mul != nullptr ? mul[i] : 1.f;
++  g_monotone.saturate = std::clamp(saturate, 0.f, 1.f);
++  g_monotone.frameCopy = frameCopy & 0x3FFFFFFFu;
++}
++
++Monotone monotone_params() noexcept {
++  if (!monotone_hd_supported())
++    return {};
++  std::lock_guard lock{g_monotoneMutex};
++  return g_monotone;
++}
++
++bool monotone_hd_supported() noexcept {
++  static const bool off = [] {
++    const char* value = std::getenv("DOL_AURORA_MONOTONE_HD");
++    return value != nullptr && value[0] == '0';
++  }();
++  return !off && webgpu::g_hasCoreFeatures && webgpu::g_graphicsConfig.msaaSamples <= 1;
++}
++
++void snapshot_monotone_depth(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
++                             const wgpu::Extent3D& size) {
++  g_monoDepthValid = false;
++  if (!g_module || !depthView || !g_monoModule)
++    return;
++  ensure_monotone(size, g_monoFormat);
++  const std::array<float, 8> none{}; // the shader's Mono, unused
++  draw_monotone_into(cmd, "Monotone depth (HD)", g_monoDepthPass, g_monoDepthView, false, g_monoHalfView, depthView,
++                     g_monoCopyView, none.data(), sizeof none);
++  g_monoDepthValid = true;
++}
++
++void encode_late(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
++                 const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
++                 const wgpu::TextureView& resolve, uint32_t msaaSamples, const Camera& camera,
++                 const SunMap* sunMap, bool lateLight) {
++  if (lateLight && g_monoDepthValid && g_monoModule && msaaSamples == 1 && depthView && camera.valid &&
++      g_monoFormat == format && copy_monotone_scene(cmd, size, dst)) {
++    const webgpu::gpu_prof::Zone zone{cmd, "Monotone, after the player (HD)"};
++    g_sunTemporalHeld = true;
++    encode(cmd, g_monoCopyView, depthView, size, format, g_monoCopyView, nullptr, 1, camera, sunMap,
++           Phase::LateLight);
++    g_sunTemporalHeld = false;
++    const std::array<float, 8> none{}; // the shader's Mono, unused
++    draw_monotone_into(cmd, "Monotone, after the player (HD)", g_monoLatePass, dst, true, g_monoCopyView, depthView,
++                       g_monoDepthView, none.data(), sizeof none);
++  }
++  g_monoDepthValid = false;
++  if (bloom_enabled())
++    encode_bloom(cmd, scene, size, format, dst, resolve, msaaSamples);
++}
++
++
+ void initialize() {
+   const char* bloom = std::getenv("DOL_AURORA_BLOOM");
+   g_bloom.store(bloom != nullptr && bloom[0] == '1', std::memory_order_relaxed);
+@@ -4451,6 +4802,14 @@ void initialize() {
+ }
+ 
+ void shutdown() {
++  g_monoHalfPass = g_monoPass = g_monoDepthPass = g_monoLatePass = {};
++  g_monoHalf = g_monoCopy = g_monoDepth = {};
++  g_monoHalfView = g_monoCopyView = g_monoDepthView = {};
++  g_monoModule = {};
++  g_monoPipelineLayout = {};
++  g_monoLayout = {};
++  g_monoFormat = wgpu::TextureFormat::Undefined;
++  g_monoDepthValid = false;
+   g_bloomHdDetect = g_bloomHdDetectMasked = g_bloomHdDown = g_bloomHdBlurX = g_bloomHdBlurY = {};
+   g_bloomHdGather1 = g_bloomHdGather2 = g_bloomHdCompose = {};
+   g_bloomHdTex = {};
+@@ -5197,7 +5556,8 @@ bool copy_exposure_scene(const wgpu::CommandEncoder& cmd, const wgpu::Extent3D&
+ 
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+-            const wgpu::TextureView& resolve, uint32_t msaaSamples, const Camera& camera, const SunMap* sunMap) {
++            const wgpu::TextureView& resolve, uint32_t msaaSamples, const Camera& camera, const SunMap* sunMap,
++            Phase phase, const Monotone* monotone) {
+   ++g_postEncodes;
+   const bool exposureScene = camera.exposure > 1.f && g_module && msaaSamples == 1 && camera.valid &&
+                              size.width >= 4 && size.height >= 4 && copy_exposure_scene(cmd, size, dst);
+@@ -5305,7 +5665,9 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+       draw_with_view(cmd, "Cloud shadows", g_cloudPass, camera.view, depthView, dst, resolve, &effectView);
+     }
+   }
+-  if (far_blur_enabled() && g_module && depthView && msaaSamples == 1 && size.width >= 4 && size.height >= 4) {
++  // HD draws no far blur in a monotone frame (its DOF is the monotone's).
++  if (phase == Phase::Full && far_blur_enabled() && g_module && depthView && msaaSamples == 1 && size.width >= 4 &&
++      size.height >= 4) {
+     const webgpu::gpu_prof::Zone zone{cmd, "Far blur"};
+     ensure_targets(size, format, msaaSamples);
+     draw(cmd, "Far blur downsample", g_down, scene, g_farView[0], false);
+@@ -5331,7 +5693,10 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+                      exposureScene ? &g_exposureSceneView : &g_seaMaskView); // the mask: no taper where it is 0
+     }
+   }
+-  if (bloom_enabled())
++  if (phase == Phase::Scene && monotone != nullptr && monotone->on && g_module && depthView && msaaSamples == 1 &&
++      camera.valid && size.width >= 4 && size.height >= 4)
++    draw_monotone(cmd, scene, depthView, size, format, dst, camera, *monotone);
++  if (phase == Phase::Full && bloom_enabled())
+     encode_bloom(cmd, scene, size, format, dst, resolve, msaaSamples);
+ }
+ 
+@@ -5409,6 +5774,11 @@ void aurora_set_sun_hd_light(int on, int night, float fade) {
+ 
+ void aurora_set_cloud_hd_floor(float floor) { aurora::gfx::post_fx::set_cloud_hd_floor(floor); }
+ void aurora_set_sun_caster_cull(int on) { aurora::gfx::post_fx::set_sun_caster_cull(on != 0); }
++void aurora_set_monotone_hd(int on, float level, float start, float end, const float mul[3], float saturate,
++                            uint32_t frame_copy) {
++  aurora::gfx::post_fx::set_monotone(on != 0, level, start, end, mul, saturate, frame_copy);
++}
++int aurora_monotone_hd_supported(void) { return aurora::gfx::post_fx::monotone_hd_supported() ? 1 : 0; }
+ 
+ void aurora_set_edge_light(bool enabled) { aurora::gfx::post_fx::set_edge_light(enabled); }
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 9429630839..3e0cf4d635 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -232,6 +232,27 @@ void end_actor_shadow() noexcept;
+ const wgpu::TextureView& sun_map_view();
+ // One cascade's layer, for drawing its casters into.
+ const wgpu::TextureView& sun_map_layer(uint32_t cascade);
++// Wind Waker HD's monotone (Frozen Hyrule's sepia, aurora_set_monotone_hd()): the host's parameters for its DOF
++// pass, taken when a frame is recorded and kept on the frame's passes, so every in-between frame draws the same.
++struct Monotone {
++  bool on = false;
++  float level = 0.8f;                     // how much of the sepia replaces the scene (HD's DOF level)
++  float start = 0.f;                      // distance where it starts, nearer: colour (HD's DOF start and end)
++  float end = 0.f;
++  std::array<float, 3> mul{1.4f, 1.5f, 0.6f}; // the tint on the grey (HD's DOF colour multiply)
++  float saturate = 1.f;                   // how far to the grey (1: all of it)
++  uint32_t frameCopy = 0;                 // the game's frame copy (mDoGph_gInf_c::mFrameBufferTex), physical
++};
++// The host's monotone, while the HD look's version of it can be drawn (single-sampled, core features,
++// DOL_AURORA_MONOTONE_HD not 0); else off, and the game draws its own grey.
++Monotone monotone_params() noexcept;
++void set_monotone(bool on, float level, float start, float end, const float mul[3], float saturate,
++                  uint32_t frameCopy) noexcept;
++bool monotone_hd_supported() noexcept;
++// Which of the effects encode() draws: all of them; in a monotone frame, at the game's grey composite, the scene's
++// (no far blur, as HD; no bloom) and then the monotone; or, after the player's lists, only the lighting (no far blur,
++// no bloom, no monotone), for encode_late().
++enum class Phase : uint8_t { Full, Scene, LateLight };
+ // Every effect that is on, in order (ambient occlusion, sun shadows, edge
+ // light, torch light, cloud shadows, far blur, bloom);
+ // depthView: the EFB's depth; camera: the one the frame is drawn from;
+@@ -239,7 +260,18 @@ const wgpu::TextureView& sun_map_layer(uint32_t cascade);
+ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
+             const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
+             const wgpu::TextureView& resolve, uint32_t msaaSamples, const Camera& camera,
+-            const SunMap* sunMap = nullptr);
++            const SunMap* sunMap = nullptr, Phase phase = Phase::Full, const Monotone* monotone = nullptr);
++// A monotone frame's EFB depth at the grey composite (before the player's lists), for encode_late().
++void snapshot_monotone_depth(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
++                             const wgpu::Extent3D& size);
++// A monotone frame after the player's lists (HD's pass 6, then its bloom): with `lateLight`, the lighting
++// (Phase::LateLight) on a copy of the EFB, laid back where something was drawn nearer than the snapshot's depth (an
++// arrow, a bomb, a rupee: what the game draws after the grey and Wind Waker HD's light doesn't light in its own
++// draw); then bloom over all of it.
++void encode_late(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, const wgpu::TextureView& depthView,
++                 const wgpu::Extent3D& size, wgpu::TextureFormat format, const wgpu::TextureView& dst,
++                 const wgpu::TextureView& resolve, uint32_t msaaSamples, const Camera& camera,
++                 const SunMap* sunMap, bool lateLight);
+ // scene: the EFB as a texture (resolved when multisampled), size: its size;
+ // dst: the EFB's color attachment, with msaaSamples samples, and resolve its
+ // single-sample copy when multisampled (null otherwise).
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp
+index d333571ad7..00399abf20 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp
+@@ -134,6 +134,16 @@ static constexpr std::string_view FragI8 = R"(
+ }
+ )"sv;
+ 
++// GX_TF_I8, keeping the colour beside the intensity: Wind Waker's grey composite copy while Wind Waker HD's monotone
++// is drawn (ConvRequest::keepColour). HD doesn't turn that copy grey, so what samples it (the heat haze, the next
++// frame's motion blur) keeps the colour; the alpha is the intensity, as the game's.
++static constexpr std::string_view FragI8Colour = R"(
++@fragment fn fs_main(in: VertexOutput) -> @location(0) vec4f {
++    let rgb = textureSample(src, src_samp, in.uv).rgb;
++    return vec4f(rgb, intensity(rgb));
++}
++)"sv;
++
+ // GX_TF_IA4: 4-bit intensity + 4-bit alpha -> RG8Unorm
+ static constexpr std::string_view FragIA4 = R"(
+ @fragment fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+@@ -341,6 +351,7 @@ static wgpu::Sampler g_nearestSampler;
+ static wgpu::Sampler g_linearSampler;
+ static absl::flat_hash_map<GXTexFmt, wgpu::RenderPipeline> g_pipelines;
+ static wgpu::RenderPipeline g_blitPipeline;
++static wgpu::RenderPipeline g_i8ColourPipeline;
+ 
+ static wgpu::RenderPipeline create_pipeline(const ConvPipeline& conv, const std::string_view shaderPreamble,
+                                             const wgpu::BindGroupLayout& bindGroupLayout) {
+@@ -491,6 +502,7 @@ void initialize() {
+ void shutdown() {
+   g_pipelines.clear();
+   g_blitPipeline = {};
++  g_i8ColourPipeline = {};
+   g_bindGroupLayout = {};
+   g_depthBindGroupLayout = {};
+   g_nearestSampler = {};
+@@ -573,6 +585,14 @@ static void execute(const wgpu::CommandEncoder& cmd, const ConvRequest& req, con
+ }
+ 
+ void run(const wgpu::CommandEncoder& cmd, const ConvRequest& req) {
++  if (req.keepColour && req.fmt == GX_TF_I8) {
++    if (!g_i8ColourPipeline)
++      g_i8ColourPipeline = create_pipeline(
++          ConvPipeline{GX_TF_I8, FragI8Colour, wgpu::TextureFormat::RGBA8Unorm, "TexCopyConv I8 (colour)"},
++          ShaderPreamble, g_bindGroupLayout);
++    execute(cmd, req, g_i8ColourPipeline);
++    return;
++  }
+   const auto it = g_pipelines.find(req.fmt);
+   if (it == g_pipelines.end()) {
+     Log.fatal("No copy conversion pipeline for format {}", static_cast<int>(req.fmt));
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp
+index 31aa804af2..08bcecdac3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp
+@@ -17,6 +17,7 @@ struct ConvRequest {
+   Range uniformRange;        // UV transform uniform (offset + scale)
+   TextureHandle dst;         // Destination texture
+   SampleFilter sampleFilter = SampleFilter::Nearest;
++  bool keepColour = false;   // GX_TF_I8 only: the colour beside the intensity (Wind Waker HD's monotone)
+ };
+ 
+ bool needs_conversion(GXTexFmt fmt);
+-- 
+2.56.0
+

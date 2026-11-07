@@ -1,0 +1,242 @@
+From cfad81a2c1b58426c7859c6c59579ae5050dfa34 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 18:59:15 -0600
+Subject: [PATCH] fixup! Fog: Wind Waker HD's curve, the square of the
+ GameCube's linear fog, while the host has HD's distances in place
+
+HD's fog start before the camera on the draws' own fog too: a draw with linear
+perspective fog from the game's clamped start (C 0) to the end of the host's
+pair (its end is the projection's near x B / A) takes GXSetFog's A and C for
+HD's start to that end. HD fogs its characters, plants and objects in their
+own shaders with the same squared curve from that start; they kept the
+clamped start. The lit scenery's draws take the same constants and the sun
+pass's after-shade fog reads them, so it fogs from HD's start as before.
+Ganon's Tower's far wall half: linear luminance 0.100 -> 0.111 (HD 0.123).
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  3 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 23 +++++++-
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp |  7 +++
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  2 +
+ .../include/gxruntime/gxcore/shader.hpp       |  8 +++
+ .../graphics/gxcore/src/gxcore_shader.cpp     | 20 +++++++
+ .../gxcore/tests/gxcore_wgsl_test.cpp         | 53 +++++++++++++++++++
+ 7 files changed, 113 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index f14a8a0b6f..2db120724f 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -266,7 +266,8 @@ void aurora_set_fog_hd(int on);
+    the GameCube's palette blend (float_kankyo_color_ratio_set) clamps every blended value at 0, so the game's fog
+    starts at 0 there and fogs far less than HD. The host gives the stage's HD palette entries with a start below 0
+    (count pairs of start, end; at most 8; 0 or NULL: none): where the lit scenery's fog starts at 0 and ends at one
+-   of those ends, the sun pass fogs it from that start instead, as HD does. */
++   of those ends, the sun pass fogs it from that start instead, as HD does; every other draw fogged from 0 to the
++   first pair's end (characters, plants, objects) takes that start in its own fog. */
+ void aurora_set_fog_hd_starts(const float* start_end, int count);
+ /* Wind Waker HD's own normals for the stage in play (the HD pack's optional/hd-normals/<stage>.bin, made by the
+    importer from the player's HD dump), for the sun shadows' facing term; NULL or a missing file: none, and
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 7f7cbc9dd8..f6a219db40 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -3256,6 +3256,21 @@ static const gxc::PixelShaderConstants& hd_light_constants(const gxc::DrawPlan&
+   return pc;
+ }
+ 
++// A draw's pixel constants with Wind Waker HD's fog start before the camera (gxc::fog_start_before_camera()), while
++// the host has HD's fog in the game's palettes and a start below 0 for the frame; else `pc` itself.
++static const gxc::PixelShaderConstants& hd_fog_constants(const gxc::PixelShaderConstants& pc,
++                                                         const gxc::DrawPlan& plan) {
++  const gxc::ShaderKey& key = plan.pipeline.shader;
++  if (key.fog_fsel != static_cast<uint8_t>(gxc::FogType::Linear) || pc.fogf[1] != 0.f || !post_fx::fog_hd())
++    return pc;
++  float start = 0.f, end = 0.f;
++  if (!post_fx::fog_hd_start(start, end))
++    return pc;
++  static thread_local gxc::PixelShaderConstants out;
++  out = pc;
++  return gxc::fog_start_before_camera(out, key, plan.constants.projection, start, end) ? out : pc;
++}
++
+ // Wind Waker HD's lava and fire rooms (GanonB, Cave01, MiniKaz, Ganon's Tower's lava parts): their materials with
+ // a konst2 animation add the lava's light, albedo x lava K x 4 x the vertex red squared (Cemu, GanonB's PS 4345;
+ // lava K the animation at the game frame, 0.453, 0.0415, 0.0005 at frame 23), outside the shade and before the fog.
+@@ -4075,8 +4090,12 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   const bool alphaCaster = cutoutBindGroup != 0 && (sun_caster_alpha(plan.pipeline) || blendedCutout);
+   const bool smoothNormal = smooth_normal_draw(plan, seaSurface);
+   // A palm with Wind Waker HD's light (apply_hd_colours()): its shade colour black.
+-  const gxc::PixelShaderConstants& pixelConstants =
++  const gxc::PixelShaderConstants& lightConstants =
+       smoothNormal && hd_light_draw(plan) ? hd_light_constants(plan) : plan.pixel_constants;
++  // Wind Waker HD's fog start before the camera (aurora_set_fog_hd_starts) on every draw fogged from the game's
++  // clamped start (C 0) to the same end: the characters, plants and objects as well as the lit scenery, all fogged
++  // from that start in HD's shaders. The lit scenery's fog the sun pass takes (note_scene_fog()) is these constants.
++  const gxc::PixelShaderConstants& pixelConstants = tev ? hd_fog_constants(lightConstants, plan) : lightConstants;
+   Range pixelUniformRange{};
+   bool pixelRepeats = false;
+   if (tev) {
+@@ -4132,7 +4151,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   // its shade, as Wind Waker HD fogs its scenery (post_fx::note_scene_fog()).
+   if (tev && key.shader.fog_fsel == static_cast<uint8_t>(gxc::FogType::Linear) &&
+       key.shader.fog_proj == static_cast<uint8_t>(gxc::FogProjection::Perspective) && hd_light_draw(plan)) {
+-    const auto& pc = plan.pixel_constants;
++    const auto& pc = pixelConstants;
+     post_fx::note_scene_fog(pc.fogf[0], pc.fogi[1], pc.fogi[3], pc.fogf[1], pc.fogcolor, key.shader.hd_fog != 0u,
+                             key.shader.fog_range != 0u ? &pc.fogrange[0][0] : nullptr, pc.fogf[2], pc.fogf[3]);
+   }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index e43dc253d2..595eb462ba 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -5168,6 +5168,13 @@ void set_fog_hd_starts(const float* start_end, int count) noexcept {
+   }
+ }
+ 
++bool fog_hd_start(float& start, float& end) noexcept {
++  std::lock_guard lock{g_sceneFogMutex};
++  start = g_fogHdStarts[0];
++  end = g_fogHdStarts[1];
++  return end > 0.f && start < 0.f;
++}
++
+ void note_scene_fog(float a, int b_magnitude, int b_shift, float c, const int colour[3], bool hd_square,
+                     const float* range, float centre, float width) noexcept {
+   std::lock_guard lock{g_sceneFogMutex};
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index e1e3272fc3..88d110f7d7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -90,6 +90,8 @@ bool fog_hd() noexcept;
+ void set_fog_hd(bool on) noexcept;
+ // Wind Waker HD's palette fog starts below 0, as start, end pairs (aurora_set_fog_hd_starts).
+ void set_fog_hd_starts(const float* start_end, int count) noexcept;
++// The first of those pairs (the host gives one a frame, HD's start for the palette blend in play): false if none.
++bool fog_hd_start(float& start, float& end) noexcept;
+ // The fog the lit scenery's draws took this frame (GX's: A, B's magnitude and shift, C, its colour 0-255, and HD's
+ // square), for the sun pass to fog after the shade, by the distance from the eye, as Wind Waker HD's scenery
+ // shaders do (DOL_AURORA_SUN_FOG_HD=0: as drawn). From the draw thread.
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+index 91d935633c..bb01b63385 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/shader.hpp
+@@ -751,6 +751,14 @@ ToonLightMatch toon_light_stage(const ShaderKey& key);
+ // Gods' room materials). Not a toon draw (toon_light_stage()).
+ bool hd_point_light_stage(const ShaderKey& key);
+ 
++// Wind Waker HD's fog start before the camera on a draw's own GX fog. HD's palettes start the fog below 0 in many
++// places (Ganon's Tower -5000, the Tower of the Gods -1000), where the GameCube's palette blend clamps the start at 0,
++// so a draw fogged from the game's palette (C 0) fogs far less than HD's shaders. For a draw with linear perspective
++// fog, C 0 and a perspective projection whose fog ends at `end` (within 1%: its end is the projection's near x B / A,
++// GXSetFog's terms), sets A and C to GXSetFog's for `start` to `end`: the same fog, from `start`. True if it did.
++bool fog_start_before_camera(PixelShaderConstants& pc, const ShaderKey& key, const float projection[4][4],
++                             float start, float end);
++
+ // The uniform a ShaderKey::hd_actor_light shader reads at group(0) binding(2)
+ // (binding 0 and 1 are the pass's static storage buffers; binding 3 the shadow
+ // texture, 4 its sampler; 5 HD's cloud shadow texture, 6 its sampler). All
+diff --git a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+index 9ff5f5cb94..988ddb14e4 100644
+--- a/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
++++ b/GXRuntime/graphics/gxcore/src/gxcore_shader.cpp
+@@ -1075,6 +1075,26 @@ ToonLightMatch toon_light_stage(const ShaderKey& key) {
+   return match;
+ }
+ 
++bool fog_start_before_camera(PixelShaderConstants& pc, const ShaderKey& key, const float projection[4][4],
++                             float start, float end) {
++  if (key.fog_fsel != static_cast<std::uint8_t>(FogType::Linear) ||
++      key.fog_proj != static_cast<std::uint8_t>(FogProjection::Perspective) || pc.fogf[1] != 0.f ||
++      !(pc.fogf[0] > 0.f) || pc.fogi[1] <= 0 || !(start < 0.f) || !(end > 0.f) || projection[3][2] != -1.f)
++    return false;
++  // GXSetFog: A = n f / ((f - n)(end - start)) and B = f / (f - n), held as a = A / 2^shift and
++  // b = B x 2^24 / 2^shift, so A / B = a 2^24 / b = n / (end - start). The projection's near: its z row is
++  // (-n / (f - n), -f n / (f - n)), so n = row[3] / (row[2] - 1).
++  const float near = projection[2][3] / (projection[2][2] - 1.f);
++  if (!(near > 0.f))
++    return false;
++  const float game_end = near * static_cast<float>(pc.fogi[1]) / (pc.fogf[0] * 16777216.f);
++  if (!(std::abs(game_end - end) <= 0.01f * end))
++    return false;
++  pc.fogf[0] *= game_end / (game_end - start);
++  pc.fogf[1] = start / (game_end - start);
++  return true;
++}
++
+ bool hd_point_light_stage(const ShaderKey& key) {
+   if (key.tev_valid == 0u || key.num_tev_stages < 2u || key.num_tev_stages > kMaxTevStages || key.num_ind_stages != 0u ||
+       toon_light_stage(key).matched)
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+index 5a43ec07e6..56581c4384 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_wgsl_test.cpp
+@@ -2952,6 +2952,58 @@ void test_fog() {
+   CHECK(counters.fog_ignored == 0);
+ }
+ 
++// Wind Waker HD's fog start before the camera (gxc::fog_start_before_camera()): a draw fogged from a start of 0 to
++// the given end gets GXSetFog's A and C for HD's start to the same end; other draws are left alone.
++void test_fog_start_before_camera() {
++  const float n = 1.f, f = 200000.f;
++  // GXSetFog's terms, as the SDK stores them (a = A / 2^shift, b = B x 2^23 / 2^(shift - 1)).
++  auto set_fog = [&](gxc::PixelShaderConstants& pc, float s, float e) {
++    const float A = (f * n) / ((f - n) * (e - s)), C = s / (e - s);
++    float B = f / (f - n);
++    int shift = 0;
++    while (B > 0.5f) {
++      B *= 0.5f;
++      ++shift;
++    }
++    pc.fogf[0] = A / static_cast<float>(1 << (shift + 1));
++    pc.fogf[1] = C;
++    pc.fogi[1] = static_cast<std::int32_t>(8.388638e6f * B);
++    pc.fogi[3] = shift + 1;
++  };
++  float proj[4][4]{};
++  proj[0][0] = 1.f;
++  proj[1][1] = 1.f;
++  proj[2][2] = -n / (f - n);
++  proj[2][3] = -(f * n) / (f - n);
++  proj[3][2] = -1.f;
++  gxc::ShaderKey key{};
++  key.fog_fsel = static_cast<std::uint8_t>(gxc::FogType::Linear);
++  key.fog_proj = static_cast<std::uint8_t>(gxc::FogProjection::Perspective);
++  gxc::PixelShaderConstants pc{}, want{};
++  set_fog(pc, 0.f, 8000.f);
++  set_fog(want, -1000.f, 8000.f);
++  CHECK(gxc::fog_start_before_camera(pc, key, proj, -1000.f, 8000.f));
++  CHECK(std::abs(pc.fogf[0] / want.fogf[0] - 1.f) < 1e-4f);
++  CHECK(std::abs(pc.fogf[1] - want.fogf[1]) < 1e-4f);
++  CHECK(pc.fogi[1] == want.fogi[1] && pc.fogi[3] == want.fogi[3]);
++  // Not taken: another end, a start already set, a start not below 0, other fog, an orthographic projection.
++  gxc::PixelShaderConstants other{};
++  set_fog(other, 0.f, 4000.f);
++  CHECK(!gxc::fog_start_before_camera(other, key, proj, -1000.f, 8000.f));
++  set_fog(other, 500.f, 8000.f);
++  CHECK(!gxc::fog_start_before_camera(other, key, proj, -1000.f, 8000.f));
++  set_fog(other, 0.f, 8000.f);
++  CHECK(!gxc::fog_start_before_camera(other, key, proj, 0.f, 8000.f));
++  gxc::ShaderKey exp_key = key;
++  exp_key.fog_fsel = static_cast<std::uint8_t>(gxc::FogType::Exp);
++  CHECK(!gxc::fog_start_before_camera(other, exp_key, proj, -1000.f, 8000.f));
++  float ortho[4][4]{};
++  ortho[3][3] = 1.f;
++  CHECK(!gxc::fog_start_before_camera(other, key, ortho, -1000.f, 8000.f));
++  set_fog(want, 0.f, 8000.f);
++  CHECK(other.fogf[0] == want.fogf[0] && other.fogf[1] == 0.f);
++}
++
+ // S16 EFB copy: the GxCoreSink turns a resolved CopyDestination packet into an
+ // EfbCopyCommand carrying the dest/rect/format + the copy-clear color/Z from
+ // live BP state, and only when a copy observer is registered (else it counts
+@@ -3071,6 +3123,7 @@ int main() {
+   test_lighting_completeness();
+   test_cached_normal();
+   test_fog();
++  test_fog_start_before_camera();
+   test_efb_copy_sink();
+   test_draw_fusion();
+   if (g_failures != 0) {
+-- 
+2.56.0
+

@@ -1,0 +1,248 @@
+From 2187d62191bda863ad33921e2f50fd8844430654 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:51:48 -0600
+Subject: [PATCH] Sun shadows: Wind Waker HD's cascade splits from the game's
+ camera each frame
+
+aurora_set_sun_cascade_splits(middle, far): HD sets its shadow cascades' splits each frame from its camera
+(its distance to what it looks at and its field of view) and fits its first two cascades to the slices they
+make. The HD quality's splits (now in the pass's uniform, in place of constants) and its first two cascades'
+sizes follow them; 0 keeps the fixed ones (420 and 1395, HD's at Outset's bridge; DOL_AURORA_SUN_SHADOW_HD_SPLITS
+sets them for tests). With fixed ones, BlueWake's camera zoomed out (the mouse wheel's 2x) left Star Island in
+the far cascade's 18-unit texels and its grass's shadows crawled as the sun turned; the shadow's change from
+frame to frame over the grass fell from 3.6 to 2.4 (worst frame 4.7% to 2.8% of pixels).
+
+Also a test of HD's pre-pass taking the farthest of the four depth texels under each of its pixels (agl's
+shadow_pre_pass.sh, USE_FETCH_4; DOL_AURORA_SUN_SHADOW_PREPASS_FAR=1). It barely changed the palms' crowns
+(45% to 43% of leaf pixels shaded below 0.9, against HD's 13%); off by default.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  5 ++
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 74 +++++++++++++++++--
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp |  1 +
+ 3 files changed, 72 insertions(+), 8 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index c85fe8c0e7..2a79d1b6b7 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -201,6 +201,11 @@ void aurora_set_sun_shadow_quality(int quality);
+    Waker HD's): the full shadow's colour is blended in by this much, the
+    moon's shadows too. Takes effect at the next frame. */
+ void aurora_set_sun_shadow_strength(float strength);
++/* Wind Waker HD's shadow cascade splits for this frame, from the game's camera (HD sets them each frame from the
++   camera's distance to what it looks at and its field of view): the distances from the camera where the "HD" shadow
++   quality moves to its second and third cascade, whose first two cascades are sized with them. 0 goes back to the
++   fixed ones (420 and 1395, HD's at Outset's bridge). Takes effect at the next frame. */
++void aurora_set_sun_cascade_splits(float middle, float far);
+ /* Wind Waker HD's light for the sun shadow map's shade, the hour's (linear RGB): `sky`, the light from the sky
+    its shade takes from above (its palette's shadow colour), `ground`, the ambient it takes from the side (the
+    scenery's C0 times its factor), and `lit`, the sun's light (the scenery's K0 times its factor). A shaded pixel
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index c289fc7285..6a28bb8622 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -156,6 +156,10 @@ float g_sunFacingDepthBlur = 8.f; // DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR: it
+ // Skinned scenery (a palm) takes its ambient's sky-to-ground mix from its smooth normal, as HD's per-vertex light
+ // does, not from the depth's normal of a cut-out leaf card (DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1, local test).
+ bool g_sunSmoothAmbient = false;
++// HD's pre-pass takes the farthest of the four depths under each of its pixels (agl's shadow_pre_pass.sh, USE_FETCH_4):
++// on a palm's lacy crown that is often what lies behind a leaf, so its leaves barely shade each other
++// (DOL_AURORA_SUN_SHADOW_PREPASS_FAR=1, local test; HD's pass only).
++bool g_sunPrepassFar = false;
+ float g_sunFacingFarStart = 12000.f; // DOL_AURORA_SUN_SHADOW_FACING_FAR_START / _END: where it fades out
+ float g_sunFacingFarEnd = 14000.f;
+ // With the facing term, HD's terrain curve for its shadow (its terrain shaders' 0.5 x pow(2 x shadow, e), e
+@@ -198,6 +202,20 @@ bool g_sunHdPrepass = false;
+ // HD's pass's default; 1 otherwise), where the sea mask has the sea. -1: the default.
+ float g_sunSeaShadow = -1.f;
+ float g_sunMapRanges[kSunMapCascades] = {}; // each cascade's range when set (0: g_sunMapRange x g_sunMapSpread^k)
++// HD's pass: the distances from the camera where its pre-pass moves to the second and third cascade (HD's 420 and
++// 1395; DOL_AURORA_SUN_SHADOW_HD_SPLITS=a,b, local test, with _MAP_RANGES for a camera zoomed out past HD's).
++float g_sunHdSplits[2] = {420.f, 1395.f};
++// HD's splits this frame, from the game's camera (aurora_set_sun_cascade_splits; 0: g_sunHdSplits). HD sets them each
++// frame from the camera's distance to its target and its field of view, and fits its first two cascades to the
++// slices they make: with fixed ones, BlueWake's camera zoomed out (the mouse wheel's 2x) left the island in the far
++// cascade's 18-unit texels and its grass's shadows crawled as the sun turned (Star Island, Nov 1).
++std::atomic<float> g_sunHdLiveSplits[2]{0.f, 0.f};
++
++// HD's split k (0: its second cascade's start, 1: its third's) this frame.
++float hd_split(int k) noexcept {
++  const float live = g_sunHdLiveSplits[k].load(std::memory_order_relaxed);
++  return live > 0.f ? live : g_sunHdSplits[k];
++}
+ // DOL_AURORA_SUN_SHADOW_TEMPORAL=1 (local test; with HD's terrain mix or pass): the quarter-size pre-pass blended
+ // with the last frames' at the same place in the world, more the farther from the camera
+ // (DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE=near,far,most: none nearer than `near`, `most` of the last frames' from `far`
+@@ -272,13 +290,17 @@ float g_sunMapNormalOffset = 2.f; // DOL_AURORA_SUN_SHADOW_MAP_NORMAL_OFFSET: a
+ // A cascade's range (world units from its centre to its edge), and the depth
+ // toward and away from the sun it holds: enough for what stands in it.
+ float cascade_range(uint32_t cascade) noexcept {
+-  if (cascade < kSunMapCascades && g_sunMapRanges[cascade] > 0.f)
+-    return g_sunMapRanges[cascade];
++  if (cascade < kSunMapCascades && g_sunMapRanges[cascade] > 0.f) {
++    // HD's first two are fitted to the slices its splits make this frame (the ranges are for its splits at Outset's
++    // bridge, g_sunHdSplits); its far one already reaches past the haze.
++    const float scale = g_sunHdPrepass && cascade < 2 ? hd_split(static_cast<int>(cascade)) / g_sunHdSplits[cascade] : 1.f;
++    return g_sunMapRanges[cascade] * scale;
++  }
+   return g_sunMapRange * std::pow(g_sunMapSpread, static_cast<float>(cascade));
+ }
+ float cascade_depth(float range) noexcept { return std::max(g_sunMapDepth, 2.f * range); }
+ // The sun shadow pass's uniform (kSunMapShader's View).
+-constexpr size_t kSunMapUniformFloats = 92;
++constexpr size_t kSunMapUniformFloats = 96;
+ float g_cloudStrength = 0.28f;  // how dark a cloud's shadow is
+ float g_cloudScale = 7000.f;    // world units across one cloud
+ bool g_cloudDebug = false;
+@@ -1168,7 +1190,7 @@ override hd_mix: f32 = 0.0;
+ override mix_e_start: f32 = 545.0;
+ override mix_e_near: f32 = 4.0; // the curve's power near the camera (HD's 4; 2 farther off)
+ // Wind Waker HD's shadow pass (hd_prepass, the "HD" shadow quality): the low pass is HD's pre-pass, at half the
+-// size, one hardware-filtered lookup per pixel in the cascade its distance picks (hd_split0/1: HD's 420 and 1395),
++// size, one hardware-filtered lookup per pixel in the cascade its distance picks (view.hd: HD's 420 and 1395),
+ // blurred; the main pass takes every pixel's shadow from it, as HD's materials read its pre-pass.
+ override hd_prepass: f32 = 0.0;
+ // The mask's green from which a pixel is a character (keeps its own shading, BlueWake's bias, no facing term or
+@@ -1176,8 +1198,6 @@ override hd_prepass: f32 = 0.0;
+ // (g_sunSkinnedScenery), as Wind Waker HD draws Outset's palms with its scenery's shader.
+ override character_g: f32 = 0.5;
+ override sea_shadow: f32 = 1.0; // the sea's shadow strength (HD's cPrimShadowIntensity: 0.5 in HD's pass)
+-override hd_split0: f32 = 420.0;
+-override hd_split1: f32 = 1395.0;
+ override mix_blur_start: f32 = 1318.0;
+ override mix_blur_end: f32 = 1833.0;
+ override normal_near: f32 = 2.0;
+@@ -1197,6 +1217,7 @@ override facing_mul: f32 = 10.0;
+ override facing_depth_mul: f32 = 0.0;
+ override facing_depth_blur: f32 = 8.0;
+ override smooth_ambient: f32 = 0.0;
++override prepass_far: f32 = 0.0;
+ override facing_far_start: f32 = 12000.0;
+ override facing_far_end: f32 = 14000.0;
+ override shape_on: f32 = 1.0;
+@@ -1234,6 +1255,8 @@ struct View {
+     palette: vec4<f32>,         // with HD's palette: the ambient its shade takes from the side (linear); w: the cloud
+                                 // shadows' floor (HD's cCloudShadowPower)
+     lit: vec4<f32>,             // with HD's palette: its sunlight (linear); w: 1 with HD's cloud texture bound
++    hd: vec4<f32>,              // HD's pass: x, y the distances from the camera where it moves to the second and third
++                                // cascade (HD's 420 and 1395, times the camera's zoom)
+ };
+ 
+ @group(0) @binding(0) var samp: sampler;
+@@ -1289,6 +1312,21 @@ fn effect_cover(uv: vec2<f32>, dist: f32) -> f32 {
+     return clamp(max(c.r, max(c.g, c.b)) * effect_gain, 0.0, 1.0) * (1.0 - smoothstep(3000.0, 6000.0, dist));
+ }
+ 
++// The farthest of the four depth texels around uv (a half-size pass's pixel centre is their shared corner), as HD's
++// pre-pass gathers them; the sky (0) if any of them is.
++fn view_depth_far(uv: vec2<f32>) -> f32 {
++    let size = vec2<i32>(textureDimensions(depth));
++    let base = vec2<i32>(floor(uv * vec2<f32>(size) - 0.5));
++    var d = 1.0;
++    for (var j = 0; j < 2; j++) {
++        for (var i = 0; i < 2; i++) {
++            let p = clamp(base + vec2(i, j), vec2<i32>(0), size - vec2<i32>(1));
++            d = min(d, textureLoad(depth, p, 0));
++        }
++    }
++    return select(view.lens.z / (d + view.params.w), 0.0, d <= 0.0);
++}
++
+ // Wind Waker HD's SSAO (agl's ssao.sh, PASS_AO_BUFFER with 4 pairs, as Cemu's dump of it computes; its sample
+ // pairs, weights and 4x4 rotation tile read from a RenderDoc capture). HD's depth is normalised to its far plane
+ // (400,000). For each pair, a sample in front of the centre occludes (all but at once: the depth difference is
+@@ -1408,7 +1446,7 @@ fn grow_at(k: i32, w: vec4<f32>) -> f32 {
+ // HD's cascade for a place z units from the camera: the first past each split (no blending), or a later one if it
+ // doesn't hold the place; -1 when none does.
+ fn hd_cascade(z: f32, w: vec4<f32>) -> i32 {
+-    var k = select(0, 1, z > hd_split0) + select(0, 1, z > hd_split1);
++    var k = select(0, 1, z > view.hd.x) + select(0, 1, z > view.hd.y);
+     for (; k < i32(view.params.y); k++) {
+         if (inside(k, to_cascade(k, w))) {
+             return k;
+@@ -1577,7 +1615,7 @@ fn depth_facing_blurred(uv: vec2<f32>, z: f32, tx: f32, ty: f32, sun: vec3<f32>)
+ 
+ @fragment
+ fn fs_sun_map(in: VertexOutput) -> @location(0) vec4<f32> {
+-    let z = view_depth(in.uv);
++    let z = select(view_depth(in.uv), view_depth_far(in.uv), low_pass > 0.5 && hd_prepass > 0.5 && prepass_far > 0.5);
+     let sun = view.time.yzw;
+     let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+     let tx = view.lens.x * view.lens.y;
+@@ -2482,6 +2520,7 @@ wgpu::RenderPipeline make_sun_map_pipeline(wgpu::TextureFormat format, bool dire
+       wgpu::ConstantEntry{.key = "facing_depth_mul", .value = g_sunFacingDepthMul},
+       wgpu::ConstantEntry{.key = "facing_depth_blur", .value = g_sunFacingDepthBlur},
+       wgpu::ConstantEntry{.key = "smooth_ambient", .value = g_sunSmoothAmbient ? 1.0 : 0.0},
++      wgpu::ConstantEntry{.key = "prepass_far", .value = g_sunPrepassFar ? 1.0 : 0.0},
+       wgpu::ConstantEntry{.key = "facing_far_start", .value = g_sunFacingFarStart},
+       wgpu::ConstantEntry{.key = "facing_far_end", .value = g_sunFacingFarEnd},
+       wgpu::ConstantEntry{.key = "shape_on", .value = g_sunShape ? 1.0 : 0.0},
+@@ -2697,6 +2736,11 @@ void apply_sun_quality(int level) {
+       for (int i = 0; i < 3; ++i)
+         g_sunMapRanges[i] = std::max(r[i], 1.f);
+   }
++  if (const char* splits = std::getenv("DOL_AURORA_SUN_SHADOW_HD_SPLITS")) {
++    float s[2] = {};
++    if (std::sscanf(splits, "%f,%f", &s[0], &s[1]) == 2 && s[0] > 0.f && s[1] > s[0])
++      g_sunHdSplits[0] = s[0], g_sunHdSplits[1] = s[1];
++  }
+   g_sunMapTaps = static_cast<uint32_t>(env_float("DOL_AURORA_SUN_SHADOW_MAP_TAPS", static_cast<float>(g_sunMapTaps), 6.f, 12.f));
+   g_sunMapSize = static_cast<uint32_t>(env_float("DOL_AURORA_SUN_SHADOW_MAP_SIZE", static_cast<float>(g_sunMapSize), 256.f, 8192.f));
+   g_sunMapCascades = static_cast<uint32_t>(env_float("DOL_AURORA_SUN_SHADOW_MAP_CASCADES",
+@@ -3285,6 +3329,9 @@ void draw_sun_map(const wgpu::CommandEncoder& cmd, const Camera& camera, const S
+     }
+   }
+   uniform[91] = g_cloudTexView ? 1.f : 0.f;
++  // HD's splits this frame, as its first two cascades are sized (cascade_range).
++  uniform[92] = g_sunHdPrepass ? hd_split(0) : g_sunHdSplits[0];
++  uniform[93] = g_sunHdPrepass ? hd_split(1) : g_sunHdSplits[1];
+   uniform[87] = g_cloudHdPower >= 0.f ? g_cloudHdPower
+                                       : 1.f - 0.9f * std::clamp(camera.view[18], 0.f, 1.f); // the sun's height
+   // The scenery's smooth normals (sun_normal_target()), drawn with the mask while the facing term is on.
+@@ -3723,6 +3770,8 @@ void initialize() {
+   g_sunFacingDepthBlur = env_float("DOL_AURORA_SUN_SHADOW_FACING_DEPTH_BLUR", g_sunFacingDepthBlur, 0.f, 200.f);
+   if (const char* ambient = std::getenv("DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT"))
+     g_sunSmoothAmbient = ambient[0] == '1';
++  if (const char* prepassFar = std::getenv("DOL_AURORA_SUN_SHADOW_PREPASS_FAR"))
++    g_sunPrepassFar = prepassFar[0] == '1';
+   g_sunFacingFarStart = env_float("DOL_AURORA_SUN_SHADOW_FACING_FAR_START", g_sunFacingFarStart, 0.f, 1e7f);
+   g_sunFacingFarEnd = env_float("DOL_AURORA_SUN_SHADOW_FACING_FAR_END", g_sunFacingFarEnd, g_sunFacingFarStart + 1.f, 1e7f);
+   if (const char* shape = std::getenv("DOL_AURORA_SUN_SHADOW_SHAPE"))
+@@ -4104,6 +4153,12 @@ void set_sun_shadow_strength(float strength) noexcept {
+   g_sunMapStrength.store(std::clamp(strength, 0.f, 1.f), std::memory_order_relaxed);
+ }
+ 
++void set_sun_cascade_splits(float middle, float far) noexcept {
++  const bool ok = std::isfinite(middle) && std::isfinite(far) && middle > 0.f && far > middle;
++  g_sunHdLiveSplits[0].store(ok ? middle : 0.f, std::memory_order_relaxed);
++  g_sunHdLiveSplits[1].store(ok ? far : 0.f, std::memory_order_relaxed);
++}
++
+ void set_hd_cloud_texture(const char* path) noexcept {
+   std::lock_guard lock{g_cameraMutex};
+   g_cloudTexPath = path != nullptr ? path : "";
+@@ -4632,6 +4687,9 @@ void aurora_set_sun_shadow_map(bool enabled) { aurora::gfx::post_fx::set_sun_sha
+ void aurora_set_sun_shadow_quality(int quality) { aurora::gfx::post_fx::set_sun_shadow_quality(quality); }
+ 
+ void aurora_set_sun_shadow_strength(float strength) { aurora::gfx::post_fx::set_sun_shadow_strength(strength); }
++void aurora_set_sun_cascade_splits(float middle, float far) {
++  aurora::gfx::post_fx::set_sun_cascade_splits(middle, far);
++}
+ void aurora_set_sun_palette(int on, const float sky[3], const float ground[3], const float lit[3]) {
+   aurora::gfx::post_fx::set_sun_palette(on != 0, sky, ground, lit);
+ }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+index 2690ff7b45..e6fbe255f9 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.hpp
+@@ -68,6 +68,7 @@ void set_sun_shadow_map(bool enabled) noexcept;
+ // (DOL_AURORA_SUN_SHADOW_QUALITY's levels, "hd" for 3); applied by the render thread before its next frame.
+ void set_sun_shadow_quality(int level) noexcept;
+ void set_sun_shadow_strength(float strength) noexcept;
++void set_sun_cascade_splits(float middle, float far) noexcept;
+ void set_sun_palette(bool on, const float sky[3], const float ground[3], const float lit[3]) noexcept;
+ // Wind Waker HD's cloud shadow texture (aurora_set_hd_cloud_texture): a BC4 DDS, loaded by the render thread; null
+ // or empty: none (BlueWake's noise).
+-- 
+2.56.0
+
