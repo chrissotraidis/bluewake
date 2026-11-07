@@ -32,6 +32,15 @@
 typedef void (*BwGatherPipeWrite)(u64 value, u8 size);
 extern BwGatherPipeWrite bw_gather_pipe_write;
 
+/* Normal builds inline these very small stages. Diagnostic builds retain
+ * their boundaries so a sampler can attribute translated-store validation
+ * separately from batching and host hand-off. */
+#if defined(BLUEWAKE_GATHER_PIPE_PROFILE)
+#define BW_GATHER_PIPE_STAGE static __attribute__((noinline))
+#else
+#define BW_GATHER_PIPE_STAGE static inline
+#endif
+
 static inline bool bw_gather_pipe_unaliased(CPUState* cpu, u32 addr, u32 size) {
 #if defined(BLUEWAKE_GATHER_ALIAS_CACHE)
     /* The FIFO occupies one 32-byte window and get_ram_ptr() also accepts its
@@ -52,7 +61,7 @@ static inline bool bw_gather_pipe_unaliased(CPUState* cpu, u32 addr, u32 size) {
     return get_ram_ptr(cpu, addr, size, NULL) == NULL;
 }
 
-static inline bool bw_gather_pipe(CPUState* cpu, u32 addr, u32 size) {
+BW_GATHER_PIPE_STAGE bool bw_gather_pipe(CPUState* cpu, u32 addr, u32 size) {
     /* The mirror bit first: guest RAM stores, which never have it, pay one test. */
     /* Registered storage takes precedence over hardware in the ordinary path. */
     return (addr & 0x40000000u) != 0u && (addr & ~0x1Fu) == 0xCC008000u &&
@@ -66,7 +75,7 @@ static inline bool bw_hardware(u32 addr) {
     return (addr & 0x40000000u) != 0u && (addr & 0xF8000000u) == 0xC8000000u;
 }
 
-static inline void bw_gather_pipe_put(u64 value, u8 size) {
+BW_GATHER_PIPE_STAGE void bw_gather_pipe_put(u64 value, u8 size) {
     if (bw_gather_pipe_bytes == NULL) {
         bw_gather_pipe_write(value, size);
         return;
@@ -96,6 +105,8 @@ static inline void bw_gather_pipe_put(u64 value, u8 size) {
     if (bw_gather_pipe_length >= BW_GATHER_PIPE_BATCH)
         bw_gather_pipe_flush();
 }
+
+#undef BW_GATHER_PIPE_STAGE
 
 static __attribute__((noinline)) void bw_mem_write8_slow(CPUState* cpu, u32 addr, u8 value) {
     if (__builtin_expect(bw_hardware(addr), 0)) {

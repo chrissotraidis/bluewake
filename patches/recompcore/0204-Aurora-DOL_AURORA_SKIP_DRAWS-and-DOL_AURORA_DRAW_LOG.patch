@@ -1,0 +1,128 @@
+From 8d7beeab7c5aecf5f7ed89b4db99b34e34d9d450 Mon Sep 17 00:00:00 2001
+From: irregularthanis <343663069+irregularthanis@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 21:36:46 -0500
+Subject: [PATCH 204/205] Aurora: DOL_AURORA_SKIP_DRAWS and DOL_AURORA_DRAW_LOG
+ for a pass's draws
+
+PASS:FIRST-LAST. SKIP_DRAWS leaves those commands of the pass out, in real
+and in-between frames, to see what they draw and what they cost. DRAW_LOG
+logs them once (the 300th real frame): each draw's pipeline state (TEV
+stages, blending, depth test and write, alpha test), indices, vertex bytes
+and texture bind group. Pipeline states are kept only while DRAW_LOG is set.
+Diagnostics; unset, nothing changes.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp | 70 ++++++++++++++++++++
+ 1 file changed, 70 insertions(+)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 81985348ee..77630fe8db 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1091,6 +1091,24 @@ void push_draw_command(rmlui::DrawData data) {
+ }
+ #endif
+ 
++// DOL_AURORA_SKIP_DRAWS / DOL_AURORA_DRAW_LOG=PASS:FIRST-LAST (diagnostics):
++// the commands FIRST to LAST of the frame's pass PASS.
++struct PassRange {
++  bool set = false;
++  uint32_t pass = 0;
++  size_t first = 0, last = 0;
++};
++static PassRange pass_range(const char* name) {
++  PassRange range;
++  const char* env = std::getenv(name);
++  unsigned pass = 0;
++  unsigned long long first = 0, last = 0;
++  if (env != nullptr && std::sscanf(env, "%u:%llu-%llu", &pass, &first, &last) == 3 && first <= last)
++    range = {.set = true, .pass = pass, .first = static_cast<size_t>(first), .last = static_cast<size_t>(last)};
++  return range;
++}
++static const PassRange g_skipDraws = pass_range("DOL_AURORA_SKIP_DRAWS");
++static const PassRange g_drawLog = pass_range("DOL_AURORA_DRAW_LOG");
+ #ifdef AURORA_ENABLE_GXCORE
+ template <>
+ void push_draw_command(gxcore::DrawData data) {
+@@ -1112,6 +1130,11 @@ DrawData* last_recorded_draw() noexcept {
+ }
+ } // namespace gxcore
+ 
++// For DOL_AURORA_DRAW_LOG: each GXCore pipeline's state in a line, kept when
++// it is first looked up (recording thread), read when a draw is logged.
++static std::mutex g_pipelineDescMutex;
++static absl::flat_hash_map<PipelineRef, std::string> g_pipelineDesc;
++
+ template <>
+ PipelineRef pipeline_ref(const gxcore::PipelineConfig& config) {
+   // Most draws use the pipeline of the draw before them (a draw with early
+@@ -1132,6 +1155,18 @@ PipelineRef pipeline_ref(const gxcore::PipelineConfig& config) {
+   if (m.valid && m.generation == generation && std::memcmp(&m.config, &config, sizeof config) == 0)
+     return m.ref;
+   m.ref = find_pipeline(ShaderType::GXCore, config, [=] { return gxcore::create_pipeline(config); });
++  if (g_drawLog.set) {
++    const auto& key = config.key;
++    std::lock_guard lock{g_pipelineDescMutex};
++    g_pipelineDesc.try_emplace(
++        m.ref, fmt::format("tev={} texgens={} ind={} blend={}{}({},{}) z=test{}/func{}/write{}/early{} "
++                           "alpha={},{},{} write=c{}a{} topo={} cull={} depthOnly={}",
++                           key.shader.num_tev_stages, key.shader.num_tex_gens, key.shader.num_ind_stages,
++                           key.blend_enable, key.blend_subtract ? "-" : "", key.src_factor, key.dst_factor,
++                           key.depth_test, key.depth_func, key.depth_update, key.early_depth_test,
++                           key.shader.alpha_comp0, key.shader.alpha_comp1, key.shader.alpha_logic, key.color_update,
++                           key.alpha_update, key.primitive_topology, key.cull_mode, config.depthOnly));
++  }
+   m.config = config;
+   m.generation = generation;
+   m.valid = true;
+@@ -2162,6 +2197,34 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+ #endif
+   const post_fx::SunMap* frameSunMap = sunMapFrame == frameKey && sunMap.valid ? &sunMap : nullptr;
+ 
++#ifdef AURORA_ENABLE_GXCORE
++  // DOL_AURORA_DRAW_LOG=PASS:FIRST-LAST: the draws of that range, once, in the
++  // 300th real frame: each one's pipeline state, indices, vertex bytes and
++  // textures (a texture bind group is the same textures where it repeats).
++  if (g_drawLog.set && passIndex == g_drawLog.pass && !frame_interp::encoding_interpolated()) {
++    static uint32_t frames = 0;
++    if (++frames == 300) {
++      std::lock_guard lock{g_pipelineDescMutex};
++      for (size_t i = g_drawLog.first; i <= g_drawLog.last && i < passInfo.commands.size(); ++i) {
++        const auto& command = passInfo.commands[i];
++        if (command.type != CommandType::Draw || command.data.draw.type != ShaderType::GXCore) {
++          std::fprintf(stderr, "[draw-log] pass=%u cmd=%zu type=%d\n", passIndex, i, static_cast<int>(command.type));
++          continue;
++        }
++        const auto& draw = command.data.draw.gxcore;
++        const auto desc = g_pipelineDesc.find(draw.pipeline);
++        std::fprintf(stderr,
++                     "[draw-log] pass=%u cmd=%zu pipeline=%016llx indices=%u vert_bytes=%u batch=%u textures=%016llx "
++                     "tev=%d flat=%d early_depth=%d %s\n",
++                     passIndex, i, static_cast<unsigned long long>(draw.pipeline), draw.indexCount,
++                     draw.vertRange.size, draw.batchSize, static_cast<unsigned long long>(draw.textureBindGroup),
++                     draw.tev ? 1 : 0, command.flat ? 1 : 0, draw.depthPipeline != 0 ? 1 : 0,
++                     desc != g_pipelineDesc.end() ? desc->second.c_str() : "(pipeline not described)");
++      }
++    }
++  }
++#endif
++
+   // DOL_AURORA_GPU_PROF_CHUNK=N (diagnostic): a pass of more than N commands is
+   // encoded as timed sub-passes of N commands, "EFB 1 @0", "EFB 1 @N", ...,
+   // each loading what the one before stored, the last resolving. The same
+@@ -2202,6 +2265,13 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+       render_pass(chunk, frame, passInfo, first, first + profChunk);
+       chunk.End();
+     }
++  } else if (g_skipDraws.set && passIndex == g_skipDraws.pass && split == SIZE_MAX) {
++    // DOL_AURORA_SKIP_DRAWS=PASS:FIRST-LAST (diagnostic): that range is left
++    // out, in real and in-between frames, to see what it draws and costs.
++    auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
++    render_pass(pass, frame, passInfo, 0, g_skipDraws.first);
++    render_pass(pass, frame, passInfo, g_skipDraws.last + 1, SIZE_MAX);
++    pass.End();
+   } else {
+     auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
+     render_pass(pass, frame, passInfo, 0, split);
+-- 
+2.46.0
+

@@ -55,7 +55,7 @@ MODULE = "gGZLE01_recomp.so"
 GC_MAGIC = 0xC2339F3D
 CI_CONTAINER_IMAGE = "bluewake-linux-ci:local"
 CI_CONTAINER_ENV = "BLUEWAKE_CI_CONTAINER"
-LLVM22_BIN = Path("/usr/lib/llvm-22/bin")
+LLVM18_BIN = Path("/usr/lib/llvm-18/bin")
 
 
 class BuildError(Exception):
@@ -300,12 +300,12 @@ def run_in_ci_container(args):
 
 
 def select_container_toolchain(args):
-    """Opt into LLVM 22 inside the shared image; Clang 18 stays the default."""
-    if not args.clang22:
+    """The shared image puts LLVM 22 first (#437); --clang18 opts back into LLVM 18."""
+    if not args.clang18:
         return
-    if not LLVM22_BIN.is_dir():
-        die(f"--clang22 requested, but {LLVM22_BIN} is missing from the container")
-    os.environ["PATH"] = f"{LLVM22_BIN}{os.pathsep}{os.environ.get('PATH', '')}"
+    if not LLVM18_BIN.is_dir():
+        die(f"--clang18 requested, but {LLVM18_BIN} is missing from the container")
+    os.environ["PATH"] = f"{LLVM18_BIN}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 class Builder:
@@ -605,7 +605,7 @@ int main(void) {{
         # the recorded inputs.
         inputs = hashlib.sha256()
         inputs.update((f"{digest}\n{int(self.mods)}\n{int(self.args.prepared_blocks)}\n"
-                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
+                       f"{int(self.args.fixed_cpu)}\n{int(self.args.fixed_mem1)}\n{int(self.args.inline_fp)}\n{int(self.args.gather_pipe)}\n{int(getattr(self.args, 'gather_pipe_profile', False))}\n{int(self.args.direct_calls)}\n{int(self.args.inline_gpr)}\n{int(self.args.native_j3d)}\n{int(self.args.native_vec)}\n{int(self.args.native_math)}\n{int(self.args.native_skin)}\n{int(self.args.native_game_math)}\n"
                        f"{int(self.args.gather_alias_cache)}\n"
                        f"{int(self.args.lean_memory)}\n{int(self.args.native_entries)}\n"
                        f"{int(getattr(self.args, 'cache_ops', False))}\n"
@@ -642,6 +642,9 @@ int main(void) {{
             inputs.update((ROOT / "scripts/windows/behaviour_timing.py").read_bytes())
         if getattr(self.args, "cache_ops", False):
             inputs.update((ROOT / "scripts/windows/cache_ops.py").read_bytes())
+        if getattr(self.args, "fp_checks", False):
+            inputs.update(b"fp_checks\n")
+            inputs.update((ROOT / "scripts/windows/fp_checks.py").read_bytes())
         if getattr(self.args, "native_entries", False):
             for name in seventh_native_sources():
                 inputs.update((ROOT / "cmake/composite" / name).read_bytes())
@@ -740,6 +743,8 @@ int main(void) {{
                                                == bool(getattr(self.args, "lean_deadlines", False)))
             options_match = options_match and (receipt.get("cache_ops", False)
                                                == bool(getattr(self.args, "cache_ops", False)))
+            options_match = options_match and (receipt.get("fp_checks", False)
+                                               == bool(getattr(self.args, "fp_checks", False)))
             options_match = options_match and (receipt.get("native_gx", False)
                                                == bool(getattr(self.args, "native_gx", False)))
             options_match = options_match and (receipt.get("native_set4", False)
@@ -775,6 +780,10 @@ int main(void) {{
                      + (["--lean"] if getattr(self.args, "lean_blocks", False) else []))
         if self.args.direct_calls:
             self.run("direct-calls", [sys.executable, ROOT / "scripts/windows/direct_calls.py", o / "composite-src"])
+        # One FP-available test per stretch of a prepaid copy (fp_checks.py; off by
+        # default): before lean-memory, which can then make the FP accesses lean.
+        if getattr(self.args, "fp_checks", False):
+            self.run("fp-checks", [sys.executable, ROOT / "scripts/windows/fp_checks.py", o / "composite-src"])
         # Elliott Tate's Windows steps, off by default. Each changes only what it
         # can prove: lean_memory.py needs the prepaid copies' deadline test, and
         # native_entries.py hooks a native only where the translation hashes to the
@@ -826,6 +835,7 @@ int main(void) {{
                    "lean_blocks": getattr(self.args, "lean_blocks", False),
                    "native_entries": self.args.native_entries,
                    "cache_ops": getattr(self.args, "cache_ops", False),
+                   "fp_checks": getattr(self.args, "fp_checks", False),
                    "native_gx": getattr(self.args, "native_gx", False),
                    "native_set4": getattr(self.args, "native_set4", False),
                    "gather_sha256": {name: sha256_file(ROOT / "cmake/composite" / name)
@@ -847,6 +857,8 @@ int main(void) {{
     # --- 9 compile -----------------------------------------------------------
     def compile_module(self):
         flags = []
+        if getattr(self.args, "gather_pipe_profile", False):
+            flags.append("-gline-tables-only")
         if self.profile is not None:
             # The profile is a compiler input but not a header dependency: its
             # hash in the file name makes Ninja recompile when the counts change.
@@ -952,6 +964,7 @@ int main(void) {{
             *([f"-DBLUEWAKE_NATIVE_GEN_DIR={gen_dir}"] if gen_dir else []),
             f"-DBLUEWAKE_DIRECT_CALLS={'ON' if self.args.direct_calls else 'OFF'}",
             f"-DBLUEWAKE_GATHER_PIPE={'ON' if self.args.gather_pipe else 'OFF'}",
+            f"-DBLUEWAKE_GATHER_PIPE_PROFILE={'ON' if getattr(self.args, 'gather_pipe_profile', False) else 'OFF'}",
             f"-DBLUEWAKE_GATHER_ALIAS_CACHE={'ON' if self.args.gather_alias_cache else 'OFF'}",
             f"-DBLUEWAKE_INLINE_FP={'ON' if self.args.inline_fp else 'OFF'}",
             f"-DBLUEWAKE_FIXED_MEM1={'ON' if self.args.fixed_mem1 else 'OFF'}",
@@ -1062,11 +1075,14 @@ int main(void) {{
                                             "gather_pipe", "direct_calls", "inline_gpr", "native_j3d",
                                             "native_vec", "native_math", "native_skin", "native_game_math",
                                             "lean_memory", "native_entries", "lean_blocks")},
+                               **({"gather_pipe_profile": True} if getattr(self.args, "gather_pipe_profile", False) else {}),
                                **({"lean_deadlines": True} if getattr(self.args, "lean_deadlines", False) else {}),
                                **({"behaviour_timing": True} if getattr(self.args, "behaviour_timing", False) else {}),
                                **({"cache_ops": True} if getattr(self.args, "cache_ops", False) else {}),
+                               **({"fp_checks": True} if getattr(self.args, "fp_checks", False) else {}),
                                **({"native_gx": True} if getattr(self.args, "native_gx", False) else {}),
                                **({"native_set4": True} if getattr(self.args, "native_set4", False) else {}),
+                               **({"direct_gate": True} if getattr(self.args, "direct_gate", False) else {}),
                                "runtime": self.git("-C", str(self.recompcore), "rev-parse", "HEAD"),
                                "source": tree_digest(self.out / "composite-src")},
                               sort_keys=True).encode())
@@ -1194,6 +1210,8 @@ int main(void) {{
                              ("native_skin", "BLUEWAKE_NATIVE_SKIN"),
                              ("native_game_math", "BLUEWAKE_NATIVE_GAME_MATH")):
             env[name] = "1" if getattr(self.args, option) else "0"
+        # Training plays the path it measures: the gate open only with --direct-gate.
+        env["BLUEWAKE_DIRECT_GATE"] = "1" if getattr(self.args, "direct_gate", False) else "0"
         if warps:
             env["BLUEWAKE_TEST_WARP"] = ",".join(warps)
         if headless:
@@ -1278,9 +1296,12 @@ int main(void) {{
             "fixed_mem1": self.args.fixed_mem1,
             "inline_fp": self.args.inline_fp,
             "gather_pipe": self.args.gather_pipe,
+            "gather_pipe_profile": getattr(self.args, "gather_pipe_profile", False),
             "gather_alias_cache": self.args.gather_alias_cache,
+            "direct_gate_training": getattr(self.args, "direct_gate", False),
             "direct_calls": self.args.direct_calls,
             "inline_gpr": self.args.inline_gpr,
+            "fp_checks": getattr(self.args, "fp_checks", False),
             "native_j3d": self.args.native_j3d,
             "native_vec": self.args.native_vec,
             "native_math": self.args.native_math,
@@ -1438,7 +1459,7 @@ LINUX_DEFAULT_OPTIMIZATIONS = ("fixed_cpu", "fixed_mem1", "inline_fp", "gather_p
                                "inline_gpr",
                                "prepared_blocks", "direct_calls", "native_j3d", "native_vec", "native_math",
                                "native_skin", "native_game_math", "lean_blocks", "lean_memory", "lean_deadlines",
-                               "behaviour_timing")
+                               "behaviour_timing", "fp_checks")
 
 
 def main():
@@ -1480,6 +1501,8 @@ def main():
                         help="opt into experimental inline floating-point helpers (off by default)")
     parser.add_argument("--gather-pipe", action="store_true",
                         help="opt into experimental gather/inline-memory wrappers (off by default; host writer setup is separate)")
+    parser.add_argument("--gather-pipe-profile", action="store_true",
+                        help="retain gather-pipe stages and module line tables for profiler attribution (diagnostic only; requires --gather-pipe)")
     parser.add_argument("--gather-alias-cache", action="store_true",
                         help="cache gather-pipe alias-window overlap by registry generation (on by default; requires --gather-pipe)")
     parser.add_argument("--no-gather-alias-cache", action="store_true",
@@ -1496,6 +1519,9 @@ def main():
                         help="certify optional native game-math entry hooks (off by default)")
     parser.add_argument("--native-skin", action="store_true",
                         help="certify and enable optional native skinning preparation (off by default)")
+    parser.add_argument("--direct-gate", action="store_true",
+                        help="train with the opt-in direct-call gate open (BLUEWAKE_DIRECT_GATE=1), "
+                             "for a build that measures it; the module is the same either way")
     parser.add_argument("--native-math", action="store_true",
                         help="prepare certified native matrix functions; off by default, compatible host opt-in required")
     parser.add_argument("--lean-blocks", action="store_true",
@@ -1529,6 +1555,12 @@ def main():
     parser.add_argument("--cache-ops", action="store_true",
                         help="dcbf, dcbst, dcbi and icbi as the pc store the host's fallback makes "
                              "(off by default; after return-ranges, before native-entries)")
+    parser.add_argument("--fp-checks", action="store_true",
+                        help="one FP-available test per stretch of a prepaid copy, so lean memory can "
+                             "make FP loads and stores lean (fp_checks.py; on by default, #553)")
+    parser.add_argument("--no-fp-checks", action="store_true",
+                        help="keep every FP-available test in the prepaid copies, as before #553: "
+                             "about 3%% slower on a Steam Deck")
     parser.add_argument("--native-gx", action="store_true",
                         help="Wind Waker Recomp's GX FIFO writer natives, the fifth set "
                              "(off by default; needs --direct-calls, --gather-pipe and --native-vec; "
@@ -1550,8 +1582,10 @@ def main():
     parser.add_argument("--check-only", action="store_true", help="check tools, dependencies and the disc only")
     parser.add_argument("--ci-container", action="store_true",
                         help="run this same build inside the Ubuntu 24.04 Linux CI container")
+    parser.add_argument("--clang18", action="store_true",
+                        help="use Clang 18 instead of the default Clang 22 (requires --ci-container)")
     parser.add_argument("--clang22", action="store_true",
-                        help="use Clang 22 instead of Clang 18 (requires --ci-container)")
+                        help="the default compiler for container builds; kept so older commands still work")
     parser.add_argument("--portable", action="store_true",
                         help="put portable.txt in the app folder, so saves, settings and logs stay in a user "
                              "folder beside the app (a rebuild leaves user/ alone)")
@@ -1560,8 +1594,10 @@ def main():
     args = parser.parse_args()
     if args.module_sources and (args.source_only or args.host_only or args.check_only):
         parser.error("--module-sources cannot be combined with --source-only, --host-only or --check-only")
-    if args.clang22 and not args.ci_container:
-        parser.error("--clang22 requires --ci-container")
+    if args.clang18 and args.clang22:
+        parser.error("--clang18 and --clang22 are mutually exclusive")
+    if (args.clang18 or args.clang22) and not args.ci_container:
+        parser.error(f"--clang{18 if args.clang18 else 22} requires --ci-container")
     if args.ci_container and os.environ.get(CI_CONTAINER_ENV) != "1":
         try:
             sys.exit(run_in_ci_container(args))
@@ -1588,6 +1624,8 @@ def main():
         args.lean_deadlines = False
     if args.no_behaviour_timing:
         args.behaviour_timing = False
+    if args.no_fp_checks:
+        args.fp_checks = False
     if args.host_only and (args.retrain or args.no_train or args.no_pgo):
         parser.error("--host-only keeps the last build's profile; it cannot be combined with --retrain or --no-train")
     if args.inline_gpr and not args.direct_calls:
@@ -1598,10 +1636,14 @@ def main():
         args.prepared_blocks = True
     if args.lean_memory and not args.prepared_blocks:
         parser.error("--lean-memory requires --prepared-blocks")
+    if args.fp_checks and not args.prepared_blocks:
+        parser.error("--fp-checks requires --prepared-blocks")
     if args.lean_memory and not args.gather_pipe:
         parser.error("--lean-memory requires --gather-pipe (its accesses call gather_pipe.h's helpers)")
     if args.gather_alias_cache and not args.gather_pipe:
         parser.error("--gather-alias-cache requires --gather-pipe")
+    if args.gather_pipe_profile and not args.gather_pipe:
+        parser.error("--gather-pipe-profile requires --gather-pipe")
     if getattr(args, "behaviour_timing", False) and not args.prepared_blocks:
         parser.error("--behaviour-timing requires --prepared-blocks")
     if args.lean_deadlines and not args.lean_memory:

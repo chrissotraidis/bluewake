@@ -1,0 +1,76 @@
+From 2bed438ebc6194a95948d835c40f16f17e47af37 Mon Sep 17 00:00:00 2001
+From: irregularthanis <343663069+irregularthanis@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 20:33:47 -0500
+Subject: [PATCH 203/205] Aurora: DOL_AURORA_GPU_PROF_CHUNK times a pass in
+ chunks of draws
+
+A pass of more than N commands is encoded as timed sub-passes of N commands
+("EFB 1 @0", "EFB 1 @50", ...), each loading what the one before stored and
+only the last resolving, so the picture is unchanged and [gpu-prof] (=2)
+shows which draws of a pass cost what. Diagnostic; unset, nothing changes.
+---
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp | 48 ++++++++++++++++++--
+ 1 file changed, 45 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index a005b11755..81985348ee 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -2162,9 +2162,51 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+ #endif
+   const post_fx::SunMap* frameSunMap = sunMapFrame == frameKey && sunMap.valid ? &sunMap : nullptr;
+ 
+-  auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
+-  render_pass(pass, frame, passInfo, 0, split);
+-  pass.End();
++  // DOL_AURORA_GPU_PROF_CHUNK=N (diagnostic): a pass of more than N commands is
++  // encoded as timed sub-passes of N commands, "EFB 1 @0", "EFB 1 @N", ...,
++  // each loading what the one before stored, the last resolving. The same
++  // picture, with [gpu-prof] (=2) saying which draws of the pass cost what.
++  static const size_t profChunk = [] {
++    const char* env = std::getenv("DOL_AURORA_GPU_PROF_CHUNK");
++    return env != nullptr ? static_cast<size_t>(std::strtoull(env, nullptr, 10)) : size_t{0};
++  }();
++  if (profChunk != 0 && split == SIZE_MAX && passInfo.commands.size() > profChunk) {
++    for (size_t first = 0; first < passInfo.commands.size(); first += profChunk) {
++      const bool last = first + profChunk >= passInfo.commands.size();
++      auto chunkAttachments = attachments;
++      auto chunkDepthStencil = depthStencilAttachment;
++      if (first != 0) {
++        chunkAttachments[0].loadOp = wgpu::LoadOp::Load;
++        if (passInfo.hasDepth)
++          chunkDepthStencil.depthLoadOp = wgpu::LoadOp::Load;
++        if (passInfo.hasStencil)
++          chunkDepthStencil.stencilLoadOp = wgpu::LoadOp::Load;
++      }
++      if (!last) {
++        chunkAttachments[0].resolveTarget = nullptr;
++        chunkAttachments[0].storeOp = wgpu::StoreOp::Store;
++        if (passInfo.hasDepth)
++          chunkDepthStencil.depthStoreOp = wgpu::StoreOp::Store;
++        if (passInfo.hasStencil)
++          chunkDepthStencil.stencilStoreOp = wgpu::StoreOp::Store;
++      }
++      const auto chunkLabel = fmt::format("{} @{}", label, first);
++      const wgpu::RenderPassDescriptor chunkDescriptor{
++          .label = chunkLabel.c_str(),
++          .colorAttachmentCount = chunkAttachments.size(),
++          .colorAttachments = chunkAttachments.data(),
++          .depthStencilAttachment = depthStencilAttachmentPtr != nullptr ? &chunkDepthStencil : nullptr,
++          .timestampWrites = webgpu::gpu_prof::pass_writes(chunkLabel),
++      };
++      auto chunk = cmd.BeginRenderPass(&chunkDescriptor);
++      render_pass(chunk, frame, passInfo, first, first + profChunk);
++      chunk.End();
++    }
++  } else {
++    auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
++    render_pass(pass, frame, passInfo, 0, split);
++    pass.End();
++  }
+ 
+   if (bloomBeforeCopy) {
+     post_fx::encode(cmd, passInfo.copySourceView, passInfo.copySourceDepthView, passInfo.targetSize,
+-- 
+2.46.0
+

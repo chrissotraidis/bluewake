@@ -305,7 +305,7 @@ label_80004004:
         self.assertEqual(before, bw.tree_digest(self.out / "composite-src"))
 
     def test_native_skin_reuse_and_disable(self):
-        body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'
+        body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\nlabel_802EE834:\n'
         digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
         script = self.root / "scripts/windows/native_skin.py"
         text = script.read_text()

@@ -11,10 +11,10 @@ ARG TYPE2_RUNTIME_X86_64_SHA256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c8
 
 # This is the shared Linux build environment for GitHub Actions and
 # scripts/linux/build.py --ci-container. Keep tool and library dependencies
-# here rather than duplicating them in the workflow. Clang 18 remains the
-# default for both CI and playable builds. The playable builder can opt into
-# LLVM 22 with --ci-container --clang22 for performance testing without moving
-# the project's default compiler.
+# here rather than duplicating them in the workflow. Clang 22 is the default
+# for both CI and playable builds: on the current tree it is about 1% faster
+# than Clang 18 with identical guest checkpoints (#437). Clang 18 stays in the
+# image; the playable builder selects it with --ci-container --clang18.
 # Keep Ubuntu's libc++ 18 development files for both compilers: versioned
 # libc++ development packages conflict, and this preserves CI's existing C++
 # runtime and the AppImage ABI baseline while only changing code generation.
@@ -66,7 +66,7 @@ RUN mkdir -p /opt/appimage \
         | sha256sum --check --strict - \
     && chmod 0755 /opt/appimage/appimagetool-x86_64.AppImage /opt/appimage/runtime-x86_64
 
-ENV PATH="/opt/cmake/bin:/usr/lib/llvm-18/bin:/usr/lib/llvm-22/bin:${PATH}" \
+ENV PATH="/opt/cmake/bin:/usr/lib/llvm-22/bin:/usr/lib/llvm-18/bin:${PATH}" \
     APPIMAGETOOL=/opt/appimage/appimagetool-x86_64.AppImage \
     APPIMAGE_RUNTIME_FILE=/opt/appimage/runtime-x86_64 \
     APPIMAGE_EXTRACT_AND_RUN=1

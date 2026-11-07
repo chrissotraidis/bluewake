@@ -422,14 +422,19 @@ static inline void bw_fp_ps_sum1(CPUState* cpu, u8 d, u8 a, u8 c, u8 b) {
 /* lfs, lfsx, lfsu and the other single loads: the generated header widens the
  * single's bits by hand so that a signalling NaN keeps its payload and stays
  * signalling. For a normal single (exponent 1-254) the hardware's widening is
- * the same double: the exponent rebiased, the fraction shifted, the sign kept.
- * Zeros, denormals, infinities and NaNs take the generated path
- * (gather_pipe.h renames it ahead of the generated header; tests/f32_from_bits_test.c
- * compares the two over every bit pattern). */
+ * the same double: the exponent rebiased, the fraction shifted, the sign kept;
+ * so it is for a zero of either sign, the most common single that is not normal
+ * (#553 M2). Denormals, infinities and NaNs take the generated path: a NaN
+ * because the hardware quiets a signalling one, a denormal because the game's
+ * non-IEEE mode sets the host's DAZ, under which the hardware widens it to zero.
+ * The test is one branch, so a zero does not mispredict a first one
+ * (gather_pipe.h renames the generated path ahead of the generated header;
+ * tests/f32_from_bits_test.c compares the two over every bit pattern, with DAZ
+ * off and on). */
 #if defined(RECOMP_COMPOSITE_H) && defined(dolrecomp_f32_from_bits)
 #undef dolrecomp_f32_from_bits
 static inline f64 dolrecomp_f32_from_bits(u32 bits) {
-    if (__builtin_expect(((bits >> 23) & 0xFFu) - 1u < 254u, 1)) {
+    if (__builtin_expect((((bits >> 23) & 0xFFu) - 1u < 254u) | ((bits << 1) == 0u), 1)) {
         f32 single;
         memcpy(&single, &bits, sizeof single);
         return (f64)single;

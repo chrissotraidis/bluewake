@@ -53,12 +53,28 @@ int bluewake_composite_direct_calls_v2(bool, const bool*, const bool*, const u32
 int bluewake_composite_direct_calls_v3(bool, const bool*, const bool*, const u32*,
                                      const u32*, BwHostCanSkipFn, void*,
                                      const BwHostSkipFast*, bool);
+/* v4 keeps the v3 layout intact and adds host-supplied fixed watches. */
+int bluewake_composite_direct_calls_v4(bool, const bool*, const bool*, const u32*,
+                                     const u32*, BwHostCanSkipFn, void*,
+                                     const BwHostSkipFastV4*, bool);
 extern const volatile BwHostSkipFast* bw_host_skip_fast;
+extern const volatile BwHostSkipFastV4* bw_host_skip_fast_v4;
 extern bool bw_host_skip_verify;
 void bw_host_skip_verify_check(const CPUState* cpu, u32 address, bool allowed);
 void bluewake_composite_direct_skip_counts(unsigned long long* unsafe,
                                            unsigned long long* conservative,
                                            unsigned long long* inline_answers);
+/* The host's gate word (direct_skip.h), or a closed one: closed until the host
+ * hands it over, and whenever direct calls, the address-only answer or verify
+ * change it (direct_calls.c). */
+extern const volatile u32* bw_direct_gate;
+int bluewake_composite_direct_gate(const volatile u32* gate);
+/* With verify on, every direct call takes the full check, which also asks what
+ * the gate would have answered and counts disagreements. */
+void bw_direct_gate_verify(const CPUState* cpu, u32 address, bool exact);
+void bluewake_composite_direct_gate_counts(unsigned long long* unsafe,
+                                           unsigned long long* conservative,
+                                           unsigned long long* answers);
 int bluewake_composite_edge_filter(bool);
 
 /* The host's edge service has nothing to do at an address it does not watch:
@@ -71,9 +87,29 @@ static inline bool bw_host_quiet(const CPUState* cpu) {
            (!*bw_host_decrementer_pending && (*bw_host_pi_cause & *bw_host_pi_mask) == 0u);
 }
 
+/* v4's known hooks, in simple's bits 1..5 (direct_skip.h, #524): true when the
+ * target is one of the stage select's hooks and the host has set its bit. With
+ * the stage select off simple is 1, and this is one compare on a loaded value.
+ * Every inline answer that reads `simple` must test it (the exact and the plain
+ * checks; the host keeps the gate closed while the stage select is live). */
+static inline __attribute__((always_inline)) bool bw_skip_known_hook(u32 simple, u32 address) {
+    if (__builtin_expect(simple <= 1u, 1))
+        return false;
+    const u32 canonical = address & ~0x40000000u;
+    const u32 bit = canonical == BW_SKIP_KNOWN_CHANGE ? 2u
+                  : canonical == BW_SKIP_KNOWN_DATA_SELECT ? 4u
+                  : canonical == BW_SKIP_KNOWN_EXECUTE ? 8u
+                  : canonical == BW_SKIP_KNOWN_PLAY_EXECUTE ? 16u
+                  : canonical == BW_SKIP_KNOWN_MENU_DELETE ? 32u : 0u;
+    return (simple & bit) != 0u;
+}
+
 /* The chassis loop's checks before a dispatch (an exception, the turn's
  * budget), and the edge service's before it would have nothing to do. */
-static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
+/* Both checks stay out of line and with the hot code, as the single check was:
+ * inlined at every call site the chunks grow about 11% and run slower (#503,
+ * Steam Deck), and the trained profile does not know these names. */
+static inline __attribute__((always_inline)) bool bw_direct_call_ready_exact(const CPUState* cpu, u32 address) {
     if (!bw_direct_enabled || cpu == NULL || bw_host_can_skip == NULL ||
         bw_direct_depth >= BW_DIRECT_DEPTH_MAX)
         return false;
@@ -84,15 +120,80 @@ static inline bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
     /* The host's answer read inline when only the address matters (direct_skip.h),
      * instead of a call into the host for every direct call. */
     const volatile BwHostSkipFast* fast = bw_host_skip_fast;
-    if (fast != NULL && fast->simple) {
-        const bool allowed = address != fast->single[0] && address != fast->single[1] &&
+    const u32 simple = fast != NULL ? fast->simple : 0u;
+    if (simple != 0u) {
+        bool allowed = address != fast->single[0] && address != fast->single[1] &&
                              address - fast->range_first[0] > fast->range_span[0] &&
                              address - fast->range_first[1] > fast->range_span[1];
+        if (allowed && bw_skip_known_hook(simple, address))
+            allowed = false;
         if (__builtin_expect(bw_host_skip_verify, 0))
             bw_host_skip_verify_check(cpu, address, allowed);
         return allowed;
     }
     return bw_host_can_skip(bw_host_can_skip_user, cpu, address);
+}
+
+static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_full(const CPUState* cpu, u32 address) {
+    const bool exact = bw_direct_call_ready_exact(cpu, address);
+    if (__builtin_expect(bw_host_skip_verify, 0))
+        bw_direct_gate_verify(cpu, address, exact);
+    return exact;
+}
+
+/* The same answer for an address the build knows lies outside the host's two
+ * ranges (direct_skip.h): with the inline answer on, only the singles remain.
+ * bw_host_skip_fast is set only while direct calls are on, so it stands for
+ * bw_direct_enabled and the host's query; the translated code's cpu is never
+ * NULL. Anything else (the answer off, verify) is the full check. */
+static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_plain(const CPUState* cpu, u32 address) {
+    const volatile BwHostSkipFast* fast = bw_host_skip_fast;
+    const u32 simple = __builtin_expect(fast != NULL, 1) ? fast->simple : 0u;
+    if (simple != 0u && !bw_host_skip_verify) {
+        if (bw_direct_depth >= BW_DIRECT_DEPTH_MAX || cpu->exception != 0u ||
+            (cpu->cycle_budget > 0 && cpu->downcount <= -cpu->cycle_budget) || !bw_host_quiet(cpu))
+            return false;
+        return address != fast->single[0] && address != fast->single[1] &&
+               !bw_skip_known_hook(simple, address);
+    }
+    return bw_direct_call_ready_full(cpu, address);
+}
+
+static inline bool bw_skip_range_outside(u32 address) {
+    return (address < BW_SKIP_RANGE0_FIRST || address > BW_SKIP_RANGE0_LAST) &&
+           (address < BW_SKIP_RANGE1_FIRST || address > BW_SKIP_RANGE1_LAST);
+}
+
+static inline bool bw_skip_main_code(u32 address) {
+    return address >= BW_GATE_MAIN_FIRST && address < BW_GATE_MAIN_END;
+}
+
+/* What remains of the plain check while the gate is open: the host-side tests
+ * all hold (direct_skip.h), so only the depth, an exception and the budget. */
+static inline __attribute__((always_inline)) bool bw_direct_gate_ready(const CPUState* cpu) {
+    return bw_direct_depth < BW_DIRECT_DEPTH_MAX && cpu->exception == 0u &&
+           !(cpu->cycle_budget > 0 && cpu->downcount <= -cpu->cycle_budget);
+}
+
+/* A target in the main executable's code, outside both ranges: with the gate
+ * open it stands for every host-side test, read inline without a call (#503
+ * M5); closed, the plain check answers as before. */
+static inline __attribute__((always_inline)) bool bw_direct_call_ready_main(const CPUState* cpu, u32 address) {
+    if (__builtin_expect(*bw_direct_gate == 0u, 1))
+        return bw_direct_gate_ready(cpu);
+    return bw_direct_call_ready_plain(cpu, address);
+}
+
+/* At a call the translator wrote, the address is a constant: the range tests
+ * are settled here, at build time, and so is whether the target is in the main
+ * executable's code. */
+static inline __attribute__((always_inline)) bool bw_direct_call_ready(const CPUState* cpu, u32 address) {
+    if (__builtin_constant_p(address) && bw_skip_range_outside(address)) {
+        if (bw_skip_main_code(address))
+            return bw_direct_call_ready_main(cpu, address);
+        return bw_direct_call_ready_plain(cpu, address);
+    }
+    return bw_direct_call_ready_full(cpu, address);
 }
 
 /* The addresses the host's edge service acts at, from the builder's watch list

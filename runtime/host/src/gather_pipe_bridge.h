@@ -37,4 +37,15 @@ static inline BluewakeGatherMode bluewake_gather_pipe_configure(
     return BLUEWAKE_GATHER_DIRECT;
 }
 
+/* BLUEWAKE_GATHER_PIPE_BATCH as the bridge reads it: an unset value means
+ * batching on every platform, one hand-off per run of bytes instead of one host
+ * call per written value (measured on the Steam Deck at +1.7% game FPS in
+ * Outset, #531; the other platforms are on by default pending their own
+ * measurement). "0" keeps direct writes. */
+static inline const char* bluewake_gather_pipe_batch_option(const char* value) {
+    if (value == NULL || value[0] == '\0')
+        return "1";
+    return value;
+}
+
 #endif
