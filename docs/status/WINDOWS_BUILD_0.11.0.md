@@ -177,10 +177,12 @@ Both builds and every game launch ran from visible desktop PowerShell windows. T
 below and the same private disc. Testing used portable folders and copies of an existing populated test card;
 real AppData saves were not changed. Logs, cards, states and disc files remain private.
 
-**Acceptance remains incomplete:** the automated checks below passed, but Chris's Forest Haven play/visual check,
-F9 at Outset, interactive save/reload and Dragon Roost soft-effects comparison have not been observed. No gameplay
-acceptance is inferred from compilation, headless benchmarks or title rendering. The release remains a draft;
-the Mac's content-gate check and Chris's publication decision are still required.
+Runtime checks used the game's built-in controller scripts, desktop hotkeys and reviewed screen captures.
+No human gameplay observation is claimed; periodic captures cannot establish the absence of every transient
+visual defect. The results below distinguish those observations from the headless measurements. Two limitations
+were found: GPU/VRAM readings are unavailable in the performance panel on this PC, and F7 does not open after
+loading a state taken with stage select off. The prescribed stage-select-on case works. The release remains a
+draft; the Mac's content-gate check and Chris's publication decision are still required.
 
 | | |
 | --- | --- |
@@ -189,11 +191,11 @@ the Mac's content-gate check and Chris's publication decision are still required
 | Lean copies, behaviour timing, fp-checks, gather alias cache, RecompCore, provenance | Lean copies: 464,979 blocks / 842 chunks; behaviour timing: 404,438 block starts / 842 chunks; FP checks: 296,188 tests removed / 811 chunks; gather alias cache on. RecompCore `f9e3f4e59be4d49f10130bf6e68bc5d5fa0451e6`. Provenance: `fp_checks=true`, `direct_gate_training=true`, `local_training=true`, `source_modified=false` |
 | Module SHA-256 | `5141850ee3f426ce4b07b3e95d2650f8e2736774502806d760daee53daf7d6fb` |
 | Speed: 0.10.0, 0.11.0, 0.11.0 gate closed (per stop) and checkpoints | Pass for default 0.11.0: 14.8–19.6% faster at every stop. See the table below. All six runs loaded five stops and produced 31 checkpoints. Full checkpoints match within each version, including 0.11.0 gate open/closed; cycles, MEM1, MEM2, aliases, spans and bytes match across versions. CPU hashes differ across versions as allowed for #553. Closed runs explicitly passed `--env BLUEWAKE_DIRECT_GATE=0` |
-| a. Start and look | Partial: D3D12, draw fusion on, `gate=on`, title rendered, no fatal lines in startup; Config visibly shows Faster calls on. Forest Haven two-minute movement/camera, sustained speed and Chris's visual acceptance pending |
+| a. Start and look | Scripted two-minute Forest Haven movement/camera check completed; D3D12, draw fusion on, `gate=on`, and Config shows Faster calls on. No missing geometry or wrong colours apparent in sampled views; zero fatal lines. The movement interval's 120 performance samples averaged 59.87 retraces/s, minimum 55.9, one sample below 57. Whole-session triage also records 10 seconds below target, including initial loading; it was not uniformly full speed |
 | b. The first run | UI automation observed the disc picker, four named progress stages with completion checkmarks, required/free disk space, then the rendered title; F1 Quit exited cleanly. Second run: 12 MB required, 67.8 GB free, zero fatal lines. Chris's observation was not collected. Temporary folder retained because cleanup was rejected by automatic approval review (`blocked by policy`) |
-| c. F9 | Pending: three-state panel at Outset and CPU share at or below 100% not observed |
-| d. Save states | Pending: F5/F8 messages, F8 before starting a file then F7, in-game save/restart/load and absence of recovery message not checked interactively. Benchmark state loading is not acceptance of this check |
-| e. Soft effects | Pending: Dragon Roost minute off/on comparison not performed. Config shows Efficient soft effects off by default |
+| c. F9 | At rendered Outset, three presses showed 30 FPS, then the full top-right panel and graph, then off. Observed system CPU 7–9%, game CPU 6%, RAM 10.8/12.9 GB and game memory 0.7 GB. Limitation: GPU/VRAM values and some graphics metadata showed dashes on this Radeon PC |
+| d. Save states | F5 showed State saved and F8 showed State loaded at Forest Haven and Outset; 161 host fields restored, none missing/mismatched. With stage select on when saving, a fresh launch's F8 before file selection restored Outset; F7 showed its confirmation, then opened the stage list. A separate scripted Start/Save run wrote the copied card, restored a state and saved again (six writes / 49,152 bytes total). Clean exit 0, fresh launch loaded that saved Quest Log into rendered Outset, no recovery message or fatal lines. Limitation: a state made with stage select off loaded correctly, but enabling it on the next launch and pressing F7 after F8 said Start a file first |
+| e. Soft effects | Scripted Dragon Roost (`M_NewD2`, room 0, point 0) ran for over a minute with Efficient soft effects off and over a minute on; the same state was restored for comparison. Sampled views looked comparable, with no obvious missing geometry or large smoke/haze change. The checkbox is under Config in this build, not Display. Returned it to off and verified `DOL_AURORA_EFFICIENT_EFFECTS=0`; zero fatal lines. Periodic captures do not prove continuous flicker-free rendering |
 | Zip SHA-256, uploaded to the v0.11.0 draft | `000e165cd780fdf3f17c8cc1359c0e2952f4ebcc18148d1d3134f1f73c5a7c24`; uploaded to the existing v0.11.0 draft; GitHub SHA-256 matches |
 | AppImage: build time, clang, audit line, headless start, SHA-256, uploaded | 2h 19m 15s, six jobs, clang 22.1.8, same freeze/RecompCore and fresh local training. `appimage audit: 14 ELF files; maximum GLIBC_2.38; no private game files`. Empty-data-folder headless start: title-ready at retrace 328, `gate=on`, zero fatal lines, exit 0. SHA-256 `b72fbb993b84b01c9369d50450bae952c06bece1c2660aa8c31789546f1e4462`; uploaded to the existing v0.11.0 draft; GitHub SHA-256 matches. Linux gameplay not checked |
 
@@ -210,6 +212,18 @@ Game frames per second, headless, mean of two runs per variant in the prescribed
 These measure headless throughput, not displayed frame rate. Closed-gate Dragon Roost was effectively flat
 (-0.06% versus baseline), not faster. Baseline Windfall varied about 6% between its two runs; default 0.11.0
 repeats varied at most 1.9%. The default build improved at all five stops.
+
+The additional F7 case is reproducible with a state saved while stage select is off: F8 restores gameplay,
+but the log says `state loaded: no file started yet`, and F7 says `Start a file first` after enabling stage select
+for the new launch. Source inspection suggests the saved `in_game=false` host field overwrites the gameplay
+inference made during loading. A state saved with stage select already on restores `a file is going, F7 opens
+the stage select` and opens the selector. This handoff makes no code change or claim that the off-to-on case is fixed.
+
+The in-game save check used the built-in save route. Its initial continue presses were stopped at retrace 640
+so they could not open an item description after the route pressed Start. The corrected run saved a state at
+retrace 1001, loaded it through the F8 test hook at retrace 1800, and completed another card save after loading.
+The separately observed F5/F8 hotkey messages and fresh-launch F7 test are reported above. No crash, failed state
+load, failed card load or recovery prompt occurred in these runs.
 
 Packaging used a clean allowlisted app copy so the live portable test session could keep its copied card.
 The ZIP contains 35 files, including 17 license files; its module hash matches the build. The packager's fixed
