@@ -172,18 +172,48 @@ sha256sum /mnt/c/BlueWake-private/BlueWake-v0.11.0-linux-x86_64.AppImage
 
 ## Results
 
+November 7, 2026, Chris's Windows 11 Pro PC (Ryzen 7 5700U, Radeon integrated graphics, 12.9 GB RAM).
+Both builds and every game launch ran from visible desktop PowerShell windows. The builds used the clean freeze
+below and the same private disc. Testing used portable folders and copies of an existing populated test card;
+real AppData saves were not changed. Logs, cards, states and disc files remain private.
+
+**Acceptance remains incomplete:** the automated checks below passed, but Chris's Forest Haven play/visual check,
+F9 at Outset, interactive save/reload and Dragon Roost soft-effects comparison have not been observed. No gameplay
+acceptance is inferred from compilation, headless benchmarks or title rendering. The release remains a draft;
+the Mac's content-gate check and Chris's publication decision are still required.
+
 | | |
 | --- | --- |
-| Commit built | |
-| Build time, jobs, clang | |
-| Lean copies, behaviour timing, fp-checks, gather alias cache, RecompCore, provenance | |
-| Module SHA-256 | |
-| Speed: 0.10.0, 0.11.0, 0.11.0 gate closed (per stop) and checkpoints | |
-| a. Start and look | |
-| b. The first run | |
-| c. F9 | |
-| d. Save states | |
-| e. Soft effects | |
-| Zip SHA-256, uploaded to the v0.11.0 draft | |
-| AppImage: build time, clang, audit line, headless start, SHA-256, uploaded | |
+| Commit built | `0d84fa1969a1ac9a9e9333d85dd425816ea3ce23`; version 0.11.0, build 10; clean source |
+| Build time, jobs, clang | Windows: 1h 19m 37s, six jobs, clang 22.1.3; exit 0; trained build and app optimization profile used |
+| Lean copies, behaviour timing, fp-checks, gather alias cache, RecompCore, provenance | Lean copies: 464,979 blocks / 842 chunks; behaviour timing: 404,438 block starts / 842 chunks; FP checks: 296,188 tests removed / 811 chunks; gather alias cache on. RecompCore `f9e3f4e59be4d49f10130bf6e68bc5d5fa0451e6`. Provenance: `fp_checks=true`, `direct_gate_training=true`, `local_training=true`, `source_modified=false` |
+| Module SHA-256 | `5141850ee3f426ce4b07b3e95d2650f8e2736774502806d760daee53daf7d6fb` |
+| Speed: 0.10.0, 0.11.0, 0.11.0 gate closed (per stop) and checkpoints | Pass for default 0.11.0: 14.8–19.6% faster at every stop. See the table below. All six runs loaded five stops and produced 31 checkpoints. Full checkpoints match within each version, including 0.11.0 gate open/closed; cycles, MEM1, MEM2, aliases, spans and bytes match across versions. CPU hashes differ across versions as allowed for #553. Closed runs explicitly passed `--env BLUEWAKE_DIRECT_GATE=0` |
+| a. Start and look | Partial: D3D12, draw fusion on, `gate=on`, title rendered, no fatal lines in startup; Config visibly shows Faster calls on. Forest Haven two-minute movement/camera, sustained speed and Chris's visual acceptance pending |
+| b. The first run | UI automation observed the disc picker, four named progress stages with completion checkmarks, required/free disk space, then the rendered title; F1 Quit exited cleanly. Second run: 12 MB required, 67.8 GB free, zero fatal lines. Chris's observation was not collected. Temporary folder retained because cleanup was rejected by automatic approval review (`blocked by policy`) |
+| c. F9 | Pending: three-state panel at Outset and CPU share at or below 100% not observed |
+| d. Save states | Pending: F5/F8 messages, F8 before starting a file then F7, in-game save/restart/load and absence of recovery message not checked interactively. Benchmark state loading is not acceptance of this check |
+| e. Soft effects | Pending: Dragon Roost minute off/on comparison not performed. Config shows Efficient soft effects off by default |
+| Zip SHA-256, uploaded to the v0.11.0 draft | `000e165cd780fdf3f17c8cc1359c0e2952f4ebcc18148d1d3134f1f73c5a7c24`; uploaded to the existing v0.11.0 draft; GitHub SHA-256 matches |
+| AppImage: build time, clang, audit line, headless start, SHA-256, uploaded | 2h 19m 15s, six jobs, clang 22.1.8, same freeze/RecompCore and fresh local training. `appimage audit: 14 ELF files; maximum GLIBC_2.38; no private game files`. Empty-data-folder headless start: title-ready at retrace 328, `gate=on`, zero fatal lines, exit 0. SHA-256 `b72fbb993b84b01c9369d50450bae952c06bece1c2660aa8c31789546f1e4462`; uploaded to the existing v0.11.0 draft; GitHub SHA-256 matches. Linux gameplay not checked |
+
+Game frames per second, headless, mean of two runs per variant in the prescribed six-run order:
+
+| Stop | 0.10.0 | 0.11.0 default | 0.11.0 gate closed | Default gain |
+| --- | ---: | ---: | ---: | ---: |
+| Outset | 54.77 | 64.50 | 56.03 | 17.8% |
+| Windfall | 56.98 | 68.18 | 60.26 | 19.6% |
+| Dragon Roost Cavern | 76.52 | 87.82 | 76.47 | 14.8% |
+| Forest Haven | 50.23 | 58.06 | 52.03 | 15.6% |
+| Sea by the Fortress | 58.70 | 67.78 | 58.73 | 15.5% |
+
+These measure headless throughput, not displayed frame rate. Closed-gate Dragon Roost was effectively flat
+(-0.06% versus baseline), not faster. Baseline Windfall varied about 6% between its two runs; default 0.11.0
+repeats varied at most 1.9%. The default build improved at all five stops.
+
+Packaging used a clean allowlisted app copy so the live portable test session could keep its copied card.
+The ZIP contains 35 files, including 17 license files; its module hash matches the build. The packager's fixed
+SDL license lookup was satisfied with a local junction to this build's dependency directory; no source changes
+were needed. Only the Windows ZIP and Linux AppImage were uploaded; the release was verified still a draft with its pre-existing assets unchanged; generated source ZIP and sums
+stay local. The Linux module SHA-256 is `5f0210c0352e3378fbd8270ac8317d61cc87890f09a869f7dd9317d93a893d17`.
 
