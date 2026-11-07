@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#if !defined(_WIN32)
+// Not on the Mac: its headers declare sysconf and the rest by default, and under
+// _POSIX_C_SOURCE <sys/sysctl.h> loses the BSD types it needs (u_int).
+#if !defined(_WIN32) && !defined(__APPLE__)
 #define _POSIX_C_SOURCE 200809L   // sysconf, clock_gettime, nanosleep
 #endif
 
