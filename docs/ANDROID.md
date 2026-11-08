@@ -134,6 +134,15 @@ is written at all. The runs use their own memory card; the player's saves are no
 the game, so it stays in `build/android/pgo-device` and is never shared. The training APK is left installed: put
 the real one back with `install.py`.
 
+**A playback that stops advancing.** Eight minutes with no retrace is not a slow frame, so the builder ends the run
+there instead of waiting out its cap, and writes what the process was doing into the run's directory: `session.log` as
+it stood, `threads.txt` (every thread's state and CPU over five seconds, busiest first, which says which thread is
+spinning) and `stacks.txt` (that thread's backtrace, taken by `run-as` aborting it and reading the crash log's
+tombstone - `debuggerd` is root-only from `adb`, even for a debuggable app). `BLUEWAKE_STALL_SECONDS=180` makes an
+attempt cost three minutes. The training APKs are packaged debuggable for this; the real APK is not. The
+`session-in-progress` marker the app keeps beside the logs is skipped when the builder picks the run's log, and the
+per-run scratch directory is opened up for the app, which cannot write one `adb shell mkdir` leaves behind.
+
 **The app's own training.** The module's training is headless, so it never runs the GX worker's translation or
 the render thread, the app's busiest code (the GX worker is most of a core on the sea). With `--train-app` the
 builder also compiles an instrumented `libmain.so` (the host, GXRuntime, Aurora and SDL; Dawn is prebuilt),
