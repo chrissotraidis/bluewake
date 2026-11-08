@@ -3,8 +3,8 @@
 The record for 0.11.0: what it contains, the exact artifacts, and every check with its status. Previous release:
 [0.10.0](RELEASE_0.10.0.md), November 1. Only Chris publishes.
 
-**Status, November 8, 2026:** frozen; every artifact is built, gated and on the v0.11.0 draft with `SHA256SUMS`. Waiting
-for Chris's decision to publish.
+**Status, November 8, 2026:** published by Chris at 13:58 UTC from `0d84fa1` (the `v0.11.0` tag), with the six artifacts
+below; `releases/latest` leads to it.
 
 ## The release
 
@@ -116,3 +116,15 @@ inlined again (#565), the benchmark tour's `--env` (#569), and the Clang, traini
 | PadMint `audit` | Passed | IPA, source zip, recipe |
 | PadMint `player-check.sh` before tagging | Passed | 2 h 54 min, from `0d84fa1` with the release IPA |
 | Draft state | Passed | Draft, untagged, six assets |
+
+
+## After publishing
+
+| Check | Status |
+| --- | --- |
+| The tag | `v0.11.0` points at `0d84fa1969a1ac9a9e9333d85dd425816ea3ce23`; `releases/latest` is v0.11.0 |
+| Every asset downloads without signing in and matches `SHA256SUMS` | Passed: all six through `releases/latest/download` with no token (HTTP 200), all five lines of `SHA256SUMS` OK |
+| README and guides name 0.11.0's downloads | #576 (also LINUX.md's Clang default and the PadMint route on Windows) |
+| Replies | Asked to confirm: #523, #535, #476, #498, #451 (left open until they do); updated: #215, #427, #56; #543's F7 case raised with pdale-boop; #574 acknowledged |
+| PadMint `player-check.sh` without a checkout, from `releases/latest` | Running: PadMint `main` `28562d2`, Apple Python 3.9.6, an empty PadMint folder; it picked up v0.11.0 |
+
