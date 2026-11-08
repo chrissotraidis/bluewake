@@ -295,7 +295,7 @@ CI image and avoid installing packaging tools on the host:
       --ci-container --appimage
 
 The shared Dockerfile pins appimagetool, the Type 2 runtime and CMake. It uses
-Clang 18 by default, includes optional Clang 22 tools, and retains Ubuntu's
+Clang 22 by default (#550), keeps Clang 18 for `--clang18`, and retains Ubuntu's
 libc++ 18 with either compiler.
 The completed AppImage is automatically audited for prohibited private files,
 accidental libstdc++ linkage and a maximum `GLIBC_2.39` requirement.
@@ -323,7 +323,7 @@ it under the Linux release exception, after it passes the release asset check:
 ### Run the AppImage
 
 The [latest release](https://github.com/chrissotraidis/bluewake/releases/latest) has a ready-made AppImage
-(`BlueWake-v0.10.0-linux-x86_64.AppImage` since 0.10.0); these steps work for it and for one you built.
+(`BlueWake-v0.11.0-linux-x86_64.AppImage` in 0.11.0); these steps work for it and for one you built.
 
 1. Make the AppImage executable (you only need to do this once):
 
