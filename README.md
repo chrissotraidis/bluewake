@@ -56,7 +56,7 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download [`BlueWake-v0.10.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-windows-x64.zip)
+1. Download [`BlueWake-v0.11.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.11.0/BlueWake-v0.11.0-windows-x64.zip)
    from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play:
    you don't need PadMint or a Mac.
 2. Unpack the whole ZIP and run `BlueWake.exe`.
@@ -69,7 +69,7 @@ GPU gets Direct3D 11 instead of a black screen (not yet checked on such a PC). I
 
 ### Linux
 
-1. Download [`BlueWake-v0.10.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-linux-x86_64.AppImage)
+1. Download [`BlueWake-v0.11.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.11.0/BlueWake-v0.11.0-linux-x86_64.AppImage)
    from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play,
    and built to run on SteamOS too.
 2. Make it executable (`chmod +x`, or Properties › Permissions in the Deck's desktop mode) and run it.
