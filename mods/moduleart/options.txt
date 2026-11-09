@@ -1,0 +1,55 @@
+# Art fixes: module art that GX reads from the wrong address (#545), as a mod
+# that is off by default (docs/MODS.md, "Art fixes").
+#
+# Some modules hand GX a pointer to art in their own data. GX keeps only the
+# address's low bits (bits 5-25 of a texture or palette, & 0x3FFFFFFF for a
+# vertex array), and these four modules are linked below 0xC1800000, so the cut
+# address is real game memory and the art is read from whatever the heap holds
+# there. (Modules linked higher are read right without this: the cut address
+# lands past the retail 24 MiB, where the host looks it up as a module's.)
+#
+# A hook before each of the four modules' calls to GXInitTexObj, GXInitTexObjCI,
+# GXInitTlutObj and GXSetArray moves the pointer in r4, when it is one of the
+# four modules' own data, to a window the host keeps for GX only over the same
+# bytes, above module 1 (game_options.c, main.c's host_art_fix_windows). The
+# cut form of a window address lands past the retail 24 MiB too. Pointers to
+# anything else pass unchanged. Same format as mods/betterww/options.txt; an
+# `always` option has no switch of its own: it is on whenever its mod is.
+
+option art_fixes 64 always Art fixes for flags, banners and capes
+
+# d_a_majuu_flag: the reefs', Forsaken Fortress's and the cannon boats' flags
+# (l_flag02TEX, l_texCoord).
+hook d_a_majuu_flag.rel+0x8A8 art_fixes before 6    # bl GXSetArray
+hook d_a_majuu_flag.rel+0x8C4 art_fixes before 6    # bl GXSetArray
+hook d_a_majuu_flag.rel+0x8D4 art_fixes before 6    # bl GXSetArray
+hook d_a_majuu_flag.rel+0xDF0 art_fixes before 6    # bl GXSetArray
+hook d_a_majuu_flag.rel+0x19BC art_fixes before 6   # bl GXInitTexObj
+hook d_a_majuu_flag.rel+0x1A74 art_fixes before 6   # bl GXInitTexObj
+hook d_a_majuu_flag.rel+0x1AF8 art_fixes before 6   # bl GXInitTexObj
+
+# d_a_obj_buoyflag: the floating barrels and their banners.
+hook d_a_obj_buoyflag.rel+0x3DC art_fixes before 6  # bl GXSetArray
+hook d_a_obj_buoyflag.rel+0x3EC art_fixes before 6  # bl GXSetArray
+hook d_a_obj_buoyflag.rel+0x3FC art_fixes before 6  # bl GXSetArray
+hook d_a_obj_buoyflag.rel+0x420 art_fixes before 6  # bl GXInitTexObj
+hook d_a_obj_buoyflag.rel+0x4A8 art_fixes before 6  # bl GXInitTexObj
+hook d_a_obj_buoyflag.rel+0x810 art_fixes before 6  # bl GXSetArray
+hook d_a_obj_buoyflag.rel+0x904 art_fixes before 6  # bl GXSetArray
+hook d_a_obj_buoyflag.rel+0x918 art_fixes before 6  # bl GXSetArray
+hook d_a_obj_buoyflag.rel+0x928 art_fixes before 6  # bl GXSetArray
+hook d_a_obj_buoyflag.rel+0x94C art_fixes before 6  # bl GXInitTexObj
+hook d_a_obj_buoyflag.rel+0x9D4 art_fixes before 6  # bl GXInitTexObj
+
+# d_a_mant: Darknut's and Phantom Ganon's capes (their textures and palettes;
+# the cape's arrays go through GFSetArray, which the host already resolves).
+hook d_a_mant.rel+0x2B4 art_fixes before 6          # bl GXInitTlutObj
+hook d_a_mant.rel+0x2E0 art_fixes before 6          # bl GXInitTexObjCI
+
+# d_a_goal_flag: the goal flag (its l_texCoord; its texture is an archive's).
+hook d_a_goal_flag.rel+0x254 art_fixes before 6     # bl GXInitTexObj
+hook d_a_goal_flag.rel+0x374 art_fixes before 6     # bl GXInitTexObj
+hook d_a_goal_flag.rel+0x4F0 art_fixes before 6     # bl GXSetArray
+hook d_a_goal_flag.rel+0x50C art_fixes before 6     # bl GXSetArray
+hook d_a_goal_flag.rel+0x51C art_fixes before 6     # bl GXSetArray
+hook d_a_goal_flag.rel+0xA38 art_fixes before 6     # bl GXSetArray

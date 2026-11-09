@@ -24,11 +24,21 @@ WRITE_TYPES = {"f32": ">f", "u32": ">I", "u16": ">H", "u8": ">B"}
 
 
 class Spec:
-    def __init__(self, path):
-        self.options = []   # (index, name, default_on, title)
+    """One spec file, or several (one option table: their names and indexes
+    must not clash)."""
+
+    def __init__(self, paths):
+        self.options = []   # (index, name, default_on, title); default_on 2 is always
         self.sites = []     # (where, index, kind, value)
         self.writes = []    # (where, index, bytes)
         by_name = {}
+        for path in [paths] if isinstance(paths, (str, Path)) else paths:
+            self._read(path, by_name)
+        wheres = [s[0] for s in self.sites]
+        if len(wheres) != len(set(wheres)):
+            sys.exit("%s: two sites at one address" % paths)
+
+    def _read(self, path, by_name):
         for number, raw in enumerate(Path(path).read_text().splitlines(), 1):
             line = raw.split("#", 1)[0].split()
             if not line:
@@ -36,13 +46,14 @@ class Spec:
             what = line[0]
             fail = lambda why: sys.exit("%s:%d: %s" % (path, number, why))
             if what == "option":
-                if len(line) < 5 or line[3] not in ("on", "off"):
-                    fail("expected `option NAME INDEX on|off TITLE`")
+                # always: no switch of its own, on whenever its mod is (default_on 2).
+                if len(line) < 5 or line[3] not in ("on", "off", "always"):
+                    fail("expected `option NAME INDEX on|off|always TITLE`")
                 name, index = line[1], int(line[2], 0)
                 if not 1 <= index <= 255 or name in by_name or index in by_name.values():
                     fail("option %s: index %d taken or out of range" % (name, index))
                 by_name[name] = index
-                self.options.append((index, name, line[3] == "on", " ".join(line[4:])))
+                self.options.append((index, name, ("off", "on", "always").index(line[3]), " ".join(line[4:])))
                 continue
             if len(line) != 5 or line[2] not in by_name:
                 fail("expected `%s WHERE OPTION KIND VALUE` with a declared option" % what)
@@ -56,9 +67,6 @@ class Spec:
                 self.writes.append((where, index, struct.pack(WRITE_TYPES[kind], number_value)))
             else:
                 fail("unknown %s kind %s" % (what, kind))
-        wheres = [s[0] for s in self.sites]
-        if len(wheres) != len(set(wheres)):
-            sys.exit("%s: two sites at one address" % path)
 
 
 def rel_sections(rel_path):

@@ -207,8 +207,9 @@ def main():
     # only they share needs no combined variant. The host keeps one of them.
     ap.add_argument("--exclusive", action="append", default=[], metavar="NAME,NAME")
     # Game options (game_options.py): the option table and the values the
-    # options write, resolved against the base tree's REL data.
-    ap.add_argument("--options", metavar="SPEC")
+    # options write, resolved against the base tree's REL data. Given once per
+    # spec (Better Wind Waker's, the art fixes'); they share one table.
+    ap.add_argument("--options", action="append", default=[], metavar="SPEC")  # one table from all
     ap.add_argument("--rels-bin-dir", metavar="DIR")
     args = ap.parse_args()
     exclusive = [set(spec.split(",")) for spec in args.exclusive]
