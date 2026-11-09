@@ -13,10 +13,12 @@
 // BLUEWAKE_OPTIONS adjusts the defaults: a comma-separated list of option
 // names, each turned on, or off when it starts with '-'; "none" first turns
 // every option off. The options take effect only while the mod that carries
-// their sites ("betterww") is enabled.
+// their sites ("betterww") is enabled. The art fixes' option
+// (mods/moduleart/options.txt) has no switch of its own: it is on while its
+// mod ("moduleart") is, and is not one of the options listed below.
 
 // At boot, after the mods are enabled and before the first dispatch.
-void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled);
+void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled, bool art_fixes);
 // Once per retrace.
 void bluewake_game_options_retrace(CPUState* cpu);
 // A save state was loaded: instant text looks for the messages again
@@ -29,5 +31,8 @@ const char* bluewake_game_options_describe(u32 position, const char** title, boo
 // Better Wind Waker's "invert camera left and right" is on (the game's C-stick
 // then already turns the camera the way the mouse does).
 bool bluewake_game_options_invert_camera_x(void);
+// The art fixes' hook (main.c): the GX-only window address for a pointer into
+// one of the four modules' own data, or the pointer unchanged.
+u32 bluewake_art_fix_window(u32 address);
 
 #endif
