@@ -144,7 +144,7 @@ your own GZLE01 revision 0 disc, and 25 GB free. Then, in PadMint, choose BlueWa
 run `padmint make bluewake ios --disc "path\to\GZLE01.iso"`.
 
 If PadMint's window shows BlueWake dimmed on Windows, your PadMint still lists it as Mac only (PadMint 0.6.1 and
-older do). The `padmint make` command above works with them; the PadMint release after 0.6.1 offers BlueWake in the
+older do). The `padmint make` command above works with them; PadMint 0.6.2 and newer offer BlueWake in the
 window.
 
 PadMint translates your disc, applies the mods, compiles the game code for iOS and adds it, with its
