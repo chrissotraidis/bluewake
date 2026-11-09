@@ -829,7 +829,8 @@ typedef struct HostArtFixRange {
 static HostArtFixRange g_art_fix_ranges[HOST_ART_FIX_MODULES * 8u];
 static u32 g_art_fix_range_count;
 
-u32 bluewake_art_fix_window(u32 address) {
+// The mod's hook calls this, through game_options.c (bluewake_game_options_enable).
+static u32 host_art_fix_window(u32 address) {
     for (u32 i = 0; i < g_art_fix_range_count; ++i) {
         const HostArtFixRange* range = &g_art_fix_ranges[i];
         if (address >= range->start && address < range->end)
@@ -8887,7 +8888,7 @@ int main(int argc, char** argv) {
             gather_mode == BLUEWAKE_GATHER_DIRECT ? "direct" : "off");
     host_mods_enable(lib, &cpu);
     host_art_fix_windows();
-    bluewake_game_options_enable(lib, &cpu, g_options_mod, g_art_fixes_mod);
+    bluewake_game_options_enable(lib, &cpu, g_options_mod, g_art_fixes_mod ? host_art_fix_window : NULL);
     host_boot_writes_mark_options(lib);
     bluewake_forest_water_set_ftree_text(
         host_rel_section_linked_start(mod, 317u, 1u));

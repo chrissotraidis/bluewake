@@ -30,6 +30,7 @@ static CPUState* g_cpu;
 static u32 g_instant_text;
 static u32 g_brisk_sail;
 static u32 g_invert_camera_x;
+static BluewakeArtFixWindowFn g_art_fix_window;
 
 static bool option_on(u32 index) { return g_flags != NULL && index != 0u && g_flags[index] != 0u; }
 
@@ -125,7 +126,8 @@ static u32 native_hook(CPUState* cpu, u32 id) {
     case HOOK_ART_FIX:
         // Before a call to GXInitTexObj, GXInitTexObjCI, GXInitTlutObj or
         // GXSetArray: the art's pointer is r4 in each.
-        cpu->gpr[4] = bluewake_art_fix_window(cpu->gpr[4]);
+        if (g_art_fix_window != NULL)
+            cpu->gpr[4] = g_art_fix_window(cpu->gpr[4]);
         return 0u;
     default:
         return 0u;
@@ -159,7 +161,7 @@ static bool named(const char* list, const char* name, bool* on) {
     return found;
 }
 
-void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled, bool art_fixes) {
+void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled, BluewakeArtFixWindowFn art_fix_window) {
     typedef volatile unsigned char* (*FlagsFn)(void);
     typedef void (*SetHookFn)(NativeHookFn);
     typedef u32 (*CountFn)(void);
@@ -175,6 +177,7 @@ void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled, bo
     g_flags = flags();
     g_option = option;
     g_cpu = cpu;
+    g_art_fix_window = art_fix_window;
     set_hook(native_hook);
 
     const char* wanted = getenv("BLUEWAKE_OPTIONS");
@@ -188,7 +191,7 @@ void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled, bo
         named(wanted, name, &on);
         on = on && mod_enabled;
         if (default_on == 2u)
-            on = art_fixes; // always: on with its mod, which only the art fixes have
+            on = art_fix_window != NULL; // always: on with its mod, which only the art fixes have
         if (strcmp(name, "instant_text") == 0)
             g_instant_text = index;
         else if (strcmp(name, "brisk_sail") == 0)
