@@ -1,6 +1,6 @@
 # PRD — Why higher render settings slow the game when the GPU has room
 
-Status: In progress; mechanism confirmed, opt-in source experiment next
+Status: In progress; mechanism confirmed, first source experiment rejected; next: the in-between frame
 Source base: BlueWake `main` at `ee991d3`
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 Scope: explain the game's frame-rate loss when higher render settings increase GPU work, then test a narrowly scoped reduction in that work. The first source experiment batches safe staging-buffer copies while preserving texture-upload order. Excluded: changing the picture, shipping a GPU clock cap, reordering texture uploads, and enabling an unqualified experiment by default.
@@ -33,19 +33,19 @@ The measurements now identify the missing link: the Deck's CPU and GPU share an 
 
 1. **Why does 4x lose at Outset?** More GPU work changes the Deck's shared-power operating point and lowers the clock of the CPU-bound game thread.
 2. **Why does Smooth Motion matter?** It gives the GPU an in-between frame to render. With it off, the GPU does substantially less work and the Outset loss disappears.
-3. **What should change?** Reduce GPU work, beginning with an opt-in staging-copy experiment and then the in-between frame itself if the copy experiment is insufficient.
+3. **What should change?** Reduce the work rerun for Smooth Motion's in-between frame. The first experiment, batching non-texture staging copies, reduced reported GPU work but did not improve frame rate.
 4. **What remains outside this pass?** Confirming whether the HD look has the same mechanism is deferred until a concrete source change needs that qualification.
 
-## Planned outcome
+## Outcome and next direction
 
-- Keep the diagnosis, implementation, dependency pin, and validation together in BlueWake PR #563.
-- Stack RecompCore #53 on #49. #53 keeps ordered texture uploads in place and batches only vertex, uniform, index, and storage-buffer staging copies into a command buffer submitted before the already-encoded render work.
-- Expose the experiment as an experimental GUI switch backed by `DOL_AURORA_BATCH_STAGING_COPIES=1`. It is off by default, persists through the shared settings file, and takes effect on the next launch while it is being qualified.
-- Keep the source change only if it wins every one of at least six interleaved Deck launches, preserves guest checkpoints, and produces identical pictures with Smooth Motion off. Otherwise revert the pin/change in #563 and record the no-go result.
+- The shared-power diagnosis remains in BlueWake PR #563.
+- RecompCore #53's safe staging-copy experiment was tested with 12 candidate and 12 baseline launches. It was performance-neutral overall (+0.03 %) and slower in four of five scenes, including Outset (−1.23 %), despite lowering the median reported GPU work from 26.627 to 22.188 ms.
+- All 24 measured runs loaded every scene and guest checkpoints matched. The experiment failed performance acceptance, so its BlueWake pin, patches, build-recipe changes and GUI setting were removed. Picture qualification was not run because it could not change the rejection.
+- The next isolated source experiment should target render/EFB work repeated for Smooth Motion's in-between frame.
 
 ## First experiment result
 
-The staging-copy candidate was measured with 12 launches per setting. It reduced median reported GPU work from 26.627 to 22.188 ms, but overall FPS was effectively unchanged (+0.03 %) and four of five scenes were slower, including Outset (−1.23 %). All 24 measured runs loaded every scene and guest checkpoints matched. This records the data only; the experiment and its opt-in integration remain in the PR pending an explicit disposition decision.
+The staging-copy candidate was measured with 12 launches per setting. It reduced median reported GPU work from 26.627 to 22.188 ms, but overall FPS was effectively unchanged (+0.03 %) and four of five scenes were slower, including Outset (−1.23 %). All 24 measured runs loaded every scene and guest checkpoints matched. **Rejected:** the pin, patches, GUI switch and build recipe are removed from this PR; RecompCore #53 stays as the record. Lower reported GPU work did not free the CPU, so the next target is the in-between frame's repeated render and EFB work.
 
 ## Success and constraints
 
@@ -54,7 +54,6 @@ The staging-copy candidate was measured with 12 launches per setting. It reduced
 | Attribution | ≥ 90 % of the 3x → 4x frame-time increase assigned to a named cause |
 | Repeatability | Six interleaved launches per setting, same build, same save states |
 | Performance gate | Candidate ahead of baseline in every one of at least six interleaved Deck launches |
-| Exactness of the source change | Identical guest checkpoints; identical pictures with Smooth Motion off |
+| Exactness of a retained source change | Identical guest checkpoints; identical pictures with Smooth Motion off |
 | Picture | No change to what is drawn |
-| Rollout | Experiment remains opt-in until it passes the performance and exactness gates |
-| Product access | Experimental GUI switch on every desktop platform; default off and next-launch behavior covered by Linux and Windows CI settings tests |
+| Rejected experiments | Remove product/build integration and preserve the measured no-go result |
