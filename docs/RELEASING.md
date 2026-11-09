@@ -19,7 +19,8 @@ same pull request as the fix, with the release it came from.
    `python3 scripts/release/check_padmint_catalog.py`: it compares the recipe's iPhone hosts with the computers
    PadMint's menu offers BlueWake on. If it fails, open the PadMint pull request now, so it can merge and ship in a
    PadMint release on the day BlueWake publishes. A new or changed host is labelled experimental until a run is
-   recorded.
+   recorded. PadMint's player check (lines 5 and 9) enforces this too: before tagging it lists what the catalog will
+   need, and after publishing it fails until the catalog matches.
 
 ## Before tagging
 
@@ -37,7 +38,8 @@ same pull request as the fix, with the release it came from.
 
 8. **The tag and the downloads.** The tag points at the release commit, `releases/latest` is the new release, and every
    asset downloads without signing in and matches `SHA256SUMS`.
-9. **PadMint player check, without a checkout**, from `releases/latest` (same setup as line 5).
+9. **PadMint player check, without a checkout**, from `releases/latest` (same setup as line 5). It first audits PadMint's
+   catalog against the published recipe and fails if PadMint would hide or offer something the release doesn't match.
 10. **PadMint offers what the release builds.** `python3 scripts/release/check_padmint_catalog.py` passes against
     PadMint's `main`, and a PadMint release that contains the catalog change is out. For a host added in this release,
     someone opens PadMint on that kind of computer and sees BlueWake offered, or the record says nobody could.
