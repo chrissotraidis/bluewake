@@ -75,8 +75,9 @@ Adreno), game controllers on Android (they go through SDL, as on Windows), the H
     passed with `--llvm`
   - **macOS (Intel or Apple silicon):** Xcode's command line tools (`xcode-select --install`), Rust (`cargo`,
     which builds `nodtool` to convert an `.rvz`), and `brew install cmake ninja`. No `--llvm`. The NDK's macOS
-    toolchain is a universal binary and runs natively. Builds from an `.rvz` or an `.iso`. Linux hosts take the
-    same path in the code but are untested.
+    toolchain is a universal binary and runs natively. Builds from an `.rvz` or an `.iso`.
+  - **Linux:** Docker, and nothing else: `--ci-container` builds in the Android build container below. The native
+    host path is the same code as the Mac's, but the container is what has been run on Linux.
   - Python 3.10+, Git, CMake 3.25+ (Ninja from the Android SDK's CMake is used if none is on PATH)
 - The Android SDK with the NDK (r27 or newer), build-tools and a platform, and a JDK 17
 - An arm64 Android device on Android 10 (API 29) or newer with Vulkan 1.1. The APK declares API 29, but the
