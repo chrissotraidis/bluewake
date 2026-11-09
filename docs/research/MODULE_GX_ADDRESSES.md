@@ -1,6 +1,6 @@
 # Module art read from the wrong address (#545)
 
-Findings from November 3, 2026, on `main` at ee991d31 (RecompCore 78c266d2), Linux (Arch, Ryzen 9 9900X, Vulkan). This is research only: no code changes. The open question at the end is which fix to take for the modules linked low.
+Findings from November 3, 2026, on `main` at ee991d31 (RecompCore 78c266d2), Linux (Arch, Ryzen 9 9900X, Vulkan). This is research only: no code changes. The fixes are #583 and #584; [Outcome](#outcome) at the end says which route was taken and why.
 
 ## What players see
 
@@ -59,7 +59,7 @@ Checks:
 - **Save states:** states made on `main` and with the fix load with the tapestry right.
 - **Speed:** rendered on the 9900X limited to 4 cores, fix against `main`, 4 rotating reps at the Earth Temple, Forbidden Woods, Outset and Windfall. The difference was -0.1% to -0.4%, inside the spread. GX does about 1,600 uncached resolves a frame (median; Forbidden Woods about 6,500), and the fix adds one compare to each. This isn't a weak-PC measurement.
 
-## Modules linked low: the open question
+## Modules linked low: the options
 
 No lookup on the cut address alone can be safe, because it is a valid RAM address. The full pointer has to be kept at the call, or the data has to move. What was looked at:
 
@@ -75,18 +75,20 @@ No lookup on the cut address alone can be safe, because it is a valid RAM addres
 
   It needs no RecompCore or DolRecomp source change.
 
-- **The same hooks as an opt-in option on the mod build.** Mods are added as variant chunks beside the base composite, and the base game is untouched when a mod is off (`docs/MODS.md`). So a fix option built that way should leave the base translation and `COMPOSITE_DIGEST` unchanged (not yet checked). It would be off by default, as AGENTS.md asks for rendering changes until each platform is tested. Costs:
+- **The same hooks as an opt-in option on the mod build.** Mods are added as variant chunks beside the base composite, and the base game is untouched when a mod is off (`docs/MODS.md`). So a fix option built that way leaves the base translation and `COMPOSITE_DIGEST` unchanged (checked later on Windows and Linux; see [Outcome](#outcome)). It would be off by default, as AGENTS.md asks for rendering changes until each platform is tested. Costs:
   - builds without the mod phase (`--no-mods`) don't get the low-module fix, and keep today's flags;
   - where its chunks overlap Better Wind Waker's, a combined variant is needed, as for Better Wind Waker with widescreen;
   - a bug fix sits among the options.
 
-## Question for Chris
+## Outcome
 
-Which way do you want the low modules fixed?
-1. Option-site hooks in the base translation, with a new composite digest.
-2. Relink the four modules' data above module 1, with DolRecomp and save-state version changes.
-3. The hooks as an opt-in option on the mod build (no-mod builds keep the bug).
-4. Ship the high-module fix first as its own PR, then the low modules once a route is picked.
-5. Something else.
+Chris picked the route on November 6, 2026 (on #549): the high-module fix first as its own pull request, and the low modules as the opt-in mod-build option, as long as it leaves the base composite and its digest unchanged. He didn't want a DolRecomp change and a save-state version bump for this.
 
-I'd like one PR to fix all of it if the route allows. I'm not sure which route is best.
+- **#583**, the modules linked high: the host-only resolver fix above. It fixes the Earth Temple's tapestries and the pirate ship's sail and flag, and is always on.
+- **#584**, the modules linked low: the `moduleart` mod (`mods/moduleart/options.txt`). It hooks the four modules' 26 GX calls and points them at the GX-only window above module 1, so save states don't change. The switch is Config › Fixes, "Art fixes for flags, banners and capes (testing)", off by default. Builds without mods don't get it. It is stacked on #583, and the two together close #545.
+
+Checked for #584 on November 9, 2026:
+- **Windows:** the cannon boats' flag and Phantom Ganon's cape draw their art. With the switch on, frames are pixel-identical wherever those modules aren't drawn. The digest check still reports the verified base tree.
+- **Linux (Arch, Ryzen 9 9900X, RTX 5070 Ti):** in play, the reefs' and the Forsaken Fortress's flags draw their art. Save states loaded with the switch off and then on show a Darknut's cape, the goal flag and a skull barrel's flag going from noise or plain colour to their real art. The base composite digest is the same as `main`'s.
+
+Not checked: the Mac build.
