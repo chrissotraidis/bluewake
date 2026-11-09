@@ -7,14 +7,16 @@
 #include <string.h>
 
 // The native code at the options' hook sites (the ids in mods/betterww/
-// options.txt). Each does what Better Wind Waker's added assembly does at the
-// same place, on the guest state the site hands it.
+// options.txt and mods/moduleart/options.txt). Each of Better Wind Waker's does
+// what its added assembly does at the same place, on the guest state the site
+// hands it.
 enum {
     HOOK_SWING_TURN = 1,
     HOOK_INVERT_CAMERA_X = 2,
     HOOK_SAIL_WIND = 3,
     HOOK_SAIL_BRAKE = 4,
     HOOK_SAIL_IDLE_BRAKE = 5,
+    HOOK_ART_FIX = 6,
 };
 
 typedef u32 (*NativeHookFn)(CPUState* ctx, u32 id);
@@ -28,6 +30,7 @@ static CPUState* g_cpu;
 static u32 g_instant_text;
 static u32 g_brisk_sail;
 static u32 g_invert_camera_x;
+static BluewakeArtFixWindowFn g_art_fix_window;
 
 static bool option_on(u32 index) { return g_flags != NULL && index != 0u && g_flags[index] != 0u; }
 
@@ -120,6 +123,12 @@ static u32 native_hook(CPUState* cpu, u32 id) {
         set_single(cpu, 3, option_on(g_brisk_sail) ? 4.0f : 2.0f);
         set_single(cpu, 4, option_on(g_brisk_sail) ? 0.2f : 0.1f);
         return 0u;
+    case HOOK_ART_FIX:
+        // Before a call to GXInitTexObj, GXInitTexObjCI, GXInitTlutObj or
+        // GXSetArray: the art's pointer is r4 in each.
+        if (g_art_fix_window != NULL)
+            cpu->gpr[4] = g_art_fix_window(cpu->gpr[4]);
+        return 0u;
     default:
         return 0u;
     }
@@ -152,7 +161,7 @@ static bool named(const char* list, const char* name, bool* on) {
     return found;
 }
 
-void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled) {
+void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled, BluewakeArtFixWindowFn art_fix_window) {
     typedef volatile unsigned char* (*FlagsFn)(void);
     typedef void (*SetHookFn)(NativeHookFn);
     typedef u32 (*CountFn)(void);
@@ -168,6 +177,7 @@ void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled) {
     g_flags = flags();
     g_option = option;
     g_cpu = cpu;
+    g_art_fix_window = art_fix_window;
     set_hook(native_hook);
 
     const char* wanted = getenv("BLUEWAKE_OPTIONS");
@@ -180,6 +190,8 @@ void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled) {
         bool on = default_on != 0u && !none;
         named(wanted, name, &on);
         on = on && mod_enabled;
+        if (default_on == 2u)
+            on = art_fix_window != NULL; // always: on with its mod, which only the art fixes have
         if (strcmp(name, "instant_text") == 0)
             g_instant_text = index;
         else if (strcmp(name, "brisk_sail") == 0)
@@ -202,9 +214,15 @@ void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled) {
 bool bluewake_game_options_invert_camera_x(void) { return option_on(g_invert_camera_x); }
 
 const char* bluewake_game_options_describe(u32 position, const char** title, bool* default_on, bool* on) {
+    // The options with a switch, in table order (an always option has none).
     u32 index = 0u, defaults = 0u;
     const char* text = NULL;
-    const char* name = g_option != NULL ? g_option(position, &index, &defaults, &text) : NULL;
+    const char* name = NULL;
+    for (u32 i = 0u, shown = 0u; g_option != NULL; ++i) {
+        name = g_option(i, &index, &defaults, &text);
+        if (name == NULL || (defaults != 2u && shown++ == position))
+            break;
+    }
     if (name == NULL)
         return NULL;
     if (title)

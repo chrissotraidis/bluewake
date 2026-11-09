@@ -96,6 +96,29 @@ values and changed message data. BlueWake does the same things at runtime, from
 Better Wind Waker's other changes are left out: its randomizer fixes, the custom player model and colours,
 random enemy colours and the title and memory-card art.
 
+## Art fixes
+
+**F1 › Config › Fixes › Art fixes for flags, banners and capes (testing)** (`BLUEWAKE_ART_FIXES=1`), off by
+default until each platform has been checked, and read when BlueWake starts. It draws the reefs', Forsaken
+Fortress's and the cannon boats' flags, the floating barrels' banners, Darknut's and Phantom Ganon's capes and
+the goal flag with their own art instead of noise (#545).
+
+Those four modules (`d_a_majuu_flag`, `d_a_obj_buoyflag`, `d_a_mant`, `d_a_goal_flag`) hand GX a pointer to art
+in their own data. GX keeps only the address's low bits, and these modules are linked below 0xC1800000, so the
+cut address is real game memory and the art is read from whatever the heap holds there. (Modules linked higher
+need nothing: their cut address lands past the retail 24 MiB, where the host looks it up as a module's.)
+
+The fix is built like Better Wind Waker's options, in the mods step, so the base translation and its verified
+digest don't change. `mods/moduleart/options.txt` puts a hook before each of the four modules' 26 calls to
+`GXInitTexObj`, `GXInitTexObjCI`, `GXInitTlutObj` and `GXSetArray`; the RELs are translated with those hooks,
+and the four chunks that hold them are the `moduleart` mod's variants, applied when the switch is on. The hook
+(`game_options.c`) moves the art's pointer, when it is one of the four modules' own data, to a window the host
+keeps for GX over the same bytes, one 64 KiB page a module from 0xC1F90000 (`host_art_fix_windows` in
+`main.c`). The window is in the host's registry only: the game never sees it, and save states don't hold it. Its
+cut address is past the retail 24 MiB too, where `host_graphics_guest_resolve` reads it as a module's. The
+option is an `always` one: it has no switch of its own and isn't listed with Better Wind Waker's. A build
+without mods has no `moduleart` chunks, and the switch does nothing there.
+
 ## How code mods work in a static recompilation
 
 BlueWake runs the game from native code translated ahead of time, so a mod that rewrites game code in

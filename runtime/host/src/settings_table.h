@@ -345,6 +345,18 @@ inline constexpr Setting kSettings[] = {
              "faster. Uses about 370 MB more memory. Linux only (elsewhere it does nothing). Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // Fixes: corrections to how BlueWake draws the game, off by default until
+    // each platform has been checked. The art fixes (#545) are the "moduleart"
+    // mod's chunks (mods/moduleart/options.txt), so a build without mods has
+    // none and the switch does nothing there.
+    {.key = "BLUEWAKE_ART_FIXES", .kind = Kind::Bool,
+     .label = "Art fixes for flags, banners and capes (testing)", .tab = Tab::Config,
+     .control = Control::Switch,
+     .note = "Draws the reefs', Forsaken Fortress's and the cannon boats' flags, the floating barrels' "
+             "banners, Darknut's and Phantom Ganon's capes and the goal flag with their own art instead "
+             "of noise. Off by default while it is tested. Needs a build with mods. Takes effect when "
+             "BlueWake starts again.",
+     .group = "Fixes", .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.

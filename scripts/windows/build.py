@@ -654,14 +654,15 @@ int main(void) {
 
     # --- 5 translate -------------------------------------------------------
     def translate(self, dol, out, rels=None, name="translate", sites=()):
-        """DolRecomp over main.dol (and the RELs); `sites` is --option-sites FILE
-        for Better Wind Waker's options (scripts/mods/build_mods.sh)."""
+        """DolRecomp over main.dol (None: the RELs only) and the RELs; `sites` is
+        --option-sites FILE for the game options (scripts/mods/build_mods.sh)."""
         pending = out.with_name(out.name + ".new")
         shutil.rmtree(pending, ignore_errors=True)
         pending.mkdir(parents=True)
-        self.run(f"{name}-dol", [self.dolrecomp, "--gamecube", "--backend", "c", "--cpu", "gekko",
-                                 "--partition-instructions", "4096", *sites, dol, pending / "dol",
-                                 "-j", self.args.jobs])
+        if dol is not None:
+            self.run(f"{name}-dol", [self.dolrecomp, "--gamecube", "--backend", "c", "--cpu", "gekko",
+                                     "--partition-instructions", "4096", *sites, dol, pending / "dol",
+                                     "-j", self.args.jobs])
         if rels is not None:
             # With option sites, name the RELs' folder with "/" and a trailing
             # "/": DolRecomp matches a REL's sites (d_a_ship.rel+0x...) to the
@@ -707,7 +708,8 @@ int main(void) {
                        + ("lean_deadlines\n" if getattr(self.args, "lean_deadlines", False) else "")
                        + ("behaviour_timing\n" if getattr(self.args, "behaviour_timing", False) else "")).encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
-                  + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py",
+                  + [ROOT / "mods/betterww/options.txt", ROOT / "mods/moduleart/options.txt",
+                     ROOT / "scripts/windows/fast_blocks.py",
                      ROOT / "scripts/windows/return_ranges.py",
                      ROOT / "scripts/windows/global_guest_cpu.py", ROOT / "scripts/windows/chunk_headers.py",
                      ROOT / "cmake/composite/inline_fp.h", ROOT / "cmake/composite/gather_pipe.h",
@@ -794,18 +796,23 @@ int main(void) {
 
     # --- 7 mods --------------------------------------------------------------
     def build_mods(self):
-        """Widescreen 16:9, 16:10 and 21:9, Better Wind Waker's options, and each
-        widescreen with them, as variants compiled into the same module: the
-        steps of scripts/mods/build_mods.sh (docs/MODS.md)."""
+        """Widescreen 16:9, 16:10 and 21:9, Better Wind Waker's options, each
+        widescreen with them, and the art fixes, as variants compiled into the
+        same module: the steps of scripts/mods/build_mods.sh (docs/MODS.md)."""
         o, m = self.out, self.out / "mods"
         m.mkdir(parents=True, exist_ok=True)
         options = ROOT / "mods/betterww/options.txt"
-        # The site list DolRecomp reads, with LF line ends (Python's stdout
-        # writes CRLF on Windows).
-        listed = subprocess.run([sys.executable, "-X", "utf8", ROOT / "scripts/mods/game_options.py", "sites", options],
-                                capture_output=True, check=True).stdout
-        (m / "option-sites.txt").write_bytes(listed.replace(b"\r\n", b"\n"))
-        sites = ("--option-sites", m / "option-sites.txt")
+        art_options = ROOT / "mods/moduleart/options.txt"
+
+        def site_list(spec, path):
+            # The site list DolRecomp reads, with LF line ends (Python's stdout
+            # writes CRLF on Windows).
+            listed = subprocess.run([sys.executable, "-X", "utf8", ROOT / "scripts/mods/game_options.py", "sites",
+                                     spec], capture_output=True, check=True).stdout
+            path.write_bytes(listed.replace(b"\r\n", b"\n"))
+            return ("--option-sites", path)
+        sites = site_list(options, m / "option-sites.txt")
+        art_sites = site_list(art_options, m / "option-sites-art.txt")
 
         def widescreen(name, gecko):
             print(name)
@@ -838,6 +845,17 @@ int main(void) {
                            o / "game/rels", m / widescreen / "main.dol", m / combo / "composite-src",
                            f"mods-{combo}-composite")
 
+        def moduleart():
+            # The art fixes (mods/moduleart/options.txt): the modules translated
+            # with their hooks, beside the base game's executable.
+            print("Art fixes")
+            (m / "moduleart").mkdir(exist_ok=True)
+            self.translate(None, m / "moduleart/translated", o / "game/rels", name="mods-moduleart-translate",
+                           sites=art_sites)
+            self.composite(o / "translated/dol/generated", m / "moduleart/translated/rels/generated/rels",
+                           o / "game/rels", o / "game/main.dol", m / "moduleart/composite-src",
+                           "mods-moduleart-composite")
+
         base = m / "composite-src.base"
 
         def base_tree():
@@ -848,7 +866,7 @@ int main(void) {
         # widescreen's main.dol and Better Wind Waker's RELs: two rounds at once.
         self.together(lambda: widescreen("widescreen", "GZLE01.gecko"),
                       lambda: widescreen("widescreen1610", "GZLE01-16x10.gecko"),
-                      lambda: widescreen("widescreen219", "GZLE01-21x9.gecko"), betterww, base_tree)
+                      lambda: widescreen("widescreen219", "GZLE01-21x9.gecko"), betterww, moduleart, base_tree)
         self.together(lambda: combo("combo", "widescreen"), lambda: combo("combo1610", "widescreen1610"),
                       lambda: combo("combo219", "widescreen219"))
 
@@ -866,11 +884,12 @@ int main(void) {
                      "mods/widescreen1610/runtime.json",
             "--mod", "widescreen219:mods/widescreen219/composite-src:mods/widescreen219/main.dol:"
                      "mods/widescreen219/runtime.json",
+            "--mod", "moduleart:mods/moduleart/composite-src:game/main.dol",
             "--combo", "widescreen+betterww:mods/combo/composite-src",
             "--combo", "widescreen1610+betterww:mods/combo1610/composite-src",
             "--combo", "widescreen219+betterww:mods/combo219/composite-src",
             "--exclusive", "widescreen,widescreen1610,widescreen219",
-            "--options", options, "--rels-bin-dir", o / "game/rels"], cwd=o)
+            "--options", options, "--options", art_options, "--rels-bin-dir", o / "game/rels"], cwd=o)
         dst = o / "composite-src"
         if (base / "generated.h").read_bytes() != (dst / "generated.h").read_bytes():
             die(f"{dst} was generated from other inputs; rebuild it first")

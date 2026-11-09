@@ -807,6 +807,37 @@ static ModWritesFn g_mod_writes;
 static u32 g_mod_mask;
 // Whether the mod that carries the game options' sites is on (game_options.h).
 static bool g_options_mod;
+// Whether the art fixes are on: the "moduleart" mod, which Config > Fixes'
+// switch (BLUEWAKE_ART_FIXES=1) turns on (mods/moduleart/options.txt).
+static bool g_art_fixes_mod;
+
+// The art fixes' GX-only windows. Four modules linked below 0xC1800000 hand GX
+// pointers to art in their own data, and GX keeps only the address's low bits,
+// so the cut address is game memory (#545). The mod's hooks move such a pointer
+// to a window over the same bytes, one 64 KiB page a module from 0xC1F90000
+// (the address's low 16 bits kept, so a texture keeps its 32-byte alignment),
+// whose cut form is past the retail 24 MiB where host_graphics_guest_resolve
+// looks it up as a module's. The windows are in the host's registry only: the
+// game never sees them and save states don't hold them.
+#define HOST_ART_FIX_WINDOW_BASE 0xC1F90000u
+static const u32 kArtFixModules[] = {41u, 217u, 230u, 303u}; // majuu_flag, goal_flag, mant, obj_buoyflag
+#define HOST_ART_FIX_MODULES (sizeof kArtFixModules / sizeof kArtFixModules[0])
+#define HOST_ART_FIX_WINDOW_END (HOST_ART_FIX_WINDOW_BASE + (u32)HOST_ART_FIX_MODULES * 0x10000u)
+typedef struct HostArtFixRange {
+    u32 start, end, window;
+} HostArtFixRange;
+static HostArtFixRange g_art_fix_ranges[HOST_ART_FIX_MODULES * 8u];
+static u32 g_art_fix_range_count;
+
+// The mod's hook calls this, through game_options.c (bluewake_game_options_enable).
+static u32 host_art_fix_window(u32 address) {
+    for (u32 i = 0; i < g_art_fix_range_count; ++i) {
+        const HostArtFixRange* range = &g_art_fix_ranges[i];
+        if (address >= range->start && address < range->end)
+            return range->window + (address - range->start);
+    }
+    return address;
+}
 
 static void host_mod_write(void* user, u32 address, const u8* bytes, u32 size) {
     // Through the guest accessor, as the REL data images are materialized:
@@ -1092,6 +1123,42 @@ static void host_boot_writes_state_loaded(CPUState* cpu) {
     }
 }
 
+// The art fixes' windows, once the modules' own aliases are registered: each
+// data and BSS section of the four modules gets a second entry in the host's
+// registry over its storage, in its module's window page.
+static void host_art_fix_windows(void) {
+    if (!g_art_fixes_mod || g_rel_data == NULL)
+        return;
+    u32 added = 0u;
+    for (u32 k = 0; k < HOST_ART_FIX_MODULES; ++k) {
+        const u32 window_page = HOST_ART_FIX_WINDOW_BASE + k * 0x10000u;
+        for (u32 i = 0; i < g_rel_data_count; ++i) {
+            const BlueWakeRelData* image = &g_rel_data[i];
+            if (image->module_id != kArtFixModules[k] || image->size == 0u || image->linked_start == 0u)
+                continue;
+            u8* storage = NULL;
+            const u32 offset = image->linked_start & 0xFFFFu;
+            bool ok = offset + image->size <= 0x10000u &&
+                      g_art_fix_range_count < sizeof g_art_fix_ranges / sizeof g_art_fix_ranges[0];
+            pthread_mutex_lock(&g_guest_alias_lock);
+            ok = ok && ppc_guest_alias_get_storage(image->linked_start, image->size, &storage) &&
+                 storage != NULL && ppc_guest_alias_add_shared(window_page + offset, image->size, storage);
+            g_guest_alias_changes++;
+            pthread_mutex_unlock(&g_guest_alias_lock);
+            if (!ok) {
+                fprintf(stderr, "[art-fixes] module %u section %u (0x%08X, %u bytes) has no window\n",
+                        image->module_id, image->section_index, image->linked_start, image->size);
+                continue;
+            }
+            g_art_fix_ranges[g_art_fix_range_count++] =
+                (HostArtFixRange){image->linked_start, image->linked_start + image->size, window_page + offset};
+            added++;
+        }
+    }
+    fprintf(stderr, "[art-fixes] on: %u sections of %u modules read by GX through 0x%08X-0x%08X\n", added,
+            (unsigned)HOST_ART_FIX_MODULES, HOST_ART_FIX_WINDOW_BASE, HOST_ART_FIX_WINDOW_END);
+}
+
 static void host_mods_enable(void* lib, CPUState* cpu) {
     typedef u32 (*CountFn)(void);
     typedef const char* (*NameFn)(u32);
@@ -1114,10 +1181,18 @@ static void host_mods_enable(void* lib, CPUState* cpu) {
                 on = true;
             p = end ? end + 1 : NULL;
         }
+        // The art fixes are a switch of their own (Config > Fixes), not a
+        // name in BLUEWAKE_MODS.
+        if (!on && mod != NULL && strcmp(mod, "moduleart") == 0) {
+            const char* art = getenv("BLUEWAKE_ART_FIXES");
+            on = art != NULL && strcmp(art, "1") == 0;
+        }
         if (on)
             g_mod_mask |= 1u << i;
         if (on && strcmp(mod, "betterww") == 0)
             g_options_mod = true;
+        if (on && strcmp(mod, "moduleart") == 0)
+            g_art_fixes_mod = true;
     }
     // The widescreen mods patch the same code for different shapes; the
     // composite has no variant for two of them. If asked for more than one,
@@ -5467,10 +5542,23 @@ static bool host_graphics_guest_resolve_uncached(
     // look it up at the linked address it came from: Molgera's sand floor
     // (d_a_bwdg's GFSetArray of its texture coordinates) was skipped every
     // frame and the arena had no floor (issue #126).
+    //
+    // A texture or palette's address reaches GX through SETIMAGE3 or
+    // LOADTLUT0, which hold only bits 5-25: a module's texture at 0xC1856760
+    // (d_a_obj_tapestry's cloth, Earth Temple) arrives as 0x01856760. MEM1
+    // past the retail 24 MiB holds no GX data (the callback sentinel and the
+    // raw REL staging window), so such an address is a module's linked
+    // address with its top bits dropped: look it up at 0xC0000000 | address.
+    // Not from module 1 (0x81F80000) on: it sits in RAM there, and its
+    // alias holds other bytes (its relocated pointers) than that RAM. The art
+    // fixes' windows above it (host_art_fix_windows) are read the same way.
     {
-        const u32 linked = (address & 0xC0000000u) == 0x40000000u
-                               ? address | 0x80000000u
-                               : address;
+        u32 linked = (address & 0xC0000000u) == 0x40000000u
+                         ? address | 0x80000000u
+                         : address;
+        if ((address >= GC_MAIN_RAM_SIZE && address < (BLUEWAKE_DYNAMIC_SCRATCH_LIMIT & 0x3FFFFFFFu)) ||
+            (address >= (HOST_ART_FIX_WINDOW_BASE & 0x3FFFFFFFu) && address < (HOST_ART_FIX_WINDOW_END & 0x3FFFFFFFu)))
+            linked = address | 0xC0000000u;
         u8* alias = NULL;
         u32 alias_offset = 0u;
         // The translation worker's thread: see g_guest_alias_lock.
@@ -8799,7 +8887,8 @@ int main(int argc, char** argv) {
             gather_mode == BLUEWAKE_GATHER_BATCH ? "batch" :
             gather_mode == BLUEWAKE_GATHER_DIRECT ? "direct" : "off");
     host_mods_enable(lib, &cpu);
-    bluewake_game_options_enable(lib, &cpu, g_options_mod);
+    host_art_fix_windows();
+    bluewake_game_options_enable(lib, &cpu, g_options_mod, g_art_fixes_mod ? host_art_fix_window : NULL);
     host_boot_writes_mark_options(lib);
     bluewake_forest_water_set_ftree_text(
         host_rel_section_linked_start(mod, 317u, 1u));
