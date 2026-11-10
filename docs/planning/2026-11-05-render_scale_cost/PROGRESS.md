@@ -30,9 +30,10 @@ Status: In progress. Goal: 3x + full HD look + Smooth Motion holds 30 on the Dec
 
 ### M4: 3x + full HD look holds 30 (goal)
 - [x] M4-T01: Cost of each part at 3x + HD, turned off, paced, owner's state, 2 launches each (baseline 24.39): Smooth Motion off 29.92 (+22.7 %), cloud shadows +7.9 %, ambient occlusion +6.5 %, far blur +5.2 %, edge light +1.4 %, bloom +1.1 %. The effects together ≈ the whole gap; far blur matters more at 3x than at 4x
-- [ ] M4-T02: Step 1 — faster cloud shadows: Deck A/B, switch on vs off in the same stack build, 6+ paced launches each, pictures (build running; RecompCore#54, #586)
-- [ ] M4-T03: Step 2 — cheaper ambient occlusion, opt-in
-- [ ] M4-T04: Step 3 — one pass for the per-pixel HD effects, bit-identical, plus a cheaper far blur (5.2 % at 3x: downsample, 2×2 blur passes, composite), opt-in
+- [ ] M4-T02: Step 1 — faster cloud shadows (`DOL_AURORA_CLOUD_NOISE_TEXTURE`): Deck A/B, switch on vs off in the same stack build, 6+ paced launches each, pictures. Code in RecompCore#54 / #586, which now carry steps 1–3a in one PR each (owner's request)
+- [ ] M4-T03: Step 2 — faster ambient occlusion (`DOL_AURORA_AO_PACKED`): the quarter-size occlusion keeps its distance beside its shade (RG16Float), so the blurs and upscale don't re-read full-size depth. Written and compiled (RecompCore `c00b3399`); Deck A/B pending
+- [ ] M4-T04: Step 3a — skip effect pixels that change nothing (`DOL_AURORA_POST_SKIP_IDENTITY`): the five full-size passes discard pixels whose result is the blend's identity, bit-identical. Written and compiled (RecompCore `cfc02a90`); Deck A/B pending
+- [ ] M4-T04b: Step 3b — one pass for the per-pixel HD effects (copy of the scene + one combined pass repeating each blend), and a cheaper far blur, if 3a and the others fall short
 - [ ] M4-T05: Step 4 — in-between frame reuses the real frame's off-screen copies, opt-in (only if 1–3 fall short)
 - [ ] M4-T06: Check against the goal: 3x + HD + Smooth Motion ≥ 30 fps paced, and in the owner's play
 
