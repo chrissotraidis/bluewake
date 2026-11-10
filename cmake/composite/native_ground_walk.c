@@ -50,9 +50,12 @@ enum { GW_CYC_VISIT = 64, GW_CYC_CHILD = 9, GW_CYC_FILTER = 26, GW_CYC_TREE = 6 
 /* The budget held open while a walk runs. */
 #define GW_OPEN ((s64)1 << 40)
 
+/* module_export.c: the chunk that runs a guest address. */
+BwChunkFn bw_find_chunk(u32 address);
+
 static int s_enabled = -1;
 static int s_unwatched = -1;
-static unsigned long long s_walks, s_declined, s_visits, s_trees, s_broken;
+static unsigned long long s_walks, s_declined, s_visits, s_trees, s_broken, s_resumed;
 
 static bool gw_enabled(void) {
     if (s_enabled < 0) {
@@ -93,11 +96,31 @@ typedef struct {
 } GwWalk;
 
 /* A translated function, called with LR at the sentinel; true when it
- * returned there. */
+ * returned there. A chunk can hand back before that without an exception (a
+ * call it does not run directly): the rest runs here, chunk by chunk, as the
+ * dispatcher would run it, through addresses the host does not watch. An
+ * exception is left alone (the walk is then broken: it is declined up front
+ * where one can come, as with floating point off). */
 static bool gw_call(GwWalk* w, u32 target) {
     CPUState* cpu = w->cpu;
     cpu->lr = GW_SENTINEL;
-    if (!bw_call_translated(cpu, target) || cpu->pc != GW_SENTINEL || cpu->exception != 0u) {
+    if (!bw_call_translated(cpu, target)) {
+        w->broken = true;
+        return false;
+    }
+    for (unsigned hops = 0; cpu->pc != GW_SENTINEL && cpu->exception == 0u && hops < 4096u; ++hops) {
+        const u32 pc = cpu->pc;
+        if (!bw_edge_unwatched(pc))
+            break;
+        const BwChunkFn fn = bw_find_chunk(pc);
+        if (fn == NULL)
+            break;
+        s_resumed++;
+        ++bw_direct_depth;
+        fn(cpu);
+        --bw_direct_depth;
+    }
+    if (cpu->pc != GW_SENTINEL || cpu->exception != 0u) {
         w->broken = true;
         return false;
     }
@@ -181,7 +204,10 @@ int bluewake_native_ground_walk_try(CPUState* cpu) {
     if (!gw_enabled())
         return 0;
     const u32 sp = cpu->gpr[1];
+    /* Floating point off: the polygon test's first float instruction would
+     * trap to the OS's handler midway, so the translation runs instead. */
     if (!bw_direct_enabled || bw_direct_depth + 4u >= BW_DIRECT_DEPTH_MAX || cpu->exception != 0u ||
+        (cpu->msr & PPC_MSR_FP) == 0u ||
         !gw_unwatched() || !BW_RAM_FAST_STORE(cpu, sp - 64u, 64u)) {
         s_declined++;
         return 0;
@@ -209,8 +235,8 @@ int bluewake_native_ground_walk_try(CPUState* cpu) {
     if (w.broken && s_broken++ < 8)
         fprintf(stderr, "[native-ground-walk] a callee did not return to the walk (pc %08X, exception %u)\n",
                 cpu->pc, cpu->exception);
-    if ((s_walks & ((1u << 20) - 1u)) == 0u)
-        fprintf(stderr, "[native-ground-walk] walks=%llu visits=%llu trees=%llu declined=%llu broken=%llu\n",
-                s_walks, s_visits, s_trees, s_declined, s_broken);
+    if ((s_walks & ((1u << 16) - 1u)) == 0u)
+        fprintf(stderr, "[native-ground-walk] walks=%llu visits=%llu trees=%llu declined=%llu resumed=%llu broken=%llu\n",
+                s_walks, s_visits, s_trees, s_declined, s_resumed, s_broken);
     return 1;
 }
