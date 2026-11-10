@@ -356,6 +356,15 @@ inline constexpr Setting kSettings[] = {
              "once instead of again for every pixel. The shading can differ very slightly. Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // The HD look's full-size effects drawn into the scene in one render pass instead of a
+    // pass each (RecompCore #54, DOL_AURORA_POST_SHARED_PASS): the same draws in the same
+    // order, so the same picture. Opt-in; read when the renderer starts.
+    {.key = "DOL_AURORA_POST_SHARED_PASS", .kind = Kind::Bool,
+     .label = "Draw the HD effects together", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Draws the HD look's effects into the picture in one go instead of "
+             "one at a time. The picture is the same. Off by default; measured on a Steam Deck. "
+             "Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
