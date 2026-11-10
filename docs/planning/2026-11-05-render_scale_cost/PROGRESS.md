@@ -1,6 +1,6 @@
 # PROGRESS — Why higher render settings slow the game when the GPU has room
 
-Status: In progress. Cause confirmed: CPU/GPU power sharing. The first source experiment, non-texture staging-copy batching, was measured and rejected; BlueWake integration has been removed. Next target: Smooth Motion's repeated render/EFB work.
+Status: Closing. The 2026-11-09 recheck with chip power logged did not reproduce the 4x loss (−0.2 %) and put the HD look at −1.2 %. Shared power is at most a ~1 % effect; Outset is below 30 fps at every setting because of the game thread. The 1100 MHz cap does not confirm the power explanation: compared with uncapped runs it is slower in 9 of 10 scene/scale cases. Next: game-thread work at Outset (separate PR).
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -36,6 +36,12 @@ Status: In progress. Cause confirmed: CPU/GPU power sharing. The first source ex
 - [x] M5-T03: Scale 2 vs 3: +1.3 % overall, every 2x launch above every 3x launch; clock rises at 2x. Recommend scale 2 on the Deck
 - [ ] M5-T04: Opt-in picture-changing experiments (in-between frame or EFB copies at a lower scale): not started
 
+### M6: Recheck with chip power logged (depends: M4-T01)
+- [x] M6-T01: Cap against no cap, from the existing runs: the 1100 MHz cap is slower at 3x in all five scenes (−1.0 % to −3.6 %) and at 4x in four of five (−1.8 % to −5.8 %; Outset +9.3 %). It is a diagnostic, not a setting, and matches the owner's in-play result
+- [x] M6-T02: Outset 3x vs 4x, six launches each, slowPPT/GPU clock/temperature sampled every 0.5 s: 4x uses ~0.5 W more (14.6 vs 14.2 W) at the same FPS (26.00 vs 26.05, −0.2 %). The earlier −6.3 % did not reproduce; both settings were ~9 % slower than that day's 3x
+- [x] M6-T03: Outset HD look off vs on, 3x, same sampling: −1.2 % (26.38 → 26.07); HD on sits at the 15 W limit (median ~15.0 W vs ~14.2 W). Checkpoints identical
+- [x] M6-T04: Conclusion: render settings cost 0 % to ~1 % at Outset; day-to-day device variation (~10 %) is larger. Outset is below 30 fps unpaced at every setting, the owner sees <10 W and <30 fps in play: the game thread is the limit
+
 ### M4: Decide (depends: M3)
 - [x] M4-T01: Name the render-scale cause with ≥ 90 % of the Outset frame-rate loss attributed: shared APU power lowers the game-thread clock; evidence: artifact=uncapped and 1100-MHz capped Deck profiles; method=compare game-thread work, effective clock, and FPS; result=7.0 % uncapped clock loss accounts for the 6.3 % FPS loss and the cap reverses the result
 - [x] M4-T02: Reject #53's product integration, restore BlueWake's prior RecompCore pin/build recipe, remove the GUI setting and exported experimental patches, and record the result; evidence: artifact=render-power-batch/report.txt and #563; method=acceptance comparison plus repository diff; result=measured no-go retained without shipping the experiment
@@ -52,18 +58,27 @@ Status: In progress. Cause confirmed: CPU/GPU power sharing. The first source ex
 | M3-T01, M3-T02 | RecompCore #53, `d72f71b9` | `git diff --check`; compile modified `common.cpp` and `gpu_prof.cpp`; symbol check | Host Clang 22, existing BlueWake build defines/includes | Opt-in `DOL_AURORA_BATCH_STAGING_COPIES=1` batches only vertex/uniform/index/storage copies before render submission. Default path and texture order remain unchanged. Compilation passed with one pre-existing shader-type warning; no CTest tests were registered in the available build |
 | M3-T04, M3-T05 | BlueWake `a555c3aed7f4`; `render-power-batch/report.txt` | Same executable, A=batching on, B=off; 12 measured launches each, interleaved A/B/B/A | Steam Deck, headless gamescope 1280x800, five states, 4x, Smooth Motion one step | A vs B: overall +0.03%; Outset −1.23%, lava −0.69%, Hyrule −0.93%, butterfly +0.34%, shipwreck −0.37%. Median reported GPU work 26.627 to 22.188 ms. All 24 runs loaded all scenes; checkpoints identical. Rejected |
 
+## Recheck evidence (2026-11-09)
+
+| Task | Artifact | Method | Result |
+|---|---|---|---|
+| M6-T01 | `render-scale-3v4`, `render-scale-3v4-gpu1100` | Per-scene median FPS, capped vs uncapped at the same scale | 3x: Outset −3.6 %, lava −3.3 %, Hyrule −2.7 %, butterfly −1.0 %, shipwreck −2.1 %. 4x: Outset +9.3 %, lava −4.0 %, Hyrule −2.3 %, butterfly −1.8 %, shipwreck −5.8 %. Separate sessions, so less precise than an interleaved A/B |
+| M6-T02 | `render-power-3v4`, stack `afb6c35d8805` | `render_bench`, Outset only, 3 pairs + warm-up; read-only SSH sampler of `hwmon` slowPPT, GPU clock, temperature, tagged by the running game's settings | 3x 26.05 FPS at ~14.2 W, ~480 MHz; 4x 26.00 FPS at ~14.6 W, ~640 MHz |
+| M6-T03 | `render-power-hd`, same build | Same, A=HD look off, B=on, both 3x | Off 26.38 FPS at ~14.2 W; on 26.07 FPS at ~15.0 W |
+
 ## Decisions
 
 | Date | Decision |
 | --- | --- |
-| 2026-11-05 | The 1100 MHz cap confirms shared APU power/governor behavior: it restores the 4x game-thread clock from 3.06 to 3.34 GHz and reverses Outset from −6.3 % to +6.4 %. If GPU execution time were the limit, lowering its ceiling would have made 4x worse, not better |
+| 2026-11-09 | Superseded below: the cap does not confirm the power explanation, and the 4x loss did not reproduce. Close #563's render-settings track; speed work moves to the game thread at Outset |
+| 2026-11-05 | (Superseded 2026-11-09) The 1100 MHz cap confirms shared APU power/governor behavior: it restores the 4x game-thread clock from 3.06 to 3.34 GHz and reverses Outset from −6.3 % to +6.4 %. If GPU execution time were the limit, lowering its ceiling would have made 4x worse, not better |
 | 2026-11-05 | Stop collecting render-scale data. The capped profile's IPC difference means the exact +6.4 % reversal should not be decomposed further; the mechanism is sufficiently established to move to Aurora source work |
 | 2026-11-05 | Corrected attribution: at Outset, 4x plus Smooth Motion raises GPU power enough to lower the busy game thread's clock by 7.0 %, accounting for the 6.3 % slowdown. This is CPU/GPU power competition, not proof that the GPU ran out of frame time |
 | 2026-11-05 | GPU-side reductions remain the fix direction because they free APU power for the bottlenecked CPU. First targets: Smooth Motion's in-between frame and staging copies; test batching the copies before the first pass |
 | 2026-11-05 | Source inspection narrows copy batching: Smooth Motion does not replay ordinary staging copies, and texture uploads must retain operation order. #53 batches only non-texture buffer arenas behind an opt-in flag |
 | 2026-11-05 | Use BlueWake #563 for the RecompCore pin, exported patch, build, and Deck qualification. Do not open a separate BlueWake PR |
 | 2026-11-05 | Accept #53 only if it is ahead in every one of at least six interleaved Deck launches, checkpoints match, and pictures are identical with Smooth Motion off; otherwise revert it in #563 and record the result |
-| 2026-11-09 | HD look and render scale share one mechanism (shared APU power). Identical-pass skipping is closed; scale 2 is faster than 3 on the Deck in every launch. Remaining GPU-side ideas change the picture and need opt-in Aurora work |
+| 2026-11-09 | (Superseded the same day by M6) HD look and render scale share one mechanism (shared APU power). Identical-pass skipping is closed; scale 2 is faster than 3 on the Deck in every launch. Remaining GPU-side ideas change the picture and need opt-in Aurora work |
 | 2026-11-05 | Reject #53's staging-copy batching for BlueWake: 12 launches per setting were performance-neutral overall (+0.03%) and slower in four of five scenes, including Outset (−1.23%), despite lower reported GPU work. Remove the pin, patches, recipe and GUI integration; skip pictures because performance already failed (owner's decision, 2026-11-09) |
 | 2026-11-05 | Superseded: cause for the render scale was attributed to Smooth Motion halving the GPU's time budget. `[gpu-prof]` busy cannot be read as elapsed frame occupancy and exceeds frame time with Smooth Motion off |
 | 2026-11-05 | Superseded: H4 (GPU full) led based on `[gpu-prof]` busy per presented frame. The effective game-thread clock instead identifies shared APU power as the mechanism |

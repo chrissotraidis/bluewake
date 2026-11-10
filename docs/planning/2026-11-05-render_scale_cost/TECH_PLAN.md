@@ -1,8 +1,23 @@
 # TECH_PLAN — Why higher render settings slow the game when the GPU has room
 
-Status: In progress — render-scale mechanism confirmed; source work next
+Status: Closing — the recheck did not reproduce the 4x loss; see Recheck
 Source base: BlueWake `main` at `ee991d3`
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
+
+## Recheck (2026-11-09): the settings cost little; the game thread is the limit
+
+A recheck logged the chip's power (slowPPT, 15 W limit), GPU clock and temperature every half second during Outset launches, six per setting, and lined them up with each launch's frame rate.
+
+| Outset, same build | Power | FPS |
+|---|---|---|
+| 3x | ~14.2 W | 26.05 |
+| 4x | ~14.6 W | 26.00 (−0.2 %) |
+| 3x, HD look off | ~14.2 W | 26.38 |
+| 3x, HD look on | ~15.0 W, at the limit | 26.07 (−1.2 %) |
+
+The earlier −6.3 % at 4x did not reproduce. Both settings ran about 9 % below that day's 3x, a variation between days larger than any render effect. The 1100 MHz cap does not confirm the power explanation either: compared with uncapped runs at the same scale, it is slower in 9 of 10 cases, matching the owner's in-play result. Shared power costs at most about 1 % here.
+
+Outset is below 30 fps unpaced at every setting, and the owner sees it below 30 in play at under 10 W. The limit is the game thread: about 38 ms of work per frame where 30 fps allows 33 ms. Speed work moves there.
 
 ## How a frame reaches the screen
 
@@ -48,12 +63,6 @@ RecompCore #53, stacked on #49, therefore implements only the safe subset behind
 5. Preserve profiler event order with a deferred timestamp zone.
 
 The default path remained unchanged. The experiment did not clear the performance gate and has been removed from BlueWake integration. The next source target is the work rerun for Smooth Motion's in-between frame, not broader or unsafe copy reordering.
-
-## First experiment result
-
-The same `a555c3aed7f4` build ran with batching enabled for A and disabled for B: 12 measured launches of each, interleaved A/B/B/A, five states, 4x and Smooth Motion one step. All 24 runs loaded every scene and their guest checkpoints were identical.
-
-Batching reduced the median reported GPU work from 26.627 to 22.188 ms, but overall FPS was unchanged within noise (+0.03 %). It was slower at Outset (−1.23 %), lava (−0.69 %), Hyrule Castle (−0.93 %) and shipwreck (−0.37 %), with only butterfly ahead (+0.34 %). It therefore fails the all-launch performance gate. No picture run is warranted for a rejected candidate.
 
 ## First experiment result
 

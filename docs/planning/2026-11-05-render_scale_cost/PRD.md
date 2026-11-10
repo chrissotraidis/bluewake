@@ -1,9 +1,24 @@
 # PRD — Why higher render settings slow the game when the GPU has room
 
-Status: In progress; mechanism confirmed, first source experiment rejected; next: the in-between frame
+Status: Closing — render settings cost 0 % to ~1 % at Outset in the recheck; the game thread is the limit
 Source base: BlueWake `main` at `ee991d3`
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 Scope: explain the game's frame-rate loss when higher render settings increase GPU work, then test a narrowly scoped reduction in that work. The first source experiment batches safe staging-buffer copies while preserving texture-upload order. Excluded: changing the picture, shipping a GPU clock cap, reordering texture uploads, and enabling an unqualified experiment by default.
+
+## Recheck (2026-11-09): the settings cost little; the game thread is the limit
+
+A recheck logged the chip's power (slowPPT, 15 W limit), GPU clock and temperature every half second during Outset launches, six per setting, and lined them up with each launch's frame rate.
+
+| Outset, same build | Power | FPS |
+|---|---|---|
+| 3x | ~14.2 W | 26.05 |
+| 4x | ~14.6 W | 26.00 (−0.2 %) |
+| 3x, HD look off | ~14.2 W | 26.38 |
+| 3x, HD look on | ~15.0 W, at the limit | 26.07 (−1.2 %) |
+
+The earlier −6.3 % at 4x did not reproduce. Both settings ran about 9 % below that day's 3x, a variation between days larger than any render effect. The 1100 MHz cap does not confirm the power explanation either: compared with uncapped runs at the same scale, it is slower in 9 of 10 cases, matching the owner's in-play result. Shared power costs at most about 1 % here.
+
+Outset is below 30 fps unpaced at every setting, and the owner sees it below 30 in play at under 10 W. The limit is the game thread: about 38 ms of work per frame where 30 fps allows 33 ms. Speed work moves there.
 
 ## The problem
 
