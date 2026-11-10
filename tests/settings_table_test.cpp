@@ -34,7 +34,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
     "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
-    "DOL_AURORA_AO_PACKED",
+    "DOL_AURORA_AO_PACKED", "DOL_AURORA_BATCH_STAGING_COPIES",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -141,6 +141,10 @@ int main() {
     const Setting* ao = find("DOL_AURORA_AO_PACKED");
     assert(ao != nullptr && ao == clouds + 1 && ao->tab == Tab::Config && ao->group == nullptr);
     assert(!default_on(*ao) && next_launch_on(*ao));
+    // Then batching the frame's data uploads (RecompCore #53, in #54): off by default.
+    const Setting* uploads = find("DOL_AURORA_BATCH_STAGING_COPIES");
+    assert(uploads != nullptr && uploads == ao + 1 && uploads->tab == Tab::Config && uploads->group == nullptr);
+    assert(!default_on(*uploads) && next_launch_on(*uploads));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

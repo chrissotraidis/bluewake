@@ -356,6 +356,15 @@ inline constexpr Setting kSettings[] = {
              "once instead of again for every pixel. The shading can differ very slightly. Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // The frame's vertex, uniform, index and storage uploads encoded together ahead of its
+    // drawing instead of one arena at a time (RecompCore #53 in #54,
+    // DOL_AURORA_BATCH_STAGING_COPIES); texture uploads keep their order. Opt-in.
+    {.key = "DOL_AURORA_BATCH_STAGING_COPIES", .kind = Kind::Bool,
+     .label = "Batch the frame's data uploads", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Sends each frame's geometry and settings to the graphics card in one "
+             "batch before drawing. The picture is the same. Off by default; measured on a Steam "
+             "Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
