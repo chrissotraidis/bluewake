@@ -190,6 +190,9 @@ class Runs(Work):
                                   timeout=1)
         self.assertTrue(result['timed_out'])
 
+    # Game Mode is a Steam Deck (Linux) mode. The run script finds the game by its process name, which a
+    # shell-script stand-in only has on Linux (macOS names it after its interpreter).
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Game Mode runs are Linux (Steam Deck) only')
     def test_a_game_mode_run_goes_through_the_steam_shortcut(self):
         # A stand-in steam command starts the shortcut's target, as Steam does; the stand-in game (named
         # bluewake, as the run script looks for it) writes the session log the run takes as its own.
