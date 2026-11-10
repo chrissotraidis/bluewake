@@ -7692,10 +7692,34 @@ static inline void host_state_turn(CPUState* cpu, const StaticRecompModuleDesc* 
         host_state_try_save(cpu, mod, loop, retrace_boundary);
 }
 
+// BLUEWAKE_NO_GAMESCOPE_WSI took effect (set at the top of main, read where vsync is chosen).
+static bool g_host_no_gamescope_wsi;
+
 int main(int argc, char** argv) {
     // The options menu's saved choices, before anything reads the environment.
     bluewake_settings_load();
     host_apply_aspect();
+#if defined(__linux__) && !defined(__ANDROID__)
+    // BLUEWAKE_NO_GAMESCOPE_WSI=1 (Config > Performance): present through Xwayland with FIFO and
+    // four swap-chain images instead of gamescope's Vulkan WSI layer. In Steam Deck Game Mode the
+    // layer held the game in present ~100 ms a second at a busy Outset view with Smooth Motion
+    // (26.3-27.3 game frames a second; 29.9-30.0 this way, presents 16.7 ms apart, spread 0.7 ms).
+    // Mailbox through Xwayland was as fast but felt choppy: a newer frame replaced one not yet
+    // shown. FIFO shows each frame; the fourth image keeps it from holding the game, as three did
+    // (27.8). The Vulkan loader and Mesa read these when the renderer starts Vulkan, so they are
+    // set here, before anything does (#586). A value set before BlueWake starts wins.
+    g_host_no_gamescope_wsi = false;
+    {
+        const char* no_wsi = getenv("BLUEWAKE_NO_GAMESCOPE_WSI");
+        if (no_wsi != NULL && no_wsi[0] == '1' && getenv("GAMESCOPE_WAYLAND_DISPLAY") != NULL) {
+            setenv("ENABLE_GAMESCOPE_WSI", "0", 1);
+            setenv("vk_x11_override_min_image_count", "4", 0);
+            g_host_no_gamescope_wsi = true;
+            fprintf(stderr, "[present] gamescope's WSI layer off: FIFO through Xwayland, %s swap-chain images\n",
+                    getenv("vk_x11_override_min_image_count"));
+        }
+    }
+#endif
 #if defined(__APPLE__) || defined(__ANDROID__)
     // Draw fusion (RecompCore patch 0166, Elliott Tate): a display list's strips
     // as one draw, a tenth of the draws. On for Windows and Linux, where it has
@@ -8048,6 +8072,15 @@ int main(int argc, char** argv) {
         if (getenv("WAYLAND_DISPLAY") != NULL)
             vsync = false;
 #endif
+        // BLUEWAKE_PRESENT_MAILBOX=1 (Config > Performance): Mailbox wherever BlueWake runs.
+        // Under gamescope (Steam Deck Game Mode) the FIFO wait holds the game thread the same
+        // way: with Smooth Motion presenting twice a game frame, two of the three swapchain
+        // images are always queued, and a frame that runs late waits for a vblank. Measured
+        // on a Steam Deck at 3x with the HD look: 27.3 -> 30.0 game frames a second (#586).
+        const char* mailbox_env = getenv("BLUEWAKE_PRESENT_MAILBOX");
+        // Not with gamescope's layer off: Mailbox through Xwayland drops in-between frames.
+        if (mailbox_env != NULL && mailbox_env[0] == '1' && !g_host_no_gamescope_wsi)
+            vsync = false;
         if (vsync_env != NULL && vsync_env[0] != '\0')
             vsync = vsync_env[0] != '0';
         const AuroraBackendConfig aurora_config = {
