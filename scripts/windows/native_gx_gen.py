@@ -165,6 +165,7 @@ class Gen:
 
     def transform(self, native, chunk, leader, text, from_copy):
         out = self.inline_gpr(text) if not native.stops else self.inline_gpr_stops(native, chunk, text)
+        out = self.inline_gpr_frame(out)
         # Nothing after an unconditional transfer (blr, b, bctr) runs; the
         # copies chain the next block's text after it all the same.
         m = re.search(r"\n    // [0-9A-F]{8}: (?:blr|b +0x[0-9A-F]{8}|bctr)\n    \{\n(?:        [^\n]*\n)*    \}\n", out)
@@ -395,6 +396,23 @@ class Gen:
         native.reach.add(target)
         native.boundaries.add(target)
         return f"if (!gx_silent(&s, 0x{target:08X}u))\n        return 0;\n    goto B_{target:08X};"
+
+    def inline_gpr_frame(self, text):
+        # inline_save_restore_gpr.py's frame form (#451): the saved registers
+        # through a host pointer to the frame's MEM1 bytes (inline_gpr.h's
+        # bw_inline_gpr_frame: r11 - 4 * (32 - first), lowest register first).
+        # Here the same addresses through the run's own memory: a save's stores
+        # as gx_stp32 (each clears a matching reservation, as the helper clears
+        # it once for the frame), a restore's loads as gx_ld32; a frame that is
+        # not RAM marks the run bad.
+        def frame(m):
+            indent, first = m.group(1), int(m.group(2))
+            return f"{indent}const u32 slots = ctx->gpr[11] - {4 * (32 - first)}u;\n"
+        text = re.sub(r"(?m)^( +)u8\* const slots = bw_inline_gpr_frame\(ctx, (\d+)u, (?:true|false)\);\n", frame, text)
+        text = re.sub(r"write_be32\(slots \+ (\d+), (\(u32\)ctx->gpr\[\d+\])\);",
+                      r"gx_stp32(&s, 0u, slots + \1u, \2);", text)
+        text = re.sub(r"read_be32\(slots \+ (\d+)\)", r"gx_ld32(&s, slots + \1u)", text)
+        return text
 
     def inline_gpr(self, text):
         # The inline _savegpr_N/_restgpr_N (inline_save_restore_gpr.py): its
