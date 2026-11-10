@@ -347,6 +347,15 @@ inline constexpr Setting kSettings[] = {
              "of for every pixel of every frame. The shadows can differ by less than one shade "
              "step. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // The HD look's ambient occlusion keeps each quarter-size texel's distance beside its
+    // shade (RecompCore #55, DOL_AURORA_AO_PACKED), so its blurs and its upscale don't read
+    // the full-size depth again. Opt-in; read when the renderer starts.
+    {.key = "DOL_AURORA_AO_PACKED", .kind = Kind::Bool,
+     .label = "Faster ambient occlusion", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Keeps the HD look's shading-in-corners data together so it is read "
+             "once instead of again for every pixel. The shading can differ very slightly. Off by "
+             "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.

@@ -34,6 +34,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
     "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
+    "DOL_AURORA_AO_PACKED",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -136,6 +137,10 @@ int main() {
     const Setting* clouds = find("DOL_AURORA_CLOUD_NOISE_TEXTURE");
     assert(clouds != nullptr && clouds == huge + 1 && clouds->tab == Tab::Config && clouds->group == nullptr);
     assert(!default_on(*clouds) && next_launch_on(*clouds));
+    // Then faster ambient occlusion (RecompCore #55): off by default, read when the renderer starts.
+    const Setting* ao = find("DOL_AURORA_AO_PACKED");
+    assert(ao != nullptr && ao == clouds + 1 && ao->tab == Tab::Config && ao->group == nullptr);
+    assert(!default_on(*ao) && next_launch_on(*ao));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));
