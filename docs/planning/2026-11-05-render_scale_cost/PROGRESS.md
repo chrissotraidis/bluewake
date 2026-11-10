@@ -1,6 +1,6 @@
 # PROGRESS — Why higher render settings drop the Deck below 30 fps
 
-Status: Goal reached at Outset in the bench: 3x + full HD look + Smooth Motion holds 30 with faster clouds, faster occlusion and Mailbox presentation (24.9 → 30.0). Next: the five scenes, and a play test that in-between frames reach the screen under Mailbox.
+Status: Goal reached at the bench's Outset view and confirmed in the owner's play: 3x + full HD look + Smooth Motion holds 30 with faster clouds, faster occlusion and Mailbox presentation (24.9 → 30.0), every in-between frame on screen. Busier Outset views (~890 draws a frame against ~500) still run ~26: next target, measured from a new save state (`2-heavy`). The plan moved here from #563 (closed, superseded by #586).
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -42,9 +42,10 @@ Status: Goal reached at Outset in the bench: 3x + full HD look + Smooth Motion h
 - [x] M4-T12: Present mode — Mailbox vs Fifo, clouds + AO on: **29.99 vs 27.28 (+9.9 %)**, every launch at 30, game thread 95.6 % busy, `[fps-dip]` 1 vs 26. Kept as "Present without waiting for the display" (`BLUEWAKE_PRESENT_MAILBOX`, #586); in-between frames on screen still to confirm in a play test
 - [x] M4-T13: Five scenes, clouds + AO + Mailbox vs today's defaults, 6 launches each: **+10.1 %** overall (26.41 → 29.08); Outset bench state +15.4 %, lava +8.9 % (holds 30), butterfly +14.6 %, shipwreck +12.6 %, every launch ahead; Hyrule already at 30. The bench's Outset state is now game-thread bound (~98 %)
 - [x] M4-T14: At 4x + HD, five scenes, the three switches vs none: **+21.3 %** (19.48 → 23.630); Outset +16.4 %, lava +21.4 %, Hyrule +31.9 %, butterfly +23.6 %, shipwreck +14.5 %. Still short of 30: the docked target is the next round
-- [ ] M4-T06: Play test — the owner plays with the three switches on; confirm in-between frames reach the screen under Mailbox
+- [x] M4-T06: Play test (owner, Game Mode, 2026-11-10, all three switches on, 3x + HD): at the bench's saved view a steady 30 game fps with every in-between frame shown (the log's `interpolated` count equals the game frames), Mailbox in the log, no hitches. In busier views of Outset (camera over the village, 880–1,770 draws a frame vs ~500) 25–29 game fps, GPU 99–100 % busy at 1,040–1,490 MHz, present waits 70–177 ms a second. The bench's Outset view is a light one
 - [x] M4-T05: Step 4 — closed by measurement before building. `DOL_AURORA_PASS_TRACE=1` at 3x + HD (owner's state): pass 0 (31 flat draws) and pass 1 (17 flat draws) end in 1024×768 copies; pass 2 is the scene (1,026 draws) with a full-size depth copy; pass 3 copies the finished scene; pass 4 is the HUD drawing that copy back. The only reusable off-screen work is passes 0–1, which are cheap; the full-size copies must be redrawn or the in-between frame would show the real frame. Reprojection (S4) stays the lever for 4x / docked. Confirmed in all five bench scenes at 3x + HD: Outset 4 small passes (56 flat draws), lava room 1 (31), Hyrule Castle 1 (31), butterfly room 4 (56), shipwreck 1 (31), each into 1024×768; scene passes 254–1,831 draws; no large reflection or haze passes anywhere
-- [ ] M4-T06: Check against the goal: 3x + HD + Smooth Motion ≥ 30 fps paced, and in the owner's play
+- [ ] M4-T15: Check against the goal: 3x + HD + Smooth Motion ≥ 30 fps paced, and in the owner's play — met at the bench view (M4-T12, M4-T06); not yet in busier views (M4-T16)
+- [ ] M4-T16: Heavy Outset view (`2-heavy`, the owner's `quick-9162`, ~26 fps in play): cost of each part with the three switches on, turned off one at a time, paced, 2 launches each (running)
 
 ## Evidence ledger
 
@@ -68,6 +69,8 @@ Status: Goal reached at Outset in the bench: 3x + full HD look + Smooth Motion h
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Owner: fold the plan into #586 and close #563, so the code and its evidence live in one PR (with RecompCore#54) |
+| 2026-11-10 | The bench's Outset state is a light view (~500 draws a frame); add the owner's busier view (`2-heavy`, ~890) as the next target scene |
 | 2026-11-09 | Measure render settings paced, with the owner's build, settings and save state. Unpaced runs hide a full GPU because the game thread pins the chip at its power limit |
 | 2026-11-09 | Retract the unpaced results: power-sharing cause, 1100 MHz cap confirmation, scale 2 over 3, the M6 recheck, and #53's rejection (to be retested). Keep the identical-draw count |
 | 2026-11-10 | Next lever is pipelining, not effect cost: with the GPU ~92 % busy at a governor-chosen clock and the game thread ~85 %, presentation and frames in flight decide the rate. Test present mode and queue depth before more effect work |

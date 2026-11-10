@@ -1,6 +1,6 @@
 # PRD — Why higher render settings drop the Deck below 30 fps
 
-Status: In progress — goal: 3x + full HD look + Smooth Motion holds 30 on the Deck; step 1 (faster cloud shadows) building
+Status: In progress — goal met at the bench's Outset view and in the owner's play there (three switches in #586); busier Outset views still run ~26, next target
 Source base: BlueWake `main` at `ee991d3`
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 Scope: find and remove avoidable GPU work so the Steam Deck holds 30 game frames a second at higher render settings, without changing the picture. Excluded: lowering picture quality, shipping a GPU clock setting, and enabling an unqualified experiment by default.
@@ -35,7 +35,7 @@ As the settings rise the game thread gets *less* busy: it is waiting for the GPU
 
 ## Retracted earlier conclusions
 
-Earlier runs on this PR measured **unpaced**, with an empty settings file (direct-call gate, huge pages, efficient effects, mods and widescreen all off) and a different save state. Unpaced, the game thread runs flat out and holds the chip at its 15 W limit, which hides a full GPU. These conclusions came from those runs and are withdrawn:
+Earlier runs on #563 (where this plan started; superseded by #586) measured **unpaced**, with an empty settings file (direct-call gate, huge pages, efficient effects, mods and widescreen all off) and a different save state. Unpaced, the game thread runs flat out and holds the chip at its 15 W limit, which hides a full GPU. These conclusions came from those runs and are withdrawn:
 
 | Withdrawn | Why |
 |---|---|

@@ -1,6 +1,6 @@
 # TECH_PLAN — Why higher render settings drop the Deck below 30 fps
 
-Status: In progress — goal 3x + full HD at 30; step 1 (cloud shadows) building
+Status: In progress — three switches kept (clouds, AO, Mailbox): 30 at the bench view; next, the heavy Outset view
 Source base: BlueWake `main` at `ee991d3`
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
