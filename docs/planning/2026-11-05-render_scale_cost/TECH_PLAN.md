@@ -93,7 +93,7 @@ flowchart TD
 | 1 | Bake the cloud noise once into a 4096² `R32Float` world-space texture; read with exact bilinear weights; re-bake near the edge | `post_fx.cpp` `fs_clouds_baked`, `ensure_cloud_noise` (RecompCore#54); switch "Faster cloud shadows" (#586) | Same build, switch on vs off, 6+ paced launches each, all ahead; pictures within half a step |
 | 2 | AO: fewer or cheaper passes (occlusion, two blurs, apply), e.g. a smaller occlusion target or a joint blur | `post_fx.cpp` `encode` AO block | Same; pictures unchanged or within a step |
 | 3 | One fragment pass for edge light, torch light and the cloud/AO apply: depth read once, colour written once, 8-bit rounding repeated between steps; and a cheaper far blur (5.2 % at 3x: downsample, two blur rounds, composite) | `post_fx.cpp` `encode`, new combined pipeline; far blur block | Same; merge bit-identical, far blur unchanged or within a step |
-| 4 | In-between frame samples the real frame's render-to-texture results (reflections, shadow and blur sources) | `common.cpp` `replay_op` / `present_with_in_between` | Same; pictures within a small, stated difference |
+| 4 | ~~In-between frame samples the real frame's render-to-texture results~~ Closed: the pass trace at Outset shows only two small off-screen passes (48 flat draws, 1024×768 copies); the scene and its full-size copies must be redrawn | — | — |
 
 Each step is opt-in in Config → Performance first; a step that is not ahead in every launch is reverted and recorded.
 
