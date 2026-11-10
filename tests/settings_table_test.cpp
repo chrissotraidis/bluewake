@@ -34,7 +34,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
     "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
-    "DOL_AURORA_AO_PACKED", "DOL_AURORA_POST_SHARED_PASS",
+    "DOL_AURORA_AO_PACKED",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -141,10 +141,6 @@ int main() {
     const Setting* ao = find("DOL_AURORA_AO_PACKED");
     assert(ao != nullptr && ao == clouds + 1 && ao->tab == Tab::Config && ao->group == nullptr);
     assert(!default_on(*ao) && next_launch_on(*ao));
-    // Then drawing the HD effects in one render pass (RecompCore #54): off by default.
-    const Setting* shared = find("DOL_AURORA_POST_SHARED_PASS");
-    assert(shared != nullptr && shared == ao + 1 && shared->tab == Tab::Config && shared->group == nullptr);
-    assert(!default_on(*shared) && next_launch_on(*shared));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));
