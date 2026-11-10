@@ -23,6 +23,10 @@ Status: In progress. Measured paced with the owner's build, settings and save st
 - [ ] M3-T00: Cheaper cloud shadows, opt-in in the Performance section; choose between exact shortcuts (~1 %) and baking the noise into a world-space texture once a frame (picture within an 8-bit step), judged paced with 6+ launches and pictures
 - [ ] M3-T01: L1 fix, if the reading finds avoidable work; opt-in, picture identical, judged paced
 - [ ] M3-T02: L2 — retest RecompCore #53 staging-copy batching paced with these settings
+- [ ] M3-T03: B1–B3 — count pass cuts and full-screen passes at 4x + HD (`DOL_AURORA_GPU_PROF=2`), then fuse/merge where exact
+- [ ] M3-T04: S2 — measure the off-screen share of the in-between frame by turning those passes off
+- [ ] M3-T05: S4 — reprojection prototype (opt-in), only option likely to hold 60 at 4x + HD
+- [ ] M3-T06: E3 — ambient occlusion cost
 
 ## Evidence ledger
 

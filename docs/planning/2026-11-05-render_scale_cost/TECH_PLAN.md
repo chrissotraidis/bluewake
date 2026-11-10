@@ -79,3 +79,36 @@ Aurora's `[gpu-prof]` zones, median per presented frame (ms). Zones nest inside 
 | L2 | Staging copies are 5.6–9 ms | Largest item after the replay | Retest RecompCore #53 paced with these settings |
 | L3 | GPU clock governor stays far below 1600 MHz while busy | Tested: locked at 1600 MHz, 4x and 3x + HD gain 1–3 fps and become CPU-bound (chip at 14–15 W); 4x + HD does not gain | Closed as a fix |
 | L4 | 4x + HD stalls in present | 255–282 ms a second in present, `acquire-drawable` 30–65 ms, GPU 77 % and game thread 80 % busy at 1600 MHz | Trace swap-chain depth, gamescope latency and Smooth Motion pacing around `acquire-drawable` |
+
+## Other options (not started)
+
+From turning each part off at 4x + HD (Smooth Motion +64 %, cloud shadows +14.5 %, ambient occlusion +7.5 %). The owner's priority is keeping the 60-fps feeling, so the in-between frame should get cheaper, not be skipped.
+
+### Smooth Motion's in-between frame
+
+| Option | What it does | Picture | Effort | Expected |
+|---|---|---|---|---|
+| S1 Real frames first | Skip the next in-between frame when the GPU is behind, instead of delaying the next real frame | Frames unchanged; fewer in-between frames when the GPU is short | Small (present code) | Holds 30 game fps, but gives up the 60 feeling under load: **set aside** |
+| S2 Reuse off-screen copies | The in-between frame samples the real frame's render-to-texture passes (reflections, shadow and blur sources) instead of redrawing them | Very small differences on those textures; opt-in | Medium | Medium; measure the off-screen share first by turning passes off |
+| S3 Cheaper depth and copies in the replay | Store-op discard for depth and multisample targets after their last use; skip conversions nothing reads | None | Small–medium | Small |
+| S4 Reprojection | Build the in-between frame from the real frame, depth and motion in one full-screen pass instead of a full replay | Approximate at disocclusions; opt-in | Large | Largest: ~1–2 ms instead of ~10 ms; the only option that plausibly keeps 60 at 4x + HD |
+
+### Memory traffic (the GPU-side analogue of the CPU batching)
+
+Aurora already skips redundant pipeline, bind-group and buffer binds and batches draws ([`gxcore_draw.cpp`](../../../ref/recompcore/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp)). What it does not avoid is whole-image memory traffic; at 4x one image is 2560×2112 (~22 MB colour, ~22 MB depth) on a shared ~88 GB/s bus, and the in-between frame repeats it all.
+
+| Option | Today | Exact-picture alternative |
+|---|---|---|
+| B1 Fewer pass splits | The EFB pass is cut around soft-effect runs and where the HD effects go in; each cut stores and reloads colour and depth | Merge cuts where possible; load/store only what the next part reads |
+| B2 Fuse per-pixel HD effects | Cloud shadows, edge light, torch light and the AO apply are separate full-screen passes, each reading depth and blending into the image | One pass reading depth once and writing colour once, repeating the 8-bit rounding between steps to stay bit-identical |
+| B3 Discard depth after last use | Depth is stored to the end of the frame | Store-op discard once nothing reads it |
+
+Measure first: `DOL_AURORA_GPU_PROF=2` lists each pass; count cuts and full-screen passes per frame at 4x + HD.
+
+### Effects
+
+| Option | Note |
+|---|---|
+| E1 Cloud shadows, exact shortcuts | Early exit when `smoothstep(0.42, 0.6, n)` is decided and skipping the faded-out far sea: ~8 % of octaves, ~1 % fps. Not pursued alone |
+| E2 Cloud shadows, baked noise texture | **In progress** (M3-T00): 4096² R32Float world-space texture, exact bilinear weights, re-baked only near its edge; error ≤ 0.4 of an 8-bit step (simulated) |
+| E3 Ambient occlusion (7.5 %) | Next effect to look at after clouds |
