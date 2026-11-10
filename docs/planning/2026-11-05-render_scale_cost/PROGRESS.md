@@ -36,5 +36,5 @@ Status: In progress. Measured paced with the owner's build, settings and save st
 | 2026-11-09 | Measure render settings paced, with the owner's build, settings and save state. Unpaced runs hide a full GPU because the game thread pins the chip at its power limit |
 | 2026-11-09 | Retract the unpaced results: power-sharing cause, 1100 MHz cap confirmation, scale 2 over 3, the M6 recheck, and #53's rejection (to be retested). Keep the identical-draw count |
 | 2026-11-09 | A locked 1600 MHz GPU moves the limit to the game thread (shared power) and does not help 4x + HD: drop L3 as a fix. Add L4, the present stall at 4x + HD |
-| 2026-11-09 | Next: L1, why in-between passes cost 2–4x the real frame's; then L2 (#53 paced) and L3 (clock at 1600 MHz) |
+| 2026-11-09 | Next: L1, why in-between passes cost 2–4x the real frame's; then L4 (present stall) and L2 (#53 paced) |
 | 2026-11-05 | Started as a follow-up to #524: the render scale and the HD look slow the game on the Deck |
