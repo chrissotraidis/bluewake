@@ -19,7 +19,7 @@ Status: Planned — follows #586
 - [x] M2-T00: Fuse the per-pixel effects into one full-screen pass, opt-in: `DOL_AURORA_FUSED_EFFECTS=1`, menu "Draw the HD effects in one pass" (RecompCore #57 `kFusedShader`, generated from the four shaders' own terms; bluewake `04ebe869b`). Blended as scene × alpha + rgb: ((scene × ao + edge + torch) × cloud), one 8-bit rounding. Used when two or more of the four apply, not with the sun shadows or a debug view. Runs on the Deck without shader errors (build `0e1138649`)
 - [x] M2-T01b: First version, four effects fused (occlusion, edge, torch, clouds; build `0e1138649`), headless. Pictures (Smooth Motion off, eight scenes): lava identical; Hyrule 70.8 dB, owner's state 70.8, butterfly 62.4, shipwreck 62.1, heavy 60.1, busiest 54.2, **Outset 50.7: sunlit rims up to 27 of 255 brighter under cloud shadow**. Separately, the target clamps the rim at white before the clouds darken it; fused, the clamp comes after. Speed at `8-busiest`: 25.80 vs 25.57 (+0.9 %), fused ahead in each interleaved pair. Fusing saves the reads and writes, not the effects' own shader work, which is most of their cost
 - [x] M2-T01c: The cloud shadows stay their own pass (RecompCore #57 `cloud shadows leave the fused pass`); occlusion, edge and torch light sum the same with one clamp (both lights add). Build `7139b315c`
-- [ ] M2-T01d: Pictures and speed of the three-effect version
+- [x] M2-T01d: Three-effect version (build `7139b315c`), headless: pictures within 1–2 of 255 in every scene and frame (62.3–81.8 dB; lava identical), except one Outset capture taken a moment apart (every edge moved; its other four frames 79 dB). Speed at `8-busiest`, 6 launches each way: **25.68 vs 25.73 (−0.21 %)**, not ahead. **Removed** (RecompCore #57 `767eefe8` reverts; bluewake `090dcb4e2` removes the menu switch). Fusing saves the reads and writes, not the effects' own shader work
 - [ ] M2-T01: The largest effect from M1-T02 made cheaper, opt-in, exact or within one shade step
 - [ ] M2-T02: Game Mode, 6 launches each way, every launch ahead; pictures; #586's seven scenes plus `8-busiest`
 
@@ -34,6 +34,7 @@ Status: Planned — follows #586
 
 | Task | Artifact | Method | Environment | Result |
 |---|---|---|---|---|
+| M2-T01d | `render-fused3-pics/report.md`, `render-fused3-speed/report.md` | As M2-T01b | Build `7139b315c` | Pictures 62.3–81.8 dB; −0.21 % |
 | M2-T01b | `render-fused-pics/report.md`, `render-fused-speed/report.md`, comparison images | render_bench headless, paced; pictures with Smooth Motion off, `--every 300`, eight scenes; speed 6 launches each way | Build `0e1138649`, 3x + HD, #586's switches | Pictures 50.7–70.8 dB (Outset rims); +0.9 % at `8-busiest` |
 | M1-T02h | `render-fx-busiest/report.md`, `fxh-samples.txt` | render_bench headless, paced, 9 setups × 2 launches, interleaved | Build `eaa85f0f1`, `8-busiest`, 3x + HD + Smooth Motion, #586's switches | As above |
 | M1-T00 | #586 tracker M4-T23; Deck `~/bluewake-render/gm/busy` | Game Mode through the owner's shortcut, 3 launches each | Build `9dde6aa9d`, 3x + HD + Smooth Motion, #586's switches | 26.53 / SM off 30.02 / HD off 29.19 / islands off 26.57 |
@@ -42,4 +43,5 @@ Status: Planned — follows #586
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Remove the fused per-pixel pass: with the cloud shadows apart it isn't ahead (−0.21 %), and with them it changes sunlit rims. The effects' cost is their own shader work, about 1.2 % each at the busiest view |
 | 2026-11-10 | Owner: wrap up #586 with its data; plan the GPU side of busy views here (HD effect costs with power, and reprojection) and the game thread on #592 |
