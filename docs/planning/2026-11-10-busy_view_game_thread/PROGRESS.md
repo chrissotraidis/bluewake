@@ -1,6 +1,6 @@
 # PROGRESS — The game thread at busy views
 
-Status: In progress — the busiest view's game thread named by game function (M1-T02): background collision ≈ 7.3 % is the one sizeable group; next, the natives-from-source mechanism
+Status: In progress — the ground walk native built (M2-T01/T02), being tested; the draw side next (owner, 2026-11-10)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -12,9 +12,13 @@ Status: In progress — the busiest view's game thread named by game function (M
 - [x] M1-T03: The busiest view against the owner's lighter Outset state (`6-play`, ~500 draws), named profiles, headless, same build: **110.5 → 128.8 M cycles a game frame (+18.3)**, spread: drawing (J3D/J2D shapes, packets, GX setup, particles) 15.4 → 18.4 (+3.0); **background collision 12.8 → 15.7 (+2.9)**; J3D animation and matrices 4.4 → 5.9 (+1.5); native helpers (maths, vectors, skinning) 8.8 → 10.7 (+1.9); dispatch, memory and other module code 19.0 → 22.9 (+3.9); other game code 17.1 → 19.3 (+2.2); actors' update 3.4 → 4.3; host (GX writes, runtime) 13.2 → 14.1; sound 5.3 → 4.9. The busy view is Link near the village with more actors active, not only more draws. Collision is ~12 % of the game thread in both views: a faster walk helps every view about equally. The draw side (drawing + animation + matrices, ~34 M cycles at the busiest view, +6.4) scales with GX activity but has no single hot spot ([`scripts/guest_profile_systems.py`](../../../scripts/guest_profile_systems.py))
 - [ ] M1-T04: Natives compiled from the decompilation's source: background collision is the one sizeable group, but non-leaf (walks the collision tree, calls translated code, reads module memory: needs a big-endian shim, guest pointers and calls back). Leaf candidates (`cM_atan2s`, `cSPolar::Val`, `cM3dGCyl::SetC`, `J3DGetKeyFrameInterpolationS`, `MakeBlckMinMax`) ≈ 1.5–2 % together. #364's source-compiled `__ieee754_fmod` (never hooked) is the starting point for the mechanism
 
-### M2: Cheaper game-thread work
-- [ ] M2-T01: First candidate from M1, opt-in, exact (guest checkpoints identical)
-- [ ] M2-T02: Game Mode, 6 launches each way, every launch ahead, `8-busiest` and #586's seven scenes
+### M2: The ground collision walk, natively, plays the same (opt-in)
+#542 timed an exact native walk at 1.03x the translation and a prototype that skipped guest-visible effects at 8.1x, and stopped there because it required cycle-exactness. Performance changes are judged by "plays the same" since October 10 (docs/PERFORMANCE.md), so the owner chose to retry the walk under that rule (2026-11-10).
+- [x] M2-T01: `cmake/composite/native_ground_walk.c`: `cBgW::GroundCrossGrpRp` natively. The group filter (`dBgW::ChkGrpThrough` in C; any other virtual target translated), the x/z and y bounds (C compares, NaN-equivalent to `fcmpo`), the polygon tree (`cBgW::GroundCrossRp`, translated through `bw_call_translated` with a 64-byte guest frame and LR at a sentinel outside every chunk) and the children, recursively. Leaves out the walk's own stack frames, `_savegpr_27`/`_restgpr_27`, FPSCR's compare flags and CR0; charges an estimate per visit (64 + 26 for the filter, 9 a child, 6 a tree call), while the callees charge their own. The turn's budget is held open during a walk, so a callee never stops midway. Declines unless direct calls and the edge filter are on, the walk, filter and tree are unwatched, and the stack is plain RAM
+- [x] M2-T02: Builder `--native-ground-walk` (`scripts/windows/native_ground_walk.py`): certifies the function by the hash of its 93 guest instructions (the same in the base translation and every mod variant) and routes its entry label to the native (`ctx->pc = ctx->lr; goto return_dispatch_802456E0` when it ran). Menu: "Faster ground collision" (`BLUEWAKE_NATIVE_GROUND_WALK`), off by default
+- [ ] M2-T03: Plays the same: runs on vs off from every bench state, no crash or safe mode, `[native-ground-walk]` counters (broken = 0), Link and actors where they were (positions in the log, pictures)
+- [ ] M2-T04: Speed: `8-busiest`, `6-play` and the five bench scenes, 6 launches each way, every launch ahead; Game Mode when Steam's prompt allows
+- [ ] M2-T05: The other walks with the same shape (wall correction, roof, water), if M2-T04 holds
 
 ## Evidence ledger
 
@@ -26,5 +30,6 @@ Status: In progress — the busiest view's game thread named by game function (M
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Owner: both the collision walk and the draw side, the walk first; the walk native plays the same (opt-in), not cycle-exact |
 | 2026-11-10 | Owner asked whether this repeats earlier work: the named profile says yes (same hot list as #503's planning, 12 % fewer cycles a frame since). No profile-and-trim round; the open option is natives compiled from the decompilation's source |
 | 2026-11-10 | Owner: plan the game thread at busy views separately from the GPU side (#591); #503, the earlier Outset game-thread work, is merged |
