@@ -1,6 +1,6 @@
 # PROGRESS — The game thread at busy views
 
-Status: In progress — the ground walk native built (M2-T01/T02), being tested; the draw side next (owner, 2026-11-10)
+Status: In progress — the ground walk native removed (no measurable gain, M2-T03); the draw side next (M3)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -18,9 +18,10 @@ Status: In progress — the ground walk native built (M2-T01/T02), being tested;
 - [x] M2-T02: Builder `--native-ground-walk` (`scripts/windows/native_ground_walk.py`): certifies the function by the hash of its 93 guest instructions (the same in the base translation and every mod variant) and routes its entry label to the native (`ctx->pc = ctx->lr; goto return_dispatch_802456E0` when it ran). Menu: "Faster ground collision" (`BLUEWAKE_NATIVE_GROUND_WALK`), off by default
 - [x] M2-T03a: First Deck run (build `2a41dafd6`, headless, Outset): walks broke. With MSR[FP] off (the OS enables floating point lazily, in its FP-unavailable handler), the polygon test's first float instruction trapped to 0x800 midway; the native went on without it, and later walks returned to the wrong place (pc 0x80246980). Fixed: the walk declines with FP off and the translation takes the trap; a callee that hands back to the dispatcher without an exception is finished in the native, chunk by chunk, through unwatched addresses (`resumed` counter)
 - [x] M2-T03b: Second run (build `8756f19b2`, headless, eight states, 2 launches each way): 7 of 8 states clean (about 1.6 M walks in an Outset launch, 119 declined, broken 0); guest checkpoints differ from the translation, as cycle estimates make them. **The butterfly room broke**: the polygon test's epilogue called `_restgpr_27` (0x80328F84), which the host watches for `cBgS::GroundCross`'s return to 0x80246A04 (the collision-provenance check and the raft merchants' fix, main.c); the walk took the watch as a stop, and the launch ended after 4 s. Fixed: at each boundary the walk asks the host (`bw_direct_call_ready_full`, as translated code does before a direct call) and runs on where it has nothing to do; it also declines when the host isn't quiet. Speed in this run (1 pair, noise): Outset +1.3 %, lava +2.6 %, the rest within ±0.6 %
-- [ ] M2-T03: Plays the same: runs on vs off from every bench state, no crash or safe mode, `[native-ground-walk]` counters (broken = 0), Link and actors where they were (positions in the log, pictures)
-- [ ] M2-T04: Speed: `8-busiest`, `6-play` and the five bench scenes, 6 launches each way, every launch ahead; Game Mode when Steam's prompt allows
-- [ ] M2-T05: The other walks with the same shape (wall correction, roof, water), if M2-T04 holds
+- [x] M2-T03c: Third run (build `f89aeea05`): all eight states clean with the native on (~35 M native walks, none broken; the butterfly room fixed by declining while the host is not quiet). Speed, one launch each way: within ±1 %, inside the run-to-run spread (up to 3 %)
+- [x] M2-T03: **Removed** (owner, 2026-11-10). The walk's own code is ~1.3 % of the game thread at the busiest view, so even 5–8× faster saves ~1 %, at the noise level and short of every-launch-ahead; #542 had already priced it at +0.1–0.2 %. Against that: checkpoints no longer match the translation, two real failures surfaced in play (lazy FP, the host's merchant-raft watch), and ~250 lines tied to one translation. The native, hook script and menu switch are reverted; their commits stay as the record (`2a41dafd6`, `8756f19b2`, `f89aeea05`). The tools stay. Was: plays the same: runs on vs off from every bench state, no crash or safe mode, `[native-ground-walk]` counters (broken = 0), Link and actors where they were (positions in the log, pictures)
+- [x] M2-T04: Not run (removed at M2-T03)
+- [x] M2-T05: Not pursued; the other walks have the same shape and size
 
 ## Evidence ledger
 
@@ -32,6 +33,7 @@ Status: In progress — the ground walk native built (M2-T01/T02), being tested;
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Remove the ground walk native: ~1 % at best, not measurable, at a cost in exactness and risk. Next: the draw side, starting with the key-frame native's declines |
 | 2026-11-10 | Owner: both the collision walk and the draw side, the walk first; the walk native plays the same (opt-in), not cycle-exact |
 | 2026-11-10 | Owner asked whether this repeats earlier work: the named profile says yes (same hot list as #503's planning, 12 % fewer cycles a frame since). No profile-and-trim round; the open option is natives compiled from the decompilation's source |
 | 2026-11-10 | Owner: plan the game thread at busy views separately from the GPU side (#591); #503, the earlier Outset game-thread work, is merged |
