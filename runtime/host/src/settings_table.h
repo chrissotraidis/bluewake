@@ -356,6 +356,15 @@ inline constexpr Setting kSettings[] = {
              "once instead of again for every pixel. The shading can differ very slightly. Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // Present with Mailbox instead of the blocking FIFO wherever BlueWake runs
+    // (BLUEWAKE_PRESENT_MAILBOX, main.c): under gamescope the FIFO wait held the game
+    // thread with Smooth Motion. Opt-in; read when BlueWake starts. BLUEWAKE_VSYNC wins.
+    {.key = "BLUEWAKE_PRESENT_MAILBOX", .kind = Kind::Bool,
+     .label = "Present without waiting for the display", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Hands each finished frame to the screen without waiting for a free "
+             "slot, so a late frame doesn't hold up the game. The screen still shows whole "
+             "frames. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.

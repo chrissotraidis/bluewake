@@ -7688,6 +7688,14 @@ int main(int argc, char** argv) {
         if (getenv("WAYLAND_DISPLAY") != NULL)
             vsync = false;
 #endif
+        // BLUEWAKE_PRESENT_MAILBOX=1 (Config > Performance): Mailbox wherever BlueWake runs.
+        // Under gamescope (Steam Deck Game Mode) the FIFO wait holds the game thread the same
+        // way: with Smooth Motion presenting twice a game frame, two of the three swapchain
+        // images are always queued, and a frame that runs late waits for a vblank. Measured
+        // on a Steam Deck at 3x with the HD look: 27.3 -> 30.0 game frames a second (#563).
+        const char* mailbox_env = getenv("BLUEWAKE_PRESENT_MAILBOX");
+        if (mailbox_env != NULL && mailbox_env[0] == '1')
+            vsync = false;
         if (vsync_env != NULL && vsync_env[0] != '\0')
             vsync = vsync_env[0] != '0';
         const AuroraBackendConfig aurora_config = {

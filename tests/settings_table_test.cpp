@@ -34,7 +34,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
     "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
-    "DOL_AURORA_AO_PACKED",
+    "DOL_AURORA_AO_PACKED", "BLUEWAKE_PRESENT_MAILBOX",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -141,6 +141,10 @@ int main() {
     const Setting* ao = find("DOL_AURORA_AO_PACKED");
     assert(ao != nullptr && ao == clouds + 1 && ao->tab == Tab::Config && ao->group == nullptr);
     assert(!default_on(*ao) && next_launch_on(*ao));
+    // Then presenting with Mailbox (main.c): off by default, read when BlueWake starts.
+    const Setting* mailbox = find("BLUEWAKE_PRESENT_MAILBOX");
+    assert(mailbox != nullptr && mailbox == ao + 1 && mailbox->tab == Tab::Config && mailbox->group == nullptr);
+    assert(!default_on(*mailbox) && next_launch_on(*mailbox));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));
