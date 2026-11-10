@@ -44,7 +44,7 @@ def chunk_of(v):
     return funcs[i] if i >= 0 else (0, "?")
 # which chunks are hot
 chunk_count = collections.Counter(chunk_of(v)[1] for v in inmod)
-hot = [n for n, _ in chunk_count.most_common(60) if re.match(r"func_[0-9A-F]{8}$", n)]
+hot = [n for n, _ in chunk_count.most_common(400) if re.match(r"func_[0-9A-F]{8}$", n)]
 # pc_table entries for the hot chunks, from the RELATIVE relocations
 want = {}
 for n in hot:
@@ -94,3 +94,7 @@ for name, c in by_fn.most_common(top): print(f"  {100*c/total:5.2f}%  {name}")
 print("module code outside the mapped chunks (helpers, natives):")
 for name, c in other.most_common(10): print(f"  {100*c/total:5.2f}%  {name}")
 print("host/libs:", ", ".join(f"{k} {100*v/total:.1f}%" for k, v in host.most_common(4)))
+if "--json" in sys.argv:
+    import json
+    out = {"total": total, "functions": dict(by_fn), "module_other": dict(other), "host": dict(host)}
+    json.dump(out, open(sys.argv[sys.argv.index("--json") + 1], "w"), indent=0)
