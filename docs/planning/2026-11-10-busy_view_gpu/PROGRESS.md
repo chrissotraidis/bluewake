@@ -24,7 +24,8 @@ Status: Planned — follows #586
 - [ ] M2-T02: Game Mode, 6 launches each way, every launch ahead; pictures; #586's seven scenes plus `8-busiest`
 
 ### M3: Smooth Motion by reprojection (opt-in)
-- [ ] M3-T00: The ceiling first: `DOL_AURORA_FRAME_INTERP_REPEAT=1` (RecompCore #57, diagnostic) presents the real frame again instead of replaying the scene for the in-between frame. What it saves is the most any cheaper in-between frame (reprojection included) can save
+- [x] M3-T00: The ceiling: `DOL_AURORA_FRAME_INTERP_REPEAT=1` (RecompCore #57, diagnostic) presents the real frame again instead of replaying the scene. First run invalid: the skip sat in `present_with_in_between`, but the default path is the clocked `present_steps` (the replay still showed 7.3 ms). Fixed (`9a206173`), build `298ac17b5`, headless, `8-busiest`, 4 launches each: as played **25.70**; no replay **27.95 (+8.7 %)**, GPU time per frame 20.2 → 1.6 ms; Smooth Motion off **29.64 (+15.3 %)**. Of Smooth Motion's cost here, ~8.7 % is the replay (GPU, and the render worker encoding it) and ~6.6 % the CPU work beside it (recording each draw, blending its matrices; the interp worker 16 % busy)
+- [ ] M3-T00b: Reprojection's reach from M3-T00: a camera-only warp replaces the replay (up to ~8.7 % less its own full-screen pass) and needs no per-draw blending (part of the other ~6.6 %); with per-object motion it keeps the per-draw blending, so up to ~8.7 %
 - [ ] M3-T01: The in-between frame's GPU and CPU share at `8-busiest`
 - [ ] M3-T02: Motion pass (positions only, both frames) and warp; HUD after the warp
 - [ ] M3-T03: Pictures against today's in-between frames (Smooth Motion dump); blended draws handled
@@ -34,6 +35,7 @@ Status: Planned — follows #586
 
 | Task | Artifact | Method | Environment | Result |
 |---|---|---|---|---|
+| M3-T00 | `render-repeat2/report.md` (`render-repeat` invalid) | render_bench headless, paced, 3 setups × 4 launches, interleaved | Build `298ac17b5`, `8-busiest`, #586's switches | 25.70 / no replay 27.95 / SM off 29.64 |
 | M2-T01d | `render-fused3-pics/report.md`, `render-fused3-speed/report.md` | As M2-T01b | Build `7139b315c` | Pictures 62.3–81.8 dB; −0.21 % |
 | M2-T01b | `render-fused-pics/report.md`, `render-fused-speed/report.md`, comparison images | render_bench headless, paced; pictures with Smooth Motion off, `--every 300`, eight scenes; speed 6 launches each way | Build `0e1138649`, 3x + HD, #586's switches | Pictures 50.7–70.8 dB (Outset rims); +0.9 % at `8-busiest` |
 | M1-T02h | `render-fx-busiest/report.md`, `fxh-samples.txt` | render_bench headless, paced, 9 setups × 2 launches, interleaved | Build `eaa85f0f1`, `8-busiest`, 3x + HD + Smooth Motion, #586's switches | As above |
