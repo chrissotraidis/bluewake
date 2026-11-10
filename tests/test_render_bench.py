@@ -190,6 +190,30 @@ class Runs(Work):
                                   timeout=1)
         self.assertTrue(result['timed_out'])
 
+    def test_a_game_mode_run_goes_through_the_steam_shortcut(self):
+        # A stand-in steam command starts the shortcut's target, as Steam does; the stand-in game (named
+        # bluewake, as the run script looks for it) writes the session log the run takes as its own.
+        game = self.dir / 'game' / 'bluewake'
+        game.parent.mkdir()
+        game.write_text('#!/bin/sh\nmkdir -p "$BLUEWAKE_DATA_DIR/logs"\n'
+                        'echo "[perf] retrace=100 rate=59.9 state=$BLUEWAKE_LOAD_STATE" '
+                        '> "$BLUEWAKE_DATA_DIR/logs/session-1.log"\nsleep 1\n')
+        game.chmod(0o755)
+        target, env = render_bench.gamemode_target(self.dir / 'cache')
+        bin_dir = self.dir / 'bin'
+        bin_dir.mkdir()
+        (bin_dir / 'steam').write_text(f'#!/bin/sh\nsh {target} &\n')
+        (bin_dir / 'steam').chmod(0o755)
+        runner = render_bench.launcher(game, self.dir / 'launch', 'gamemode', '1280x800', 'A',
+                                       ('123', target, env, 60))
+        path = os.environ['PATH']
+        os.environ['PATH'] = f'{bin_dir}:{path}'
+        self.addCleanup(os.environ.__setitem__, 'PATH', path)
+        rendered_run.run(runner, None, self.dir / 'run', {'BLUEWAKE_LOAD_STATE': "/states/it's here.bwstate"},
+                         self.dir / 'status.txt', 0, timeout=60)
+        self.assertIn("state=/states/it's here.bwstate", (self.dir / 'run' / 'log.txt').read_text())
+        self.assertFalse(env.exists())  # the shortcut does nothing on its own after the run
+
     def test_an_empty_quest_log_ends_the_run_at_once(self):
         result = rendered_run.run(self.app('empty'), None, self.dir / 'run', {'BLUEWAKE_WARP': 'sea:44:0:0'},
                                   self.dir / 'status.txt', 0, timeout=60, stop_on='is empty; stopped pressing A')
