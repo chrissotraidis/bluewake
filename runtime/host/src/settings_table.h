@@ -356,15 +356,6 @@ inline constexpr Setting kSettings[] = {
              "once instead of again for every pixel. The shading can differ very slightly. Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
-    // Smooth Motion's in-between frames reuse the real frame's blurred far background and
-    // bloom (RecompCore #54, DOL_AURORA_INTERP_REUSE_SOFT) instead of blurring their own
-    // picture again. Opt-in; read when the renderer starts.
-    {.key = "DOL_AURORA_INTERP_REUSE_SOFT", .kind = Kind::Bool,
-     .label = "Smooth Motion reuses soft blurs", .tab = Tab::Config, .control = Control::Switch,
-     .note = "Experimental. Smooth Motion's extra frames take the distance blur and glow from the "
-             "frame before instead of working them out again. Very slight lag in those blurs. Off "
-             "by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
-     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
