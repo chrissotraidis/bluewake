@@ -64,4 +64,5 @@ Aurora's `[gpu-prof]` zones, median per presented frame (ms). Zones nest inside 
 |---|---|---|---|
 | L1 | In-between passes cost 2–4x the same pass on the real frame | Same size, same pass; should cost about the same | Read Aurora's replay (`frame_interp.cpp`, `replay_op`) for a different path (efficient effects skipped, redone work), or profiler attribution of waits |
 | L2 | Staging copies are 5.6–9 ms | Largest item after the replay | Retest RecompCore #53 paced with these settings |
-| L3 | GPU clock governor stays far below 1600 MHz while busy | ~20 % more GPU at 4x + HD | Paced run with Steam's GPU clock at 1600 MHz (owner sets it) |
+| L3 | GPU clock governor stays far below 1600 MHz while busy | Tested: locked at 1600 MHz, 4x and 3x + HD gain 1–3 fps and become CPU-bound (chip at 14–15 W); 4x + HD does not gain | Closed as a fix |
+| L4 | 4x + HD stalls in present | 255–282 ms a second in present, `acquire-drawable` 30–65 ms, GPU 77 % and game thread 80 % busy at 1600 MHz | Trace swap-chain depth, gamescope latency and Smooth Motion pacing around `acquire-drawable` |
