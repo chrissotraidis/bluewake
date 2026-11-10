@@ -1,6 +1,6 @@
 # PROGRESS — The game thread at busy views
 
-Status: In progress — the ground walk native removed (no measurable gain, M2-T03); the draw side next (M3)
+Status: **Done: findings and tools for review** (owner, 2026-11-10). The busiest view's game thread is a flat, already-optimised profile: no single game function or native target is measurable (collision walk removed, M2; draw side priced, M3). The structural draw-side option is planned separately (#593)
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -23,6 +23,12 @@ Status: In progress — the ground walk native removed (no measurable gain, M2-T
 - [x] M2-T04: Not run (removed at M2-T03)
 - [x] M2-T05: Not pursued; the other walks have the same shape and size
 
+### M3: The draw side, priced
+- [x] M3-T01: Draw-side game-thread functions at `8-busiest` against `6-play` (named profiles): **≈ 26.0 M cycles a frame against 19.9 M**; no function above 0.95 M (particle strips, 0.7 %). Growth: model animation (`J3DAnmTransformKey::calcTransform`, `J3DGetKeyFrameInterpolationS`, `J3DMtxCalcMaya::calcTransform`) +0.8 M; light and TEV setup per material (`dScnKy_env_light_c::settingTevStruct*`, `J3DGDSetTevColorS10`, `J3DGDSetFog`, `J3DGDSetLightPos`) +0.9 M; GX state (`GXSetArray`, `GXLoadTexObjPreLoaded`, `GXCallDisplayList`) +0.4 M
+- [x] M3-T02: The cheapest lead, priced before building: the exact key-frame native (`native_game_math.c` `key_s`) declines ~77 % of its calls, but its function is 0.62 M cycles a frame (0.5 %); full coverage at the exact natives' 1.3–1.7× saves ~0.15–0.25 %. Not built. The same holds for any one draw-side function
+- [x] M3-T03: A measurable draw-side gain needs a structural change (drawing at the GX/J3D API level, docs/PERFORMANCE.md): planned on its own (#593)
+- [x] M3-T04: Tools for merge: `scripts/guest_profile.py`, `scripts/guest_profile_systems.py`, and their use in docs/PROFILING.md ("Naming samples by game function")
+
 ## Evidence ledger
 
 | Task | Artifact | Method | Environment | Result |
@@ -33,6 +39,7 @@ Status: In progress — the ground walk native removed (no measurable gain, M2-T
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Owner: this PR keeps its findings, docs and tools for merge (not closed); the structural draw-side work is planned separately; #591 stays on hold |
 | 2026-11-10 | Remove the ground walk native: ~1 % at best, not measurable, at a cost in exactness and risk. Next: the draw side, starting with the key-frame native's declines |
 | 2026-11-10 | Owner: both the collision walk and the draw side, the walk first; the walk native plays the same (opt-in), not cycle-exact |
 | 2026-11-10 | Owner asked whether this repeats earlier work: the named profile says yes (same hot list as #503's planning, 12 % fewer cycles a frame since). No profile-and-trim round; the open option is natives compiled from the decompilation's source |

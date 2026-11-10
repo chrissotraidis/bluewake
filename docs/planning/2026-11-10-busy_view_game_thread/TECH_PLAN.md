@@ -1,6 +1,6 @@
 # TECH_PLAN — The game thread at busy views
 
-Status: Planned — follows #586
+Status: Done — findings and tools for review; the structural draw-side option is planned on #593
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
 ## Where the game thread's time goes

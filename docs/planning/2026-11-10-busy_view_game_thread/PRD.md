@@ -1,6 +1,6 @@
 # PRD — The game thread at busy views
 
-Status: Planned — follows #586
+Status: Done — findings and tools for review; the structural draw-side option is planned on #593
 Source base: BlueWake `main` with #586
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 Related: #586 (where this was found), #591 (the GPU's share at busy views), #590 (render_bench in Game Mode), #503 (the earlier Outset game-thread work, merged)

@@ -139,6 +139,20 @@ perf annotate --stdio -i /tmp/bw.perf.data <symbol>
 This shows which exact instruction in the function is burning the samples, which is what
 you want before deciding what to change.
 
+### Naming samples by game function
+
+A `func_<addr>` chunk holds many game functions, so its share doesn't say which one is hot. [`scripts/guest_profile.py`](../scripts/guest_profile.py) names every game-thread sample instead:
+1. It finds the sample's chunk.
+2. It finds the guest instruction inside the chunk, through the chunk's `pc_table` (the address of every instruction's label). The module uses packed RELR relocations, so the table is read straight from the file.
+3. It finds the function containing that guest address in the decompilation's `config/GZLE01/symbols.txt` ([zeldaret/tww](https://github.com/zeldaret/tww)).
+
+```sh
+python3 scripts/guest_profile.py perf.data GAME_THREAD_TID path/to/gGZLE01_recomp.so symbols.txt --top 40 --json out.json
+python3 scripts/guest_profile_systems.py light.json CYCLES_PER_FRAME busy.json CYCLES_PER_FRAME
+```
+
+The module must be the exact build that was profiled; perf's mmap event records its build id. The second script groups two profiles by game system (collision, J3D animation, drawing, sound and so on) in cycles per frame, to see what grows between a light and a busy scene. render_bench's `--cpu-profile` gives the `perf.data`, the game thread's id (`perf-SCENE-window.json`) and the cycles per frame (its report). Profile with `BLUEWAKE_MODULE_HUGEPAGES=0`, or the translated code shows as `[JIT]`.
+
 ## Step 4 — Profile the rendered path (GX worker and presentation)
 
 A headless run never starts the GX worker, so it cannot answer any question about the
