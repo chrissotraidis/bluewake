@@ -373,15 +373,6 @@ inline constexpr Setting kSettings[] = {
              "slot, so a late frame doesn't hold up the game. The screen still shows whole "
              "frames. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
-    // The occlusion's apply, the edge light and the torch light in one full-screen pass
-    // (RecompCore #57, DOL_AURORA_FUSED_EFFECTS) instead of three, each reading the depth and
-    // blending into the full-size scene. Opt-in; read when the renderer starts.
-    {.key = "DOL_AURORA_FUSED_EFFECTS", .kind = Kind::Bool,
-     .label = "Draw the HD effects in one pass", .tab = Tab::Config, .control = Control::Switch,
-     .note = "Experimental. Draws the HD look's shading, sunlit edges and torch glow "
-             "together instead of one after another. Colours can differ by about one shade step. Off by "
-             "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
-     .next_launch = Os::All},
     // Present through Xwayland with FIFO and four swap-chain images instead of gamescope's Vulkan
     // WSI layer (BLUEWAKE_NO_GAMESCOPE_WSI; main.c sets ENABLE_GAMESCOPE_WSI=0 and Mesa's
     // vk_x11_override_min_image_count=4 under gamescope, and keeps FIFO over the Mailbox switch):
