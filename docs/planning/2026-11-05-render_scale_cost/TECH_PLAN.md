@@ -1,6 +1,6 @@
 # TECH_PLAN — Why higher render settings drop the Deck below 30 fps
 
-Status: In progress — three switches kept (clouds, AO, Mailbox): 30 at the bench view; next, the heavy Outset view
+Status: Done for this PR — four switches, +9.1 % over seven scenes in Game Mode; six of seven hold 30. The busiest view continues on #591 and #592
 Source base: BlueWake `main` at `ee991d3`
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 

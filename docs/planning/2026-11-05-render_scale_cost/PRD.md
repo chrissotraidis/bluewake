@@ -1,6 +1,6 @@
 # PRD — Why higher render settings drop the Deck below 30 fps
 
-Status: In progress — goal met at the bench's Outset view and in the owner's play there (three switches in #586); busier Outset views still run ~26, next target
+Status: Done for this PR — four switches, +9.1 % over seven scenes in Game Mode; six of seven hold 30. The busiest view continues on #591 and #592
 Source base: BlueWake `main` at `ee991d3`
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 Scope: find and remove avoidable GPU work so the Steam Deck holds 30 game frames a second at higher render settings, without changing the picture. Excluded: lowering picture quality, shipping a GPU clock setting, and enabling an unqualified experiment by default.

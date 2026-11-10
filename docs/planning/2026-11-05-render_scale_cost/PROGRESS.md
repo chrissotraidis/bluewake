@@ -1,13 +1,13 @@
 # PROGRESS — Why higher render settings drop the Deck below 30 fps
 
-Status: In Game Mode, all four switches: +9.1 % over seven scenes (27.07 → 29.54); six of seven hold 30, including the owner's busy Outset view, and the owner's play test there feels smooth (FIFO, four swap-chain images, gamescope's layer off). Goal reached at the bench's Outset view and confirmed in the owner's play: 3x + full HD look + Smooth Motion holds 30 with faster clouds, faster occlusion and Mailbox presentation (24.9 → 30.0), every in-between frame on screen. Busier Outset views (~890 draws a frame against ~500) still run ~26: next target, measured from a new save state (`2-heavy`). The plan moved here from #563 (closed, superseded by #586).
+Status: **Done for this PR.** In Steam Deck Game Mode, #586's four switches take seven scenes from 27.07 to 29.54 game frames a second (+9.1 %); six of seven hold 30 at 3x with the full HD look and Smooth Motion, including the owner's busy Outset view, and the owner's play test there feels smooth. The busiest view (~1,950 draws, 26.5) is limited by the game thread and CPU/GPU power sharing: continued on #591 (the GPU's share: HD effects with power, Smooth Motion reprojection) and #592 (the game thread). Started on #563 (closed, superseded by this PR).
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
 
 ### M1: Measure as played
 - [x] M1-T01: Profile the owner's real play over SSH (session `[perf]`/`[fps-dip]` lines, GPU busy, clock, power): 3x holds 30 at ~60 % GPU busy; 4x 26–28 fps at ~97 % busy; 3x + HD 25.5–29; 4x + HD 19–20 with in-between frames skipped; the game thread waits in `acquire-drawable` 30–42 ms
-- [x] M1-T02: render_bench `--paced` and copy-once for identical AppImages (uncommitted in the #524 worktree's `scripts/`; to land in its own PR)
+- [x] M1-T02: render_bench `--paced` and copy-once for identical AppImages; with Game Mode runs (`--display gamemode`) in #590
 - [x] M1-T03: Paced bench from the owner's save state with the Game Mode build and settings, 4 launches per setting: 29.0 / 25.8 / 24.5 / 18.2 fps for 3x / 4x / 3x+HD / 4x+HD, each setting's launches within ±1.5 %
 - [x] M1-T04: Power does not set the GPU clock: GPU ≥ 95 % busy runs at about the same clock below 12 W as at 15 W
 
@@ -17,16 +17,16 @@ Status: In Game Mode, all four switches: +9.1 % over seven scenes (27.07 → 29.
 - [x] M2-T05: Cost of each part by turning it off, paced, owner's state at 4x + HD, 2 launches each: Smooth Motion off 29.96 fps (+64 %), cloud shadows off +14.5 %, ambient occlusion off +7.5 %, bloom +2.6 %, far blur +2.4 %, edge light +2.0 % (baseline 18.25)
 - [x] M2-T06: Cloud shadows shader: 4 octaves of gradient noise per pixel, each 4 hashed lattice gradients with `cos`/`sin` (~32 trig calls per pixel, at 5.4 MP twice a game frame at 4x). An exact early exit when `smoothstep(0.42, 0.6, n)` is already decided saves only ~8 % of octaves (simulated: the noise sits in that band on 54 % of the screen)
 - [x] M2-T03: L3 — owner's play with the GPU locked at 1600 MHz: 3x 29.9, 4x 27.4, 3x + HD 28.9, 4x + HD 18.8 fps. 4x and 3x + HD gain 1–3 fps but the game thread becomes the limit (98 % busy, chip at 14–15 W); 4x + HD does not gain. Clock is not a fix
-- [ ] M2-T04: L4 — 4x + HD stalls in present: 255–282 ms a second waiting, `acquire-drawable` 30–65 ms, with the GPU 77 % and the game thread 80 % busy. Find what holds the frames (gamescope, swap-chain depth, Smooth Motion pacing)
+- [x] M2-T04: L4 — 4x + HD stalls in present: explained by gamescope's WSI layer (M4-T18), fixed by the fourth switch. Previously:: 255–282 ms a second waiting, `acquire-drawable` 30–65 ms, with the GPU 77 % and the game thread 80 % busy. Find what holds the frames (gamescope, swap-chain depth, Smooth Motion pacing)
 
 ### M3: Source experiments
-- [ ] M3-T00: E2 — cheaper cloud shadows, opt-in "Faster cloud shadows" in the Performance section: baked 4096² noise texture (owner's choice over exact shortcuts worth ~1 %). Code: [RecompCore#54](https://github.com/chrissotraidis/RecompCore/pull/54) (`b48524af`), switch and pin: [#586](https://github.com/chrissotraidis/bluewake/pull/586) on the #554 stack. Full stack build running; then paced Deck A/B (switch on vs off, same build, 6+ launches) and pictures
-- [ ] M3-T01: L1 fix, if the reading finds avoidable work; opt-in, picture identical, judged paced
-- [ ] M3-T02: L2 — retest RecompCore #53 staging-copy batching paced with these settings
-- [ ] M3-T03: B1–B3 — count pass cuts and full-screen passes at 4x + HD (`DOL_AURORA_GPU_PROF=2`), then fuse/merge where exact
-- [ ] M3-T04: S2 — measure the off-screen share of the in-between frame by turning those passes off
-- [ ] M3-T05: S4 — reprojection prototype (opt-in), only option likely to hold 60 at 4x + HD
-- [ ] M3-T06: E3 — ambient occlusion cost
+- [x] M3-T00: Done as M4-T02 (kept). Was: E2 — cheaper cloud shadows, opt-in "Faster cloud shadows" in the Performance section: baked 4096² noise texture (owner's choice over exact shortcuts worth ~1 %). Code: [RecompCore#54](https://github.com/chrissotraidis/RecompCore/pull/54) (`b48524af`), switch and pin: [#586](https://github.com/chrissotraidis/bluewake/pull/586) on the #554 stack. Full stack build running; then paced Deck A/B (switch on vs off, same build, 6+ launches) and pictures
+- [x] M3-T01: Closed: L1 was a profiler artifact (M2-T02). Was: L1 fix, if the reading finds avoidable work; opt-in, picture identical, judged paced
+- [x] M3-T02: Done as M4-T09 (out again). Was: L2 — retest RecompCore #53 staging-copy batching paced with these settings
+- [x] M3-T03: Moved to #591 (fusing the per-pixel effects is a candidate there; the shared pass, M4-T04b, gained +0.76 %). Was: B1–B3 — count pass cuts and full-screen passes at 4x + HD (`DOL_AURORA_GPU_PROF=2`), then fuse/merge where exact
+- [x] M3-T04: Closed by the pass traces (M4-T05): little off-screen work to reuse. Was: S2 — measure the off-screen share of the in-between frame by turning those passes off
+- [x] M3-T05: Moved to #591 (part 2). Was: S4 — reprojection prototype (opt-in), only option likely to hold 60 at 4x + HD
+- [x] M3-T06: Done as M4-T03 (kept). Was: E3 — ambient occlusion cost
 
 ### M4: 3x + full HD look holds 30 (goal)
 - [x] M4-T07: Five scenes, kept switches vs all off, 6 launches each: clouds Outset +9.3 % (every launch), butterfly +5.4 %, lava/shipwreck no cloud pass (no bake: spread only), Hyrule held at 30; AO +1.8–2.6 % in every scene not held at 30. Overall +2.3 % / +1.6 %
@@ -44,7 +44,7 @@ Status: In Game Mode, all four switches: +9.1 % over seven scenes (27.07 → 29.
 - [x] M4-T14: At 4x + HD, five scenes, the three switches vs none: **+21.3 %** (19.48 → 23.630); Outset +16.4 %, lava +21.4 %, Hyrule +31.9 %, butterfly +23.6 %, shipwreck +14.5 %. Still short of 30: the docked target is the next round
 - [x] M4-T06: Play test (owner, Game Mode, 2026-11-10, all three switches on, 3x + HD): at the bench's saved view a steady 30 game fps with every in-between frame shown (the log's `interpolated` count equals the game frames), Mailbox in the log, no hitches. In busier views of Outset (camera over the village, 880–1,770 draws a frame vs ~500) 25–29 game fps, GPU 99–100 % busy at 1,040–1,490 MHz, present waits 70–177 ms a second. The bench's Outset view is a light one
 - [x] M4-T05: Step 4 — closed by measurement before building. `DOL_AURORA_PASS_TRACE=1` at 3x + HD (owner's state): pass 0 (31 flat draws) and pass 1 (17 flat draws) end in 1024×768 copies; pass 2 is the scene (1,026 draws) with a full-size depth copy; pass 3 copies the finished scene; pass 4 is the HUD drawing that copy back. The only reusable off-screen work is passes 0–1, which are cheap; the full-size copies must be redrawn or the in-between frame would show the real frame. Reprojection (S4) stays the lever for 4x / docked. Confirmed in all five bench scenes at 3x + HD: Outset 4 small passes (56 flat draws), lava room 1 (31), Hyrule Castle 1 (31), butterfly room 4 (56), shipwreck 1 (31), each into 1024×768; scene passes 254–1,831 draws; no large reflection or haze passes anywhere
-- [ ] M4-T15: Check against the goal: 3x + HD + Smooth Motion ≥ 30 fps paced, and in the owner's play — met at the bench view (M4-T12, M4-T06); not yet in busier views (M4-T16)
+- [x] M4-T15: Check against the goal: met in Game Mode in six of seven scenes and in the owner's play at the busy Outset view (M4-T20, M4-T22); the busiest view (M4-T23) moves to #591 and #592
 - [x] M4-T16: Heavy Outset view (`2-heavy`, the owner's `quick-9162`), three switches on, each part turned off, paced, 4 launches each: baseline **28.80** (not ~26 as in play); Smooth Motion off 29.96 (+4.0 %), AO off +1.7 %, far blur off +1.7 %, clouds off +1.1 %, edge light off +0.7 %, bloom off +0.6 %, torch light off −0.5 %, distant islands off +0.2 % (vs baseline). In the bench the game thread is 97–98 % busy and waits only ~11 ms a second in present; GPU ~91 % at ~1030 MHz, 14.3 W. No single effect is the limit here
 - [x] M4-T17: Bench vs play gap at the same view (~890 draws a frame): in play the game thread waits 93–166 ms a second in present and runs 25–26; headless it waits ~11 ms and runs 28.8. Measured in Game Mode itself (M4-T18)
 - [x] M4-T18: Game Mode runs through the owner's Steam shortcut (merged build `debfb4abd`, state `2-heavy`, three switches on, 3 launches each, interleaved). As played **27.33** (present waits ~96–115 ms a second, GPU ~80 % at ~1070 MHz: not full); Steam overlay layer off 27.35 (no effect); Smooth Motion off 29.96; FIFO instead of Mailbox 27.50 (no effect); **gamescope's Vulkan WSI layer off (`ENABLE_GAMESCOPE_WSI=0`) 29.91** (29.98 / 29.96 / 29.80, present waits 10–14 ms, every in-between frame made: `interpolated=26/26`). The remaining loss at busy views is gamescope's WSI layer (3 swap-chain images, `minImageCount: 3`) holding the game in present, not GPU work. To confirm: the in-between frames reach the panel without the layer, and FIFO without it
@@ -80,6 +80,7 @@ Status: In Game Mode, all four switches: +9.1 % over seven scenes (27.07 → 29.
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Owner: wrap up #586 with its data; the busiest view continues on #591 (GPU: HD effects with power, reprojection) and #592 (game thread). RecompCore #54 drops the far blur's diagnostic (`740132cb`) |
 | 2026-11-10 | Measure busy views in Game Mode itself (render_bench `--display gamemode`, #590): headless gamescope does not include gamescope's WSI layer, which costs ~9 % at the heavy Outset view |
 | 2026-11-10 | The headless bench under-reads the GPU cost of real Game Mode presentation (present waits 11 vs 93–166 ms a second at the same view). Effect work at the heavy view is on hold until that cost is measured on the real display |
 | 2026-11-10 | Owner: fold the plan into #586 and close #563, so the code and its evidence live in one PR (with RecompCore#54) |
