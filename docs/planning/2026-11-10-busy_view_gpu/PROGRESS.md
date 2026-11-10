@@ -16,11 +16,13 @@ Status: Planned — follows #586
 - [ ] M1-T03: Confirm the power sharing: CPU clock with the HD look on against off
 
 ### M2: Cheaper HD effects at busy views
-- [ ] M2-T00: Fuse the per-pixel effects (occlusion apply, edge light, torch light, cloud shadows) into one full-screen pass, opt-in: colour × (occlusion × cloud) + (edge + torch) × cloud, read depth once, write colour once. Within one 8-bit step (one rounding instead of one per pass)
+- [x] M2-T00: Fuse the per-pixel effects into one full-screen pass, opt-in: `DOL_AURORA_FUSED_EFFECTS=1`, menu "Draw the HD effects in one pass" (RecompCore #57 `kFusedShader`, generated from the four shaders' own terms; bluewake `04ebe869b`). Blended as scene × alpha + rgb: ((scene × ao + edge + torch) × cloud), one 8-bit rounding. Used when two or more of the four apply, not with the sun shadows or a debug view. Runs on the Deck without shader errors (build `0e1138649`)
+- [ ] M2-T01b: Pictures (Smooth Motion off, eight scenes) and speed (`8-busiest`, 6 launches each way) of the fused pass, headless
 - [ ] M2-T01: The largest effect from M1-T02 made cheaper, opt-in, exact or within one shade step
 - [ ] M2-T02: Game Mode, 6 launches each way, every launch ahead; pictures; #586's seven scenes plus `8-busiest`
 
 ### M3: Smooth Motion by reprojection (opt-in)
+- [ ] M3-T00: The ceiling first: `DOL_AURORA_FRAME_INTERP_REPEAT=1` (RecompCore #57, diagnostic) presents the real frame again instead of replaying the scene for the in-between frame. What it saves is the most any cheaper in-between frame (reprojection included) can save
 - [ ] M3-T01: The in-between frame's GPU and CPU share at `8-busiest`
 - [ ] M3-T02: Motion pass (positions only, both frames) and warp; HUD after the warp
 - [ ] M3-T03: Pictures against today's in-between frames (Smooth Motion dump); blended draws handled
