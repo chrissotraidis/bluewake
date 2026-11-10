@@ -47,9 +47,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The guest-alias range query and its registry generation (RecompCore #45), and the guest alias lookup in constant time, the last hit first and then a page index (RecompCore #48): patches/recompcore/0193-0196 (irregularthanis).
 # 0.10.0 pins the bluewake-next commit that merges #45, #48 and 0186-0192.
 # Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), merged into bluewake-next as f9e3f4e.
-# Cheaper HD look effects, opt-in (RecompCore #54, on top of f9e3f4e): pin #54's head, fetched from upstream, until it merges.
+# Cheaper HD look effects, opt-in (RecompCore #54, on top of f9e3f4e), and the GPU's share at busy views (RecompCore #57, stacked on #54, bluewake#591): pin #57's head, fetched from upstream, until they merge.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=740132cb993bd5a230a02bc6b90eb4b179b704ec
+RECOMPCORE_SHA=0ae1d16f79ae6d372a9fb1568018fe6459ba0256
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
