@@ -3,7 +3,7 @@
 Status: Planned — follows #586
 Source base: BlueWake `main` with #586
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
-Related: #586 (where this was found), #GPUPLAN (the GPU's share at busy views), #590 (render_bench in Game Mode), #503 (the earlier Outset game-thread work, merged)
+Related: #586 (where this was found), #591 (the GPU's share at busy views), #590 (render_bench in Game Mode), #503 (the earlier Outset game-thread work, merged)
 
 ## The problem
 
@@ -22,11 +22,11 @@ A CPU profile at that view (Linux perf, build `9dde6aa9d`, #586's settings):
 
 Most of the translated code runs from the copy on 2 MB pages (`BLUEWAKE_MODULE_HUGEPAGES`), so perf shows it as `[JIT]` with no names. The time is spread thin: the game simply runs a lot of its own logic per frame at this view, for the actors, their models and their draw lists.
 
-The GPU makes it worse: CPU and GPU share the chip's ~15 W, and at this view the chip draws ~13.4 W. That side is planned on #GPUPLAN.
+The GPU makes it worse: CPU and GPU share the chip's ~15 W, and at this view the chip draws ~13.4 W. That side is planned on #591.
 
 ## Goal
 
-**Cut the game thread's time per frame at busy views by 10 % or more**, exactly (the same game state at the same retraces), so that with #GPUPLAN the busiest Outset view holds 30 game frames a second at 3x with the full HD look and Smooth Motion.
+**Cut the game thread's time per frame at busy views by 10 % or more**, exactly (the same game state at the same retraces), so that with #591 the busiest Outset view holds 30 game frames a second at 3x with the full HD look and Smooth Motion.
 
 ## Success and constraints
 

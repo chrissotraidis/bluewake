@@ -25,4 +25,4 @@ Status: Planned — follows #586
 
 | Date | Decision |
 | --- | --- |
-| 2026-11-10 | Owner: plan the game thread at busy views separately from the GPU side (#GPUPLAN); #503, the earlier Outset game-thread work, is merged |
+| 2026-11-10 | Owner: plan the game thread at busy views separately from the GPU side (#591); #503, the earlier Outset game-thread work, is merged |
