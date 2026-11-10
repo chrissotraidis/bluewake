@@ -625,6 +625,8 @@ int main(void) {{
                      ROOT / "scripts/windows/native_game_math.py", ROOT / "cmake/composite/native_game_math.c",
                      ROOT / "cmake/composite/native_game_math.h", ROOT / "scripts/windows/native_skin.py",
                      ROOT / "cmake/composite/native_skin.c", ROOT / "cmake/composite/native_skin.h",
+                     ROOT / "scripts/windows/native_ground_walk.py", ROOT / "cmake/composite/native_ground_walk.c",
+                     ROOT / "cmake/composite/native_ground_walk.h",
                      ROOT / "cmake/composite/native_math.c", ROOT / "cmake/composite/native_math.h",
                      ROOT / "cmake/composite/native_work_pool.c", ROOT / "cmake/composite/native_work_pool.h",
                      ROOT / "scripts/windows/inline_save_restore_gpr.py",
@@ -733,13 +735,16 @@ int main(void) {{
             option_names = ("enabled", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe",
                             "direct_calls", "inline_gpr", "native_j3d", "native_vec", "native_math",
                             "native_skin", "native_game_math", "lean_memory", "native_entries", "lean_blocks")
+            # Newer than the receipts above: absent means off.
+            options_match_walk = (receipt.get("native_ground_walk", False)
+                                  == bool(getattr(self.args, "native_ground_walk", False)))
             arg_names = ("prepared_blocks", "fixed_cpu", "fixed_mem1", "inline_fp", "gather_pipe",
                          "direct_calls", "inline_gpr", "native_j3d", "native_vec", "native_math",
                          "native_skin", "native_game_math", "lean_memory", "native_entries", "lean_blocks")
             options_match = all(receipt.get(name) == bool(getattr(self.args, arg, False))
                                 for name, arg in zip(option_names, arg_names))
             # Newer than the receipts above: absent means off.
-            options_match = options_match and (receipt.get("lean_deadlines", False)
+            options_match = options_match and options_match_walk and (receipt.get("lean_deadlines", False)
                                                == bool(getattr(self.args, "lean_deadlines", False)))
             options_match = options_match and (receipt.get("cache_ops", False)
                                                == bool(getattr(self.args, "cache_ops", False)))
@@ -763,6 +768,9 @@ int main(void) {{
             self.run("native-math", [sys.executable, ROOT / "scripts/mods/prepare_native_math.py", o / "composite-src"])
         if self.args.native_skin:
             self.run("native-skin", [sys.executable, ROOT / "scripts/windows/native_skin.py", o / "composite-src"])
+        if getattr(self.args, "native_ground_walk", False):
+            self.run("native-ground-walk", [sys.executable, ROOT / "scripts/windows/native_ground_walk.py",
+                                            o / "composite-src"])
         if self.args.fixed_cpu:
             self.run("fixed-cpu", [sys.executable, cpu_script, o / "composite-src"])
         if self.args.inline_fp or self.args.gather_pipe:
@@ -828,6 +836,7 @@ int main(void) {{
                    "native_vec": self.args.native_vec,
                    "native_math": self.args.native_math,
                    "native_skin": self.args.native_skin,
+                   "native_ground_walk": getattr(self.args, "native_ground_walk", False),
                    "native_game_math": self.args.native_game_math,
                    "lean_memory": self.args.lean_memory,
                    "lean_deadlines": getattr(self.args, "lean_deadlines", False),
@@ -957,6 +966,7 @@ int main(void) {{
             f"-DBLUEWAKE_NATIVE_VEC={'ON' if self.args.native_vec else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_GAME_MATH={'ON' if self.args.native_game_math else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_SKIN={'ON' if self.args.native_skin else 'OFF'}",
+            f"-DBLUEWAKE_NATIVE_GROUND_WALK={'ON' if getattr(self.args, 'native_ground_walk', False) else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_MATH={'ON' if self.args.native_math else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_ENTRIES={'ON' if self.args.native_entries else 'OFF'}",
             f"-DBLUEWAKE_NATIVE_GX={'ON' if getattr(self.args, 'native_gx', False) else 'OFF'}",
@@ -1306,6 +1316,7 @@ int main(void) {{
             "native_vec": self.args.native_vec,
             "native_math": self.args.native_math,
             "native_skin": self.args.native_skin,
+            "native_ground_walk": getattr(self.args, "native_ground_walk", False),
             "native_game_math": self.args.native_game_math,
             "local_training": self.profile is not None,
             "composite_profile_sha256": sha256_file(self.profile) if self.profile else "",
@@ -1519,6 +1530,9 @@ def main():
                         help="certify optional native game-math entry hooks (off by default)")
     parser.add_argument("--native-skin", action="store_true",
                         help="certify and enable optional native skinning preparation (off by default)")
+    parser.add_argument("--native-ground-walk", action="store_true",
+                        help="certify and route the native ground collision walk (#592); it runs only when the "
+                             "player turns it on (BLUEWAKE_NATIVE_GROUND_WALK=1)")
     parser.add_argument("--direct-gate", action="store_true",
                         help="train with the direct-call gate open (BLUEWAKE_DIRECT_GATE=1, #552); the default "
                              "whenever direct calls are on, kept for older scripts")

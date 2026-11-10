@@ -345,6 +345,16 @@ inline constexpr Setting kSettings[] = {
              "faster. Uses about 370 MB more memory. Linux only (elsewhere it does nothing). Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // The ground collision walk (cBgW::GroundCrossGrpRp) natively (#592,
+    // native_ground_walk.c): plays the same rather than cycle-exact (its cycles
+    // estimated, its own stack frames left out). The module reads it when the
+    // game starts; builds without the native leave it inert.
+    {.key = "BLUEWAKE_NATIVE_GROUND_WALK", .kind = Kind::Bool,
+     .label = "Faster ground collision", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Works out where characters and objects stand on the ground with native "
+             "code instead of the translated game code. Plays the same, but not cycle for cycle. Off by "
+             "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
