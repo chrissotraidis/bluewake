@@ -1,6 +1,6 @@
 # PROGRESS — Why higher render settings drop the Deck below 30 fps
 
-Status: In progress. Measured paced with the owner's build, settings and save state: the GPU fills at 4x and with the HD look. Earlier unpaced conclusions are retracted (see PRD). A locked 1600 MHz GPU is not a fix. Turning each part off at 4x + HD: Smooth Motion +64 %, cloud shadows +14.5 %, AO +7.5 %. Next: cheaper cloud shadows (opt-in), then the in-between frame.
+Status: In progress. Goal: 3x + full HD look + Smooth Motion holds 30 on the Deck (24.5 today). Step 1, faster cloud shadows (RecompCore#54, #586), is building; the per-part costs at 3x are being measured.
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -28,6 +28,14 @@ Status: In progress. Measured paced with the owner's build, settings and save st
 - [ ] M3-T05: S4 — reprojection prototype (opt-in), only option likely to hold 60 at 4x + HD
 - [ ] M3-T06: E3 — ambient occlusion cost
 
+### M4: 3x + full HD look holds 30 (goal)
+- [ ] M4-T01: Cost of each part at 3x + HD, turned off, paced, owner's state (running)
+- [ ] M4-T02: Step 1 — faster cloud shadows: Deck A/B, switch on vs off in the same stack build, 6+ paced launches each, pictures (build running; RecompCore#54, #586)
+- [ ] M4-T03: Step 2 — cheaper ambient occlusion, opt-in
+- [ ] M4-T04: Step 3 — one pass for the per-pixel HD effects, bit-identical, opt-in
+- [ ] M4-T05: Step 4 — in-between frame reuses the real frame's off-screen copies, opt-in (only if 1–3 fall short)
+- [ ] M4-T06: Check against the goal: 3x + HD + Smooth Motion ≥ 30 fps paced, and in the owner's play
+
 ## Evidence ledger
 
 | Task | Artifact | Method | Environment | Result |
@@ -43,6 +51,7 @@ Status: In progress. Measured paced with the owner's build, settings and save st
 | --- | --- |
 | 2026-11-09 | Measure render settings paced, with the owner's build, settings and save state. Unpaced runs hide a full GPU because the game thread pins the chip at its power limit |
 | 2026-11-09 | Retract the unpaced results: power-sharing cause, 1100 MHz cap confirmation, scale 2 over 3, the M6 recheck, and #53's rejection (to be retested). Keep the identical-draw count |
+| 2026-11-10 | Goal set by the owner: full HD look at 3x holds 30 with Smooth Motion. Plan: cloud shadows, ambient occlusion, one pass for the per-pixel effects, then reuse of off-screen copies in the in-between frame. 4x is overkill on the Deck's screen (smoothing, not detail) and comes after, for docked play |
 | 2026-11-10 | `[gpu-prof]` per-pass numbers are not comparable on the Deck (double-counted HD zones, leaking encoder timestamps); cost each part by turning it off instead. First code target: cloud shadows (14.5 % at 4x + HD), opt-in in the Performance section |
 | 2026-11-09 | A locked 1600 MHz GPU moves the limit to the game thread (shared power) and does not help 4x + HD: drop L3 as a fix. Add L4, the present stall at 4x + HD |
 | 2026-11-09 | Next: L1, why in-between passes cost 2–4x the real frame's; then L4 (present stall) and L2 (#53 paced) |

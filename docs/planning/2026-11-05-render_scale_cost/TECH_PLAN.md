@@ -1,6 +1,6 @@
 # TECH_PLAN — Why higher render settings drop the Deck below 30 fps
 
-Status: In progress — GPU-bound when paced; next: in-between pass cost (source reading)
+Status: In progress — goal 3x + full HD at 30; step 1 (cloud shadows) building
 Source base: BlueWake `main` at `ee991d3`
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
 
@@ -69,6 +69,33 @@ Aurora's `[gpu-prof]` zones, median per presented frame (ms). Zones nest inside 
 | EFB copy 2, real / in-between | 1.1 / 4.2 | 1.3 / 6.2 | 0.8 / 3.5 | 2.2 / 5.0 |
 | Cloud shadows, real / in-between | — | — | 0.8 / 3.3 | 2.2 / 4.8 |
 | Ambient occlusion, real / in-between | — | — | 0.4 / 1.4 | 1.2 / 2.1 |
+
+## Plan: 3x + full HD look at 30
+
+Target 24.5 → 30 fps (+22 %), paced, owner's state, Game Mode build and settings, Smooth Motion one step.
+
+```mermaid
+flowchart TD
+    M["M4-T01: cost of each part at 3x + HD<br/>(turned off, paced)"] --> S1["Step 1: faster cloud shadows<br/>RecompCore#54 + #586"]
+    S1 --> Q1{"30 held?"}
+    Q1 -- no --> S2["Step 2: cheaper ambient occlusion"]
+    S2 --> Q2{"30 held?"}
+    Q2 -- no --> S3["Step 3: one pass for the per-pixel HD effects"]
+    S3 --> Q3{"30 held?"}
+    Q3 -- no --> S4["Step 4: in-between frame reuses<br/>the real frame's off-screen copies"]
+    Q1 -- yes --> D["Done: 4x / docked next"]
+    Q2 -- yes --> D
+    Q3 -- yes --> D
+```
+
+| Step | Change | Where | Qualification |
+|---|---|---|---|
+| 1 | Bake the cloud noise once into a 4096² `R32Float` world-space texture; read with exact bilinear weights; re-bake near the edge | `post_fx.cpp` `fs_clouds_baked`, `ensure_cloud_noise` (RecompCore#54); switch "Faster cloud shadows" (#586) | Same build, switch on vs off, 6+ paced launches each, all ahead; pictures within half a step |
+| 2 | AO: fewer or cheaper passes (occlusion, two blurs, apply), e.g. a smaller occlusion target or a joint blur | `post_fx.cpp` `encode` AO block | Same; pictures unchanged or within a step |
+| 3 | One fragment pass for edge light, torch light and the cloud/AO apply: depth read once, colour written once, 8-bit rounding repeated between steps | `post_fx.cpp` `encode`, new combined pipeline | Same; pictures bit-identical |
+| 4 | In-between frame samples the real frame's render-to-texture results (reflections, shadow and blur sources) | `common.cpp` `replay_op` / `present_with_in_between` | Same; pictures within a small, stated difference |
+
+Each step is opt-in in Config → Performance first; a step that is not ahead in every launch is reverted and recorded.
 
 ## Leads, in order
 

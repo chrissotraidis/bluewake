@@ -1,9 +1,24 @@
 # PRD — Why higher render settings drop the Deck below 30 fps
 
-Status: In progress — cause measured as played (the GPU fills); next: why Smooth Motion's in-between passes cost more than the real frame's
+Status: In progress — goal: 3x + full HD look + Smooth Motion holds 30 on the Deck; step 1 (faster cloud shadows) building
 Source base: BlueWake `main` at `ee991d3`
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
 Scope: find and remove avoidable GPU work so the Steam Deck holds 30 game frames a second at higher render settings, without changing the picture. Excluded: lowering picture quality, shipping a GPU clock setting, and enabling an unqualified experiment by default.
+
+## Goal: full HD look at 3x holds 30
+
+**3x render scale + the full HD look + Smooth Motion holds 30 game frames a second on the Steam Deck**, paced, from the owner's save state at Outset, with the Game Mode build and settings. Today: 24.5 fps, so about **+22 %** is needed. On the Deck's 1280×800 screen, 3x already supersamples about 3 samples a pixel; 4x adds smoothing, not detail, and is the docked/TV target after this one.
+
+Four steps, in order, each opt-in in the Performance section first and qualified paced (six or more launches each way, pictures):
+
+| Step | What | Expected share of the gap | Picture |
+|---|---|---|---|
+| 1 | Faster cloud shadows (baked noise texture; RecompCore#54, #586) | Largest: cloud shadows were 14.5 % at 4x + HD | Within half an 8-bit step |
+| 2 | Cheaper ambient occlusion (four full-screen passes today) | AO was 7.5 % at 4x + HD | Target: unchanged or within an 8-bit step |
+| 3 | One pass for the per-pixel HD effects (edge light, torch light, cloud and AO apply) | ~2 % each today, mostly memory traffic | Bit-identical (8-bit rounding repeated between steps) |
+| 4 | In-between frame reuses the real frame's off-screen copies | Only if 1–3 fall short | Very small differences; opt-in |
+
+The 3x shares come from the same turn-it-off measurement at 3x + HD (M4-T01).
 
 ## The problem
 
