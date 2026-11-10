@@ -381,7 +381,8 @@ def certify(root, watched, report=False):
                 print(f"{entry:08X} {name}: {digest} ({where})")
             if digest != expected:
                 if not report:
-                    print(f"{name}: not the certified translation ({where}); not hooked")
+                    print(f"{name}: not the certified translation ({where}); not hooked "
+                          f"(this tree: {digest})")
                 ok = False
             hit = sorted(a for a in named if a in watched or (a & ~0x40000000) in watched)
             if hit:
