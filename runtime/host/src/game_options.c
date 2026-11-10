@@ -75,17 +75,18 @@ static u32 hook_swing_turn(CPUState* cpu) {
 // faces, rounded to the nearest eighth of a turn, through the game's own
 // dKyw_tact_wind_set(0, angle). The call is made by returning into it with the
 // link register pointing back at this site; the second visit is the return.
+static bool g_sail_wind_returning;
+
 static u32 hook_sail_wind(CPUState* cpu) {
-    static bool returning;
-    if (returning) {
-        returning = false;
+    if (g_sail_wind_returning) {
+        g_sail_wind_returning = false;
         return 0u;
     }
     const u32 korl = mem_read32(cpu, 0x803CA75Cu);
     if (korl == 0u)
         return 0u;
     const s32 facing = -(s32)(s16)mem_read16(cpu, korl + 0x206u) + 0x4000 + 0x1000;
-    returning = true;
+    g_sail_wind_returning = true;
     cpu->gpr[3] = 0u;
     cpu->gpr[4] = (u32)facing & 0xFFFFE000u;
     cpu->lr = cpu->pc;
@@ -239,6 +240,18 @@ static bool patch_bmg(CPUState* cpu, u32 bmg, u32* messages_out, u32* waits_out)
     BmgGuestWrite write = {cpu, bmg};
     return bluewake_bmg_patch(cpu->ram + offset, cpu->ram_size - offset,
                              write_bmg_byte, &write, messages_out, waits_out);
+}
+
+// A save state was loaded: its message data may not be patched (saved with
+// instant text off) though it sits where this run's was, so it is looked for
+// again (patching is the same however often it is done). A Swift Sail wind
+// call this run was in the middle of is not the state's.
+void bluewake_game_options_state_loaded(bool reapply) {
+    if (reapply) {
+        g_bmg = 0u;
+        g_retrace = 59u;  // looked for at the next retrace
+    }
+    g_sail_wind_returning = false;
 }
 
 void bluewake_game_options_retrace(CPUState* cpu) {

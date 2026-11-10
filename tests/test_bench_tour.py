@@ -161,6 +161,7 @@ class BenchTourTests(unittest.TestCase):
         self.assertEqual(env['BLUEWAKE_TEST_WARP'],
                          '2400:sea:44:0,4200:sea:11:1,6000:M_NewD2:0:0,7800:sea:41:0,9600:sea:1:100')
         self.assertEqual(env['BLUEWAKE_LOAD_STATE'], scratch + '/tour.bwstate')
+        self.assertEqual(env['BLUEWAKE_STATE_REAPPLY'], '0')
         self.assertNotIn('BLUEWAKE_RENDERER', env)
         self.assertNotIn('BLUEWAKE_PLAYER_PROBE', env)
         self.assertNotIn('BLUEWAKE_DISC', env)
@@ -188,6 +189,13 @@ class BenchTourTests(unittest.TestCase):
         self.assertNotIn('BLUEWAKE_TEST_WARP', env)
         self.assertEqual(env['BLUEWAKE_RENDERER'], 'headless')
         self.assertNotIn('BLUEWAKE_PLAYER_PROBE', env)
+
+    def test_state_reapply_is_off_unless_asked(self):
+        common = dict(mode='headless', load_state='scene.bwstate', scratch='/tmp/bluewake-bench-scratch',
+                      card='/tmp/bluewake-bench-scratch/GZLE01.card', warp=None, max_retraces=11400)
+        self.assertEqual(bench_tour.measurement_environment({}, **common)['BLUEWAKE_STATE_REAPPLY'], '0')
+        asked = bench_tour.measurement_environment({'BLUEWAKE_STATE_REAPPLY': '1'}, **common)
+        self.assertEqual(asked['BLUEWAKE_STATE_REAPPLY'], '1')
 
     def test_card_command_is_an_argument_list(self):
         argv = bench_tour.card_restart_argv('in.card', 'out.card')

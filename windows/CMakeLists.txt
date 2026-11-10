@@ -108,6 +108,7 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/hd_look.c
     ${BLUEWAKE_HOST_SRC}/audio_watch.c
     ${BLUEWAKE_HOST_SRC}/fps_watch.c
+    ${BLUEWAKE_HOST_SRC}/perf_monitor.c
     ${BLUEWAKE_HOST_SRC}/game_options.c
     ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
     ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
@@ -131,6 +132,7 @@ add_executable(BlueWake
     src/win_entry.c
     src/win_disc.c
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c
     src/win_settings.cpp
     src/win_crash.cpp
     src/bluewake.rc
@@ -428,7 +430,8 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
         endif()
         add_test(NAME bluewake_guest_alias_lookup_${_variant}_test COMMAND bluewake_guest_alias_lookup_${_variant}_test)
     endforeach()
-    add_executable(bluewake_windows_disc_test ${BLUEWAKE_REPO_ROOT}/tests/windows_disc_test.c)
+    add_executable(bluewake_windows_disc_test ${BLUEWAKE_REPO_ROOT}/tests/windows_disc_test.c
+        ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c)
     target_include_directories(bluewake_windows_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
     target_compile_options(bluewake_windows_disc_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
     target_link_libraries(bluewake_windows_disc_test PRIVATE bluewake_posix_compat comctl32 comdlg32)
@@ -447,6 +450,14 @@ if(BLUEWAKE_WINDOWS_REGRESSION_TESTS)
     target_link_libraries(bluewake_card_dispatch_lock_test PRIVATE gxruntime bluewake_posix_compat)
     set_target_properties(bluewake_card_dispatch_lock_test PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME bluewake_card_dispatch_lock_test COMMAND bluewake_card_dispatch_lock_test)
+    add_executable(bluewake_card_state_loaded_test ${BLUEWAKE_REPO_ROOT}/tests/card_state_loaded_test.c)
+    target_include_directories(bluewake_card_state_loaded_test PRIVATE ${BLUEWAKE_HOST_SRC} ${GXRUNTIME_DIR}/include ${BLUEWAKE_COMPAT_INCLUDES})
+    target_compile_options(bluewake_card_state_loaded_test PRIVATE ${BLUEWAKE_COMPAT_FORCE_INCLUDE})
+    target_link_libraries(bluewake_card_state_loaded_test PRIVATE gxruntime bluewake_posix_compat)
+    set_target_properties(bluewake_card_state_loaded_test PROPERTIES LINKER_LANGUAGE CXX)
+    foreach(_case marker saved kept)
+        add_test(NAME bluewake_card_state_loaded_${_case}_test COMMAND bluewake_card_state_loaded_test ${_case})
+    endforeach()
     add_executable(bluewake_render_worker_identity_test ${BLUEWAKE_REPO_ROOT}/tests/render_worker_identity_test.cpp)
     target_include_directories(bluewake_render_worker_identity_test PRIVATE ${GXRUNTIME_DIR}/graphics/aurora/lib)
     target_link_libraries(bluewake_render_worker_identity_test PRIVATE gxruntime GXRuntime::aurora GXRuntime::gxcore)

@@ -188,6 +188,26 @@ In that same folder (`files/`):
 | `launch.env` | optional launch settings, one `NAME=value` a line (`install.py --env NAME=value`) |
 | `logs/session-*.log` | the newest eight sessions (also in logcat, tag `BlueWake`) |
 
+## First run, and the log a crash leaves
+
+With no `main.dol` or rels yet, the app opens its first-run screen instead of SDL (`FirstRunActivity`): the player
+picks their own `GZLE01.iso`, it is copied into `files/game`, and `main.dol` and `rels/` are extracted from it on the
+device. That runs before the game and its menu exist, so the session log starts with the first-run screen:
+`logs/session-*.log` then holds the disc import and the game after it in one file, with the copy's size and the free
+space logged as it goes.
+
+The copy is checked before and after it runs. Before, the space left in `files/` must cover the size the provider
+reports for the picked file plus 32 MB for the extraction, and the screen says both sizes when it does not. After,
+the copy must be that same size: a provider that ends the stream early — a cloud-backed file, a cancelled download —
+leaves a short image that passes the disc's header check and then dies when the game reads past its end. The image
+is written beside the real name as `GZLE01.iso.part` and renamed once it is whole, so a copy that a kill or a full
+filesystem interrupts leaves nothing for the game to read. When a provider cannot report a size, the log says so and
+the copy is only checked against the free space the filesystem reports.
+
+A session that ends properly deletes `logs/session-in-progress`; one that does not leaves it there naming its log,
+and the next first-run screen offers **Share Its Log** (through `LogProvider`, as Help & Feedback > Share Session Log
+does). A crash before the menu is reportable that way instead of existing only in logcat and the tombstone.
+
 **Uninstalling the app deletes this folder, saves included.** Back up the card first:
 `python scripts/android/install.py --pull-saves backup/`. Installing a new build over the old one keeps it.
 
@@ -218,6 +238,12 @@ same touch controls, the same settings under the same names.
 - The picture keeps the game's shape and renders at three times the GameCube's 480 lines by default; the mouse
   camera is off (touches would reach it as clicks).
 
+The picture is presented without waiting on the display. A phone's compositor holds the buffer the way
+Wayland's does, and a FIFO present waits on the game thread: a frame that misses the vsync it aimed for
+(33.3 ms at 60 Hz) waits for the next but one — 50 ms, 20 fps — so the display falls by a flat 10 on top of the speed the game has already lost.
+Mailbox returns at once and the compositor still times the display. `BLUEWAKE_VSYNC=1` in `launch.env`
+restores the blocking present.
+
 ## Measure
 
 ```bash
@@ -232,6 +258,18 @@ heats and throttles. `--cool` waits for the phone to cool to under 34 °C at ful
 build first; `--headless` measures without drawing or pacing; `--env` adds launch settings (a test warp, the
 player's display settings). `--probe` also logs the player's position, to check the spot; since #297 it keeps
 the full overlap watch on from a card save, so measure speed without it. The card is only read.
+
+The same numbers are on the phone: **⋯ → Display → Performance Panel → Full** draws a panel in the
+picture's top right corner — the frame rate, the average and longest frame with a graph of them, the game's share
+of the processor, and the memory in use against the whole, with a thin bar under each share. It is the desktop's F9
+panel (`runtime/host/src/perf_monitor.c`) drawn in the Android shell's own idiom, refreshed twice a second, and it
+is remembered with the other display settings. An Android app is not given everything a desktop is: `/proc/stat` is
+denied to it, so the machine-wide processor share is not shown, only the game's own; and a phone publishes no
+graphics card counters or temperatures to apps, so those rows are left out rather than drawn as permanent dashes.
+What the platform does say is used instead: the processors' mean clock and the fastest core (from `cpufreq`), the
+thermal status in place of a temperature, and the SoC's and the card's names from the build and from the driver's
+own GL renderer, as the panel's last lines.
+The one-time `[perf] panel (android)` line in the log says which of them the phone would give.
 
 ## Files
 

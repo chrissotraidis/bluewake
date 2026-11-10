@@ -318,6 +318,18 @@ static bool saving_was_off(CPUState* cpu) {
     return false;
 }
 
+// A save state was loaded. Saving goes off if the state says it was off where
+// it was taken (main.c's HOSTVARS, `saved_off`), or, for a state from before
+// that was saved, if the game in it holds the messages said this way. A load
+// never turns saving back on: a run that has used the stage select keeps it
+// off whatever state it loads.
+void bluewake_card_runtime_state_loaded(CPUState* cpu, bool saved_off) {
+    pthread_mutex_lock(&g_card_mutex);
+    if (!g_card_writes_refused && !bluewake_card_runtime_saving_kept() && (saved_off || saving_was_off(cpu)))
+        refuse_writes_locked(cpu, "the save state is from a session with saving off");
+    pthread_mutex_unlock(&g_card_mutex);
+}
+
 static void say_saving_is_off(CPUState* cpu, bool search) {
     for (size_t k = 0; k < sizeof k_no_card_texts / sizeof k_no_card_texts[0]; ++k) {
         u8* at = find_game_text(cpu, k_no_card_texts[k].text, k_no_card_texts[k].seen_at, search);

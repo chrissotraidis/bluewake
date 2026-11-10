@@ -53,7 +53,12 @@ int bluewake_composite_direct_calls_v2(bool, const bool*, const bool*, const u32
 int bluewake_composite_direct_calls_v3(bool, const bool*, const bool*, const u32*,
                                      const u32*, BwHostCanSkipFn, void*,
                                      const BwHostSkipFast*, bool);
+/* v4 keeps the v3 layout intact and adds host-supplied fixed watches. */
+int bluewake_composite_direct_calls_v4(bool, const bool*, const bool*, const u32*,
+                                     const u32*, BwHostCanSkipFn, void*,
+                                     const BwHostSkipFastV4*, bool);
 extern const volatile BwHostSkipFast* bw_host_skip_fast;
+extern const volatile BwHostSkipFastV4* bw_host_skip_fast_v4;
 extern bool bw_host_skip_verify;
 void bw_host_skip_verify_check(const CPUState* cpu, u32 address, bool allowed);
 void bluewake_composite_direct_skip_counts(unsigned long long* unsafe,
@@ -82,6 +87,23 @@ static inline bool bw_host_quiet(const CPUState* cpu) {
            (!*bw_host_decrementer_pending && (*bw_host_pi_cause & *bw_host_pi_mask) == 0u);
 }
 
+/* v4's known hooks, in simple's bits 1..5 (direct_skip.h, #524): true when the
+ * target is one of the stage select's hooks and the host has set its bit. With
+ * the stage select off simple is 1, and this is one compare on a loaded value.
+ * Every inline answer that reads `simple` must test it (the exact and the plain
+ * checks; the host keeps the gate closed while the stage select is live). */
+static inline __attribute__((always_inline)) bool bw_skip_known_hook(u32 simple, u32 address) {
+    if (__builtin_expect(simple <= 1u, 1))
+        return false;
+    const u32 canonical = address & ~0x40000000u;
+    const u32 bit = canonical == BW_SKIP_KNOWN_CHANGE ? 2u
+                  : canonical == BW_SKIP_KNOWN_DATA_SELECT ? 4u
+                  : canonical == BW_SKIP_KNOWN_EXECUTE ? 8u
+                  : canonical == BW_SKIP_KNOWN_PLAY_EXECUTE ? 16u
+                  : canonical == BW_SKIP_KNOWN_MENU_DELETE ? 32u : 0u;
+    return (simple & bit) != 0u;
+}
+
 /* The chassis loop's checks before a dispatch (an exception, the turn's
  * budget), and the edge service's before it would have nothing to do. */
 /* Both checks stay out of line and with the hot code, as the single check was:
@@ -98,10 +120,13 @@ static inline __attribute__((always_inline)) bool bw_direct_call_ready_exact(con
     /* The host's answer read inline when only the address matters (direct_skip.h),
      * instead of a call into the host for every direct call. */
     const volatile BwHostSkipFast* fast = bw_host_skip_fast;
-    if (fast != NULL && fast->simple) {
-        const bool allowed = address != fast->single[0] && address != fast->single[1] &&
+    const u32 simple = fast != NULL ? fast->simple : 0u;
+    if (simple != 0u) {
+        bool allowed = address != fast->single[0] && address != fast->single[1] &&
                              address - fast->range_first[0] > fast->range_span[0] &&
                              address - fast->range_first[1] > fast->range_span[1];
+        if (allowed && bw_skip_known_hook(simple, address))
+            allowed = false;
         if (__builtin_expect(bw_host_skip_verify, 0))
             bw_host_skip_verify_check(cpu, address, allowed);
         return allowed;
@@ -123,11 +148,13 @@ static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_full(con
  * NULL. Anything else (the answer off, verify) is the full check. */
 static __attribute__((noinline, hot, unused)) bool bw_direct_call_ready_plain(const CPUState* cpu, u32 address) {
     const volatile BwHostSkipFast* fast = bw_host_skip_fast;
-    if (__builtin_expect(fast != NULL, 1) && fast->simple && !bw_host_skip_verify) {
+    const u32 simple = __builtin_expect(fast != NULL, 1) ? fast->simple : 0u;
+    if (simple != 0u && !bw_host_skip_verify) {
         if (bw_direct_depth >= BW_DIRECT_DEPTH_MAX || cpu->exception != 0u ||
             (cpu->cycle_budget > 0 && cpu->downcount <= -cpu->cycle_budget) || !bw_host_quiet(cpu))
             return false;
-        return address != fast->single[0] && address != fast->single[1];
+        return address != fast->single[0] && address != fast->single[1] &&
+               !bw_skip_known_hook(simple, address);
     }
     return bw_direct_call_ready_full(cpu, address);
 }

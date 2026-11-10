@@ -46,7 +46,8 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The scene's brightness from the game, where there is depth and not the sea (Wind Waker HD's sunlight for the hour; the sea found by a mask from its textures): patches/recompcore/0192 (pdale-boop).
 # The guest-alias range query and its registry generation (RecompCore #45), and the guest alias lookup in constant time, the last hit first and then a page index (RecompCore #48): patches/recompcore/0193-0196 (irregularthanis).
 # 0.10.0 pins the bluewake-next commit that merges #45, #48 and 0186-0192.
-# Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), on bluewake-next after 0.10.0: pin #49's head, fetched from upstream, until it merges.
+# Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), merged into bluewake-next as f9e3f4e.
+# Cheaper HD look effects, opt-in (RecompCore #54, on top of f9e3f4e): pin #54's head, fetched from upstream, until it merges.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
 RECOMPCORE_SHA=dc09a4fb2a49471be131cae063e1bd8fc51725e2
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de

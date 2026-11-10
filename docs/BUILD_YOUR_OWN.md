@@ -137,11 +137,15 @@ keeps your saves and settings, and requires importing the disc again before play
 
 ## On a Windows PC (experimental)
 
-From BlueWake's next release, PadMint 0.5.27 or newer can also build the iPhone/iPad app on a
-Windows PC (x64 or ARM64). BlueWake 0.10.0's recipe still builds on a Mac only. You need Visual
+Since BlueWake 0.11.0, PadMint 0.5.27 or newer can also build the iPhone/iPad app on a
+Windows PC (x64 or ARM64); 0.10.0's recipe builds on a Mac only. You need Visual
 Studio Build Tools with **Desktop development with C++** and **C++ Clang Compiler for Windows**,
 your own GZLE01 revision 0 disc, and 25 GB free. Then, in PadMint, choose BlueWake and your disc, or
 run `padmint make bluewake ios --disc "path\to\GZLE01.iso"`.
+
+If PadMint's window shows BlueWake dimmed on Windows, your PadMint still lists it as Mac only (PadMint 0.6.1 and
+older do). The `padmint make` command above works with them; PadMint 0.6.2 and newer offer BlueWake in the
+window.
 
 PadMint translates your disc, applies the mods, compiles the game code for iOS and adds it, with its
 `ModuleOptimizations` data, to the release's app without game code. The Windows build skips the
@@ -149,8 +153,9 @@ Mac's local training step, so it isn't claimed to run as fast as a copy built on
 
 Checked on 31 October: on Windows 11 ARM64, PadMint 0.5.27 built the original disc into a personal
 IPA in 2 h 19 min. The app's 14 original entries stayed unchanged and only the game module and its
-companion were added; a repeat build recompiled nothing. Not checked yet: a Windows-built copy on an
-iPhone or iPad, and a native x64 Windows PC. Linux stays planned.
+companion were added; a repeat build recompiled nothing. A contributor (imcamilouribe) built it on
+Windows 11 x64 from their own disc and played the IPA on an iPhone, with the Windows SDK fix (#502).
+Not checked by a maintainer yet: a Windows-built copy on an iPhone or iPad. Linux stays planned.
 
 ## Updating
 

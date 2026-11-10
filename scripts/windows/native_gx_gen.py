@@ -23,7 +23,12 @@ lean_memory.py) - or a block's main path where it has none - with:
 - each load through gx_ldN (plain RAM), each store through gx_stN or gx_stpN
   (RAM in place, its old bytes kept; or the gather pipe's bytes collected),
   the suffixes the copies store kept; the inline register saves and restores
-  (inline_save_restore_gpr.py) where the budget allows them;
+  (inline_save_restore_gpr.py) where the budget allows them; a lean access
+  (lean_deadlines.py's bw_readN_ato and bw_writeN_ato) as the same gx_ldN or
+  gx_stN with its out-of-line flag and deadline test dropped - a way out of
+  line here is an address the run does not have, which discards it and replays
+  the block in the translation, so the flag cannot change what this native
+  produces (lean_deadlines.py's own argument);
 - the FP arithmetic through native_replay.h's inline paths on the run's FPSCR
   (fadds, fsubs, fmuls, fdivs, fcmpo, ...) and the interpreter's own fctiw,
   frsqrte and frsp;
@@ -51,8 +56,23 @@ import sys
 from pathlib import Path
 
 LEADER = re.compile(
-    r"\nlabel_([0-9A-F]{8}):\n(?:    (?!ctx->pc = |cycle_block_prepaid = )[^\n]*\n)*?"
-    r"(?:    ctx->pc = 0x\1u;\n)?    cycle_block_prepaid = dolrecomp_block_can_precharge\(ctx, (\d+)u\);\n")
+    r"\nlabel_([0-9A-F]{8}):\n"
+    # The native vector leaf's fast path, which prepare_native_vec.py puts at a
+    # vector function's entry: the run replays the translation's own body instead,
+    # which computes the same thing (the leaf is certified against it).
+    r"(?:    /\* bluewake: SDK vector leaf [0-9A-F]{8} \*/\n"
+    r"    if \(bluewake_native_vec_try\(ctx, 0x[0-9A-F]{8}u\)\)\n"
+    r"        goto return_dispatch_[0-9A-F]{8};\n"
+    r"(?:bwend_\d+: ;\n)?)?"
+    r"(?:    (?!ctx->pc = |cycle_block_prepaid = )[^\n]*\n)*?"
+    r"(?:    ctx->pc = 0x\1u;\n)?"
+    r"(?:"
+    r"    cycle_block_prepaid = dolrecomp_block_can_precharge\(ctx, (\d+)u\);\n"
+    r"|"
+    # A block whose whole body is its prepaid copy: the cycles charged up front and
+    # straight to the copy, nothing left on the main path (scripts/windows/fast_blocks.py).
+    r"    cycle_block_prepaid = true;\n    ctx->downcount -= (\d+)u;\n    goto (bwfast_\d+);\n"
+    r")")
 
 
 class Chunk:
@@ -89,8 +109,8 @@ class Chunk:
             body = self.main[m.end():body_end]
             fast = re.search(r"    if \(cycle_block_prepaid\) goto (bwfast_\d+);\n", body)
             self.leaders.append(address)
-            self.blocks[address] = {"cycles": int(m.group(2)), "body": body,
-                                    "copy": fast.group(1) if fast else None}
+            self.blocks[address] = {"cycles": int(m.group(2) or m.group(3)), "body": body,
+                                    "copy": m.group(4) or (fast.group(1) if fast else None)}
         self.next_leader = {a: b for a, b in zip(self.leaders, self.leaders[1:])}
         # bwend_K -> the leader that follows block K's main path.
         self.bwend = {}
@@ -98,6 +118,10 @@ class Chunk:
             m = re.search(r"\nbwend_(\d+): ;", self.blocks[address]["body"])
             if m:
                 self.bwend[m.group(1)] = self.next_leader.get(address)
+        # A block that is all copy has no fall-through, so its bwend label is never
+        # emitted: its key is the block's own index, and it goes to the block after it.
+        for index, address in enumerate(self.leaders):
+            self.bwend.setdefault(str(index), self.next_leader.get(address))
 
     def owns(self, address):
         return self.start <= address < self.start + 0x4000
@@ -199,6 +223,17 @@ class Gen:
         # Loads and stores.
         out = re.sub(r"bw_read(8|16|32|64)_at\(ctx, 0x[0-9A-F]{8}u, \d+u, ", r"gx_ld\1(&s, ", out)
         out = re.sub(r"bw_write(8|16|32|64)_at\(ctx, (0x[0-9A-F]{8}u), (\d+u), ", r"gx_st\1(&s, \2, \3, ", out)
+        # The same after lean_deadlines.py: the access carries the out-of-line flag in
+        # front of it, and the deadline test it sets follows the instruction. A way out
+        # of line here is an address gx_ldN/gx_stN finds outside RAM and the pipe -
+        # s->bad, the run discarded and the block replayed in the translation - so the
+        # flag and the test it feeds cannot change what this native produces, and the
+        # refund the test would make is one this path never owes (no suffix in a block
+        # exceeds its cycles).
+        out = re.sub(r"bw_read(8|16|32|64)_ato\(&bw_ool, ctx, 0x[0-9A-F]{8}u, \d+u, ", r"gx_ld\1(&s, ", out)
+        out = re.sub(r"bw_write(8|16|32|64)_ato\(&bw_ool, ctx, (0x[0-9A-F]{8}u), (\d+u), ",
+                     r"gx_st\1(&s, \2, \3, ", out)
+        out = self.no_lean_deadline_test(out)
         out = re.sub(r"\bmem_read(8|16|32|64)\(ctx, ", r"gx_ld\1(&s, ", out)
         out = self.plain_stores(out)
         # Paired singles (type 0 by the GQR named; gx_psq_ready at entry).
@@ -272,6 +307,24 @@ class Gen:
                 line = next(l for l in out.split("\n") if bad in l)
                 raise SystemExit(f"{native.name}: block {leader:08X}: unhandled `{bad}`: {line.strip()}")
         return out
+
+    def no_lean_deadline_test(self, text):
+        """lean_deadlines.py's out-of-line flag and the test it gates, dropped:
+        the access in front of it is a gx_ldN/gx_stN now (see transform)."""
+        lines, out, i = text.split("\n"), [], 0
+        while i < len(lines):
+            stripped = lines[i].strip()
+            if stripped == "bool bw_ool = false;":
+                i += 1
+                continue
+            if stripped == "if (__builtin_expect(bw_ool, 0) &&":
+                while i < len(lines) and lines[i].strip() != "}":
+                    i += 1
+                i += 1
+                continue
+            out.append(lines[i])
+            i += 1
+        return "\n".join(out)
 
     def paired(self, text):
         """The paired-single arithmetic and the fused multiply-adds (inline_fp.h's
@@ -361,17 +414,25 @@ class Gen:
                     f"            goto label_{ret};\n")
         return re.sub(
             r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
+            # direct_calls.py and inline_save_restore_gpr.py now put the callee's address
+            # in the pc and gate the inline form on the call being ready and the saved
+            # registers' memory being RAM. A gate that fails runs the same routine
+            # through the chassis, and a frame that is not RAM marks the run bad here,
+            # so neither changes what this native produces.
+            r"(?:            ctx->pc = 0x[0-9A-F]{8}u;\n)?"
             r"            /\* bluewake: _savegpr/_restgpr inline \(scripts/windows/inline_save_restore_gpr\.py\) \*/\n"
+            r"(?:            if \(bw_direct_call_ready\(ctx, 0x[0-9A-F]{8}u\) &&\n"
+            r"                bw_inline_gpr_memory_ready\(ctx, \d+u\)\) \{\n)?"
             r"            if \(ctx->downcount - (\d+) > -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET\) \{\n"
             r"                ctx->downcount -= (\d+);\n"
             r"((?:                (?!ctx->cycle_observation_suffix)[^\n]*\n)*?)"
             r"                ctx->cycle_observation_suffix = 0u;\n"
             r"                ctx->pc = 0x\1u;\n"
-            r"                if \(ctx->downcount <= -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET \|\| ctx->exception != 0u \|\|\n"
-            r"                    \(ctx->cycle_budget > 0 && ctx->downcount <= -ctx->cycle_budget\)\)\n"
-            r"                    return;\n"
+            r"                if \(ctx->downcount <= -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET \|\|[^\n]*\n"
+            r"(?:                    [^\n]*\n)*?                    return;\n"
             r"                goto label_\1;\n"
             r"            \}\n"
+            r"(?:            \}\n)?"
             r"            ctx->pc = 0x[0-9A-F]{8}u;\n"
             r"            return;\n", save_restore, text)
 
@@ -415,28 +476,36 @@ class Gen:
                     f"            goto label_{ret:08X};\n")
         return re.sub(
             r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
+            r"(?:            ctx->pc = 0x[0-9A-F]{8}u;\n)?"
             r"            /\* bluewake: _savegpr/_restgpr inline \(scripts/windows/inline_save_restore_gpr\.py\) \*/\n"
-            r"            if \(((?:[^{\n]|\n(?! +ctx->downcount -=))*)\) \{\n"
+            r"(?:            if \(bw_direct_call_ready\(ctx, 0x[0-9A-F]{8}u\) &&\n"
+            r"                bw_inline_gpr_memory_ready\(ctx, \d+u\)\) \{\n)?"
+            r"            if \(((?:[^{]|\n(?! +ctx->downcount -=))*)\) \{\n"
             r"                ctx->downcount -= (\d+);\n"
             r"((?:                (?!ctx->cycle_observation_suffix)[^\n]*\n)*?)"
             r"                ctx->cycle_observation_suffix = (\d+)u;\n"
             r"                ctx->pc = 0x\1u;\n"
-            r"                if \(ctx->downcount <= -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET \|\| ctx->exception != 0u \|\|\n"
-            r"                    \(ctx->cycle_budget > 0 && ctx->downcount <= -ctx->cycle_budget\)\)\n"
-            r"                    return;\n"
+            r"                if \(ctx->downcount <= -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET \|\|[^\n]*\n"
+            r"(?:                    [^\n]*\n)*?                    return;\n"
             r"                goto label_\1;\n"
             r"            \}\n"
+            r"(?:            \}\n)?"
             r"            ctx->pc = 0x[0-9A-F]{8}u;\n"
             r"            return;\n", save_restore, text)
 
     def calls(self, native, chunk, text):
+        # The gate's address argument: direct_calls.py now asks
+        # bw_direct_call_ready(ctx, <the address the gate is about>), and a prepared
+        # source from before it did has the bare (ctx); both read the same here.
+        GATE = r"bw_direct_call_ready\(ctx(?:, (?:0x[0-9A-F]{8}u|target))?\)"
+
         # A direct call into another chunk (scripts/windows/direct_calls.py).
         def direct(m):
             ret, target = int(m.group(1), 16), int(m.group(2), 16)
             return self.call(native, chunk, target, ret, boundary=True)
         text = re.sub(
             r"            ctx->lr = 0x([0-9A-F]{8})u;\n            ctx->pc = 0x([0-9A-F]{8})u;\n"
-            r"            if \(bw_direct_call_ready\(ctx\)\) \{\n(?:                [^\n]*\n)*?            \}\n"
+            r"            if \(" + GATE + r"\) \{\n(?:                [^\n]*\n)*?            \}\n"
             r"            return;\n", direct, text)
         # A call inside the chunk, with or without the budget test.
         def inner(m):
@@ -462,8 +531,8 @@ class Gen:
                       r"            (?:goto return_dispatch_[0-9A-F]{8};|return;)\n", indirect_call, text)
         # The same through bw_call_translated (direct_calls.py's indirect calls).
         text = re.sub(r"            ctx->lr = 0x([0-9A-F]{8})u;\n            ctx->pc = target;\n"
-                      r"            if \(bw_direct_call_ready\(ctx\) && bw_call_translated\(ctx, target\) &&\n"
-                      r"                ctx->pc == 0x\1u && bw_direct_call_ready\(ctx\)\)\n"
+                      r"            if \(" + GATE + r" && bw_call_translated\(ctx, target\) &&\n"
+                      r"                ctx->pc == 0x\1u && " + GATE + r"\)\n"
                       r"                goto label_\1;\n"
                       r"            return;\n", indirect_call, text)
         # A return (blr, bclr).

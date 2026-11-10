@@ -18,6 +18,9 @@ void bluewake_card_runtime_suspend_writes(bool suspend);
 // from here on carries them: loading one in any later run turns saving off again.
 void bluewake_card_runtime_refuse_writes(CPUState* cpu, const char* why);
 bool bluewake_card_runtime_writes_refused(void);
+// A save state was loaded; `saved_off`: saving was off in the run that took it.
+// Turns saving off as above when it was (or the state's game says so); never on.
+void bluewake_card_runtime_state_loaded(CPUState* cpu, bool saved_off);
 // BLUEWAKE_STAGE_SELECT_SAVES=1: refusing does nothing, and saving stays on.
 bool bluewake_card_runtime_saving_kept(void);
 const char* bluewake_card_runtime_path(void);

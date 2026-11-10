@@ -22,6 +22,9 @@ void bluewake_sprint_retrace(void);
 void bluewake_sprint_touch(bool down);
 // Reads BLUEWAKE_SPRINT_SPEED again (the options menu).
 void bluewake_sprint_reload(void);
+// A save state was loaded: Link's normal speed back (`reapply`; without it the
+// state's is left), the sprint off until held again.
+void bluewake_sprint_state_loaded(CPUState* cpu, bool reapply);
 
 #ifdef __cplusplus
 }

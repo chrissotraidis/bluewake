@@ -1,0 +1,55 @@
+From b406ab0e10d11d660e17d22e1c2e71dd8811daae Mon Sep 17 00:00:00 2001
+From: irregularthanis <343663069+irregularthanis@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 17:52:26 -0500
+Subject: [PATCH 201/205] Aurora: DOL_AURORA_GPU_PROF=2 reports each pass apart
+
+=1 sums passes of one kind ("EFB 0" to "EFB 3" as "EFB"); =2 keeps each
+pass's GPU time apart, to see which pass of a frame costs what. Measurement
+only.
+---
+ GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp b/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp
+index 6e5860f3e0..161d355e10 100644
+--- a/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp
++++ b/GXRuntime/graphics/aurora/lib/webgpu/gpu_prof.cpp
+@@ -169,7 +169,7 @@ void emit_zone_end(uint64_t gpuNs) {
+ #endif
+ 
+ // DOL_AURORA_GPU_PROF=1, without Tracy: each pass's and zone's GPU time, summed
+-// by kind ("Render pass 12" counts as "Render pass") over a window of
++// by kind ("Render pass 12" counts as "Render pass"; =2 keeps each pass apart) over a window of
+ // frames, and the frames' GPU time, written to stderr as [gpu-prof] lines.
+ struct LogKind {
+   double ms = 0.0;
+@@ -177,6 +177,7 @@ struct LogKind {
+ };
+ constexpr uint32_t LogWindow = 240;
+ bool g_log = false;
++bool g_logEachPass = false; // DOL_AURORA_GPU_PROF=2: "EFB 3" apart from "EFB 1"
+ uint32_t g_logFrames = 0;
+ double g_logFrameMs = 0.0;
+ double g_logFrameMax = 0.0;
+@@ -185,6 +186,8 @@ absl::flat_hash_map<std::string, LogKind> g_logKinds;
+ uint64_t g_logBytes[static_cast<size_t>(CopyKind::Count)] = {};
+ 
+ std::string_view log_kind(std::string_view name) {
++  if (g_logEachPass)
++    return name;
+   size_t end = name.size();
+   while (end > 0 && name[end - 1] >= '0' && name[end - 1] <= '9') {
+     --end;
+@@ -399,7 +402,8 @@ void initialize() {
+   }
+   g_timestampsEnabled = true; // TODO: check if allow_unsafe_apis enabled?
+   const char* logEnv = std::getenv("DOL_AURORA_GPU_PROF");
+-  g_log = logEnv != nullptr && logEnv[0] == '1';
++  g_log = logEnv != nullptr && (logEnv[0] == '1' || logEnv[0] == '2');
++  g_logEachPass = logEnv != nullptr && logEnv[0] == '2';
+   constexpr wgpu::QuerySetDescriptor querySetDescriptor{
+       .label = "GPU profiler timestamps",
+       .type = wgpu::QueryType::Timestamp,
+-- 
+2.46.0
+

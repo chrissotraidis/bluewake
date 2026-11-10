@@ -26,6 +26,8 @@ one, this one wins.
   `docs/PERFORMANCE_OPTIMIZATIONS.md` (Smooth Motion and renderer changes, with their switches) and
   `docs/PADMINT_HANDOFF.md` (the PadMint adapter contract) are references.
 - `docs/WINDOWS_TASKS.md`: what each Windows build was checked for, and what still needs a Windows PC.
+- `docs/RELEASING.md`: the checklist every release follows, before freezing, before tagging and after publishing,
+  including the reports that come in afterwards.
 - `docs/status/`: dated records of October's work that the guides link to. They are evidence, not instructions.
 - `docs/archive/`: old plans, goal prompts, handoffs and September's records (`docs/archive/status/`). Never act
   on them.
@@ -85,6 +87,9 @@ just by building from `main`:
 ## Releases
 
 The maintainers decided on October 4, 2026 to make two exceptions: BlueWake may publish a ready-made Windows build and a ready-made Linux build that contain the translated game module, as Wind Waker Recomp did for Windows. Mac, iPhone and iPad stay on PadMint: their releases hold source and the app without game code. Do not publish any other build with game code.
+
+Every release follows [docs/RELEASING.md](docs/RELEASING.md), and its record gives each line a status. When a release
+misses something, the fix adds the check there.
 
 Every release artifact must pass `scripts/release/check_public_assets.sh <artifact>...`, which runs `python3 ~/.codex/release-gate/release_gate.py` on the maintainer's machine. For the Windows and Linux builds the only accepted finding is `containsTranslatedGameCode: true`. Any other failure is a stop, not a note: these builds must contain no disc data, game assets, saves, signing material or console keys (Elliott's `nodtool.exe` embeds Wii common keys, so it is left out).
 

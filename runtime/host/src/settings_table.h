@@ -144,6 +144,12 @@ inline constexpr Setting kSettings[] = {
      .control = Control::Chooser, .needs = "BLUEWAKE_HD_SUN_SHADOWS", .pane = "Wind Waker HD look settings"},
     {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
      .label = "Show the frame rate   (F9)", .control = Control::Switch},
+    {.key = "BLUEWAKE_PERF_OVERLAY", .kind = Kind::Choice, .fallback = "off", .label = "Performance panel",
+     .control = Control::Chooser,
+     .note = "Off, the frame rate alone. Full adds a panel in the corner: the frame times and a graph of them, the "
+             "machine's CPU, memory and graphics card load, temperatures, power and clocks, and how the picture is "
+             "scaled. F9 cycles all three.",
+     .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_ASPECT_FIT", .old_windows = "keep_aspect", .kind = Kind::Bool, .on = Os::Windows,
      .label = "Keep the picture's shape (black bars rather than stretching)", .control = Control::Custom,
      .next_launch = Os::All},
@@ -320,13 +326,15 @@ inline constexpr Setting kSettings[] = {
              "Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
     // The direct-call gate (#552): one host word read inline before a direct
-    // call between translated chunks, instead of a call into the check. Opt-in:
-    // measured +5.5% on a Steam Deck, exact; read when the module is set up.
-    {.key = "BLUEWAKE_DIRECT_GATE", .kind = Kind::Bool,
+    // call between translated chunks, instead of a call into the check. On by
+    // default on Windows, Linux and the Mac, where it was measured (+12% on
+    // Windows and Linux desktops, +5.5% on a Steam Deck, +12.9% on an M3 Max,
+    // exact); main.c reads an unset value the same way. Read when the module is set up.
+    {.key = "BLUEWAKE_DIRECT_GATE", .kind = Kind::Bool, .on = Os::Windows | Os::Linux | Os::Mac,
      .label = "Faster calls inside the game's code", .tab = Tab::Config, .control = Control::Switch,
-     .note = "Experimental. Checks, without a call, whether the game's code can call its next "
-             "function directly. Off by default; measured on a Steam Deck. Takes effect when "
-             "BlueWake starts again.",
+     .note = "Checks, without a call, whether the game's code can call its next function "
+             "directly. The game plays the same either way; turn it off if you suspect it. Takes "
+             "effect when BlueWake starts again.",
      .next_launch = Os::All},
     // The game module's code on 2 MB pages (#554, module_hugepages.h), copied
     // right after the module loads. Opt-in: measured +4.5% on a Steam Deck,
@@ -348,7 +356,7 @@ inline constexpr Setting kSettings[] = {
              "step. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
     // The HD look's ambient occlusion keeps each quarter-size texel's distance beside its
-    // shade (RecompCore #55, DOL_AURORA_AO_PACKED), so its blurs and its upscale don't read
+    // shade (RecompCore #54, DOL_AURORA_AO_PACKED), so its blurs and its upscale don't read
     // the full-size depth again. Opt-in; read when the renderer starts.
     {.key = "DOL_AURORA_AO_PACKED", .kind = Kind::Bool,
      .label = "Faster ambient occlusion", .tab = Tab::Config, .control = Control::Switch,

@@ -18,7 +18,7 @@ static const char* const kFileOrder[] = {
     "DOL_AURORA_TEXTURE_PACK", "BLUEWAKE_ASPECT", "BLUEWAKE_HD_LOOK", "BLUEWAKE_HD_DISTANT_ISLANDS", "BLUEWAKE_HD_AO",
     "BLUEWAKE_HD_CLOUD_SHADOWS", "BLUEWAKE_HD_EDGE_LIGHT", "BLUEWAKE_HD_TORCH_LIGHT", "BLUEWAKE_HD_FAR_BLUR", "BLUEWAKE_HD_BLOOM",
     "BLUEWAKE_HD_CLOUDS", "BLUEWAKE_HD_SKY", "BLUEWAKE_HD_SKY_MODELS", "BLUEWAKE_HD_SKY_LINEAR", "BLUEWAKE_HD_SUNLIGHT",
-    "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "DOL_AURORA_SHOW_FPS",
+    "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "DOL_AURORA_SHOW_FPS", "BLUEWAKE_PERF_OVERLAY",
     "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES",
     "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST", "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE",
     "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
@@ -125,11 +125,13 @@ int main() {
     const Setting* batch = find("BLUEWAKE_GATHER_PIPE_BATCH");
     assert(batch != nullptr && batch->tab == Tab::Config && batch->group == nullptr && batch == efficient_effects + 1);
     assert(efficient_effects->experimental == nullptr);
-    // Then the direct-call gate (#552) and the module on huge pages (#554): off by
-    // default, read when the module loads (huge pages: the host acts on Linux only).
+    // Then the direct-call gate (#552), on by default on every desktop where it was
+    // measured (#567), and the module on huge pages (#554), off by default; both
+    // read when the module loads (huge pages: the host acts on Linux only).
     const Setting* gate = find("BLUEWAKE_DIRECT_GATE");
     assert(gate != nullptr && gate == batch + 1 && gate->tab == Tab::Config && gate->group == nullptr);
-    assert(!default_on(*gate) && next_launch_on(*gate));
+    for (const Os os : {Os::Windows, Os::Linux, Os::Mac})
+        assert(default_on(*gate, os) && next_launch_on(*gate, os));
     const Setting* huge = find("BLUEWAKE_MODULE_HUGEPAGES");
     assert(huge != nullptr && huge == gate + 1 && huge->tab == Tab::Config && huge->group == nullptr);
     assert(!default_on(*huge) && next_launch_on(*huge));
@@ -137,7 +139,7 @@ int main() {
     const Setting* clouds = find("DOL_AURORA_CLOUD_NOISE_TEXTURE");
     assert(clouds != nullptr && clouds == huge + 1 && clouds->tab == Tab::Config && clouds->group == nullptr);
     assert(!default_on(*clouds) && next_launch_on(*clouds));
-    // Then faster ambient occlusion (RecompCore #55): off by default, read when the renderer starts.
+    // Then faster ambient occlusion (RecompCore #54): off by default, read when the renderer starts.
     const Setting* ao = find("DOL_AURORA_AO_PACKED");
     assert(ao != nullptr && ao == clouds + 1 && ao->tab == Tab::Config && ao->group == nullptr);
     assert(!default_on(*ao) && next_launch_on(*ao));

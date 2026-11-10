@@ -47,16 +47,32 @@ static void journal(u32 a,u32 n,void* p) { (void)a;(void)n;(void)p;assert(0); }
 static bool ready(void* p,const CPUState* c,u32 entry) {
     assert(c && entry==BLUEWAKE_NATIVE_SKIN_ENTRY); return *(bool*)p;
 }
+static void force_native(const char* value) {
+#if defined(_WIN32)
+    char setting[64]; snprintf(setting, sizeof setting, "BLUEWAKE_NATIVE_SKIN=%s", value); _putenv(setting);
+#else
+    setenv("BLUEWAKE_NATIVE_SKIN", value, 1);
+#endif
+}
 int main(void) {
     ram=calloc(1,RAM_SIZE);assert(ram);
     CPUState c=state(), before=c;
+    bool allow=false;
+#if !BLUEWAKE_NATIVE_SKIN_HARDWARE_FMA
+    /* Without hardware FMA the native stays off unless BLUEWAKE_NATIVE_SKIN=1. */
+    force_native("");
+    assert(!bluewake_composite_native_skin_v1(true,ready,&allow));
+#endif
+    force_native("1");
     assert(!bluewake_native_skin_try(&c)); assert(!memcmp(&c,&before,sizeof c));
     assert(!bluewake_composite_native_skin_v1(true,NULL,NULL));
-    bool allow=false;
     assert(bluewake_composite_native_skin_v1(true,ready,&allow));
     assert(!bluewake_native_skin_try(&c)); assert(!memcmp(&c,&before,sizeof c));
-    allow=true;assert(bluewake_native_skin_try(&c));
-    assert(c.pc==0x80001000 && c.downcount==-141);
+    /* The prologue and the loop (37 + 23 + 60 cycles), stopping at the loop's
+     * last test for the hook's goto to the translated epilogue. */
+    allow=true;assert(bluewake_native_skin_try(&c)==1);
+    assert(c.pc==0x802EE820u && c.downcount==-120 && c.gpr[31]==1u && c.gpr[8]==1u);
+    assert(c.gpr[1]==GC_RAM_BASE+0x201000-112u && c.lr==0x802EE6B8u);
     assert(!memcmp(ram+0xa000,ram+0x9000,48));assert(ram[0x8000]==1);
     assert(!bluewake_composite_native_skin_v1(false,ready,&allow));
     c=state();assert(!bluewake_native_skin_try(&c));

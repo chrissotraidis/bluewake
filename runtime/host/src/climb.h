@@ -32,6 +32,8 @@ extern "C" {
 void bluewake_climb_attach(CPUState* cpu);
 // Reads the settings again (the options menu).
 void bluewake_climb_reload(void);
+// A save state was loaded: stamina full again.
+void bluewake_climb_state_loaded(void);
 
 // The wheel for the overlay (any thread): false when it is hidden. `x`, `y`
 // are where it goes in the game's picture (0..1 from its top left), `fraction`

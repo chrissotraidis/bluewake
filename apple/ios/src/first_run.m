@@ -10,6 +10,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #include "disc_import.h"
+#include "disc_import_stages.h"
 #include "first_run.h"
 
 typedef NS_ENUM(NSInteger, BWItemState) { BWItemMissing, BWItemReady, BWItemBusy };
@@ -65,6 +66,7 @@ typedef NS_ENUM(NSInteger, BWItemState) { BWItemMissing, BWItemReady, BWItemBusy
     UIButton* _play;
     UIButton* _guide;
     BOOL _importing;
+    int _importStage;   // the stage the importer last reported, marked on failure
 }
 
 - (NSString*)discPath { return [self.dataDir stringByAppendingPathComponent:@"GZLE01.iso"]; }
@@ -327,17 +329,25 @@ static void BWRow(BWRowView* row, BWItemState state, NSString* name, NSString* d
     return [self hasDisc] ? [text stringByAppendingString:@" The disc already imported is unchanged."] : text;
 }
 
+// The four stages every platform lists while the disc is prepared, with the
+// importer's own words for the task in hand under them.
 static void BWProgress(void* context, double fraction, const char* stage) {
     BWFirstRunController* controller = (__bridge BWFirstRunController*)context;
-    NSString* text = @(stage);
+    const int current = bw_import_stage_for_report(stage, fraction);
+    controller->_importStage = current;
+    char lines[512];
+    bw_import_stage_lines(current, 0, 0, lines, sizeof lines);
+    NSString* text = [NSString stringWithFormat:@"Preparing game files\u2026\n%s", lines];
+    const double overall = bw_import_overall_fraction(current, fraction);
     dispatch_async(dispatch_get_main_queue(), ^{
-        [controller->_progress setProgress:(float)fraction animated:YES];
+        [controller->_progress setProgress:(float)overall animated:YES];
         [controller setStatus:text error:NO];
     });
 }
 
 - (void)prepareFromDisc {
     _importing = YES;
+    _importStage = BW_IMPORT_STAGE_CHECK;
     _progress.hidden = NO;
     _progress.progress = 0;
     [self setStatus:@"Preparing game files…" error:NO];
@@ -352,17 +362,23 @@ static void BWProgress(void* context, double fraction, const char* stage) {
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_importing = NO;
             self->_progress.hidden = YES;
+            char lines[512];
             if (rc != 0) {
                 // A disc that fails preparation is not kept.
                 [[NSFileManager defaultManager] removeItemAtPath:disc error:nil];
-                [self setStatus:message error:YES];
+                // The stage that failed stays marked, as the desktop windows show it.
+                bw_import_stage_lines(self->_importStage, 1, 0, lines, sizeof lines);
+                [self setStatus:[NSString stringWithFormat:@"%s\n\n%@", lines, message] error:YES];
                 fprintf(stderr, "[first-run] preparation failed: %s\n", message.UTF8String);
             } else {
                 for (NSString* name in @[ @"main.dol", @"rels" ])
                     [[NSURL fileURLWithPath:[dir stringByAppendingPathComponent:name]]
                         setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
                 fprintf(stderr, "[first-run] disc prepared\n");
-                [self setStatus:([self hasComposite] ? @"Ready." : @"The disc is ready. The game code is still missing.")
+                bw_import_stage_lines(BW_IMPORT_STAGE_COUNT - 1, 0, 1, lines, sizeof lines);
+                [self setStatus:[NSString stringWithFormat:@"%s\n\n%@", lines,
+                                  ([self hasComposite] ? @"Ready." :
+                                   @"The disc is ready. The game code is still missing.")]
                           error:NO];
             }
             [self refresh];

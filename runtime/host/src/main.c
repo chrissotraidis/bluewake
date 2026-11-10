@@ -80,6 +80,7 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <TargetConditionals.h>
 #endif
 #if defined(_WIN32)
 #include <SDL3/SDL_video.h>
@@ -819,6 +820,278 @@ static void host_mods_reapply(CPUState* cpu) {
         g_mod_writes(g_mod_mask, 1u, host_mod_write, cpu);
 }
 
+// The values the mods and the game options write at boot are the game's data
+// (main.dol's and the RELs'), so a save state holds the ones of the run that
+// took it, while the code follows this run: a state taken at 21:9 loaded in a
+// 16:9 run kept 21:9's values beside 16:9's code, and looked wrong. So every
+// value any mod or option can write is kept here at boot with the disc's bytes
+// under it (read before anything is written), and after a load this run's are
+// put back (host_boot_writes_state_loaded).
+typedef struct HostBootWrite {
+    u32 address, size;
+    const u8* value;  // the module's (it stays loaded)
+    u8* disc;
+    bool ours;        // this run writes it
+    bool every_frame; // a Gecko code's: written each retrace
+    bool known;       // `disc` is the game's own value: main.dol's, or one the game set (host_boot_writes_capture)
+    u8 mod;           // the mod's number, or 0xFF for a game option
+} HostBootWrite;
+static HostBootWrite* g_boot_writes;
+static DolLayout g_dol_layout;
+
+// Whether main.dol's text or data sections hold all of [address, address + size).
+static bool host_dol_holds(u32 address, u32 size) {
+    for (u32 i = 0; i < DOL_NUM_TEXT + DOL_NUM_DATA; ++i) {
+        const u32 start = i < DOL_NUM_TEXT ? g_dol_layout.text_address[i] : g_dol_layout.data_address[i - DOL_NUM_TEXT];
+        const u32 length = i < DOL_NUM_TEXT ? g_dol_layout.text_size[i] : g_dol_layout.data_size[i - DOL_NUM_TEXT];
+        if (length != 0u && address >= start && (u64)address + size <= (u64)start + length)
+            return true;
+    }
+    return false;
+}
+static u32 g_boot_write_count, g_boot_write_capacity;
+
+typedef struct HostBootRecord {
+    CPUState* cpu;
+    bool ours;
+    u8 mod;
+} HostBootRecord;
+static bool g_boot_writes_captured;
+
+static void host_boot_write_record(void* user, u32 address, const u8* bytes, u32 size) {
+    const HostBootRecord* record = (const HostBootRecord*)user;
+    if (size == 0u)
+        return;
+    if (g_boot_write_count == g_boot_write_capacity) {
+        const u32 capacity = g_boot_write_capacity != 0u ? g_boot_write_capacity * 2u : 256u;
+        HostBootWrite* grown = (HostBootWrite*)realloc(g_boot_writes, capacity * sizeof *grown);
+        if (grown == NULL)
+            return;
+        g_boot_writes = grown;
+        g_boot_write_capacity = capacity;
+    }
+    u8* disc = (u8*)malloc(size);
+    if (disc == NULL)
+        return;
+    for (u32 i = 0; i < size; ++i)
+        disc[i] = (u8)mem_read8(record->cpu, address + i);
+    g_boot_writes[g_boot_write_count++] =
+        (HostBootWrite){address, size, bytes, disc, record->ours, false, host_dol_holds(address, size), record->mod};
+}
+
+static void host_boot_write_mark_frame(void* user, u32 address, const u8* bytes, u32 size) {
+    (void)user;
+    for (u32 i = 0; i < g_boot_write_count; ++i)
+        if (g_boot_writes[i].value == bytes && g_boot_writes[i].address == address && g_boot_writes[i].size == size)
+            g_boot_writes[i].every_frame = true;
+}
+
+static void host_boot_write_mark_ours(void* user, u32 address, const u8* bytes, u32 size) {
+    (void)user;
+    for (u32 i = 0; i < g_boot_write_count; ++i)
+        if (g_boot_writes[i].value == bytes && g_boot_writes[i].address == address && g_boot_writes[i].size == size)
+            g_boot_writes[i].ours = true;
+}
+
+// Before anything is written: each mod's values, and each game option's (the
+// option's switch on for a moment, so the module lists them; which are this
+// run's is marked once the options are set, host_boot_writes_mark_options).
+static void host_boot_writes_record(void* lib, CPUState* cpu, u32 mod_mask, u32 mods) {
+    for (u32 i = 0; i < mods && i < 32u && g_mod_writes != NULL; ++i) {
+        HostBootRecord record = {cpu, (mod_mask & (1u << i)) != 0u, (u8)i};
+        g_mod_writes(1u << i, 0u, host_boot_write_record, &record);
+        g_mod_writes(1u << i, 1u, host_boot_write_mark_frame, NULL);
+    }
+    typedef volatile unsigned char* (*FlagsFn)(void);
+    typedef u32 (*CountFn)(void);
+    typedef const char* (*OptionFn)(u32, u32*, u32*, const char**);
+    typedef u32 (*WritesFn)(ModWriteFn, void*);
+    FlagsFn flags_of = (FlagsFn)dlsym(lib, "bluewake_composite_option_flags");
+    CountFn count = (CountFn)dlsym(lib, "bluewake_composite_option_count");
+    OptionFn option = (OptionFn)dlsym(lib, "bluewake_composite_option");
+    WritesFn writes = (WritesFn)dlsym(lib, "bluewake_composite_option_writes");
+    volatile unsigned char* flags = flags_of != NULL ? flags_of() : NULL;
+    const u32 options = count != NULL ? count() : 0u;
+    for (u32 i = 0; flags != NULL && option != NULL && writes != NULL && i < options; ++i) {
+        u32 index = 0u;
+        if (option(i, &index, NULL, NULL) == NULL)
+            continue;
+        const unsigned char was = flags[index];
+        HostBootRecord record = {cpu, false, 0xFFu};
+        // One switch at a time, so each value is listed once.
+        unsigned char saved[256];
+        u32 indices[256];
+        u32 others = 0u;
+        for (u32 k = 0; k < options && others < 256u; ++k) {
+            u32 other = 0u;
+            if (k != i && option(k, &other, NULL, NULL) != NULL && other != index && flags[other] != 0u) {
+                indices[others] = other;
+                saved[others++] = flags[other];
+                flags[other] = 0u;
+            }
+        }
+        flags[index] = 1u;
+        writes(host_boot_write_record, &record);
+        flags[index] = was;
+        for (u32 k = 0; k < others; ++k)
+            flags[indices[k]] = saved[k];
+    }
+}
+
+static void host_boot_writes_mark_options(void* lib) {
+    typedef u32 (*WritesFn)(ModWriteFn, void*);
+    WritesFn writes = (WritesFn)dlsym(lib, "bluewake_composite_option_writes");
+    if (writes != NULL)
+        writes(host_boot_write_mark_ours, NULL);
+}
+
+// Whether the game's byte at `address` is one a mod or an option may have put
+// there: the disc's, or a value written there.
+static bool host_boot_byte_known(CPUState* cpu, u32 address) {
+    const u8 now = (u8)mem_read8(cpu, address);
+    for (u32 i = 0; i < g_boot_write_count; ++i) {
+        const HostBootWrite* w = &g_boot_writes[i];
+        if (address >= w->address && address - w->address < w->size &&
+            (now == w->disc[address - w->address] || now == w->value[address - w->address]))
+            return true;
+    }
+    return false;
+}
+
+// Whether a value can be written where it goes after a load: in MEM1, or in a
+// REL's data that is in place (its linked addresses are its own, so no other
+// REL is ever there; a REL not registered now is not written to).
+static bool host_boot_write_target_ok(CPUState* cpu, const HostBootWrite* w) {
+    if (w->address >= 0x80000000u && (u64)w->address + w->size <= 0x80000000ull + cpu->ram_size)
+        return true;
+    u8* storage = NULL;
+    u32 journal = 0u;
+    return ppc_guest_alias_resolve(w->address, w->size, &storage, &journal) && storage != NULL;
+}
+
+// A Gecko code's per-frame values outside main.dol's sections are in the BSS:
+// the HUD's tuning (dMeter_HIO_c, dMeter_map_HIO_c), which the game's
+// constructors set as it starts. At the first retrace, before this run's own
+// per-frame values go in (host_mods_reapply) and before any state is loaded,
+// the game's are there and are kept as the values under them.
+static void host_boot_writes_capture(CPUState* cpu) {
+    g_boot_writes_captured = true;
+    for (u32 i = 0; i < g_boot_write_count; ++i) {
+        HostBootWrite* w = &g_boot_writes[i];
+        if (!w->every_frame || w->known || !host_boot_write_target_ok(cpu, w))
+            continue;
+        for (u32 b = 0; b < w->size; ++b)
+            w->disc[b] = (u8)mem_read8(cpu, w->address + b);
+        w->known = true;
+    }
+}
+
+// Whether `w` touches what a kept mod writes (another mod can write the same
+// bytes there, as the widescreen shapes do).
+static bool host_boot_write_kept(const HostBootWrite* w, u32 kept_mods) {
+    for (u32 k = 0; k < g_boot_write_count; ++k) {
+        const HostBootWrite* o = &g_boot_writes[k];
+        if (o->mod < 32u && (kept_mods & (1u << o->mod)) != 0u && o->address < w->address + w->size &&
+            w->address < o->address + o->size)
+            return true;
+    }
+    return false;
+}
+
+// After a load: the values of mods and options this run does not have go back
+// to the disc's where the state holds them, then this run's go in wherever the
+// state holds the disc's or another setting's value. A value the game has
+// changed itself (neither) is left alone. A Gecko code's per-frame values:
+// this run's are written again each retrace (host_mods_reapply); another
+// mod's go back to the game's own (main.dol's constants, as 4:3's picture
+// shape where 21:9's has 2.33, and the HUD's tuning the game set as it
+// started). The HUD itself the game made from that mod's values (its panes'
+// positions, in the meter's own objects), so a 21:9 state loaded at 4:3 has
+// 4:3's picture but no hearts or magic bar until the next scene change makes
+// the HUD again; the status line says so. A state loaded before the first
+// retrace (BLUEWAKE_LOAD_STATE) comes before the game set the HUD's tuning: a
+// mod whose values this run can't put back, and doesn't write over, is left
+// as the state has it, whole (its picture squeezed, as before). 16:9, 16:10
+// and 21:9 write over each other's per-frame values.
+static void host_boot_writes_state_loaded(CPUState* cpu) {
+    u32 undone = 0u, done = 0u, left = 0u, absent = 0u, kept_mods = 0u, hud_mods = 0u;
+    for (u32 i = 0; i < g_boot_write_count; ++i) {
+        const HostBootWrite* w = &g_boot_writes[i];
+        if (w->ours || !w->every_frame || w->mod >= 32u || !host_boot_write_target_ok(cpu, w))
+            continue;
+        bool holds = true, covered = false;
+        for (u32 b = 0; b < w->size && holds; ++b)
+            holds = (u8)mem_read8(cpu, w->address + b) == w->value[b];
+        for (u32 k = 0; k < g_boot_write_count && holds && !covered; ++k) {
+            const HostBootWrite* o = &g_boot_writes[k];
+            covered = o->ours && o->every_frame && o->address <= w->address &&
+                      (u64)o->address + o->size >= (u64)w->address + w->size;
+        }
+        if (holds && !covered && !w->known)
+            kept_mods |= 1u << w->mod;
+        else if (holds && !covered)
+            hud_mods |= 1u << w->mod;
+    }
+    hud_mods &= ~kept_mods;
+    for (u32 i = 0; i < g_boot_write_count; ++i) {
+        const HostBootWrite* w = &g_boot_writes[i];
+        if (w->every_frame && (w->ours || !w->known))
+            continue;
+        if (!w->ours && kept_mods != 0u && host_boot_write_kept(w, kept_mods))
+            continue;
+        if (!host_boot_write_target_ok(cpu, w)) {
+            absent++;
+            continue;
+        }
+        if (w->ours)
+            continue;
+        bool holds = true, disc = true;
+        for (u32 b = 0; b < w->size && holds; ++b) {
+            const u8 now = (u8)mem_read8(cpu, w->address + b);
+            holds = now == w->value[b];
+            disc = disc && now == w->disc[b];
+        }
+        if (!holds || disc)
+            continue;
+        for (u32 b = 0; b < w->size; ++b)
+            mem_write8(cpu, w->address + b, w->disc[b]);
+        undone++;
+    }
+    for (u32 i = 0; i < g_boot_write_count; ++i) {
+        const HostBootWrite* w = &g_boot_writes[i];
+        if (!w->ours || w->every_frame || !host_boot_write_target_ok(cpu, w))
+            continue;
+        bool same = true, known = true;
+        for (u32 b = 0; b < w->size; ++b) {
+            same = same && (u8)mem_read8(cpu, w->address + b) == w->value[b];
+            known = known && host_boot_byte_known(cpu, w->address + b);
+        }
+        if (same)
+            continue;
+        if (!known) {
+            left++;
+            continue;
+        }
+        for (u32 b = 0; b < w->size; ++b)
+            mem_write8(cpu, w->address + b, w->value[b]);
+        done++;
+    }
+    if (undone != 0u || done != 0u || left != 0u || absent != 0u)
+        fprintf(stderr,
+                "[mods] the state's mod and option values: %u put back to this run's, %u of other settings "
+                "back to the disc's, %u left (changed by the game), %u skipped (their module not in place)\n",
+                done, undone, left, absent);
+    if (kept_mods != 0u) {
+        fprintf(stderr, "[mods] the state's mods 0x%X keep their values: loaded before the game set its HUD "
+                        "(load it again with F8 once the game is going)\n", kept_mods);
+        bluewake_status_post("State keeps its widescreen shape; load again with F8");
+    } else if (hud_mods != 0u) {
+        fprintf(stderr, "[mods] the state's mods 0x%X made its HUD: parts of it return at the next scene change\n",
+                hud_mods);
+        bluewake_status_post("Other widescreen state: HUD returns at next scene change");
+    }
+}
+
 static void host_mods_enable(void* lib, CPUState* cpu) {
     typedef u32 (*CountFn)(void);
     typedef const char* (*NameFn)(u32);
@@ -870,6 +1143,7 @@ static void host_mods_enable(void* lib, CPUState* cpu) {
         snprintf(list + strlen(list), sizeof list - strlen(list), "%s%s%s",
                  i ? "," : "", mod ? mod : "?", on ? "+" : "");
     }
+    host_boot_writes_record(lib, cpu, g_mod_mask, available);
     const u32 chunks = (g_mod_mask && apply) ? apply(g_mod_mask) : 0u;
     const u32 writes = (g_mod_mask && g_mod_writes)
                            ? g_mod_writes(g_mod_mask, 0u, host_mod_write, cpu)
@@ -2108,7 +2382,7 @@ static bool g_direct_call_trace;
 // Conservative by construction: `simple` is off whenever an address-independent
 // check could refuse, and the address lists always include Forest Water's and
 // the draw tags' addresses whether or not those features are on.
-static BwHostSkipFast g_skip_fast = {0u, {0u, 0u}, {0xFFFFFFFFu, 0xFFFFFFFFu}, {0u, 0u}};
+static BwHostSkipFastV4 g_skip_fast = {{0u, {0u, 0u}, {0xFFFFFFFFu, 0xFFFFFFFFu}, {0u, 0u}}};
 static bool g_skip_fast_on;
 static bool g_skip_verify; // BLUEWAKE_DIRECT_SKIP_VERIFY=1: the counts at exit
 // A single address the module could meet as a constant target in the main
@@ -2121,17 +2395,31 @@ static void host_skip_fast_refresh(void) {
         g_direct_gate.bits.closed = 1u;
         return;
     }
-    g_skip_fast.single[0] = g_module1_raw_base != 0u ? g_module1_raw_base + 0xD4u : 0u;
-    g_skip_fast.single[1] = bluewake_forest_water_tree_timer_check;
-    g_skip_fast.range_first[0] = BLUEWAKE_PARTICLE_DRAW_FIRST;
-    g_skip_fast.range_span[0] = BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST;
-    g_skip_fast.range_first[1] = BLUEWAKE_WAKE_DRAW_FIRST;
-    g_skip_fast.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
-    g_skip_fast.simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
-                         !g_overlap_watch_until_control;
-    g_direct_gate.bits.closed = !g_skip_fast.simple ||
-                                host_skip_single_in_main_code(g_skip_fast.single[0]) ||
-                                host_skip_single_in_main_code(g_skip_fast.single[1]);
+    g_skip_fast.base.single[0] = g_module1_raw_base != 0u ? g_module1_raw_base + 0xD4u : 0u;
+    g_skip_fast.base.single[1] = bluewake_forest_water_tree_timer_check;
+    g_skip_fast.base.range_first[0] = BLUEWAKE_PARTICLE_DRAW_FIRST;
+    g_skip_fast.base.range_span[0] = BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST;
+    g_skip_fast.base.range_first[1] = BLUEWAKE_WAKE_DRAW_FIRST;
+    g_skip_fast.base.range_span[1] = BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST;
+    // Bit 0: the inline path may answer; bits 1..5: the stage select's hooks,
+    // which only a v4 module reads (direct_skip.h, #524). A v3 module never gets
+    // the fast path while the stage select is live, so it never sees them.
+    const bool simple = !g_diagnostics_block_skip && !bluewake_jump_button_armed &&
+                        !g_overlap_watch_until_control;
+    g_skip_fast.base.simple = simple ? 1u | (bluewake_stage_select_live ? BW_SKIP_KNOWN_ALL : 0u) : 0u;
+    // The gate (#552) answers constant targets in the main executable's code
+    // without the address test, and all five stage-select hooks are there: keep
+    // it closed while the stage select is live, so those calls take the
+    // address test and its hook bits (exact; the gate's gain then waits).
+    g_direct_gate.bits.closed = !simple || bluewake_stage_select_live ||
+                                host_skip_single_in_main_code(g_skip_fast.base.single[0]) ||
+                                host_skip_single_in_main_code(g_skip_fast.base.single[1]);
+    _Static_assert(BLUEWAKE_STAGE_SELECT_CHANGE == BW_SKIP_KNOWN_CHANGE &&
+                       BLUEWAKE_STAGE_SELECT_DATA_SELECT == BW_SKIP_KNOWN_DATA_SELECT &&
+                       BLUEWAKE_STAGE_SELECT_EXECUTE == BW_SKIP_KNOWN_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_PLAY_EXECUTE == BW_SKIP_KNOWN_PLAY_EXECUTE &&
+                       BLUEWAKE_STAGE_SELECT_MENU_DELETE == BW_SKIP_KNOWN_MENU_DELETE,
+                   "the module's known stage-select watches match stage_select.h");
 }
 _Static_assert(BW_SKIP_RANGE0_FIRST == BLUEWAKE_PARTICLE_DRAW_FIRST &&
                BW_SKIP_RANGE0_LAST == BLUEWAKE_PARTICLE_DRAW_LAST &&
@@ -5455,6 +5743,8 @@ static void host_sync_vi_cycles(CPUState* cpu) {
         host_trace_bgm_stream(cpu, 0u);
 #endif
         aurora_backend_service_present();
+        if (__builtin_expect(!g_boot_writes_captured, 0))
+            host_boot_writes_capture(cpu);
         host_mods_reapply(cpu);
         bluewake_game_options_retrace(cpu);
         bluewake_mouse_camera_retrace();
@@ -5466,6 +5756,8 @@ static void host_sync_vi_cycles(CPUState* cpu) {
         bluewake_quick_doors_retrace();
         bluewake_hd_look_retrace(cpu);
         bluewake_haptics_retrace();
+        if (__builtin_expect(bluewake_stage_select_key_test_count != 0u, 0))
+            bluewake_stage_select_key_test(g_host_retrace_count);
         if (g_wall_pace_enabled && !bluewake_fast_load_fast_forward())
             host_wall_pace(g_host_retrace_count);
         if (g_perf_log_enabled)
@@ -6603,6 +6895,55 @@ typedef struct HostStateHeader {
     char game_id[8];
 } HostStateHeader;
 
+// Whether saving was off (card_runtime.c) where a state was taken: set as it is
+// saved (host_state_fields_update), and after a load it turns saving off in
+// this run too. A load never turns it back on.
+static bool g_state_saving_off;
+
+static void host_state_fields_update(void) { g_state_saving_off = bluewake_card_runtime_writes_refused(); }
+
+// A state's game is in memory (MEM1, ARAM and the REL data), before its
+// HOSTVARS: what each feature keeps of the game outside it is put right or
+// forgotten. The rule: this session's settings win. Every mod, game option
+// and HD look setting, and what it writes into the game, follows what the
+// player has set now, not what was set when the state was taken. Only facts
+// about that game travel with the state (HOSTVARS): whether a file is going
+// and the stage select's way back, and whether saving was off (a load can
+// turn it off, never on). Those are restored after this and win; for a state
+// from before they were saved, what is read here from the game stays.
+//
+// BLUEWAKE_STATE_REAPPLY=0 (the benchmarks set it) leaves the state's game as
+// it was saved instead: no mod or option values, sprint speed, instant text or
+// HD sky are put to this session's, so guest checkpoints from one state agree
+// byte for byte between runs and builds whatever their settings. The facts
+// above still follow the state; of them, only saving off writes the game's
+// memory (the no-card messages reworded, which a state from such a session
+// already holds).
+static bool host_state_reapply(void) {
+    static int reapply = -1;
+    if (reapply < 0) {
+        const char* value = getenv("BLUEWAKE_STATE_REAPPLY");
+        reapply = !(value != NULL && value[0] == '0');
+        if (!reapply)
+            fprintf(stderr, "[state] BLUEWAKE_STATE_REAPPLY=0: a loaded state's game keeps the settings it was "
+                            "saved with\n");
+    }
+    return reapply != 0;
+}
+
+static void host_features_state_loaded(CPUState* cpu) {
+    const bool reapply = host_state_reapply();
+    if (reapply)
+        host_boot_writes_state_loaded(cpu);
+    bluewake_card_runtime_state_loaded(cpu, false);
+    bluewake_stage_select_state_loaded(cpu);
+    bluewake_game_options_state_loaded(reapply);
+    bluewake_hd_look_state_loaded(reapply);
+    bluewake_sprint_state_loaded(cpu, reapply);
+    bluewake_mouse_camera_state_loaded();
+    bluewake_climb_state_loaded();
+}
+
 #define HS_FIELD(x) {#x, (void*)&(x), (uint32_t)sizeof(x)}
 static const BwStateField k_host_state_fields[] = {
     // REL links: raw images, their executable aliases and scratch slots.
@@ -6696,6 +7037,13 @@ static const BwStateField k_host_state_fields[] = {
     HS_FIELD(g_save_trigger_length), HS_FIELD(g_save_trigger_value),
     HS_FIELD(g_save_route_page_presses), HS_FIELD(g_save_route_script_suppressed),
     HS_FIELD(g_live_takeover), HS_FIELD(g_player_route_waiting),
+    // Host features: the stage select's file and way back (stage_select.h),
+    // and saving off.
+    HS_FIELD(bluewake_stage_select_in_game), HS_FIELD(bluewake_stage_select_kept),
+    HS_FIELD(bluewake_stage_select_kept_place), HS_FIELD(bluewake_stage_select_kept_time),
+    HS_FIELD(bluewake_stage_select_kept_date), HS_FIELD(bluewake_stage_select_kept_half),
+    HS_FIELD(bluewake_stage_select_used), HS_FIELD(bluewake_stage_select_going_back),
+    HS_FIELD(bluewake_stage_select_restore_time), HS_FIELD(g_state_saving_off),
 };
 #undef HS_FIELD
 
@@ -6787,6 +7135,7 @@ static bool host_state_save(const char* path, CPUState* cpu,
                                         sizeof(*g_cycle_vi_clock));
     u8* vars = NULL;
     u64 vars_size = 0u;
+    host_state_fields_update();
     if (bw_state_fields_pack(k_host_state_fields,
                              (u32)(sizeof k_host_state_fields / sizeof k_host_state_fields[0]),
                              &vars, &vars_size)) {
@@ -6892,10 +7241,9 @@ static bool host_state_load(const char* path, CPUState* cpu,
             goto done;
     }
     if (saved.mod_mask != here.mod_mask)
-        fprintf(stderr,
-                "[state] warning: saved with mods 0x%X, this run has 0x%X (their code "
-                "differs; per-frame mod writes follow this run)\n",
-                saved.mod_mask, here.mod_mask);
+        fprintf(stderr, "[state] saved with mods 0x%X, this run has 0x%X: %s\n", saved.mod_mask, here.mod_mask,
+                host_state_reapply() ? "their code and values follow this run"
+                                     : "their code follows this run, their values stay the state's");
     if (saved.dsp_hle != here.dsp_hle)
         fprintf(stderr, "[state] warning: saved with DSP %s, this run is %s\n",
                 saved.dsp_hle ? "HLE" : "LLE/off", here.dsp_hle ? "HLE" : "LLE/off");
@@ -7016,8 +7364,15 @@ static bool host_state_load(const char* path, CPUState* cpu,
     else
         fprintf(stderr, "[state] warning: no VI clock in the state\n");
 
+    host_features_state_loaded(cpu);
+    g_boot_writes_captured = true;  // the game in memory is the state's now
+    // Whether a person took the pad over is this session's, not the state's: a
+    // state saved while playing would otherwise turn a test run's pad script off
+    // (the field stays in the state's host variables for older builds).
+    const bool live_takeover = g_live_takeover;
     chunk = bw_state_find(&reader, "HOSTVARS");
     uint32_t restored = 0u, missing = 0u, mismatched = 0u;
+    g_state_saving_off = false;
     // Old states have no pending queue. Never retain completions from the future.
     memset(&g_dvd_completions, 0, sizeof(g_dvd_completions));
     if (chunk == NULL ||
@@ -7037,6 +7392,10 @@ static bool host_state_load(const char* path, CPUState* cpu,
         (g_interrupts.pi_cause & DOL_PI_CAUSE_PE_FINISH) != 0u;
     if (pe != NULL)
         memcpy(&g_interrupts.pe_token, pe->data, (size_t)pe->size);
+    g_live_takeover = live_takeover;
+    if (g_state_saving_off)
+        bluewake_card_runtime_state_loaded(cpu, true);
+    bluewake_stage_select_state_report();
     chunk = bw_state_find(&reader, "LOOPVARS");
     if (chunk != NULL) {
         const BwStateField loop_fields[] = {
@@ -7406,8 +7765,9 @@ int main(int argc, char** argv) {
 
     GetModuleFn get_module = (GetModuleFn)dlsym(lib, "staticrecomp_get_module");
     if (!get_module) { fprintf(stderr, "dlsym: %s\n", dlerror()); return 1; }
-#if defined(__linux__)
-    // The module's code on 2 MB pages (module_hugepages.h; opt-in), before any
+#if defined(__linux__) && !defined(__ANDROID__)
+    // The module's code on 2 MB pages (not on Android: the APK keeps the module
+    // uncompressed inside itself, and SELinux may refuse the remap; #558) (module_hugepages.h; opt-in), before any
     // of it runs.
     {
         const char* huge_env = getenv("BLUEWAKE_MODULE_HUGEPAGES");
@@ -8085,6 +8445,7 @@ int main(int argc, char** argv) {
 
     DolLayout layout;
     if (!dol_load_into_ram(&cpu, dol_path, &layout)) { fprintf(stderr, "dol_load failed\n"); return 1; }
+    g_dol_layout = layout;
     printf("[host] DOL loaded: entry=%#010x bss=[%#010x,%#010x)\n",
            layout.entry_point, layout.bss_address, layout.bss_address + layout.bss_size);
 #ifdef BLUEWAKE_HAS_DSP_ADAPTER
@@ -8317,6 +8678,10 @@ int main(int argc, char** argv) {
                                        const u32*, CanSkipFn, void*, const BwHostSkipFast*, bool);
         DirectCallsV3Fn direct_calls_v3 = (DirectCallsV3Fn)
             dlsym(lib, "bluewake_composite_direct_calls_v3");
+        typedef int (*DirectCallsV4Fn)(bool, const bool*, const bool*, const u32*,
+                                       const u32*, CanSkipFn, void*, const BwHostSkipFastV4*, bool);
+        DirectCallsV4Fn direct_calls_v4 = (DirectCallsV4Fn)
+            dlsym(lib, "bluewake_composite_direct_calls_v4");
         const char* direct_env = getenv("BLUEWAKE_DIRECT_CALLS");
         const char* direct_trace = getenv("BLUEWAKE_DIRECT_CALL_TRACE");
         g_direct_call_trace = direct_trace != NULL && strcmp(direct_trace, "1") == 0;
@@ -8325,12 +8690,13 @@ int main(int argc, char** argv) {
                           getenv("BLUEWAKE_PER_BLOCK_TURNS") == NULL &&
                           dlsym(lib, "bluewake_set_edge_service") != NULL;
         // With the lazy overlap watch the host's answer depends on the address
-        // alone, so a module that can (v3) reads it inline instead of calling
-        // the host at every direct call. Not with the stage select, which has
-        // its own checks, or with the call trace, which counts the calls.
+        // alone, so a module that can reads it inline instead of calling the
+        // host at every direct call. v4 adds stage-select's fixed watches;
+        // older modules retain the v2 callback while stage selection is live.
         const char* verify_env = getenv("BLUEWAKE_DIRECT_SKIP_VERIFY");
-        bool want_fast = g_lazy_overlap && direct_calls_v3 != NULL && !bluewake_stage_select_live &&
-                         !g_direct_call_trace;
+        bool want_fast = g_lazy_overlap && !g_direct_call_trace &&
+                         (direct_calls_v4 != NULL ||
+                          (direct_calls_v3 != NULL && !bluewake_stage_select_live));
 #if BLUEWAKE_ENABLE_DEVELOPER_TRACING || BLUEWAKE_EDGE_CENSUS
         want_fast = false;
 #endif
@@ -8340,21 +8706,40 @@ int main(int argc, char** argv) {
         if (want_fast) {
             g_skip_fast_on = true;
             host_skip_fast_refresh();
-            enabled = direct_calls_v3(
-                want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
-                &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL,
-                &g_skip_fast, verify);
+            if (direct_calls_v4 != NULL)
+                enabled = direct_calls_v4(
+                    want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
+                    &g_interrupts.pi_cause, &g_interrupts.pi_mask,
+                    bluewake_stage_select_live ? host_direct_can_skip_stage_select
+                                               : host_direct_can_skip,
+                    NULL, &g_skip_fast, verify);
+            else
+                enabled = direct_calls_v3(
+                    want, &g_interrupt_sources_dirty, &g_guest_decrementer_pending,
+                    &g_interrupts.pi_cause, &g_interrupts.pi_mask, host_direct_can_skip, NULL,
+                    &g_skip_fast.base, verify);
             g_skip_fast_on = enabled;
             host_skip_fast_refresh();
             // The gate (direct_skip.h): the module reads one word inline before a
-            // direct call instead of calling its check. Opt-in while it is
-            // measured: BLUEWAKE_DIRECT_GATE=1 hands the word over; otherwise
-            // the gate stays closed and every direct call takes the out-of-line
-            // check as before. A module without the export never reads it.
+            // direct call instead of calling its check. BLUEWAKE_DIRECT_GATE=1
+            // hands the word over and 0 keeps it closed, so every direct call
+            // takes the out-of-line check as before. Unset, it is open on
+            // Windows, Linux and the Mac, where it was measured (+12% on Windows
+            // and Linux desktops, +5.5% on a Steam Deck, +12.9% on an M3 Max,
+            // checkpoints identical), and closed on iPhone, iPad and Android
+            // until it is measured there. A module without the
+            // export never reads it.
             typedef int (*DirectGateFn)(const volatile u32*);
             DirectGateFn direct_gate = (DirectGateFn)dlsym(lib, "bluewake_composite_direct_gate");
             const char* gate_env = getenv("BLUEWAKE_DIRECT_GATE");
-            const bool want_gate = gate_env != NULL && strcmp(gate_env, "1") == 0;
+#if ((defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)) || \
+    (defined(__APPLE__) && TARGET_OS_OSX)
+            const bool gate_default = true;
+#else
+            const bool gate_default = false;
+#endif
+            const bool want_gate = gate_env == NULL || gate_env[0] == '\0' ? gate_default
+                                                                            : strcmp(gate_env, "1") == 0;
             host_direct_gate_pi();
             g_direct_gate_on = enabled && direct_gate != NULL &&
                                direct_gate(want_gate ? &g_direct_gate.word : NULL) == 1;
@@ -8423,6 +8808,7 @@ int main(int argc, char** argv) {
             gather_mode == BLUEWAKE_GATHER_DIRECT ? "direct" : "off");
     host_mods_enable(lib, &cpu);
     bluewake_game_options_enable(lib, &cpu, g_options_mod);
+    host_boot_writes_mark_options(lib);
     bluewake_forest_water_set_ftree_text(
         host_rel_section_linked_start(mod, 317u, 1u));
     host_skip_fast_refresh();  // Forest Water's tree-timer address
@@ -14325,8 +14711,13 @@ int main(int argc, char** argv) {
         if (g_runqueue_trace &&
             late_worker_callback_trace_reports < 48u &&
             blocks >= 31000000ull &&
+// bluewake-unwatched-begin
+            /* diagnostic only: a trace on refuses every skip (host_direct_can_skip),
+             * and a bare literal here would make the save routine a watch entry, one
+             * the inliner and the direct-call rewrite both refuse (#565). */
             ((dispatch_input_pc == 0x80328F40u &&
               dispatch_input_lr == 0x802B09C4u) ||
+// bluewake-unwatched-end
              dispatch_input_pc == 0x802B09C4u)) {
             fprintf(stderr,
                     "[sched] late-worker-callback #%u input=0x%08X "
@@ -14392,8 +14783,13 @@ int main(int argc, char** argv) {
         if (g_runqueue_trace &&
             late_scheduler_callback_trace_reports < 48u &&
             blocks >= 31000000ull &&
+// bluewake-unwatched-begin
+            /* diagnostic only: a trace on refuses every skip (host_direct_can_skip),
+             * and a bare literal here would make the save routine a watch entry, one
+             * the inliner and the direct-call rewrite both refuse (#565). */
             ((dispatch_input_pc == 0x80328F40u &&
               dispatch_input_lr == 0x802B4100u) ||
+// bluewake-unwatched-end
              dispatch_input_pc == 0x802B4100u)) {
             fprintf(stderr,
                     "[sched] late-scheduler-callback #%u input=0x%08X "

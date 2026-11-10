@@ -25,7 +25,7 @@
 | You play on | What to do |
 | --- | --- |
 | **Windows** 10 or 11 | [Download the ready-made build](#windows): nothing to build, just choose your disc image |
-| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac, then install it; building on Windows comes with the next release (experimental) |
+| **iPhone or iPad** | [Build your own app](#iphone-and-ipad) on an Apple Silicon Mac or, experimentally, a Windows PC, then install it |
 | **Mac** (Apple silicon) | [Build your own app](#mac) from this repository |
 | **Apple TV** | Follow the [tvOS build guide](docs/TVOS_BUILD.md) (experimental) |
 | **Linux** (x86-64) | [Build the native version](docs/LINUX.md); a ready-made download is not published yet |
@@ -56,7 +56,7 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download [`BlueWake-v0.10.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-windows-x64.zip)
+1. Download [`BlueWake-v0.11.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.11.0/BlueWake-v0.11.0-windows-x64.zip)
    from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play:
    you don't need PadMint or a Mac.
 2. Unpack the whole ZIP and run `BlueWake.exe`.
@@ -69,7 +69,7 @@ GPU gets Direct3D 11 instead of a black screen (not yet checked on such a PC). I
 
 ### Linux
 
-1. Download [`BlueWake-v0.10.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.10.0/BlueWake-v0.10.0-linux-x86_64.AppImage)
+1. Download [`BlueWake-v0.11.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.11.0/BlueWake-v0.11.0-linux-x86_64.AppImage)
    from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play,
    and built to run on SteamOS too.
 2. Make it executable (`chmod +x`, or Properties › Permissions in the Deck's desktop mode) and run it.
@@ -103,7 +103,7 @@ Then:
    ~~~
 
    Expect a first build of well over an hour. Add `--source-only` first to check your tools and
-   disc in a few minutes. From the next release PadMint can also build it on a Windows PC, experimentally; see [On a Windows PC](docs/BUILD_YOUR_OWN.md#on-a-windows-pc-experimental).
+   disc in a few minutes. PadMint can also build it on a Windows PC, experimentally; see [On a Windows PC](docs/BUILD_YOUR_OWN.md#on-a-windows-pc-experimental).
 2. **Install the IPA** with Sideloadly, AltStore, SideStore or Xcode. On Windows, Sideloadly.
 3. **Copy the same disc image to your device:** in Finder on a Mac, or the Apple Devices app on
    Windows, select the device, open **Files** and drag it onto **BlueWake**. The app imports it on

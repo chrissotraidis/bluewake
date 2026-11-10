@@ -25,6 +25,10 @@ final class Shell {
     static native int nativePauseReasons();
     /** shown, speed, worst_ms, display, game, smooth_paused (1 or 0). */
     static native void nativeFps(float[] out);
+    /** The performance panel: 0 off, 2 the full panel (perf_monitor.h); a change restarts the frame times. */
+    static native void nativePerfMode(int mode);
+    /** PerfPanelView's numbers (perf_monitor.h's BwPerfStats), then names[0] the processor, names[1] the card. */
+    static native void nativePerfSnapshot(float[] values, String[] names);
     /** natives: GameCube A, B, X, Y, Z, Start as SDL gamepad buttons, or null for the defaults. */
     static native void nativeApplySettings(int renderScale, int anisotropy, boolean invertX, boolean invertY,
                                            int[] natives, int smoothMotion);
@@ -39,9 +43,18 @@ final class Shell {
     static native boolean nativeFlushPath(String path);
     static native void nativeCloseForSaves();
     static native void nativeLog(String line);
+    /**
+     * Start this run's session log before SDL does: the first-run screen, so a
+     * crash while the disc is imported is in the log (android_entry.c).
+     */
+    static native void nativeSessionLogStart(String dataDir);
     /** Rows "empty\tchecksum_ok\tmax_life\trupees\tname" for each quest log, or null with error[0] set. */
     static native String[] nativeQuestLogs(byte[] bytes, boolean dolphin, String[] error);
     static native byte[] nativeCardImport(byte[] card, byte[] save, int source, int destination, String[] error);
+    /** Extract main.dol and rels/ from the disc into the game dir; null = success, else the reason. */
+    static native String nativeDiscPrepare(String iso, String gameDir);
+    /** Whether the disc image is whole, not merely present; null = it is, else the reason. */
+    static native String nativeDiscCheck(String iso);
     /** The card written out as a Dolphin .gci, or null with error[0] set. The card is only read. */
     static native byte[] nativeCardExport(byte[] card, String[] error);
 

@@ -250,6 +250,54 @@ int main(void) {
     assert(!bluewake_composite_direct_calls_v3(true, NULL, NULL, NULL, NULL, NULL, NULL, &fast, true));
     assert(bw_host_skip_fast == NULL && !bw_host_skip_verify);
 
+    /* v4: the known watches decline exactly their own hooks (and mirrors),
+     * whether the target is a constant or a run-time value. */
+    BwHostSkipFastV4 fast_v4 = {fast};
+    fast_v4.base.simple = 1u;
+    assert(bluewake_composite_direct_calls_v4(true, &attention, &decrementer, &cause, &mask,
+                                             can_skip, &allow, &fast_v4, false));
+    before = queries;
+    const u32 hooks[5] = {BW_SKIP_KNOWN_CHANGE, BW_SKIP_KNOWN_DATA_SELECT, BW_SKIP_KNOWN_EXECUTE,
+                          BW_SKIP_KNOWN_PLAY_EXECUTE, BW_SKIP_KNOWN_MENU_DELETE};
+    for (u32 h = 0u; h < 5u; ++h) /* no bits: every hook is an ordinary target */
+        assert(bw_direct_call_ready(&cpu, hooks[h]));
+    for (u32 on = 0u; on < 5u; ++on) {
+        fast_v4.base.simple = 1u | (2u << on);
+        for (u32 h = 0u; h < 5u; ++h) {
+            volatile u32 target = hooks[h]; /* not folded: the run-time path */
+            assert(bw_direct_call_ready(&cpu, target) == (h != on));
+            assert(bw_direct_call_ready(&cpu, target | 0x40000000u) == (h != on));
+        }
+        assert(bw_direct_call_ready(&cpu, 0x80009000u));
+    }
+    fast_v4.base.simple = 1u | BW_SKIP_KNOWN_ALL;
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_CHANGE) && !bw_direct_call_ready(&cpu, 0xC0029E6Cu));
+    assert(!bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_MENU_DELETE));
+    /* The plain path (#552) must honour the hooks too: the stage select's
+     * targets are in the main executable's code, where it answers. */
+    for (u32 h = 0u; h < 5u; ++h) {
+        assert(!bw_direct_call_ready_plain(&cpu, hooks[h]));
+        assert(!bw_direct_call_ready_plain(&cpu, hooks[h] | 0x40000000u));
+    }
+    assert(bw_direct_call_ready_plain(&cpu, 0x80009000u));
+    fast_v4.base.simple = 1u;
+    for (u32 h = 0u; h < 5u; ++h)
+        assert(bw_direct_call_ready_plain(&cpu, hooks[h]));
+    fast_v4.base.simple = 1u | BW_SKIP_KNOWN_ALL;
+    assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before);
+    fast_v4.base.simple = 1u; /* stage select off: the hooks are ordinary targets */
+    assert(bw_direct_call_ready(&cpu, BW_SKIP_KNOWN_PLAY_EXECUTE));
+    fast_v4.base.simple = 0u; /* inline path off: the host answers every call */
+    before = queries;
+    assert(bw_direct_call_ready(&cpu, 0x80009000u) && queries == before + 1u);
+    /* Falling back to v3: the host sets no hook bits there (direct_skip.h), so
+     * the hooks are ordinary targets. */
+    fast_v4.base.simple = 1u;
+    assert(bluewake_composite_direct_calls_v3(true, &attention, &decrementer, &cause, &mask,
+                                             can_skip, &allow, &fast_v4.base, false));
+    assert(bw_host_skip_fast_v4 == NULL);
+    assert(bw_direct_call_ready(&cpu, 0x80029E6Cu));
+
     assert(!bluewake_composite_direct_calls_v2(false, NULL, NULL, NULL, NULL, NULL, NULL));
     assert(!bw_edge_filter_enabled && !bw_direct_call_ready(&cpu, 0x80004000u));
     test_gate();

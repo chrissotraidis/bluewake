@@ -61,7 +61,7 @@ if env.get("BLUEWAKE_CAPTURE_OPENING_FRAME"):
         (folder / f"frame-{retrace + ('late' in name)}.ppm").write_bytes(picture(n))
 warps = [item.split(":") for item in env.get("BLUEWAKE_TEST_WARP", "").split(",") if item]
 saves = [item.rpartition("@") for item in env.get("BLUEWAKE_SAVE_STATE", "").split(",") if item]
-rate = 50.0 if "slow" in name else 120.0
+rate = float(env.get("BLUEWAKE_TEST_RATE", 50.0 if "slow" in name else 120.0))
 gpu = 8.0 if "slow" in name else 4.0
 checkpoint = int(env.get("BLUEWAKE_GUEST_CHECKPOINT_INTERVAL", "0"))
 for retrace in range(start - start % 60 + 60, end, 60):

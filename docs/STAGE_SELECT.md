@@ -46,8 +46,12 @@ was worse: the game either retried on its own forever or called the card damaged
 your file is exactly as it was before you opened the menu. Save first: nothing after opening it can be
 kept, including the save the game offers after the credits (the one that starts the Second Quest).
 Save states (F5) don't get around it. A state taken after the stage select was used still can't be
-saved from when it's loaded later, even after a restart: the rewritten message is in the game's memory
-the state holds, and BlueWake looks for it whenever the game mounts the card.
+saved from when it's loaded later, even after a restart: the state records that saving was off, and
+loading it turns saving off at once (for a state from an older build, BlueWake finds the rewritten
+message in the game's memory the state holds). Loading a state never turns saving back on.
+
+A save state also keeps whether a file was going and, from inside the stage select, the way back, so F7
+works straight after loading one, even in a session where no file was started first.
 
 So that this never costs you progress, **F7 during play asks first**: "Go to the stage select?", with
 **Cancel** (Esc, or B on a controller; it has the focus) and **Go to the stage select** (or F7 again).

@@ -16,7 +16,7 @@ class CertificationTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         (self.root / "generated.h").write_text("/* synthetic header */\n")
-        self.body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\n'
+        self.body = '\nlabel_00000100:\n    ctx->gpr[3] = 1;\nlabel_802EE834:\n'
         digest = hashlib.sha256(' '.join(self.body.split()).encode()).hexdigest()
         self.old_leaves = prepare.LEAVES
         prepare.LEAVES = ((0x100, 0x104, {digest}),)
@@ -55,6 +55,17 @@ class CertificationTest(unittest.TestCase):
         self.file.write_text(prepare.GENERATED_INCLUDE + 'return_dispatch_802ED6E0:\n')
         with self.assertRaises(ValueError):
             prepare.prepare(self.root)
+
+    def test_missing_hand_over_label(self):
+        # The native hands over at the epilogue: it must be a label inside the
+        # certified body, in every variant.
+        body = self.body.replace('label_802EE834:\n', '')
+        digest = hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+        prepare.LEAVES = ((0x100, 0x104, {digest}),)
+        self.file.write_text(self.source.replace(self.body, body))
+        with self.assertRaises(ValueError):
+            prepare.prepare(self.root)
+        self.assertFalse((self.root / 'native_skin.json').exists())
 
 
 if __name__ == '__main__':
