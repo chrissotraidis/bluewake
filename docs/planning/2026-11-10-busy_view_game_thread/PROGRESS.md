@@ -1,6 +1,6 @@
 # PROGRESS — The game thread at busy views
 
-Status: On hold — the named profile at the busiest view is the one the earlier Outset game-thread work already covered (M1-T01); waiting for the owner's decision on the structural option
+Status: In progress — the busiest view's game thread named by game function (M1-T02): background collision ≈ 7.3 % is the one sizeable group; next, the natives-from-source mechanism
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -8,7 +8,8 @@ Status: On hold — the named profile at the busiest view is the one the earlier
 ### M1: Attribute the game thread's time
 - [x] M1-T00: Found on #586 (its M4-T23): `8-busiest` (~1,950 draws) runs 26.53 in Game Mode with #586's switches; the game thread is 98.6 % busy, ~89 % in translated code, flat (largest function 1.5 %)
 - [x] M1-T01: Profile `8-busiest` with names (huge pages off, build `eaa85f0f1`, headless, perf): 129 M cycles a game frame, IPC 1.47, game thread 98.6 % busy. Top: `func_802456E0` (ground collision, per the lava-room work) 3.2 %, `bluewake_native_game_math_try` 2.0 %, `func_800A56E0` 1.6 %, `func_803256E0` 1.3 %, `func_802ED6E0` 1.2 %, `chassis_dispatch` 1.2 %, `func_802D56E0` 1.2 %, `func_8009D6E0` 1.1 %, native math 1.05 %, native vec 1.04 %. **The same flat list the earlier Outset work (#503's planning, M1-T01) found** at its worst-angle Outset state: `func_802456E0` 5.6 %, `func_800A56E0` 3.5 %, native game math 3.4 %, `func_802ED6E0` 3.1 %, at 147 M cycles a frame then. That work (direct calls, the dispatch loop, code layout, natives, training, the alias resolver) has covered this profile; what's left is structural (natives compiled from the decompilation's source, docs/PERFORMANCE.md)
-- [ ] M1-T02: Group the time by game system (actors, models and joints, draw lists, collision)
+- [x] M1-T02: Game-thread samples named by game function: [`scripts/guest_profile.py`](../../../scripts/guest_profile.py) places each sample in its translated chunk, then at the guest instruction through the chunk's `pc_table` (label addresses, read from the file: the module uses packed RELR relocations), then in the decompilation's function (zeldaret/tww `config/GZLE01/symbols.txt`). At `8-busiest` (18,424 samples, 89 % in the module): **background collision ≈ 7.3 %** (`cBgW::GroundCrossGrpRp` 1.30, `dBgS::WallCorrect` 0.94, `cBgW::GroundCrossRp` 0.91, `dBgW::RwgWallCorrect` 0.60, `dBgS_Acch::CrrPos` 0.51, `cBgS::GroundCross` 0.50, `WallCorrectGrpRp` 0.46, `RoofChkGrpRp` 0.39, `MakeBlckMinMax` 0.37, `SplGrpChkGrpRp` 0.31, `ChkGrpThrough` 0.30, `WallCorrectRp` 0.25, `RoofChkRp` 0.24, `SplGrpChk` 0.21); native maths helpers 7.8 % (already native); J3D animation and matrices ≈ 2.4 %; sea, sky and particles ≈ 2.2 % (`wave_move`, `drawWave`, `drawVrkumo`, `vrkumo_move`, JPA strips); actor collision ≈ 0.8 %; the top 40 functions ≈ 18 %, the rest a long tail
+- [ ] M1-T04: Natives compiled from the decompilation's source: background collision is the one sizeable group, but non-leaf (walks the collision tree, calls translated code, reads module memory: needs a big-endian shim, guest pointers and calls back). Leaf candidates (`cM_atan2s`, `cSPolar::Val`, `cM3dGCyl::SetC`, `J3DGetKeyFrameInterpolationS`, `MakeBlckMinMax`) ≈ 1.5–2 % together. #364's source-compiled `__ieee754_fmod` (never hooked) is the starting point for the mechanism
 - [ ] M1-T03: Per-frame counts of the game's work at `8-busiest` against the bench's lighter Outset view
 
 ### M2: Cheaper game-thread work
