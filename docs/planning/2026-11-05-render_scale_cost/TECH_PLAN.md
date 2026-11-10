@@ -110,5 +110,5 @@ Measure first: `DOL_AURORA_GPU_PROF=2` lists each pass; count cuts and full-scre
 | Option | Note |
 |---|---|
 | E1 Cloud shadows, exact shortcuts | Early exit when `smoothstep(0.42, 0.6, n)` is decided and skipping the faded-out far sea: ~8 % of octaves, ~1 % fps. Not pursued alone |
-| E2 Cloud shadows, baked noise texture | **In progress** (M3-T00): 4096² R32Float world-space texture, exact bilinear weights, re-baked only near its edge; error ≤ 0.4 of an 8-bit step (simulated) |
+| E2 Cloud shadows, baked noise texture | **In progress** (M3-T00, RecompCore#54, #586): 4096² R32Float world-space texture, exact bilinear weights, re-baked only near its edge; error ≤ 0.4 of an 8-bit step (simulated) |
 | E3 Ambient occlusion (7.5 %) | Next effect to look at after clouds |

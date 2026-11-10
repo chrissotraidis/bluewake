@@ -20,7 +20,7 @@ Status: In progress. Measured paced with the owner's build, settings and save st
 - [ ] M2-T04: L4 — 4x + HD stalls in present: 255–282 ms a second waiting, `acquire-drawable` 30–65 ms, with the GPU 77 % and the game thread 80 % busy. Find what holds the frames (gamescope, swap-chain depth, Smooth Motion pacing)
 
 ### M3: Source experiments
-- [ ] M3-T00: Cheaper cloud shadows, opt-in in the Performance section; choose between exact shortcuts (~1 %) and baking the noise into a world-space texture once a frame (picture within an 8-bit step), judged paced with 6+ launches and pictures
+- [ ] M3-T00: E2 — cheaper cloud shadows, opt-in "Faster cloud shadows" in the Performance section: baked 4096² noise texture (owner's choice over exact shortcuts worth ~1 %). Code: [RecompCore#54](https://github.com/chrissotraidis/RecompCore/pull/54) (`b48524af`), switch and pin: [#586](https://github.com/chrissotraidis/bluewake/pull/586) on the #554 stack. Full stack build running; then paced Deck A/B (switch on vs off, same build, 6+ launches) and pictures
 - [ ] M3-T01: L1 fix, if the reading finds avoidable work; opt-in, picture identical, judged paced
 - [ ] M3-T02: L2 — retest RecompCore #53 staging-copy batching paced with these settings
 - [ ] M3-T03: B1–B3 — count pass cuts and full-screen passes at 4x + HD (`DOL_AURORA_GPU_PROF=2`), then fuse/merge where exact
