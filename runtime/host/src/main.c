@@ -7696,6 +7696,20 @@ int main(int argc, char** argv) {
     // The options menu's saved choices, before anything reads the environment.
     bluewake_settings_load();
     host_apply_aspect();
+#if defined(__linux__) && !defined(__ANDROID__)
+    // BLUEWAKE_NO_GAMESCOPE_WSI=1 (Config > Performance): present through Xwayland instead of
+    // gamescope's Vulkan WSI layer. In Steam Deck Game Mode the layer held the game in present
+    // ~100 ms a second at a busy Outset view with Smooth Motion (27.3 game frames a second; 29.9
+    // without it; the GPU was not full). The Vulkan loader reads ENABLE_GAMESCOPE_WSI when the
+    // renderer creates its instance, so it is set here, before anything starts Vulkan (#586).
+    {
+        const char* no_wsi = getenv("BLUEWAKE_NO_GAMESCOPE_WSI");
+        if (no_wsi != NULL && no_wsi[0] == '1' && getenv("GAMESCOPE_WAYLAND_DISPLAY") != NULL) {
+            setenv("ENABLE_GAMESCOPE_WSI", "0", 1);
+            fprintf(stderr, "[present] gamescope's WSI layer off: presenting through Xwayland\n");
+        }
+    }
+#endif
 #if defined(__APPLE__) || defined(__ANDROID__)
     // Draw fusion (RecompCore patch 0166, Elliott Tate): a display list's strips
     // as one draw, a tenth of the draws. On for Windows and Linux, where it has
