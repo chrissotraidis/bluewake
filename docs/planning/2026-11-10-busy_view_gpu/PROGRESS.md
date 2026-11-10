@@ -1,6 +1,6 @@
 # PROGRESS — The GPU's share at busy views: HD effects, power and Smooth Motion
 
-Status: Planned — follows #586
+Status: **On hold** (owner, 2026-11-10) — measurements done; the fused effects pass removed; reprojection (up to ~8.7 % at the busiest view, M3-T00) not started. The game thread (#592) goes first
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -45,5 +45,6 @@ Status: Planned — follows #586
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Owner: hold #591; reprojection is the riskier lead. #592 (the game thread) first |
 | 2026-11-10 | Remove the fused per-pixel pass: with the cloud shadows apart it isn't ahead (−0.21 %), and with them it changes sunlit rims. The effects' cost is their own shader work, about 1.2 % each at the busiest view |
 | 2026-11-10 | Owner: wrap up #586 with its data; plan the GPU side of busy views here (HD effect costs with power, and reprojection) and the game thread on #592 |
