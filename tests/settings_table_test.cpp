@@ -33,7 +33,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_AIM_INVERT_Y",
     "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
-    "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES",
+    "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -132,6 +132,10 @@ int main() {
     const Setting* huge = find("BLUEWAKE_MODULE_HUGEPAGES");
     assert(huge != nullptr && huge == gate + 1 && huge->tab == Tab::Config && huge->group == nullptr);
     assert(!default_on(*huge) && next_launch_on(*huge));
+    // Then faster cloud shadows (RecompCore #54): off by default, read when the renderer starts.
+    const Setting* clouds = find("DOL_AURORA_CLOUD_NOISE_TEXTURE");
+    assert(clouds != nullptr && clouds == huge + 1 && clouds->tab == Tab::Config && clouds->group == nullptr);
+    assert(!default_on(*clouds) && next_launch_on(*clouds));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

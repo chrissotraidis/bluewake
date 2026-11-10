@@ -48,7 +48,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # 0.10.0 pins the bluewake-next commit that merges #45, #48 and 0186-0192.
 # Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), on bluewake-next after 0.10.0: pin #49's head, fetched from upstream, until it merges.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=a4dbaaa811c280938000ab0e34f08df22366f668
+RECOMPCORE_SHA=b48524af2c5f5ab39401a563cc4dbb103a5a5a1b
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

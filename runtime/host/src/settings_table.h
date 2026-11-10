@@ -337,6 +337,16 @@ inline constexpr Setting kSettings[] = {
              "faster. Uses about 370 MB more memory. Linux only (elsewhere it does nothing). Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // The HD look's cloud shadows from a noise texture baked once around the camera
+    // (RecompCore #54, DOL_AURORA_CLOUD_NOISE_TEXTURE) instead of four octaves of noise
+    // for every pixel of both frames. Opt-in: 14.5% of the frame at 4x with the HD look
+    // and Smooth Motion on a Steam Deck; read when the renderer starts.
+    {.key = "DOL_AURORA_CLOUD_NOISE_TEXTURE", .kind = Kind::Bool,
+     .label = "Faster cloud shadows", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Works out the HD look's cloud shadows once and reuses them, instead "
+             "of for every pixel of every frame. The shadows can differ by less than one shade "
+             "step. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
