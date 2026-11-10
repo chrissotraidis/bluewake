@@ -373,9 +373,9 @@ inline constexpr Setting kSettings[] = {
              "slot, so a late frame doesn't hold up the game. The screen still shows whole "
              "frames. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
-    // The occlusion's apply, the edge light, the torch light and the cloud shadows in one
-    // full-screen pass (RecompCore #57, DOL_AURORA_FUSED_EFFECTS) instead of four, each reading
-    // the depth and blending into the full-size scene. Opt-in; read when the renderer starts.
+    // The occlusion's apply, the edge light and the torch light in one full-screen pass
+    // (RecompCore #57, DOL_AURORA_FUSED_EFFECTS) instead of three, each reading the depth and
+    // blending into the full-size scene. Opt-in; read when the renderer starts.
     {.key = "DOL_AURORA_FUSED_EFFECTS", .kind = Kind::Bool,
      .label = "Draw the HD effects in one pass", .tab = Tab::Config, .control = Control::Switch,
      .note = "Experimental. Draws the HD look's shading, sunlit edges and torch glow "
