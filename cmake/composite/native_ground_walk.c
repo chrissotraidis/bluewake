@@ -98,7 +98,7 @@ typedef struct {
 /* A translated function, called with LR at the sentinel; true when it
  * returned there. A chunk can hand back before that without an exception (a
  * call it does not run directly): the rest runs here, chunk by chunk, as the
- * dispatcher would run it, through addresses the host does not watch. An
+ * dispatcher would run it, where the host answers that it has nothing to do. An
  * exception is left alone (the walk is then broken: it is declined up front
  * where one can come, as with floating point off). */
 static bool gw_call(GwWalk* w, u32 target) {
@@ -110,7 +110,10 @@ static bool gw_call(GwWalk* w, u32 target) {
     }
     for (unsigned hops = 0; cpu->pc != GW_SENTINEL && cpu->exception == 0u && hops < 4096u; ++hops) {
         const u32 pc = cpu->pc;
-        if (!bw_edge_unwatched(pc))
+        /* The host's own answer for this boundary, with this state: a watched
+         * helper (_restgpr_27, watched for GroundCross's return to 0x80246A04)
+         * is fine to run on when the host would do nothing here. */
+        if (!bw_direct_call_ready_full(cpu, pc))
             break;
         const BwChunkFn fn = bw_find_chunk(pc);
         if (fn == NULL)
@@ -207,7 +210,7 @@ int bluewake_native_ground_walk_try(CPUState* cpu) {
     /* Floating point off: the polygon test's first float instruction would
      * trap to the OS's handler midway, so the translation runs instead. */
     if (!bw_direct_enabled || bw_direct_depth + 4u >= BW_DIRECT_DEPTH_MAX || cpu->exception != 0u ||
-        (cpu->msr & PPC_MSR_FP) == 0u ||
+        (cpu->msr & PPC_MSR_FP) == 0u || !bw_host_quiet(cpu) ||
         !gw_unwatched() || !BW_RAM_FAST_STORE(cpu, sp - 64u, 64u)) {
         s_declined++;
         return 0;
