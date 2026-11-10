@@ -373,13 +373,16 @@ inline constexpr Setting kSettings[] = {
              "slot, so a late frame doesn't hold up the game. The screen still shows whole "
              "frames. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
-    // Present through Xwayland instead of gamescope's Vulkan WSI layer (BLUEWAKE_NO_GAMESCOPE_WSI,
-    // main.c sets ENABLE_GAMESCOPE_WSI=0 under gamescope): in Steam Deck Game Mode the layer held
-    // the game in present at busy views with Smooth Motion. Opt-in; Linux; read when BlueWake starts.
+    // Present through Xwayland with FIFO and four swap-chain images instead of gamescope's Vulkan
+    // WSI layer (BLUEWAKE_NO_GAMESCOPE_WSI; main.c sets ENABLE_GAMESCOPE_WSI=0 and Mesa's
+    // vk_x11_override_min_image_count=4 under gamescope, and keeps FIFO over the Mailbox switch):
+    // in Steam Deck Game Mode the layer held the game in present at busy views with Smooth Motion.
+    // Opt-in; Linux; read when BlueWake starts.
     {.key = "BLUEWAKE_NO_GAMESCOPE_WSI", .kind = Kind::Bool,
      .label = "Present without gamescope's frame layer", .tab = Tab::Config, .control = Control::Switch,
      .note = "Experimental. In Steam Deck Game Mode, hands frames to the screen the plain way instead of "
              "through gamescope's own layer, which can hold the game back in busy places with Smooth Motion. "
+             "Every frame is still shown in turn (it overrides \"Present without waiting for the display\"). "
              "Does nothing outside gamescope. Off by default; measured on a Steam Deck. Takes effect when "
              "BlueWake starts again.",
      .next_launch = Os::All},
