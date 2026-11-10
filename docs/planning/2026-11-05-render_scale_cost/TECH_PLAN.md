@@ -70,6 +70,22 @@ Aurora's `[gpu-prof]` zones, median per presented frame (ms). Zones nest inside 
 | Cloud shadows, real / in-between | — | — | 0.8 / 3.3 | 2.2 / 4.8 |
 | Ambient occlusion, real / in-between | — | — | 0.4 / 1.4 | 1.2 / 2.1 |
 
+## Pictures: the switches on against off
+
+Seven scenes (the five bench scenes and the owner's two Outset states), build `debfb4abd`, 3x + HD, Smooth Motion off so frames are exact, five captures a scene (render_bench `--every 300`, `render-pics586`). Each image: whole frame before, after and the difference x32 (top), and a 1:1 crop where the difference is densest (bottom, marked in yellow above). Made with a small script over render_bench's raw frames.
+
+| Scene | Changed pixels (of 3.69 M) | Largest difference (of 255) | PSNR | Image |
+|---|---:|---:|---:|---|
+| Outset | 376,783 | 4 | 62.2 dB | [image](images/hd-switches-1-outset.jpg) |
+| Lava room | 28,700 | 3 | 73.1 dB | [image](images/hd-switches-2-lava-room.jpg) |
+| Hyrule Castle | 5,153 | 1 | 76.7 dB | [image](images/hd-switches-3-hyrule-castle.jpg) |
+| Outset coast (butterfly state) | 274,276 | 2 | 63.8 dB | [image](images/hd-switches-4-butterfly-room.jpg) |
+| Shipwreck | 66,015 | 5 | 69.4 dB | [image](images/hd-switches-5-shipwreck.jpg) |
+| Owner's Outset state | 153,676 | 4 | 65.8 dB | [image](images/hd-switches-6-play.jpg) |
+| Owner's busy Outset view | 287,770 | 6 | 63.5 dB | [image](images/hd-switches-7-heavy.jpg) |
+
+render_bench's flicker check flags the butterfly state: 277,845 blinking pixels across its captures with the switches on, 277,561 off. The scene blinks by itself either way (284 more of 3.69 M pixels), and the image shows no artefact.
+
 ## Plan: 3x + full HD look at 30
 
 Target 24.4 → 30 fps (+22 %), paced, owner's state, Game Mode build and settings, Smooth Motion one step. Cost of each part at 3x + HD (turned off): cloud shadows 7.9 %, ambient occlusion 6.5 %, far blur 5.2 %, edge light 1.4 %, bloom 1.1 %; Smooth Motion off 29.92.
