@@ -29,10 +29,10 @@ Status: In progress. Goal: 3x + full HD look + Smooth Motion holds 30 on the Dec
 - [ ] M3-T06: E3 — ambient occlusion cost
 
 ### M4: 3x + full HD look holds 30 (goal)
-- [ ] M4-T01: Cost of each part at 3x + HD, turned off, paced, owner's state (running)
+- [x] M4-T01: Cost of each part at 3x + HD, turned off, paced, owner's state, 2 launches each (baseline 24.39): Smooth Motion off 29.92 (+22.7 %), cloud shadows +7.9 %, ambient occlusion +6.5 %, far blur +5.2 %, edge light +1.4 %, bloom +1.1 %. The effects together ≈ the whole gap; far blur matters more at 3x than at 4x
 - [ ] M4-T02: Step 1 — faster cloud shadows: Deck A/B, switch on vs off in the same stack build, 6+ paced launches each, pictures (build running; RecompCore#54, #586)
 - [ ] M4-T03: Step 2 — cheaper ambient occlusion, opt-in
-- [ ] M4-T04: Step 3 — one pass for the per-pixel HD effects, bit-identical, opt-in
+- [ ] M4-T04: Step 3 — one pass for the per-pixel HD effects, bit-identical, plus a cheaper far blur (5.2 % at 3x: downsample, 2×2 blur passes, composite), opt-in
 - [ ] M4-T05: Step 4 — in-between frame reuses the real frame's off-screen copies, opt-in (only if 1–3 fall short)
 - [ ] M4-T06: Check against the goal: 3x + HD + Smooth Motion ≥ 30 fps paced, and in the owner's play
 
@@ -42,6 +42,7 @@ Status: In progress. Goal: 3x + full HD look + Smooth Motion holds 30 on the Dec
 |---|---|---|---|---|
 | M1-T01 | owner's session log `session-20261109-212210.log`, hwmon samples | Read-only SSH: `[perf]` lines, `gpu_busy_percent`, `freq1_input`, slowPPT | Steam Deck Game Mode, stack `afb6c35d8805`, owner's settings, Outset | 3x 30 fps / GPU ~60 % / 810 MHz / 8.4 W; 4x 26–28 / ~97 % / ~1200 MHz / 10.3 W; 3x+HD 25.5–29 / ~95 % / ~1300 MHz / 11–18 W; 4x+HD 19–20 / ~95 % / ~1480 MHz / 13.8 W |
 | M2-T03, M2-T04 | owner's session log `session-20261109-222400.log`, hwmon samples | Read-only SSH; segments split by the log's menu open/close and settings-saved lines | GPU clock locked at 1600 MHz in Steam, same build and settings | 3x 29.9 fps / game thread 86 % / GPU 50 % / 15.4 W; 4x 27.4 / 98 % / 75 % / 14.2 W; 3x+HD 28.9 / 98 % / 65 % / 13.9 W; 4x+HD 18.8 / 80 % / 77 % / 13.4 W, `[fps-dip]` waits present=255–282 ms/s |
+| M4-T01 | `render-ablate3/report.md` | Same as M2-T05 at 3x + HD | Owner's state, Game Mode build and settings | 24.39 baseline; Smooth Motion off 29.92; cloud shadows off 26.31; AO off 25.98; far blur off 25.66; edge light off 24.73; bloom off 24.67 |
 | M2-T05 | `render-ablate/report.md` | render_bench `--paced --every 0`, 7 setups x 2 launches, each turning one part off | Owner's state, 4x + HD, Game Mode build and settings | 18.25 baseline; Smooth Motion off 29.96; cloud shadows off 20.91; AO off 19.62; bloom off 18.74; far blur off 18.69; edge light off 18.62 |
 | M1-T03, M1-T04, M2-T01 | `render-paced/report.md`, samplers | render_bench `--paced`, A/B/C/D interleaved, 2 pairs, no warm-up; samplers tagged by launch settings | Same build; state `quick-1835` (Outset, retrace 1835); 16:9 widescreen + BetterWW (`mask=0x3`), gate and huge pages on | FPS 29.0 / 25.8 / 24.5 / 18.2; game thread 88 / 82 / 79 / 69 %; GPU 85 / 89 / 89 / 93 % at 553 / 913 / 938 / 1266 MHz; 16/16 launches loaded; HD-on checkpoints differ from HD-off (the HD look's culling) |
 

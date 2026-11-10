@@ -13,12 +13,12 @@ Four steps, in order, each opt-in in the Performance section first and qualified
 
 | Step | What | Expected share of the gap | Picture |
 |---|---|---|---|
-| 1 | Faster cloud shadows (baked noise texture; RecompCore#54, #586) | Largest: cloud shadows were 14.5 % at 4x + HD | Within half an 8-bit step |
-| 2 | Cheaper ambient occlusion (four full-screen passes today) | AO was 7.5 % at 4x + HD | Target: unchanged or within an 8-bit step |
-| 3 | One pass for the per-pixel HD effects (edge light, torch light, cloud and AO apply) | ~2 % each today, mostly memory traffic | Bit-identical (8-bit rounding repeated between steps) |
+| 1 | Faster cloud shadows (baked noise texture; RecompCore#54, #586) | Cloud shadows cost 7.9 % at 3x + HD | Within half an 8-bit step |
+| 2 | Cheaper ambient occlusion (four full-screen passes today) | AO costs 6.5 % at 3x + HD | Target: unchanged or within an 8-bit step |
+| 3 | One pass for the per-pixel HD effects (edge light, torch light, cloud and AO apply), and a cheaper far blur | Far blur 5.2 %, edge light 1.4 %, bloom 1.1 % at 3x + HD | Bit-identical for the merge; far blur unchanged or within a step |
 | 4 | In-between frame reuses the real frame's off-screen copies | Only if 1–3 fall short | Very small differences; opt-in |
 
-The 3x shares come from the same turn-it-off measurement at 3x + HD (M4-T01).
+The 3x shares (M4-T01, turned off, paced, 24.39 baseline): cloud shadows 7.9 %, ambient occlusion 6.5 %, far blur 5.2 %, edge light 1.4 %, bloom 1.1 %; Smooth Motion off reaches 29.92. The effects together are about the whole 22 % gap, so steps 1–3 must remove most of each effect's cost, or step 4 is needed.
 
 ## The problem
 
