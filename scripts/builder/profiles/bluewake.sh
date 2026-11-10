@@ -49,7 +49,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), merged into bluewake-next as f9e3f4e.
 # Cheaper HD look effects, opt-in (RecompCore #54, on top of f9e3f4e), and the GPU's share at busy views (RecompCore #57, stacked on #54, bluewake#591): pin #57's head, fetched from upstream, until they merge.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=5489d20661285e536d7a9e4adfc15415c96dc248
+RECOMPCORE_SHA=f5a629b2b09b36743de5ef8428506fe5c28dd09f
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

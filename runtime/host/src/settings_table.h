@@ -378,7 +378,7 @@ inline constexpr Setting kSettings[] = {
     // the depth and blending into the full-size scene. Opt-in; read when the renderer starts.
     {.key = "DOL_AURORA_FUSED_EFFECTS", .kind = Kind::Bool,
      .label = "Draw the HD effects in one pass", .tab = Tab::Config, .control = Control::Switch,
-     .note = "Experimental. Draws the HD look's shading, sunlit edges, torch glow and cloud shadows "
+     .note = "Experimental. Draws the HD look's shading, sunlit edges and torch glow "
              "together instead of one after another. Colours can differ by about one shade step. Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
