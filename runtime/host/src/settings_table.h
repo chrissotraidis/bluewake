@@ -356,6 +356,16 @@ inline constexpr Setting kSettings[] = {
              "once instead of again for every pixel. The shading can differ very slightly. Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
      .next_launch = Os::All},
+    // The HD look's full-size passes discard pixels they leave exactly as they are (RecompCore
+    // #56, DOL_AURORA_POST_SKIP_IDENTITY): the same picture, less reading and writing of the
+    // scene. Opt-in; read when the renderer starts.
+    {.key = "DOL_AURORA_POST_SKIP_IDENTITY", .kind = Kind::Bool,
+     .label = "Skip effect pixels that change nothing", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. The HD look's effects leave alone the pixels they would not change "
+             "(no cloud, no rim light, nothing far away), instead of blending into every pixel. "
+             "The picture is the same. Off by default; measured on a Steam Deck. Takes effect "
+             "when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
