@@ -31,4 +31,4 @@ Status: Planned — follows #586
 
 | Date | Decision |
 | --- | --- |
-| 2026-11-10 | Owner: wrap up #586 with its data; plan the GPU side of busy views here (HD effect costs with power, and reprojection) and the game thread on #GAMETHREAD |
+| 2026-11-10 | Owner: wrap up #586 with its data; plan the GPU side of busy views here (HD effect costs with power, and reprojection) and the game thread on #592 |

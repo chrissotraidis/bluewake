@@ -3,7 +3,7 @@
 Status: Planned — follows #586
 Source base: BlueWake `main` with #586 (cheaper HD look effects and the present switches)
 [Technical plan](TECH_PLAN.md) · [Tracker](PROGRESS.md)
-Related: #586 (where this was found), #GAMETHREAD (the game thread at busy views), #590 (render_bench in Game Mode)
+Related: #586 (where this was found), #592 (the game thread at busy views), #590 (render_bench in Game Mode)
 
 ## The problem
 
@@ -31,7 +31,7 @@ The game thread is about 98 % busy in every row. Turning off the HD look leaves 
 | 1 | Measure what each HD effect costs at the busiest view, with the processor's clock logged beside the GPU's clock and the chip's power, then make the largest cheaper | The HD look costs 10 % here, mostly through power. Per-effect costs so far are from lighter views |
 | 2 | A Smooth Motion in-between frame built by reprojection, opt-in | Smooth Motion costs 13 % here: a full replay of the scene on the GPU, and its worker's CPU time |
 
-The game thread's own work at busy views is the other half of the problem, planned on #GAMETHREAD.
+The game thread's own work at busy views is the other half of the problem, planned on #592.
 
 ## Success and constraints
 
