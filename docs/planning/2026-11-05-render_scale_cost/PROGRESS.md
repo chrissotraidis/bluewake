@@ -1,85 +1,37 @@
-# PROGRESS — Why higher render settings slow the game when the GPU has room
+# PROGRESS — Why higher render settings drop the Deck below 30 fps
 
-Status: Closing. The 2026-11-09 recheck with chip power logged did not reproduce the 4x loss (−0.2 %) and put the HD look at −1.2 %. Shared power is at most a ~1 % effect; Outset is below 30 fps at every setting because of the game thread. The 1100 MHz cap does not confirm the power explanation: compared with uncapped runs it is slower in 9 of 10 scene/scale cases. Next: game-thread work at Outset (separate PR).
+Status: In progress. Measured paced with the owner's build, settings and save state: the GPU fills at 4x and with the HD look. Earlier unpaced conclusions are retracted (see PRD). Next: L1, in-between pass cost.
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
 
-### M1: Size the slowdown
-- [x] M1-T01: render_bench, render scale 3 vs 4, Smooth Motion on: −1.1 % overall, Outset −6.3 % by the paired CPU-profile result; 4x's launches spread as power management settles differently; evidence: artifact=stack afb6c35d8805; method=render_bench with three interleaved pairs plus warm-up and CPU profile; result=Outset 27.45 to 25.73 FPS with identical checkpoints
-- [x] M1-T02: The same with Smooth Motion off, desktop display: Outset +2.0 % (every 4x launch ahead), lava −1.5 %, Hyrule +2.0 %, butterfly −1.7 %, shipwreck −2.6 %
+### M1: Measure as played
+- [x] M1-T01: Profile the owner's real play over SSH (session `[perf]`/`[fps-dip]` lines, GPU busy, clock, power): 3x holds 30 at ~60 % GPU busy; 4x 26–28 fps at ~97 % busy; 3x + HD 25.5–29; 4x + HD 19–20 with in-between frames skipped; the game thread waits in `acquire-drawable` 30–42 ms
+- [x] M1-T02: render_bench `--paced` and copy-once for identical AppImages (uncommitted in the #524 worktree's `scripts/`; to land in its own PR)
+- [x] M1-T03: Paced bench from the owner's save state with the Game Mode build and settings, 4 launches per setting: 29.0 / 25.8 / 24.5 / 18.2 fps for 3x / 4x / 3x+HD / 4x+HD, each setting's launches within ±1.5 %
+- [x] M1-T04: Power does not set the GPU clock: GPU ≥ 95 % busy runs at about the same clock below 12 W as at 15 W
 
-### M2: Attribute it (depends: M1)
-- [x] M2-T01: `--cpu-profile` at 3 vs 4: the game thread's cycles and instructions a frame are the same (Outset 119.9/119.1 M cycles, 189.7/188.8 M instructions, 98.7 % busy), but cycles/frame × frames/second gives 3.29/3.06 GHz. The 7.0 % clock loss accounts for the 6.3 % frame-rate loss; evidence: artifact=render-scale-3v4 CPU profiles; method=cycles per frame times frames per second; result=3.29 versus 3.06 GHz with unchanged work per frame
-- [ ] M2-T02: `BLUEWAKE_GX_FLUSH_CENSUS=1` at 3 vs 4: draw-done wait per frame
-- [ ] M2-T03: Present time per frame (opt-in diagnostic if needed)
-- [ ] M2-T04: Synchronous readbacks: count and time (opt-in diagnostic if needed)
-- [x] M2-T05: GPU capped at 1100 MHz: 4x holds 3.34 GHz and reverses the Outset loss to +6.4 %; all six 4x launches beat all six 3x launches
+### M2: Attribute the GPU time
+- [x] M2-T01: Per-pass `[gpu-prof]` for the four settings: in-between replay 5.3–11.9 ms, staging copies 5.6–9.0 ms; in-between EFB copy 2, cloud shadows and ambient occlusion cost 2–4x the real frame's
+- [ ] M2-T02: L1 — source reading: why in-between passes cost more (different path, redone work, or profiler attribution)
+- [ ] M2-T03: L3 — paced run with the GPU clock at 1600 MHz (needs the owner to set Steam's slider)
 
-### M2b: GPU work (depends: M1)
-- [ ] M2b-T01: Deferred — per-pass GPU capture on the Deck, only if a concrete follow-up needs it
-- [x] M2b-T02: Source inspection: Smooth Motion replay skips ordinary staging-copy ops; real frames incrementally upload vertex, uniform, index, storage, and ordered texture data
-- [x] M2b-T03: Source inspection: the in-between frame reruns render passes and EFB work; it does not repeat ordinary staging copies
-- [ ] M2b-T04: Deferred — characterize `[gpu-prof]` busy before using it as elapsed occupancy
-
-### M3: First source experiment (depends: M2, M2b)
-- [x] M3-T01: Implement opt-in non-texture staging-copy batching in RecompCore #53, stacked on #49; default path and texture order unchanged; evidence: artifact=RecompCore d72f71b9; method=source diff and commit inspection; result=flag-gated buffer-copy command buffer with ordered texture uploads unchanged
-- [x] M3-T02: Compile the modified Aurora translation units; `git diff --check` clean; evidence: artifact=common.cpp and gpu_prof.cpp objects; method=host Clang 22 using existing BlueWake defines and includes plus symbol check; result=compiled with one pre-existing shader-type warning and matching DeferredZone symbols, with no registered CTest tests
-- [x] M3-T03: Update #563's RecompCore pin, dependency lock, exported patches, opt-in GUI setting, and tests; evidence: artifact=BlueWake #563 pin 05b2493f via upstream draft refs/pull/53/head and patches 0197-0207; method=profile/lock inspection, exact RecompCore format-patches, settings-table/state tests, and RecompCore PR CI workflow; result=#49/#53 are pinned to the upstream draft and exact SHA before merge, the GUI defaults off and persists its next-launch value, and both copy plans have executable coverage
-- [x] M3-T04: Produce a matched build with baseline and candidate selected only by the opt-in environment key; evidence: artifact=BlueWake a555c3aed7f4 executable 77754f5e58d7 and module 717a582e5661; method=same executable and game module for A and B; result=only DOL_AURORA_BATCH_STAGING_COPIES differed
-- [x] M3-T05: Run 12 interleaved Deck launches per setting; evidence: artifact=render-power-batch/report.txt; method=24 measured runs, A/B/B/A, five states, 4x, Smooth Motion one step; result=+0.03% overall, slower in four scenes including Outset −1.23%, all scenes loaded and checkpoints identical; performance gate failed
-- [!] M3-T06: Blocked by M3-T05 failing the required performance gate; a picture result cannot qualify a rejected candidate
-
-### M5: More settings and ideas (depends: M4-T01)
-- [x] M5-T01: HD look off vs on at 3x: −1.2 % to −7.0 % per scene, game-thread clock −3 % to −6 % with the same instructions: the shared power budget, as for 4x. Butterfly checkpoints differ (the HD look's room culling)
-- [x] M5-T02: Skip identical in-between passes: closed. `DOL_AURORA_FRAME_INTERP_LOG` shows ≈ 0 identical draws (Outset 12 of 1.69 M)
-- [x] M5-T03: Scale 2 vs 3: +1.3 % overall, every 2x launch above every 3x launch; clock rises at 2x. Recommend scale 2 on the Deck
-- [ ] M5-T04: Opt-in picture-changing experiments (in-between frame or EFB copies at a lower scale): not started
-
-### M6: Recheck with chip power logged (depends: M4-T01)
-- [x] M6-T01: Cap against no cap, from the existing runs: the 1100 MHz cap is slower at 3x in all five scenes (−1.0 % to −3.6 %) and at 4x in four of five (−1.8 % to −5.8 %; Outset +9.3 %). It is a diagnostic, not a setting, and matches the owner's in-play result
-- [x] M6-T02: Outset 3x vs 4x, six launches each, slowPPT/GPU clock/temperature sampled every 0.5 s: 4x uses ~0.5 W more (14.6 vs 14.2 W) at the same FPS (26.00 vs 26.05, −0.2 %). The earlier −6.3 % did not reproduce; both settings were ~9 % slower than that day's 3x
-- [x] M6-T03: Outset HD look off vs on, 3x, same sampling: −1.2 % (26.38 → 26.07); HD on sits at the 15 W limit (median ~15.0 W vs ~14.2 W). Checkpoints identical
-- [x] M6-T04: Conclusion: render settings cost 0 % to ~1 % at Outset; day-to-day device variation (~10 %) is larger. Outset is below 30 fps unpaced at every setting, the owner sees <10 W and <30 fps in play: the game thread is the limit
-
-### M4: Decide (depends: M3)
-- [x] M4-T01: Name the render-scale cause with ≥ 90 % of the Outset frame-rate loss attributed: shared APU power lowers the game-thread clock; evidence: artifact=uncapped and 1100-MHz capped Deck profiles; method=compare game-thread work, effective clock, and FPS; result=7.0 % uncapped clock loss accounts for the 6.3 % FPS loss and the cap reverses the result
-- [x] M4-T02: Reject #53's product integration, restore BlueWake's prior RecompCore pin/build recipe, remove the GUI setting and exported experimental patches, and record the result; evidence: artifact=render-power-batch/report.txt and #563; method=acceptance comparison plus repository diff; result=measured no-go retained without shipping the experiment
-- [ ] M4-T03: If batching is insufficient, plan the next isolated experiment around work rerun for Smooth Motion's in-between frame
+### M3: Source experiments
+- [ ] M3-T01: L1 fix, if the reading finds avoidable work; opt-in, picture identical, judged paced
+- [ ] M3-T02: L2 — retest RecompCore #53 staging-copy batching paced with these settings
 
 ## Evidence ledger
 
-| Task | Commit / artifact | Command / method | Environment / input | Result |
+| Task | Artifact | Method | Environment | Result |
 |---|---|---|---|---|
-| M1-T01, M2-T01 | stack `afb6c35d8805`, gate and huge pages on | `render_bench` A=scale 3, B=scale 4, 3 pairs + warm-up, `--cpu-profile`; effective game-thread clock = cycles/frame × game frames/second | Steam Deck, headless gamescope, Smooth Motion 1 step | 4x vs 3x: Outset frame rate −6.3 % (27.45 → 25.73) and game-thread clock −7.0 % (3.29 → 3.06 GHz); lava 0 % clock/+3.3 % FPS; Hyrule 0 %/−1.6 %; butterfly −1 %/−0.4 %; shipwreck −2 %/−2.6 %. The game thread does the same work and is 98.7 % busy. Checkpoints identical. `[gpu-prof]` busy is not interpreted as elapsed occupancy because it can exceed frame time |
-| M1-T02 | same build | `render_bench` A=scale 3, B=scale 4, Smooth Motion off, `--display desktop` | Steam Deck, 3–4 launches per scene | 4x vs 3x: Outset +2.0 % (33.47–33.72 vs 32.80–33.08), lava −1.5 %, Hyrule +2.0 %, butterfly −1.7 %, shipwreck −2.6 %. `[gpu-prof]` busy exceeds the frame time in this mode, so it's not used |
-| M2-T05 | same build | Same 3x/4x run with the Deck GPU fixed at 1100 MHz; six measured launches per setting plus one CPU-profile launch | Steam Deck, headless gamescope, Smooth Motion 1 step | 4x vs 3x: Outset +6.4 % (median 29.38 vs 27.61 FPS; ranges 29.14–30.15 vs 27.08–28.19), lava +3.1 %, Hyrule 0.0 %, butterfly +0.1 %, shipwreck −4.3 %, overall +0.6 %. Every 4x Outset launch beat every 3x launch. Effective game-thread clock 3.34 vs 3.30 GHz; instructions/frame −0.4 %. The profile also has −5.3 % cycles/frame and +5.2 % IPC at 4x, so do not attribute the reversal's exact size to clock alone. All 12 runs loaded every state; guest checkpoints identical. Picture results ignored because Smooth Motion was on. Deck restored to 200–1600 MHz and `auto` |
-| M2b-T02, M2b-T03 | RecompCore #49 head `a4dbaaa8` | Read Aurora operation replay and staging upload paths | RecompCore source | Smooth Motion replay skips ordinary staging-copy operations and reruns render/EFB work. Texture uploads cannot be moved wholesale without changing overwrite/sample order; buffer arenas can be isolated for an opt-in experiment |
-| M3-T01, M3-T02 | RecompCore #53, `d72f71b9` | `git diff --check`; compile modified `common.cpp` and `gpu_prof.cpp`; symbol check | Host Clang 22, existing BlueWake build defines/includes | Opt-in `DOL_AURORA_BATCH_STAGING_COPIES=1` batches only vertex/uniform/index/storage copies before render submission. Default path and texture order remain unchanged. Compilation passed with one pre-existing shader-type warning; no CTest tests were registered in the available build |
-| M3-T04, M3-T05 | BlueWake `a555c3aed7f4`; `render-power-batch/report.txt` | Same executable, A=batching on, B=off; 12 measured launches each, interleaved A/B/B/A | Steam Deck, headless gamescope 1280x800, five states, 4x, Smooth Motion one step | A vs B: overall +0.03%; Outset −1.23%, lava −0.69%, Hyrule −0.93%, butterfly +0.34%, shipwreck −0.37%. Median reported GPU work 26.627 to 22.188 ms. All 24 runs loaded all scenes; checkpoints identical. Rejected |
-
-## Recheck evidence (2026-11-09)
-
-| Task | Artifact | Method | Result |
-|---|---|---|---|
-| M6-T01 | `render-scale-3v4`, `render-scale-3v4-gpu1100` | Per-scene median FPS, capped vs uncapped at the same scale | 3x: Outset −3.6 %, lava −3.3 %, Hyrule −2.7 %, butterfly −1.0 %, shipwreck −2.1 %. 4x: Outset +9.3 %, lava −4.0 %, Hyrule −2.3 %, butterfly −1.8 %, shipwreck −5.8 %. Separate sessions, so less precise than an interleaved A/B |
-| M6-T02 | `render-power-3v4`, stack `afb6c35d8805` | `render_bench`, Outset only, 3 pairs + warm-up; read-only SSH sampler of `hwmon` slowPPT, GPU clock, temperature, tagged by the running game's settings | 3x 26.05 FPS at ~14.2 W, ~480 MHz; 4x 26.00 FPS at ~14.6 W, ~640 MHz |
-| M6-T03 | `render-power-hd`, same build | Same, A=HD look off, B=on, both 3x | Off 26.38 FPS at ~14.2 W; on 26.07 FPS at ~15.0 W |
+| M1-T01 | owner's session log `session-20261109-212210.log`, hwmon samples | Read-only SSH: `[perf]` lines, `gpu_busy_percent`, `freq1_input`, slowPPT | Steam Deck Game Mode, stack `afb6c35d8805`, owner's settings, Outset | 3x 30 fps / GPU ~60 % / 810 MHz / 8.4 W; 4x 26–28 / ~97 % / ~1200 MHz / 10.3 W; 3x+HD 25.5–29 / ~95 % / ~1300 MHz / 11–18 W; 4x+HD 19–20 / ~95 % / ~1480 MHz / 13.8 W |
+| M1-T03, M1-T04, M2-T01 | `render-paced/report.md`, samplers | render_bench `--paced`, A/B/C/D interleaved, 2 pairs, no warm-up; samplers tagged by launch settings | Same build; state `quick-1835` (Outset, retrace 1835); 16:9 widescreen + BetterWW (`mask=0x3`), gate and huge pages on | FPS 29.0 / 25.8 / 24.5 / 18.2; game thread 88 / 82 / 79 / 69 %; GPU 85 / 89 / 89 / 93 % at 553 / 913 / 938 / 1266 MHz; 16/16 launches loaded; HD-on checkpoints differ from HD-off (the HD look's culling) |
 
 ## Decisions
 
 | Date | Decision |
 | --- | --- |
-| 2026-11-09 | Superseded below: the cap does not confirm the power explanation, and the 4x loss did not reproduce. Close #563's render-settings track; speed work moves to the game thread at Outset |
-| 2026-11-05 | (Superseded 2026-11-09) The 1100 MHz cap confirms shared APU power/governor behavior: it restores the 4x game-thread clock from 3.06 to 3.34 GHz and reverses Outset from −6.3 % to +6.4 %. If GPU execution time were the limit, lowering its ceiling would have made 4x worse, not better |
-| 2026-11-05 | Stop collecting render-scale data. The capped profile's IPC difference means the exact +6.4 % reversal should not be decomposed further; the mechanism is sufficiently established to move to Aurora source work |
-| 2026-11-05 | Corrected attribution: at Outset, 4x plus Smooth Motion raises GPU power enough to lower the busy game thread's clock by 7.0 %, accounting for the 6.3 % slowdown. This is CPU/GPU power competition, not proof that the GPU ran out of frame time |
-| 2026-11-05 | GPU-side reductions remain the fix direction because they free APU power for the bottlenecked CPU. First targets: Smooth Motion's in-between frame and staging copies; test batching the copies before the first pass |
-| 2026-11-05 | Source inspection narrows copy batching: Smooth Motion does not replay ordinary staging copies, and texture uploads must retain operation order. #53 batches only non-texture buffer arenas behind an opt-in flag |
-| 2026-11-05 | Use BlueWake #563 for the RecompCore pin, exported patch, build, and Deck qualification. Do not open a separate BlueWake PR |
-| 2026-11-05 | Accept #53 only if it is ahead in every one of at least six interleaved Deck launches, checkpoints match, and pictures are identical with Smooth Motion off; otherwise revert it in #563 and record the result |
-| 2026-11-09 | (Superseded the same day by M6) HD look and render scale share one mechanism (shared APU power). Identical-pass skipping is closed; scale 2 is faster than 3 on the Deck in every launch. Remaining GPU-side ideas change the picture and need opt-in Aurora work |
-| 2026-11-05 | Reject #53's staging-copy batching for BlueWake: 12 launches per setting were performance-neutral overall (+0.03%) and slower in four of five scenes, including Outset (−1.23%), despite lower reported GPU work. Remove the pin, patches, recipe and GUI integration; skip pictures because performance already failed (owner's decision, 2026-11-09) |
-| 2026-11-05 | Superseded: cause for the render scale was attributed to Smooth Motion halving the GPU's time budget. `[gpu-prof]` busy cannot be read as elapsed frame occupancy and exceeds frame time with Smooth Motion off |
-| 2026-11-05 | Superseded: H4 (GPU full) led based on `[gpu-prof]` busy per presented frame. The effective game-thread clock instead identifies shared APU power as the mechanism |
-| 2026-11-05 | Started as a follow-up to #524: the render scale and the HD look slow the game on the Deck while the GPU reports idle time |
+| 2026-11-09 | Measure render settings paced, with the owner's build, settings and save state. Unpaced runs hide a full GPU because the game thread pins the chip at its power limit |
+| 2026-11-09 | Retract the unpaced results: power-sharing cause, 1100 MHz cap confirmation, scale 2 over 3, the M6 recheck, and #53's rejection (to be retested). Keep the identical-draw count |
+| 2026-11-09 | Next: L1, why in-between passes cost 2–4x the real frame's; then L2 (#53 paced) and L3 (clock at 1600 MHz) |
+| 2026-11-05 | Started as a follow-up to #524: the render scale and the HD look slow the game on the Deck |

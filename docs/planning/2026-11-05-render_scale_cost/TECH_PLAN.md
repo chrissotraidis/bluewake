@@ -1,149 +1,67 @@
-# TECH_PLAN — Why higher render settings slow the game when the GPU has room
+# TECH_PLAN — Why higher render settings drop the Deck below 30 fps
 
-Status: Closing — the recheck did not reproduce the 4x loss; see Recheck
+Status: In progress — GPU-bound when paced; next: in-between pass cost (source reading)
 Source base: BlueWake `main` at `ee991d3`
 [Product brief](PRD.md) · [Tracker](PROGRESS.md)
-
-## Recheck (2026-11-09): the settings cost little; the game thread is the limit
-
-A recheck logged the chip's power (slowPPT, 15 W limit), GPU clock and temperature every half second during Outset launches, six per setting, and lined them up with each launch's frame rate.
-
-| Outset, same build | Power | FPS |
-|---|---|---|
-| 3x | ~14.2 W | 26.05 |
-| 4x | ~14.6 W | 26.00 (−0.2 %) |
-| 3x, HD look off | ~14.2 W | 26.38 |
-| 3x, HD look on | ~15.0 W, at the limit | 26.07 (−1.2 %) |
-
-The earlier −6.3 % at 4x did not reproduce. Both settings ran about 9 % below that day's 3x, a variation between days larger than any render effect. The 1100 MHz cap does not confirm the power explanation either: compared with uncapped runs at the same scale, it is slower in 9 of 10 cases, matching the owner's in-play result. Shared power costs at most about 1 % here.
-
-Outset is below 30 fps unpaced at every setting, and the owner sees it below 30 in play at under 10 W. The limit is the game thread: about 38 ms of work per frame where 30 fps allows 33 ms. Speed work moves there.
 
 ## How a frame reaches the screen
 
 ```mermaid
 flowchart TD
     A["Game thread: translated game code<br/>writes GX commands"] --> B["Render worker: decodes the stream,<br/>builds draw plans, submits"]
-    B --> C["GPU: draws at the render scale"]
-    A --> D{"Draw-done commit<br/>(the one barrier)"}
-    B --> D
-    D --> E["Present (swap chain)"]
-    E --> A
+    B --> C["GPU: real frame at the render scale"]
+    C --> D["GPU: Smooth Motion in-between frame<br/>(replays the passes, blended)"]
+    D --> E["Present (gamescope)"]
+    E -->|"next frame to draw into<br/>(acquire-drawable)"| A
 ```
 
-At the draw-done commit the game thread waits until the render worker has drained everything appended so far ([`main.c`](../../../runtime/host/src/main.c), the `BLUEWAKE_GX_FLUSH_CENSUS` comment). So the game thread can be slowed by its own work, by the render worker's CPU work, by present, by the GPU, or by CPU/GPU power sharing on the Deck APU. Only the first of those shows up as more game-thread instructions in a profile; power sharing instead lowers how many cycles the busy thread gets each second.
+When the GPU cannot finish both frames in a game frame's time, the game thread waits for a free frame to draw into (`acquire-drawable` in the `[render-slow]` log) and the game drops below 30.
 
-## Hypotheses, in order of likelihood
+## How it is measured
 
-| # | Hypothesis | Grows with the render scale because | Test |
-|---|---|---|---|
-| H1 | The game thread waits at draw-done for the render worker | EFB copies, resolves and texture copies are larger; the draw plan does more per draw | Flush census: wait per frame at 3x vs 4x |
-| H2 | The game thread waits in present | More pixels to hand over, or a swap-chain queue full | Time in present on the game thread; `BLUEWAKE_VSYNC=0` |
-| H3 | A synchronous GPU readback | EFB peeks, bounding box, or copy-to-texture read back to the CPU and wait for the GPU | Count and time the readbacks; GPU timestamps around them |
-| H4 | The GPU is full on some frames | Busy ms is an average; spikes can still miss the frame | Per-frame GPU busy distribution (p95, max), not only the mean |
-| H5 | Memory bandwidth shared by CPU and GPU (the Deck's APU) | Bigger render targets take bandwidth the game thread needs | Game-thread cycles and cache misses per frame at 3x vs 4x with no change in its instructions |
-| H6 | CPU/GPU power budget shared by the Deck APU | More GPU work moves power from the CPU and lowers its clock | Effective game-thread clock: cycles/frame × frames/second; then cap the GPU clock and test whether the CPU holds its clock at 4x |
-
-H5 and H6 matter on the Deck in particular. The CPU and GPU share memory and power, so a GPU with idle time can still slow a CPU-bound game. The first profile distinguishes them: more cycles per frame and cache misses point to bandwidth, while the same cycles per frame at fewer frames per second means the CPU is executing those cycles at a lower effective clock. A GPU clock cap then tests the power explanation directly.
-
-## Render-scale result
-
-H6 is confirmed for Outset with Smooth Motion. Uncapped, 4x lowers the game thread's effective clock by 7.0 % and frame rate by 6.3 %. Fixing the GPU at 1100 MHz restores the 4x game-thread clock to 3.34 GHz and reverses the frame-rate result to +6.4 %, with every 4x launch ahead of every 3x launch. Lowering the GPU ceiling would worsen a GPU-time limit; the reversal instead identifies shared APU power and governor behavior. No more render-scale measurements are planned before source work.
-
-## Source findings and first experiment
-
-Source inspection changes the initial staging-copy idea in one important way. Smooth Motion's replay path skips ordinary staging-copy operations and reruns render passes and EFB work, so copy batching does not directly remove duplicated copies from the in-between frame. On a real frame, however, Aurora currently emits completed staging-buffer arenas incrementally as passes are sealed. Texture uploads must remain in operation order because a later upload can overwrite data sampled by an earlier pass.
-
-RecompCore #53, stacked on #49, therefore implements only the safe subset behind `DOL_AURORA_BATCH_STAGING_COPIES=1`:
-
-1. Keep texture staging copies in their existing operation order.
-2. Collect completed vertex, uniform, index, and storage-buffer arenas.
-3. Encode those copies in a separate command buffer at frame end.
-4. Submit the copy buffer before the already-encoded render command buffer.
-5. Preserve profiler event order with a deferred timestamp zone.
-
-The default path remained unchanged. The experiment did not clear the performance gate and has been removed from BlueWake integration. The next source target is the work rerun for Smooth Motion's in-between frame, not broader or unsafe copy reordering.
-
-## First experiment result
-
-The same `a555c3aed7f4` build ran with batching enabled for A and disabled for B: 12 measured launches of each, interleaved A/B/B/A, five states, 4x and Smooth Motion one step. All 24 runs loaded every scene and their guest checkpoints were identical.
-
-Batching reduced median reported GPU work from 26.627 to 22.188 ms. Overall FPS was +0.03 %; Outset −1.23 %, lava −0.69 %, Hyrule Castle −0.93 %, butterfly +0.34 %, and shipwreck −0.37 %. It does not meet the stated all-launch performance gate. **Rejected and removed** (pin, patches, GUI, recipe); RecompCore #53 stays as the record.
-
-## PR and dependency structure
-
-```mermaid
-flowchart LR
-    A["RecompCore #49<br/>diagnostics and efficient effects<br/>a4dbaaa8"] --> B["RecompCore #53<br/>opt-in copy batching<br/>d72f71b9"]
-    B --> C["BlueWake #563<br/>pin, exported patch,<br/>build and Deck qualification"]
-```
-
-There is no separate BlueWake PR. #563 owns the result and records the rejection. The temporary RecompCore pin, exported patches, GUI setting and PR-ref build recipe were removed after qualification failed.
-
-## Implementation surfaces
-
-| Explored surface | Result |
-|---|---|
-| RecompCore/Aurora `GXRuntime/graphics/aurora/lib/gfx/common.cpp` | #53 remains as the measured experiment; not pinned by BlueWake |
-| RecompCore/Aurora `lib/webgpu/gpu_prof.*` | Deferred timestamp support was mechanically valid but did not lead to a product win |
-| BlueWake pin, dependency lock and `patches/recompcore/` | Restored to the pre-experiment runtime |
-| BlueWake GUI and settings tests | Experimental switch removed because the candidate was rejected |
-
-## Implementation order
-
-| Milestone | Depends | Can run with | Deliverable / integration gate |
-|---|---|---|---|
-| M1 | — | — | Reproducible 3x/4x and Smooth Motion on/off baseline |
-| M2 | M1 | — | Shared-power attribution and GPU-cap confirmation |
-| M2b | M1 | M2 | Source-level map of staging copies and Smooth Motion replay |
-| M3 | M2, M2b | — | Opt-in RecompCore experiment, BlueWake integration, and matched qualification |
-| M4 | M3 | — | Evidence-backed keep/reject decision and next target |
-
-Critical path: M1 → M2 → M3 → M4. M2b was inspected alongside attribution work but must be complete before M3 integration. Deck qualification is serial because baseline and candidate must use the same device state and build profile.
-
-## Qualification plan
-
-Build baseline and candidate from the same BlueWake stack and reuse the same build directory/profile so PGO variation does not masquerade as a rendering win. Baseline is RecompCore #49 at `a4dbaaa8`; candidate adds #53 at `d72f71b9` and enables `DOL_AURORA_BATCH_STAGING_COPIES=1`.
-
-The qualification build temporarily pinned #53's upstream draft ref and exact tested SHA. After the failed result, BlueWake returned to its pre-experiment RecompCore pin and normal SHA fetch recipe; no rejected setting remains in the GUI.
-
-The completed run exceeded the minimum with 12 launches per setting. The candidate failed performance acceptance, so the conditional Smooth-Motion-off picture comparison was skipped.
-
-## Measurements
-
-All on the Steam Deck with render_bench, five save states, six interleaved launches per setting, the same build.
-
-| Step | Settings compared | What it records | Answers |
-|---|---|---|---|
-| Q1 | Render scale 3 vs 4 | Game FPS, game thread busy %, GPU busy ms (mean, p95, max) | How big the slowdown is, and whether GPU busy ever reaches the frame budget (H4) |
-| Q2 | Same, `--cpu-profile` | Per-thread cycles and instructions per frame; effective game-thread clock from cycles/frame × frames/second; the game thread's and render worker's hottest functions | Whether the game thread's instructions grow (its own work), its cycles grow (H5), or the same cycles run at a lower clock (H6), and what grows on the render worker (H1) |
-| Q3 | Same, `BLUEWAKE_GX_FLUSH_CENSUS=1` | Draw-done wait per call, per frame, max | H1 |
-| Q4 | Same, timers around present | Time per frame in present | H2 |
-| Q5 | Same, readback counters | Number and time of synchronous readbacks | H3 |
-| Q6 | HD look on vs off, scale 3 | Q1 to Q3 again | Whether the HD look's slowdown has the same cause |
-
-The diagnostic sequence stops after Q6 because it established the mechanism. Q3 to Q5 and the HD-look comparison are deferred rather than treated as prerequisites for source work.
-
-## How the result is used
-
-| If the cause is | Likely direction (each its own PR) |
-|---|---|
-| H1: the render worker's CPU work | Make the render worker cheaper, or split its work so the barrier waits less |
-| H2: present | Present mode and swap-chain depth |
-| H3: readbacks | Asynchronous readback, or caching what is read back |
-| H4: GPU spikes | GPU-side work at the larger size |
-| H5: shared memory bandwidth | Smaller or fewer intermediate render targets at high scales |
-| H6: shared power budget | Reduce GPU work to free power for the CPU; verify with a GPU clock cap |
-
-## Commands
+Paced, as played. render_bench gained `--paced` (measured launches keep the game's own pacing, with Aurora's GPU profiler on) and copies an AppImage shared by several labels once. The settings are the owner's Game Mode settings, each passed with `--set-build`; only render scale and the HD look differ between labels. Two read-only SSH samplers log chip power (slowPPT), GPU clock, GPU busy % and temperature every 0.25–0.5 s, tagged with the running launch's settings.
 
 ```sh
-# Q1/Q2: render scale 3 against 4, same build
-scripts/render_bench deck@DECK BUILD BUILD --states test_render/states --pairs 3 --warmup 1 \
-  --set-build A:DOL_AURORA_RENDER_SCALE=3 --set-build B:DOL_AURORA_RENDER_SCALE=4 --cpu-profile --out render-scale-3v4
-
-# Q3: add the flush census
-  --set-build A:BLUEWAKE_GX_FLUSH_CENSUS=1 --set-build B:BLUEWAKE_GX_FLUSH_CENSUS=1
+S="BLUEWAKE_DIRECT_GATE=1 BLUEWAKE_MODULE_HUGEPAGES=1 DOL_AURORA_EFFICIENT_EFFECTS=1 BLUEWAKE_GATHER_PIPE_BATCH=1
+   DOL_AURORA_FORCE_ANISO=4 BLUEWAKE_MODS=betterww BLUEWAKE_ASPECT=16:9 DOL_AURORA_FRAME_INTERP=1
+   DOL_AURORA_FRAME_INTERP_STEPS=1 DOL_AURORA_FRAME_INTERP_PACING=0 BLUEWAKE_OPTIONS=<the owner's list>"
+scripts/render_bench deck@DECK APP APP APP APP --states test_render/states-play --pairs 2 --warmup 0 --paced \
+  $(for L in A B C D; do for kv in $S; do echo --set-build $L:$kv; done; done) \
+  --set-build A:DOL_AURORA_RENDER_SCALE=3 --set-build A:BLUEWAKE_HD_LOOK=0 \
+  --set-build B:DOL_AURORA_RENDER_SCALE=4 --set-build B:BLUEWAKE_HD_LOOK=0 \
+  --set-build C:DOL_AURORA_RENDER_SCALE=3 --set-build C:BLUEWAKE_HD_LOOK=1 \
+  --set-build D:DOL_AURORA_RENDER_SCALE=4 --set-build D:BLUEWAKE_HD_LOOK=1 --out render-paced
 ```
 
-Before each Deck run, clear `/tmp/appimage_extracted_*` on the Deck: the bench unpacks each AppImage into a RAM disk, and a full one has truncated an AppImage before (#524).
+Check in the first launch's log: `gate=on`, the huge-pages line, `[mods] mask=0x3` and no `[state] warning`. Clear `/tmp/appimage_extracted_*` on the Deck before a run.
+
+## Result: the GPU fills
+
+| Setting | FPS | Game thread busy | GPU busy | GPU clock | Power |
+|---|---|---|---|---|---|
+| 3x | 29.0 | 88 % | 85 % | 553 MHz | 14.6 W |
+| 4x | 25.8 | 82 % | 89 % | 913 MHz | 13.7 W |
+| 3x + HD | 24.5 | 79 % | 89 % | 938 MHz | 14.2 W |
+| 4x + HD | 18.2 | 69 % | 93 % | 1266 MHz | 14.2 W |
+
+Power is not what holds the GPU clock: with the GPU ≥ 95 % busy, its clock is about the same whether the chip draws under 12 W or sits at 15 W (4x + HD: 1358 vs 1374 MHz). The governor picks a clock per load and stays well under 1600 MHz.
+
+## Where the GPU time goes
+
+Aurora's `[gpu-prof]` zones, median per presented frame (ms). Zones nest inside "In-between replay", so they do not add up to a frame; use them to compare passes and settings.
+
+| Pass | 3x | 4x | 3x+HD | 4x+HD |
+|---|---|---|---|---|
+| In-between replay | 5.3 | 7.8 | 8.3 | 11.9 |
+| Staging copies | 5.6 | 7.2 | 6.7 | 9.0 |
+| EFB copy 2, real / in-between | 1.1 / 4.2 | 1.3 / 6.2 | 0.8 / 3.5 | 2.2 / 5.0 |
+| Cloud shadows, real / in-between | — | — | 0.8 / 3.3 | 2.2 / 4.8 |
+| Ambient occlusion, real / in-between | — | — | 0.4 / 1.4 | 1.2 / 2.1 |
+
+## Leads, in order
+
+| # | Lead | Why | First step |
+|---|---|---|---|
+| L1 | In-between passes cost 2–4x the same pass on the real frame | Same size, same pass; should cost about the same | Read Aurora's replay (`frame_interp.cpp`, `replay_op`) for a different path (efficient effects skipped, redone work), or profiler attribution of waits |
+| L2 | Staging copies are 5.6–9 ms | Largest item after the replay | Retest RecompCore #53 paced with these settings |
+| L3 | GPU clock governor stays far below 1600 MHz while busy | ~20 % more GPU at 4x + HD | Paced run with Steam's GPU clock at 1600 MHz (owner sets it) |
