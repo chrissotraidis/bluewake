@@ -46,7 +46,19 @@ Check in the first launch's log: `gate=on`, the huge-pages line, `[mods] mask=0x
 
 Power is not what holds the GPU clock: with the GPU ≥ 95 % busy, its clock is about the same whether the chip draws under 12 W or sits at 15 W (4x + HD: 1358 vs 1374 MHz). The governor picks a clock per load and stays well under 1600 MHz.
 
-## Where the GPU time goes
+## What each part costs (turned off, paced, 4x + HD)
+
+| Turned off | FPS | Change |
+|---|---|---|
+| — (baseline) | 18.25 | |
+| Smooth Motion | 29.96 | +64 % |
+| Cloud shadows | 20.91 | +14.5 % |
+| Ambient occlusion | 19.62 | +7.5 % |
+| Bloom | 18.74 | +2.6 % |
+| Far blur | 18.69 | +2.4 % |
+| Edge light | 18.62 | +2.0 % |
+
+## Where the GPU time goes (per-pass profiler; superseded for per-pass comparisons)
 
 Aurora's `[gpu-prof]` zones, median per presented frame (ms). Zones nest inside "In-between replay", so they do not add up to a frame; use them to compare passes and settings.
 
@@ -62,7 +74,8 @@ Aurora's `[gpu-prof]` zones, median per presented frame (ms). Zones nest inside 
 
 | # | Lead | Why | First step |
 |---|---|---|---|
-| L1 | In-between passes cost 2–4x the same pass on the real frame | Same size, same pass; should cost about the same | Read Aurora's replay (`frame_interp.cpp`, `replay_op`) for a different path (efficient effects skipped, redone work), or profiler attribution of waits |
+| L1 | ~~In-between passes cost 2–4x the real frame's~~ | Closed: a profiler artifact (HD zones double-counted; encoder timestamps leak). The in-between frame is ~60 % of the real frame | — |
+| L5 | Cloud shadows cost 14.5 % at 4x + HD | ~32 trig calls per pixel at full size, twice a game frame | Opt-in cheaper version in the Performance section; exact shortcuts save only ~1 %, a world-space noise texture baked once a frame saves most of it |
 | L2 | Staging copies are 5.6–9 ms | Largest item after the replay | Retest RecompCore #53 paced with these settings |
 | L3 | GPU clock governor stays far below 1600 MHz while busy | Tested: locked at 1600 MHz, 4x and 3x + HD gain 1–3 fps and become CPU-bound (chip at 14–15 W); 4x + HD does not gain | Closed as a fix |
 | L4 | 4x + HD stalls in present | 255–282 ms a second in present, `acquire-drawable` 30–65 ms, GPU 77 % and game thread 80 % busy at 1600 MHz | Trace swap-chain depth, gamescope latency and Smooth Motion pacing around `acquire-drawable` |
