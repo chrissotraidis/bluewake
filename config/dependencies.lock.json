@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "0354f721d7933e512d9ea9645bcb09aa015c8efa",
+      "sha": "85f2c3ea01fb883dccab47845514468c4cef4cc9",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/54",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49",
