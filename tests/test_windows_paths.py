@@ -11,6 +11,7 @@ import subprocess
 import struct
 import sys
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 import unittest
@@ -107,6 +108,27 @@ with patch.object(sys,'platform','win32'):
         stream = io.StringIO()
         with patch.object(bw.sys, "platform", "win32"), patch.object(bw.sys, "stdout", stream):
             bw.configure_output()
+
+    def test_a_new_folder_is_renamed_once_a_scan_lets_go_of_its_files(self):
+        # What antivirus does to translated.new: a file inside is still open when
+        # the builder renames the folder. Windows then refuses the rename.
+        pending, out = self.work / "translated.new", self.work / "translated"
+        pending.mkdir()
+        (pending / "func_0.c").write_text("// translated\n")
+        scan = open(pending / "func_0.c", "rb")
+        timer = threading.Timer(1, scan.close)
+        timer.start()
+        self.addCleanup(timer.join)
+        bw.replace_folder(pending, out)
+        self.assertTrue((out / "func_0.c").is_file())
+        self.assertFalse(pending.exists())
+
+    def test_a_folder_that_stays_in_use_still_fails(self):
+        with patch.object(bw.os, "name", "nt"), patch.object(bw.time, "sleep") as sleep, \
+                patch.object(bw.os, "replace", side_effect=PermissionError(13, "Access is denied")):
+            with self.assertRaises(PermissionError):
+                bw.replace_folder(self.work / "translated.new", self.work / "translated")
+        self.assertEqual(sleep.call_count, 6)
 
     @unittest.skipUnless(sys.platform == "win32", "requires Windows C compiler and SDK")
     def test_real_extractor_build_without_renderer_tree(self):
