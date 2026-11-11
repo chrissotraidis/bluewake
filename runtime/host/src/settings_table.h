@@ -180,7 +180,7 @@ inline constexpr Setting kSettings[] = {
      .fallback = "1"},
     {.key = "DOL_AURORA_FRAME_INTERP_PACING", .kind = Kind::Choice,
      .label = "Smooth Motion under sustained load", .control = Control::Chooser,
-     .note = "Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch.",
+     .note = "Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch. Step down (experimental) drops one in-between frame at a time at 120 Hz and up, instead of stalling.",
      .next_launch = Os::All},
     {.key = "DOL_AURORA_FPS_POSITION", .old_windows = "fps_position", .kind = Kind::Choice,
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
