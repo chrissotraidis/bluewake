@@ -102,8 +102,8 @@ const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
 // The frame rate's three modes, and the panel's numbers (perf_monitor.h).
 const char* const kPerfShown[] = {"Off", "Frame rate", "Full panel"};
 const char* const kPerfStored[] = {"off", "fps", "full"};
-const char* const kInterpPacingShown[] = {"Automatic", "Never pause"};
-const char* const kInterpPacingStored[] = {"", "0"};
+const char* const kInterpPacingShown[] = {"Automatic", "Never pause", "Step down (experimental)"};
+const char* const kInterpPacingStored[] = {"", "0", "step"};
 
 // Beside the control when it fits there. A list or a slider fills its line,
 // and after one the note went past the edge and, wrapped to nothing there, was
@@ -747,7 +747,7 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
     if (std::strcmp(key, "DOL_AURORA_FRAME_INTERP_PACING") == 0) {
         *shown = bw_desktop::kInterpPacingShown;
         *stored = bw_desktop::kInterpPacingStored;
-        *count = 2;
+        *count = 3;
         return true;
     }
     if (std::strcmp(key, "BLUEWAKE_MENU_TEXT_SIZE") == 0) {
