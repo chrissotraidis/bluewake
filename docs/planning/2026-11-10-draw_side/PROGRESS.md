@@ -1,6 +1,6 @@
 # PROGRESS — The draw side of the game thread
 
-Status: In progress — #451's generator blockers fixed; round 7 re-certified, exact on the Deck but no speed gain (−0.19 %); round 5 (the GX FIFO writers, the draw side proper) next
+Status: Phase 1 done — #451's generators fixed and round 7 re-certified (exact; no speed gain on the Deck, −0.19 %); rounds 4 and 5 priced below measurable (≤ 0.9 %). Phase 2 (drawing at the API level) needs the owner's decision
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md)
 
 ## Milestones
@@ -15,11 +15,12 @@ Status: In progress — #451's generator blockers fixed; round 7 re-certified, e
 - [x] M1-T03: A build with `--native-entries --native-gx --native-set4` hooked **0 of 34** entries: every recorded hash predates lean memory, lean deadlines and inline registers ("not the certified translation")
 - [x] M1-T03b: Round 7's comparison test (`tests/native_leaf_test.c`, built on Linux in the build container against `libgxruntime.a`) against today's module: **all 19 natives, 20,000 random cases each, 0 mismatches** (`__ieee754_fmod`, `fmod`, `cM_rad2s`, `cM_rnd`, `cM_rndF`, `cM_rndFX`, `sin`, `cos`, `tan`, `cBgW::MakeBlckMinMax`, `cBgW::MakeBlckBnd`, `JMAEulerToQuat`, `cM_atan2s`, `cM3d_CalcPla`, `cSPolar::Val`, `dKyw_pntwind_get_info`, JASystem's `TOscillator::getOffset`, `TOscillator::calc`, `TChannel::updateEffectorParam`)
 - [x] M1-T03c: Round 7 re-certified (`d770dd2c2`): the builder step now logs each uncertified entry's hash for this tree (`ba94975d5`; it runs before behaviour timing, so the final source's `--hashes` differ); the 19 that passed M1-T03b recorded. A build with `--native-entries` hooks **19/34** (the rest: rounds 2–3, whose comparison tests haven't run on this tree)
-- [ ] M1-T04: Round 5 (GX FIFO writers): build, measure (`8-busiest` + bench scenes, 6 launches each way, checkpoints identical), keep or remove
-- [ ] M1-T05: Round 4 (animation, actor collision, environment light): the same
+- [x] M1-T04: Round 5 (GX FIFO writers) priced before porting its test: its 32 GX SDK functions are **2.82 M cycles a frame at the busiest view, 2.2 % of the game thread** (`J3DGDSetFog` 0.31 M, `GXSetArray` 0.27, `GXLoadTexObjPreLoaded` 0.26, `GXCallDisplayList` 0.21, `GXSetCurrentMtx` 0.20, …). At the exact natives' 1.3–1.7× that saves 0.5–0.9 %, the size round 7 measured as noise. Not pursued
+- [x] M1-T05: Round 4 (animation, actor collision, environment light) priced the same way: its functions are of the same small size in the busiest view's profile (key-frame interpolation 0.62 M, environment-light TEV setup ~0.6 M, actor collision ~0.8 M in total). Not pursued
 - [x] M1-T06: Round 7 on the Deck (build `d770dd2c2`, headless, eight states, natives on vs `BLUEWAKE_NATIVE_ENTRIES=0`, 4 launches each way): **guest checkpoints identical in all 16 runs** (exact), but **−0.19 %** overall (25.33 vs 25.38); per scene −2.0 % (shipwreck) to +1.5 % (busiest), noise. The natives run a lot (one Outset launch: `sin` 1.03 M calls natively, `cM3d_CalcPla` 0.82 M, `JMAEulerToQuat` 0.45 M, `cSPolar::Val` 0.34 M, `cM_atan2s` 0.29 M; the two JASystem oscillators mostly leave their calls to the translation), but each saves little per call and together they are a small share of the frame on the Deck's cores. Elliott's +3.8 points were at Forest Haven on four slow E-cores. Not a gain here: `--native-entries` stays off by default; the generator fixes and the re-certification stay (exact, and they unblock the other sets)
 
 ### M2: The API-level option (only if M1 leaves a gap)
+M1 leaves the whole gap: on the Deck, exact natives of the draw side's functions save under 1 % each round. What remains is structural.
 - [ ] M2-T01: Draw-side profile with M1's sets on; pick the largest remaining path
 - [ ] M2-T02: Prototype plan for that path, for the owner's decision
 
@@ -35,4 +36,5 @@ Status: In progress — #451's generator blockers fixed; round 7 re-certified, e
 
 | Date | Decision |
 | --- | --- |
+| 2026-11-10 | Stop phase 1 after round 7: on the Deck the exact natives save too little per call; rounds 4 and 5 priced at ≤ 0.9 %. Keep the generator fixes and round 7's certification (exact, off by default). Phase 2 waits for the owner |
 | 2026-11-10 | Owner: plan the structural draw-side work separately from #592. Phase 1 is #451 (Elliott's existing, exact native sets, blocked on the current tree); drawing at the API level only if a gap remains |
