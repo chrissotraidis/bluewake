@@ -470,3 +470,8 @@ mix(lit, fog colour, f) on linear values: the draws' fog (`emit_fog` and the ube
 curve, in place of the integer blend in the game's gamma. The sun pass reads the scene from a copy taken just
 before it (single-sampled), takes the draws' fog out in linear light, shades, and puts HD's radial fog back in
 linear light. Without the copy it works as before.
+
+Patch 0227 adds `dol_aurora_set_texture_pack_optional`: an optional/ folder can be loaded or dropped while the game
+runs, so a look that brings one (HD's sky clouds) can be turned off and on in a session; the start's
+`DOL_AURORA_TEXTURE_PACK_OPTIONAL` goes through the same call. Each change to the replacements bumps a generation,
+and gxcore's decode cache is cleared when it changes. A background decode is used only for the entry it was made for.

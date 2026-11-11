@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "40da45c8f3c20299028755966ccfeb75c74a9d86",
+      "sha": "ecb5c1adccbd2711bfd0715062abe15ebdc4b6c6",
       "branch": "bluewake-next",
       "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
@@ -944,6 +944,13 @@
             "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
           ],
           "evidence": "pdale-boop's: far half of the dungeon stops in linear luminance against Cemu: Forbidden Woods R05 0.056 to 0.065 (0.064), its hue back from orange; Earth Temple R00 0.027 to 0.039 (0.037); Wind Temple R02 0.059 to 0.074 (0.073); Ganon's Tower 0.110 to 0.118 (0.123)."
+        },
+        "pack_optional_live": {
+          "runtime": "ecb5c1adccbd2711bfd0715062abe15ebdc4b6c6",
+          "tracked_patches": [
+            "patches/recompcore/0227-Aurora-a-texture-pack-s-optional-folders-load-and-drop-while-running-and-the-decode-cache-follows-them.patch"
+          ],
+          "evidence": "pdale-boop's: the HD look off, on, off, on at Outset's dock at noon and at dusk shows the skies of a start with it off and on: HD's clouds go and come back, and the GameCube's horizon bank with them."
         }
       }
     },

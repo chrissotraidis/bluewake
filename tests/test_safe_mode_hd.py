@@ -43,6 +43,8 @@ int map_on = -1;
 void aurora_set_sun_shadow_map(bool on) { map_on = on; }
 void aurora_set_sun_shadow_quality(int) {}
 void aurora_set_sun_shadow_strength(float) {}
+// HD's sky clouds load or drop with the look (RecompCore's aurora_backend.h).
+void dol_aurora_set_texture_pack_optional(const char*, bool) {}
 std::string read_file(const std::string& path) {
     std::ifstream file(path);
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
