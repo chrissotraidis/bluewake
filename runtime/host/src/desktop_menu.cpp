@@ -26,6 +26,7 @@
 // The host's modules are C.
 extern "C" {
 #include "climb.h"
+#include "letterbox.h"
 #include "dpad_menus.h"
 #include "fast_load.h"
 #include "forest_water.h"
@@ -302,6 +303,7 @@ void apply_live() {
     bluewake_mouse_camera_reload();  // the mouse, both sticks, gyro and the mouse's buttons
     bluewake_haptics_reload();
     bluewake_climb_reload();
+    bluewake_letterbox_reload();
     bluewake_forest_water_reload();
     bluewake_hd_look_reload();
     bluewake_dpad_menus_reload();
@@ -347,6 +349,8 @@ void apply_now(const bw_settings::Setting& s) {
         bluewake_fast_load_reload();
     else if (std::strcmp(key, "BLUEWAKE_CLIMB") == 0 || std::strcmp(key, "BLUEWAKE_CLIMB_STAMINA") == 0)
         bluewake_climb_reload();
+    else if (std::strcmp(key, "BLUEWAKE_NATIVE_CUTSCENE_FRAMING") == 0)
+        bluewake_letterbox_reload();
     else if (std::strcmp(key, "BLUEWAKE_DPAD_MENUS") == 0)
         bluewake_dpad_menus_reload();
     // Everything the mouse, the sticks and gyro aiming do is read back together.

@@ -5,6 +5,7 @@
 #include "climb.h"
 #include "draw_tags.h"
 #include "forest_water.h"
+#include "letterbox.h"
 #include "mouse_camera.h"
 #include "quick_doors.h"
 
@@ -14,7 +15,8 @@
 static inline bool bluewake_feature_observes(u32 address) {
     return bluewake_mouse_camera_observes(address) || bluewake_climb_observes(address) ||
            bluewake_quick_doors_observes(address) || bluewake_draw_tags_observes(address) ||
-           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address);
+           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address) ||
+           bluewake_letterbox_observes(address);
 }
 
 /* The chassis services every block boundary except the block a host turn
@@ -28,6 +30,7 @@ static inline void bluewake_feature_dispatch_turn_entry(CPUState* cpu, u32 addre
         return;
     bluewake_mouse_camera_dispatch(cpu, address);
     bluewake_climb_dispatch(cpu, address);
+    bluewake_letterbox_dispatch(cpu, address);
     bluewake_quick_doors_dispatch(cpu, address);
     bluewake_draw_tags_dispatch(cpu, address);
 }

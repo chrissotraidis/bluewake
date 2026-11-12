@@ -60,6 +60,7 @@
 #include "save_state.h"
 #include "status_line.h"
 #include "climb.h"
+#include "letterbox.h"
 #include "gxruntime/hle.h"
 #include <aurora/gfx.h>
 #include "external_memory.h"
@@ -6942,6 +6943,7 @@ static void host_features_state_loaded(CPUState* cpu) {
     bluewake_sprint_state_loaded(cpu, reapply);
     bluewake_mouse_camera_state_loaded();
     bluewake_climb_state_loaded();
+    bluewake_letterbox_state_loaded();
 }
 
 #define HS_FIELD(x) {#x, (void*)&(x), (uint32_t)sizeof(x)}
@@ -7094,6 +7096,8 @@ static bool host_state_save(const char* path, CPUState* cpu,
         free(gx);
         return false;
     }
+    // Guest memory as the game left it: no cutscene bars held away by Native cutscene framing.
+    bluewake_letterbox_state_saving(cpu);
     HostStateHeader header;
     host_state_header(&header, cpu, mod);
     bool ok = bw_state_write_chunk(writer, "HEADER", &header, sizeof header);
@@ -8808,6 +8812,7 @@ int main(int argc, char** argv) {
     bluewake_hd_look_reload();
     bluewake_mouse_camera_attach(&cpu);
     bluewake_climb_attach(&cpu);
+    bluewake_letterbox_attach(&cpu);
     bluewake_jump_button_attach(&cpu);
     bluewake_sprint_attach(&cpu);
     bluewake_fps_watch_attach(&cpu);
