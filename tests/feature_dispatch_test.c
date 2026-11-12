@@ -12,7 +12,8 @@ bool bluewake_draw_tags_enabled;
 bool bluewake_forest_water_enabled;
 u32 bluewake_forest_water_tree_timer_check;
 bool bluewake_letterbox_armed;
-static unsigned calls[7];
+bool bluewake_opening_armed;
+static unsigned calls[8];
 static unsigned order;
 static u32 camera_seen[8];
 static unsigned camera_seen_count;
@@ -39,21 +40,25 @@ void bluewake_audio_watch_cue(CPUState* cpu) {
 void bluewake_letterbox_hook(CPUState* cpu, u32 address) {
     (void)cpu; (void)address; ++calls[6]; order = order * 8 + 6;
 }
+void bluewake_opening_hook(CPUState* cpu) {
+    (void)cpu; ++calls[7]; order = order * 8 + 7;
+}
 
 static void compare_dispatch(u32 address) {
     memset(calls, 0, sizeof calls);
     order = 0;
     bluewake_forest_water_dispatch(NULL, address);
     bluewake_audio_watch_dispatch(NULL, address);
+    bluewake_opening_dispatch(NULL, address);
     bluewake_mouse_camera_dispatch(NULL, address);
     bluewake_climb_dispatch(NULL, address);
     bluewake_letterbox_dispatch(NULL, address);
     bluewake_quick_doors_dispatch(NULL, address);
     bluewake_draw_tags_dispatch(NULL, address);
-    unsigned expected[7];
+    unsigned expected[8];
     const unsigned expected_order = order;
     assert(bluewake_feature_observes(address) ==
-           (calls[0] + calls[1] + calls[2] + calls[3] + calls[4] + calls[5] + calls[6] != 0));
+           (calls[0] + calls[1] + calls[2] + calls[3] + calls[4] + calls[5] + calls[6] + calls[7] != 0));
     memcpy(expected, calls, sizeof calls);
     memset(calls, 0, sizeof calls);
     order = 0;
@@ -125,8 +130,9 @@ int main(void) {
         bluewake_quick_doors_armed = (flags & 2) != 0;
         bluewake_draw_tags_enabled = (flags & 4) != 0;
         bluewake_forest_water_enabled = (flags & 8) != 0;
-        /* Letterbox rides along with one of the others' bits. */
+        /* Letterbox and the legend ride along with two of the others' bits. */
         bluewake_letterbox_armed = (flags & 1) != 0;
+        bluewake_opening_armed = (flags & 2) != 0;
         /* Every aligned MEM1 address, including the complete particle/wake
          * ranges, not just a list that could omit a newly added hook. */
         for (u32 address = 0x80000000u; address < 0x81800000u; address += 4)
@@ -137,7 +143,8 @@ int main(void) {
                             BLUEWAKE_QUICK_DOORS_ACTOR_CREATE + 1,
                             BLUEWAKE_PARTICLE_DRAW_LAST - 1,
                             BLUEWAKE_PARTICLE_DRAW_LAST,
-                            BLUEWAKE_PARTICLE_DRAW_LAST + 1};
+                            BLUEWAKE_PARTICLE_DRAW_LAST + 1,
+                            BLUEWAKE_OPENING_SCREEN_DRAW};
         for (size_t i = 0; i < sizeof edges / sizeof edges[0]; ++i)
             compare_dispatch(edges[i]);
     }

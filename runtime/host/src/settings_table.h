@@ -83,10 +83,10 @@ inline constexpr Setting kSettings[] = {
      .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_ASPECT", .old_windows = "aspect", .kind = Kind::Choice, .fallback = "4:3",
      .label = "Widescreen", .tab = Tab::Mods, .control = Control::Custom, .next_launch = Os::All},
-    // letterbox.c: the cutscene's band between the bars zoomed to fill the screen.
+    // letterbox.c: the cutscene's band between the bars zoomed to fill the screen; opening.c: the legend unstretched.
     {.key = "BLUEWAKE_NATIVE_CUTSCENE_FRAMING", .kind = Kind::Bool, .label = "Native cutscene framing",
      .tab = Tab::Mods, .control = Control::Switch,
-     .note = "In widescreen, cutscenes fill the screen without black bars."},
+     .note = "In widescreen, cutscenes fill the screen without black bars, and the opening legend isn't stretched."},
     {.key = "BLUEWAKE_HD_LOOK", .old_windows = "hd_look", .kind = Kind::Bool, .label = "Wind Waker HD look   (F2)",
      .control = Control::Switch,
      .note = "The HD release's look, rebuilt piece by piece. Its settings below turn each piece off on its own. Off by default."},

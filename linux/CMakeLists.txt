@@ -63,6 +63,7 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/save_state.c
     ${BLUEWAKE_HOST_SRC}/sprint.c
     ${BLUEWAKE_HOST_SRC}/letterbox.c
+    ${BLUEWAKE_HOST_SRC}/opening.c
     ${BLUEWAKE_HOST_SRC}/quick_doors.c
     ${BLUEWAKE_HOST_SRC}/haptics.c
     ${BLUEWAKE_HOST_SRC}/draw_tags.c

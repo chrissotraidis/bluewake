@@ -61,6 +61,7 @@
 #include "status_line.h"
 #include "climb.h"
 #include "letterbox.h"
+#include "opening.h"
 #include "gxruntime/hle.h"
 #include <aurora/gfx.h>
 #include "external_memory.h"
@@ -8813,6 +8814,7 @@ int main(int argc, char** argv) {
     bluewake_mouse_camera_attach(&cpu);
     bluewake_climb_attach(&cpu);
     bluewake_letterbox_attach(&cpu);
+    bluewake_opening_attach(&cpu);
     bluewake_jump_button_attach(&cpu);
     bluewake_sprint_attach(&cpu);
     bluewake_fps_watch_attach(&cpu);
