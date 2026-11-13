@@ -582,21 +582,38 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
 - (UIMenu*)buildMenu {
     __weak BWGameOverlay* weakSelf = self;
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+    // While the controls are hidden, by Hide or by a controller, Show Touch
+    // Controls is the first row of the menu and brings them back for both.
+    const BOOL touchHidden = [self touchControlsHidden];
     UIAction* showTouch = [UIAction actionWithTitle:@"Show Touch Controls"
                                               image:[UIImage systemImageNamed:@"hand.tap"]
                                          identifier:nil
                                             handler:^(__kindof UIAction* a) {
         (void)a;
-        BOOL on = !BWBoolDefault(kShowTouchKey, YES);
-        [[NSUserDefaults standardUserDefaults] setBool:on forKey:kShowTouchKey];
+        [weakSelf showTouchControls];
+    }];
+    UIAction* hideTouch = [UIAction actionWithTitle:@"Hide Touch Controls"
+                                              image:[UIImage systemImageNamed:@"eye.slash"]
+                                         identifier:nil
+                                            handler:^(__kindof UIAction* a) {
+        (void)a;
+        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:kShowTouchKey];
         [weakSelf applyControllerVisibility];
         [weakSelf refreshMenu];
     }];
-    showTouch.state = BWBoolDefault(kShowTouchKey, YES) ? UIMenuElementStateOn : UIMenuElementStateOff;
+    UIAction* autoHide = [UIAction actionWithTitle:@"Auto-hide Touch Controls with Controller"
+                                             image:[UIImage systemImageNamed:@"gamecontroller"]
+                                        identifier:nil
+                                           handler:^(__kindof UIAction* a) {
+        (void)a;
+        [weakSelf setAutoHideTouchControls:!BWBoolDefault(kHideOnControllerKey, YES)];
+    }];
+    autoHide.state = BWBoolDefault(kHideOnControllerKey, YES) ? UIMenuElementStateOn : UIMenuElementStateOff;
 
     UIMenu* touchMenu = [UIMenu menuWithTitle:@"Touch Controls" image:[UIImage systemImageNamed:@"hand.draw"]
                                    identifier:nil options:0 children:@[
-        showTouch,
+        touchHidden ? showTouch : hideTouch,
+        autoHide,
         [UIAction actionWithTitle:@"Touch Control Settings…" image:[UIImage systemImageNamed:@"slider.horizontal.3"]
                        identifier:nil handler:^(__kindof UIAction* a) { (void)a; [weakSelf showSettingsPanel]; }],
         [UIAction actionWithTitle:@"Move Controls" image:[UIImage systemImageNamed:@"arrow.up.and.down.and.arrow.left.and.right"]
@@ -791,7 +808,10 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
     ]];
 
     // These guest changes apply at the next launch, like the code mods.
-    UIMenu* root = [UIMenu menuWithTitle:@"BlueWake" children:@[
+    NSMutableArray<UIMenuElement*>* rootItems = [NSMutableArray array];
+    if (touchHidden)
+        [rootItems addObject:showTouch];
+    [rootItems addObjectsFromArray:@[
         displayMenu,
         [self gameplayMenu],
         [self modsMenu],
@@ -800,6 +820,7 @@ static void BWDumpMenu(UIMenuElement* element, int depth) {
         dataMenu,
         helpMenu,
     ]];
+    UIMenu* root = [UIMenu menuWithTitle:@"BlueWake" children:rootItems];
     // BLUEWAKE_MENU_DUMP=1 writes the menu tree to the session log once, so a
     // device run can check what the ⋯ menu offers without a screenshot.
     static bool dumped;
@@ -2037,7 +2058,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
 }
 
 - (void)stick:(BWStickView*)stick movedX:(float)x y:(float)y {
-    if (_editing)
+    if (_editing || [self touchControlsHidden])
         return;
     const int8_t xi = (int8_t)std::lround(x * 127.0f), yi = (int8_t)std::lround(y * 127.0f);
     if (stick == _moveStick) {
@@ -2051,7 +2072,8 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
 }
 
 - (void)buttonDown:(BWGameButton*)button {
-    if (_editing)
+    // A touch that began before the controls hid presses nothing.
+    if (_editing || [self touchControlsHidden])
         return;
     _pad.buttons |= button.inputMask;
     button.transform = CGAffineTransformMakeScale(0.92, 0.92);
@@ -2312,7 +2334,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
 }
 
 - (void)updateAppearance {
-    const BOOL hidden = (_controllerHidden || !BWBoolDefault(kShowTouchKey, YES)) && !_editing;
+    const BOOL hidden = [self touchControlsHidden];
     const CGFloat alpha = _editing ? 1.0 : BWDefault(kOpacityKey, 0.8);
     for (UIView* control in [self gameplayControls]) {
         BOOL extraHidden = NO;
@@ -2507,8 +2529,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
 }
 
 - (void)hideChanged:(UISwitch*)sw {
-    [[NSUserDefaults standardUserDefaults] setBool:sw.on forKey:kHideOnControllerKey];
-    [self applyControllerVisibility];
+    [self setAutoHideTouchControls:sw.on];
 }
 
 - (void)editChanged:(UISwitch*)sw {
@@ -2560,6 +2581,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
     for (UIGestureRecognizer* g in _editGestures)
         g.enabled = ![self isDPadButton:g.view];
     [self setNeedsLayout];
+    [self refreshMenu];
 }
 
 - (void)endLayoutEditing {
@@ -2574,6 +2596,7 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
     _selected = nil;
     bluewake_pause_set(BLUEWAKE_PAUSE_LAYOUT, false);
     [self setNeedsLayout];
+    [self refreshMenu];
 }
 
 - (void)dragged:(UIPanGestureRecognizer*)drag {
@@ -2634,7 +2657,33 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
 
 // ---------------------------------------------------------------- controller and lifecycle
 
+// Hidden by the menu's Hide, or by auto-hide while a controller is connected.
+// The layout editor always shows the controls.
+- (BOOL)touchControlsHidden {
+    return !_editing && (_controllerHidden || !BWBoolDefault(kShowTouchKey, YES));
+}
+
+// The saved "Auto-hide Touch Controls with Controller" choice (also the
+// settings panel's switch). Off shows the controls at once; on applies the
+// current controller at once.
+- (void)setAutoHideTouchControls:(BOOL)on {
+    [[NSUserDefaults standardUserDefaults] setBool:on forKey:kHideOnControllerKey];
+    _hideSwitch.on = on;
+    [self applyControllerVisibility];
+    [self refreshMenu];
+}
+
+// Recovery for both kinds of hiding: undoes Hide and turns auto-hide off, so
+// the controls come back and work with the controller still connected, until
+// the player turns auto-hide on again.
+- (void)showTouchControls {
+    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kShowTouchKey];
+    fprintf(stderr, "[shell] touch controls shown from the menu; auto-hide off\n");
+    [self setAutoHideTouchControls:NO];
+}
+
 - (void)applyControllerVisibility {
+    const BOOL wasHidden = [self touchControlsHidden];
     BOOL connected = NO;
 #if !TARGET_OS_SIMULATOR
     // Only hardware controllers hide the touch controls; the simulator can
@@ -2644,9 +2693,13 @@ static NSString* BWQuestLogSummary(const BWQuestLog& log) {
             connected = YES;
 #endif
     _controllerHidden = connected && BWBoolDefault(kHideOnControllerKey, YES);
-    if (connected)
+    // Hidden controls must not leave a button or stick held.
+    const BOOL hidden = [self touchControlsHidden];
+    if (hidden)
         [self clearTouchInput];
     [self setNeedsLayout];
+    if (hidden != wasHidden)
+        [self refreshMenu];
 }
 
 - (void)observeLifecycle {
