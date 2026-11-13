@@ -266,3 +266,10 @@ swell's height unlit and lit the swells' crests. Pools, rivers and falls count a
 from 10,000 to 25,000 units away (`DOL_AURORA_EXPOSURE_FAR`), where islands are the haze's colour, and tapers off on what is already bright
 (`DOL_AURORA_EXPOSURE_HIGHLIGHTS`, ice and white rock). `DOL_AURORA_SEA_MASK_DEBUG=1`
 shows the mask.
+
+Patch 0206 adds the SDL3 UIKit scene-geometry correction shared with the other SDL3 Pad ports
+(chrissotraidis/wiicompiled#28) to the vendored Aurora's SDL patch chain
+(`GXRuntime/graphics/aurora/cmake/patches/apply-sdl3-uikit-scene-geometry.cmake`). SDL then runs the app only in the
+application scene it started in, leaves an external display's scene to the system (mirroring or an extended display),
+adopts a replacement scene if iOS discards the first, and takes orientation from that scene's effectiveGeometry instead
+of statusBarOrientation, which reads as unknown in scene apps on iOS 27.
