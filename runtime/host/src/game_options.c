@@ -15,6 +15,7 @@ enum {
     HOOK_SAIL_WIND = 3,
     HOOK_SAIL_BRAKE = 4,
     HOOK_SAIL_IDLE_BRAKE = 5,
+    HOOK_HD_TRIFORCE = 6,
 };
 
 typedef u32 (*NativeHookFn)(CPUState* ctx, u32 id);
@@ -93,6 +94,24 @@ static u32 hook_sail_wind(CPUState* cpu) {
     return 0x8008A7D0u; // dKyw_tact_wind_set__Fss
 }
 
+// Shorter Triforce quest, after the chest's item is read into r4 for
+// fopAcM_createItemForTrBoxDemo: Triforce Chart n (item 0xFF - n, so 0xFE is
+// Chart 1 and 0xF7 Chart 8) becomes Triforce Shard n (0x60 + n), the shard
+// that chart leads to, for the five charts Wind Waker HD turned into shards.
+// Charts 1, 3 and 5 stay charts. (0x79-0x80 are the "deciphered" flags Tingle
+// gives, not the charts.)
+static u32 hook_hd_triforce(CPUState* cpu) {
+    const u32 item = cpu->gpr[4];
+    if (item < 0xF7u || item > 0xFEu)
+        return 0u;
+    const u32 chart = 0xFFu - item;
+    if (chart == 1u || chart == 3u || chart == 5u)
+        return 0u;
+    cpu->gpr[4] = 0x60u + chart;
+    fprintf(stderr, "[options] hd triforce: chest's Triforce Chart %u gives Triforce Shard %u\n", chart, chart);
+    return 0u;
+}
+
 static u32 native_hook(CPUState* cpu, u32 id) {
     // The first call of each hook is logged: it shows a setting's code ran.
     static u32 seen;
@@ -120,6 +139,8 @@ static u32 native_hook(CPUState* cpu, u32 id) {
         set_single(cpu, 3, option_on(g_brisk_sail) ? 4.0f : 2.0f);
         set_single(cpu, 4, option_on(g_brisk_sail) ? 0.2f : 0.1f);
         return 0u;
+    case HOOK_HD_TRIFORCE:
+        return hook_hd_triforce(cpu);
     default:
         return 0u;
     }
