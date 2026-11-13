@@ -165,6 +165,7 @@ class Gen:
 
     def transform(self, native, chunk, leader, text, from_copy):
         out = self.inline_gpr(text) if not native.stops else self.inline_gpr_stops(native, chunk, text)
+        out = self.inline_gpr_frame(out)
         # Nothing after an unconditional transfer (blr, b, bctr) runs; the
         # copies chain the next block's text after it all the same.
         m = re.search(r"\n    // [0-9A-F]{8}: (?:blr|b +0x[0-9A-F]{8}|bctr)\n    \{\n(?:        [^\n]*\n)*    \}\n", out)
@@ -396,14 +397,37 @@ class Gen:
         native.boundaries.add(target)
         return f"if (!gx_silent(&s, 0x{target:08X}u))\n        return 0;\n    goto B_{target:08X};"
 
+    def inline_gpr_frame(self, text):
+        # inline_save_restore_gpr.py's frame form (#451): the saved registers
+        # through a host pointer to the frame's MEM1 bytes (inline_gpr.h's
+        # bw_inline_gpr_frame: r11 - 4 * (32 - first), lowest register first).
+        # Here the same addresses through the run's own memory: a save's stores
+        # as gx_stp32 (each clears a matching reservation, as the helper clears
+        # it once for the frame), a restore's loads as gx_ld32; a frame that is
+        # not RAM marks the run bad.
+        def frame(m):
+            indent, first = m.group(1), int(m.group(2))
+            return f"{indent}const u32 slots = ctx->gpr[11] - {4 * (32 - first)}u;\n"
+        text = re.sub(r"(?m)^( +)u8\* const slots = bw_inline_gpr_frame\(ctx, (\d+)u, (?:true|false)\);\n", frame, text)
+        text = re.sub(r"write_be32\(slots \+ (\d+), (\(u32\)ctx->gpr\[\d+\])\);",
+                      r"gx_stp32(&s, 0u, slots + \1u, \2);", text)
+        text = re.sub(r"read_be32\(slots \+ (\d+)\)", r"gx_ld32(&s, slots + \1u)", text)
+        return text
+
     def inline_gpr(self, text):
         # The inline _savegpr_N/_restgpr_N (inline_save_restore_gpr.py): its
         # cycles and accesses when the budget allows them, then the turn's
         # test, and on to the return address; the routine itself (through the
         # chassis) otherwise, which declines here.
         def save_restore(m):
-            ret, room, cycles, body = m.group(1), m.group(2), m.group(3), m.group(4)
-            return (f"            lr = 0x{ret}u;\n"
+            ret, room, cycles, body = m.group("ret"), m.group("room"), m.group("cycles"), m.group("body")
+            gate = m.group("gate")
+            # The translation's gates (#451): the host silent at the routine and
+            # at the return, as bw_direct_call_ready asks; else the routine runs
+            # through the chassis, which this native declines to.
+            silent = (f"            if (!gx_silent(&s, 0x{gate}u) || !gx_silent(&s, 0x{ret}u))\n"
+                      f"                return 0; /* the host has something to do there */\n") if gate else ""
+            return (silent + f"            lr = 0x{ret}u;\n"
                     f"            if (!(s.downcount - {room} > -s.budget))\n"
                     f"                return 0; /* the routine itself, through the chassis */\n"
                     f"            s.downcount -= {cycles};\n"
@@ -413,24 +437,24 @@ class Gen:
                     "                return 0;\n"
                     f"            goto label_{ret};\n")
         return re.sub(
-            r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
+            r"            ctx->lr = 0x(?P<ret>[0-9A-F]{8})u;\n"
             # direct_calls.py and inline_save_restore_gpr.py now put the callee's address
             # in the pc and gate the inline form on the call being ready and the saved
             # registers' memory being RAM. A gate that fails runs the same routine
-            # through the chassis, and a frame that is not RAM marks the run bad here,
-            # so neither changes what this native produces.
+            # through the chassis, which this native declines to (gx_silent above); a
+            # frame that is not RAM marks the run bad here.
             r"(?:            ctx->pc = 0x[0-9A-F]{8}u;\n)?"
             r"            /\* bluewake: _savegpr/_restgpr inline \(scripts/windows/inline_save_restore_gpr\.py\) \*/\n"
-            r"(?:            if \(bw_direct_call_ready\(ctx, 0x[0-9A-F]{8}u\) &&\n"
+            r"(?:            if \(bw_direct_call_ready\(ctx, 0x(?P<gate>[0-9A-F]{8})u\) &&\n"
             r"                bw_inline_gpr_memory_ready\(ctx, \d+u\)\) \{\n)?"
-            r"            if \(ctx->downcount - (\d+) > -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET\) \{\n"
-            r"                ctx->downcount -= (\d+);\n"
-            r"((?:                (?!ctx->cycle_observation_suffix)[^\n]*\n)*?)"
+            r"            if \(ctx->downcount - (?P<room>\d+) > -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET\) \{\n"
+            r"                ctx->downcount -= (?P<cycles>\d+);\n"
+            r"(?P<body>(?:                (?!ctx->cycle_observation_suffix)[^\n]*\n)*?)"
             r"                ctx->cycle_observation_suffix = 0u;\n"
-            r"                ctx->pc = 0x\1u;\n"
+            r"                ctx->pc = 0x(?P=ret)u;\n"
             r"                if \(ctx->downcount <= -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET \|\|[^\n]*\n"
             r"(?:                    [^\n]*\n)*?                    return;\n"
-            r"                goto label_\1;\n"
+            r"                goto label_(?P=ret);\n"
             r"            \}\n"
             r"(?:            \}\n)?"
             r"            ctx->pc = 0x[0-9A-F]{8}u;\n"
@@ -466,6 +490,12 @@ class Gen:
                      else "return 0;")
             if after != "return 0;":
                 native.stops_at.add(ret)
+            # The translation's gates (#451): the host silent at the routine and at
+            # the return; else the routine runs through the chassis (the stop above).
+            gate = re.search(r"bw_direct_call_ready\(ctx, 0x([0-9A-F]{8})u\) &&", m.group(0))
+            if gate:
+                native.boundaries |= {int(gate.group(1), 16), ret}
+                cond = f"gx_silent(&s, 0x{gate.group(1)}u) && gx_silent(&s, 0x{ret:08X}u) && {cond}"
             return (f"            if (!({cond})) {{\n{fail}\n            }}\n"
                     f"            lr = 0x{ret:08X}u;\n"
                     f"            s.downcount -= {cycles};\n"
