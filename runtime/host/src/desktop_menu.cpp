@@ -12,6 +12,7 @@
 #include "button_remap.h"
 #include "controller_face_swap.h"
 #include "desktop_theme.h"
+#include "dolphin_save_menu.h"
 #include "fps_position.h"
 #include "input_remap.h"
 #include "menu_draw.h"
@@ -802,11 +803,8 @@ void controls_tab() {
     ImGui::TextDisabled("Game controllers work as they are plugged in (Xbox, PlayStation, Switch Pro, ...).");
 }
 
-// Config: the sound's engine (next launch), this menu's own behaviour and
-// look, and where the saves, settings and logs are.
-void config_tab() {
-    bw_menu::draw_tab(bw_settings::Tab::Config);
-    ImGui::Spacing();
+// Where the saves, settings and logs are.
+void your_files() {
     ImGui::SeparatorText("Your files");
     std::string folder = data_dir();
     if (folder.empty() && !settings_path().empty())
@@ -828,6 +826,16 @@ void config_tab() {
         if (ImGui::Button("Open the session logs"))
             bw_platform::open_folder(logs);
     }
+}
+
+// Config: the sound's engine (next launch), this menu's own behaviour and
+// look, where the saves, settings and logs are, and Dolphin saves in and out.
+void config_tab() {
+    bw_menu::draw_tab(bw_settings::Tab::Config);
+    ImGui::Spacing();
+    your_files();
+    ImGui::Spacing();
+    bw_dolphin_save::controls(game_window());
 }
 
 // --- the overlays --------------------------------------------------------------

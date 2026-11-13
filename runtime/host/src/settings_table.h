@@ -367,6 +367,9 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_MENU_SIZE", .tab = Tab::Config, .fill = Os::None},
     // Not drawn: the texture pack's folder while HD textures are off, so they come back to it.
     {.key = "BLUEWAKE_TEXTURE_PACK_FOLDER", .tab = Tab::Mods, .fill = Os::None},
+    // Not drawn: the folder a Dolphin save was last imported from or exported to, where
+    // both of Config's Dolphin save pickers open next (dolphin_save_menu.cpp).
+    {.key = "BLUEWAKE_DOLPHIN_SAVE_FOLDER", .tab = Tab::Config, .fill = Os::None},
     // Windows only, not drawn: the window's size and place as the player left them, checked at launch.
     {.key = "DOL_AURORA_WINDOW", .old_windows = "window", .platforms = Os::Windows, .fill = Os::None},
     {.key = "BLUEWAKE_WINDOW_POSITION", .old_windows = "window_position", .platforms = Os::Windows,

@@ -321,15 +321,16 @@ to update it.
 Yes, for USA (`GZLE01`) in-game saves; Dolphin save states are not supported. Export a `.gci` from
 Dolphin's **Tools › Memory Card Manager**.
 
-- **iPhone and iPad:** copy the save to your device and open
+- **iPhone, iPad and Android:** copy the save to your device and open
   **⋯ › Game Data & Saves › Import Dolphin Save…**. Pick the quest log and the BlueWake slot to put it
   in; the app backs up your current card first. Dolphin `.raw` cards work too. **Export Dolphin Save…**, in
   the same menu, goes the other way: it writes all three of your quest logs out as a `.gci` Dolphin can open,
   and only reads your card.
-- **Windows:** there is no import or export screen yet, and renaming a `.gci` to `.card` will not work.
-  Source users can use the [save helper](tests/dolphin_save_import_cli.c), which uses the same code as
-  iOS: `inject` puts a Dolphin save into your card and `export` writes your card out as a `.gci`. Close
-  BlueWake, work on a copy of your card, then put the result at `%APPDATA%\BlueWake\GZLE01.card`.
+- **Windows, Mac and Linux:** open the menu (Esc), then **Config › Dolphin saves**. **Import Dolphin
+  Save...** asks for the `.gci` or `.raw`, then which quest log to bring in and where to put it; your current
+  card is copied to `Backups` beside it first, and BlueWake restarts (the Mac app closes) so the save loads.
+  **Export Dolphin Save...** writes your three quest logs out as a `.gci` and only reads your card. Both open
+  in the folder you last picked or saved a Dolphin save in. Renaming a `.gci` to `.card` will not work.
 
 </details>
 
