@@ -19,6 +19,11 @@ namespace wwhd {
 
 inline constexpr const char* kHdSkyFolder = "optional/hd-sky";
 inline constexpr const char* kHdSkyFile = "stages.bin";
+// HD's room lights: each stage's baseLight.bin (an external file in its Stage.bfres: 64 big-endian s16 pitches,
+// one a room, then 64 yaws), which HD's setLightPosHD lights a room from in place of the sun. 'BWRL' u32 count,
+// then for each stage its name (16 bytes, zero-padded) and the file's 256 bytes as they are; only stages with a
+// room's angles set (scripts/wwhd/sky.py makes the same bytes).
+inline constexpr const char* kHdRoomLightsFile = "room-lights.bin";
 
 namespace sky_detail {
 
@@ -95,7 +100,8 @@ inline std::optional<size_t> find_dzs(const Bytes& b) {
     return std::nullopt;
 }
 
-// One stage's palettes from its GameCube dzs and HD's ('BWSK', version 2).
+// One stage's palettes from its GameCube dzs and HD's ('BWSK', version 4: each Pale entry's shadow colour, linear,
+// before its multipliers; then each Virt entry's five floats, HD's 0x24-0x37, which version 3 didn't have).
 // Throws FormatError when they can't be paired.
 inline Bytes convert_sky(const Bytes& gc, const Bytes& hd) {
     const auto gcc = sky_detail::chunks(gc), hdc = sky_detail::chunks(hd);
@@ -110,7 +116,7 @@ inline Bytes convert_sky(const Bytes& gc, const Bytes& hd) {
     if (pn != hpn || vn != hvn)
         throw FormatError("HD and GC tables differ in length");
     Bytes out = {'B', 'W', 'S', 'K'};
-    sky_detail::put32(out, 2);
+    sky_detail::put32(out, 4);
     sky_detail::put32(out, pn);
     sky_detail::put32(out, vn);
     sky_detail::append(out, gc, po, 0x2Cu * pn);
@@ -131,7 +137,9 @@ inline Bytes convert_sky(const Bytes& gc, const Bytes& hd) {
         sky_detail::append(out, hd, e + 0x21, 3);
     }
     for (uint32_t i = 0; i < pn; i++)
-        sky_detail::append(out, hd, hpo + 0x6Cu * size_t(i) + 0x30, 24);  // the first six multipliers
+        sky_detail::append(out, hd, hpo + 0x6Cu * size_t(i) + 0x2C, 28);  // the shadow colour, the first six multipliers
+    for (uint32_t i = 0; i < vn; i++)
+        sky_detail::append(out, hd, hvo + 0x38u * size_t(i) + 0x24, 20);  // its floats (3: the haze's brightness)
     return out;
 }
 
@@ -161,6 +169,72 @@ inline Bytes pack_sky(const std::map<std::string, std::pair<Bytes, Bytes>>& stag
         count++;
     }
     Bytes out = {'B', 'W', 'S', 'A'};
+    sky_detail::put32(out, count);
+    out.insert(out.end(), entries.begin(), entries.end());
+    return out;
+}
+
+// An external file of a Wii U BFRES (its twelfth index group) by name, or nothing.
+inline std::optional<Bytes> bfres_external(const Bytes& b, const std::string& name) {
+    const auto s32 = [&](size_t at) -> int64_t { return int32_t(sky_detail::be32(b, at)); };
+    if (b.size() < 0x50 || std::memcmp(b.data(), "FRES", 4) != 0)
+        return std::nullopt;
+    const size_t pos = 0x20 + 11 * 4;
+    const int64_t rel = s32(pos);
+    if (rel == 0)
+        return std::nullopt;
+    const int64_t g = int64_t(pos) + rel;
+    if (g < 0 || size_t(g) + 8 > b.size())
+        return std::nullopt;
+    const int64_t count = s32(size_t(g) + 4);
+    if (count < 0 || count >= 4096 || size_t(g) + 8 + 16 * size_t(count + 1) > b.size())
+        return std::nullopt;
+    for (int64_t i = 1; i <= count; i++) {
+        const size_t e = size_t(g) + 8 + size_t(i) * 16;
+        const int64_t at = int64_t(e) + 8 + s32(e + 8);
+        if (at < 0 || size_t(at) + name.size() >= b.size() ||
+            std::memcmp(&b[size_t(at)], name.data(), name.size()) != 0 || b[size_t(at) + name.size()] != 0)
+            continue;
+        const int64_t d = int64_t(e) + 12 + s32(e + 12);
+        if (d < 0 || size_t(d) + 8 > b.size())
+            return std::nullopt;
+        const int64_t start = d + s32(size_t(d));
+        const uint32_t size = sky_detail::be32(b, size_t(d) + 4);
+        if (start < 0 || size_t(start) + size > b.size())
+            return std::nullopt;
+        return Bytes(b.begin() + long(start), b.begin() + long(start) + long(size));
+    }
+    return std::nullopt;
+}
+
+// A stage's baseLight.bin from its Stage.bfres, when it sets a room's light, else nothing.
+inline std::optional<Bytes> room_lights(const Bytes& bfres) {
+    auto blob = bfres_external(bfres, "baseLight.bin");
+    if (!blob || blob->size() < 0x100)
+        return std::nullopt;
+    blob->resize(0x100);
+    bool any = false;
+    for (const uint8_t v : *blob)
+        any = any || v != 0;
+    if (!any)
+        return std::nullopt;
+    return blob;
+}
+
+// room-lights.bin from {name: baseLight.bin's 256 bytes}.
+inline Bytes pack_room_lights(const std::map<std::string, Bytes>& stages) {
+    Bytes entries;
+    uint32_t count = 0;
+    for (const auto& [name, blob] : stages) {
+        if (name.size() > 15)
+            continue;
+        Bytes padded(16, 0);
+        std::memcpy(padded.data(), name.data(), name.size());
+        entries.insert(entries.end(), padded.begin(), padded.end());
+        entries.insert(entries.end(), blob.begin(), blob.end());
+        count++;
+    }
+    Bytes out = {'B', 'W', 'R', 'L'};
     sky_detail::put32(out, count);
     out.insert(out.end(), entries.begin(), entries.end());
     return out;

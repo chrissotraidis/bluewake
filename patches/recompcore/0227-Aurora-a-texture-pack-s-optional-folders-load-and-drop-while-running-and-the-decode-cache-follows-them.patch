@@ -1,0 +1,279 @@
+From ecb5c1adccbd2711bfd0715062abe15ebdc4b6c6 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 19:13:03 -0600
+Subject: [PATCH] Aurora: a texture pack's optional/ folders load and drop
+ while running, and the decode cache follows them
+
+An optional/ folder can be loaded or dropped while running
+(dol_aurora_set_texture_pack_optional), so a look that brings one can be
+turned off and on in a session; the start's DOL_AURORA_TEXTURE_PACK_OPTIONAL
+goes through the same call. Every change to the registered replacements bumps
+a generation, and gxcore's decode cache (keyed by the guest's bytes, holding
+the replacement or the decode it stood for) is cleared when it changes:
+before, a texture seen once kept its first lookup, so HD's sky clouds stayed
+after their folder went and, once dropped, did not come back. A background
+decode carries its entry's id and is used only for that entry.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 50 +++++++++++++------
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 10 ++++
+ .../aurora/lib/gfx/texture_replacement.cpp    | 43 ++++++++++++----
+ .../aurora/lib/gfx/texture_replacement.hpp    |  3 ++
+ GXRuntime/include/gxruntime/aurora_backend.h  |  4 ++
+ 5 files changed, 85 insertions(+), 25 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 2c64fda709..64a4162e61 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -252,6 +252,9 @@ void install_platform_ops() {
+     dol_platform_install(&ops);
+ }
+ 
++// The texture pack's folder and the optional/ folders loaded over it (dol_aurora_set_texture_pack_optional).
++std::string g_texture_pack_root;
++std::vector<std::pair<std::string, aurora::texture::ReplacementGroup>> g_texture_pack_optional;
+ } // namespace gx_aurora
+ 
+ extern "C" {
+@@ -393,26 +396,14 @@ bool dol_aurora_initialize(int argc, char** argv,
+                      s_texture_pack.registrations.size());
+         // DOL_AURORA_TEXTURE_PACK_OPTIONAL: comma-separated folders of the
+         // pack's optional/ (which the pack itself leaves out), loaded over it.
+-        static std::vector<aurora::texture::ReplacementGroup> s_optional;
++        gx_aurora::g_texture_pack_root = pack;
+         if (const char* names = std::getenv("DOL_AURORA_TEXTURE_PACK_OPTIONAL"); names != nullptr) {
+             std::string list = names;
+             for (size_t start = 0; start <= list.size();) {
+                 const size_t end = std::min(list.find(',', start), list.size());
+                 const std::string name = list.substr(start, end - start);
+                 start = end + 1;
+-                if (name.empty() || name.find_first_of("/\\") != std::string::npos || name == "..")
+-                    continue;
+-                const std::filesystem::path folder = std::filesystem::path(pack) / "optional" / name;
+-                std::error_code ec;
+-                if (!std::filesystem::is_directory(folder, ec)) {
+-                    // A pack imported before it had this folder (the loader
+-                    // would make an empty one).
+-                    std::fprintf(stderr, "[mods] texture-pack optional=%s missing\n", name.c_str());
+-                    continue;
+-                }
+-                s_optional.push_back(aurora::texture::load_replacement_directory(folder, {.priority = 1}));
+-                std::fprintf(stderr, "[mods] texture-pack optional=%s replacements=%zu\n", name.c_str(),
+-                             s_optional.back().registrations.size());
++                dol_aurora_set_texture_pack_optional(name.c_str(), true);
+             }
+         }
+     }
+@@ -595,6 +586,37 @@ void dol_aurora_set_fast_forward(bool on) {
+     aurora_set_present_suppressed(on);
+ }
+ 
++void dol_aurora_set_texture_pack_optional(const char* name_c, bool on) {
++    using gx_aurora::g_texture_pack_optional;
++    const std::string name = name_c != nullptr ? name_c : "";
++    if (gx_aurora::g_texture_pack_root.empty() || name.empty() || name.find_first_of("/\\") != std::string::npos ||
++        name == "..")
++        return;
++    auto it = std::find_if(g_texture_pack_optional.begin(), g_texture_pack_optional.end(),
++                           [&](const auto& loaded) { return loaded.first == name; });
++    if (!on) {
++        if (it == g_texture_pack_optional.end())
++            return;
++        // Back to the pack's own textures (the cache of converted ones is cleared with them).
++        aurora::texture::unregister_replacements(it->second);
++        g_texture_pack_optional.erase(it);
++        std::fprintf(stderr, "[mods] texture-pack optional=%s dropped\n", name.c_str());
++        return;
++    }
++    if (it != g_texture_pack_optional.end())
++        return;
++    const std::filesystem::path folder = std::filesystem::path(gx_aurora::g_texture_pack_root) / "optional" / name;
++    std::error_code ec;
++    if (!std::filesystem::is_directory(folder, ec)) {
++        // A pack imported before it had this folder (the loader would make an empty one).
++        std::fprintf(stderr, "[mods] texture-pack optional=%s missing\n", name.c_str());
++        return;
++    }
++    g_texture_pack_optional.emplace_back(name, aurora::texture::load_replacement_directory(folder, {.priority = 1}));
++    std::fprintf(stderr, "[mods] texture-pack optional=%s replacements=%zu\n", name.c_str(),
++                 g_texture_pack_optional.back().second.registrations.size());
++}
++
+ void dol_aurora_set_hold_redraw(bool redraw) { gx_aurora::g_hold_redraw = redraw; }
+ 
+ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 113ae87774..f7d8bb5762 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -3746,6 +3746,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+       tlut_data = nullptr;
+       tlut_available = 0u;
+     }
++    // The pack's replacements changed (an optional/ folder loaded or dropped as the HD look goes on or off): the
++    // decode cache holds lookups made before, a replacement that is gone or a decode a new one replaces.
++    static uint64_t s_replacementGeneration = texture_replacement::replacement_generation();
++    if (const uint64_t generation = texture_replacement::replacement_generation();
++        generation != s_replacementGeneration) {
++      s_replacementGeneration = generation;
++      g_textureCache.clear();
++      g_textureAwaitingReplacement.clear();
++      g_textureAddrKey.clear();
++    }
+     auto efbIt = g_efbCopyTextures.find(address);
+     if (efbIt != g_efbCopyTextures.end() && efbIt->second.handle) {
+       uint64_t memoryEpoch = 0;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+index 205a9d3235..69e9f6c138 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+@@ -17,6 +17,7 @@
+ #include <absl/hash/hash.h>
+ 
+ #include <algorithm>
++#include <atomic>
+ #if defined(__APPLE__)
+ #include <TargetConditionals.h>
+ #endif
+@@ -103,6 +104,16 @@ struct ReplacementKeyHash {
+ };
+ 
+ std::mutex s_registryMutex;
++// Bumped by every change to the registered replacements (replacement_generation()).
++std::atomic<uint64_t> s_registryGeneration{0};
++
++// The registered replacements changed: the converted textures cached by GX object (gx.cpp) and by the guest's
++// bytes (gxcore's decode cache, which holds a replacement or the decode it stood for) both go.
++void registry_changed() noexcept {
++  s_registryGeneration.fetch_add(1, std::memory_order_acq_rel);
++  clear_static_texture_cache();
++}
++
+ absl::flat_hash_map<aurora::texture::ReplacementKey, std::vector<ReplacementEntry>, ReplacementKeyHash> s_entriesByKey;
+ absl::flat_hash_map<aurora::texture::ReplacementKey, SelectedCache, ReplacementKeyHash> s_cacheByKey;
+ absl::flat_hash_set<uint64_t> s_failedIds;
+@@ -850,8 +861,13 @@ std::mutex s_decodeMutex;
+ std::condition_variable s_decodeCv;
+ std::deque<DecodeJob> s_decodeQueue;
+ absl::flat_hash_set<aurora::texture::ReplacementKey, ReplacementKeyHash> s_decodePending;
+-absl::flat_hash_map<aurora::texture::ReplacementKey, std::optional<aurora::gfx::ConvertedTexture>, ReplacementKeyHash>
+-    s_decoded;
++// Each decode with the id of the entry it was made from: a key's entry can change while it decodes (an optional/
++// folder dropped or loaded), and the old entry's pixels must not stand for the new one.
++struct Decoded {
++  uint64_t id = 0;
++  std::optional<aurora::gfx::ConvertedTexture> texture;
++};
++absl::flat_hash_map<aurora::texture::ReplacementKey, Decoded, ReplacementKeyHash> s_decoded;
+ bool s_decoderStarted = false;
+ bool s_decoderStop = false;
+ 
+@@ -868,7 +884,7 @@ void decoder_main() noexcept {
+     }
+     auto converted = load_file_replacement(job.entry);
+     std::lock_guard lk(s_decodeMutex);
+-    s_decoded.insert_or_assign(job.key, std::move(converted));
++    s_decoded.insert_or_assign(job.key, Decoded{job.entry.id, std::move(converted)});
+   }
+ }
+ 
+@@ -1021,7 +1037,7 @@ aurora::texture::ReplacementRegistration register_file_replacement(aurora::textu
+   });
+   ++s_sourceEntryCount;
+   erase_cache_locked(replacementKey);
+-  clear_static_texture_cache();
++  registry_changed();
+   return registration;
+ }
+ } // namespace
+@@ -1059,7 +1075,7 @@ ReplacementRegistration register_replacement(ReplacementKey key, RawTextureRepla
+     ++s_sourceEntryCount;
+   }
+   erase_cache_locked(key);
+-  clear_static_texture_cache();
++  registry_changed();
+   return registration;
+ }
+ 
+@@ -1087,7 +1103,7 @@ void unregister_replacement(const ReplacementRegistration& registration) {
+   if (entries.empty()) {
+     s_entriesByKey.erase(it);
+   }
+-  clear_static_texture_cache();
++  registry_changed();
+ }
+ 
+ void unregister_replacements(std::span<const ReplacementRegistration> registrations) {
+@@ -1113,13 +1129,13 @@ void unregister_replacements(const ReplacementKey& key) {
+   }
+   erase_cache_locked(key);
+   s_entriesByKey.erase(it);
+-  clear_static_texture_cache();
++  registry_changed();
+ }
+ 
+ void clear_replacements() {
+   std::lock_guard lk(s_registryMutex);
+   clear_replacement_runtime_state_locked();
+-  clear_static_texture_cache();
++  registry_changed();
+ }
+ 
+ ReplacementGroup load_replacement_directory(const std::filesystem::path& root, ReplacementOptions options) {
+@@ -1315,6 +1331,8 @@ std::string build_texture_replacement_name(const GXTexObj_& obj) noexcept {
+   return format_replacement_filename(key);
+ }
+ 
++uint64_t replacement_generation() noexcept { return s_registryGeneration.load(std::memory_order_acquire); }
++
+ bool has_source_replacements() noexcept {
+   std::lock_guard lk(s_registryMutex);
+   return s_sourceEntryCount != 0;
+@@ -1393,11 +1411,14 @@ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t
+   {
+     std::lock_guard dlk(s_decodeMutex);
+     if (auto it = s_decoded.find(*replacementKey); it != s_decoded.end()) {
+-      decoded = std::move(it->second);
++      const bool current = it->second.id == entry->id;
++      if (current)
++        decoded = std::move(it->second.texture);
+       s_decoded.erase(it);
+       s_decodePending.erase(*replacementKey);
+-      ready = true;
+-    } else if (!s_decodePending.contains(*replacementKey)) {
++      ready = current;
++    }
++    if (!ready && !s_decodePending.contains(*replacementKey)) {
+       s_decodePending.insert(*replacementKey);
+       s_decodeQueue.push_back(DecodeJob{*replacementKey, *entry});
+       if (!s_decoderStarted) {
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+index 31efb3a096..8a9404caf8 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+@@ -23,4 +23,7 @@ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t
+                                                         const uint8_t* tlut, uint32_t tlut_bytes,
+                                                         bool* pending = nullptr) noexcept;
+ bool has_source_replacements() noexcept;
++// Changes whenever a replacement is registered or unregistered (a pack's optional/ folder loaded or dropped while
++// running): a renderer's own cache of lookups made before it is stale.
++uint64_t replacement_generation() noexcept;
+ } // namespace aurora::gfx::texture_replacement
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 8bca53c961..848c98583b 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -54,6 +54,10 @@ void dol_aurora_set_hold_redraw(bool redraw);
+ // dropped, so neither the display nor the audio queue holds the guest to real
+ // time. The screen keeps the last presented frame.
+ void dol_aurora_set_fast_forward(bool on);
++// One of the texture pack's optional/ folders (DOL_AURORA_TEXTURE_PACK_OPTIONAL), loaded over the pack (on) or
++// dropped from it (off) while running, so a look that brings it can be turned off and on in a session. Nothing
++// happens without a pack, for a missing folder, or when it is already as asked.
++void dol_aurora_set_texture_pack_optional(const char* name, bool on);
+ 
+ /* Cumulative main-thread frame timing, for per-second diagnostics: time spent
+    waiting for the FIFO translation worker at the guest's GX barriers, time in
+-- 
+2.49.0.windows.1
+

@@ -266,3 +266,212 @@ swell's height unlit and lit the swells' crests. Pools, rivers and falls count a
 from 10,000 to 25,000 units away (`DOL_AURORA_EXPOSURE_FAR`), where islands are the haze's colour, and tapers off on what is already bright
 (`DOL_AURORA_EXPOSURE_HIGHLIGHTS`, ice and white rock). `DOL_AURORA_SEA_MASK_DEBUG=1`
 shows the mask.
+
+Patch 0206 keeps the HD look's shading off the effects drawn over the scene. The sun shadows, the occlusion and the
+cloud shadows are worked out after the scene from its depth buffer, and an effect drawn blended without writing depth
+(the spin attack's rings and burst, the Master Sword's glow, sparks) leaves the depth there the scenery's behind it:
+Link's cast shadow was drawn across the glowing rings. Wind Waker HD draws such effects after its lighting. The scene's
+effects are drawn again with their own pipelines into a mask, over black and against the finished depth, and the
+shading takes away as much of its shade as they make up (their brightest channel times 2,
+`DOL_AURORA_EFFECT_MASK_GAIN`), within 3,000 units. Left out of the mask: the sea's surf, the GameCube's own shadows,
+what has no depth test (the sky's clouds) and a character's eyes and mouth; the effects are drawn 5% of their distance
+further back (`DOL_AURORA_EFFECT_MASK_PUSH`), so what lies on a surface keeps its shade.
+`DOL_AURORA_EFFECT_MASK_DEBUG=1` shows in red what the sun shadows leave.
+
+Patch 0206 also treats a blended draw that writes depth as an effect when it is one of the game's particles (the host's
+tag) or a glow model (its colour from neither a texture nor the rasterized colour). A particle's colour draw over
+its own depth draw, and an effect that writes depth, go into the effects' mask at their own depth, against a copy
+of the sea mask's depth. Where such an effect covers a pixel, the occlusion, sun shadows and cloud shadows shade
+from the sea mask's depth, the scenery under it, as Wind Waker HD lights before it draws its effects. A small pass
+makes that depth only in frames with such effects.
+
+Patch 0206 also finishes Dragon Roost Cavern's effects. A glow model may take the rasterized colour when its textures
+only cut its shape (the geysers' middle layer, C1 + 0.5 x RASC, was shaded as scenery); an effect drawn at its own
+depth keeps its share near or far (the cover's fade from 3,000 units went by the far wall's depth behind it). The
+effects are drawn into the mask a second time over white, so a blended effect's share is its opacity: a dark
+dust no longer lets the floor's shadows show through. `DOL_AURORA_EFFECT_MASK_OPACITY=0` keeps the colour alone.
+
+Patch 0207 adds Wind Waker HD's facing term to the sun shadows (off by default, `DOL_AURORA_SUN_SHADOW_FACING=1`):
+what faces away from the sun is in shade too, from the scenery's smooth normals made on the CPU while it is on,
+then HD's terrain curve. Characters, marked in the sea mask, keep their own shading. `aurora_set_sun_palette` gives
+the shade HD's light for the hour: its ambient (the palette's shadow colour from above, BG0 C0 from the side) over
+its sunlight. The gap fill is off (it shaded Link's own front) and the slope term is 20 near the camera as far off.
+
+Patch 0208 reads a table of Wind Waker HD's normals keyed by the GameCube's exact vertex positions (`BWHN`;
+`DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS` for tests), for the facing term. It also tries the depth's own facing
+(`DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL`, `_BLUR`), which HD turned out not to have; off by default.
+
+Patch 0209 adds Wind Waker HD's shadow bias and terrain shadow mix (test switches), `aurora_set_sun_hd_light` (HD's
+light rule: the sun by day, the moon's side by night, its day/night fade) and `aurora_set_hd_normals` (HD's normals
+for the stage in play, from the HD pack's `optional/hd-normals/<stage>.bin`).
+
+Patch 0209's pre-pass takes its grazing term from the edge-aware depth normal (`depth_normal()`), and characters
+none: its neighbours lie four pixels apart, and across a silhouette their normal came out edge-on, so Link's outline
+grazed and the blur spread that onto the ground around him, a lit hole in his shape in the soft shadow.
+
+Patch 0210 adds Wind Waker HD's bloom chain, SSAO, rim light and cloud shadows (each behind its own switch, off by
+default; the cloud texture from the host, `aurora_set_hd_cloud_texture`), and HD's own shadow pass as a fourth
+shadow quality (`hd`, `set_sun_shadow_quality(3)`): three 1024 maps, a half-size pre-pass with one filtered lookup
+per pixel in the cascade its distance picks, blurred.
+
+Patch 0211 blends the shadow pre-pass with the last frames' by distance (`DOL_AURORA_SUN_SHADOW_TEMPORAL=1`, off by
+default): at sea the clock turns the sun every frame and shadow edges jumped by the map's texels.
+
+Patch 0212 shades and lights the palms as Wind Waker HD does (test switches, off by default): skinned draws that
+aren't toon-shaded are scenery to the sun pass, with smooth normals lit from either side; a table of HD's vertex
+colours by position (`BWHC`) gives the draws that mix their shade colour to their light colour by the vertex colour
+HD's light: texture x HD's colour x the light, the sun pass making the light.
+
+Patch 0213 adds `aurora_set_sun_cascade_splits`: the HD shadow quality's two cascade splits and the first two
+cascades' sizes each frame, as Wind Waker HD sets them from its camera; with fixed ones, a camera zoomed out past
+HD's left the ground around Link in the far cascade, where grass shadows crawled as the sun turned.
+
+Patch 0214 adds `aurora_set_hd_object_tables`: Wind Waker HD's normals and vertex colours for the game's object
+models (the HD pack's `optional/hd-normals/objects.bin` and `optional/hd-colours/objects.bin`), looked up after the
+stage's; and HD's light on the scenery (`DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT=1`, off by default): HD's terrain
+material is texture x vertex colour x light, where the GameCube's mix never goes below the shade colour.
+
+Patch 0214 also gives all scenery with a smooth normal Wind Waker HD's hemisphere per vertex
+(`DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT=1`, which the HD look sets): the mask pass normalizes each vertex's normal
+and writes the blend across the triangle as it is, and the hemisphere (0.5 + 0.5 N.y between the ambient and the
+sky's light) takes its y without renormalizing, as HD's terrain shader does. Before, the ground took N.y from the
+depth's face (about 1: the sky's colour alone), bluer in the shade than HD's where its normals lean. Palms keep
+theirs; `=skinned` keeps the old rule.
+
+Patch 0214 also keeps the sun shadows' smooth normals and Wind Waker HD's vertex colours per draw from frame to frame
+(`smooth_normal_cache.hpp`). They were made again for every lit scenery draw every frame, a weld map and a lookup
+per vertex in HD's tables: 66 draws and 47,000 vertices a game frame in Hyrule Castle's hall. A draw that comes
+again with the same bytes and the same tables and light colours takes the vertices made the first time; it is
+compared in full, so the picture is the same. Lava draws always make them. Entries unused for 120 game frames go.
+`DOL_AURORA_SUN_SHADOW_NORMAL_CACHE=0` makes them every frame, as before.
+
+Patch 0215 adds Wind Waker HD's actor light (`DOL_AURORA_ACTOR_LIGHT_HD=1`, off by default): characters drawn with
+the GameCube's toon pattern (C0, K and the ramp, then the albedo) take HD's toon shader, read pixel for pixel from
+Cemu captures: the ramp as a lit/dark switch on the lit channel, its coordinate times the blurred sun shadow (this
+frame's, as HD's); the shade a hemisphere from actor C0 to the palette's shadow colour; the lit side actor
+K0 times its factor; HD's rim; the albedo in linear light, clipped before the gamma. The host sends the blended
+palette each frame (`aurora_set_actor_light_hd`). The GameCube's effect-light stage (K1) is left out, as HD drops it
+for its point lights. Matched draws mark the sea mask's alpha, and the sun pass, the HD rim and the exposure leave
+them alone. `DOL_AURORA_ACTOR_LIGHT_DEBUG` (1-5) shows its terms, `DOL_AURORA_ACTOR_LIGHT_LOG` each toon shader's TEV.
+The characters take this frame's sun shadow, as Wind Waker HD does (depth, then its shadow pre-pass,
+then the characters): for scene passes with HD's actor light, the sea mask and its depth are drawn before the scene,
+a characters' pre-pass is built from that depth with HD's blur, and the characters sample it. Before, they took the
+last frame's pre-pass, whose edge lagged a frame on a moving camera. `DOL_AURORA_ACTOR_LIGHT_SAME_FRAME=0` keeps the
+last frame's, to compare.
+
+Patch 0216 finishes the sea for the HD look. The sea rooms' untextured square of sea counts as the sea at the size
+it is drawn (`sea_shape()` scales its extent by the position matrix), so the sea mask takes the open sea and the
+HD look's brightness no longer turns it pale cyan with a seam. Blended draws that write depth (a bush faded near
+the camera) are drawn into the mask by their cut-out and clear the character, bloom and actor-light marks behind
+them. On Wind Waker HD's light the sea takes HD's own term, 0.5 + 0.5 x clamp(cloud + floor) x the sun shadow in
+linear light (its sea quad and wave grid), in place of the scenery's shade.
+
+Patch 0217 dims the characters' sunlight under Wind Waker HD's cloud shadows, as HD does: mix(shade, lit, ramp x
+cloud), the cloud read from the same texture, drift and floor as the scenery's cloud shadows on HD's rule. The floor
+is HD's from the clock, 1 - max(0.25, -0.9 cos(time - 15 degrees)), which the host gives
+(`aurora_set_cloud_hd_floor`); unset, it comes from the light's height. `DOL_AURORA_ACTOR_LIGHT_DEBUG=6` shows the
+characters' cloud term.
+
+Patch 0218 makes the HD shadow quality's cascades follow the camera, as Wind Waker HD's: each cascade is fitted to
+its slice of the view between the splits, a far fade to lit from 12,000 to 14,000, and the facing term no longer
+fades with distance. Each cascade is HD's own fit (`DOL_AURORA_SUN_SHADOW_CASCADES_HD=1`, the default), read from
+Cemu captures of a turn at Outset's pier: the tight box round its slice of the view (the first from 30 units to the
+first split), in a frame whose y is the camera's forward made flat to the sun, refitted every frame. At 21:9 the
+square about the sphere round the slice wasted most of its texels: from the boat at Outset the first cascade was
+4096 units square where HD's fit is 3194 x 1038. `=2` takes HD's frame only, the sizes held in steps and the centre
+snapped to whole texels. `=0` gives stable cascades: each in the frame fixed to the sun, its box the square about the
+sphere round its slice, so the grid doesn't move as the camera turns; with it,
+`DOL_AURORA_SUN_SHADOW_CASCADES_STABLE=0` turns the frame with the camera instead (and `_TURN_STEP` applies only
+then). Past the second cascade only the stage's BG lists cast, as Wind Waker HD's drawShadowCascade draws mpModelList
+into every cascade and the other lists into the first two: the host marks the game's draw list in BP register 0x7A
+(0 or never written: a BG list, 1: another), kept until written again, and a game module that doesn't write it keeps
+the old rule (`DOL_AURORA_SUN_SHADOW_FAR_CASTERS=all` keeps every caster in every cascade).
+`DOL_AURORA_SUN_SHADOW_CASCADES_FOLLOW=0` keeps the cascades fixed to the sun, to compare;
+`DOL_AURORA_SUN_SHADOW_TEMPORAL_DEBUG=2` shows debug view 12 unblurred, with the pre-pass shadow in red.
+
+Patch 0219 lets alpha-tested draws of more than one texture cast into the sun map with the cut-out of the texture
+their alpha is from (`gxc::cutout_alpha_texmap()`: a Windfall girl's body, colour from texmap 0 and its toon ramp
+from texmap 1, cast no shadow before), and still scenery the game draws blended and alpha-tested while writing
+depth (Outset's grass) casts through the same cut-out, as Wind Waker HD casts it. Additive glows and what the game
+writes each frame stay out.
+
+Patch 0220 gives three more toon patterns Wind Waker HD's actor light, right after the albedo stage, with the
+stages after it run on the lit colour as the GameCube ran them: the colour-register albedo (the Mirror Shield's
+face, the Master Sword's grip, ice, Chus; no rim, and the glint added in linear light as HD adds it), a register
+added to stage 1 (the bomb's flash; no rim, as HD's material table has for all 28 of those materials), and the main
+pattern then other stages (the chests' decal). The GameCube's effect-light stage (PREV + K1 x the ramp: the
+sword-hit flash, the bombs' flash, the item-get light) runs on HD's colour too, until a light buffer takes it
+(`DOL_AURORA_ACTOR_LIGHT_HD_EFFECT=0` leaves it out, to compare). `DOL_AURORA_ACTOR_LIGHT_HD_EXT=0` keeps the main
+pattern only.
+
+Patch 0221 adds Wind Waker HD's far blur ramp (`DOL_AURORA_FAR_BLUR_HD=1`): clamp(level x (distance - start) /
+(end - start)) with HD's 25,000 and 50,000, in place of the smoothstep from 8,000 to 30,000, times
+`DOL_AURORA_FAR_BLUR_AMOUNT` as before. The level is HD's for the hour (1.2 by day, 0.65 at night, blended at
+dawn and dusk), from the host (`aurora_set_far_blur_level`).
+
+Patch 0222 adds Wind Waker HD's light buffer (`DOL_AURORA_POINT_LIGHTS_HD=1`): the point and effect lights the
+host sends on HD's rule (`aurora_set_point_lights`, up to 32) add colour x sat(N.L) x sat(1 - d / r)^1.5 to the
+characters' HD light (x 1.75) and to the lit scenery's stage-0 light (x 1.25) in their own draws, and the sun
+shadows' shade leaves that light as HD's does (1.25 x AO x the lights after its shade). With it on, the torch
+glow and the GameCube's effect-light stage are left out, so the lights aren't counted twice.
+
+Patch 0223 lights each character by its own palettes on Wind Waker HD's character light, as HD's
+setLightTevColorType: a character's colours are its own tevstr's (the floor under it) times the global
+intensities (Link's). The host gives the GameCube's global actor C0 and K0 (`aurora_set_actor_light_hd_own`); a
+character draw whose toon registers (C0, the ramp stage's KONST) differ takes HD's c0 and k times those ratios in
+linear light (clamped 0-4), the shadow colour global. Link's own draws have ratio 1.
+`DOL_AURORA_ACTOR_LIGHT_HD_OWN=0` turns it off.
+
+Patch 0224 adds `aurora_set_sun_caster_cull`: the scenery's casters take their draw's own cull mode, as Wind Waker
+HD draws its shadow map's casters, so a closed room's ceiling no longer shades the whole floor from a room light
+above. Characters keep their own. The host turns it on in HD's lit rooms; `DOL_AURORA_SUN_SHADOW_CASTER_CULL`
+overrides it for tests. In HD's lava and fire rooms (GanonB, Cave01, MiniKaz, Ganon's Tower's lava
+parts) a lit room draw in the GameCube's two-stage form adds HD's lava glow, albedo x lava K x 4 x the vertex red
+squared, outside the shade, with lava K the material's konst2 animation at the game frame, from a version 2
+stage colour table (`aurora_set_hd_stage_colours`).
+
+Patch 0224 also gives Dragon Roost Cavern's lava rooms Wind Waker HD's glow: its shaders for the konst2 materials add
+albedo x lava K x 4 x (1 - the vertex alpha) squared (read from the disc's model.sharcfb), which the importer gives
+as the glow. Their GameCube materials are three stages, the third the GameCube's own glow (PREV + C1 x APREV),
+which HD's programs don't have: the draw takes C1 black and the glow goes on after stage 1. Two-stage draws make
+the same WGSL as before.
+
+Patch 0224 also draws the Tower of the Gods' water floor (Obj_Humi's Humi00_v, the only material of its kind) as Wind
+Waker HD does: KONST + C0 x texel, plus KONST x the second layer's texel x (1 - the vertex alpha x the first's), on
+the colours made linear, then back to gamma for the GX fog. `gxc::hd_water_floor_stage()` matches its three
+stages, and `ShaderKey::hd_water` flags it while HD's palettes are in place. On the GameCube's gamma colours the
+caustics came out twice HD's brightness.
+
+Patch 0225 adds `aurora_set_monotone_hd`: while the host's monotone is on (Frozen Hyrule), the game's grey quad is
+left out and at that point Wind Waker HD's pass runs instead: the scene's grey by HD's weights at half size,
+`saturate` of the way, times HD's multiply, over the scene by distance. What the game draws after it (Link and
+his things) stays in colour, and bloom goes over all of it, as in HD. Single-sampled only
+(`aurora_monotone_hd_supported`); `DOL_AURORA_MONOTONE_HD=0` turns it off.
+
+Patch 0225 also makes the copy the heat haze samples again after Wind Waker HD's monotone, into a second texture that
+the frame's later draws sample, so the haze over the lava in a sepia boss replay (Xboss0) is sepia too; it showed
+square quads of the colours before the monotone. The copy goes back in place at the frame's end, so the next
+frame's motion blur takes the colour as before.
+
+Patch 0226 adds `aurora_set_fog_hd`: while the host has Wind Waker HD's fog distances in the game's palettes, linear
+fog is squared, as HD's shaders fog (`ShaderKey::hd_fog`). The sun shadows' pass then takes the draws' fog out
+and puts HD's back in after the shade, as HD fogs after its light, so a room's far walls in shade keep their fog
+(`DOL_AURORA_SUN_FOG_HD=0` keeps it as drawn). Where HD's fog starts before the camera and the game's
+palette blend clamps the start at 0, the host gives HD's start with the game's end
+(`aurora_set_fog_hd_starts`) and the sun pass fogs the lit scenery from it.
+
+Patch 0226 also fogs every draw with linear perspective fog from Wind Waker HD's start, not only the lit scenery: a
+draw fogged from the game's clamped start (C 0) to the end of the host's pair (`aurora_set_fog_hd_starts`; its end
+is the projection's near x B / A) takes GXSetFog's A and C for HD's start to that end. The characters, plants and
+objects now fog as HD's own shaders fog them; the sun pass's fog after the shade reads the same constants.
+
+Patch 0226 also mixes the fog in linear light while HD's fog curve is on, as Wind Waker HD's scenery shader ends with
+mix(lit, fog colour, f) on linear values: the draws' fog (`emit_fog` and the ubershader) is that mix by the sRGB
+curve, in place of the integer blend in the game's gamma. The sun pass reads the scene from a copy taken just
+before it (single-sampled), takes the draws' fog out in linear light, shades, and puts HD's radial fog back in
+linear light. Without the copy it works as before.
+
+Patch 0227 adds `dol_aurora_set_texture_pack_optional`: an optional/ folder can be loaded or dropped while the game
+runs, so a look that brings one (HD's sky clouds) can be turned off and on in a session; the start's
+`DOL_AURORA_TEXTURE_PACK_OPTIONAL` goes through the same call. Each change to the replacements bumps a generation,
+and gxcore's decode cache is cleared when it changes. A background decode is used only for the entry it was made for.

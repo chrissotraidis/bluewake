@@ -39,6 +39,11 @@
 // the same way as a wake's (a scope over a count of draws), with the flag
 // that they index their positions; each strip is blended vertex by vertex.
 //
+// Draw lists. Wind Waker HD's sun shadows draw only the stage's BG models into
+// their cascades past the second; before each draw buffer draws (drawHead or
+// drawTail), the host marks whether it is one of the game's BG lists, so the
+// renderer's far cascades can leave the others' casters out.
+//
 //   BLUEWAKE_DRAW_TAGS=0   off
 #define BLUEWAKE_PARTICLE_DRAW_FIRST 0x80260BACu // JPADrawExecBillBoard::exec
 #define BLUEWAKE_PARTICLE_DRAW_LAST 0x80264C4Cu  // JPADrawExecCallBack::exec
@@ -46,6 +51,10 @@
 #define BLUEWAKE_WAKE_DRAW_LAST 0x8007F3BCu      // dPa_trackEcallBack::draw
 #define BLUEWAKE_CLOTH_DRAW 0x80063728u          // dCloth_packet_c::draw
 #define BLUEWAKE_SAIL_DRAW 0x800E93B8u           // daHo_packet_c::draw (the boat's sail)
+// J3DDrawBuffer::draw calls one of these through its member-function table (an indirect call, so always a
+// dispatch boundary), with r3 the buffer: the host marks whether the buffer is one of the stage's BG lists.
+#define BLUEWAKE_DRAW_LIST_HEAD 0x802ECD38u      // J3DDrawBuffer::drawHead
+#define BLUEWAKE_DRAW_LIST_TAIL 0x802ECDB0u      // J3DDrawBuffer::drawTail
 
 // Once the guest is running.
 void bluewake_draw_tags_attach(CPUState* cpu);
@@ -70,7 +79,8 @@ static inline bool bluewake_draw_tags_observes(u32 address) {
                 BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_PARTICLE_DRAW_FIRST ||
             address - BLUEWAKE_WAKE_DRAW_FIRST <=
                 BLUEWAKE_WAKE_DRAW_LAST - BLUEWAKE_WAKE_DRAW_FIRST ||
-            address == BLUEWAKE_CLOTH_DRAW || address == BLUEWAKE_SAIL_DRAW);
+            address == BLUEWAKE_CLOTH_DRAW || address == BLUEWAKE_SAIL_DRAW ||
+            address == BLUEWAKE_DRAW_LIST_HEAD || address == BLUEWAKE_DRAW_LIST_TAIL);
 }
 static inline void bluewake_draw_tags_dispatch(CPUState* cpu, u32 address) {
     if (__builtin_expect(bluewake_draw_tags_observes(address), 0))

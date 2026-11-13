@@ -94,7 +94,7 @@ const char* const kAnisoShown[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
 const char* const kAnisoStored[] = {"1", "2", "4", "8", "16"};
 // The HD look's sunlight and sun shadows, as HD's or softer (settings_table.h).
 const char* const kSunlightShown[] = {"As in HD", "Softer", "Much softer"};
-const char* const kSunlightStored[] = {"0.37", "0.3", "0.22"};
+const char* const kSunlightStored[] = {"0.4545", "0.37", "0.3"};
 const char* const kShadowShown[] = {"As in HD", "Lighter", "Much lighter"};
 const char* const kShadowStored[] = {"1", "0.8", "0.6"};
 const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "Largest"};
@@ -102,8 +102,8 @@ const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
 // The frame rate's three modes, and the panel's numbers (perf_monitor.h).
 const char* const kPerfShown[] = {"Off", "Frame rate", "Full panel"};
 const char* const kPerfStored[] = {"off", "fps", "full"};
-const char* const kInterpPacingShown[] = {"Automatic", "Never pause"};
-const char* const kInterpPacingStored[] = {"", "0"};
+const char* const kInterpPacingShown[] = {"Automatic", "Never pause", "Step down (experimental)"};
+const char* const kInterpPacingStored[] = {"", "0", "step"};
 
 // Beside the control when it fits there. A list or a slider fills its line,
 // and after one the note went past the edge and, wrapped to nothing there, was
@@ -747,7 +747,7 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
     if (std::strcmp(key, "DOL_AURORA_FRAME_INTERP_PACING") == 0) {
         *shown = bw_desktop::kInterpPacingShown;
         *stored = bw_desktop::kInterpPacingStored;
-        *count = 2;
+        *count = 3;
         return true;
     }
     if (std::strcmp(key, "BLUEWAKE_MENU_TEXT_SIZE") == 0) {

@@ -95,7 +95,7 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_HD_AO", .kind = Kind::Bool, .on = Os::All, .label = "Soft shading (ambient occlusion)",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
      .pane = "Wind Waker HD look settings"},
-    {.key = "BLUEWAKE_HD_CLOUD_SHADOWS", .kind = Kind::Bool, .on = Os::All, .label = "Cloud shadows outdoors",
+    {.key = "BLUEWAKE_HD_CLOUD_SHADOWS", .kind = Kind::Bool, .label = "Cloud shadows outdoors",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
      .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_EDGE_LIGHT", .kind = Kind::Bool, .on = Os::All, .label = "Edge light outdoors",
@@ -130,9 +130,9 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_HD_SKY_LINEAR", .kind = Kind::Bool, .label = "HD's dawn and dusk colours (blended in linear light)",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
     // How strong HD's brighter sunlight is (hd_look.c sky_brightness()): the
-    // power its factor for the hour is taken to, as HD's (0.37, 1.5 times at
+    // power its factor for the hour is taken to, as HD's (1/2.2, 1.65 times at
     // noon) or softer, for players who find it too bright.
-    {.key = "BLUEWAKE_HD_SUNLIGHT", .kind = Kind::Choice, .fallback = "0.37", .label = "HD sunlight",
+    {.key = "BLUEWAKE_HD_SUNLIGHT", .kind = Kind::Choice, .fallback = "0.4545", .label = "HD sunlight",
      .control = Control::Chooser, .note = "How much brighter HD's sun makes the scenery and Link.",
      .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
@@ -180,7 +180,7 @@ inline constexpr Setting kSettings[] = {
      .fallback = "1"},
     {.key = "DOL_AURORA_FRAME_INTERP_PACING", .kind = Kind::Choice,
      .label = "Smooth Motion under sustained load", .control = Control::Chooser,
-     .note = "Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch.",
+     .note = "Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch. Step down (experimental) drops one in-between frame at a time at 120 Hz and up, instead of stalling.",
      .next_launch = Os::All},
     {.key = "DOL_AURORA_FPS_POSITION", .old_windows = "fps_position", .kind = Kind::Choice,
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},

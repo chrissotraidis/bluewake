@@ -112,12 +112,13 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "f9e3f4e59be4d49f10130bf6e68bc5d5fa0451e6",
+      "sha": "ecb5c1adccbd2711bfd0715062abe15ebdc4b6c6",
       "branch": "bluewake-next",
+      "upstream_pull_request_candidate": "https://github.com/chrissotraidis/RecompCore/pull/51, on https://github.com/chrissotraidis/RecompCore/pull/58 and https://github.com/chrissotraidis/RecompCore/pull/59",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/49 (merged)",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
-      "verified": "2026-11-07",
+      "verified": "2026-11-05",
       "upstream": {
         "url": "https://github.com/ExpansionPak/RecompCore",
         "base_sha": "5c3611e2bcb03d1578274c956bc3d7b913527ec2"
@@ -705,6 +706,251 @@
             "patches/recompcore/0196-GXRuntime-the-remembered-alias-also-builds-with-MSVC.patch"
           ],
           "evidence": "irregularthanis's RecompCore #45 (ppc_guest_alias_range_overlaps and an alias registry generation, used by BlueWake #495's gather-pipe alias cache) and #48 (ppc_guest_alias_resolve finds an alias from the last hit, then a 4 KiB page index, with the same results; differential test guest_alias_lookup_test.c, run by BlueWake's Linux and Windows host CI). Steam Deck, rendered, interleaved against 0.9.0 with BlueWake #480 and #495: 31.86 to 36.38 game FPS (+14.2%) over five scenes, the lava room +33%, guest checkpoints identical (BlueWake #501). Merged into bluewake-next with pdale-boop's 0186-0192 for 0.10.0."
+        },
+        "hd_effects_unshaded": {
+          "runtime": "22ddca24e11acf57900122e0d7212cecdbb0e588",
+          "tracked_patches": [
+            "patches/recompcore/0206-Aurora-the-HD-look-s-shading-leaves-the-effects-drawn-over-the-scene-alone.patch"
+          ],
+          "evidence": "pdale-boop's: the HD look's sun shadows (the shadow map's and the screen's), occlusion and cloud shadows, worked out after the scene from its depth, leave the effects drawn over it alone, as Wind Waker HD draws them after its lighting: Link's cast shadow had been drawn across the spin attack's glowing rings. A 3D draw that is blended, tests depth and writes none (not the sea's surf, the GameCube's own dst-alpha shadows, what has no depth test, or a skinned model's eyes and mouth) is drawn again with its own pipeline into a mask over black against the finished depth, 5% of its distance further back so what lies on a surface keeps its shade; the shading takes away twice the mask's brightest channel, within 3,000 units. Arch Linux (Ryzen 9 9900X, RTX 5070 Ti, Vulkan), rendered from Dale's charged spin attack state against the same build without it, frames matched by content: Link's shadow no longer crosses the rings and burst (the changed pixels, 1.2-4.2% of the frame, are within 3 steps of the sun-shadows-off frame for about 90% of them), Link's shadow on the grass and the rest of the frame unchanged but for a grass fringe at a cliff's edge; with the sun shadows off, 0.0-0.3% changed (the occlusion and cloud shadows on the rings). Windows and Mac not yet checked."
+        },
+        "effects_with_depth": {
+          "runtime": "22ddca24e11acf57900122e0d7212cecdbb0e588",
+          "tracked_patches": [
+            "patches/recompcore/0206-Aurora-the-HD-look-s-shading-leaves-the-effects-drawn-over-the-scene-alone.patch"
+          ],
+          "evidence": "pdale-boop's: Dragon Roost Cavern's lava geysers stay orange in the room's shade (they went blue) and a shutting door's dust no longer shows as dark holes in the haze; frame dumps from five other save states match the build before within noise."
+        },
+        "effects_geysers_dust": {
+          "runtime": "22ddca24e11acf57900122e0d7212cecdbb0e588",
+          "tracked_patches": [
+            "patches/recompcore/0206-Aurora-the-HD-look-s-shading-leaves-the-effects-drawn-over-the-scene-alone.patch"
+          ],
+          "evidence": "pdale-boop's: the geysers' core is cream with no blue, as with the look off; under a shutting door's dust the shadow band goes from 0.836 of the floor beside it to 1.001 (1.047 with the look off); frame dumps from four other save states match within noise."
+        },
+        "hd_facing_term": {
+          "runtime": "845809f29ff3bbc3d45f9b84ad828ffbcf94465b",
+          "tracked_patches": [
+            "patches/recompcore/0207-Sun-shadows-Wind-Waker-HD-s-facing-term-and-its-light-for-the-hour.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_FACING (off by default) shades what faces away from the sun, from the scenery's smooth normals made on the CPU; characters, marked in the sea mask, keep their own shading; aurora_set_sun_palette multiplies the shade by HD's ambient over its sunlight for the hour (stages.bin version 3); the gap fill off (it shaded Link's own front); the near slope term 20. Windows 11 (RTX 5070 Ti, Direct3D 12): Outset's bridge and east wall at 10:00 against Cemu's HD."
+        },
+        "hd_normals_by_position": {
+          "runtime": "10d1669c31dcc4c646eafdac42a9f2adf072ad0d",
+          "tracked_patches": [
+            "patches/recompcore/0208-Sun-shadows-the-facing-term-from-Wind-Waker-HD-s-own-normals.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_FACING_HD_NORMALS, a table of HD's normals keyed by the GameCube's raw joint-local positions; and the depth's own facing (DOL_AURORA_SUN_SHADOW_FACING_DEPTH_MUL, _BLUR), which HD's own shader source later showed it doesn't have; both off by default."
+        },
+        "hd_shadow_rule": {
+          "runtime": "01aebe25dd45a0a529a5a0be7201e3cf3bed88b5",
+          "tracked_patches": [
+            "patches/recompcore/0209-Sun-shadows-Wind-Waker-HD-s-bias-terrain-mix-and-light-rule-its-stage-normals-from-the-host.patch"
+          ],
+          "evidence": "pdale-boop's: HD's bias (DOL_AURORA_SUN_SHADOW_MAP_HD_BIAS, _CASTER_BIAS 80,3 as HD draws its map), HD's terrain shadow mix (DOL_AURORA_SUN_SHADOW_HD_MIX), aurora_set_sun_hd_light (HD's sun by day, the moon's side by night, its day/night fade) and aurora_set_hd_normals (the pack's optional/hd-normals/<stage>.bin); all off by default."
+        },
+        "hd_prepass_graze": {
+          "runtime": "01aebe25dd45a0a529a5a0be7201e3cf3bed88b5",
+          "tracked_patches": [
+            "patches/recompcore/0209-Sun-shadows-Wind-Waker-HD-s-bias-terrain-mix-and-light-rule-its-stage-normals-from-the-host.patch"
+          ],
+          "evidence": "pdale-boop's: Link's outline no longer leaves a lit hole in his shape in the soft shadow round him (Windows, Nov 10, in play)."
+        },
+        "hd_effects_and_shadow_pass": {
+          "runtime": "f666739131aebdba96c95bba68be7f4c43b21157",
+          "tracked_patches": [
+            "patches/recompcore/0210-Aurora-Wind-Waker-HD-s-bloom-SSAO-rim-light-cloud-shadows-and-shadow-pass.patch"
+          ],
+          "evidence": "pdale-boop's, each behind its own switch and off by default: HD's bloom chain and mask, SSAO, rim light, cloud shadows on HD's rule with its ww_shadow_clouds (aurora_set_hd_cloud_texture, the pack's optional/hd-cloud-shadow), and HD's shadow pass (set_sun_shadow_quality(3): three 1024 cascades, a half-size pre-pass, blurred); characters keep BlueWake's caster bias. Read from RenderDoc captures of Cemu on Windows."
+        },
+        "hd_shadow_temporal": {
+          "runtime": "60cdf1417e8685a25c4278e02520896eca195de7",
+          "tracked_patches": [
+            "patches/recompcore/0211-Sun-shadows-the-shadow-pre-pass-blended-with-the-last-frames-by-distance.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_TEMPORAL, the pre-pass blended with the last frame's through the last camera, within the neighbours' range, more with distance; the sea clock's turning sun showed the 1024 map's texels as jumps along shadow edges (Sector 0A, 14:00). Off by default."
+        },
+        "hd_palms": {
+          "runtime": "8a147e0dda5c42ac2032798c2093b2db84d27435",
+          "tracked_patches": [
+            "patches/recompcore/0212-Sun-shadows-the-palms-shaded-and-lit-as-Wind-Waker-HD-s.patch"
+          ],
+          "evidence": "pdale-boop's: DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY (a palm's leaves are scenery to the sun pass, as HD lights them), smooth normals for skinned scenery lit from either side, DOL_AURORA_HD_VERTEX_COLOURS (HD's colours by position; a draw mixing C0 to KONST by its vertex colour takes HD's light), DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT. Off by default."
+        },
+        "hd_cascade_splits": {
+          "runtime": "be967b1ecea6095c723102e21467128a61219fd8",
+          "tracked_patches": [
+            "patches/recompcore/0213-Sun-shadows-Wind-Waker-HD-s-cascade-splits-from-the-game-s-camera-each-frame.patch"
+          ],
+          "evidence": "pdale-boop's: aurora_set_sun_cascade_splits, HD's splits each frame (calculateShadowRanges in the WWHD decompilation, its tuning read from cking.rpx); the HD quality's splits and first two cascades follow them. Star Island at the mouse wheel's 2x zoom on Windows: the shadow's change frame to frame over the grass 3.6 to 2.4."
+        },
+        "hd_object_tables": {
+          "runtime": "09a55c7e62758796398e62993029d26a69dae001",
+          "tracked_patches": [
+            "patches/recompcore/0214-Sun-shadows-Wind-Waker-HD-s-normals-and-colours-for-the-objects-and-the-rooms-and-its-light-on-the-scenery.patch"
+          ],
+          "evidence": "pdale-boop's: aurora_set_hd_object_tables (the pack's optional/hd-normals/objects.bin and optional/hd-colours/objects.bin, the importer's), looked up after the stage's; DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT, HD's light on every draw of the palms' kind (Outset's left cliff at 10:00, median brightness: HD 64, before 76, after 62)."
+        },
+        "hd_hemisphere_per_vertex": {
+          "runtime": "09a55c7e62758796398e62993029d26a69dae001",
+          "tracked_patches": [
+            "patches/recompcore/0214-Sun-shadows-Wind-Waker-HD-s-normals-and-colours-for-the-objects-and-the-rooms-and-its-light-on-the-scenery.patch"
+          ],
+          "evidence": "pdale-boop's: on Windfall's path (spawn 7) the shaded dirt's red share 0.281 and blue 0.239 against Cemu's 0.271 and 0.235 (before 0.214 and 0.279); Link and the stone unchanged."
+        },
+        "smooth_normal_cache": {
+          "runtime": "09a55c7e62758796398e62993029d26a69dae001",
+          "tracked_patches": [
+            "patches/recompcore/0214-Sun-shadows-Wind-Waker-HD-s-normals-and-colours-for-the-objects-and-the-rooms-and-its-light-on-the-scenery.patch"
+          ],
+          "evidence": "pdale-boop's: Debian i5-6500 / GTX 1660 SUPER, Hyrule Castle layer 2: 22.2 to 15.0 ms CPU per game frame, frames over 34 ms at 30 FPS 5.8% to 0.1% (still, turning and walking); the frozen hall -0.35 ms still and -1.3 turning (the emulation thread's); frames at the same retrace match the cache off; smooth_normal_cache_tests."
+        },
+        "hd_actor_light": {
+          "runtime": "cb62dbc12a80b590be60fee4fc38322be647ee2c",
+          "tracked_patches": [
+            "patches/recompcore/0215-Characters-Wind-Waker-HD-s-actor-light.patch"
+          ],
+          "evidence": "pdale-boop's: Wind Waker HD's actor light, read pixel for pixel from Cemu captures of Link (Outset 10:00, Windfall 21:00) and his shield (Windfall 12:00): the ramp as a lit/dark switch times the blurred sun shadow, a hemisphere shade from actor C0 to the shadow colour, actor K0 times its factor lit, HD's rim; the effect-light stage left out as HD drops it. gxcore tests check the formula against the traced pixels; in game at Outset and Windfall (Linux, Vulkan), Dale: the day shade accurate. This frame's sun shadow: the characters' sun shadow from this frame (HD's order: depth, shadow pre-pass, characters) instead of the last frame's; from a state at Outset's pier only Link and the King of Red Lions change against the last frame's shadow, GPU busy 0.716 ms against 0.680 (1680x720, Linux, Vulkan); Dale: the shadows on Link look good."
+        },
+        "hd_sea": {
+          "runtime": "53449c57d0591db7e837e834546b45e94eccbe23",
+          "tracked_patches": [
+            "patches/recompcore/0216-Sun-shadows-the-sea-as-Wind-Waker-HD-s-all-of-it-in-the-sea-mask-foliage-in-front-clearing-the-marks-and-HD-s-sea-term.patch"
+          ],
+          "evidence": "pdale-boop's: sea_shape() scales the sea square by its position matrix's columns (the mask takes the open sea); blended depth-writing draws clear the marks behind them in the sea mask by their cut-out; on HD's light the sea's shade is HD's sea term in linear light. Without HD's palette the sea is as before."
+        },
+        "hd_actor_clouds": {
+          "runtime": "d6960b2c0b5b1d6f14d416476db706c502e90381",
+          "tracked_patches": [
+            "patches/recompcore/0217-Characters-Wind-Waker-HD-s-clouds-on-the-characters-light-and-its-cloud-floor-from-the-clock.patch"
+          ],
+          "evidence": "pdale-boop's: the characters take HD's cloud term (cloud = 1 reproduces the traced HD pixels, gxcore tests); the cloud floor from the host's clock matches HD's 0.75 at 07:30, 18:30 and 20:00, where the light's height gave 0.596."
+        },
+        "hd_cascades_follow": {
+          "runtime": "0fb3c10d6b029cb9b92ec7f0bbea2869b7748d72",
+          "tracked_patches": [
+            "patches/recompcore/0218-Sun-shadows-cascades-that-follow-the-camera-as-Wind-Waker-HD-s.patch"
+          ],
+          "evidence": "pdale-boop's: the title screen's far island is shaded from its first frames; the sword state is bit-identical; Link on the pier within 0.3/255; GPU time the same with three cascades, about 0.1 ms for the fourth (Linux, Vulkan)."
+        },
+        "cascades_stable": {
+          "runtime": "0fb3c10d6b029cb9b92ec7f0bbea2869b7748d72",
+          "tracked_patches": [
+            "patches/recompcore/0218-Sun-shadows-cascades-that-follow-the-camera-as-Wind-Waker-HD-s.patch"
+          ],
+          "evidence": "pdale-boop's: on a camera turn at I_TestR the pre-pass shadow's changed pixels went from 59 to 50 per 10k (34-37 with the camera still), and the crawl along the edges went."
+        },
+        "far_cascade_casters": {
+          "runtime": "0fb3c10d6b029cb9b92ec7f0bbea2869b7748d72",
+          "tracked_patches": [
+            "patches/recompcore/0218-Sun-shadows-cascades-that-follow-the-camera-as-Wind-Waker-HD-s.patch"
+          ],
+          "evidence": "pdale-boop's: the Tower of the Gods' six pillars no longer shade its far face, which HD leaves lit (room 0, 12:00, with a rebuilt game module); Link's and the near objects' shadows unchanged; Outset at 10:00 as before."
+        },
+        "cascades_hd_fit": {
+          "runtime": "0fb3c10d6b029cb9b92ec7f0bbea2869b7748d72",
+          "tracked_patches": [
+            "patches/recompcore/0218-Sun-shadows-cascades-that-follow-the-camera-as-Wind-Waker-HD-s.patch"
+          ],
+          "evidence": "pdale-boop's: at 21:9 from the boat at Outset the first cascade 3194 x 1038 units (3.1 x 1.0 a texel; HD's own at the bridge 2.4 x 1.3) where the stable square was 4096 (4 x 4), the second 10.7 x 2.7 against 13.5; in play on Windows (Nov 10) the near shadows sharper and nothing popped."
+        },
+        "hd_cutout_casters": {
+          "runtime": "58a390eb1788ba50f2a7b1780379f95c158394ee",
+          "tracked_patches": [
+            "patches/recompcore/0219-Sun-shadows-alpha-tested-casters-cut-out-by-the-texture-their-alpha-is-from-the-game-s-blended-grass-too.patch"
+          ],
+          "evidence": "pdale-boop's: gxcore cutout tests; over ten states the cut-out path takes 0 to 7 more draws a frame, all characters' bodies of that material; Outset's grass tufts cast, as in HD's own sun map."
+        },
+        "hd_actor_classes": {
+          "runtime": "50e3f85086953dc57a6ac21af4de0a6768b0e13c",
+          "tracked_patches": [
+            "patches/recompcore/0220-Characters-Wind-Waker-HD-s-light-on-the-Mirror-Shield-the-sword-s-grip-ice-Chus-bombs-and-chests.patch"
+          ],
+          "evidence": "pdale-boop's: about 87% of the disc's toon materials take HD's light (1,328 of 1,812 before); the Mirror Shield's face matches HD's trace (PS 2960) for the glint; gxcore WGSL tests."
+        },
+        "hd_far_blur": {
+          "runtime": "3f9b36233ee8e6fbf555ed4f6ad779fb41a4e432",
+          "tracked_patches": [
+            "patches/recompcore/0221-Far-blur-Wind-Waker-HD-s-linear-ramp-and-its-level-for-the-hour.patch"
+          ],
+          "evidence": "pdale-boop's: HD's DOF composite (PS 786) blends by clamp(level x (z / 25,000 - 1)); wwHD_basic and wwHD_night's levels 1.2 and 0.65 over 06:00-08:00 and 18:00-20:00."
+        },
+        "hd_light_buffer": {
+          "runtime": "4f280d14843c3a0b51761c7f781fc9602968fa00",
+          "tracked_patches": [
+            "patches/recompcore/0222-Characters-and-scenery-Wind-Waker-HD-s-light-buffer-its-point-and-effect-lights-on-their-light.patch"
+          ],
+          "evidence": "pdale-boop's: at Windfall at 21:00 a lamp takes Link's hair in the shade from 0.02 to 0.41 in red, as in Cemu; Dragon Roost Cavern's first room and the Tower of the Gods' rooms take their torches (Linux, Vulkan); gxcore tests."
+        },
+        "hd_actor_own": {
+          "runtime": "936e2cb3d53adb73d9c5173f84361ba9384af906",
+          "tracked_patches": [
+            "patches/recompcore/0223-Characters-each-character-s-own-palettes-on-Wind-Waker-HD-s-actor-light-aurora_set_actor_light_hd_own.patch"
+          ],
+          "evidence": "pdale-boop's: at Windfall (T09a) a kid's shirt goes from (132, 81, 66) to (218, 140, 109) against Cemu's (232, 160, 127); Link's own colours identical; gxcore tests 13/13."
+        },
+        "hd_caster_cull": {
+          "runtime": "dca1d7a8efa655d1796cc998eb81573817716c1e",
+          "tracked_patches": [
+            "patches/recompcore/0224-Sun-shadows-Wind-Waker-HD-s-caster-culling-and-lava-glow-in-its-lit-rooms-aurora_set_sun_caster_cull.patch"
+          ],
+          "evidence": "pdale-boop's: in Dragon Roost Cavern's room 0, 225 of HD's 240 map draws cull back faces, the rest none; with them culled the floor is lit and shows Link's shadow, as in HD. Lava glow: Cave01 from 0.47 to 0.97 of HD's brightness and to its hue (red share 0.50, HD 0.49); GanonB from 0.60 to 0.86."
+        },
+        "hd_lava_drc": {
+          "runtime": "dca1d7a8efa655d1796cc998eb81573817716c1e",
+          "tracked_patches": [
+            "patches/recompcore/0224-Sun-shadows-Wind-Waker-HD-s-caster-culling-and-lava-glow-in-its-lit-rooms-aurora_set_sun_caster_cull.patch"
+          ],
+          "evidence": "pdale-boop's: Dragon Roost Cavern room 11's lit right wall from 0.71 of HD's red to 1.02 (Cemu, 12:00)."
+        },
+        "hd_water_floor": {
+          "runtime": "dca1d7a8efa655d1796cc998eb81573817716c1e",
+          "tracked_patches": [
+            "patches/recompcore/0224-Sun-shadows-Wind-Waker-HD-s-caster-culling-and-lava-glow-in-its-lit-rooms-aurora_set_sun_caster_cull.patch"
+          ],
+          "evidence": "pdale-boop's: ToG room 0 at 12:00, 16 frames: the floor's linear luminance from 0.155 to 0.098 (Cemu 0.074), the lit caustics from 0.223 to 0.120 (Cemu about 0.10); the rest is the boat's ripple quads. WGSL test of the match and its rejects."
+        },
+        "hd_monotone": {
+          "runtime": "497e360b0614c8eb0536a65f6ba263f479852d93",
+          "tracked_patches": [
+            "patches/recompcore/0225-Aurora-Wind-Waker-HD-s-monotone-at-the-game-s-grey-composite-aurora_set_monotone_hd.patch"
+          ],
+          "evidence": "pdale-boop's: in Frozen Hyrule the castle is sepia, Link in colour with his sun shadow, the game's grey quad left out; the hue as HD's."
+        },
+        "monotone_haze": {
+          "runtime": "497e360b0614c8eb0536a65f6ba263f479852d93",
+          "tracked_patches": [
+            "patches/recompcore/0225-Aurora-Wind-Waker-HD-s-monotone-at-the-game-s-grey-composite-aurora_set_monotone_hd.patch"
+          ],
+          "evidence": "pdale-boop's: in Xboss0's sepia replay the heat haze over the lava shows no coloured squares."
+        },
+        "hd_fog": {
+          "runtime": "40da45c8f3c20299028755966ccfeb75c74a9d86",
+          "tracked_patches": [
+            "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
+          ],
+          "evidence": "pdale-boop's: at noon an island 18,000 out takes 0.25 of the fog colour as in HD, not 0.50; Earth Temple's teal and Hyrule Castle's haze stay on the far walls in shade; gxcore tests: the flagged module differs by the square alone; Wind Temple R0f from 0.76 to 0.97 of HD's brightness with HD's fog start."
+        },
+        "hd_fog_start_draws": {
+          "runtime": "40da45c8f3c20299028755966ccfeb75c74a9d86",
+          "tracked_patches": [
+            "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
+          ],
+          "evidence": "pdale-boop's: Ganon's Tower's far wall half from 0.100 to 0.111 in linear luminance (HD 0.123); gxcore test of the match against GXSetFog's terms and five rejects."
+        },
+        "hd_fog_linear": {
+          "runtime": "40da45c8f3c20299028755966ccfeb75c74a9d86",
+          "tracked_patches": [
+            "patches/recompcore/0226-Fog-Wind-Waker-HD-s-curve-the-square-of-the-GameCube-s-linear-fog-while-the-host-has-HD-s-distances-in-place.patch"
+          ],
+          "evidence": "pdale-boop's: far half of the dungeon stops in linear luminance against Cemu: Forbidden Woods R05 0.056 to 0.065 (0.064), its hue back from orange; Earth Temple R00 0.027 to 0.039 (0.037); Wind Temple R02 0.059 to 0.074 (0.073); Ganon's Tower 0.110 to 0.118 (0.123)."
+        },
+        "pack_optional_live": {
+          "runtime": "ecb5c1adccbd2711bfd0715062abe15ebdc4b6c6",
+          "tracked_patches": [
+            "patches/recompcore/0227-Aurora-a-texture-pack-s-optional-folders-load-and-drop-while-running-and-the-decode-cache-follows-them.patch"
+          ],
+          "evidence": "pdale-boop's: the HD look off, on, off, on at Outset's dock at noon and at dusk shows the skies of a start with it off and on: HD's clouds go and come back, and the GameCube's horizon bank with them."
         }
       }
     },

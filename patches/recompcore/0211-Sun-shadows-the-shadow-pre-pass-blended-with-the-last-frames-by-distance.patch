@@ -1,0 +1,304 @@
+From 60cdf1417e8685a25c4278e02520896eca195de7 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 14:51:48 -0600
+Subject: [PATCH] Sun shadows: the shadow pre-pass blended with the last
+ frames' by distance
+
+DOL_AURORA_SUN_SHADOW_TEMPORAL=1 (with HD's terrain mix or pass): each place in the world takes back what it
+had last frame (through last frame's camera and the depth kept in alpha), within what this frame's neighbours
+hold, more the farther from the camera (DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE=near,far,most; 300,1500,0.9).
+The weight follows the camera's seconds, so Smooth Motion's in-between frames blend as much over a game frame
+as one frame without it. At sea the clock turns the sun every frame and the 1024 map's texels showed as jumps
+along shadow edges (Sector 0A, 14:00).
+---
+ GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp | 232 +++++++++++++++++-
+ 1 file changed, 230 insertions(+), 2 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index ad235fc867..ce115ac430 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -215,6 +215,24 @@ bool g_sunHdPrepass = false;
+ // HD's pass's default; 1 otherwise), where the sea mask has the sea. -1: the default.
+ float g_sunSeaShadow = -1.f;
+ float g_sunMapRanges[kSunMapCascades] = {}; // each cascade's range when set (0: g_sunMapRange x g_sunMapSpread^k)
++// DOL_AURORA_SUN_SHADOW_TEMPORAL=1 (local test; with HD's terrain mix or pass): the quarter-size pre-pass blended
++// with the last frames' at the same place in the world, more the farther from the camera
++// (DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE=near,far,most: none nearer than `near`, `most` of the last frames' from `far`
++// on). At sea the game's clock turns the sun a little every frame, and each texel of the 1024 map an edge crosses
++// showed as a jump (Sector 0A at 14:00: the tree's, the sign's and the bridge rail's shadows wiggled with the
++// camera still, and stood still with the clock held). Last frame's place comes from its camera and the depth the
++// blend keeps in alpha; a place that was hidden then (another depth there) takes this frame's alone.
++bool g_sunTemporal = false;
++float g_sunTemporalRange[3] = {300.f, 1500.f, 0.9f};
++wgpu::Texture g_sunHist;
++wgpu::TextureView g_sunHistView;
++bool g_sunHistValid = false;
++std::array<float, 16> g_sunHistCamera{}; // last frame's Camera::view (its view to world rows, its lens)
++float g_sunHistTime = 0.f;               // and its seconds
++wgpu::ShaderModule g_sunTemporalModule;
++wgpu::BindGroupLayout g_sunTemporalLayout;
++wgpu::PipelineLayout g_sunTemporalPipelineLayout;
++wgpu::RenderPipeline g_sunTemporalPipeline;
+ // HD's terrain mix is on: asked for (DOL_AURORA_SUN_SHADOW_HD_MIX) or part of HD's pass.
+ bool hd_mix_on() noexcept { return g_sunHdMix || g_sunHdPrepass; }
+ // DOL_AURORA_AO_HD=1 (local test; needs DOL_AURORA_SUN_SHADOW_HD_MIX=1 and the AO on): Wind Waker HD's SSAO in
+@@ -2973,6 +2991,187 @@ void make_sun_blur_pipelines() {
+   }
+ }
+ 
++// The pre-pass blended with the last frame's (g_sunTemporal): each place in the world takes back what it had last
++// frame (found through last frame's camera), kept within what this frame's neighbours hold so a moving shadow
++// doesn't leave a trail, by `range.z` from `range.y` units away and none nearer than `range.x`. Red (the shadow)
++// and blue (HD's SSAO) are blended; green (the grazing term) is this frame's. Alpha keeps the depth for the next.
++constexpr const char* kSunTemporalShader = R"""(
++struct Temporal {
++    rows: array<vec4<f32>, 3>,  // this frame's view to world, by rows
++    lens: vec4<f32>,            // tan(fovy / 2), aspect, near, near / (far - near)
++    prev: array<vec4<f32>, 3>,  // last frame's world to view, by rows
++    prev_lens: vec4<f32>,       // its tan(fovy / 2), aspect; z: 1 when there is a last frame; w: game frames since
++    range: vec4<f32>,           // nearest blended, fully blended from, the most of the last frame's
++};
++@group(0) @binding(0) var samp: sampler;
++@group(0) @binding(1) var current: texture_2d<f32>;
++@group(0) @binding(2) var history: texture_2d<f32>;
++@group(0) @binding(3) var depth: texture_depth_2d;
++@group(0) @binding(4) var<uniform> t: Temporal;
++struct VertexOutput {
++    @builtin(position) pos: vec4<f32>,
++    @location(0) uv: vec2<f32>,
++};
++var<private> pos: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(-1.0, 1.0), vec2(-1.0, -3.0), vec2(3.0, 1.0));
++var<private> uvs: array<vec2<f32>, 3> = array<vec2<f32>, 3>(vec2(0.0, 0.0), vec2(0.0, 2.0), vec2(2.0, 0.0));
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var out: VertexOutput;
++    out.pos = vec4<f32>(pos[i], 0.0, 1.0);
++    out.uv = uvs[i];
++    return out;
++}
++@fragment
++fn fs_temporal(in: VertexOutput) -> @location(0) vec4<f32> {
++    let cur = textureSampleLevel(current, samp, in.uv, 0.0);
++    let dsize = vec2<f32>(textureDimensions(depth));
++    let d = textureLoad(depth, clamp(vec2<i32>(in.uv * dsize), vec2<i32>(0), vec2<i32>(dsize) - vec2<i32>(1)), 0);
++    let z = select(t.lens.z / (d + t.lens.w), 0.0, d <= 0.0);
++    if (z <= 0.0 || t.prev_lens.z < 0.5) {
++        return vec4(cur.rgb, z);
++    }
++    let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
++    let p = vec4(vec3(ndc.x * t.lens.x * t.lens.y, ndc.y * t.lens.x, -1.0) * z, 1.0);
++    let w = vec4(dot(t.rows[0], p), dot(t.rows[1], p), dot(t.rows[2], p), 1.0);
++    let q = vec3(dot(t.prev[0], w), dot(t.prev[1], w), dot(t.prev[2], w));
++    let pz = -q.z;
++    if (pz <= 0.0) {
++        return vec4(cur.rgb, z);
++    }
++    let pn = vec2(q.x / (pz * t.prev_lens.x * t.prev_lens.y), q.y / (pz * t.prev_lens.x));
++    let puv = vec2(pn.x * 0.5 + 0.5, 0.5 - pn.y * 0.5);
++    if (any(puv < vec2(0.0)) || any(puv > vec2(1.0))) {
++        return vec4(cur.rgb, z);
++    }
++    let hist = textureSampleLevel(history, samp, puv, 0.0);
++    // Hidden last frame: something else was there (its depth differs).
++    if (abs(hist.a - pz) > 0.03 * pz + 2.0) {
++        return vec4(cur.rgb, z);
++    }
++    let size = vec2<i32>(textureDimensions(current));
++    let c = vec2<i32>(in.uv * vec2<f32>(size));
++    var lo = cur.rgb;
++    var hi = cur.rgb;
++    for (var dy = -1; dy <= 1; dy++) {
++        for (var dx = -1; dx <= 1; dx++) {
++            let s = textureLoad(current, clamp(c + vec2(dx, dy), vec2<i32>(0), size - vec2<i32>(1)), 0).rgb;
++            lo = min(lo, s);
++            hi = max(hi, s);
++        }
++    }
++    // range.z is what the last frame keeps a thirtieth of a second on (one game frame); prev_lens.w holds how many
++    // of those since, so Smooth Motion's in-between frames blend as much over a game frame as one frame without it.
++    let a = pow(t.range.z, t.prev_lens.w) * smoothstep(t.range.x, t.range.y, z);
++    let blended = mix(cur.rgb, clamp(hist.rgb, lo, hi), a);
++    return vec4(blended.r, cur.g, blended.b, z);
++}
++)""";
++
++void make_sun_temporal_pipeline() {
++  wgpu::ShaderSourceWGSL source{};
++  source.code = kSunTemporalShader;
++  const wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &source, .label = "Sun shadows' blend"};
++  g_sunTemporalModule = g_device.CreateShaderModule(&moduleDescriptor);
++  const wgpu::TextureBindingLayout colour{.sampleType = wgpu::TextureSampleType::Float,
++                                          .viewDimension = wgpu::TextureViewDimension::e2D};
++  const std::array entries{
++      wgpu::BindGroupLayoutEntry{.binding = 0, .visibility = wgpu::ShaderStage::Fragment,
++                                 .sampler = {.type = wgpu::SamplerBindingType::Filtering}},
++      wgpu::BindGroupLayoutEntry{.binding = 1, .visibility = wgpu::ShaderStage::Fragment, .texture = colour},
++      wgpu::BindGroupLayoutEntry{.binding = 2, .visibility = wgpu::ShaderStage::Fragment, .texture = colour},
++      wgpu::BindGroupLayoutEntry{.binding = 3, .visibility = wgpu::ShaderStage::Fragment,
++                                 .texture = {.sampleType = wgpu::TextureSampleType::Depth,
++                                             .viewDimension = wgpu::TextureViewDimension::e2D}},
++      wgpu::BindGroupLayoutEntry{.binding = 4, .visibility = wgpu::ShaderStage::Fragment,
++                                 .buffer = {.type = wgpu::BufferBindingType::Uniform}},
++  };
++  const wgpu::BindGroupLayoutDescriptor layoutDescriptor{
++      .label = "Sun shadows' blend", .entryCount = entries.size(), .entries = entries.data()};
++  g_sunTemporalLayout = g_device.CreateBindGroupLayout(&layoutDescriptor);
++  const wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
++                                                                .bindGroupLayouts = &g_sunTemporalLayout};
++  g_sunTemporalPipelineLayout = g_device.CreatePipelineLayout(&pipelineLayoutDescriptor);
++  const wgpu::ColorTargetState target{.format = kSunLowFormat, .writeMask = wgpu::ColorWriteMask::All};
++  const wgpu::FragmentState fragment{
++      .module = g_sunTemporalModule, .entryPoint = "fs_temporal", .targetCount = 1, .targets = &target};
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = "Sun shadows' blend",
++      .layout = g_sunTemporalPipelineLayout,
++      .vertex = {.module = g_sunTemporalModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = 1, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  g_sunTemporalPipeline = g_device.CreateRenderPipeline(&descriptor);
++}
++
++void draw_into(const wgpu::CommandEncoder& cmd, const char* label, const wgpu::RenderPipeline& pipeline,
++               const wgpu::BindGroup& group, const wgpu::TextureView& target);
++
++// The blend (g_sunTemporal): this frame's pre-pass (`raw`, in g_sunLow[1]'s mip 0) with the last frame's into
++// g_sunLow[0]'s mip 0, then that copied as the next frame's last. `nearOverFar`: near / (far - near).
++void draw_sun_temporal(const wgpu::CommandEncoder& cmd, const Camera& camera, const wgpu::TextureView& depthView,
++                       float nearOverFar) {
++  if (!g_sunTemporalPipeline)
++    make_sun_temporal_pipeline();
++  std::array<float, 36> u{};
++  std::memcpy(u.data(), camera.view.data(), 12 * sizeof(float));
++  u[12] = camera.view[12];
++  u[13] = camera.view[13];
++  u[14] = camera.view[14];
++  u[15] = nearOverFar;
++  // Last frame's world to view: the inverse of its view to world (rows of [A | b]).
++  const float* m = g_sunHistCamera.data();
++  const float a00 = m[0], a01 = m[1], a02 = m[2], a10 = m[4], a11 = m[5], a12 = m[6], a20 = m[8], a21 = m[9],
++              a22 = m[10];
++  const float det = a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20);
++  const bool valid = g_sunHistValid && std::fabs(det) > 1e-12f;
++  if (valid) {
++    const float inv[9] = {(a11 * a22 - a12 * a21) / det, (a02 * a21 - a01 * a22) / det, (a01 * a12 - a02 * a11) / det,
++                          (a12 * a20 - a10 * a22) / det, (a00 * a22 - a02 * a20) / det, (a02 * a10 - a00 * a12) / det,
++                          (a10 * a21 - a11 * a20) / det, (a01 * a20 - a00 * a21) / det, (a00 * a11 - a01 * a10) / det};
++    const float b[3] = {m[3], m[7], m[11]};
++    for (int r = 0; r < 3; ++r) {
++      for (int c = 0; c < 3; ++c)
++        u[16 + r * 4 + c] = inv[r * 3 + c];
++      u[16 + r * 4 + 3] = -(inv[r * 3] * b[0] + inv[r * 3 + 1] * b[1] + inv[r * 3 + 2] * b[2]);
++    }
++  }
++  u[28] = m[12];
++  u[29] = m[13];
++  u[30] = valid ? 1.f : 0.f;
++  // Game frames (thirtieths of a second) since the last blend, from the camera's seconds (each of Smooth Motion's
++  // in-between frames has its own); at least a quarter, so a frame whose time didn't move still takes some of its own.
++  const float since = camera.view[16] - g_sunHistTime;
++  u[31] = std::clamp(since * 30.f, 0.25f, 4.f);
++  u[32] = g_sunTemporalRange[0];
++  u[33] = g_sunTemporalRange[1];
++  u[34] = g_sunTemporalRange[2];
++  const wgpu::BufferDescriptor bufferDescriptor{
++      .label = "Sun shadows' blend", .usage = wgpu::BufferUsage::Uniform, .size = sizeof(u), .mappedAtCreation = true};
++  const auto buffer = g_device.CreateBuffer(&bufferDescriptor);
++  std::memcpy(buffer.GetMappedRange(0, sizeof(u)), u.data(), sizeof(u));
++  buffer.Unmap();
++  const std::array entries{
++      wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = g_sunLowMipView[1][0]},
++      wgpu::BindGroupEntry{.binding = 2, .textureView = g_sunHistView},
++      wgpu::BindGroupEntry{.binding = 3, .textureView = depthView},
++      wgpu::BindGroupEntry{.binding = 4, .buffer = buffer, .offset = 0, .size = sizeof(u)},
++  };
++  const wgpu::BindGroupDescriptor groupDescriptor{
++      .layout = g_sunTemporalLayout, .entryCount = entries.size(), .entries = entries.data()};
++  draw_into(cmd, "Sun shadows' blend", g_sunTemporalPipeline, g_device.CreateBindGroup(&groupDescriptor),
++            g_sunLowMipView[0][0]);
++  const wgpu::TexelCopyTextureInfo from{.texture = g_sunLow[0], .mipLevel = 0};
++  const wgpu::TexelCopyTextureInfo to{.texture = g_sunHist};
++  const wgpu::Extent3D extent{g_sunLowSize.width, g_sunLowSize.height, 1};
++  cmd.CopyTextureToTexture(&from, &to, &extent);
++  std::memcpy(g_sunHistCamera.data(), camera.view.data(), 16 * sizeof(float));
++  g_sunHistTime = camera.view[16];
++  g_sunHistValid = true;
++}
++
+ // HD's SSAO runs this frame (in the terrain mix), in place of BlueWake's own.
+ bool ao_hd_on() noexcept { return g_aoHd && hd_mix_on() && ambient_occlusion_enabled() && sun_shadow_map_enabled(); }
+ 
+@@ -2988,7 +3187,8 @@ void ensure_sun_low(const wgpu::Extent3D& size) {
+   for (int i = 0; i < 2; ++i) {
+     const wgpu::TextureDescriptor descriptor{
+         .label = "Sun shadows (quarter size)",
+-        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding |
++                 wgpu::TextureUsage::CopySrc,
+         .size = low,
+         .format = kSunLowFormat,
+         .mipLevelCount = 2,
+@@ -3000,6 +3200,16 @@ void ensure_sun_low(const wgpu::Extent3D& size) {
+       g_sunLowMipView[i][mip] = g_sunLow[i].CreateView(&one);
+     }
+   }
++  // The blend's last frame (g_sunTemporal): the pre-pass after the blend, copied each frame, its depth in alpha.
++  const wgpu::TextureDescriptor history{
++      .label = "Sun shadows (last frame)",
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
++      .size = low,
++      .format = kSunLowFormat,
++  };
++  g_sunHist = g_device.CreateTexture(&history);
++  g_sunHistView = g_sunHist.CreateView();
++  g_sunHistValid = false;
+   g_sunLowSize = low;
+ }
+ 
+@@ -3127,7 +3337,13 @@ void draw_sun_map(const wgpu::CommandEncoder& cmd, const Camera& camera, const S
+       make_sun_blur_pipelines();
+     if (!g_sunMapLow)
+       g_sunMapLow = make_sun_map_pipeline(kSunLowFormat, false, true);
+-    draw_into(cmd, "Sun shadows (quarter size)", g_sunMapLow, sun_group(g_farView[0]), g_sunLowMipView[0][0]);
++    // With the blend, the pre-pass goes to g_sunLow[1] first and the blend writes g_sunLow[0].
++    draw_into(cmd, "Sun shadows (quarter size)", g_sunMapLow, sun_group(g_farView[0]),
++              g_sunLowMipView[g_sunTemporal ? 1 : 0][0]);
++    if (g_sunTemporal)
++      draw_sun_temporal(cmd, camera, depthView, uniform[71]);
++    else
++      g_sunHistValid = false;
+     const auto blur_group = [&](const wgpu::TextureView& view) {
+       const std::array entries{wgpu::BindGroupEntry{.binding = 0, .sampler = g_sampler},
+                                wgpu::BindGroupEntry{.binding = 1, .textureView = view}};
+@@ -3462,6 +3678,11 @@ void initialize() {
+   g_sunHdMixBlurs = static_cast<int>(env_float("DOL_AURORA_SUN_SHADOW_HD_MIX_BLURS", 1.f, 0.f, 8.f));
+   g_sunSeaShadow = env_float("DOL_AURORA_SUN_SHADOW_SEA_STRENGTH", g_sunSeaShadow, 0.f, 1.f);
+   g_sunHdMixNearPower = env_float("DOL_AURORA_SUN_SHADOW_HD_MIX_NEAR_POWER", g_sunHdMixNearPower, 1.f, 8.f);
++  if (const char* temporal = std::getenv("DOL_AURORA_SUN_SHADOW_TEMPORAL"))
++    g_sunTemporal = temporal[0] == '1';
++  if (const char* range = std::getenv("DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE"))
++    std::sscanf(range, "%f,%f,%f", &g_sunTemporalRange[0], &g_sunTemporalRange[1], &g_sunTemporalRange[2]);
++  g_sunTemporalRange[2] = std::clamp(g_sunTemporalRange[2], 0.f, 0.98f);
+   if (const char* aoHd = std::getenv("DOL_AURORA_AO_HD"))
+     g_aoHd = aoHd[0] == '1';
+   g_aoHdRadius = env_float("DOL_AURORA_AO_HD_RADIUS", g_aoHdRadius, 0.f, 1.f);
+@@ -3785,6 +4006,13 @@ void shutdown() {
+     g_sunLowMipView[i][0] = g_sunLowMipView[i][1] = {};
+     g_sunLow[i] = {};
+   }
++  g_sunHistView = {};
++  g_sunHist = {};
++  g_sunHistValid = false;
++  g_sunTemporalPipeline = {};
++  g_sunTemporalPipelineLayout = {};
++  g_sunTemporalLayout = {};
++  g_sunTemporalModule = {};
+   g_sunLowSize = {};
+   g_sunMapModule = {};
+   g_sunMapPipelineLayout = {};
+-- 
+2.49.0.windows.1
+
