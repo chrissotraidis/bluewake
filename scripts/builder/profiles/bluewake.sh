@@ -48,7 +48,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # 0.10.0 pins the bluewake-next commit that merges #45, #48 and 0186-0192.
 # Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), on bluewake-next after 0.10.0: pin #49's head, fetched from upstream, until it merges.
 # SDL3's UIKit scene geometry (one app instance, external displays left to the system, orientation from the app's scene) in the vendored Aurora's SDL patch chain (RecompCore #60): patches/recompcore/0206; pin #60's head until it merges.
-# The game's depth copy read as GX_TF_Z16 (target 0xB), and steps for its depth of field and where it starts (RecompCore #61): patches/recompcore/0207-0208; pin #61's head until it merges.
+# The game's depth copy read as GX_TF_Z16 (target 0xB), and steps for its depth of field and where it starts (RecompCore #61): patches/recompcore/0207-0208; #61's head, merged into bluewake-next for 0.12.0.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
 RECOMPCORE_SHA=2159e88b10f1d4c77cfb67041382b623b4462205
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
