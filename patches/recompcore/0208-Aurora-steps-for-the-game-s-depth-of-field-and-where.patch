@@ -1,0 +1,542 @@
+From 2159e88b10f1d4c77cfb67041382b623b4462205 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 22:23:14 -0600
+Subject: [PATCH] Aurora: steps for the game's depth of field, and where it
+ starts
+
+Wind Waker's depth of field (drawDepth) draws a half-size copy of the
+whole EFB back over the distance. Copies are made at the render scale, so
+at 2x and up its blur shrank to a fraction of the game's; and where it
+starts is fixed by the game's focus.
+
+- aurora_set_game_dof (DOL_AURORA_GAME_DOF): how soft the blur is.
+  0 none (a full-size copy), 1 half the default's, 2 the default (as
+  before), 3 between, 4 the game's own blur at 1x at any render scale,
+  the copy blurred on the GPU (tex_copy_conv: a separable blur of the
+  colour copy, its strength from the scale).
+- aurora_set_game_dof_start (DOL_AURORA_GAME_DOF_START): how much
+  farther out it starts, 0 to 100. The game starts it at the camera's
+  focus or its room's PhotoDepth, as minus the depth's second byte m;
+  there the depth is about 1 - near/distance, so moving the start k
+  times as far out is m' = 256 - (256 - m) / k, with no near plane
+  needed, and it still follows the camera. k doubles about every 29
+  steps, to about 11 at 100 (farther showed no difference in a
+  full-screen 1x picture). The draw is found by its blend stage (a
+  second stage of ZERO, APREV, TEXA, A0, times 4, after a compare).
+
+Both start at the game's behaviour (step 2, start 0), so nothing changes
+unless a host sets them.
+---
+ .../graphics/aurora/include/aurora/aurora.h   |  14 ++
+ GXRuntime/graphics/aurora/lib/gfx/common.cpp  |  12 +-
+ GXRuntime/graphics/aurora/lib/gfx/common.hpp  |   3 +-
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   | 102 ++++++++-
+ .../graphics/aurora/lib/gfx/gxcore_draw.hpp   |   5 +
+ .../graphics/aurora/lib/gfx/tex_copy_conv.cpp | 215 ++++++++++++++++++
+ .../graphics/aurora/lib/gfx/tex_copy_conv.hpp |   3 +
+ 7 files changed, 349 insertions(+), 5 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/include/aurora/aurora.h b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+index b3671086cf..8fa47a24ad 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/aurora.h
++++ b/GXRuntime/graphics/aurora/include/aurora/aurora.h
+@@ -161,6 +161,20 @@ void aurora_set_forced_anisotropy(unsigned samples);
+    size and blended over it once, at render scales of 2 and up. Off by default;
+    takes effect for draws recorded after the change. */
+ void aurora_set_efficient_effects(bool on);
++/* The game's own depth of field (a half-size copy of the whole EFB drawn back
++   over the distance, as Wind Waker's): how soft it is. 0 no blur (a full-size
++   copy), 1 half the default's blur, 2 the default (the copy at half the render
++   size, as every copy), 3 between, 4 the game's own blur at 1x at any render
++   scale (the copy blurred on the GPU). Takes effect at the next copy.
++   DOL_AURORA_GAME_DOF sets the starting step. */
++void aurora_set_game_dof(int step);
++/* How much farther out that blur starts, 0 to 100: 0 leaves it where the game
++   puts it (its room's setting or the camera's focus, whichever is farther);
++   each step moves it farther by the same factor, twice as far at about 29 and
++   about 11 times at 100. As the game's own start follows the
++   camera, so does this. Takes effect at the next frame.
++   DOL_AURORA_GAME_DOF_START sets the starting value. */
++void aurora_set_game_dof_start(int start);
+ /* In-between frames: each finished frame is drawn a second time with every
+    draw's transforms blended halfway toward the previous frame and shown
+    first, so a 30 FPS game presents 60 frames a second with its own logic
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index efc151d07a..025ab59674 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -195,6 +195,10 @@ struct RenderPass {
+   GXTexFmt resolveFormat = GX_TF_RGBA8;
+   ClipRect resolveRect;
+   Range resolveUniformRange;
++  // A blur of the resolved copy (tex_copy_conv::blur), in its pixels, and how
++  // much of it replaces the sharp copy (the game's depth of field steps).
++  float resolveBlurSigma = 0.f;
++  float resolveBlurMix = 1.f;
+   Vec4<float> clearColorValue{0.f, 0.f, 0.f, 0.f};
+   float clearDepthValue = gx::UseReversedZ ? 0.f : 1.f;
+   wgpu::LoadOp colorLoadOp = wgpu::LoadOp::Undefined;
+@@ -880,12 +884,15 @@ PipelineRef pipeline_ref(const clear::PipelineConfig& config) {
+ }
+ 
+ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
+-                  Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat) {
++                  Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat, float blurSigma,
++                  float blurMix) {
+   // Resolve current render pass
+   auto& prevPass = current_render_passes()[g_currentRenderPass];
+   prevPass.resolveTarget = std::move(texture);
+   prevPass.resolveRect = rect;
+   prevPass.resolveFormat = resolveFormat;
++  prevPass.resolveBlurSigma = blurSigma;
++  prevPass.resolveBlurMix = blurMix;
+   // Push UV transform uniform for tex_copy_conv (crop region in UV space)
+   const auto srcW = static_cast<float>(prevPass.targetSize.width);
+   const auto srcH = static_cast<float>(prevPass.targetSize.height);
+@@ -2712,6 +2719,9 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+       };
+       cmd.CopyTextureToTexture(&src, &dst, &size);
+     }
++    if (!isDepth && (passInfo.resolveBlurSigma > 0.f || passInfo.resolveBlurMix < 1.f)) {
++      tex_copy_conv::blur(cmd, passInfo.resolveTarget, passInfo.resolveBlurSigma, passInfo.resolveBlurMix);
++    }
+   }
+ }
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 0ed46f3c53..81be09f278 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -260,7 +260,8 @@ float calculate_fps() noexcept;
+ // in-between frame); calculate_fps() counts every present.
+ float calculate_game_fps() noexcept;
+ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
+-                  Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat = GX_TF_RGBA8);
++                  Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat = GX_TF_RGBA8,
++                  float blurSigma = 0.f, float blurMix = 1.f);
+ 
+ struct ColorPassDescriptor {
+   const char* label = nullptr;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index ed13b4f88b..33e2b204b7 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -1623,6 +1623,17 @@ std::vector<uint8_t> read_efb_copy(const gxc::EfbCopyCommand& cmd) {
+       cmd.destination_height, rgba, texture->size.width, texture->size.height);
+ }
+ 
++// The game's depth of field step, 0 to 4 (copy_efb_to_texture); 2 leaves it as
++// every copy. DOL_AURORA_GAME_DOF sets the starting step.
++std::atomic<int> g_gameDofStep{[] {
++  const char* env = std::getenv("DOL_AURORA_GAME_DOF");
++  return env != nullptr && env[0] >= '0' && env[0] <= '4' && env[1] == '\0' ? env[0] - '0' : 2;
++}()};
++
++int game_dof_step() { return g_gameDofStep.load(std::memory_order_relaxed); }
++
++void set_game_dof_step(int step) { g_gameDofStep.store(std::clamp(step, 0, 4), std::memory_order_relaxed); }
++
+ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   // Mirror the copy-clear color/Z (BP 0x4F-0x51 at this copy) into the gx
+   // state GXSetCopyClear would have written: begin_frame's pass-0 EFB clear
+@@ -1660,6 +1671,8 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   // so a larger texture needs nothing else.
+   uint32_t dstWidth = std::max(cmd.destination_width, static_cast<uint32_t>(1));
+   uint32_t dstHeight = std::max(cmd.destination_height, static_cast<uint32_t>(1));
++  float blurSigma = 0.f; // the game's depth of field steps (below)
++  float blurMix = 1.f;
+   static const bool scale_copies = [] {
+     const char* env = std::getenv("DOL_GXCORE_COPY_SCALE");
+     return env == nullptr || env[0] != '0';
+@@ -1670,8 +1683,34 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+     if (logicalW != 0 && logicalH != 0 && targetW != 0 && targetH != 0) {
+       const float sx = static_cast<float>(targetW) / static_cast<float>(logicalW);
+       const float sy = static_cast<float>(targetH) / static_cast<float>(logicalH);
+-      dstWidth = std::max<uint32_t>(static_cast<uint32_t>(std::lround(dstWidth * sx)), 1u);
+-      dstHeight = std::max<uint32_t>(static_cast<uint32_t>(std::lround(dstHeight * sy)), 1u);
++      // The game's depth of field (Wind Waker's drawDepth) is a colour copy of
++      // the whole EFB at half its size, drawn back over the distance: the blur
++      // is that copy's lower resolution. Scaled as every copy, its pixels are
++      // half the render's, so the blur shrinks as the scale grows. The step
++      // (aurora_set_game_dof): 0 a full-size copy (sharp, no blur); 1 a
++      // full-size copy blurred about as the default and mixed half in; 2 as
++      // every copy (the default); 3 and 4 the half-size copy blurred further,
++      // to the game's own blur at 1x for 4 (half a pixel of its 320-wide copy,
++      // as box filter and bilinear stretch give) and halfway in scale for 3.
++      const int dofStep = game_dof_step();
++      const bool halfColour = (cmd.format & 0x10u) == 0u && cmd.width >= 512u &&
++                              cmd.destination_width * 2u == cmd.width && cmd.destination_height * 2u == cmd.height;
++      const float scale = std::max(1.f, std::min(sx, sy));
++      if (halfColour && dofStep <= 1) {
++        dstWidth = std::max<uint32_t>(static_cast<uint32_t>(std::lround(cmd.width * sx)), 1u);
++        dstHeight = std::max<uint32_t>(static_cast<uint32_t>(std::lround(cmd.height * sy)), 1u);
++        if (dofStep == 1) {
++          blurSigma = 1.f;
++          blurMix = 0.5f;
++        }
++      } else {
++        dstWidth = std::max<uint32_t>(static_cast<uint32_t>(std::lround(dstWidth * sx)), 1u);
++        dstHeight = std::max<uint32_t>(static_cast<uint32_t>(std::lround(dstHeight * sy)), 1u);
++        if (halfColour && dofStep >= 3) {
++          const float target = dofStep == 4 ? scale : 0.5f * (1.f + scale);
++          blurSigma = 0.5f * std::sqrt(std::max(target * target - 1.f, 0.f));
++        }
++      }
+     }
+   }
+ 
+@@ -1709,7 +1748,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+                                 static_cast<float>(cmd.clear_g) / 255.f,
+                                 static_cast<float>(cmd.clear_b) / 255.f,
+                                 static_cast<float>(cmd.clear_a) / 255.f},
+-                    clearDepthValue, fmt);
++                    clearDepthValue, fmt, blurSigma, blurMix);
+ }
+ 
+ // Uniform de-duplication across consecutive draws.
+@@ -2223,10 +2262,63 @@ static void dump_draw(const gxc::DrawPlan& plan) {
+                  plan.pixel_constants.kcolors[i][2], plan.pixel_constants.kcolors[i][3]);
+ }
+ 
++// The game's depth of field blends its blurred copy in over a short band of
++// depth: its second TEV stage takes the depth byte (TEXA) plus a negative
++// offset (A0), times 4 (Wind Waker's drawDepth). Whether a draw is that blend:
++// a ZERO, b APREV, c TEXA, d A0, add, times 4 (TevScale 2), after a compare
++// stage.
++bool game_dof_blend(const gxc::DrawPlan& plan) {
++  const auto& shader = plan.pipeline.shader;
++  if (shader.tev_valid == 0u || shader.num_tev_stages != 3u) {
++    return false;
++  }
++  const auto& blend = shader.tev_stages[1];
++  return blend.ac_a == 7u && blend.ac_b == 0u && blend.ac_c == 4u && blend.ac_d == 1u && blend.ac_bias == 0u &&
++         blend.ac_op == 0u && blend.ac_scale == 2u && shader.tev_stages[0].ac_bias == 3u;
++}
++
++// How much farther out the blur starts (0 to 100; aurora_set_game_dof_start).
++// The game starts it at its room's PhotoDepth or the camera's focus, whichever
++// is farther (drawDepth, with auto-focus in play), as minus the depth's second
++// byte m there (A0); past the depth's first byte reaching 255 the depth is
++// about 1 - near/distance, so the distance goes as 1 / (256 - m), and moving
++// the start k times as far out is m' = 256 - (256 - m) / k, with no near plane
++// needed. k doubles every 100/3.5 steps, to about 11 at 100 (farther made no
++// visible difference at a full-screen 1x picture). The full blur follows
++// the start out by the game's band. DOL_AURORA_GAME_DOF_START sets the
++// starting value.
++std::atomic<int> g_gameDofStart{[] {
++  const char* env = std::getenv("DOL_AURORA_GAME_DOF_START");
++  return env != nullptr ? std::clamp(std::atoi(env), 0, 100) : 0;
++}()};
++
++void set_game_dof_start(int start) { g_gameDofStart.store(std::clamp(start, 0, 100), std::memory_order_relaxed); }
++
++// The game's start (A0, minus the depth's second byte) moved `start` steps farther out.
++int pushed_dof_start(int a0, int start) {
++  const int m = std::clamp(-a0, 0, 256);
++  const double k = std::exp2(start * 3.5 / 100.0);
++  const int pushed = 256 - static_cast<int>(std::lround((256 - m) / k));
++  return -std::clamp(pushed, m, 256);
++}
++
++static bool submit_draw_plan_as_is(const gxc::DrawPlan& plan);
++
+ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+   if (!plan.ok || plan.vertex_count == 0 || plan.indices.empty()) {
+     return false;
+   }
++  const int start = g_gameDofStart.load(std::memory_order_relaxed);
++  if (start == 0 || !game_dof_blend(plan)) {
++    return submit_draw_plan_as_is(plan);
++  }
++  gxc::DrawPlan later = plan;
++  auto& a0 = later.pixel_constants.colors[1][3]; // TEVREG0 alpha: minus where the blur starts
++  a0 = pushed_dof_start(a0, start);
++  return submit_draw_plan_as_is(later);
++}
++
++static bool submit_draw_plan_as_is(const gxc::DrawPlan& plan) {
+   dump_draw(plan);
+ 
+   if (plan.viewport_valid) {
+@@ -3013,6 +3105,10 @@ void aurora_set_efficient_effects(bool on) {
+   aurora::gfx::gxcore::g_efficientEffects.store(on, std::memory_order_relaxed);
+ }
+ 
++void aurora_set_game_dof(int step) { aurora::gfx::gxcore::set_game_dof_step(step); }
++
++void aurora_set_game_dof_start(int start) { aurora::gfx::gxcore::set_game_dof_start(start); }
++
+ void aurora_set_forced_anisotropy(unsigned samples) {
+   aurora::gfx::gxcore::g_forcedAnisotropy.store(
+       static_cast<std::uint16_t>(std::clamp(samples, 1u, 16u)), std::memory_order_relaxed);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+index f85a37d20e..43c5a287a3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.hpp
+@@ -154,6 +154,11 @@ void render_sea_mask(const DrawData& data, const wgpu::RenderPassEncoder& pass);
+ // address samples the copied EFB instead of stale guest memory. Called by the
+ // GxCoreSink copy observer at the copy's stream position (pending draw flushed).
+ void copy_efb_to_texture(const gxruntime::gxcore::EfbCopyCommand& cmd);
++// The game's depth of field step (aurora_set_game_dof), 0 to 4.
++int game_dof_step();
++void set_game_dof_step(int step);
++// Where its blur starts at the nearest (aurora_set_game_dof_start), 0 to 255.
++void set_game_dof_start(int start);
+ // Submit a preserving frame segment, read the exact captured texture, and
+ // encode guest tiles. Recording thread only, with the FIFO worker drained.
+ std::vector<uint8_t> read_efb_copy(const gxruntime::gxcore::EfbCopyCommand& cmd);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp
+index d333571ad7..511e562cc9 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.cpp
+@@ -9,6 +9,9 @@
+ 
+ #include <absl/container/flat_hash_map.h>
+ 
++#include <algorithm>
++#include <cstring>
++
+ #include "texture_convert.hpp"
+ 
+ using namespace std::string_literals;
+@@ -488,7 +491,10 @@ void initialize() {
+   g_linearSampler = g_device.CreateSampler(&linearSamplerDescriptor);
+ }
+ 
++static void blur_shutdown();
++
+ void shutdown() {
++  blur_shutdown();
+   g_pipelines.clear();
+   g_blitPipeline = {};
+   g_bindGroupLayout = {};
+@@ -582,4 +588,213 @@ void run(const wgpu::CommandEncoder& cmd, const ConvRequest& req) {
+ 
+ void blit(const wgpu::CommandEncoder& cmd, const ConvRequest& req) { execute(cmd, req, g_blitPipeline); }
+ 
++// --- Blur of a colour copy (the game's depth of field steps) ------------------
++// Two passes over a whole-texture triangle, reading texels by position: across
++// into one scratch texture, then down into another, mixed there with the sharp
++// copy; the result is copied back over the copy.
++static constexpr std::string_view BlurShader = R"(
++@group(0) @binding(0) var src: texture_2d<f32>;
++@group(0) @binding(1) var sharp: texture_2d<f32>;
++struct BlurParams {
++    sigma: f32,
++    mix_amount: f32,
++    dir_x: i32,
++    dir_y: i32,
++};
++@group(0) @binding(2) var<uniform> params: BlurParams;
++
++var<private> positions: array<vec2f, 3> = array(
++    vec2f(-1.0, 1.0),
++    vec2f(-1.0, -3.0),
++    vec2f(3.0, 1.0),
++);
++
++@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
++    return vec4f(positions[vi], 0.0, 1.0);
++}
++
++@fragment fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
++    let size = vec2i(textureDimensions(src));
++    let p = vec2i(pos.xy);
++    let dir = vec2i(params.dir_x, params.dir_y);
++    let radius = min(i32(ceil(params.sigma * 3.0)), 48);
++    let k = -0.5 / (params.sigma * params.sigma);
++    var sum = vec4f(0.0);
++    var weights = 0.0;
++    for (var i = -radius; i <= radius; i++) {
++        let w = exp(f32(i * i) * k);
++        sum += textureLoad(src, clamp(p + dir * i, vec2i(0), size - vec2i(1)), 0) * w;
++        weights += w;
++    }
++    var c = sum / weights;
++    if (params.dir_y == 1) {
++        c = mix(textureLoad(sharp, p, 0), c, params.mix_amount);
++    }
++    return c;
++}
++)"sv;
++
++namespace {
++struct BlurScratch {
++  wgpu::Texture across;
++  wgpu::TextureView acrossView;
++  wgpu::Texture down;
++  wgpu::TextureView downView;
++  wgpu::Extent3D size;
++  wgpu::TextureFormat format = wgpu::TextureFormat::Undefined;
++};
++wgpu::BindGroupLayout g_blurLayout;
++absl::flat_hash_map<uint32_t, wgpu::RenderPipeline> g_blurPipelines; // by wgpu::TextureFormat
++BlurScratch g_blurScratch;
++
++const wgpu::RenderPipeline& blur_pipeline(wgpu::TextureFormat format) {
++  auto& pipeline = g_blurPipelines[static_cast<uint32_t>(format)];
++  if (pipeline) {
++    return pipeline;
++  }
++  if (!g_blurLayout) {
++    const std::array entries{
++        wgpu::BindGroupLayoutEntry{
++            .binding = 0,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .texture = wgpu::TextureBindingLayout{.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                                                  .viewDimension = wgpu::TextureViewDimension::e2D},
++        },
++        wgpu::BindGroupLayoutEntry{
++            .binding = 1,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .texture = wgpu::TextureBindingLayout{.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                                                  .viewDimension = wgpu::TextureViewDimension::e2D},
++        },
++        wgpu::BindGroupLayoutEntry{
++            .binding = 2,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .buffer = wgpu::BufferBindingLayout{.type = wgpu::BufferBindingType::Uniform},
++        },
++    };
++    const wgpu::BindGroupLayoutDescriptor layoutDescriptor{
++        .label = "Copy Blur Bind Group Layout",
++        .entryCount = entries.size(),
++        .entries = entries.data(),
++    };
++    g_blurLayout = g_device.CreateBindGroupLayout(&layoutDescriptor);
++  }
++  const wgpu::ShaderSourceWGSL wgslSource{wgpu::ShaderSourceWGSL::Init{.code = BlurShader.data()}};
++  const wgpu::ShaderModuleDescriptor moduleDescriptor{.nextInChain = &wgslSource, .label = "Copy Blur"};
++  const auto module = g_device.CreateShaderModule(&moduleDescriptor);
++  const std::array colorTargets{wgpu::ColorTargetState{.format = format}};
++  const wgpu::FragmentState fragmentState{
++      .module = module,
++      .entryPoint = "fs_main",
++      .targetCount = colorTargets.size(),
++      .targets = colorTargets.data(),
++  };
++  const wgpu::PipelineLayoutDescriptor pipelineLayoutDescriptor{
++      .bindGroupLayoutCount = 1,
++      .bindGroupLayouts = &g_blurLayout,
++  };
++  const wgpu::RenderPipelineDescriptor pipelineDescriptor{
++      .label = "Copy Blur",
++      .layout = g_device.CreatePipelineLayout(&pipelineLayoutDescriptor),
++      .vertex = wgpu::VertexState{.module = module, .entryPoint = "vs_main"},
++      .primitive = wgpu::PrimitiveState{.topology = wgpu::PrimitiveTopology::TriangleList},
++      .fragment = &fragmentState,
++  };
++  pipeline = g_device.CreateRenderPipeline(&pipelineDescriptor);
++  return pipeline;
++}
++
++void blur_scratch(const wgpu::Extent3D& size, wgpu::TextureFormat format) {
++  if (g_blurScratch.format == format && g_blurScratch.size.width == size.width &&
++      g_blurScratch.size.height == size.height) {
++    return;
++  }
++  const wgpu::TextureDescriptor descriptor{
++      .label = "Copy Blur Scratch",
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc,
++      .dimension = wgpu::TextureDimension::e2D,
++      .size = {size.width, size.height, 1},
++      .format = format,
++      .mipLevelCount = 1,
++      .sampleCount = 1,
++  };
++  g_blurScratch.across = g_device.CreateTexture(&descriptor);
++  g_blurScratch.acrossView = g_blurScratch.across.CreateView();
++  g_blurScratch.down = g_device.CreateTexture(&descriptor);
++  g_blurScratch.downView = g_blurScratch.down.CreateView();
++  g_blurScratch.size = {size.width, size.height, 1};
++  g_blurScratch.format = format;
++}
++
++void blur_pass(const wgpu::CommandEncoder& cmd, const wgpu::RenderPipeline& pipeline, const wgpu::TextureView& src,
++               const wgpu::TextureView& sharp, const wgpu::TextureView& target, float sigma, float mix, bool down) {
++  struct Params {
++    float sigma;
++    float mix;
++    int32_t dirX;
++    int32_t dirY;
++  } const params{sigma, mix, down ? 0 : 1, down ? 1 : 0};
++  const wgpu::BufferDescriptor bufferDescriptor{
++      .label = "Copy Blur Params",
++      .usage = wgpu::BufferUsage::Uniform,
++      .size = sizeof(Params),
++      .mappedAtCreation = true,
++  };
++  const auto buffer = g_device.CreateBuffer(&bufferDescriptor);
++  std::memcpy(buffer.GetMappedRange(), &params, sizeof(Params));
++  buffer.Unmap();
++  const std::array entries{
++      wgpu::BindGroupEntry{.binding = 0, .textureView = src},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = sharp},
++      wgpu::BindGroupEntry{.binding = 2, .buffer = buffer, .size = sizeof(Params)},
++  };
++  const wgpu::BindGroupDescriptor bindGroupDescriptor{
++      .layout = g_blurLayout,
++      .entryCount = entries.size(),
++      .entries = entries.data(),
++  };
++  const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
++  const std::array colorAttachments{wgpu::RenderPassColorAttachment{
++      .view = target,
++      .loadOp = wgpu::LoadOp::Clear,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  }};
++  const wgpu::RenderPassDescriptor passDescriptor{
++      .label = "Copy Blur Pass",
++      .colorAttachmentCount = colorAttachments.size(),
++      .colorAttachments = colorAttachments.data(),
++  };
++  const auto pass = cmd.BeginRenderPass(&passDescriptor);
++  pass.SetPipeline(pipeline);
++  pass.SetBindGroup(0, bindGroup);
++  pass.Draw(3);
++  pass.End();
++}
++} // namespace
++
++static void blur_shutdown() {
++  g_blurPipelines.clear();
++  g_blurLayout = {};
++  g_blurScratch = {};
++}
++
++void blur(const wgpu::CommandEncoder& cmd, const TextureHandle& texture, float sigma, float mix) {
++  if (!texture || !texture->texture) {
++    return;
++  }
++  const webgpu::gpu_prof::Zone zone{cmd, "EFB copy blur"};
++  sigma = std::max(sigma, 0.05f);
++  const auto& pipeline = blur_pipeline(texture->format);
++  blur_scratch(texture->size, texture->format);
++  blur_pass(cmd, pipeline, texture->sampleTextureView, texture->sampleTextureView, g_blurScratch.acrossView, sigma,
++            mix, false);
++  blur_pass(cmd, pipeline, g_blurScratch.acrossView, texture->sampleTextureView, g_blurScratch.downView, sigma, mix,
++            true);
++  const wgpu::TexelCopyTextureInfo from{.texture = g_blurScratch.down};
++  const wgpu::TexelCopyTextureInfo to{.texture = texture->texture};
++  const wgpu::Extent3D extent{texture->size.width, texture->size.height, 1};
++  cmd.CopyTextureToTexture(&from, &to, &extent);
++}
++
+ } // namespace aurora::gfx::tex_copy_conv
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp
+index 31aa804af2..db981a587e 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/tex_copy_conv.hpp
+@@ -25,5 +25,8 @@ void initialize();
+ void shutdown();
+ void run(const wgpu::CommandEncoder& cmd, const ConvRequest& req);
+ void blit(const wgpu::CommandEncoder& cmd, const ConvRequest& req);
++// Blur a colour copy in place: a Gaussian of `sigma` of its pixels, across then
++// down, and `mix` of the blurred result over the sharp copy (1 replaces it).
++void blur(const wgpu::CommandEncoder& cmd, const TextureHandle& texture, float sigma, float mix);
+ 
+ } // namespace aurora::gfx::tex_copy_conv
+-- 
+2.56.0.windows.4
+

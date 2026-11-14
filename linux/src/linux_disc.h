@@ -35,12 +35,18 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir,
 // a fresh folder there and remembers it. bw_disc_setup calls this, and so does
 // the setup window, which runs it on a thread so it can show the importer's
 // progress: the reports arrive through `progress` when it is not NULL, with
-// `context` as given. *already_prepared (when given) is 1 when the remembered
-// preparation was current and nothing had to be written. Returns 0 on success,
-// otherwise -1 with a sentence for the player in `error`.
+// `context` as given. `cancelled` (optional, with `cancel_context`) is the
+// setup window's Cancel: answering it stops the import between files, removes
+// what it wrote and the folder it made, and leaves the remembered preparation
+// as it was. *already_prepared (when given) is 1 when the remembered
+// preparation was current and nothing had to be written.
+// Returns 0 on success, 1 when the player cancelled, and -1 with a sentence for
+// the player in `error`.
 int bw_disc_prepare_into(const char* data_dir, const char* disc,
                          BlueWakeImportProgress progress, void* context,
-                         int* already_prepared, char* error, size_t error_size);
+                         BlueWakeImportCancelled cancelled,
+                         void* cancel_context, int* already_prepared,
+                         char* error, size_t error_size);
 #ifdef __cplusplus
 }
 #endif

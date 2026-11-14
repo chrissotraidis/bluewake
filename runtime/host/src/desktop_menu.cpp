@@ -12,6 +12,7 @@
 #include "button_remap.h"
 #include "controller_face_swap.h"
 #include "desktop_theme.h"
+#include "dolphin_save_menu.h"
 #include "fps_position.h"
 #include "input_remap.h"
 #include "menu_draw.h"
@@ -26,6 +27,8 @@
 // The host's modules are C.
 extern "C" {
 #include "climb.h"
+#include "letterbox.h"
+#include "opening.h"
 #include "dpad_menus.h"
 #include "fast_load.h"
 #include "forest_water.h"
@@ -64,6 +67,8 @@ void aurora_set_frame_interpolation(bool enabled);
 void aurora_set_frame_interp_steps(int steps);
 void aurora_set_fps_overlay(bool enabled);
 void aurora_set_forced_anisotropy(unsigned samples);
+void aurora_set_game_dof(int step);
+void aurora_set_game_dof_start(int start);
 }
 
 namespace bw_desktop {
@@ -92,6 +97,9 @@ const char* const kScaleShown[] = {"Window", "1x", "2x", "3x", "4x"};
 const char* const kScaleStored[] = {"0", "1", "2", "3", "4"};
 const char* const kAnisoShown[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
 const char* const kAnisoStored[] = {"1", "2", "4", "8", "16"};
+// The game's distance blur (aurora_set_game_dof's steps); Default is as before.
+const char* const kDistanceBlurShown[] = {"Off", "Light", "Default", "Strong", "GameCube"};
+const char* const kDistanceBlurStored[] = {"0", "1", "2", "3", "4"};
 // The HD look's sunlight and sun shadows, as HD's or softer (settings_table.h).
 const char* const kSunlightShown[] = {"As in HD", "Softer", "Much softer"};
 const char* const kSunlightStored[] = {"0.37", "0.3", "0.22"};
@@ -292,6 +300,8 @@ void apply_live() {
     read_menu_pauses();
     aurora_set_frame_buffer_scale(static_cast<float>(env_int("DOL_AURORA_RENDER_SCALE", 0)));
     aurora_set_forced_anisotropy(static_cast<unsigned>(env_int("DOL_AURORA_FORCE_ANISO", 1)));
+    aurora_set_game_dof(env_int("DOL_AURORA_GAME_DOF", 2));
+    aurora_set_game_dof_start(env_int("DOL_AURORA_GAME_DOF_START", 0));
     aurora_set_efficient_effects(env_on("DOL_AURORA_EFFICIENT_EFFECTS", false));
     refresh_smooth_rate();
     aurora_set_frame_interpolation(env_on("DOL_AURORA_FRAME_INTERP", false));
@@ -302,6 +312,8 @@ void apply_live() {
     bluewake_mouse_camera_reload();  // the mouse, both sticks, gyro and the mouse's buttons
     bluewake_haptics_reload();
     bluewake_climb_reload();
+    bluewake_letterbox_reload();
+    bluewake_opening_reload();
     bluewake_forest_water_reload();
     bluewake_hd_look_reload();
     bluewake_dpad_menus_reload();
@@ -332,6 +344,10 @@ void apply_now(const bw_settings::Setting& s) {
         aurora_set_frame_buffer_scale(static_cast<float>(std::atoi(value.c_str())));
     else if (std::strcmp(key, "DOL_AURORA_FORCE_ANISO") == 0)
         aurora_set_forced_anisotropy(static_cast<unsigned>(std::atoi(value.c_str())));
+    else if (std::strcmp(key, "DOL_AURORA_GAME_DOF") == 0)
+        aurora_set_game_dof(std::atoi(value.c_str()));
+    else if (std::strcmp(key, "DOL_AURORA_GAME_DOF_START") == 0)
+        aurora_set_game_dof_start(std::atoi(value.c_str()));
     else if (std::strcmp(key, "DOL_AURORA_EFFICIENT_EFFECTS") == 0)
         aurora_set_efficient_effects(value != "0");
     else if (std::strcmp(key, "BLUEWAKE_PAUSE_UNFOCUSED") == 0)
@@ -347,6 +363,10 @@ void apply_now(const bw_settings::Setting& s) {
         bluewake_fast_load_reload();
     else if (std::strcmp(key, "BLUEWAKE_CLIMB") == 0 || std::strcmp(key, "BLUEWAKE_CLIMB_STAMINA") == 0)
         bluewake_climb_reload();
+    else if (std::strcmp(key, "BLUEWAKE_NATIVE_CUTSCENE_FRAMING") == 0) {
+        bluewake_letterbox_reload();
+        bluewake_opening_reload();
+    }
     else if (std::strcmp(key, "BLUEWAKE_DPAD_MENUS") == 0)
         bluewake_dpad_menus_reload();
     // Everything the mouse, the sticks and gyro aiming do is read back together.
@@ -732,6 +752,12 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *count = 5;
         return true;
     }
+    if (std::strcmp(key, "DOL_AURORA_GAME_DOF") == 0) {
+        *shown = bw_desktop::kDistanceBlurShown;
+        *stored = bw_desktop::kDistanceBlurStored;
+        *count = 5;
+        return true;
+    }
     if (std::strcmp(key, "BLUEWAKE_HD_SUNLIGHT") == 0) {
         *shown = bw_desktop::kSunlightShown;
         *stored = bw_desktop::kSunlightStored;
@@ -802,11 +828,8 @@ void controls_tab() {
     ImGui::TextDisabled("Game controllers work as they are plugged in (Xbox, PlayStation, Switch Pro, ...).");
 }
 
-// Config: the sound's engine (next launch), this menu's own behaviour and
-// look, and where the saves, settings and logs are.
-void config_tab() {
-    bw_menu::draw_tab(bw_settings::Tab::Config);
-    ImGui::Spacing();
+// Where the saves, settings and logs are.
+void your_files() {
     ImGui::SeparatorText("Your files");
     std::string folder = data_dir();
     if (folder.empty() && !settings_path().empty())
@@ -828,6 +851,16 @@ void config_tab() {
         if (ImGui::Button("Open the session logs"))
             bw_platform::open_folder(logs);
     }
+}
+
+// Config: the sound's engine (next launch), this menu's own behaviour and
+// look, where the saves, settings and logs are, and Dolphin saves in and out.
+void config_tab() {
+    bw_menu::draw_tab(bw_settings::Tab::Config);
+    ImGui::Spacing();
+    your_files();
+    ImGui::Spacing();
+    bw_dolphin_save::controls(game_window());
 }
 
 // --- the overlays --------------------------------------------------------------

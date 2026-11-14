@@ -456,6 +456,7 @@ static bool bluewake_stage_select_going_back;
 static bool bluewake_stage_select_restore_time;
 static atomic_bool bluewake_stage_select_menu_open; // from its execute to its delete
 static bool bluewake_stage_select_used; // opened since this file started
+static bool bluewake_stage_select_read_in_game; // what a state's load read from the game
 
 // Opening the stage select from play turns saving off, which would lose
 // whatever the player has not saved yet, so a press there asks first: the
@@ -984,6 +985,7 @@ static inline void bluewake_stage_select_state_loaded(CPUState* cpu) {
     const u32 link = mem_read32(cpu, BLUEWAKE_STAGE_SELECT_LINK);
     bluewake_stage_select_in_game =
         stage[0] != '\0' && strcmp(stage, "sea_T") != 0 && link >= 0x80000000u && link < 0x81800000u;
+    bluewake_stage_select_read_in_game = bluewake_stage_select_in_game;
     bluewake_stage_select_kept = false;
     bluewake_stage_select_going_back = false;
     bluewake_stage_select_restore_time = false;
@@ -994,8 +996,18 @@ static inline void bluewake_stage_select_state_loaded(CPUState* cpu) {
     bluewake_stage_select_texts_done = false;
 }
 
-// After the state's own values (if it has them) are in.
+// After the state's own values (if it has them) are in. A state that says no
+// file is going while the game in it is in play was taken with the stage select
+// off, when nothing watched the file start (the title and the file select both
+// read as no file above): the game wins, and nothing is kept.
 static inline void bluewake_stage_select_state_report(void) {
+    if (!bluewake_stage_select_in_game && bluewake_stage_select_read_in_game) {
+        bluewake_stage_select_in_game = true;
+        bluewake_stage_select_kept = false;
+        bluewake_stage_select_going_back = false;
+        bluewake_stage_select_restore_time = false;
+        bluewake_stage_select_used = bluewake_card_runtime_writes_refused();
+    }
     if (bluewake_stage_select_live)
         fprintf(stderr, "[stage-select] state loaded: %s%s\n",
                 bluewake_stage_select_in_game ? "a file is going, F7 opens the stage select" : "no file started yet",

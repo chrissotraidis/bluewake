@@ -62,6 +62,8 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/climb.c
     ${BLUEWAKE_HOST_SRC}/save_state.c
     ${BLUEWAKE_HOST_SRC}/sprint.c
+    ${BLUEWAKE_HOST_SRC}/letterbox.c
+    ${BLUEWAKE_HOST_SRC}/opening.c
     ${BLUEWAKE_HOST_SRC}/quick_doors.c
     ${BLUEWAKE_HOST_SRC}/haptics.c
     ${BLUEWAKE_HOST_SRC}/draw_tags.c
@@ -74,6 +76,8 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
     ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
     ${BLUEWAKE_HOST_SRC}/texture_pack_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/dolphin_save_menu.cpp
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/dolphin_save_import.c
     ${BLUEWAKE_HOST_SRC}/wwhd/formats.cpp
     ${BLUEWAKE_HOST_SRC}/wwhd/addrlib.cpp
     ${BLUEWAKE_HOST_SRC}/wwhd/hd.cpp
@@ -300,6 +304,14 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     set_target_properties(bluewake_disc_space_test PROPERTIES LINKER_LANGUAGE CXX)
     add_test(NAME bluewake_disc_space_test COMMAND bluewake_disc_space_test)
     set_tests_properties(bluewake_disc_space_test PROPERTIES TIMEOUT 30)
+
+    add_executable(bluewake_disc_import_cancel_test
+        ${BLUEWAKE_REPO_ROOT}/tests/disc_import_cancel_test.c)
+    target_include_directories(bluewake_disc_import_cancel_test PRIVATE
+        ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
+    set_target_properties(bluewake_disc_import_cancel_test PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME bluewake_disc_import_cancel_test COMMAND bluewake_disc_import_cancel_test)
+    set_tests_properties(bluewake_disc_import_cancel_test PROPERTIES TIMEOUT 60)
 
     add_executable(bluewake_disc_import_stages_test
         ${BLUEWAKE_REPO_ROOT}/tests/disc_import_stages_test.c

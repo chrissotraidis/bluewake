@@ -34,6 +34,7 @@ option faster_ballad       13 on  Faster Ballad of Gales
 option invert_camera_x     14 off Invert camera left and right
 option reveal_sea_chart    15 off Reveal the full sea chart (new games)
 option sea_compass         16 off Correct the sea compass (east and west)
+option hd_triforce         17 off Shorter Triforce quest, as in Wind Waker HD
 
 # Instant text: every message draws at once and its timed waits are dropped
 # (native: the message data is patched in memory once it is loaded), and holding
@@ -155,3 +156,13 @@ site 0x8005B2CC reveal_sea_chart insn 0x38800001 # li r4, 0 -> 1
 # compass rose, so the rose turns the opposite way to the boat. North and south
 # still line up; east and west are swapped.
 site 0x801FD37C sea_compass insn 0x60000000 # neg r0, r0: the heading's sign
+
+# Shorter Triforce quest (BlueWake's own; Better Wind Waker has no such
+# setting): as in Wind Waker HD, the chests that held Triforce Charts 2, 4, 6,
+# 7 and 8 (the Cabana, the Ghost Ship, Savage Labyrinth floor 30, the Stone
+# Watcher and Overlook caves) hold their Triforce Shards instead, so only
+# Charts 1, 3 and 5 still need Tingle and a salvage. Native: daTbox_c::
+# actionOpenWait reads the chest's item from its params into r4 just before
+# fopAcM_createItemForTrBoxDemo, and the hook swaps chart for shard there, so
+# the game shows the shard's own get-item demo.
+hook d_a_tbox.rel+0x2764 hd_triforce after 6     # rlwinm r4, r0, 24, 24, 31: the chest's item
