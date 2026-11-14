@@ -37,7 +37,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
-    "DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION",
+    "BLUEWAKE_DOLPHIN_SAVE_FOLDER", "DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION",
 };
 
 // Each platform's rules, as the menus had them in code before the table held
@@ -53,7 +53,8 @@ static const char* const kFilledEverywhere[] = {"BLUEWAKE_DSP_MODE", "BLUEWAKE_J
 static const char* const kWindowsOnly[] = {"DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION"};
 static const char* const kNotFilled[] = {"DOL_AURORA_FORCE_ANISO", "BLUEWAKE_MENU_PLACE",
                                          "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
-                                         "DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION"};
+                                         "BLUEWAKE_DOLPHIN_SAVE_FOLDER", "DOL_AURORA_WINDOW",
+                                         "BLUEWAKE_WINDOW_POSITION"};
 
 template <size_t N> static bool listed(const char* const (&list)[N], const char* key) {
     for (const char* k : list)

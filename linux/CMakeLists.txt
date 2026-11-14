@@ -74,6 +74,8 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
     ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
     ${BLUEWAKE_HOST_SRC}/texture_pack_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/dolphin_save_menu.cpp
+    ${BLUEWAKE_REPO_ROOT}/apple/ios/src/dolphin_save_import.c
     ${BLUEWAKE_HOST_SRC}/wwhd/formats.cpp
     ${BLUEWAKE_HOST_SRC}/wwhd/addrlib.cpp
     ${BLUEWAKE_HOST_SRC}/wwhd/hd.cpp
