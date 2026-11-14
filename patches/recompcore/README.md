@@ -273,3 +273,11 @@ Patch 0206 adds the SDL3 UIKit scene-geometry correction shared with the other S
 application scene it started in, leaves an external display's scene to the system (mirroring or an extended display),
 adopts a replacement scene if iOS discards the first, and takes orientation from that scene's effectiveGeometry instead
 of statusBarOrientation, which reads as unknown in scene apps on iOS 27.
+
+Patch 0207 reads a depth copy with target 0xB as GX_TF_Z16, which is how GXSetTexCopyDst writes it. The frontend sent
+it to GX_TF_Z24X8, so Wind Waker's depth of field (drawDepth), whose blend reads the depth's second byte from the Z16
+copy's alpha, read 255 there and blurred everything but the nearest pixels: at sea, Link and the boat with only the
+King of Red Lions' nose sharp. The frontend test now triggers a Z16 copy. Patch 0208 adds aurora_set_game_dof (how
+soft that blur is: off, light, the default, strong, and the game's own 1x blur at any render scale, its copy blurred
+on the GPU) and aurora_set_game_dof_start (0 to 100: the start moved farther out by a factor of the game's own, which
+follows the camera's focus, about eleven times as far at 100). Both start as the game has them.

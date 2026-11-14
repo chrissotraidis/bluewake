@@ -186,6 +186,20 @@ inline constexpr Setting kSettings[] = {
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_FORCE_ANISO", .old_windows = "anisotropy", .kind = Kind::Int, .fallback = "1", .low = 1.f,
      .high = 16.f, .label = "Texture filtering", .control = Control::Chooser, .fill = Os::None},
+    // The game's own distance blur (aurora_set_game_dof): at render scales
+    // above 1x it fades, since its half-size copy of the picture is made at the
+    // render scale. Default leaves it so; GameCube gives its 1x blur at any
+    // scale, Off takes it away.
+    {.key = "DOL_AURORA_GAME_DOF", .kind = Kind::Choice, .fallback = "2", .label = "Distance blur",
+     .control = Control::Chooser,
+     .note = "How soft the game blurs what is far away. Strong and GameCube matter at render scales above 1x."},
+    // Where that blur starts (aurora_set_game_dof_start): 0 as the game puts it,
+    // each step farther out by the same factor, about 11 times as far at 100.
+    {.key = "DOL_AURORA_GAME_DOF_START", .kind = Kind::Int, .fallback = "0", .high = 100.f,
+     .label = "Distance blur starts", .control = Control::Slider,
+     .note = "0 starts the blur where the game does, just past what the camera looks at. Each step moves it farther "
+             "out: twice as far at 29, four times at 57, about eleven times at 100.",
+     .needs = "DOL_AURORA_GAME_DOF", .shown = "%.0f", .stored = "%.0f"},
     {.key = "BLUEWAKE_MODS", .old_windows = "betterww", .label = "Better Wind Waker", .tab = Tab::Mods,
      .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_OPTIONS", .tab = Tab::Mods, .next_launch = Os::All}, // Windows: option.NAME
