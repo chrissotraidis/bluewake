@@ -5467,10 +5467,21 @@ static bool host_graphics_guest_resolve_uncached(
     // look it up at the linked address it came from: Molgera's sand floor
     // (d_a_bwdg's GFSetArray of its texture coordinates) was skipped every
     // frame and the arena had no floor (issue #126).
+    //
+    // A texture or palette's address reaches GX through SETIMAGE3 or
+    // LOADTLUT0, which hold only bits 5-25: a module's texture at 0xC1856760
+    // (d_a_obj_tapestry's cloth, Earth Temple) arrives as 0x01856760. MEM1
+    // past the retail 24 MiB holds no GX data (the callback sentinel and the
+    // raw REL staging window), so such an address is a module's linked
+    // address with its top bits dropped: look it up at 0xC0000000 | address.
+    // Not from module 1 (0x81F80000) on: it sits in RAM there, and its
+    // alias holds other bytes (its relocated pointers) than that RAM.
     {
-        const u32 linked = (address & 0xC0000000u) == 0x40000000u
-                               ? address | 0x80000000u
-                               : address;
+        u32 linked = (address & 0xC0000000u) == 0x40000000u
+                         ? address | 0x80000000u
+                         : address;
+        if (address >= GC_MAIN_RAM_SIZE && address < (BLUEWAKE_DYNAMIC_SCRATCH_LIMIT & 0x3FFFFFFFu))
+            linked = address | 0xC0000000u;
         u8* alias = NULL;
         u32 alias_offset = 0u;
         // The translation worker's thread: see g_guest_alias_lock.
