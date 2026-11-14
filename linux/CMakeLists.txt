@@ -301,6 +301,14 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     add_test(NAME bluewake_disc_space_test COMMAND bluewake_disc_space_test)
     set_tests_properties(bluewake_disc_space_test PROPERTIES TIMEOUT 30)
 
+    add_executable(bluewake_disc_import_cancel_test
+        ${BLUEWAKE_REPO_ROOT}/tests/disc_import_cancel_test.c)
+    target_include_directories(bluewake_disc_import_cancel_test PRIVATE
+        ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
+    set_target_properties(bluewake_disc_import_cancel_test PROPERTIES LINKER_LANGUAGE CXX)
+    add_test(NAME bluewake_disc_import_cancel_test COMMAND bluewake_disc_import_cancel_test)
+    set_tests_properties(bluewake_disc_import_cancel_test PROPERTIES TIMEOUT 60)
+
     add_executable(bluewake_disc_import_stages_test
         ${BLUEWAKE_REPO_ROOT}/tests/disc_import_stages_test.c
         ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c)

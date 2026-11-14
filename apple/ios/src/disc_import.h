@@ -16,6 +16,11 @@ extern "C" {
 typedef void (*BlueWakeImportProgress)(void* context, double fraction,
                                        const char* stage);
 
+// Returns non-zero when the player has asked to stop the import. Called between
+// the entries of the disc's file table and between the members of its RELS.arc,
+// so a cancel lands within a few files instead of at the end of the import.
+typedef int (*BlueWakeImportCancelled)(void* context);
+
 // Checks the disc header: GameCube magic and the GZLE01 id. Returns 0 on
 // success, otherwise writes a sentence for the user into error.
 int bluewake_disc_check(const char* iso_path, char* error, size_t error_size);
@@ -37,10 +42,16 @@ int bluewake_disc_space_verdict(const char* out_dir, int64_t needed,
 
 // Checks the disc, verifies main.dol's SHA-1 against USA rev 0, and writes
 // out_dir/main.dol and out_dir/rels/*.rel. Existing outputs are replaced only
-// after everything was written. Returns 0 on success.
+// after everything was written. `cancelled` (optional) is asked between files:
+// when it answers non-zero the import stops, its temporary files and any partial
+// output are removed, and out_dir is left as it was.
+//
+// Returns 0 on success, 1 when the import was cancelled, and -1 on a failure
+// with a sentence for the player in `error`.
 int bluewake_disc_prepare(const char* iso_path, const char* out_dir,
                           BlueWakeImportProgress progress, void* context,
-                          char* error, size_t error_size);
+                          BlueWakeImportCancelled cancelled,
+                          void* cancel_context, char* error, size_t error_size);
 
 #ifdef __cplusplus
 }
