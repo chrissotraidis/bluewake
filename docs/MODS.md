@@ -9,6 +9,7 @@ effect the next time BlueWake starts, and none of them changes your saves.
 | Widescreen 16:9 | The community 16:9 code (Dolphin's GZLE01 Gecko code): a wider field of view with the HUD placed for 16:9, letterboxed on a 4:3 iPad | Nothing; it is built in |
 | Widescreen 16:10 | The same code with its aspect-dependent values recomputed for 16:10 (Mac displays, most iPads' shape is closer to it); one widescreen mod at a time | Nothing; it is built in |
 | Widescreen 21:9 | The same code recomputed for 21:9 ultrawide desktop displays (Windows, Linux, Mac) | Nothing; it is built in |
+| Native cutscene framing | In widescreen, cutscenes fill the screen instead of a strip between black bars, as Wind Waker HD shows them, and the opening legend keeps its shape instead of being stretched (Windows, Linux, Mac) | Nothing; it is built in |
 | HD Textures | Replaces the game's textures with a Dolphin-format pack, such as [Hypatia's HD pack](https://forums.dolphin-emu.org/Thread-hypatia-s-tloz-the-wind-waker-hd-pack-v2-0001a) or [the textures from your own Wind Waker HD disc](WWHD_TEXTURES.md) | The pack's `tex1_…` images: on iPhone and iPad in `Documents/BlueWake/Load/Textures/GZLE01` (Install Texture Pack… copies them there); on the desktop, any folder picked with Choose texture pack folder… |
 | Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart. With them, BlueWake's own sea compass switch: on, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD | Nothing; it is built in |
 
@@ -30,6 +31,19 @@ At 21:9 the picture is no taller than 4:3's, so the follow camera starts one whe
 (`BLUEWAKE_CAMERA_DISTANCE`, 1.12 there and 1 otherwise; the wheel still moves it from there). At the default 3× render resolution 16:9
 renders 2560×1440 and 16:10 2304×1440 (the 4:3 picture's height, widened), so the game's letterbox bars line up with the scene;
 if an older device struggles, 2× renders 1707×960.
+
+**Native cutscene framing:** on Mac, Windows and Linux, turn it on in **F1 › Mods**; it takes effect at once.
+The game's cutscene bars are a scissor in `camera_draw`: `mTrimHeight` lines at the top and bottom of the
+480-line picture, eased in a quarter of the way each frame. With the switch on, `camera_draw` sees no trim and
+the camera's vertical view narrows to the band the bars would have left, so the picture zooms in where the bars
+would come in. At 16:9 that is what 4:3 showed between the bars; wider screens show a little more at the sides,
+never less than 4:3's width. It only works in widescreen: at 4:3 cutscenes keep their bars, and so does the
+telescope at any width. The game's values go back before the camera's next update, and before a save state is
+written. In widescreen it also unstretches the opening legend: Dolphin's 16:9 code has the legend's screen draw
+with no 2D port (`li r4,0` at `0x80234528`), so it fills the window stretched, text and all; with the switch on,
+that draw gets the game's widened port, and the 4:3 panels sit between black sides.
+`BLUEWAKE_NATIVE_CUTSCENE_FRAMING=1` sets it; `BLUEWAKE_LETTERBOX_TRACE=1` and `BLUEWAKE_LEGEND_TRACE=1` log what
+each part does.
 
 **HD textures:** download a Dolphin-format pack for GZLE01. On the iPad, Hypatia's *Android-Lite* build
 (3× resolution, about 530 MB of PNG files) fits comfortably; the full-size PC builds need several GB of
