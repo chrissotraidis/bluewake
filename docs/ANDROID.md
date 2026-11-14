@@ -75,8 +75,9 @@ Adreno), game controllers on Android (they go through SDL, as on Windows), the H
     passed with `--llvm`
   - **macOS (Intel or Apple silicon):** Xcode's command line tools (`xcode-select --install`), Rust (`cargo`,
     which builds `nodtool` to convert an `.rvz`), and `brew install cmake ninja`. No `--llvm`. The NDK's macOS
-    toolchain is a universal binary and runs natively. Builds from an `.rvz` or an `.iso`. Linux hosts take the
-    same path in the code but are untested.
+    toolchain is a universal binary and runs natively. Builds from an `.rvz` or an `.iso`.
+  - **Linux:** Docker, and nothing else: `--ci-container` builds in the Android build container below. The native
+    host path is the same code as the Mac's, but the container is what has been run on Linux.
   - Python 3.10+, Git, CMake 3.25+ (Ninja from the Android SDK's CMake is used if none is on PATH)
 - The Android SDK with the NDK (r27 or newer), build-tools and a platform, and a JDK 17
 - An arm64 Android device on Android 10 (API 29) or newer with Vulkan 1.1. The APK declares API 29, but the
@@ -124,6 +125,7 @@ The steps and their logs (`build/android/logs`) are the Windows builder's, then:
 | `--app-only` | Reuse the compiled game module; rebuild the app and the APK. The module's options are recorded beside it when it is compiled (`composite/module.json`); a request for other module options, behaviour timing either way for one, stops before anything is changed |
 | `--no-mods`, `--source-only` | As the Windows builder's |
 | `--debuggable` | Mark the APK debuggable (it is always profileable by `simpleperf`) |
+| `--ci-container` | Build in the Android build container: no clang, CMake, JDK, Android SDK or NDK on this machine (below) |
 
 **Optimization training on the device.** With `--device SERIAL` the builder does what the Windows builder's
 training does, on the phone: it compiles an instrumented game module (`-O0`, `-fprofile-instr-generate`, a few
@@ -165,6 +167,31 @@ The direct-call gate from #552 is built into every module but stays closed unles
 2. Install with the gate open: `python scripts/android/install.py --env BLUEWAKE_DIRECT_GATE=1`. That writes the setting to `files/launch.env`, which the app reads when it starts. Install again with `--env ''` to clear it.
 
 Neither has been measured on Android yet.
+
+## Build in a container (no toolchain on this machine)
+
+With Docker on a Linux host, `--ci-container` builds the APK in the project's Android build container instead of
+with the toolchain installed on the machine: no clang, CMake, ninja, JDK or Android SDK has to be there, and the
+toolchain is one pinned set of versions rather than the newest each piece your SDK happens to hold.
+
+```bash
+python3 scripts/android/build.py PATH/TO/GZLE01.iso --out build/android --ci-container
+```
+
+The first run builds `bluewake-android-ci:local` from `scripts/android/Dockerfile` (a few minutes, mostly the JDK
+and the NDK), and later runs reuse the image. It holds Clang, CMake and ninja, JDK 17, and the Android SDK with
+build-tools 36.0.0, platform android-36 and NDK r29. Those versions are `ARG`s at the top of the Dockerfile, so
+moving the toolchain is a one-line diff. `ANDROID_HOME` and `JAVA_HOME` are set in the image, so `--sdk`, `--ndk`
+and `--jdk` are not needed — and are refused with `--ci-container`, since those paths are the host's and would not
+exist in the mount.
+
+The builder mounts this checkout and the output directory writable and the disc read-only, runs as your user, and
+re-runs the same command inside: the Linux host's `scripts/linux/build.py --ci-container` does exactly this. The
+APK, the game files and the logs land in the same places as a host build, owned by you.
+
+Training needs the phone, which the container does not see: train on the host (`--device`, `--train-app`) and pass
+the profile to a container build with `--profile`. On Windows use the toolchain steps above; on Apple silicon the
+image runs under emulation, so a build takes much longer.
 
 ## Install
 
