@@ -64,6 +64,8 @@ add_executable(bluewake_host
     src/wwhd/disc_image.cpp
     src/wwhd/wiiu_disc.cpp
     src/sprint.c
+    src/letterbox.c
+    src/opening.c
     src/quick_doors.c
     src/haptics.c
     src/draw_tags.c

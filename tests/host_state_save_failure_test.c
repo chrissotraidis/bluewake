@@ -34,6 +34,7 @@ static u8* aram_buffer(void) { return NULL; }
 static u64 host_state_now_us(void) { return 1; }
 static void host_state_fields_update(void) {}
 static size_t dol_aurora_gx_save_state(void** data) { *data = NULL; return 0; }
+static void bluewake_letterbox_state_saving(CPUState* cpu) { (void)cpu; }
 static void host_state_header(HostStateHeader* header, CPUState* cpu, const StaticRecompModuleDesc* mod) {
     (void)cpu; (void)mod; header->cpu_pod_size = sizeof(u32);
 }
