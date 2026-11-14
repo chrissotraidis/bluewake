@@ -1,0 +1,74 @@
+From d3030152ef6f645455ff447e12d7dbeec760c6b3 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Fri, 13 Nov 2026 21:51:59 -0600
+Subject: [PATCH] Frontend: a depth copy with target 0xB is GX_TF_Z16, as
+ GXSetTexCopyDst writes it
+
+---
+ .../graphics/frontend/src/retail_gx_frontend.cpp      |  1 +
+ .../graphics/frontend/tests/frontend_replay_test.cpp  | 11 ++++++++---
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+index 26170205ef..e8e60103ef 100644
+--- a/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
++++ b/GXRuntime/graphics/frontend/src/retail_gx_frontend.cpp
+@@ -186,6 +186,7 @@ std::uint32_t copy_trigger_texture_format(std::uint32_t value, bool is_depth) {
+     case 0x8:
+       return 0x11; // GX_TF_Z8 (top 8 bits)
+     case 0x3:
++    case 0xB: // GXSetTexCopyDst writes GX_TF_Z16 as target 0xB (RG8)
+       return 0x13; // GX_TF_Z16
+     case 0x9:
+       return 0x39; // GX_CTF_Z8M (middle 8 bits)
+diff --git a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+index 85c85e6d89..ad65ece5f9 100644
+--- a/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
++++ b/GXRuntime/graphics/frontend/tests/frontend_replay_test.cpp
+@@ -947,6 +947,9 @@ int main() {
+   push_bp(display_list, DOL_GX_BP_REG_TRIGGER_EFB_COPY, 14u << 3u);
+   push_bp(display_list, DOL_GX_BP_REG_PE_CONTROL, 0x3u);
+   push_bp(display_list, DOL_GX_BP_REG_TRIGGER_EFB_COPY, 12u << 3u);
++  // GXSetTexCopyDst writes GX_TF_Z16 as target 7 (format 0xB): Wind Waker's
++  // depth of field (drawDepth) copies its depth so.
++  push_bp(display_list, DOL_GX_BP_REG_TRIGGER_EFB_COPY, 7u << 3u);
+   push_u8(display_list, DOL_GX_CMD_INVL_VC);
+   push_xf(display_list, 0x1008u, 0x12345678u);
+   push_indexed_xf(display_list, 0x20u, 1u, 0x0000u, 12u);
+@@ -1003,7 +1006,8 @@ int main() {
+   {
+     // Copy formats reconstructed from the three triggers: target 2 ->
+     // GX_CTF_R8 (0x28), target 14 -> GX_CTF_A8 (0x27, EFB alpha channel),
+-    // target 12 under PE_CONTROL Z24 -> GX_TF_Z24X8 (0x16, depth source).
++    // target 12 under PE_CONTROL Z24 -> GX_TF_Z24X8 (0x16, depth source),
++    // target 7 under Z24 -> GX_TF_Z16 (0x13).
+     std::vector<std::uint32_t> copy_formats;
+     std::vector<std::uint32_t> copy_dimensions;
+     std::vector<std::uint32_t> copy_source_dimensions;
+@@ -1015,12 +1019,13 @@ int main() {
+                                          ev.copy_src_height);
+       }
+     }
+-    assert(copy_formats.size() == 5u);
++    assert(copy_formats.size() == 6u);
+     assert(copy_formats[0] == 0x28u);
+     assert(copy_formats[1] == 0x28u);
+     assert(copy_formats[2] == 0x28u);
+     assert(copy_formats[3] == 0x27u);
+     assert(copy_formats[4] == 0x16u);
++    assert(copy_formats[5] == 0x13u);
+     assert(copy_dimensions[0] == ((8u << 16u) | 8u));
+     assert(copy_dimensions[1] == ((4u << 16u) | 4u));
+     assert(copy_dimensions[2] == ((4u << 16u) | 4u));
+@@ -1095,7 +1100,7 @@ int main() {
+     assert(consume_sink.bound_texture().size == 128u);
+ 
+     assert(consume_sink.texture_count() == 1u);
+-    assert(consume_sink.copy_count() == 5u); // R8 x3 + A8 + Z24X8 triggers
++    assert(consume_sink.copy_count() == 6u); // R8 x3 + A8 + Z24X8 + Z16 triggers
+     assert(consume_sink.indexed_span_count() == 1u);
+     assert(consume_sink.tlut_count() >= 1u);
+ 
+-- 
+2.56.0.windows.4
+
