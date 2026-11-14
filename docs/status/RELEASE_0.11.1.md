@@ -4,7 +4,7 @@ The record for 0.11.1: what it contains, the exact artifacts, and every check wi
 [0.11.0](RELEASE_0.11.0.md), November 8. Only Chris publishes.
 
 **Status, November 14, 2026:** frozen; the Apple-side artifacts are built, gated and on the v0.11.1 draft with
-`SHA256SUMS`. Open before publishing: PadMint's player check with the release checkout (line 5), a decision on
+`SHA256SUMS`, and PadMint's player check with the release checkout passed. Open before publishing: a decision on
 Windows and Linux builds, and a physical TV and controller check on an iPad.
 
 ## The release
@@ -48,7 +48,7 @@ name the 0.11.0 files and keep working either way.
 | 2 | Windows tasks | Not applicable | Nothing in 0.11.1 changes Windows; no Windows build was made |
 | 3 | What changed for PadMint | Passed | `git diff v0.11.0 -- padmint.json` is empty; `check_padmint_catalog.py`: recipe and PadMint both offer macos-arm64, windows-arm64, windows-x86_64 |
 | 4 | Artifacts | Passed | Above |
-| 5 | PadMint player check, with the checkout | **Open** | Started twice on November 14 (PadMint `93ace90`, Apple Python 3.9.6, empty folder, `a41f80c` and the release IPA) and stopped during local training both times to keep the build Mac's free disk above its floor. Not a failure; it has to pass before tagging |
+| 5 | PadMint player check, with the checkout | Passed | PadMint `main` `93ace90` (0.6.5), Apple Python 3.9.6, an empty PadMint folder, a clean clone of `a41f80c`, the release IPA and the GZLE01 disc: passed in 7,854 s (2 h 11 min), with local training. Its record names `a41f80c`, 0.11.1 build 11, status completed, checkout check before-record-passed, publication personal-only (correct). Two earlier runs that day were stopped during local training for the build Mac's free disk, not failures. The personal build went to the private iPad install queue and the check folder was deleted |
 | 6 | Player-facing text | Passed | No README or guide promises 0.11.1; the Windows and Linux links name 0.11.0's files |
 | 7 | `SHA256SUMS` | Passed | From the draft's downloads; `shasum -c` passes |
 | 8–12 | After publishing | Not started | |
