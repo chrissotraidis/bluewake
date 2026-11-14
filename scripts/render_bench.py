@@ -3,7 +3,8 @@
 
   python3 scripts/render_bench.py collect OUT_DIR --app A=APP [--app B=APP ...] [--states DIR] [--card CARD]
                                   [--pairs 2] [--runs 3] [--warmup 0] [--headless] [--retraces 1800] [--every 300]
-                                  [--display auto|headless|desktop] [--size WxH] [--cache ~/bluewake-render]
+                                  [--display auto|headless|desktop|gamemode] [--steam-game-id ID] [--size WxH]
+                                  [--cache ~/bluewake-render]
                                   [--cpu-profile] [--set-build A:KEY=VALUE ...]
   python3 scripts/render_bench.py make-state STATE.bwstate --app APP --warp stage:room:point [--card CARD]
                                   [--time noon] [--settle 180]
@@ -22,10 +23,20 @@ named after its file (1-outset.bwstate is "1-outset"): a run loads it and plays 
 
 Runs. With one build, --runs runs. With multiple builds, each --pairs round runs them forward then in reverse
 (A/B/C/C/B/A), so a slow drift (heat, battery) affects them alike; --warmup runs of each first are not measured.
-Every run is unpaced (as fast as it can), with the perf log,
+Every run is unpaced (as fast as it can; with --paced, held to the game's own rate, as played), with the perf log,
 guest checkpoints every 300 retraces and, rendered, Aurora's GPU profiler. Rendered (the default) runs under
 headless gamescope when there is one; --headless runs without a renderer (BLUEWAKE_RENDERER=headless), as
 scripts/bench_tour.py --mode headless does.
+
+Game Mode (--display gamemode --steam-game-id ID, Steam Deck): headless gamescope leaves out what the player's
+screen costs (gamescope compositing to the panel, the Steam overlay's Vulkan layer), and at a busy view that can
+be the difference between a held 30 and 26. With gamemode, each run is started through a Steam shortcut in the
+running Game Mode session, as the player starts it. One-time setup: add a non-Steam shortcut whose target is
+CACHE/gamemode-target.sh (written by the first collect; CACHE is --cache), and pass its game id (the
+SteamGameId of a game started from it, or steam://rungameid/ID). Each run writes its variables to
+CACHE/gamemode.env, starts the shortcut, waits for the game to exit and takes the session log as the run's log;
+the env file is removed after each run, so the shortcut does nothing on its own. The screen shows the runs, and
+the Deck's controls must be left alone while they play.
 
 Numbers, as scripts/bench_tour.py takes them: per scene, the first 300 retraces are skipped and the rest averaged
 (game frames a second are the [perf] rate halved). A build's number for a scene is the median over its runs; its
@@ -114,9 +125,73 @@ def per_build_settings(values, builds):
     return result
 
 
-def launcher(app, folder, mode, size, name):
-    """APP for rendered_run.py: the app itself, or a script that starts it under headless gamescope."""
+GAMEMODE_TARGET = """#!/bin/sh
+# The Steam shortcut target for render_bench --display gamemode. It only starts a game while a run's variables
+# are in {env} (render_bench writes it for each run and removes it after); started on its own, it does nothing.
+[ -f '{env}' ] || {{ echo "render_bench: no run waiting ({env})" >&2; exit 1; }}
+. '{env}'
+exec "$BLUEWAKE_BENCH_APP" "$@"
+"""
+
+GAMEMODE_RUN = """#!/bin/sh
+# One render_bench run in Game Mode: this run's variables go to {env}, Steam starts the shortcut {game_id}
+# (target {target}), and the game's session log becomes this run's log (this script's output).
+python3 - '{env}.part' <<'PY'
+import os, shlex, sys
+keys = sorted(k for k in os.environ if k.startswith(("BLUEWAKE_", "DOL_")) or k == "SDL_AUDIO_DRIVER")
+with open(sys.argv[1], "w") as out:
+    out.writelines(f"export {{k}}={{shlex.quote(os.environ[k])}}\\n" for k in keys)
+    out.write("export BLUEWAKE_BENCH_APP=" + shlex.quote({app!r}) + "\\n")
+PY
+mv '{env}.part' '{env}'
+trap "rm -f '{env}'" EXIT
+if pgrep -x bluewake >/dev/null; then echo "render_bench: another BlueWake is running" >&2; exit 1; fi
+start=$(date +%s)
+# The player's home, not the run's data folder: the steam command finds the running client through it.
+HOME='{home}' steam "steam://rungameid/{game_id}" >/dev/null 2>&1 &
+i=0
+until pgrep -x bluewake >/dev/null; do
+    i=$((i + 1))
+    [ $i -gt 120 ] && {{ echo "render_bench: the shortcut did not start BlueWake in 60 s" >&2; exit 1; }}
+    sleep 0.5
+done
+rm -f '{env}'
+while pgrep -x bluewake >/dev/null; do
+    if [ $(( $(date +%s) - start )) -gt {limit} ]; then
+        echo "render_bench: still running after {limit} s, stopping" >&2
+        pkill -x bluewake
+        sleep 3
+    fi
+    sleep 0.5
+done
+log=$(ls -t "$BLUEWAKE_DATA_DIR"/logs/session-*.log 2>/dev/null | head -1)
+[ -n "$log" ] && cat "$log"
+"""
+
+
+def gamemode_target(cache):
+    """The shortcut target and its env file in CACHE; the target is written once (its path is the shortcut's)."""
+    cache.mkdir(parents=True, exist_ok=True)
+    env, target = cache / "gamemode.env", cache / "gamemode-target.sh"
+    text = GAMEMODE_TARGET.format(env=env)
+    if not target.exists() or target.read_text() != text:
+        target.write_text(text)
+        target.chmod(0o755)
+    return target, env
+
+
+def launcher(app, folder, mode, size, name, gamemode=None):
+    """APP for rendered_run.py: the app itself, or a script that starts it under headless gamescope or, in Game
+    Mode, through the Steam shortcut (GAMEMODE: game id, target, env file, run limit in seconds)."""
     app = Path(app).resolve()
+    if mode == "gamemode":
+        game_id, target, env, limit = gamemode
+        folder.mkdir(parents=True, exist_ok=True)
+        script = folder / f"{name}-gamemode.sh"
+        script.write_text(GAMEMODE_RUN.format(app=str(app), env=env, target=target, game_id=game_id, limit=limit,
+                                               home=Path.home()))
+        script.chmod(0o755)
+        return script
     if mode != "headless":
         return app
     w, _, h = size.partition("x")
@@ -270,17 +345,30 @@ def collect(args):
     out.mkdir(parents=True, exist_ok=True)
     env = environment(mode)
     # The tour's state is made rendered (the stage select's warp), even for a --headless benchmark.
-    shown = mode if mode != "none" else display_mode(args.display, False)
+    shown = mode if mode not in ("none", "gamemode") else display_mode("auto", False)
     maker = launcher(apps[-1][1], out / "launch", shown, size, f"{apps[-1][0]}-make")
     scenes, tour_start, failed = scenes_and_states(args, environment(shown), maker)
     if failed:
         print(f"render_bench: {failed}", file=sys.stderr)
         return 2
-    runners = {name: launcher(app, out / "launch", mode, size, name) for name, app in apps}
+    gamemode = None
+    if mode == "gamemode":
+        if not args.steam_game_id:
+            print("render_bench: --display gamemode needs --steam-game-id", file=sys.stderr)
+            return 2
+        if subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode != 0:
+            print("render_bench: --display gamemode needs Steam running (Game Mode)", file=sys.stderr)
+            return 2
+        target, env_file = gamemode_target(Path(args.cache).expanduser())
+        print(f"render_bench: Game Mode runs through Steam shortcut {args.steam_game_id}, whose target must be "
+              f"{target}", flush=True)
+        gamemode = (args.steam_game_id, target, env_file, args.timeout)
+    runners = {name: launcher(app, out / "launch", mode, size, name, gamemode) for name, app in apps}
     stops = bench_tour.DEFAULT_STOPS
     collected = {"host": socket.gethostname(), "machine": platform.platform(), "gpu": gpu_name(),
-                 "mode": "headless" if args.headless else "rendered",
+                 "mode": "headless" if args.headless else "rendered", "paced": bool(args.paced),
                  "display": {"headless": f"headless gamescope {size}",
+                             "gamemode": "Steam Game Mode (gamescope on the panel, Steam overlay)",
                              "desktop": "a window" if sys.platform in ("darwin", "win32") else "desktop session",
                              "none": "no renderer"}[mode],
                  "builds": builds, "apps": {name: app.name for name, app in apps},
@@ -337,7 +425,9 @@ def collect(args):
                 options += ["--set", "BLUEWAKE_RENDERER=headless"]
             if not capture:
                 # Unpaced and without vsync (on X11 it is on by default, and holds the game at 60 frames a second).
-                options += ["--unpaced", "--set", "BLUEWAKE_VSYNC=0"] + ([] if args.headless else ["--gpu-prof"])
+                # --paced measures as played: held to the game's rate, so a full GPU shows as lost frames.
+                options += ([] if args.paced else ["--unpaced", "--set", "BLUEWAKE_VSYNC=0"]) + \
+                    ([] if args.headless else ["--gpu-prof"])
                 if profile:
                     # Each scene in this log from 300 retraces in (as FPS is measured) to a little before its end,
                     # so perf has detached before the next warp or the game's exit.
@@ -618,6 +708,7 @@ def analyze(out, build_paths, into=None):
                               f"{first_run['index']} ({first_run['build']}) at retrace {at}")
     counts = sorted({len(points) for found in checkpoints.values() for _, points in found})
     summary = {key: collected[key] for key in ("host", "machine", "gpu", "mode", "display", "kind", "retraces")}
+    summary["paced"] = collected.get("paced", False)
     summary.update(builds=builds, measured=len(measured),
                    warmups=sum(not r["measured"] and not r["captured"] and not r.get("profiled")
                                for r in collected["runs"]),
@@ -715,7 +806,8 @@ def report_blocks(summary):
     scenes = "the benchmark tour's five stops" if summary["kind"] == "tour" else \
         f"{len(summary['states'])} save state(s), {summary['retraces']} retraces each"
     method = [f"{summary['host']}: {summary['machine']}; GPU {summary['gpu'] or 'unknown'}",
-              f"{summary['mode'].capitalize()} ({summary['display']}), unpaced, vsync off, {scenes}",
+              f"{summary['mode'].capitalize()} ({summary['display']}), "
+              f"{'paced, as played' if summary.get('paced') else 'unpaced, vsync off'}, {scenes}",
               f"{summary['measured']} measured runs"
               + (f" ({', '.join(f'{v} of {k}' for k, v in summary['runs_per_build'].items())}), "
                  f"interleaved {'/'.join(builds)}/{'/'.join(reversed(builds))}" if multiple else "")
@@ -946,6 +1038,8 @@ def main():
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--warmup", type=int, default=0)
     p.add_argument("--headless", action="store_true")
+    p.add_argument("--paced", action="store_true",
+                   help="measure paced, as played (held to the game's own rate), instead of unpaced")
     p.add_argument("--cpu-profile", action="store_true",
                    help="profile measured scenes with Linux perf; do not use their FPS as benchmark results")
     p.add_argument("--set-build", action="append", default=[], metavar="BUILD:KEY=VALUE",
@@ -953,7 +1047,8 @@ def main():
     p.add_argument("--retraces", type=int, default=STOP_RETRACES)
     p.add_argument("--every", type=int, default=300)
     p.add_argument("--timeout", type=int, default=1200)
-    p.add_argument("--display", choices=("auto", "headless", "desktop"), default="auto")
+    p.add_argument("--display", choices=("auto", "headless", "desktop", "gamemode"), default="auto")
+    p.add_argument("--steam-game-id", help="with --display gamemode: the Steam shortcut's game id")
     p.add_argument("--size")
     p = sub.add_parser("make-state")
     p.add_argument("state", help="the state file to write, e.g. states/2-windfall.bwstate")
