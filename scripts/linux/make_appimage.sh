@@ -59,6 +59,9 @@ if [ -f "$app/initial_pipeline_cache.db" ]; then
 fi
 mkdir -p "$appdir/usr/bin/dsp"
 cp "$app/dsp/dsp_rom.bin" "$app/dsp/dsp_coef.bin" "$appdir/usr/bin/dsp/"
+# The stage select's English names, beside the executable as the builders put
+# them (linux_entry.c looks there); without them the menu is in Japanese.
+cp -R "$root/config/stage_select" "$appdir/usr/bin/stage_select"
 cp "$app/gGZLE01_recomp.so" "$appdir/usr/bin/gGZLE01_recomp.so"
 
 # Shared libraries the host links, minus the glibc/libstdc++ baseline. Bundling

@@ -108,6 +108,12 @@ jobs:
                 build/appimage-ci/BlueWake-CI-Fixture-x86_64.AppImage 2.39
               build/appimage-ci/BlueWake-CI-Fixture-x86_64.AppImage --help
               test -s build/appimage-ci/BlueWake-CI-Fixture-x86_64.AppImage.zsync
+              # The stage select reads its English names beside the executable.
+              names=$(mktemp -d)
+              (cd "$names" && /src/build/appimage-ci/BlueWake-CI-Fixture-x86_64.AppImage --appimage-extract \
+                "usr/bin/stage_select/*" >/dev/null)
+              cmp "$names/squashfs-root/usr/bin/stage_select/names.tsv" config/stage_select/names.tsv
+              rm -rf "$names"
             '
           # The synthetic module only proves that packaging and ABI checks work.
           # This non-playable fixture is deliberately not uploaded as an artifact.
