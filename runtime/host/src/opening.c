@@ -47,6 +47,10 @@ void bluewake_opening_hook(CPUState* cpu) {
     if (port < 0x80000000u || port >= 0x81800000u)
         return;
     cpu->gpr[4] = port;
+    // J2DScreen::mbClipToParent (J2DScreen.h, 0xCC): the screen clips to its own
+    // bounds, 640x480 mapped through the port's ortho box, the 4:3 middle; its
+    // draw ends by putting the port's own scissor back (ctx.setScissor()).
+    mem_write8(cpu, cpu->gpr[3] + 0xCCu, 1u);
     static bool logged;
     if (g_trace && !logged) {
         logged = true;

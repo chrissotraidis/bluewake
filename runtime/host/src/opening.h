@@ -12,8 +12,11 @@
 // r4,0 at 0x80234528, before dScnOpen_proc_c::proc_draw's J2DScreen::draw), so
 // it makes its own 640x480 one over the whole window and the legend fills the
 // screen stretched, text and all. With Native cutscene framing on, that draw is
-// handed the game's widened port back, so the legend keeps its shape between
-// black sides. See opening.c.
+// handed the game's widened port back, so the legend keeps its shape, and the
+// screen clips to its own 640x480, so the sides stay black as at 4:3: the
+// legend's layout is a scroll wider and taller than the screen, whose black
+// bands are only the screen's width, and through the whole widened port its
+// text columns showed past them. See opening.c.
 //
 //   BLUEWAKE_NATIVE_CUTSCENE_FRAMING=1       on (off by default; letterbox.h)
 //   BLUEWAKE_LEGEND_TRACE=1       log the first draw it hands the port to
