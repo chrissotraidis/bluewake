@@ -353,10 +353,12 @@ std::string free_space_in(const std::string& folder) {
 }
 
 struct Job {
-    enum State { Running = 0, Succeeded = 1, Failed = 2 };
+    enum State { Running = 0, Succeeded = 1, Failed = 2, Cancelled = 3 };
 
     SDL_Thread* thread = nullptr;
     std::atomic<int> state{Running};
+    // The window's Cancel: the importer samples it between files.
+    std::atomic<bool> cancel{false};
     std::atomic<int> stage{BW_IMPORT_STAGE_CHECK};
     std::atomic<int> permille{0};   // the running stage's own progress, 0..1000
     std::mutex lock;                // guards the strings and the log
@@ -467,12 +469,25 @@ void report_progress(void* context, double fraction, const char* stage) {
     static_cast<Job*>(context)->report(stage, fraction);
 }
 
+// The importer's cancel hook: the setup window's Cancel button, read between the
+// files the import writes.
+int cancel_requested(void* context) {
+    return static_cast<Job*>(context)->cancel.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
 int SDLCALL prepare_thread(void* data) {
     auto* job = static_cast<Job*>(data);
     job->note("checking " + job->disc);
     char error[1024] = "";
-    if (bw_disc_prepare_into(job->data_dir.c_str(), job->disc.c_str(), report_progress, job,
-                             &job->already_prepared, error, sizeof error) != 0) {
+    const int prepared = bw_disc_prepare_into(
+        job->data_dir.c_str(), job->disc.c_str(), report_progress, job,
+        cancel_requested, job, &job->already_prepared, error, sizeof error);
+    if (prepared == 1) {
+        job->note("cancelled; what it had unpacked was removed");
+        job->state.store(Job::Cancelled);
+        return 0;
+    }
+    if (prepared != 0) {
         job->fail(error[0] != '\0' ? error : "The disc image could not be prepared.");
         return 0;
     }
@@ -667,6 +682,8 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
     bool show_log = false;
     std::unique_ptr<Job> job;
     bool done = false, start = false;
+    // The form's line: a failure in red, the player's own cancel in amber.
+    bool message_failed = false;
 
     while (!done) {
         SDL_Event event;
@@ -700,6 +717,7 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
                 copy_text(install, sizeof install, picker.path);
                 validate_install(install, install_status, install_valid);
             } else if (picked_result < 0) {
+                message_failed = true;
                 message = std::string("The XDG file dialog failed: ") +
                           (picker.error[0] ? picker.error : SDL_GetError());
             }
@@ -713,7 +731,17 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
                 SDL_WaitThread(job->thread, nullptr);
                 job->thread = nullptr;
             }
-            if (job->state.load() == Job::Succeeded) screen = Screen::Ready;
+            const int finished = job->state.load();
+            if (finished == Job::Succeeded) {
+                screen = Screen::Ready;
+            } else if (finished == Job::Cancelled) {
+                // Back to the form with the answers still in it, so Start can
+                // run again; the cancelled folder is gone, not half written.
+                message_failed = false;
+                message = "The preparation was cancelled; nothing was left in the install folder.";
+                job.reset();
+                screen = Screen::Form;
+            }
         }
 
         ImGui_ImplSDLRenderer3_NewFrame();
@@ -816,7 +844,9 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
             else
                 ImGui::TextDisabled("Optional: a Dolphin-format pack's GZL or GZLE01 folder. "
                                     "You can also drag an ISO/GCM onto this window.");
-            if (!message.empty()) ImGui::TextColored(kFailed, "%s", message.c_str());
+            if (!message.empty())
+                ImGui::TextColored(message_failed ? kFailed : ImVec4(1.f, .65f, .25f, 1.f),
+                                   "%s", message.c_str());
 
             begin_bottom_row(style);
             constexpr float kStartWidth = 130.0f, kQuitWidth = 90.0f;
@@ -829,6 +859,7 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
                 std::error_code ec;
                 fs::create_directories(fs::path(install), ec);
                 if (!fs::is_directory(fs::path(install), ec)) {
+                    message_failed = true;
                     message = std::string("The install folder could not be created: ") +
                               (ec ? ec.message() : "not a folder");
                 } else {
@@ -845,6 +876,7 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
                 job->started = std::chrono::steady_clock::now();
                 job->thread = SDL_CreateThread(prepare_thread, "bw-setup", job.get());
                 if (job->thread == nullptr) {
+                    message_failed = true;
                     message = std::string("The preparation could not start: ") + SDL_GetError();
                     job.reset();
                 } else {
@@ -882,15 +914,21 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
                     screen = Screen::Form;
                 }
             } else {
-                // The importer has no abort hook yet, so the preparation runs to
-                // its end; a few seconds is shorter than recovering from a
-                // half-written one.
-                ImGui::BeginDisabled();
-                ImGui::Button("Cancel", ImVec2(110.0f, 0.0f));
+                // Cancel is answered between the files the import writes: it
+                // stops within a few of them, removes what it unpacked, and the
+                // window returns to the form.
+                const bool stopping = job->cancel.load();
+                ImGui::BeginDisabled(stopping);
+                if (ImGui::Button("Cancel##preparing", ImVec2(110.0f, 0.0f)))
+                    job->cancel.store(true);
                 ImGui::EndDisabled();
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                    ImGui::SetTooltip("The game files are prepared once and this takes a few seconds, "
-                                      "so the preparation finishes before the window closes.");
+                if (stopping) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("Stopping...");
+                } else if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Stops the preparation and removes what it had unpacked. "
+                                      "The disc and the install folder are remembered.");
+                }
             }
         } else if (job != nullptr) {
             ImGui::TextUnformatted("Ready");

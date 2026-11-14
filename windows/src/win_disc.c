@@ -341,7 +341,8 @@ static int unpack(Work* work) {
 }
 
 static int prepare(Work* work) {
-    return bluewake_disc_prepare(work->disc, work->out, note_progress, work, work->error, sizeof work->error);
+    return bluewake_disc_prepare(work->disc, work->out, note_progress, work, NULL, NULL,
+                                 work->error, sizeof work->error);
 }
 
 // The explanation, then Windows' file picker. 1 and the chosen path, or 0
