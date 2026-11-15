@@ -164,17 +164,33 @@ needs the setup window on a Linux desktop; it is not checked here.
 
 ## Results
 
+Completed November 15, 2026 on Chris's Windows 11 PC (Ryzen 7 5700U, AMD Radeon graphics), with Ubuntu in WSL for Linux. Chris directed accepting the changes and finishing the build despite this PC's benchmark variance. The 3% speed gate is **waived, not passed**. These are automated runtime, native UI and captured-frame checks; Chris did not perform the requested hands-on visual acceptance.
+
 | | |
 | --- | --- |
-| Commit built | |
-| Build time, jobs, clang, RecompCore, provenance, rename retry | |
-| Module SHA-256 | |
-| Speed: 0.11.0 and 0.12.0 per stop, checkpoints | |
-| a. Start and look | |
-| b. Distance blur | |
-| c. Module art | |
-| d. Cutscene framing | |
-| e. Dolphin saves | |
-| f. Save states | |
-| Zip SHA-256, uploaded to the v0.12.0 draft | |
-| AppImage: build time, clang, audit line, stage select names, headless start, SHA-256, uploaded | |
+| Commit built | Clean freeze `df9e46fe0be5c0f95d46a3b194f59a4b96186640`, version 0.12.0, build 12; both platforms |
+| Build time, jobs, clang, RecompCore, provenance, rename retry | Windows: 80m14s, six jobs, clang 22.1.3; RecompCore `2159e88b10f1d4c77cfb67041382b623b4462205`. Fresh local training, `fp_checks: true`, `direct_gate_training: true`, clean source provenance and matching module hash. App optimization profile used. No rename retry or WinError 5 stop. Desktop PowerShell used process-only `-ExecutionPolicy Bypass` because its execution policy blocked the launcher script; no persistent policy change |
+| Module SHA-256 | `59f1231f53cb3f085c3db3c86eb0540e3ab74337894e459646d4713ae2eec33f` |
+| Speed: 0.11.0 and 0.12.0 per stop, checkpoints | Four four-run sets completed. Each loaded all five stops; all 31 checkpoints matched within and across versions, including cycles, MEM1, MEM2 and aliases. Final set, with Plex stopped, is below. Outset was 4.27% slower: Chris waived the speed gate rather than repeat it again. Results do not establish a regression cause |
+| a. Start and look | Scripted Outset movement/camera run from imported quest log 3: 137s, exit 0, 12 captured frames, 29.97 game FPS, D3D12, draw fusion and gate on, no fatal lines. No human two-minute visual acceptance claimed |
+| b. Distance blur | All five prescribed rendered variants exited 0 with seven captures each. Reviewed 3x captures show the stronger GameCube distance blur and sharp Link, with Off sharper in the distance. The 1x pair was closely matched in this view; it does not prove the full expected before/after softness. Sailing with zoom and moving the slider by hand remain unchecked |
+| c. Module art | Both version pairs exited 0. Earth Temple captures confirm red/gold banner cloth in 0.12.0 versus noisy purple in 0.11.0, with surrounding scene closely matched. Ship warp reached the deck, but the sail was outside the captured view; sail art remains unverified |
+| d. Cutscene framing | On/off rendered runs exited 0. This progressed card's forest warp did not trigger Tetra's cutscene, so the captures do not verify the black-bar change |
+| e. Dolphin saves | Native UI automation exported a 98,368-byte GCI, displayed Link with six hearts and 180 rupees, imported source quest log 1 into empty Quest Log 3, made a 98,412-byte backup and restarted BlueWake. A separate rendered run loaded imported quest log 3 at Outset and ran scripted movement/camera input for 137s, exit 0. Only copied cards used; original card and tour-state hashes unchanged. RAW/damaged GCI cases and Dolphin's own import UI not tested |
+| f. Save states | Native UI: F5 saved in play with stage select off; next launch with stage select on, F8 before starting a file restored play (161 host fields, none missing/mismatched). Log says `state loaded: a file is going`; F7 asked, then a second F7 opened stage select. Passed this regression case |
+| Zip SHA-256, uploaded to the v0.12.0 draft | `3ff3915f5c893539a0ce9f1052d769d8c984826b140c907a61166508e6dc58b9` — `BlueWake-v0.12.0-windows-x64.zip`; uploaded, GitHub digest matches |
+| AppImage: build time, clang, audit line, stage select names, headless start, SHA-256, uploaded | 2h02m58s, six jobs, clang 22.1.8. `appimage audit: 14 ELF files; maximum GLIBC_2.38; no private game files`. Extracted stage names match source byte for byte. Empty-data headless launch reached `title-ready` at retrace 328, gate on, exit 0 and no fatal lines. SHA-256 `d1cc82d1e173719f1da41cabbee53a18227c35c44498134fe4319768acd60a6a` — `BlueWake-v0.12.0-linux-x86_64.AppImage`; uploaded, GitHub digest matches. Linux graphical gameplay and setup Cancel not tested |
+
+Final four-run set (0.11.0, 0.12.0, 0.12.0, 0.11.0), mean benchmark rates; higher is faster:
+
+| Stop | 0.11.0 | 0.12.0 | Change |
+| --- | ---: | ---: | ---: |
+| Outset | 63.49165 | 60.78075 | -4.27% |
+| Windfall | 65.82630 | 66.67725 | +1.29% |
+| Dragon Roost Cavern | 86.89725 | 85.44170 | -1.68% |
+| Forest Haven | 58.44040 | 57.80000 | -1.10% |
+| Sea | 66.00985 | 65.88370 | -0.19% |
+
+Packaging used the repository allowlist/private-file and DLL-dependency checks, with dependency license paths pointed at this build's own dependency directory. Portable test data was moved to private storage before packaging. The generated source ZIP and checksums stayed local; the existing three Apple/source draft assets were preserved. No logs, frames, discs or saves were uploaded or committed.
+
+The existing v0.12.0 release remains a draft. This completes the Windows/WSL build handoff; the Mac's external release-content gate and Chris's publication decision remain outstanding, as assigned above. The visual coverage gaps are recorded rather than counted as passes.
