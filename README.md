@@ -56,7 +56,7 @@ How the move happened and what's left of it: [migration status](docs/MIGRATION_S
 
 ### Windows
 
-1. Download [`BlueWake-v0.11.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.11.0/BlueWake-v0.11.0-windows-x64.zip)
+1. Download [`BlueWake-v0.12.0-windows-x64.zip`](https://github.com/chrissotraidis/bluewake/releases/download/v0.12.0/BlueWake-v0.12.0-windows-x64.zip)
    from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play:
    you don't need PadMint or a Mac.
 2. Unpack the whole ZIP and run `BlueWake.exe`.
@@ -69,7 +69,7 @@ GPU gets Direct3D 11 instead of a black screen (not yet checked on such a PC). I
 
 ### Linux
 
-1. Download [`BlueWake-v0.11.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.11.0/BlueWake-v0.11.0-linux-x86_64.AppImage)
+1. Download [`BlueWake-v0.12.0-linux-x86_64.AppImage`](https://github.com/chrissotraidis/bluewake/releases/download/v0.12.0/BlueWake-v0.12.0-linux-x86_64.AppImage)
    from the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest). It is ready to play,
    and built to run on SteamOS too.
 2. Make it executable (`chmod +x`, or Properties › Permissions in the Deck's desktop mode) and run it.
@@ -326,15 +326,13 @@ Dolphin's **Tools › Memory Card Manager**.
   in; the app backs up your current card first. Dolphin `.raw` cards work too. **Export Dolphin Save…**, in
   the same menu, goes the other way: it writes all three of your quest logs out as a `.gci` Dolphin can open,
   and only reads your card.
-- **Windows, Mac and Linux:** BlueWake 0.12.0, not released yet, adds **Config › Dolphin saves** to the
-  menu (Esc). **Import Dolphin
+- **Windows, Mac and Linux:** open the menu (Esc), then **Config › Dolphin saves** (since 0.12.0). **Import Dolphin
   Save...** asks for the `.gci` or `.raw`, then which quest log to bring in and where to put it; your current
   card is copied to `Backups` beside it first, and BlueWake restarts (the Mac app closes) so the save loads.
   **Export Dolphin Save...** writes your three quest logs out as a `.gci` and only reads your card. Both open
   in the folder you last picked or saved a Dolphin save in. Renaming a `.gci` to `.card` will not work.
-  Until 0.12.0, source users can use the [save helper](tests/dolphin_save_import_cli.c), which uses the
-  same code as iOS: `inject` puts a Dolphin save into your card and `export` writes your card out as a
-  `.gci`.
+  From a source checkout, the [save helper](tests/dolphin_save_import_cli.c) does the same from the command
+  line: `inject` puts a Dolphin save into your card and `export` writes your card out as a `.gci`.
 
 </details>
 

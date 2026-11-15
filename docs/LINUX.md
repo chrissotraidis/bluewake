@@ -326,7 +326,7 @@ it under the Linux release exception, after it passes the release asset check:
 ### Run the AppImage
 
 The [latest release](https://github.com/chrissotraidis/bluewake/releases/latest) has a ready-made AppImage
-(`BlueWake-v0.11.0-linux-x86_64.AppImage` in 0.11.0); these steps work for it and for one you built.
+(`BlueWake-v0.12.0-linux-x86_64.AppImage` in 0.12.0); these steps work for it and for one you built.
 
 1. Make the AppImage executable (you only need to do this once):
 
