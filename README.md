@@ -326,11 +326,15 @@ Dolphin's **Tools › Memory Card Manager**.
   in; the app backs up your current card first. Dolphin `.raw` cards work too. **Export Dolphin Save…**, in
   the same menu, goes the other way: it writes all three of your quest logs out as a `.gci` Dolphin can open,
   and only reads your card.
-- **Windows, Mac and Linux:** open the menu (Esc), then **Config › Dolphin saves**. **Import Dolphin
+- **Windows, Mac and Linux:** BlueWake 0.12.0, not released yet, adds **Config › Dolphin saves** to the
+  menu (Esc). **Import Dolphin
   Save...** asks for the `.gci` or `.raw`, then which quest log to bring in and where to put it; your current
   card is copied to `Backups` beside it first, and BlueWake restarts (the Mac app closes) so the save loads.
   **Export Dolphin Save...** writes your three quest logs out as a `.gci` and only reads your card. Both open
   in the folder you last picked or saved a Dolphin save in. Renaming a `.gci` to `.card` will not work.
+  Until 0.12.0, source users can use the [save helper](tests/dolphin_save_import_cli.c), which uses the
+  same code as iOS: `inject` puts a Dolphin save into your card and `export` writes your card out as a
+  `.gci`.
 
 </details>
 
