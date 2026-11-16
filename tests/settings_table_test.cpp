@@ -19,7 +19,9 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_HD_LOOK", "BLUEWAKE_HD_DISTANT_ISLANDS", "BLUEWAKE_HD_AO",
     "BLUEWAKE_HD_CLOUD_SHADOWS", "BLUEWAKE_HD_EDGE_LIGHT", "BLUEWAKE_HD_TORCH_LIGHT", "BLUEWAKE_HD_FAR_BLUR", "BLUEWAKE_HD_BLOOM",
     "BLUEWAKE_HD_CLOUDS", "BLUEWAKE_HD_SKY", "BLUEWAKE_HD_SKY_MODELS", "BLUEWAKE_HD_SKY_LINEAR", "BLUEWAKE_HD_SUNLIGHT",
-    "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "DOL_AURORA_SHOW_FPS", "BLUEWAKE_PERF_OVERLAY",
+    "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "BLUEWAKE_HD_LIGHT", "BLUEWAKE_HD_LIGHT_SHADOWS",
+    "BLUEWAKE_HD_LIGHT_CHARACTERS", "BLUEWAKE_HD_LIGHT_BLOOM", "BLUEWAKE_HD_LIGHT_AO", "BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS",
+    "BLUEWAKE_HD_LIGHT_RIM", "BLUEWAKE_HD_LIGHT_FAR_BLUR", "DOL_AURORA_SHOW_FPS", "BLUEWAKE_PERF_OVERLAY",
     "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES",
     "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST", "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE",
     "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
@@ -136,6 +138,17 @@ int main() {
     const Setting* huge = find("BLUEWAKE_MODULE_HUGEPAGES");
     assert(huge != nullptr && huge == gate + 1 && huge->tab == Tab::Config && huge->group == nullptr);
     assert(!default_on(*huge) && next_launch_on(*huge));
+    // Wind Waker HD's own light: off until turned on, at the next launch, and
+    // its parts' switches under it, on with it.
+    const Setting* hd_light = find("BLUEWAKE_HD_LIGHT");
+    assert(hd_light != nullptr && !default_on(*hd_light) && next_launch_on(*hd_light) &&
+           hd_light->experimental != nullptr && std::strcmp(hd_light->needs, "BLUEWAKE_HD_LOOK") == 0);
+    for (const char* part : {"BLUEWAKE_HD_LIGHT_SHADOWS", "BLUEWAKE_HD_LIGHT_CHARACTERS", "BLUEWAKE_HD_LIGHT_BLOOM",
+                             "BLUEWAKE_HD_LIGHT_AO", "BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS", "BLUEWAKE_HD_LIGHT_RIM",
+                             "BLUEWAKE_HD_LIGHT_FAR_BLUR"}) {
+        const Setting* s = find(part);
+        assert(s != nullptr && default_on(*s) && next_launch_on(*s) && std::strcmp(s->needs, "BLUEWAKE_HD_LIGHT") == 0);
+    }
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

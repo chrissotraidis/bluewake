@@ -92,73 +92,80 @@ void bluewake_hd_look_defaults(void) {
     const char* pack = getenv("DOL_AURORA_TEXTURE_PACK");
     if (setting("BLUEWAKE_HD_CLOUDS") == 1 && setting("BLUEWAKE_HD_LOOK") == 1 && pack != NULL && pack[0] != '\0')
         setenv("DOL_AURORA_TEXTURE_PACK_OPTIONAL", "hd-clouds", 0);
-    // Wind Waker HD's own versions of the look's parts (RecompCore 0206-0213,
-    // each behind a switch of its own, off in Aurora), as the Windows test
-    // launcher sets them, with the look on when BlueWake starts and a pack
-    // imported from the player's HD disc: they follow HD's own normals and
-    // colours, which only the importer writes (optional/hd-normals). A pack of
-    // textures alone keeps the look as it was. Each acts only under its part
-    // (sun shadows, bloom, AO, cloud shadows), so the parts' own defaults are
-    // unchanged. A value already set wins; an empty one (the settings file's)
-    // reads as unset. Aurora reads these once, so the look turned on later
-    // (F2) goes without them until BlueWake starts again.
+    // A pack imported from the player's HD disc: HD's own normals and colours,
+    // which only the importer writes (optional/hd-normals), come with it.
     char normals[4096];
     snprintf(normals, sizeof normals, "%s/optional/hd-normals/objects.bin", pack != NULL ? pack : "");
     FILE* imported = pack != NULL && pack[0] != '\0' ? fopen(normals, "rb") : NULL;
     if (imported != NULL)
         fclose(imported);
-    if (setting("BLUEWAKE_HD_LOOK") == 1 && imported != NULL) {
-        static const char* const kHdLight[][2] = {
-            {"BLUEWAKE_HD_SUN_RULE", "1"},
-            {"DOL_AURORA_SUN_SHADOW_QUALITY", "hd"},
-            {"DOL_AURORA_SUN_SHADOW_SHAPE", "0"},
-            {"DOL_AURORA_SUN_SHADOW_MAP_HD_BIAS", "1"},
-            {"DOL_AURORA_SUN_SHADOW_MAP_CASTER_BIAS", "80,3"},
-            {"DOL_AURORA_SUN_SHADOW_HD_MIX", "1"},
-            {"DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY", "1"},
-            {"DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT", "1"},
-            {"DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT", "1"},
-            {"DOL_AURORA_SUN_SHADOW_TEMPORAL", "1"},
-            {"DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE", "100,400,0.9"},
-            {"DOL_AURORA_BLOOM_HD", "1"},
-            {"DOL_AURORA_BLOOM_HD_MASK", "1"},
-            {"DOL_AURORA_BLOOM_HD_STRENGTH", "0.6"},
-            {"DOL_AURORA_EXPOSURE_HIGHLIGHTS", "0.99,1.0"},
-            {"DOL_AURORA_AO_HD", "1"},
-            {"DOL_AURORA_CLOUD_SHADOWS_HD", "1"},
-            {"DOL_AURORA_SUN_SHADOW_FACING", "1"},
-            {"DOL_AURORA_SUN_SHADOW_FACING_MUL", "1.0"},
-            {"DOL_AURORA_SUN_SHADOW_FACING_CREASE", "45"},
-            // HD's rim light takes the edge light's place whatever the edge
-            // light's switch says, so it needs that switch on.
-            {"DOL_AURORA_RIM_HD", "1"},
-            // HD's light on characters (its toon shader; needs HD's sky and light for the palette).
-            {"DOL_AURORA_ACTOR_LIGHT_HD", "1"},
-            // HD's far blur (its DOF presets wwHD_basic and wwHD_night): sharp to 25,000, then HD's linear ramp to
-            // 50,000 times its level for the hour (far_blur_level()), under the look's amount.
-            {"DOL_AURORA_FAR_BLUR_HD", "1"},
-            {"DOL_AURORA_FAR_BLUR_START", "25000"},
-            {"DOL_AURORA_FAR_BLUR_END", "50000"},
-            // HD's palettes blended in linear light, as HD blends them (its dawn and dusk: the cirrus at 07:30,
-            // the lavender at 17:30), with HD's sky and light on (it acts only under them).
-            {"BLUEWAKE_HD_SKY_LINEAR", "1"},
-            // HD's light buffer: the game's point and effect lights on HD's rule (point_lights()), added to the
-            // characters' light (x 1.75) and the lit scenery's (x 1.25) in their own draws, in place of the torch
-            // glow and of the GameCube's effect-light stage on the characters. It rides on HD's character light.
-            {"DOL_AURORA_POINT_LIGHTS_HD", "1"},
-        };
-        const bool edge_light = setting("BLUEWAKE_HD_EDGE_LIGHT") != 0;
-        const bool hd_sky = setting("BLUEWAKE_HD_SKY") != 0;
-        for (size_t i = 0; i < sizeof kHdLight / sizeof kHdLight[0]; ++i) {
-            const char* key = kHdLight[i][0];
-            if (!edge_light && strcmp(key, "DOL_AURORA_RIM_HD") == 0)
-                continue;
-            if (!hd_sky && strcmp(key, "BLUEWAKE_HD_SKY_LINEAR") == 0)
-                continue;
-            const char* value = getenv(key);
-            if (value == NULL || value[0] == '\0')
-                setenv(key, kHdLight[i][1], 1);
-        }
+    if (setting("BLUEWAKE_HD_LOOK") != 1 || imported == NULL)
+        return;
+    // HD's palettes blended in linear light, as HD blends them (its dawn and dusk: the cirrus at 07:30, the
+    // lavender at 17:30), with HD's sky and light on (it acts only under them).
+    if (setting("BLUEWAKE_HD_SKY") != 0 && (getenv("BLUEWAKE_HD_SKY_LINEAR") == NULL ||
+                                            getenv("BLUEWAKE_HD_SKY_LINEAR")[0] == '\0'))
+        setenv("BLUEWAKE_HD_SKY_LINEAR", "1", 1);
+    // Wind Waker HD's own versions of the look's parts (RecompCore #51, each
+    // behind a switch of its own, off in Aurora), as the Windows test launcher
+    // sets them, with BLUEWAKE_HD_LIGHT on (off by default: without it an
+    // imported pack gives the look as it was, on HD's textures) and each
+    // part's own switch (BLUEWAKE_HD_LIGHT_*, on unless turned off). Each acts
+    // only under the look's part (sun shadows, bloom, AO, cloud shadows), so
+    // the parts' own defaults are unchanged. A value already set wins; an
+    // empty one (the settings file's) reads as unset. Aurora reads these once,
+    // so they take effect when BlueWake starts.
+    if (setting("BLUEWAKE_HD_LIGHT") != 1)
+        return;
+    static const char* const kHdLight[][3] = {
+        // HD's sun shadows and the shading on the scenery: its shadow pass, bias, terrain mix and light, the
+        // skinned scenery, the pre-pass blended over frames by distance, the facing term from its normals, and
+        // its sun by day and the moon's side by night.
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "BLUEWAKE_HD_SUN_RULE", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_QUALITY", "hd"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_SHAPE", "0"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_MAP_HD_BIAS", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_MAP_CASTER_BIAS", "80,3"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_HD_MIX", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_SKINNED_SCENERY", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_SMOOTH_AMBIENT", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_HD_TERRAIN_LIGHT", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_TEMPORAL", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_TEMPORAL_RANGE", "100,400,0.9"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_FACING", "1"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_FACING_MUL", "1.0"},
+        {"BLUEWAKE_HD_LIGHT_SHADOWS", "DOL_AURORA_SUN_SHADOW_FACING_CREASE", "45"},
+        // HD's light on characters (its toon shader; needs HD's sky and light for the palette), and its light
+        // buffer: the game's point and effect lights on HD's rule (point_lights()), added to the characters'
+        // light (x 1.75) and the lit scenery's (x 1.25) in their own draws, in place of the torch glow and of
+        // the GameCube's effect-light stage on the characters. The light buffer rides on the character light.
+        {"BLUEWAKE_HD_LIGHT_CHARACTERS", "DOL_AURORA_ACTOR_LIGHT_HD", "1"},
+        {"BLUEWAKE_HD_LIGHT_CHARACTERS", "DOL_AURORA_POINT_LIGHTS_HD", "1"},
+        {"BLUEWAKE_HD_LIGHT_BLOOM", "DOL_AURORA_BLOOM_HD", "1"},
+        {"BLUEWAKE_HD_LIGHT_BLOOM", "DOL_AURORA_BLOOM_HD_MASK", "1"},
+        {"BLUEWAKE_HD_LIGHT_BLOOM", "DOL_AURORA_BLOOM_HD_STRENGTH", "0.6"},
+        {"BLUEWAKE_HD_LIGHT_BLOOM", "DOL_AURORA_EXPOSURE_HIGHLIGHTS", "0.99,1.0"},
+        {"BLUEWAKE_HD_LIGHT_AO", "DOL_AURORA_AO_HD", "1"},
+        {"BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS", "DOL_AURORA_CLOUD_SHADOWS_HD", "1"},
+        // HD's rim light takes the edge light's place whatever the edge light's switch says, so it needs that
+        // switch on.
+        {"BLUEWAKE_HD_LIGHT_RIM", "DOL_AURORA_RIM_HD", "1"},
+        // HD's far blur (its DOF presets wwHD_basic and wwHD_night): sharp to 25,000, then HD's linear ramp to
+        // 50,000 times its level for the hour (far_blur_level()), under the look's amount.
+        {"BLUEWAKE_HD_LIGHT_FAR_BLUR", "DOL_AURORA_FAR_BLUR_HD", "1"},
+        {"BLUEWAKE_HD_LIGHT_FAR_BLUR", "DOL_AURORA_FAR_BLUR_START", "25000"},
+        {"BLUEWAKE_HD_LIGHT_FAR_BLUR", "DOL_AURORA_FAR_BLUR_END", "50000"},
+    };
+    const bool edge_light = setting("BLUEWAKE_HD_EDGE_LIGHT") != 0;
+    for (size_t i = 0; i < sizeof kHdLight / sizeof kHdLight[0]; ++i) {
+        const char* key = kHdLight[i][1];
+        if (setting(kHdLight[i][0]) == 0)
+            continue;
+        if (!edge_light && strcmp(key, "DOL_AURORA_RIM_HD") == 0)
+            continue;
+        const char* value = getenv(key);
+        if (value == NULL || value[0] == '\0')
+            setenv(key, kHdLight[i][2], 1);
     }
 }
 
