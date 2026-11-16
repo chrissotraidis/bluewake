@@ -31,6 +31,14 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
 | 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
 
+## November 16: Linux CI signing-key download
+
+The 0.12.0 release-record CI stopped twice before compiling source because the
+LLVM signing-key download exited with a network error. The Linux build image now
+uses curl with bounded retries and visible errors for that download, followed by
+the existing pinned-fingerprint check. The Linux workflow validates the image
+and host build; no tool versions or published release files change.
+
 ## October 29: PadMint's Python 3.9 build failure
 
 [#499](https://github.com/chrissotraidis/bluewake/pull/499) fixes the default game-math and skin preparation
