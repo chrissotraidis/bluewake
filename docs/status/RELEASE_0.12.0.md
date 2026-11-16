@@ -4,8 +4,7 @@ The record for 0.12.0: what it contains, the exact artifacts, and every check wi
 [0.11.0](RELEASE_0.11.0.md), November 8. 0.12.0 replaces the unpublished 0.11.1 draft ([RELEASE_0.11.1.md](RELEASE_0.11.1.md)),
 whose two iPhone and iPad fixes it contains. Only Chris publishes.
 
-**Status, November 16, 2026:** frozen; all six artifacts are on the v0.12.0 draft, gated, with `SHA256SUMS`; PadMint's
-player check with the release checkout passed. Waiting for Chris's go-ahead to publish.
+**Status, November 16, 2026:** published by Chris on November 15 at 23:20 UTC from `df9e46f` (the `v0.12.0` tag), with the six artifacts below; `releases/latest` leads to it.
 
 ## The release
 
@@ -54,9 +53,23 @@ from the draft for the checks below; GitHub's digests match.
 | 3 | What changed for PadMint | Passed | `git diff v0.11.0 -- padmint.json` is empty; `check_padmint_catalog.py`: recipe and PadMint both offer macos-arm64, windows-arm64, windows-x86_64 |
 | 4 | Artifacts | Passed | Above |
 | 5 | PadMint player check, with the checkout | Passed | PadMint `main` `de14bd3` (0.6.5), Apple Python 3.9.6, an empty PadMint folder, a clean clone of `df9e46f`, the release IPA and the GZLE01 disc: passed in 8,980 s (2 h 30 min), with local training |
-| 6 | Player-facing text | Passed | #611 names 0.12.0's downloads and drops #609's "not released yet"; it merges after publishing |
+| 6 | Player-facing text | Passed | #611 merged after publishing: names 0.12.0's downloads and drops #609's "not released yet" |
 | 7 | `SHA256SUMS` | Passed | From the draft's downloads; `shasum -c` passes |
-| 8–12 | After publishing | Not started | |
+| 8–12 | After publishing | Below | |
+
+## After publishing
+
+| Check | Status |
+| --- | --- |
+| The tag | `v0.12.0` points at `df9e46fe0be5c0f95d46a3b194f59a4b96186640`; `releases/latest` is v0.12.0 (published by Chris, November 15 at 23:20 UTC) |
+| Every asset downloads without signing in and matches `SHA256SUMS` | Passed: all six through `releases/latest/download` with no token (HTTP 200); all five lines of `SHA256SUMS` OK |
+| README and guides name 0.12.0's downloads | #611, merged after publishing |
+| The 0.11.1 draft | Deleted after publishing, with Chris's approval: 0.12.0 contains its two fixes. It never had a tag |
+| Replies | Asked to confirm: #598, #597 (reopened: #599's "Fixes" closed it at merge), #600, #152, #69, #523; #545 updated and left open for #584 |
+| PadMint player check without a checkout, from `releases/latest` | Passed on 16 November after disk space was freed: `scripts/player-check.sh bluewake ios GZLE01.iso`, PadMint main `3bbf6c0` (0.6.6), Apple Python 3.9.6, an empty PadMint folder and no checkout. The public v0.12.0 recipe passed its catalog audit, then the full local-training, iPhone module, signing and packaging path passed in 84.7 minutes (build stage 5,068.52 seconds). The personal build was kept private and its temporary folder removed. This is build evidence, not new physical-device acceptance |
+| PadMint offers what the release builds | `check_padmint_catalog.py` passes against PadMint `main`: recipe and PadMint both offer macos-arm64, windows-arm64, windows-x86_64. No catalog change was needed (`padmint.json` is 0.11.0's) |
+| Reports since publishing | To read on November 16 and about November 18 |
+
 
 **Speed and exactness (Windows, headless, from 0.11.0's tour state):** four sets of four runs; every run loaded all five
 stops and all 31 checkpoints matched within and across versions, guest memory included. The last set, 0.11.0 against
