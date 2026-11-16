@@ -49,8 +49,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), on bluewake-next after 0.10.0: pin #49's head, fetched from upstream, until it merges.
 # SDL3's UIKit scene geometry (one app instance, external displays left to the system, orientation from the app's scene) in the vendored Aurora's SDL patch chain (RecompCore #60): patches/recompcore/0206; pin #60's head until it merges.
 # The game's depth copy read as GX_TF_Z16 (target 0xB), and steps for its depth of field and where it starts (RecompCore #61): patches/recompcore/0207-0208; #61's head, merged into bluewake-next for 0.12.0.
+# Smooth Motion's opt-in stepped pacing at 120 Hz and up (RecompCore #59, on bluewake-next): pin #59's head until it merges.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=2159e88b10f1d4c77cfb67041382b623b4462205
+RECOMPCORE_SHA=80d7da2b3a182c617b74aa7c2553fc02f00906e9
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
