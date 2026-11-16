@@ -7,7 +7,9 @@
 #include <imgui.h>
 #include <algorithm>
 #include <imgui_internal.h> // ClearActiveID, ClosePopupsExceptModals, CalcTypematicRepeatAmount
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <utility>
 #include <string>
 #include "button_remap.h"
@@ -35,107 +37,263 @@ inline ImVec4 bw_menu_slide(ImGuiID id, const ImVec4& target) {
     return ImVec4(now[0], now[1], now[2], now[3]);
 }
 
-// A list's choices as one row of cells, every name in its own, the chosen one
-// lit; a new choice slides the light across. It works as a slider does: a pad
-// lands on the whole row once and moves it with left and right, and the
-// pointer clicks a cell or drags along the row. When the names don't fit
-// side by side, the cells stack, one choice a line.
+// --- the rows -----------------------------------------------------------------
+//
+// Each setting is a row: its name on the left, its control on the right, the
+// whole row one stop for the pad's cursor. The row the cursor is on (or the
+// pointer is over) is lit in gold, the light gliding from row to row with the
+// wind's swirl beside it, and what the row is for is read on the slip under the
+// list (bw_menu_slip). A tab's body calls bw_menu_rows_begin first and
+// bw_menu_rows_end last; draw_setting (menu_draw.h) wraps each of its rows in
+// bw_menu_row_begin and bw_menu_row_end.
+
+// Which leads, the pointer or the keys (the arrows, which the pad holds):
+// whichever moved last. Worked out once a frame.
+inline bool bw_menu_pointer_leads() {
+    static bool pointer = false;
+    static int frame = -1;
+    if (frame == ImGui::GetFrameCount())
+        return pointer;
+    frame = ImGui::GetFrameCount();
+    const ImGuiIO& io = ImGui::GetIO();
+    if (io.MouseDelta.x != 0.f || io.MouseDelta.y != 0.f || ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        pointer = true;
+    for (ImGuiKey key : {ImGuiKey_UpArrow, ImGuiKey_DownArrow, ImGuiKey_LeftArrow, ImGuiKey_RightArrow,
+                         ImGuiKey_Space, ImGuiKey_Tab})
+        if (ImGui::IsKeyPressed(key, false))
+            pointer = false;
+    return pointer || !ImGui::GetCurrentContext()->NavCursorVisible;
+}
+
+// The lit row: where it is, in its window's own place (so it scrolls with
+// it), and what the slip says about it. Filled as the rows are drawn and drawn
+// from the next frame, so the light can go under the row's text.
+struct BwMenuLit {
+    ImGuiID window = 0;
+    ImRect rect;
+    bool found = false;
+    std::string title, help;
+};
+inline BwMenuLit& bw_menu_lit_now() { static BwMenuLit lit; return lit; }
+inline BwMenuLit& bw_menu_lit_shown() { static BwMenuLit lit; return lit; }
+
+// How far the rows sit in from the body's edge: room for the swirl.
+inline float bw_menu_swirl_room() { return ImGui::GetFontSize() * 1.25f; }
+
+// Call first thing in a tab's body: draws last frame's lit row under this
+// frame's text, eased to where it now is, and sets the rows in past the swirl.
+inline void bw_menu_rows_begin() {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    BwMenuLit& shown = bw_menu_lit_shown();
+    shown = bw_menu_lit_now();
+    bw_menu_lit_now() = BwMenuLit();
+    const ImVec2 origin = window->DC.CursorStartPos;
+    ImGuiStorage* storage = ImGui::GetStateStorage();
+    const ImGuiID id = ImGui::GetID("##lit");
+    const bool here = shown.found && shown.window == window->ID;
+    // It fades out where it was when nothing is lit, and back in from there.
+    const float fade = storage->GetFloat(id + 10, 0.f);
+    const float target = here ? 1.f : 0.f;
+    const float alpha = fade + (target - fade) * std::min(1.f, ImGui::GetIO().DeltaTime * 14.f);
+    storage->SetFloat(id + 10, std::fabs(alpha - target) < 0.01f ? target : alpha);
+    ImVec4 rect(storage->GetFloat(id + 11, 0.f), storage->GetFloat(id + 12, 0.f), storage->GetFloat(id + 13, 0.f),
+                storage->GetFloat(id + 14, 0.f));
+    if (here) {
+        rect = bw_menu_slide(id, ImVec4(shown.rect.Min.x, shown.rect.Min.y, shown.rect.Max.x, shown.rect.Max.y));
+        storage->SetFloat(id + 11, rect.x);
+        storage->SetFloat(id + 12, rect.y);
+        storage->SetFloat(id + 13, rect.z);
+        storage->SetFloat(id + 14, rect.w);
+    }
+    if (alpha > 0.01f && rect.z > rect.x) {
+        using namespace bluewake_ui::palette;
+        ImDrawList* paint = ImGui::GetWindowDrawList();
+        const ImVec2 a(origin.x + rect.x, origin.y + rect.y), b(origin.x + rect.z, origin.y + rect.w);
+        const float round = ImGui::GetStyle().FrameRounding * 1.25f;
+        paint->AddRect(ImVec2(a.x - 1.5f, a.y - 1.5f), ImVec2(b.x + 1.5f, b.y + 1.5f),
+                       bluewake_ui::u32(kGold, 0.16f * alpha), round + 1.5f, 0, 3.f);
+        paint->AddRectFilledMultiColor(ImVec2(a.x + round * 0.3f, a.y + 1.f), ImVec2(b.x - round * 0.3f, b.y - 1.f),
+                                       bluewake_ui::u32(kGold, 0.30f * alpha), bluewake_ui::u32(kGold, 0.12f * alpha),
+                                       bluewake_ui::u32(kGold, 0.12f * alpha), bluewake_ui::u32(kGold, 0.30f * alpha));
+        paint->AddRect(a, b, bluewake_ui::u32(kGold, 0.75f * alpha), round, 0, 1.5f);
+        // The swirl bobs gently towards the row.
+        const float bob = std::sin(static_cast<float>(ImGui::GetTime()) * 4.f) * ImGui::GetFontSize() * 0.08f;
+        const float r = ImGui::GetFontSize() * 0.42f;
+        const float top = std::min(b.y, a.y + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y);
+        const float side = ImGui::GetStyle().WindowPadding.x * 0.6f;
+        bluewake_ui::swirl(paint, ImVec2(a.x + side + bw_menu_swirl_room() * 0.4f + bob, (a.y + top) * 0.5f), r,
+                           bluewake_ui::u32(kGold, alpha), std::max(1.5f, ImGui::GetFontSize() * 0.11f));
+    }
+    ImGui::Indent(bw_menu_swirl_room());
+}
+
+// Where a row (or the item a cursor is on) is lit: across the body, from its
+// edge to its edge, half the spacing above and below so lit rows meet.
+inline void bw_menu_light(ImGuiWindow* window, float top, float bottom, const char* title, const char* help) {
+    BwMenuLit& lit = bw_menu_lit_now();
+    const float half = ImGui::GetStyle().ItemSpacing.y * 0.5f;
+    const float side = ImGui::GetStyle().WindowPadding.x * 0.6f;
+    const ImVec2 origin = window->DC.CursorStartPos;
+    lit.window = window->ID;
+    lit.rect = ImRect(window->WorkRect.Min.x - side - origin.x, top - half - origin.y,
+                      window->WorkRect.Max.x + side - origin.x, bottom + half - origin.y);
+    lit.found = true;
+    lit.title = title != nullptr ? title : "";
+    lit.help = help != nullptr ? help : "";
+}
+
+// Wraps one row. The cursor's item is known to be in it when ImGui met the
+// cursor's item while the row was drawn (NavIdIsAlive, false until then).
+inline bool& bw_menu_row_cursor_before() { static bool before = false; return before; }
+inline void bw_menu_row_begin() {
+    bw_menu_row_cursor_before() = ImGui::GetCurrentContext()->NavIdIsAlive;
+    ImGui::BeginGroup();
+}
+inline void bw_menu_row_end(const char* title, const char* help) {
+    ImGui::EndGroup();
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    if (bw_menu_pointer_leads()) {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && mouse.y >= a.y &&
+            mouse.y < b.y + ImGui::GetStyle().ItemSpacing.y)
+            bw_menu_light(window, a.y, b.y, title, help);
+        return;
+    }
+    if (bw_menu_row_cursor_before() || !g.NavIdIsAlive || g.NavWindow != window)
+        return;
+    // A tall row (a table, a list of its own) lights the line the cursor is
+    // on, not all of itself.
+    if (b.y - a.y > ImGui::GetFrameHeightWithSpacing() * 3.5f) {
+        const ImRect item = ImGui::WindowRectRelToAbs(window, window->NavRectRel[0]);
+        bw_menu_light(window, item.Min.y, item.Max.y, title, help);
+        return;
+    }
+    bw_menu_light(window, a.y, b.y, title, help);
+}
+
+// Call last thing in a tab's body: a cursor on something that is not a row (a
+// button under the rows) is lit there.
+inline void bw_menu_rows_end() {
+    ImGui::Unindent(bw_menu_swirl_room());
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (bw_menu_lit_now().found || bw_menu_pointer_leads() || !g.NavIdIsAlive || g.NavWindow != window)
+        return;
+    const ImRect item = ImGui::WindowRectRelToAbs(window, window->NavRectRel[0]);
+    bw_menu_light(window, item.Min.y, item.Max.y, nullptr, nullptr);
+}
+
+// The row's own lit look: the cursor on it, or the pointer over it.
+inline bool bw_menu_item_lit() {
+    return (ImGui::IsItemFocused() && !bw_menu_pointer_leads()) ||
+           ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride | ImGuiHoveredFlags_AllowWhenDisabled);
+}
+
+// A row's name, on its left, wrapped to `width`.
+inline float bw_menu_label_height(const char* label, float width) {
+    return ImGui::CalcTextSize(label, ImGui::FindRenderedTextEnd(label), false, std::max(1.f, width)).y;
+}
+inline void bw_menu_draw_label(ImVec2 at, const char* label, float width, bool lit) {
+    ImDrawList* paint = ImGui::GetWindowDrawList();
+    paint->AddText(ImGui::GetFont(), ImGui::GetFontSize(), at,
+                   lit ? ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 1.f)) : ImGui::GetColorU32(ImGuiCol_Text), label,
+                   ImGui::FindRenderedTextEnd(label), std::max(1.f, width));
+}
+
+// The arrows either side of a value: ‹ and ›, drawn as small chevrons.
+inline void bw_menu_chevron(ImDrawList* paint, ImVec2 centre, float size, int dir, ImU32 colour) {
+    const float w = size * 0.32f, h = size * 0.5f;
+    paint->AddPolyline(std::array<ImVec2, 3>{ImVec2(centre.x - dir * w * 0.5f, centre.y - h * 0.5f),
+                                             ImVec2(centre.x + dir * w * 0.5f, centre.y),
+                                             ImVec2(centre.x - dir * w * 0.5f, centre.y + h * 0.5f)}
+                           .data(),
+                       3, colour, 0, std::max(1.5f, size * 0.12f));
+}
+
+// A list's choices as one value with arrows either side and a dot for each
+// choice under it, the chosen one gold. Left and right step through them, A
+// steps on to the next (round to the first), and the pointer clicks an arrow,
+// a dot, or the row for the next. The name is on the left; when the row is too
+// narrow for both, the value goes under it.
 inline bool bw_menu_combo(const char* label, int* index, const char* const* items, int count) {
     constexpr int kMost = 16;
     count = std::clamp(count, 0, kMost);
     if (count == 0)
         return false;
     ImGui::PushID(label);
-    ImGui::TextWrapped("%s", label);
-    const ImGuiStyle& style = ImGui::GetStyle();
+    const float font = ImGui::GetFontSize();
     const float width = std::max(1.f, ImGui::GetContentRegionAvail().x);
-    const float pad = style.FramePadding.x, line = ImGui::GetFrameHeight();
-    // Cells as wide as each other when every name fits that way, else as wide
-    // as each name needs with the room left shared out, else stacked.
-    float need[kMost], total = 0.f, widest = 0.f;
-    for (int i = 0; i < count; ++i) {
-        need[i] = ImGui::CalcTextSize(items[i]).x + pad * 2.f;
-        total += need[i];
-        widest = std::max(widest, need[i]);
-    }
-    const bool stacked = total > width;
-    float cell[kMost];
+    const float line = ImGui::GetFrameHeight();
+    float widest = 0.f;
     for (int i = 0; i < count; ++i)
-        cell[i] = stacked ? width
-                  : widest * static_cast<float>(count) <= width ? width / static_cast<float>(count)
-                                                                : need[i] + (width - total) / static_cast<float>(count);
+        widest = std::max(widest, ImGui::CalcTextSize(items[i]).x);
+    const float arrow = font * 1.1f;
+    const float value_w = std::min(width, std::max(widest + font * 0.6f, font * 4.f) + arrow * 2.f);
+    const float pips_h = font * 0.4f;
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const bool stacked = width - value_w - spacing < font * 6.f;
+    const float label_w = stacked ? width : width - value_w - spacing;
+    const float label_h = bw_menu_label_height(label, label_w);
+    const float control_h = line + pips_h;
+    const float height = stacked ? label_h + control_h : std::max(label_h, control_h);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    const auto cell_rect = [&](int i, ImVec2* a, ImVec2* b) {
-        float x = origin.x;
-        for (int j = 0; j < i && !stacked; ++j)
-            x += cell[j];
-        const float y = origin.y + (stacked ? line * static_cast<float>(i) : 0.f);
-        *a = ImVec2(x, y);
-        *b = ImVec2(x + cell[i], y + line);
-    };
-    const ImVec2 size(width, stacked ? line * static_cast<float>(count) : line);
-    ImGui::InvisibleButton("##choices", size, ImGuiButtonFlags_EnableNav);
-    // The pointer itself over it: ImGui also counts a pad's cursor on the row
-    // as hovering, and then the cell under a pointer resting elsewhere lit up.
-    const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_NoNavOverride);
-    // The cell under the pointer: picked on a click and followed while dragged.
-    int under = -1;
-    if (hovered || (ImGui::IsItemActive() && ImGui::GetCurrentContext()->ActiveIdSource == ImGuiInputSource_Mouse)) {
-        const ImVec2 mouse = ImGui::GetIO().MousePos;
-        for (int i = 0; i < count; ++i) {
-            ImVec2 a, b;
-            cell_rect(i, &a, &b);
-            if (stacked ? mouse.y < b.y || i == count - 1 : mouse.x < b.x || i == count - 1) {
-                under = i;
-                break;
-            }
-        }
-    }
+    const ImVec2 va(origin.x + width - value_w, stacked ? origin.y + label_h : origin.y + (height - control_h) * 0.5f);
+    const ImVec2 vb(va.x + value_w, va.y + line);
+    const bool pressed = ImGui::InvisibleButton("##choices", ImVec2(width, height), ImGuiButtonFlags_EnableNav);
+    const bool lit = bw_menu_item_lit();
     bool changed = false;
     const auto choose = [&](int i) {
         i = std::clamp(i, 0, count - 1);
         changed = changed || i != *index;
         *index = i;
     };
-    const ImGuiContext& context = *ImGui::GetCurrentContext();
-    if (ImGui::IsItemActive() && context.ActiveIdSource == ImGuiInputSource_Mouse && under >= 0)
-        choose(under);
+    const int was = std::clamp(*index, 0, count - 1);
+    const float pip_gap = font * 0.5f;
+    const float pips_x = (va.x + vb.x) * 0.5f - pip_gap * static_cast<float>(count - 1) * 0.5f;
+    const float pips_y = vb.y + pips_h * 0.35f;
+    if (pressed) {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const bool by_pointer = ImGui::GetCurrentContext()->ActiveIdSource == ImGuiInputSource_Mouse ||
+                                ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+        int pip = -1;
+        for (int i = 0; i < count && by_pointer; ++i)
+            if (std::fabs(mouse.x - (pips_x + pip_gap * static_cast<float>(i))) < pip_gap * 0.5f && std::fabs(mouse.y - pips_y) < pips_h)
+                pip = i;
+        if (pip >= 0)
+            choose(pip);
+        else if (by_pointer && mouse.x >= va.x && mouse.x < va.x + arrow && mouse.y >= va.y && mouse.y < vb.y)
+            choose(was - 1);
+        else if (by_pointer && mouse.x >= vb.x - arrow && mouse.x < vb.x && mouse.y >= va.y && mouse.y < vb.y)
+            choose(was + 1);
+        else
+            choose((was + 1) % count);
+    }
     if (const int step = bw_menu_slider_nudge())
         choose(*index + step);
     const int at = std::clamp(*index, 0, count - 1);
 
+    using namespace bluewake_ui::palette;
     ImDrawList* paint = ImGui::GetWindowDrawList();
-    const float round = style.FrameRounding;
-    const ImVec2 end(origin.x + size.x, origin.y + size.y);
-    // The cursor on it lights the whole row, as the pointer lights a cell.
-    const bool focused = ImGui::IsItemFocused();
-    paint->AddRectFilled(origin, end, ImGui::GetColorU32(focused ? ImGuiCol_HeaderHovered : ImGuiCol_FrameBg),
-                         round);
-    if (hovered && under >= 0 && under != at && !ImGui::IsItemActive()) {
-        ImVec2 a, b;
-        cell_rect(under, &a, &b);
-        paint->AddRectFilled(ImVec2(a.x + 2.f, a.y + 2.f), ImVec2(b.x - 2.f, b.y - 2.f),
-                             ImGui::GetColorU32(ImGuiCol_HeaderHovered), round * 0.75f);
+    bw_menu_draw_label(ImVec2(origin.x, stacked ? origin.y : origin.y + (height - label_h) * 0.5f), label, label_w,
+                       lit);
+    const ImU32 gold = bluewake_ui::u32(kGold);
+    if (lit) {
+        bw_menu_chevron(paint, ImVec2(va.x + arrow * 0.5f, (va.y + vb.y) * 0.5f), font, -1,
+                        at > 0 ? gold : bluewake_ui::u32(kGold, 0.35f));
+        bw_menu_chevron(paint, ImVec2(vb.x - arrow * 0.5f, (va.y + vb.y) * 0.5f), font, 1,
+                        at < count - 1 ? gold : bluewake_ui::u32(kGold, 0.35f));
     }
-    {
-        ImVec2 a, b;
-        cell_rect(at, &a, &b);
-        const ImVec4 lit = bw_menu_slide(ImGui::GetID("##slide"), ImVec4(a.x, a.y, b.x, b.y));
-        const ImVec2 la(lit.x + 2.f, lit.y + 2.f), lb(lit.z - 2.f, lit.w - 2.f);
-        paint->AddRectFilled(la, lb, ImGui::GetColorU32(ImGuiCol_FrameBgActive), round * 0.75f);
-        paint->AddRect(la, lb, ImGui::GetColorU32(ImGuiCol_SliderGrab), round * 0.75f, 0, 1.5f);
-    }
-    for (int i = 0; i < count; ++i) {
-        ImVec2 a, b;
-        cell_rect(i, &a, &b);
-        const ImVec2 text = ImGui::CalcTextSize(items[i]);
-        const float x = stacked ? a.x + pad : a.x + std::max(pad, (b.x - a.x - text.x) * 0.5f);
-        const ImU32 ink = ImGui::GetColorU32(i == at || i == under ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-        paint->PushClipRect(a, b, true);
-        paint->AddText(ImVec2(x, a.y + (line - text.y) * 0.5f), ink, items[i]);
-        paint->PopClipRect();
-    }
-    paint->AddRect(origin, end, ImGui::GetColorU32(ImGuiCol_Border), round, 0, 1.f);
+    const ImVec2 text = ImGui::CalcTextSize(items[at]);
+    const ImVec2 ta(va.x + arrow, va.y), tb(vb.x - arrow, vb.y);
+    paint->PushClipRect(ta, tb, true);
+    paint->AddText(ImVec2(std::max(ta.x, (ta.x + tb.x - text.x) * 0.5f), va.y + (line - text.y) * 0.5f),
+                   lit ? gold : ImGui::GetColorU32(ImGuiCol_Text), items[at]);
+    paint->PopClipRect();
+    for (int i = 0; i < count; ++i)
+        paint->AddCircleFilled(ImVec2(pips_x + pip_gap * static_cast<float>(i), pips_y), font * 0.13f,
+                               i == at ? gold : bluewake_ui::u32(kCream, 0.3f));
     ImGui::PopID();
     return changed;
 }
@@ -249,46 +407,272 @@ inline void bw_menu_tooltip(const char* text) {
     ImGui::EndTooltip();
 }
 
-// A slider with its name above it and the bar the full width, which a
-// controller nudges left and right a twentieth of its range at a time.
+// A slider as a row: its name on the left, then a track with a diamond on it
+// and the value. A controller nudges it left and right a twentieth of its
+// range at a time; the pointer drags along the track or clicks the arrows.
+// When the row is too narrow, the track goes under the name.
 inline bool bw_menu_slider(const char* label, float* value, float low, float high, const char* format) {
     ImGui::PushID(label);
-    ImGui::TextWrapped("%s", label);
-    ImGui::SetNextItemWidth(-1.f);
-    // The pad's cursor on it lights it as the pointer over it does: ImGui
-    // lights a slider only for the pointer.
-    const bool cursor_on = ImGui::GetFocusID() == ImGui::GetID("##value") &&
-                           ImGui::GetCurrentContext()->NavCursorVisible;
-    if (cursor_on)
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered));
-    bool changed = ImGui::SliderFloat("##value", value, low, high, format);
-    if (cursor_on)
-        ImGui::PopStyleColor();
+    const float font = ImGui::GetFontSize();
+    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x);
+    const float line = ImGui::GetFrameHeight();
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    char shown[64], widest[64];
+    std::snprintf(shown, sizeof shown, format, *value);
+    std::snprintf(widest, sizeof widest, format, std::fabs(low) > std::fabs(high) ? low : high);
+    const float number_w = std::max(ImGui::CalcTextSize(widest).x, ImGui::CalcTextSize(shown).x);
+    const float arrow = font * 1.1f;
+    const float track_min = font * 7.f;
+    const float control_w = std::min(width, std::max(track_min, width * 0.42f) + arrow * 2.f + number_w + spacing);
+    const bool stacked = width - control_w - spacing < font * 6.f;
+    const float label_w = stacked ? width : width - control_w - spacing;
+    const float label_h = bw_menu_label_height(label, label_w);
+    const float height = stacked ? label_h + line : std::max(label_h, line);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float cy = stacked ? origin.y + label_h + line * 0.5f : origin.y + height * 0.5f;
+    const float cx0 = origin.x + width - control_w;
+    const ImVec2 ta(cx0 + arrow, cy - font * 0.14f), tb(origin.x + width - number_w - spacing - arrow, cy + font * 0.14f);
+    ImGui::InvisibleButton("##value", ImVec2(width, height), ImGuiButtonFlags_EnableNav);
+    const bool lit = bw_menu_item_lit();
+    ImGuiStorage* storage = ImGui::GetStateStorage();
+    const ImGuiID dragging = ImGui::GetID("##drag");
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const bool by_pointer = ImGui::GetCurrentContext()->ActiveIdSource == ImGuiInputSource_Mouse;
+    bool changed = false;
+    const auto set = [&](float v) {
+        v = std::clamp(v, low, high);
+        changed = changed || v != *value;
+        *value = v;
+    };
+    const float step = (high - low) / 20.f;
+    if (ImGui::IsItemActivated() && by_pointer) {
+        const bool on_track = mouse.x >= ta.x - font * 0.5f && mouse.x <= tb.x + font * 0.5f;
+        storage->SetBool(dragging, on_track);
+        if (!on_track && mouse.x >= cx0 && mouse.x < ta.x)
+            set(*value - step);
+        else if (!on_track && mouse.x > tb.x && mouse.x <= tb.x + arrow)
+            set(*value + step);
+    }
+    if (ImGui::IsItemActive() && by_pointer && storage->GetBool(dragging, false) && tb.x > ta.x)
+        set(low + (high - low) * std::clamp((mouse.x - ta.x) / (tb.x - ta.x), 0.f, 1.f));
+    if (!ImGui::IsItemActive())
+        storage->SetBool(dragging, false);
+    if (const int nudge = bw_menu_slider_nudge())
+        set(*value + static_cast<float>(nudge) * step);
+
+    using namespace bluewake_ui::palette;
+    ImDrawList* paint = ImGui::GetWindowDrawList();
+    bw_menu_draw_label(ImVec2(origin.x, stacked ? origin.y : origin.y + (height - label_h) * 0.5f), label, label_w,
+                       lit);
+    const ImU32 gold = bluewake_ui::u32(kGold);
+    const float t = high > low ? std::clamp((*value - low) / (high - low), 0.f, 1.f) : 0.f;
+    const float knob_x = ta.x + (tb.x - ta.x) * t;
+    const float round = (tb.y - ta.y) * 0.5f;
+    paint->AddRectFilled(ta, tb, ImGui::GetColorU32(ImGuiCol_FrameBg), round);
+    paint->AddRectFilled(ta, ImVec2(knob_x, tb.y), lit ? gold : bluewake_ui::u32(kCream, 0.8f), round);
+    const float d = font * 0.42f;
+    const ImVec2 diamond[4] = {ImVec2(knob_x, cy - d), ImVec2(knob_x + d, cy), ImVec2(knob_x, cy + d),
+                               ImVec2(knob_x - d, cy)};
+    paint->AddConvexPolyFilled(diamond, 4, lit ? gold : ImGui::GetColorU32(kCream));
+    paint->AddPolyline(diamond, 4, bluewake_ui::u32(kInk), ImDrawFlags_Closed, std::max(1.5f, font * 0.1f));
+    if (lit) {
+        bw_menu_chevron(paint, ImVec2(cx0 + arrow * 0.45f, cy), font, -1, gold);
+        bw_menu_chevron(paint, ImVec2(tb.x + arrow * 0.55f, cy), font, 1, gold);
+    }
+    std::snprintf(shown, sizeof shown, format, *value);
+    const ImVec2 text = ImGui::CalcTextSize(shown);
+    paint->AddText(ImVec2(origin.x + width - text.x, cy - text.y * 0.5f), lit ? gold : ImGui::GetColorU32(ImGuiCol_Text),
+                   shown);
+    ImGui::PopID();
+    return changed;
+}
+
+// A switch as a row: its name on the left and Off and On on the right, the one
+// it is at in gold. A or a click turns it over, left is Off and right is On,
+// and a click on Off or On sets that.
+inline bool bw_menu_checkbox(const char* label, bool* value) {
+    ImGui::PushID(label);
+    const float font = ImGui::GetFontSize();
+    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x);
+    const float line = ImGui::GetFrameHeight();
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float cell = std::max(ImGui::CalcTextSize("Off").x, ImGui::CalcTextSize("On").x) + font * 1.2f;
+    const float pill_w = cell * 2.f + 4.f, pill_h = line * 0.86f;
+    const bool stacked = width - pill_w - spacing < font * 6.f;
+    const float label_w = stacked ? width : width - pill_w - spacing;
+    const float label_h = bw_menu_label_height(label, label_w);
+    const float height = stacked ? label_h + line : std::max(label_h, line);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float cy = stacked ? origin.y + label_h + line * 0.5f : origin.y + height * 0.5f;
+    const ImVec2 pa(origin.x + width - pill_w, cy - pill_h * 0.5f), pb(origin.x + width, cy + pill_h * 0.5f);
+    const bool pressed = ImGui::InvisibleButton("##switch", ImVec2(width, height), ImGuiButtonFlags_EnableNav);
+    const bool lit = bw_menu_item_lit();
+    bool changed = false;
+    if (pressed) {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const bool on_pill = ImGui::IsMouseReleased(ImGuiMouseButton_Left) && mouse.x >= pa.x && mouse.y >= pa.y &&
+                             mouse.y <= pb.y;
+        const bool want = on_pill ? mouse.x >= pa.x + pill_w * 0.5f : !*value;
+        changed = want != *value;
+        *value = want;
+    }
     if (const int step = bw_menu_slider_nudge()) {
-        *value = std::clamp(*value + static_cast<float>(step) * (high - low) / 20.f, low, high);
-        changed = true;
+        const bool want = step > 0;
+        changed = changed || want != *value;
+        *value = want;
+    }
+
+    using namespace bluewake_ui::palette;
+    ImDrawList* paint = ImGui::GetWindowDrawList();
+    bw_menu_draw_label(ImVec2(origin.x, stacked ? origin.y : origin.y + (height - label_h) * 0.5f), label, label_w,
+                       lit);
+    paint->AddRectFilled(pa, pb, ImGui::GetColorU32(ImGuiCol_FrameBg), pill_h * 0.5f);
+    // The gold half slides to where the switch now is.
+    const float left = pa.x + 2.f + (*value ? cell : 0.f);
+    const ImVec4 knob = bw_menu_slide(ImGui::GetID("##knob"), ImVec4(left, pa.y + 2.f, left + cell, pb.y - 2.f));
+    // On is gold; Off is a quiet cream, so the two read apart at a glance.
+    paint->AddRectFilled(ImVec2(knob.x, knob.y), ImVec2(knob.z, knob.w),
+                         *value ? bluewake_ui::u32(kGold, lit ? 1.f : 0.88f) : bluewake_ui::u32(kCream, lit ? 0.32f : 0.22f),
+                         (pill_h - 4.f) * 0.5f);
+    const char* names[2] = {"Off", "On"};
+    for (int i = 0; i < 2; ++i) {
+        const ImVec2 size = ImGui::CalcTextSize(names[i]);
+        const bool chosen = (i == 1) == *value;
+        paint->AddText(ImVec2(pa.x + 2.f + cell * static_cast<float>(i) + (cell - size.x) * 0.5f, cy - size.y * 0.5f),
+                       chosen ? (*value ? bluewake_ui::u32(kInk) : ImGui::GetColorU32(ImGuiCol_Text))
+                              : ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.75f),
+                       names[i]);
     }
     ImGui::PopID();
     return changed;
 }
 
-// A checkbox whose label wraps when the window is too narrow for it; clicking
-// the wrapped label toggles it too.
-inline bool bw_menu_checkbox(const char* label, bool* value) {
-    const ImGuiStyle& style = ImGui::GetStyle();
-    if (ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(label).x <=
-        ImGui::GetContentRegionAvail().x)
-        return ImGui::Checkbox(label, value);
-    ImGui::PushID(label);
-    bool changed = ImGui::Checkbox("##box", value);
-    ImGui::SameLine(0.f, style.ItemInnerSpacing.x);
-    ImGui::TextWrapped("%s", label);
-    if (ImGui::IsItemClicked()) {
-        *value = !*value;
-        changed = true;
+// --- the frame -----------------------------------------------------------------
+
+// The panel's stitched edge, a little in from the window's border.
+inline void bw_menu_panel_edge(float scale) {
+    const ImGuiWindow* self = ImGui::GetCurrentWindow();
+    const float in = 7.f * scale;
+    bluewake_ui::stitch(ImGui::GetWindowDrawList(), ImVec2(self->Pos.x + in, self->Pos.y + in),
+                        ImVec2(self->Pos.x + self->Size.x - in, self->Pos.y + self->Size.y - in),
+                        std::max(0.f, ImGui::GetStyle().WindowRounding - in),
+                        bluewake_ui::u32(bluewake_ui::palette::kCream, 0.35f), 5.f * scale, std::max(1.f, 1.5f * scale));
+}
+
+// The tabs on a wooden plaque `width` wide, as the game titles its pages: LB
+// and RB at its ends (a click on one steps the tab too), the open tab's name in
+// gold outlined in dark brown with a bar under it. Each name is a stop for the
+// pad's cursor; A or a click opens it.
+inline void bw_menu_tab_plaque(const char* const* names, int count, int* shown, float width, float height,
+                               float scale) {
+    using namespace bluewake_ui::palette;
+    ImDrawList* paint = ImGui::GetWindowDrawList();
+    const ImVec2 a = ImGui::GetCursorScreenPos(), b(a.x + width, a.y + height);
+    const float round = height * 0.3f;
+    paint->AddRectFilled(ImVec2(a.x, a.y + 3.f * scale), ImVec2(b.x, b.y + 3.f * scale), bluewake_ui::u32(kWoodDark),
+                         round);
+    paint->AddRectFilled(a, b, bluewake_ui::u32(kWood), round);
+    paint->AddLine(ImVec2(a.x + round, a.y + 1.f), ImVec2(b.x - round, a.y + 1.f), IM_COL32(255, 255, 255, 34));
+    const float pad_x = height * 0.2f;
+    const float r = ImGui::GetTextLineHeight() * 0.5f;
+    const float bumper = bluewake_ui::glyph_width("LB", r);
+    const float mid_y = (a.y + b.y) * 0.5f;
+    for (int side = 0; side < 2; ++side) {
+        const char* name = side == 0 ? "LB" : "RB";
+        const float x = side == 0 ? a.x + pad_x : b.x - pad_x - bumper;
+        ImGui::SetCursorScreenPos(ImVec2(x, a.y));
+        ImGui::PushID(name);
+        if (ImGui::InvisibleButton("##bumper", ImVec2(bumper, height)))
+            *shown = (*shown + count + (side == 0 ? -1 : 1)) % count;
+        ImGui::PopID();
+        const ImVec2 c(x + bumper * 0.5f, mid_y);
+        paint->AddRectFilled(ImVec2(c.x - bumper * 0.5f, c.y - r), ImVec2(c.x + bumper * 0.5f, c.y + r),
+                             bluewake_ui::u32(kCream, ImGui::IsItemHovered() ? 1.f : 0.85f), r * 0.6f);
+        const ImVec2 size = ImGui::CalcTextSize(name);
+        paint->AddText(ImVec2(c.x - size.x * 0.5f, c.y - size.y * 0.5f), bluewake_ui::u32(kInk), name);
     }
-    ImGui::PopID();
-    return changed;
+    const float left = a.x + pad_x * 2.f + bumper, room = std::max(1.f, b.x - pad_x * 2.f - bumper - left);
+    // Each name gets room for itself and a share of what is left. Names that
+    // don't fit are drawn smaller, down to seven tenths; narrower still, only
+    // the open tab's name is shown, and LB and RB step through them.
+    constexpr int kMost = 12;
+    count = std::min(count, kMost);
+    const float font = ImGui::GetFontSize();
+    float need[kMost], total = 0.f;
+    for (int i = 0; i < count; ++i) {
+        need[i] = ImGui::CalcTextSize(names[i]).x;
+        total += need[i] + font;
+    }
+    const float shrink = std::min(1.f, room / std::max(1.f, total));
+    const bool only_open = shrink < 0.7f;
+    const float size = font * (only_open ? 1.f : shrink);
+    const float spare = only_open ? 0.f : std::max(0.f, room - total * shrink) / static_cast<float>(count);
+    float x = left;
+    for (int i = 0; i < count; ++i) {
+        if (only_open && i != *shown)
+            continue;
+        const float cell = only_open ? room : (need[i] + font) * shrink + spare;
+        const ImVec2 ca(only_open ? left : x, a.y), cb(ca.x + cell, b.y);
+        x += cell;
+        ImGui::SetCursorScreenPos(ca);
+        ImGui::PushID(i);
+        if (ImGui::InvisibleButton("##tab", ImVec2(std::max(1.f, cell), height), ImGuiButtonFlags_EnableNav))
+            *shown = i;
+        ImGui::PopID();
+        const bool cursor = ImGui::IsItemFocused() && !bw_menu_pointer_leads();
+        const bool lit = ImGui::IsItemHovered() || cursor;
+        const ImVec2 la(ca.x + 2.f, ca.y + 4.f * scale), lb(cb.x - 2.f, cb.y - 4.f * scale);
+        if (lit && i != *shown)
+            paint->AddRectFilled(la, lb, bluewake_ui::u32(kCream, 0.14f), round * 0.7f);
+        if (cursor)
+            paint->AddRect(la, lb, bluewake_ui::u32(kGold, 0.85f), round * 0.7f, 0, 1.5f);
+        const float text_w = need[i] * size / font, text_h = ImGui::GetTextLineHeight() * size / font;
+        const ImVec2 at(ca.x + (cell - text_w) * 0.5f, mid_y - text_h * 0.5f);
+        paint->PushClipRect(ca, cb, true);
+        if (i == *shown) {
+            bluewake_ui::outlined_text(paint, at, bluewake_ui::u32(kGold), bluewake_ui::u32(kInk), names[i], nullptr,
+                                       std::max(1.f, 1.5f * scale), size);
+            const float bar = std::min(text_w * 0.4f, cell * 0.4f);
+            paint->AddRectFilled(ImVec2((ca.x + cb.x - bar) * 0.5f, b.y - 6.f * scale),
+                                 ImVec2((ca.x + cb.x + bar) * 0.5f, b.y - 3.f * scale), bluewake_ui::u32(kGold),
+                                 2.f * scale);
+        } else {
+            paint->AddText(ImGui::GetFont(), size, at, bluewake_ui::u32(kCream, lit ? 0.95f : 0.6f), names[i]);
+        }
+        paint->PopClipRect();
+    }
+    ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + 3.f * scale));
+    ImGui::Dummy(ImVec2(1.f, ImGui::GetStyle().ItemSpacing.y * 0.5f));
+}
+
+// The cream slip under the list: the lit row's name and what it is for, as
+// the game's own options explain the chosen one underneath. `height` is fixed
+// per tab (bw_menu::slip_height), so the slip doesn't jump.
+inline void bw_menu_slip(float height, float pad, float scale) {
+    using namespace bluewake_ui::palette;
+    const BwMenuLit& lit = bw_menu_lit_shown();
+    ImDrawList* paint = ImGui::GetWindowDrawList();
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const ImVec2 b(a.x + ImGui::GetContentRegionAvail().x, a.y + height);
+    const float text_w = std::max(1.f, b.x - a.x - pad * 2.f);
+    const float round = ImGui::GetStyle().FrameRounding * 1.5f;
+    paint->AddRectFilled(ImVec2(a.x, a.y + 3.f * scale), ImVec2(b.x, b.y + 3.f * scale), bluewake_ui::u32(kSlipEdge),
+                         round);
+    paint->AddRectFilled(a, b, bluewake_ui::u32(kSlip), round);
+    paint->PushClipRect(ImVec2(a.x + pad * 0.5f, a.y), ImVec2(b.x - pad * 0.5f, b.y), true);
+    ImVec2 at(a.x + pad, a.y + pad);
+    const bool any = lit.found && !lit.title.empty();
+    const char* title = any ? lit.title.c_str() : "Choose a setting to read about it here.";
+    ImFont* font = ImGui::GetFont();
+    const float size = ImGui::GetFontSize();
+    paint->AddText(font, size, at, bluewake_ui::u32(any ? kInk : kSlipInk), title, ImGui::FindRenderedTextEnd(title),
+                   text_w);
+    if (any && !lit.help.empty()) {
+        at.y += ImGui::CalcTextSize(title, nullptr, true, text_w).y + ImGui::GetStyle().ItemSpacing.y * 0.4f;
+        paint->AddText(font, size, at, bluewake_ui::u32(kSlipInk), lit.help.c_str(), nullptr, text_w);
+    }
+    paint->PopClipRect();
+    ImGui::Dummy(ImVec2(1.f, height + 3.f * scale));
 }
 
 // --- a controller in the menu ----------------------------------------------
@@ -472,14 +856,36 @@ inline float bw_menu_footer_height(bool restart_note) {
            (restart_note ? ImGui::GetFrameHeightWithSpacing() : 0.f) + ImGui::GetFrameHeightWithSpacing() * rows;
 }
 
-// The hint and the next-launch note. The caller puts its Restart now button,
+// The hint, as the game's own corner shows it (the buttons' glyphs and what
+// they do), and the next-launch note. The caller puts its Restart now button,
 // if it has one, on the same line right after it (ImGui::SameLine()).
 inline void bw_menu_footer_note(bool restart_note) {
-    ImGui::Separator();
-    ImGui::TextDisabled("A chooses, B closes, LB and RB change tabs, the right stick scrolls.");
+    using namespace bluewake_ui::palette;
+    ImGui::Spacing();
+    ImDrawList* paint = ImGui::GetWindowDrawList();
+    const float h = ImGui::GetTextLineHeight();
+    const float r = h * 0.5f;
+    ImVec2 at = ImGui::GetCursorScreenPos();
+    const float right = at.x + ImGui::GetContentRegionAvail().x;
+    const struct { const char* glyph; const ImVec4* colour; const char* does; } hints[] = {
+        {"A", &kButtonA, "Choose"}, {"B", &kButtonB, "Back"}, {"LB", &kBumper, nullptr},
+        {"RB", &kBumper, "Tabs"}, {"RS", &kBumper, "Scroll"}};
+    for (const auto& hint : hints) {
+        const float gw = bluewake_ui::glyph_width(hint.glyph, r);
+        const float tw = hint.does != nullptr ? ImGui::CalcTextSize(hint.does).x + h * 0.3f : 0.f;
+        if (at.x + gw + tw > right)
+            break;
+        bluewake_ui::glyph(paint, ImVec2(at.x + gw * 0.5f, at.y + r), r, bluewake_ui::u32(*hint.colour), hint.glyph);
+        at.x += gw + h * 0.3f;
+        if (hint.does != nullptr) {
+            paint->AddText(at, ImGui::GetColorU32(ImGuiCol_Text), hint.does);
+            at.x += tw + h * 0.6f;
+        }
+    }
+    ImGui::Dummy(ImVec2(1.f, h));
     if (restart_note) {
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(1.f, 0.8f, 0.3f, 1.f), "Some changes take effect at the next launch.");
+        ImGui::TextColored(kGold, "Some changes take effect at the next launch.");
     }
 }
 
@@ -494,8 +900,20 @@ inline BwMenuButton bw_menu_footer_buttons(const char* settings_path) {
             if (right - ImGui::GetItemRectMax().x > width + ImGui::GetStyle().ItemSpacing.x)
                 ImGui::SameLine();
         }
+        // Pills, Resume in gold: the way back to the game is the one to find.
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, ImGui::GetFrameHeight() * 0.5f);
+        if (i == 0) {
+            using namespace bluewake_ui::palette;
+            ImGui::PushStyleColor(ImGuiCol_Button, kGold);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.f, 0.86f, 0.40f, 1.f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.f, 0.90f, 0.50f, 1.f));
+            ImGui::PushStyleColor(ImGuiCol_Text, kInk);
+        }
         if (ImGui::Button(kBwMenuButtons[i]))
             pressed = static_cast<BwMenuButton>(i + 1);
+        if (i == 0)
+            ImGui::PopStyleColor(4);
+        ImGui::PopStyleVar();
         if (i == 0 && settings_path != nullptr && settings_path[0] != '\0' && ImGui::IsItemHovered())
             bw_menu_tooltip((std::string("Preferences are saved when you resume:\n") + settings_path).c_str());
     }

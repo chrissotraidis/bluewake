@@ -83,10 +83,22 @@ inline void greyed_why(const char* why) {
         bw_menu_tooltip(why);
 }
 
-// One row: the control the table asks for, its next-launch note and its quiet
-// line. A setting nobody can change right now is drawn greyed, so the tab
-// keeps its shape and the setting can be found; the pointer over it says
-// what turns it on (or what it is off for).
+// What the slip under the list says about a row: its note, and that it is
+// experimental. Why a greyed row is greyed is added as it is drawn.
+inline std::string help_for(const bw_settings::Setting& s) {
+    std::string help = s.note != nullptr ? s.note : "";
+    if (s.experimental != nullptr)
+        help += (help.empty() ? "" : "\n") + std::string("Experimental: ") + s.experimental;
+    return help;
+}
+inline const char* title_for(const bw_settings::Setting& s) {
+    return s.label != nullptr ? s.label : s.pane != nullptr ? s.pane : "";
+}
+
+// One row: the control the table asks for and its next-launch note, lit when
+// the cursor is on it, with its note on the slip. A setting nobody can change
+// right now is drawn greyed, so the tab keeps its shape and the setting can be
+// found; the slip says what turns it on (or what it is off for).
 inline void draw_setting(const bw_settings::Setting& s) {
     if (s.control == bw_settings::Control::None)
         return;
@@ -102,27 +114,49 @@ inline void draw_setting(const bw_settings::Setting& s) {
         off_need = s.needs_set;
     const bool waiting = off_need != nullptr;
     const bool overridden = s.dead_when != nullptr && !get(s.dead_when, "").empty();
-    if (s.group != nullptr)
-        s.group[0] == '\0' ? ImGui::Separator() : ImGui::SeparatorText(s.group);
-    ImGui::BeginGroup();
+    if (s.group != nullptr) {
+        if (s.group[0] == '\0') {
+            ImGui::Separator();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, bluewake_ui::palette::kGold);
+            ImGui::SeparatorText(s.group);
+            ImGui::PopStyleColor();
+        }
+    }
+    char why[160] = "";
+    if (waiting)
+        std::snprintf(why, sizeof why, "Turn on \"%s\" to change this.", setting(off_need).label);
+    else if (overridden)
+        std::snprintf(why, sizeof why, "Off while \"%s\" is set.", setting(s.dead_when).label);
+    std::string help = help_for(s);
+    if (why[0] != '\0')
+        help = why + (help.empty() ? "" : "\n" + help);
+    bw_menu_row_begin();
     ImGui::BeginDisabled(waiting || overridden);
     draw_control(s);
     ImGui::EndDisabled();
-    ImGui::EndGroup();
-    if (waiting || overridden) {
-        char why[160];
-        if (waiting)
-            std::snprintf(why, sizeof why, "Turn on \"%s\" to change this.", setting(off_need).label);
-        else
-            std::snprintf(why, sizeof why, "Off while \"%s\" is set.", setting(s.dead_when).label);
-        ImGui::PushID(s.key);
-        greyed_why(why);
-        ImGui::PopID();
-        // A switch on another tab isn't beside the row, and a pad gets no
-        // pointer to ask: the reason is a quiet line under it instead.
-        if (waiting && setting(off_need).tab != s.tab)
-            ImGui::TextDisabled("%s", why);
+    bw_menu_row_end(title_for(s), help.c_str());
+    // A switch on another tab isn't beside the row, and a pad skips a greyed
+    // row, so never lights it: the reason is a quiet line under it as well.
+    if (waiting && setting(off_need).tab != s.tab)
+        ImGui::TextDisabled("%s", why);
+}
+
+// The slip's height for a tab at this width: room for its longest note, so
+// it doesn't jump as the cursor moves, and at least two lines.
+inline float slip_height(bw_settings::Tab tab, float width) {
+    const float line = ImGui::GetTextLineHeightWithSpacing();
+    float most = line * 2.f;
+    for (const bw_settings::Setting& s : bw_settings::kSettings) {
+        if (s.tab != tab || s.control == bw_settings::Control::None)
+            continue;
+        const std::string help = help_for(s);
+        float h = ImGui::CalcTextSize(title_for(s), nullptr, false, width).y;
+        if (!help.empty())
+            h += ImGui::GetStyle().ItemSpacing.y * 0.4f + ImGui::CalcTextSize(help.c_str(), nullptr, false, width).y;
+        most = std::max(most, h);
     }
+    return most;
 }
 
 // The row's control itself, its note and what a change does.
@@ -166,15 +200,13 @@ inline void draw_control(const bw_settings::Setting& s) {
         break;
     }
     next_launch_note(s);
-    if (s.note != nullptr)
-        ImGui::TextDisabled("%s", s.note);
     if (edited)
         changed(s);
 }
 
 // Every row of one tab, in the table's order. A pane's rows are drawn inside it,
 // set in, while it is open. Experimental rows wait for the Mods tab's last
-// section (draw_experimental), unless they are in a pane: there, their line
+// section (draw_experimental), unless they are in a pane: there, the slip
 // says they are experimental.
 inline void draw_tab(bw_settings::Tab tab) {
     const char* pane = nullptr;
@@ -193,22 +225,21 @@ inline void draw_tab(bw_settings::Tab tab) {
             continue;
         ImGui::Indent();
         draw_setting(s);
-        if (s.experimental != nullptr)
-            ImGui::TextDisabled("Experimental: %s", s.experimental);
         ImGui::Unindent();
     }
 }
 
 // The Experimental section: every row with an experimental line that is not
-// in a pane, each with that line under it saying what has not been checked yet.
+// in a pane, the slip saying what has not been checked yet.
 inline void draw_experimental() {
+    ImGui::PushStyleColor(ImGuiCol_Text, bluewake_ui::palette::kGold);
     ImGui::SeparatorText("Experimental");
+    ImGui::PopStyleColor();
     ImGui::TextDisabled("Off by default, and still being checked.");
     for (const bw_settings::Setting& s : bw_settings::kSettings) {
         if (s.experimental == nullptr || s.pane != nullptr)
             continue;
         draw_setting(s);
-        ImGui::TextDisabled("%s", s.experimental);
     }
 }
 
