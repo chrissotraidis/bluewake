@@ -50,8 +50,9 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # SDL3's UIKit scene geometry (one app instance, external displays left to the system, orientation from the app's scene) in the vendored Aurora's SDL patch chain (RecompCore #60): patches/recompcore/0206; pin #60's head until it merges.
 # The game's depth copy read as GX_TF_Z16 (target 0xB), and steps for its depth of field and where it starts (RecompCore #61): patches/recompcore/0207-0208; #61's head, merged into bluewake-next for 0.12.0.
 # Smooth Motion: the heat haze follows the camera in in-between frames (RecompCore #62); pin #62's head until it merges.
+# The Picto Box's window in a room with heat haze: a copy into an earlier copy's buffer updates that copy's texture (RecompCore #63, on #62); pin its head until it merges.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=13dca1fcef0dbb3600ba2fd4689830caa2f8ad4f
+RECOMPCORE_SHA=a6251c7a95deb202cba2c279d59ac6afdff5c24d
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
