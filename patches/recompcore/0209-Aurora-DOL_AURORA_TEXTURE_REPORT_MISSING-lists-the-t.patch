@@ -1,0 +1,164 @@
+From e2a6aa8c2d0001e3e3818c7b10d583055b1304d4 Mon Sep 17 00:00:00 2001
+From: Maximilian <m.marowsky@googlemail.com>
+Date: Fri, 13 Nov 2026 17:36:45 +0100
+Subject: [PATCH 209/210] Aurora: DOL_AURORA_TEXTURE_REPORT_MISSING lists the
+ textures an HD pack has no file for
+
+Each texture the game draws that the pack misses is logged once with the file name the pack
+would need (tex1_WxH_hash[_tlut]_fmt.dds); 2 also lists the pack's nearest candidates. With the
+host's texture dumps on, the missing texture is written as an editable RGBA DDS under the cache
+folder's texture_dumps, ready to be painted or upscaled and dropped into the pack.
+---
+ .../graphics/aurora/lib/gfx/gxcore_draw.cpp   |  4 ++
+ .../aurora/lib/gfx/texture_replacement.cpp    | 50 +++++++++++++++++--
+ .../aurora/lib/gfx/texture_replacement.hpp    |  6 +++
+ 3 files changed, 57 insertions(+), 3 deletions(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 33e2b204b7..19542f98af 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -2531,6 +2531,7 @@ static bool submit_draw_plan_as_is(const gxc::DrawPlan& plan) {
+     // The handle is cached under the same content key as a decode would be,
+     // so later draws of the same texture never repeat the lookup.
+     bool replacementPending = false;
++    std::string missingName; // a pack miss being reported (DOL_AURORA_TEXTURE_REPORT_MISSING)
+     if (texture_replacement::has_source_replacements()) {
+       static unsigned long long s_lookups;
+       static const bool s_log_misses = std::getenv("DOL_TEXREP_LOG_MISSES") != nullptr;
+@@ -2561,6 +2562,7 @@ static bool submit_draw_plan_as_is(const gxc::DrawPlan& plan) {
+           return it->second;
+       } else {
+         g_textureAwaitingReplacement.erase(key);
++        missingName = texture_replacement::take_reported_miss();
+       }
+     }
+     // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
+@@ -2607,6 +2609,8 @@ static bool submit_draw_plan_as_is(const gxc::DrawPlan& plan) {
+         }
+       }
+     }
++    if (!missingName.empty() && !decoded.empty())
++      texture_replacement::dump_missing_rgba(missingName, width, height, decoded.data());
+     TextureHandle handle;
+     if (!decoded.empty()) {
+       handle = new_static_texture_2d(
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+index 205a9d3235..ad037a8275 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+@@ -22,6 +22,7 @@
+ #endif
+ #include <array>
+ #include <charconv>
++#include <cstdlib>
+ #include <cstring>
+ #include <filesystem>
+ #include <list>
+@@ -935,12 +936,30 @@ bool dump_editable_texture_dds(const aurora::texture::TextureSourceKey& key, con
+   return aurora::gfx::dds::write_rgba8_dds(path, texWidth, texHeight, pixels.data);
+ }
+ 
++// The pack file name of the texture this thread's last guest lookup reported missing.
++thread_local std::string t_reportedMiss;
++
++int report_missing_level() noexcept {
++  static const int level = [] {
++    const char* env = std::getenv("DOL_AURORA_TEXTURE_REPORT_MISSING");
++    return env != nullptr && env[0] != '\0' ? std::atoi(env) : 0;
++  }();
++  return level;
++}
++
+ bool report_missing_key(const aurora::texture::TextureSourceKey& key, const GXTexObj_& obj) noexcept {
+   if (!s_reportedMisses.insert(key).second) {
+     return false;
+   }
+ 
+-  Log.warn("texture_replacement: missing runtime key {}", format_source_key_for_log(key));
++  Log.warn("texture_replacement: missing runtime key {} file={}", format_source_key_for_log(key),
++           format_replacement_filename(key));
++  if (report_missing_level() < 2) {
++    if (aurora::g_config.allowTextureDumps) {
++      dump_editable_texture_dds(key, obj);
++    }
++    return true;
++  }
+ 
+   size_t loggedCandidates = 0;
+   size_t omittedCandidates = 0;
+@@ -1256,8 +1275,12 @@ std::optional<TextureHandle> find_source_replacement_locked(const GXTexObj_& obj
+                                                             const texture::TextureSourceKey& sourceKey) noexcept {
+   const auto replacementKey = find_source_replacement_key_locked(sourceKey);
+   if (!replacementKey.has_value()) {
+-    // Enable for debugging
+-    // report_missing_key(sourceKey, obj);
++    // DOL_AURORA_TEXTURE_REPORT_MISSING=1 logs each texture the pack has no
++    // replacement for, once (2 adds the pack's nearest candidates); texture
++    // dumps write the missing ones as editable DDS files.
++    if (report_missing_level() != 0 || g_config.allowTextureDumps) {
++      report_missing_key(sourceKey, obj);
++    }
+     return std::nullopt;
+   }
+ 
+@@ -1320,6 +1343,23 @@ bool has_source_replacements() noexcept {
+   return s_sourceEntryCount != 0;
+ }
+ 
++std::string take_reported_miss() noexcept {
++  std::string name;
++  name.swap(t_reportedMiss);
++  return name;
++}
++
++bool dump_missing_rgba(const std::string& name, uint32_t width, uint32_t height, const uint8_t* rgba) noexcept {
++  if (!g_config.allowTextureDumps || name.empty() || rgba == nullptr) {
++    return false;
++  }
++  const auto dumpRoot = std::filesystem::path{reinterpret_cast<const char8_t*>(g_config.cachePath)} / "texture_dumps";
++  std::error_code ec;
++  std::filesystem::create_directories(dumpRoot, ec);
++  return aurora::gfx::dds::write_rgba8_dds(dumpRoot / name, width, height,
++                                           {rgba, size_t(width) * height * 4});
++}
++
+ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t height, uint32_t format,
+                                                         const uint8_t* data, uint32_t data_size,
+                                                         const uint8_t* tlut, uint32_t tlut_bytes,
+@@ -1373,6 +1413,10 @@ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t
+   }
+   const auto replacementKey = find_source_replacement_key_locked(key);
+   if (!replacementKey.has_value()) {
++    if ((report_missing_level() != 0 || g_config.allowTextureDumps) && s_reportedMisses.insert(key).second) {
++      t_reportedMiss = format_replacement_filename(key);
++      Log.warn("texture_replacement: missing runtime key {} file={}", format_source_key_for_log(key), t_reportedMiss);
++    }
+     return std::nullopt;
+   }
+   static const bool s_sync = std::getenv("DOL_TEXREP_SYNC") != nullptr;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+index 31efb3a096..19da9b3960 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include "texture.hpp"
+ #include <optional>
++#include <string>
+ 
+ namespace aurora::gfx::texture_replacement {
+ void initialize() noexcept;
+@@ -23,4 +24,9 @@ std::optional<TextureHandle> find_replacement_for_guest(uint32_t width, uint32_t
+                                                         const uint8_t* tlut, uint32_t tlut_bytes,
+                                                         bool* pending = nullptr) noexcept;
+ bool has_source_replacements() noexcept;
++// DOL_AURORA_TEXTURE_REPORT_MISSING / texture dumps (testing): the pack file name of a texture the
++// last find_replacement_for_guest call on this thread reported missing (once per texture), else empty.
++std::string take_reported_miss() noexcept;
++// Writes a missing texture's decoded RGBA8 as an editable DDS under texture_dumps, when dumps are on.
++bool dump_missing_rgba(const std::string& name, uint32_t width, uint32_t height, const uint8_t* rgba) noexcept;
+ } // namespace aurora::gfx::texture_replacement
+-- 
+2.52.0
+
