@@ -57,9 +57,9 @@ Two switches under it, on Mac, Linux and Windows, both off until turned on and b
 
 - **Keep the game's shading tables** leaves out a pack's files for the 37 textures the game shades with rather than
   draws (its toon tables: light and shadow thresholds, metal and ice ramps; `runtime/host/src/texture_pack_tables.h`).
-  Hypatia's pack replaces 15 of them; its shadow threshold table shrinks the shadow in Link's hair and makes its edge
-  jagged, and its ramps lighten the dark end of metal and ice. With the switch on, the game's own tables stay and the
-  rest of the pack is unchanged. `BLUEWAKE_TEXTURE_PACK_KEEP_TABLES=1`; Aurora's `DOL_AURORA_TEXTURE_PACK_SKIP` takes
+  Hypatia's pack replaces 15 of them, 12 as faithful enlargements; three differ: its shadow threshold table shrinks
+  the shadow in Link's hair and makes its edge jagged, a rock's ramp is solid where the game's fades, and the
+  Chuchu's ramp is lighter. With the switch on, the game's own tables stay and the rest of the pack is unchanged. `BLUEWAKE_TEXTURE_PACK_KEEP_TABLES=1`; Aurora's `DOL_AURORA_TEXTURE_PACK_SKIP` takes
   any list of `tex1_…` names.
 - **Save the textures the pack lacks** is for pack makers: each texture the game draws that the pack has no file for
   is named once in the log (`texture_replacement: missing runtime key … file=tex1_….dds`) and saved as an editable
