@@ -8,7 +8,9 @@ effect the next time BlueWake starts, and none of them changes your saves.
 | --- | --- | --- |
 | Widescreen 16:9 | The community 16:9 code (Dolphin's GZLE01 Gecko code): a wider field of view with the HUD placed for 16:9, letterboxed on a 4:3 iPad | Nothing; it is built in |
 | Widescreen 16:10 | The same code with its aspect-dependent values recomputed for 16:10 (Mac displays, most iPads' shape is closer to it); one widescreen mod at a time | Nothing; it is built in |
-| Widescreen 21:9 | The same code recomputed for 21:9 ultrawide desktop displays (Windows, Linux, Mac) | Nothing; it is built in |
+| Widescreen 21:9 | The same code recomputed for 21:9 ultrawide desktop displays (Windows, Linux, Mac). It is 21/9 = 2.3333, which no panel is: on a 2560x1080 or 3440x1440 monitor it leaves a thin black bar beside the picture | Nothing; it is built in |
+| Widescreen 21:9 · 2560x1080 | The same code recomputed for the 2.3704 shape most 2560x1080 ultrawides are, so the picture reaches the edges (Windows, Linux, Mac) | Nothing; it is built in |
+| Widescreen 21:9 · 3440x1440 | The same code recomputed for the 2.3889 shape 3440x1440 ultrawides are (Windows, Linux, Mac) | Nothing; it is built in |
 | Native cutscene framing | In widescreen, cutscenes fill the screen instead of a strip between black bars, as Wind Waker HD shows them, and the opening legend keeps its shape instead of being stretched (Windows, Linux, Mac) | Nothing; it is built in |
 | HD Textures | Replaces the game's textures with a Dolphin-format pack, such as [Hypatia's HD pack](https://forums.dolphin-emu.org/Thread-hypatia-s-tloz-the-wind-waker-hd-pack-v2-0001a) or [the textures from your own Wind Waker HD disc](WWHD_TEXTURES.md) | The pack's `tex1_…` images: on iPhone and iPad in `Documents/BlueWake/Load/Textures/GZLE01` (Install Texture Pack… copies them there); on the desktop, any folder picked with Choose texture pack folder… |
 | Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart. With them, BlueWake's own sea compass switch: on, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD; and its shorter Triforce quest: five chests that held Triforce Charts give their shards, as in Wind Waker HD | Nothing; it is built in |
@@ -18,15 +20,18 @@ On the iPad, `Documents/BlueWake` is **On My iPad › BlueWake › BlueWake** in
 ## Installing
 
 **Widescreen:** on iPhone and iPad, turn on *Widescreen 16:9* or *Widescreen 16:10* (turning one on turns
-the other off); on Mac, Windows and Linux, pick 16:10, 16:9 or 21:9 in **F1 › Mods › Widescreen**. Then
+the other off); on Mac, Windows and Linux, pick 16:10, 16:9, 21:9 or one of the two 2560x1080 / 3440x1440
+presets in **F1 › Mods › Widescreen**. Then
 restart BlueWake. The 16:10 code is generated from the 16:9 one by `scripts/mods/widescreen_aspect.py`:
 each value it changes (the camera aspect, which also widens the game's view culling, the 2D bounds, HUD
 and map positions, a few instruction immediates) is interpolated between the game's 4:3 value and the
 16:9 value, and the three HUD constants it loads from the game's pool take the nearest pool value. The 21:9
 code is generated the same way, with the 16:9 change carried on 2.25 times as far (its pool constants land
 within half a pixel); the HUD elements the 16:9 code leaves in place stay where the 4:3 game puts them, so
-at 21:9 they sit further in from the edges. On the desktop hosts, `BLUEWAKE_ASPECT=16:10`, `16:9` or
-`21:9` (the menu's aspect setting, or `--aspect`) selects the mod and the frame buffer shape together.
+at 21:9 they sit further in from the edges. The 2560x1080 (`64:27`) and 3440x1440 (`43:18`) presets are
+generated the same way at t = 2.3333 and 2.375, and take the nearest pool constant to each value their wider
+HUD wants. On the desktop hosts, `BLUEWAKE_ASPECT=16:10`, `16:9`, `21:9`, `64:27` or `43:18` (the menu's
+aspect setting, or `--aspect`) selects the mod and the frame buffer shape together.
 At 21:9 the picture is no taller than 4:3's, so the follow camera starts one wheel notch further back
 (`BLUEWAKE_CAMERA_DISTANCE`, 1.12 there and 1 otherwise; the wheel still moves it from there). At the default 3× render resolution 16:9
 renders 2560×1440 and 16:10 2304×1440 (the 4:3 picture's height, widened), so the game's letterbox bars line up with the scene;
