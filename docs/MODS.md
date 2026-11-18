@@ -50,7 +50,21 @@ each part does.
 memory. Copy the folder of `tex1_…` images (in Hypatia's pack, the `GZL` folder) into
 `Load/Textures/GZLE01`, turn on *HD Textures* and restart. Subfolders are searched, `_mipN`
 sidecar mipmaps are used, and PNG and DDS files both work. The menu shows how many textures it found. On the desktop, **Choose texture pack folder…** uses a
-pack where it is, with nothing copied.
+pack where it is, with nothing copied, and the line under the count says how many the renderer loaded when BlueWake
+started (none, in red, when no file is named like a GZLE01 texture).
+
+Two switches under it, on Mac, Linux and Windows, both off until turned on and both for the next launch:
+
+- **Keep the game's shading tables** leaves out a pack's files for the 37 textures the game shades with rather than
+  draws (its toon tables: light and shadow thresholds, metal and ice ramps; `runtime/host/src/texture_pack_tables.h`).
+  Hypatia's pack replaces 15 of them; its shadow threshold table shrinks the shadow in Link's hair and makes its edge
+  jagged, and its ramps lighten the dark end of metal and ice. With the switch on, the game's own tables stay and the
+  rest of the pack is unchanged. `BLUEWAKE_TEXTURE_PACK_KEEP_TABLES=1`; Aurora's `DOL_AURORA_TEXTURE_PACK_SKIP` takes
+  any list of `tex1_…` names.
+- **Save the textures the pack lacks** is for pack makers: each texture the game draws that the pack has no file for
+  is named once in the log (`texture_replacement: missing runtime key … file=tex1_….dds`) and saved as an editable
+  `.dds` in `texture_dumps`, in BlueWake's data folder, ready to paint or upscale and put in the pack under that name.
+  `BLUEWAKE_TEXTURE_DUMPS=1`; `DOL_AURORA_TEXTURE_REPORT_MISSING=1` alone logs the names without saving files.
 
 You can also [import compatible textures from your own Wii U Wind Waker HD
 disc](WWHD_TEXTURES.md). The local importer creates a Dolphin-format pack;
