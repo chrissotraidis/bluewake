@@ -863,9 +863,12 @@ int main(void) {
         # widescreen's main.dol and Better Wind Waker's RELs: two rounds at once.
         self.together(lambda: widescreen("widescreen", "GZLE01.gecko"),
                       lambda: widescreen("widescreen1610", "GZLE01-16x10.gecko"),
-                      lambda: widescreen("widescreen219", "GZLE01-21x9.gecko"), betterww, base_tree)
+                      lambda: widescreen("widescreen219", "GZLE01-21x9.gecko"),
+                      lambda: widescreen("widescreen6427", "GZLE01-64x27.gecko"),
+                      lambda: widescreen("widescreen4318", "GZLE01-43x18.gecko"), betterww, base_tree)
         self.together(lambda: combo("combo", "widescreen"), lambda: combo("combo1610", "widescreen1610"),
-                      lambda: combo("combo219", "widescreen219"))
+                      lambda: combo("combo219", "widescreen219"), lambda: combo("combo6427", "widescreen6427"),
+                      lambda: combo("combo4318", "widescreen4318"))
 
         print("variants into the composite source")
         # The --mod and --combo specs are colon-separated, and a Windows path
@@ -884,7 +887,13 @@ int main(void) {
             "--combo", "widescreen+betterww:mods/combo/composite-src",
             "--combo", "widescreen1610+betterww:mods/combo1610/composite-src",
             "--combo", "widescreen219+betterww:mods/combo219/composite-src",
-            "--exclusive", "widescreen,widescreen1610,widescreen219",
+            "--mod", "widescreen6427:mods/widescreen6427/composite-src:mods/widescreen6427/main.dol:"
+                     "mods/widescreen6427/runtime.json",
+            "--combo", "widescreen6427+betterww:mods/combo6427/composite-src",
+            "--mod", "widescreen4318:mods/widescreen4318/composite-src:mods/widescreen4318/main.dol:"
+                     "mods/widescreen4318/runtime.json",
+            "--combo", "widescreen4318+betterww:mods/combo4318/composite-src",
+            "--exclusive", "widescreen,widescreen1610,widescreen219,widescreen6427,widescreen4318",
             "--options", options, "--rels-bin-dir", o / "game/rels"], cwd=o)
         dst = o / "composite-src"
         if (base / "generated.h").read_bytes() != (dst / "generated.h").read_bytes():

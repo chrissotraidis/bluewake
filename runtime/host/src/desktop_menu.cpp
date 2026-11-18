@@ -600,13 +600,14 @@ bool draw_custom(const bw_settings::Setting& s) {
     if (std::strcmp(s.key, "BLUEWAKE_ASPECT") == 0) {
         // The chosen shape is the menu's copy (launch_choices): the picture, the mods and the
         // Display tab's "keep the shape" all follow it.
-        static const char* const kAspects[] = {"Off (4:3, the game's)", "16:10", "16:9", "21:9"};
-        static const char* const kAspectValues[] = {"4:3", "16:10", "16:9", "21:9"};
+        static const char* const kAspects[] = {"Off (4:3, the game's)", "16:10", "16:9", "21:9 (2.3333)",
+                                               "21:9 · 2560x1080", "21:9 · 3440x1440"};
+        static const char* const kAspectValues[] = {"4:3", "16:10", "16:9", "21:9", "64:27", "43:18"};
         int aspect = 0;
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < 6; ++i)
             if (launch_choices().aspect == kAspectValues[i])
                 aspect = i;
-        if (bw_menu_combo(s.label, &aspect, kAspects, 4)) {
+        if (bw_menu_combo(s.label, &aspect, kAspects, 6)) {
             launch_choices().aspect = kAspectValues[aspect];
             choice_changed(s.key);
         }
@@ -707,7 +708,7 @@ bool draw_custom(const bw_settings::Setting& s) {
     }
     if (std::strcmp(s.key, "DOL_AURORA_ASPECT_FIT") == 0) {
         // When the window isn't the picture's shape: black bars, or the picture
-        // stretched to fill it. A widened picture (16:10, 16:9, 21:9) always
+        // stretched to fill it. A widened picture (16:10 up to 43:18) always
         // keeps its shape, so the choice is only for 4:3.
         if (launch_choices().aspect != "4:3") {
             ImGui::TextDisabled("Widened pictures always keep their shape (black bars rather than stretching).");
