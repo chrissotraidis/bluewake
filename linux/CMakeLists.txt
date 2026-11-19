@@ -94,6 +94,7 @@ set(BLUEWAKE_HOST_SOURCES
 add_executable(bluewake
     src/linux_entry.c
     src/linux_disc.c
+    src/linux_steam.c
     src/linux_setup.cpp
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import_stages.c
     ${BLUEWAKE_REPO_ROOT}/apple/ios/src/disc_import.c
@@ -289,6 +290,10 @@ if(BLUEWAKE_LINUX_REGRESSION_TESTS)
     target_link_libraries(bluewake_soft_effects_test PRIVATE GXRuntime::gxcore)
     add_test(NAME bluewake_soft_effects_test COMMAND bluewake_soft_effects_test)
     set_tests_properties(bluewake_soft_effects_test PROPERTIES TIMEOUT 30)
+
+    add_executable(bluewake_linux_steam_test ${BLUEWAKE_REPO_ROOT}/tests/linux_steam_test.c)
+    add_test(NAME bluewake_linux_steam_test COMMAND bluewake_linux_steam_test)
+    set_tests_properties(bluewake_linux_steam_test PROPERTIES TIMEOUT 30)
 
     add_executable(bluewake_linux_disc_test ${BLUEWAKE_REPO_ROOT}/tests/linux_disc_test.c)
     target_include_directories(bluewake_linux_disc_test PRIVATE ${BLUEWAKE_HOST_SRC} ${BLUEWAKE_REPO_ROOT}/apple/ios/src)
