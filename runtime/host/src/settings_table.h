@@ -242,6 +242,17 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_SPRINT_CHOICE", .old_windows = "sprint_speed", .kind = Kind::Float, .fallback = "1.5",
      .low = 1.1f, .high = 2.f, .label = "Sprint speed", .tab = Tab::Gameplay, .needs = "BLUEWAKE_JUMP_BUTTON",
      .shown = "%.2fx", .stored = "%.2f"},
+    // Holding Tab (or a controller's right stick click) runs the game faster
+    // than realtime; turbo.c divides the retrace pace and skips the sound.
+    {.key = "BLUEWAKE_TURBO", .kind = Kind::Bool,
+     .label = "Speed up while the key is held (Tab, or the right stick's click)",
+     .tab = Tab::Gameplay, .control = Control::Custom,
+     .note = "Runs the game faster than realtime for as long as the key is held: the picture keeps up, and "
+             "the sound is skipped while it is held and starts again when it is let go. Off by default.",
+     .group = "Speed up"},
+    {.key = "BLUEWAKE_TURBO_SPEED", .kind = Kind::Float, .fallback = "3", .low = 1.5f, .high = 5.f,
+     .label = "Speed-up factor", .tab = Tab::Gameplay, .needs = "BLUEWAKE_TURBO",
+     .shown = "%.1fx", .stored = "%.1f"},
     // A and B, and X and Y, swapped (desktop_menu.cpp, apply_controller); the
     // key is the one Swap A and B had, so a file that turned it on keeps it.
     {.key = "BLUEWAKE_PAD_SWAP_AB", .old_windows = "controller_swap_ab", .kind = Kind::Bool,

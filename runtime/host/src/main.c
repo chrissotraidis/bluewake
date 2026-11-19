@@ -41,6 +41,7 @@
 #include "module_hugepages.h"
 #include "settings_menu.h"
 #include "sprint.h"
+#include "turbo.h"
 #include "quick_doors.h"
 #include "haptics.h"
 #include "draw_tags.h"
@@ -1156,6 +1157,7 @@ static void host_mods_enable(void* lib, CPUState* cpu) {
 
 static void host_wall_pace(u64 retrace) {
     static u64 base_ns, base_retrace, last_retrace;
+    static u32 last_percent;
     struct timespec now_ts;
     clock_gettime(CLOCK_MONOTONIC, &now_ts);
     const u64 now = (u64)now_ts.tv_sec * 1000000000ull + (u64)now_ts.tv_nsec;
@@ -1163,13 +1165,20 @@ static void host_wall_pace(u64 retrace) {
     // change's black, fast-forwarded): they are not waited for afterwards.
     const bool resumed = retrace != last_retrace + 1u;
     last_retrace = retrace;
-    if (base_ns == 0u || resumed) {
+    // Speeding up (turbo.c) puts the retraces that much closer together, and a
+    // change of pace restarts the schedule too: the first retrace at the new
+    // speed was not due at the old one's time.
+    const u32 percent = bluewake_turbo_percent();
+    const bool repaced = percent != last_percent;
+    last_percent = percent;
+    if (base_ns == 0u || resumed || repaced) {
         base_ns = now;
         base_retrace = retrace;
         return;
     }
-    // 1001/60000 s per retrace, in nanoseconds.
-    const u64 target = base_ns + (retrace - base_retrace) * 1001000000000ull / 60000ull;
+    // 1001/60000 s per retrace, in nanoseconds, divided by the speed-up.
+    const u64 target =
+        base_ns + (retrace - base_retrace) * 1001000000000ull * 100ull / (60000ull * percent);
     if (now > target + 100000000ull || target > now + 100000000ull) {
         base_ns = now;
         base_retrace = retrace;
@@ -5559,6 +5568,17 @@ static void host_sync_audio_cycles(CPUState* cpu) {
     if (elapsed_cycles == 0u)
         return;
     dol_audio_dma_advance_stream(&g_audio_dma, elapsed_cycles);
+    // Speeding up (turbo.c): the sound is skipped, but the DMA's cadence and its
+    // AID interrupt still advance, so the guest's audio thread retires its tasks
+    // at the times the game set them. The device's queue drains while this
+    // happens, so the first moment after the key is let go plays from empty.
+    if (bluewake_turbo_active()) {
+        u64 pending = elapsed_cycles;
+        u32 address = 0;
+        while (dol_audio_dma_advance(&g_audio_dma, pending, &address))
+            pending = 0u;
+        return;
+    }
     if (!dol_audio_dma_consume_pcm16_stereo_work(
             &g_audio_dma, elapsed_cycles, host_audio_dma_read_guest, cpu))
         return;
@@ -5764,6 +5784,7 @@ static void host_sync_vi_cycles(CPUState* cpu) {
         bluewake_jump_button_retrace();
         host_skip_fast_refresh();  // the jump button may have armed
         bluewake_sprint_retrace();
+        bluewake_turbo_retrace();
         bluewake_fps_watch_retrace();
         bluewake_fast_load_retrace(bluewake_host_thread_cpu_us());
         bluewake_quick_doors_retrace();
@@ -8828,6 +8849,7 @@ int main(int argc, char** argv) {
     bluewake_opening_attach(&cpu);
     bluewake_jump_button_attach(&cpu);
     bluewake_sprint_attach(&cpu);
+    bluewake_turbo_attach();
     bluewake_fps_watch_attach(&cpu);
     bluewake_fast_load_attach(&cpu);
     bluewake_quick_doors_attach(&cpu);

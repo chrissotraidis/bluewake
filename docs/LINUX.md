@@ -219,7 +219,8 @@ picture's shape** (black bars rather than stretching a 4:3 picture; a widened on
 **Pause while the window is in the background** and **Compile shaders before playing**. The settings
 that are new on Linux are off until you turn them on. The widescreen choice is under **Mods**, after HD
 textures. Under **Gameplay**, Jump & Sprint (with a **Sprint speed**) and Fast transitions are one
-switch each, as on the iPad.
+switch each, as on the iPad, and **Speed up** is one: on, holding Tab runs the game that many times
+realtime, and the sound is skipped while it is held.
 
 **Config** is the last tab: **Exact sound** (off: Dolphin's high-level Zelda sound, the default and faster;
 on: the sound chip's own program, slower; next launch), the menu's own settings (**Pause the game while the

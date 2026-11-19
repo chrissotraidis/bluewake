@@ -64,6 +64,7 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/jump_button.c
     ${BLUEWAKE_HOST_SRC}/climb.c
     ${BLUEWAKE_HOST_SRC}/sprint.c
+    ${BLUEWAKE_HOST_SRC}/turbo.c
     ${BLUEWAKE_HOST_SRC}/letterbox.c
     ${BLUEWAKE_HOST_SRC}/opening.c
     ${BLUEWAKE_HOST_SRC}/quick_doors.c
