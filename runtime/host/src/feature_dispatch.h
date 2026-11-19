@@ -5,7 +5,9 @@
 #include "climb.h"
 #include "draw_tags.h"
 #include "forest_water.h"
+#include "letterbox.h"
 #include "mouse_camera.h"
+#include "opening.h"
 #include "quick_doors.h"
 
 /* These hooks only run at fixed GZLE01 addresses in this interval. Reject
@@ -14,20 +16,23 @@
 static inline bool bluewake_feature_observes(u32 address) {
     return bluewake_mouse_camera_observes(address) || bluewake_climb_observes(address) ||
            bluewake_quick_doors_observes(address) || bluewake_draw_tags_observes(address) ||
-           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address);
+           bluewake_forest_water_observes(address) || bluewake_audio_watch_observes(address) ||
+           bluewake_letterbox_observes(address) || bluewake_opening_observes(address);
 }
 
 /* The chassis services every block boundary except the block a host turn
  * starts on, which the host dispatches itself. The host calls this for that
  * block; Forest Water has its own turn-start call. */
 static inline void bluewake_feature_dispatch_turn_entry(CPUState* cpu, u32 address) {
-    // The audio watch's hooks are outside the interval below.
+    // The audio watch's hooks and the legend's (J2DScreen::draw) are outside the interval below.
     bluewake_audio_watch_dispatch(cpu, address);
+    bluewake_opening_dispatch(cpu, address);
     if (address - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE >
         BLUEWAKE_PARTICLE_DRAW_LAST - BLUEWAKE_QUICK_DOORS_ACTOR_CREATE)
         return;
     bluewake_mouse_camera_dispatch(cpu, address);
     bluewake_climb_dispatch(cpu, address);
+    bluewake_letterbox_dispatch(cpu, address);
     bluewake_quick_doors_dispatch(cpu, address);
     bluewake_draw_tags_dispatch(cpu, address);
 }

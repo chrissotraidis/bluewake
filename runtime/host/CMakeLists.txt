@@ -52,6 +52,8 @@ add_executable(bluewake_host
     src/desktop_menu.cpp
     src/desktop_settings.cpp
     src/texture_pack_menu.cpp
+    src/dolphin_save_menu.cpp
+    ../../apple/ios/src/dolphin_save_import.c
     src/wwhd/formats.cpp
     src/wwhd/addrlib.cpp
     src/wwhd/hd.cpp
@@ -64,6 +66,8 @@ add_executable(bluewake_host
     src/wwhd/disc_image.cpp
     src/wwhd/wiiu_disc.cpp
     src/sprint.c
+    src/letterbox.c
+    src/opening.c
     src/quick_doors.c
     src/haptics.c
     src/draw_tags.c

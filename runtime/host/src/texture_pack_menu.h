@@ -113,7 +113,7 @@ inline ImVec4 state_color(PackState s) {
 
 // System pickers may answer on another thread. Only this mailbox is shared;
 // the menu consumes an answer before another dialog can replace its purpose.
-enum class Pick { pack, wind_waker_hd, disc_image, disc_key, common_key, title_key };
+enum class Pick { pack, wind_waker_hd, disc_image, disc_key, common_key, title_key, dolphin_save, dolphin_export };
 
 struct Picker {
     std::mutex lock;

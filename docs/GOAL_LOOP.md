@@ -1,6 +1,6 @@
 # What we're doing
 
-The dated plan, and the five-step loop every session follows. Owner: Chris. Updated October 29, 2026. The ranked
+The dated plan, and the five-step loop every session follows. Owner: Chris. Updated November 16, 2026. The ranked
 backlog is [PRIORITIES.md](PRIORITIES.md), the speed strategy and its runbook are [PERFORMANCE.md](PERFORMANCE.md),
 and the standards everything is held to are in [DIRECTION.md](DIRECTION.md). The daily sections from October 11 to
 15, with every measurement, are kept in [status/GOAL_LOOP_2026-10-15.md](status/GOAL_LOOP_2026-10-15.md).
@@ -30,6 +30,21 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 | 1. Lean what we have, and catch up with Elliott | 0.7.0 and the next two weeks | Lean block copies (the default since 0.7.0), draw fusion, his faster loads and natives rounds 4, 5 and 7, his upload changes, hidden symbols, Smooth Motion pacing | Faster on the benchmark, and the game plays the same |
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
 | 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
+
+## November 16: Linux CI signing-key download
+
+The 0.12.0 release-record CI stopped twice before compiling source because the
+LLVM signing-key download exited with a network error. The Linux build image now
+uses curl with bounded retries and visible errors for that download, followed by
+the existing pinned-fingerprint check. The Linux workflow validates the image
+and host build; no tool versions or published release files change.
+
+## November 16: 0.12.0 post-publication build check
+
+The fresh PadMint player check against public 0.12.0 passed on the Mac with Apple
+Python 3.9.6, local training and an empty PadMint folder (84.7 minutes). The earlier
+disk-space stop is resolved. The [release record](status/RELEASE_0.12.0.md#after-publishing)
+has the exact source and validation scope; physical-device gaps remain unchanged.
 
 ## October 29: PadMint's Python 3.9 build failure
 

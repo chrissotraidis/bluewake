@@ -20,8 +20,10 @@ ARG TYPE2_RUNTIME_X86_64_SHA256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c8
 # runtime and the AppImage ABI baseline while only changing code generation.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates wget gnupg python3 python3-pip python3-venv \
-    && wget -q https://apt.llvm.org/llvm-snapshot.gpg.key -O /tmp/apt.llvm.org.asc \
+        ca-certificates curl wget gnupg python3 python3-pip python3-venv \
+    && curl --fail --show-error --location --retry 3 --retry-all-errors \
+        --connect-timeout 20 --max-time 120 \
+        --output /tmp/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key \
     && test "$(gpg --batch --show-keys --with-colons /tmp/apt.llvm.org.asc \
         | awk -F: '$1 == "fpr" { print $10; exit }')" = "${LLVM_APT_SIGNER_FINGERPRINT}" \
     && gpg --batch --dearmor -o /usr/share/keyrings/apt.llvm.org.gpg /tmp/apt.llvm.org.asc \

@@ -181,6 +181,21 @@ def set4_native_sources():
     return names
 
 
+def replace_folder(new, current):
+    """os.replace for a folder that was just written. Windows refuses to rename a folder
+    while a file inside it is open, and antivirus (Microsoft Defender) opens new files to
+    scan them: on a fast PC the rename straight after DolRecomp writes its 1,582 files
+    stopped a first build with "Access is denied" (padmint#255). Wait and try again for
+    about 15 seconds before giving up."""
+    for wait in (0.2, 0.5, 1, 2, 4, 8, None):
+        try:
+            return os.replace(new, current)
+        except PermissionError:
+            if os.name != "nt" or wait is None:
+                raise
+            time.sleep(wait)
+
+
 def sync_tree(new, current):
     """Make `current` the same tree as `new`, replacing only files that differ,
     so the unchanged ones keep their timestamps and Ninja does not recompile
@@ -673,7 +688,7 @@ int main(void) {
                                       "--rel-base", "0xC0400000", *sites, rels_arg, pending / "rels",
                                       "-j", self.args.jobs])
         shutil.rmtree(out, ignore_errors=True)
-        os.replace(pending, out)
+        replace_folder(pending, out)
 
     def composite(self, dol_dir, rels_dir, rels_bin, main_dol, out, name):
         shutil.rmtree(out, ignore_errors=True)

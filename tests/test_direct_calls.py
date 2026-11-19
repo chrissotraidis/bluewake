@@ -69,7 +69,7 @@ SKIP_HARNESS = r"""
 #include "feature_dispatch.h"
 #include "bw_edge_watch.inc"
 bool bluewake_climb_on, bluewake_quick_doors_armed, bluewake_draw_tags_enabled;
-bool bluewake_forest_water_enabled;
+bool bluewake_forest_water_enabled, bluewake_letterbox_armed, bluewake_opening_armed;
 u32 bluewake_forest_water_tree_timer_check;
 static unsigned char watched[0x01800000u / 4u];
 int main(void) {
@@ -82,6 +82,9 @@ int main(void) {
         bluewake_quick_doors_armed = (flags & 2) != 0;
         bluewake_draw_tags_enabled = (flags & 4) != 0;
         bluewake_forest_water_enabled = (flags & 8) != 0;
+        /* Cutscene framing rides along with two of the others' bits. */
+        bluewake_letterbox_armed = flags & 1;
+        bluewake_opening_armed = (flags & 2) != 0;
         /* Anywhere in MEM1, so a timer address the list lacks is covered too. */
         bluewake_forest_water_tree_timer_check = 0x80001234u;
         for (u32 address = 0x80000000u; address < 0x81800000u; address += 4) {

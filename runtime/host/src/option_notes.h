@@ -19,5 +19,8 @@ inline const char* bw_option_note(const char* name) {
     if (std::strcmp(name, "sea_compass") == 0)
         return "The red end points the way you're sailing, on a north-up dial, as in Wind Waker HD. "
                "Off keeps the GameCube compass, where the red end points north.";
+    if (std::strcmp(name, "hd_triforce") == 0)
+        return "Five chests that held Triforce Charts hold the Triforce Shards themselves, as in Wind Waker HD. "
+               "Only three charts still need Tingle and a salvage.";
     return nullptr;
 }

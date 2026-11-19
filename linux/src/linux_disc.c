@@ -220,7 +220,9 @@ int bw_disc_has_usable_source(const char* exe_dir, const char* data_dir) {
 // passes no callback and reads the same behaviour from the console log.
 int bw_disc_prepare_into(const char* data_dir, const char* disc,
                          BlueWakeImportProgress progress, void* context,
-                         int* already_prepared, char* error, size_t error_size) {
+                         BlueWakeImportCancelled cancelled,
+                         void* cancel_context, int* already_prepared,
+                         char* error, size_t error_size) {
     g_data = data_dir;
     if (already_prepared != NULL) *already_prepared = 0;
     if (bluewake_disc_check(disc, error, error_size) != 0) return -1;
@@ -250,7 +252,17 @@ int bw_disc_prepare_into(const char* data_dir, const char* disc,
     snprintf(rels, sizeof rels, "%s/rels", game);
     snprintf(stamp_path, sizeof stamp_path, "%s/prepared.txt", game);
     fprintf(stderr, "[disc] preparing %s\n", disc);
-    if (bluewake_disc_prepare(disc, game, progress, context, error, error_size) != 0) {
+    const int import = bluewake_disc_prepare(disc, game, progress, context,
+                                             cancelled, cancel_context, error,
+                                             error_size);
+    if (import == 1) {
+        // The import removed what it wrote; the folder it was made in is empty,
+        // so take that back too instead of leaving one per attempt.
+        rmdir(game);
+        fprintf(stderr, "[disc] the preparation was cancelled\n");
+        return 1;
+    }
+    if (import != 0) {
         // Name where the files were going: a first import that fails for want
         // of room should say so next to the folder, and that folder can be
         // moved (#479).
@@ -343,8 +355,8 @@ int bw_disc_setup(const char* exe_dir, const char* data_dir,
         // The same call the setup window makes, so the window and the launcher
         // check and prepare identically; here there is no progress to report.
         int already_prepared = 0;
-        if (bw_disc_prepare_into(data_dir, disc, NULL, NULL, &already_prepared,
-                                 error, sizeof error) != 0) {
+        if (bw_disc_prepare_into(data_dir, disc, NULL, NULL, NULL, NULL,
+                                 &already_prepared, error, sizeof error) != 0) {
             fprintf(stderr, "[disc] %s: %s\n", disc, error);
             if (explicit_disc || scripted)
                 return -1;

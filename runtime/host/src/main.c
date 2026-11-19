@@ -60,6 +60,8 @@
 #include "save_state.h"
 #include "status_line.h"
 #include "climb.h"
+#include "letterbox.h"
+#include "opening.h"
 #include "gxruntime/hle.h"
 #include <aurora/gfx.h>
 #include "external_memory.h"
@@ -5467,10 +5469,21 @@ static bool host_graphics_guest_resolve_uncached(
     // look it up at the linked address it came from: Molgera's sand floor
     // (d_a_bwdg's GFSetArray of its texture coordinates) was skipped every
     // frame and the arena had no floor (issue #126).
+    //
+    // A texture or palette's address reaches GX through SETIMAGE3 or
+    // LOADTLUT0, which hold only bits 5-25: a module's texture at 0xC1856760
+    // (d_a_obj_tapestry's cloth, Earth Temple) arrives as 0x01856760. MEM1
+    // past the retail 24 MiB holds no GX data (the callback sentinel and the
+    // raw REL staging window), so such an address is a module's linked
+    // address with its top bits dropped: look it up at 0xC0000000 | address.
+    // Not from module 1 (0x81F80000) on: it sits in RAM there, and its
+    // alias holds other bytes (its relocated pointers) than that RAM.
     {
-        const u32 linked = (address & 0xC0000000u) == 0x40000000u
-                               ? address | 0x80000000u
-                               : address;
+        u32 linked = (address & 0xC0000000u) == 0x40000000u
+                         ? address | 0x80000000u
+                         : address;
+        if (address >= GC_MAIN_RAM_SIZE && address < (BLUEWAKE_DYNAMIC_SCRATCH_LIMIT & 0x3FFFFFFFu))
+            linked = address | 0xC0000000u;
         u8* alias = NULL;
         u32 alias_offset = 0u;
         // The translation worker's thread: see g_guest_alias_lock.
@@ -6942,6 +6955,7 @@ static void host_features_state_loaded(CPUState* cpu) {
     bluewake_sprint_state_loaded(cpu, reapply);
     bluewake_mouse_camera_state_loaded();
     bluewake_climb_state_loaded();
+    bluewake_letterbox_state_loaded();
 }
 
 #define HS_FIELD(x) {#x, (void*)&(x), (uint32_t)sizeof(x)}
@@ -7094,6 +7108,8 @@ static bool host_state_save(const char* path, CPUState* cpu,
         free(gx);
         return false;
     }
+    // Guest memory as the game left it: no cutscene bars held away by Native cutscene framing.
+    bluewake_letterbox_state_saving(cpu);
     HostStateHeader header;
     host_state_header(&header, cpu, mod);
     bool ok = bw_state_write_chunk(writer, "HEADER", &header, sizeof header);
@@ -8841,6 +8857,8 @@ int main(int argc, char** argv) {
     bluewake_hd_look_reload();
     bluewake_mouse_camera_attach(&cpu);
     bluewake_climb_attach(&cpu);
+    bluewake_letterbox_attach(&cpu);
+    bluewake_opening_attach(&cpu);
     bluewake_jump_button_attach(&cpu);
     bluewake_sprint_attach(&cpu);
     bluewake_fps_watch_attach(&cpu);
