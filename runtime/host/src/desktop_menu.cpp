@@ -1150,35 +1150,41 @@ void draw_menu(const bw_platform::Look& look) {
         // options to the buttons below without A to enter it and B to leave it.
         struct Tab {
             const char* label;
+            bw_settings::Tab rows;
             void (*draw)();
         };
-        static const Tab kTabs[] = {{"Display", display_tab},
-                                    {"Gameplay", gameplay_tab},
-                                    {"Mods", mods_tab},
-                                    {"Controls", controls_tab},
-                                    {"Config", config_tab}};
+        static const Tab kTabs[] = {{"DISPLAY", bw_settings::Tab::Display, display_tab},
+                                    {"GAMEPLAY", bw_settings::Tab::Gameplay, gameplay_tab},
+                                    {"MODS", bw_settings::Tab::Mods, mods_tab},
+                                    {"CONTROLS", bw_settings::Tab::Controls, controls_tab},
+                                    {"CONFIG", bw_settings::Tab::Config, config_tab}};
         constexpr int kTabCount = static_cast<int>(sizeof kTabs / sizeof kTabs[0]);
         static int shown = 0;
-        int request = -1;
-        if (pad.tab_step != 0)
-            request = (shown + kTabCount + pad.tab_step) % kTabCount;
-        // The tab a bumper asked for, until its body is drawn: ImGui shows a
-        // newly selected tab from the next frame, not this one.
+        // The tab a bumper asked for: the cursor goes to its first setting
+        // that can be changed, every time. Left to itself it landed on the
+        // header or the footer, differently each time.
         static int focus_tab = -1;
-        if (request >= 0)
-            focus_tab = request;
+        if (pad.tab_step != 0) {
+            shown = (shown + kTabCount + pad.tab_step) % kTabCount;
+            focus_tab = shown;
+        }
         // The body takes what the footer leaves: the hint, the next-launch note
         // when there is one, and the buttons on one row or, if narrow, two.
         const bool restart = needs_restart();
         const float footer = bw_menu_footer_height(restart);
+        using namespace bluewake_ui::palette;
+        ImDrawList* paint = ImGui::GetWindowDrawList();
+        bw_menu_panel_edge(scale);
         // The window has no title bar, so closing with the mouse is a round
-        // button in its corner, above the tabs: a tab that is not a tab reads
-        // as a sixth page you cannot open.
+        // button in its corner, beside the plaque.
+        const float plaque_h = ImGui::GetFrameHeight() * 1.45f;
+        float plaque_w = ImGui::GetContentRegionAvail().x;
         {
             const ImVec2 corner = ImGui::GetCursorScreenPos();
             const float size = ImGui::GetFrameHeight() * 0.9f;
             const float right = corner.x + ImGui::GetContentRegionAvail().x - size;
-            ImGui::SetCursorScreenPos(ImVec2(right, corner.y));
+            plaque_w -= size + ImGui::GetStyle().ItemSpacing.x;
+            ImGui::SetCursorScreenPos(ImVec2(right, corner.y + (plaque_h - size) * 0.5f));
             ImGui::InvisibleButton("##close", ImVec2(size, size), ImGuiButtonFlags_EnableNav);
             // Shown for the pointer and for a pad or the keyboard landing on it.
             const bool over = ImGui::IsItemHovered() || ImGui::IsItemFocused();
@@ -1186,46 +1192,50 @@ void draw_menu(const bw_platform::Look& look) {
                 open = false;
             const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
             const ImVec2 mid((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
-            ImDrawList* paint = ImGui::GetWindowDrawList();
-            if (over) {  // the whole button lights up, not an outline of it
-                paint->AddCircleFilled(mid, size * 0.5f, ImGui::GetColorU32(ImGuiCol_HeaderHovered));
-                paint->AddCircle(mid, size * 0.5f, ImGui::GetColorU32(ImGuiCol_SliderGrab, 0.85f), 0, 1.f);
-            }
-            const float arm = size * 0.22f;
-            const ImU32 ink = ImGui::GetColorU32(over ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-            paint->AddLine(ImVec2(mid.x - arm, mid.y - arm), ImVec2(mid.x + arm, mid.y + arm), ink, 1.6f);
-            paint->AddLine(ImVec2(mid.x - arm, mid.y + arm), ImVec2(mid.x + arm, mid.y - arm), ink, 1.6f);
+            paint->AddCircleFilled(mid, size * 0.5f, bluewake_ui::u32(over ? kButtonB : kWood));
+            const float arm = size * 0.2f;
+            const ImU32 ink = bluewake_ui::u32(kCream);
+            paint->AddLine(ImVec2(mid.x - arm, mid.y - arm), ImVec2(mid.x + arm, mid.y + arm), ink, 2.f * scale);
+            paint->AddLine(ImVec2(mid.x - arm, mid.y + arm), ImVec2(mid.x + arm, mid.y - arm), ink, 2.f * scale);
             ImGui::SetCursorScreenPos(corner);
         }
-        if (ImGui::BeginTabBar("##tabs")) {
-            for (int i = 0; i < kTabCount; ++i) {
-                if (!ImGui::BeginTabItem(kTabs[i].label, nullptr, i == request ? ImGuiTabItemFlags_SetSelected : 0))
-                    continue;
-                shown = i;
-                ImGui::PushID(i);
-                ImGui::BeginChild("##body", ImVec2(0, -footer), ImGuiChildFlags_NavFlattened);
-                ImGui::PushTextWrapPos(0.f); // text wraps at the menu's edge
-                // A shoulder button changed the tab: the cursor goes to this
-                // tab's first setting that can be changed, every time. Left to
-                // itself it landed on the header or the footer, differently
-                // each time.
-                if (i == focus_tab) {
-                    ImGui::SetKeyboardFocusHere();
-                    focus_tab = -1;
-                }
-                kTabs[i].draw();
-                // Room after the last setting, so scrolled to the end it stands
-                // clear of the footer rather than half under it.
-                ImGui::Dummy(ImVec2(1.f, ImGui::GetStyle().ItemSpacing.y * 2.f));
-                ImGui::PopTextWrapPos();
-                bw_menu_stick_scroll(pad.scroll);
-                bw_menu_scroll_past_ends();
-                ImGui::EndChild();
-                ImGui::PopID();
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
+        // The tabs on a wooden plaque, as the game titles its pages.
+        {
+            const char* names[kTabCount];
+            for (int i = 0; i < kTabCount; ++i)
+                names[i] = kTabs[i].label;
+            bw_menu_tab_plaque(names, kTabCount, &shown, plaque_w, plaque_h, scale);
         }
+        // The slip under the list: what the lit row is for, as the game's own
+        // options explain the chosen one underneath.
+        const float slip_pad = ImGui::GetFontSize() * 0.7f;
+        const float slip_text_w = std::max(1.f, ImGui::GetContentRegionAvail().x - slip_pad * 2.f);
+        const float slip_h = std::min(bw_menu::slip_height(kTabs[shown].rows, slip_text_w) + slip_pad * 2.f,
+                                      std::max(ImGui::GetTextLineHeight() * 3.f, ImGui::GetContentRegionAvail().y * 0.25f));
+        {
+            ImGui::PushID(shown);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.f * scale, 6.f * scale));
+            ImGui::BeginChild("##body", ImVec2(0, -(footer + slip_h + ImGui::GetStyle().ItemSpacing.y)),
+                              ImGuiChildFlags_NavFlattened | ImGuiChildFlags_AlwaysUseWindowPadding);
+            ImGui::PopStyleVar();
+            ImGui::PushTextWrapPos(0.f); // text wraps at the menu's edge
+            if (shown == focus_tab) {
+                ImGui::SetKeyboardFocusHere();
+                focus_tab = -1;
+            }
+            bw_menu_rows_begin();
+            kTabs[shown].draw();
+            bw_menu_rows_end();
+            // Room after the last setting, so scrolled to the end it stands
+            // clear of the footer rather than half under it.
+            ImGui::Dummy(ImVec2(1.f, ImGui::GetStyle().ItemSpacing.y * 2.f));
+            ImGui::PopTextWrapPos();
+            bw_menu_stick_scroll(pad.scroll);
+            bw_menu_scroll_past_ends();
+            ImGui::EndChild();
+            ImGui::PopID();
+        }
+        bw_menu_slip(slip_h, slip_pad, scale);
         bw_menu_footer_note(restart);
         if (restart && bw_platform::can_restart()) {
             ImGui::SameLine();

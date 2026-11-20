@@ -20,7 +20,7 @@ namespace bw_settings {
 
 enum class Kind { Bool, Int, Float, Choice, Text };
 // How a tab draws the setting. Switch, Slider and Chooser (a list's choices
-// as a row of cells, menu_shared.h's bw_menu_combo) are drawn by the shared
+// as one value with arrows and a dot each, menu_shared.h's bw_menu_combo) are drawn by the shared
 // draw_tab; Custom names a drawing function of its own (Smooth Motion's
 // rate, the FPS position, the texture pack, the remaps, Better Wind Waker's
 // options, the keyboard and controller tables); None is not drawn on its own at all.
