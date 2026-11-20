@@ -46,11 +46,12 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The scene's brightness from the game, where there is depth and not the sea (Wind Waker HD's sunlight for the hour; the sea found by a mask from its textures): patches/recompcore/0192 (pdale-boop).
 # The guest-alias range query and its registry generation (RecompCore #45), and the guest alias lookup in constant time, the last hit first and then a page index (RecompCore #48): patches/recompcore/0193-0196 (irregularthanis).
 # 0.10.0 pins the bluewake-next commit that merges #45, #48 and 0186-0192.
-# Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), on bluewake-next after 0.10.0: pin #49's head, fetched from upstream, until it merges.
+# Smooth Motion's attribution diagnostics and Efficient soft effects (RecompCore #49), merged into bluewake-next as f9e3f4e.
 # SDL3's UIKit scene geometry (one app instance, external displays left to the system, orientation from the app's scene) in the vendored Aurora's SDL patch chain (RecompCore #60): patches/recompcore/0206; pin #60's head until it merges.
 # The game's depth copy read as GX_TF_Z16 (target 0xB), and steps for its depth of field and where it starts (RecompCore #61): patches/recompcore/0207-0208; #61's head, merged into bluewake-next for 0.12.0.
+# Cheaper HD look effects, opt-in (RecompCore #54, on top of bluewake-next for 0.12.0): pin #54's head, fetched from upstream, until it merges.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=2159e88b10f1d4c77cfb67041382b623b4462205
+RECOMPCORE_SHA=aca17a61aead6c3d42a7fc5984992447232e7208
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
