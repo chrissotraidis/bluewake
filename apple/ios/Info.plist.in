@@ -22,6 +22,8 @@
     <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
     <key>UILaunchScreen</key><dict/>
     <key>UIRequiresFullScreen</key><true/>
+    <key>UIRequiresFullScreenIgnoredStartingWithVersion</key>
+    <string>26</string>
     <key>UIStatusBarHidden</key><true/>
     <key>UIApplicationSupportsIndirectInputEvents</key><true/>
     <key>CADisableMinimumFrameDurationOnPhone</key><true/>
