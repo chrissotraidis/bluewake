@@ -524,7 +524,13 @@ static bool env_is(const char* name, char value) {
     return text != NULL && text[0] == value;
 }
 
+// Sail on Z (BLUEWAKE_SAIL_ON_Z=1, off by default): see sail_on_z_frame.
+static bool g_sail_on_z;
+static bool g_sail_z_wrote; // this run has put the sail on Z at least once
+static bool g_on_boat;      // the last camera_draw was the boat's camera, the player in control
+
 static void read_stick_settings(void) {
+    g_sail_on_z = env_is("BLUEWAKE_SAIL_ON_Z", '1');
     g_aim_invert_y = env_is("BLUEWAKE_AIM_INVERT_Y", '1');
     g_stick_zoom_on = env_is("BLUEWAKE_STICK_ZOOM", '1');
 #if defined(__APPLE__) && TARGET_OS_IPHONE
@@ -1183,6 +1189,10 @@ static void camera_frame(CPUState* cpu, u32 process) {
     g_subject_step = g_first_person ? (int)mem_read32(cpu, camera + kSubjectStep) : -1;
     g_stick_owns = false;
     g_stick_can_zoom = false;
+    // rideCamera (engine 8) is the boat's camera, and only the boat's: every
+    // engine-8 style in GZLE01's dCamParam_c::styles is one of its seven
+    // (BW07, BP07, BN07, BP08, BN08, BE08, BE07).
+    g_on_boat = engine == 8u && !aiming && player_in_control(cpu);
     g_aiming = aiming && player_in_control(cpu);
     g_stick_aims = g_aiming && g_stick_on && g_stick_aim_on;
     g_stick_zooms = g_stick_aims && (mem_read16(cpu, style + kStyleFlags) & kStyleZoom) != 0u;
@@ -1212,6 +1222,43 @@ static void camera_frame(CPUState* cpu, u32 process) {
     // the stick is the camera's until the next draw says otherwise.
     g_stick_owns = g_stick_on;
     g_stick_can_zoom = g_stick_on && (engine == (u32)kEngineFollow || engine == (u32)kEngineFollow2);
+}
+
+// Sail on Z. The game keeps two copies of what X, Y and Z hold: the save's
+// (dSv_player_c's mSelectItem, an inventory slot each, at 0x803C4C11..13),
+// which the memory card keeps, and the play state's (the item numbers, at
+// 0x803CA7DB..DD), which Link reads when a button is pressed. On the boat,
+// with the sail owned (inventory slot 1, item 0x78), the play copy's Z is the
+// sail, so Z raises and lowers it. The save's Z is never written: off the
+// boat, or with the option off, the play copy's Z goes back to the item in the
+// save's Z slot, so the player's own Z is what it was, and a save made on the
+// boat keeps it. At the player's update, before Link reads his buttons.
+enum {
+    kSaveSelectZ = 0x803C4C13u, // mPlayerStatusA.mSelectItem[Z]: an inventory slot, 0xFF none
+    kSaveItems = 0x803C4C44u,   // mPlayerItem.mItems[21]: item numbers, 0xFF none
+    kPlaySelectZ = 0x803CA7DDu, // the play state's mSelectItem[Z]: an item number
+    kSailSlot = 1u,
+    kSailItem = 0x78u,
+    kNoItem = 0xFFu,
+};
+
+static void sail_on_z_frame(CPUState* cpu) {
+    if (!g_sail_on_z && !g_sail_z_wrote)
+        return;
+    if (g_sail_on_z && g_on_boat && mem_read8(cpu, kSaveItems + kSailSlot) == kSailItem) {
+        if (mem_read8(cpu, kPlaySelectZ) != kSailItem) {
+            mem_write8(cpu, kPlaySelectZ, kSailItem);
+            if (!g_sail_z_wrote)
+                fprintf(stderr, "[sail] on the boat: Z is the sail (the save's Z is unchanged)\n");
+            g_sail_z_wrote = true;
+        }
+        return;
+    }
+    // Off the boat: Z is the save's Z again, if the play copy still has the sail.
+    const u32 slot = mem_read8(cpu, kSaveSelectZ);
+    const u32 own = slot < 21u ? mem_read8(cpu, kSaveItems + slot) : kNoItem;
+    if (mem_read8(cpu, kPlaySelectZ) == kSailItem && own != kSailItem)
+        mem_write8(cpu, kPlaySelectZ, own);
 }
 
 // Testing only: gives the player an item (BLUEWAKE_MOUSE_TEST_ITEM) on X.
@@ -1292,6 +1339,7 @@ void bluewake_mouse_camera_hook(CPUState* cpu, u32 address) {
             return;
         if (g_test_item >= 0 && g_retrace >= g_test_item_retrace)
             grant_test_item(cpu);
+        sail_on_z_frame(cpu);
         aim_frame(cpu, player);
     }
 }
