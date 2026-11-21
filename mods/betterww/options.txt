@@ -35,6 +35,7 @@ option invert_camera_x     14 off Invert camera left and right
 option reveal_sea_chart    15 off Reveal the full sea chart (new games)
 option sea_compass         16 off Correct the sea compass (east and west)
 option hd_triforce         17 off Shorter Triforce quest, as in Wind Waker HD
+option no_heart_pulse      18 off No heart pulsing (the gauge holds still)
 
 # Instant text: every message draws at once and its timed waits are dropped
 # (native: the message data is patched in memory once it is loaded), and holding
@@ -166,3 +167,12 @@ site 0x801FD37C sea_compass insn 0x60000000 # neg r0, r0: the heading's sign
 # fopAcM_createItemForTrBoxDemo, and the hook swaps chart for shard there, so
 # the game shows the shard's own get-item demo.
 hook d_a_tbox.rel+0x2764 hd_triforce after 6     # rlwinm r4, r0, 24, 24, 31: the chest's item
+
+# No heart pulsing (BlueWake's own; Better Wind Waker has no such setting).
+# dMeter_heartLightMove animates a copy of the newest heart through
+# fopMsgM_valueIncrease: its alpha falls as its scale grows, which is the beat
+# the gauge runs all the time and twice as fast at one heart or less, where it
+# reads as the low-health warning. The nop drops the fade, so the copy keeps the
+# zero alpha dMeter_heartInit leaves it with and is never drawn; the heart's own
+# panes are drawn as before.
+site 0x801F12A4 no_heart_pulse insn 0x60000000 # bl fopMsgM_setNowAlpha: the beat's fade
