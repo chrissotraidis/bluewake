@@ -4,7 +4,9 @@
 
 ## Why
 
-A save state today is one keypress: F5 writes a new `quick-<retrace>.bwstate` every time, and F8 loads the last state saved or loaded (after a relaunch, the newest file). There's no way to keep a few spots and go back to a chosen one, such as a boss door and a sea chart, without managing files by hand.
+Mainly for easier debugging: with several slots, testers can keep more scenes saved at once (a busy view, a glitch spot, a boss room) and go back to any of them to test a change, instead of one state at a time.
+
+A save state today is one keypress: F5 writes a new `quick-<retrace>.bwstate` every time, and F8 loads the last state saved or loaded (after a relaunch, the newest file). There's no way to keep a few scenes and go back to a chosen one without managing files by hand.
 
 ## What changes for players
 

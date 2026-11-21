@@ -7514,6 +7514,42 @@ static bool host_state_latest(char* out, size_t size) {
     return found;
 }
 
+// A menu slot's file: slot-N.bwstate beside the quick states.
+static bool host_state_slot_path(int slot, char* out, size_t size) {
+    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
+        return false;
+    return snprintf(out, size, "%s/slot-%d.bwstate", host_state_dir(), slot) < (int)size;
+}
+
+// The menu's Save / Load for one slot, at the game's next clean point, as F5 / F8.
+void bluewake_save_state_slot(int slot, bool load) {
+    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
+        return;
+    g_state_hotkey_slot = slot;
+    if (load)
+        g_state_hotkey_load = true;
+    else
+        g_state_hotkey_save = true;
+}
+
+bool bluewake_state_slot_info(int slot, char* when, size_t size) {
+    char path[1100];
+    struct stat info;
+    if (!host_state_slot_path(slot, path, sizeof path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode))
+        return false;
+    if (when != NULL && size != 0) {
+        const time_t taken = info.st_mtime;
+        struct tm local;
+#if defined(_WIN32)
+        localtime_s(&local, &taken);
+#else
+        localtime_r(&taken, &local);
+#endif
+        strftime(when, size, "%Y-%m-%d %H:%M", &local);
+    }
+    return true;
+}
+
 // BLUEWAKE_STATE_TEST_LOAD=retrace (testing only): F8 at that retrace, once.
 static u64 g_state_test_load_retrace;
 static bool g_state_test_load_done;
@@ -7593,42 +7629,6 @@ void bluewake_save_state_hotkey(bool load) {
         g_state_hotkey_load = true;
     else
         g_state_hotkey_save = true;
-}
-
-// A menu slot's file: slot-N.bwstate beside the quick states.
-static bool host_state_slot_path(int slot, char* out, size_t size) {
-    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
-        return false;
-    return snprintf(out, size, "%s/slot-%d.bwstate", host_state_dir(), slot) < (int)size;
-}
-
-// The menu's Save / Load for one slot, at the game's next clean point, as F5 / F8.
-void bluewake_save_state_slot(int slot, bool load) {
-    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
-        return;
-    g_state_hotkey_slot = slot;
-    if (load)
-        g_state_hotkey_load = true;
-    else
-        g_state_hotkey_save = true;
-}
-
-bool bluewake_state_slot_info(int slot, char* when, size_t size) {
-    char path[1100];
-    struct stat info;
-    if (!host_state_slot_path(slot, path, sizeof path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode))
-        return false;
-    if (when != NULL && size != 0) {
-        const time_t taken = info.st_mtime;
-        struct tm local;
-#if defined(_WIN32)
-        localtime_s(&local, &taken);
-#else
-        localtime_r(&taken, &local);
-#endif
-        strftime(when, size, "%Y-%m-%d %H:%M", &local);
-    }
-    return true;
 }
 
 // What must not be in flight when the machine is written or replaced.
