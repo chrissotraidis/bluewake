@@ -296,7 +296,7 @@ inline void bw_controller_table() {
         {"Sprint", "Click the left stick (until Link stops)"},
         {"Camera and aiming", "Right stick"},
         {"First person", "Click the right stick (again to come back out)"},
-        {"Camera zoom", "Hold the right-stick click and move it up or down (if it's on above)"},
+        {"Camera zoom", "Hold the right-stick click and move it up or down, on foot and on the boat (if it's on above)"},
         {"Telescope, Picto Box", "Right stick aims; left stick or D-pad zooms"},
         {"Settings", "Back (View on Xbox, Share or Create on PlayStation)"},
     };
