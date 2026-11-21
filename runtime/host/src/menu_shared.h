@@ -457,17 +457,28 @@ inline bool bw_menu_back(bool pressed) {
 }
 
 // The footer both menus end with: the hint, the next-launch note when there is
-// one, and the buttons, on one row or, when narrow, two.
-enum BwMenuButton { BW_MENU_NONE, BW_MENU_RESUME, BW_MENU_SAVE_STATE, BW_MENU_LOAD_STATE, BW_MENU_QUIT };
-inline const char* const kBwMenuButtons[] = {"Resume", "Save state (F5)", "Load latest state (F8)", "Quit the game"};
+// one, and the buttons, on one row or, when narrow, more.
+enum BwMenuButton { BW_MENU_NONE, BW_MENU_RESUME, BW_MENU_SAVE_STATE, BW_MENU_LOAD_STATE, BW_MENU_STATE_SLOTS,
+                    BW_MENU_QUIT };
+inline const char* const kBwMenuButtons[] = {"Resume", "Save state (F5)", "Load latest state (F8)", "Save state slots...",
+                                             "Quit the game"};
+inline constexpr int kBwMenuButtonCount = static_cast<int>(sizeof kBwMenuButtons / sizeof kBwMenuButtons[0]);
 
 // The footer's height, for the tab body above it (BeginChild's -height).
 inline float bw_menu_footer_height(bool restart_note) {
     const ImGuiStyle& style = ImGui::GetStyle();
-    float buttons = -style.ItemSpacing.x;
-    for (const char* label : kBwMenuButtons)
-        buttons += ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.f + style.ItemSpacing.x;
-    const int rows = buttons > ImGui::GetContentRegionAvail().x ? 2 : 1;
+    // As many rows as bw_menu_footer_buttons wraps them into.
+    const float available = ImGui::GetContentRegionAvail().x;
+    int rows = 1;
+    float row = 0.f;
+    for (const char* label : kBwMenuButtons) {
+        const float width = ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.f;
+        if (row > 0.f && row + style.ItemSpacing.x + width > available) {
+            ++rows;
+            row = 0.f;
+        }
+        row += (row > 0.f ? style.ItemSpacing.x : 0.f) + width;
+    }
     return style.ItemSpacing.y * 2.f + ImGui::GetTextLineHeightWithSpacing() +
            (restart_note ? ImGui::GetFrameHeightWithSpacing() : 0.f) + ImGui::GetFrameHeightWithSpacing() * rows;
 }
@@ -487,7 +498,7 @@ inline void bw_menu_footer_note(bool restart_note) {
 // preferences are saved, when given.
 inline BwMenuButton bw_menu_footer_buttons(const char* settings_path) {
     BwMenuButton pressed = BW_MENU_NONE;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < kBwMenuButtonCount; ++i) {
         if (i > 0) {
             const float width = ImGui::CalcTextSize(kBwMenuButtons[i]).x + ImGui::GetStyle().FramePadding.x * 2.f;
             const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;

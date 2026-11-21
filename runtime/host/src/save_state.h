@@ -91,6 +91,15 @@ uint64_t bw_state_hash(const void* data, size_t size, uint64_t seed);
 // buttons (main.c acts on them at the next retrace).
 void bluewake_save_state_hotkey(bool load);
 
+// The menu's save state slots: slot-1.bwstate to slot-5.bwstate in the state
+// directory, each saved over and loaded on its own. F5 and F8 don't use them.
+#define BLUEWAKE_STATE_SLOTS 5
+// Save to or load from a slot (1..BLUEWAKE_STATE_SLOTS) at the next clean point.
+void bluewake_save_state_slot(int slot, bool load);
+// True if the slot holds a state; `when` (may be NULL) gets its local time,
+// "YYYY-MM-DD HH:MM".
+bool bluewake_state_slot_info(int slot, char* when, size_t size);
+
 #ifdef __cplusplus
 }
 #endif
