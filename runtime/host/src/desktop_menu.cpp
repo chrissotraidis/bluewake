@@ -371,7 +371,8 @@ void apply_now(const bw_settings::Setting& s) {
         bluewake_dpad_menus_reload();
     // Everything the mouse, the sticks and gyro aiming do is read back together.
     else if (std::strncmp(key, "BLUEWAKE_MOUSE_", 15) == 0 || std::strncmp(key, "BLUEWAKE_STICK_", 15) == 0 ||
-             std::strncmp(key, "BLUEWAKE_GYRO_", 14) == 0 || std::strcmp(key, "BLUEWAKE_AIM_INVERT_Y") == 0)
+             std::strncmp(key, "BLUEWAKE_GYRO_", 14) == 0 || std::strcmp(key, "BLUEWAKE_AIM_INVERT_Y") == 0 ||
+             std::strcmp(key, "BLUEWAKE_SAIL_ON_Z") == 0)
         bluewake_mouse_camera_reload();
     else if (std::strncmp(key, "BLUEWAKE_HAPTICS", 16) == 0)
         bluewake_haptics_reload();

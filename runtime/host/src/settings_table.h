@@ -268,6 +268,13 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_QUICK_DOORS", .old_windows = "quick_doors", .kind = Kind::Bool, .on = Os::Linux | Os::Mac,
      .label = "Quick doors (no walk-in or door closing behind Link)", .tab = Tab::Gameplay,
      .control = Control::Switch, .next_launch = Os::Windows},
+    // Sail on Z (mouse_camera.c, sail_on_z_frame): on the boat Z is the sail;
+    // the save's Z item is never written. Off by default.
+    {.key = "BLUEWAKE_SAIL_ON_Z", .kind = Kind::Bool, .label = "Sail on Z (on the boat, Z raises and lowers the sail)",
+     .tab = Tab::Gameplay, .control = Control::Switch,
+     .note = "Experimental. Only while Link is on the boat and has the sail. Your Z item stays as you set it, "
+             "on the boat and everywhere else, and in your saves. Off by default.",
+     .group = "Sailing"},
     {.key = "BLUEWAKE_CLIMB", .old_windows = "climb", .kind = Kind::Bool, .label = "Wall climbing (experimental)",
      .tab = Tab::Gameplay, .control = Control::Switch, .group = "Climbing"},
     {.key = "BLUEWAKE_CLIMB_STAMINA", .old_windows = "climb_stamina", .kind = Kind::Float, .fallback = "12",
