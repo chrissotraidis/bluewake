@@ -13,7 +13,8 @@ In the settings (F1): **Developers' stage select (F7)**, under **Gameplay** on e
 off by default and takes effect the next time BlueWake starts.
 
 The Linux and Windows builders put the English names in a `stage_select` folder beside the app, and
-BlueWake finds them there; the Linux AppImage carries them the same way, beside its executable. On a Mac, set `BLUEWAKE_STAGE_SELECT_NAMES=<repository>/config/stage_select`
+BlueWake finds them there; the Linux AppImage carries them the same way, beside its executable, and so does the
+Windows download (through 0.12.0 its zip left them out, and F7 showed the game's Japanese names). On a Mac, set `BLUEWAKE_STAGE_SELECT_NAMES=<repository>/config/stage_select`
 for them; without it the menu shows its Japanese names.
 
 `BLUEWAKE_STAGE_SELECT=1` in the environment still turns it on, whatever the toggle says, so existing
