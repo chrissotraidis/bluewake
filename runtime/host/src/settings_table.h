@@ -443,7 +443,8 @@ inline constexpr Setting kSettings[] = {
     // WSI layer (BLUEWAKE_NO_GAMESCOPE_WSI; main.c sets ENABLE_GAMESCOPE_WSI=0 and Mesa's
     // vk_x11_override_min_image_count=4 under gamescope, and keeps FIFO over the Mailbox switch):
     // in Steam Deck Game Mode the layer held the game in present at busy views with Smooth Motion.
-    // Opt-in; Linux; read when BlueWake starts.
+    // Opt-in; Linux only (gamescope is Linux's), so the Mac and Windows menus and
+    // files leave it out; read when BlueWake starts.
     {.key = "BLUEWAKE_NO_GAMESCOPE_WSI", .kind = Kind::Bool,
      .label = "Present without gamescope's frame layer", .tab = Tab::Config, .control = Control::Switch,
      .note = "Experimental. In Steam Deck Game Mode, hands frames to the screen the plain way instead of "
@@ -451,7 +452,7 @@ inline constexpr Setting kSettings[] = {
              "Every frame is still shown in turn (it overrides \"Present without waiting for the display\"). "
              "Does nothing outside gamescope. Off by default; measured on a Steam Deck. Takes effect when "
              "BlueWake starts again.",
-     .next_launch = Os::All},
+     .next_launch = Os::All, .platforms = Os::Linux},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
