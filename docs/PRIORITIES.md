@@ -51,7 +51,7 @@ the correctness fallback stays enabled. This does not erase the earlier Mac obse
 
 | Work | Current handoff |
 | --- | --- |
-| Native sets / #451 | Establish the preparations used by the recorded leaves with jslay88 and Elliott; jkoehler11 offered to rerun generation and benchmarks. No generated code, module or disc uploads. |
+| Native sets / #451 | Establish the preparations used by the recorded leaves with jslay88; jkoehler11 offered to rerun generation and benchmarks. No generated code, module or disc uploads. |
 | Deck measurement | Keep the controlled results and closed experiments linked from #215. Update #421 for the new generator blocker; retain #448 as a completed negative-result record rather than another implementation plan. |
 | Rendering stack | pdale-boop's #371/#398 and RecompCore#40/#42; retain the Dawn compatibility fix when reconciling the final pins. |
 | Importer | jkoehler11's #443/#444; review their stack and retain platform acceptance tasks. |

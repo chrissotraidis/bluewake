@@ -139,7 +139,7 @@ jslay88), its replay generated at build time from the player's own translation; 
 
 ### Waiting on contributors
 
-- **jslay88, Elliott Tate:** hashes from a BlueWake module, so the natives can be hooked one set at a time.
+- **jslay88:** hashes from a BlueWake module, so the natives can be hooked one set at a time.
 - **pdale-boop:** #368 in five pull requests (Chris builds each on the Mac); #371 rebased on `bluewake-next`;
   a Windows HD import.
 - **LiquidAzir:** a Bluetooth controller with the D-pad option; other phones are welcome from anyone.
