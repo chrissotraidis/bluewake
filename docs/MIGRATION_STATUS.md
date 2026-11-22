@@ -18,7 +18,7 @@ the detailed evidence is in [the reconciliation ledger](status/FORK_RECONCILIATI
 - All 28 open issues moved on October 4 (#54 to #80, and #13), with the originals closed and linked. The
   authors of its open pull requests were asked to reopen them here; the Android port is now #93.
 - Wind-Waker-Recomp's README, issue form and download links point here, and its releases were unpublished
-  (kept as drafts) on October 4. Elliott is a BlueWake collaborator.
+  (kept as drafts) on October 4. Elliott no longer maintains Wind-Waker-Recomp or works on BlueWake.
 - Releases: Windows builds from `main` since 0.5.0 (October 5), the latest 0.7.0. Mac, iPhone and iPad: the app
   without game code, and you build the game with PadMint. Linux: built from source since 0.7.0; a ready-made
   AppImage is allowed and waits for a contributor's own-disc build ([AGENTS.md](../AGENTS.md#releases)).
@@ -27,6 +27,6 @@ the detailed evidence is in [the reconciliation ledger](status/FORK_RECONCILIATI
 
 | Item | Who | State |
 | --- | --- | --- |
-| Wind-Waker-Recomp's repository description and archiving | Elliott (admin), with Chris | Not archived; its description still says "Personal source fork of BlueWake for The Wind Waker on iPhone and iPad". |
+| Wind-Waker-Recomp's repository description and archiving | Elliott (admin, no longer active) | Not archived; its description still says "Personal source fork of BlueWake for The Wind Waker on iPhone and iPad". |
 | Elliott's work since October 3: natives rounds 4, 5 and 7, the upload and vertex changes | BlueWake | Each change's state is in [PERFORMANCE.md](PERFORMANCE.md#the-plan); the order is in [GOAL_LOOP.md](GOAL_LOOP.md). |
-| Elliott's HD renderer work (lighting, shadows, the GameCube/HD switch) | Elliott | Where it lives isn't known yet. BlueWake rebuilt the look itself, off by default ([WWHD_LOOK.md](WWHD_LOOK.md)), and #108's hotkey is in `main` as F2. |
+| Elliott's HD renderer work (lighting, shadows, the GameCube/HD switch) | Nobody (Elliott is no longer active) | Where it lives isn't known yet. BlueWake rebuilt the look itself, off by default ([WWHD_LOOK.md](WWHD_LOOK.md)), and #108's hotkey is in `main` as F2. |
