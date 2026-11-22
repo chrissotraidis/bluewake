@@ -1070,6 +1070,54 @@ void draw_stage_select_question(const BwMenuPad& pad, const bw_platform::Look& l
         close_menu();
 }
 
+// The footer's Save state slots...: the five slots (save_state.h), each with
+// when it was saved, saved over or loaded on its own. Save or Load closes the
+// menu; the game does it at its next clean point, as F5 and F8. True: closed.
+static constexpr const char* kStateSlotsPopup = "Save state slots";
+static bool state_slots_popup() {
+    bool chosen = false;
+    if (!ImGui::BeginPopup(kStateSlotsPopup))
+        return false;
+    ImGui::TextUnformatted("Save state slots");
+    ImGui::TextDisabled("Each slot keeps one state until you save over it. F5 and F8 don't change them.");
+    ImGui::Separator();
+    if (ImGui::BeginTable("##slots", 3, ImGuiTableFlags_SizingFixedFit)) {
+        for (int slot = 1; slot <= BLUEWAKE_STATE_SLOTS; ++slot) {
+            char when[32];
+            const bool used = bluewake_state_slot_info(slot, when, sizeof when);
+            ImGui::PushID(slot);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Slot %d", slot);
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            if (used)
+                ImGui::TextUnformatted(when);
+            else
+                ImGui::TextDisabled("Empty");
+            ImGui::TableNextColumn();
+            if (ImGui::Button("Save")) {
+                bluewake_save_state_slot(slot, false);
+                chosen = true;
+            }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!used);
+            if (ImGui::Button("Load")) {
+                bluewake_save_state_slot(slot, true);
+                chosen = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (chosen)
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return chosen;
+}
+
 void draw_menu(const bw_platform::Look& look) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
@@ -1263,6 +1311,9 @@ void draw_menu(const bw_platform::Look& look) {
             bluewake_save_state_hotkey(true);
             open = false;
             break;
+        case BW_MENU_STATE_SLOTS:
+            ImGui::OpenPopup(kStateSlotsPopup);
+            break;
         case BW_MENU_QUIT:
             close_menu();
             quit_game();
@@ -1270,6 +1321,8 @@ void draw_menu(const bw_platform::Look& look) {
         case BW_MENU_NONE:
             break;
         }
+        if (state_slots_popup())
+            open = false;
         // The game's B ends an edit, or closes the menu (menu_shared.h).
         if (bw_menu_back(pad.back))
             open = false;

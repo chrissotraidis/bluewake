@@ -6900,6 +6900,9 @@ static HostStateRequest g_state_requests[HOST_STATE_MAX_REQUESTS];
 static u32 g_state_request_count;
 static volatile bool g_state_hotkey_save;
 static volatile bool g_state_hotkey_load;
+// The menu's save state slots (1..BLUEWAKE_STATE_SLOTS): the slot the pending
+// save or load is for, 0 for F5's quick-<retrace> file and F8's last state.
+static volatile int g_state_hotkey_slot;
 static bool g_state_save_armed;
 static u64 g_state_armed_retrace;
 static u64 g_state_poll_retrace = UINT64_MAX;
@@ -7526,6 +7529,42 @@ static bool host_state_latest(char* out, size_t size) {
     return found;
 }
 
+// A menu slot's file: slot-N.bwstate beside the quick states.
+static bool host_state_slot_path(int slot, char* out, size_t size) {
+    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
+        return false;
+    return snprintf(out, size, "%s/slot-%d.bwstate", host_state_dir(), slot) < (int)size;
+}
+
+// The menu's Save / Load for one slot, at the game's next clean point, as F5 / F8.
+void bluewake_save_state_slot(int slot, bool load) {
+    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
+        return;
+    g_state_hotkey_slot = slot;
+    if (load)
+        g_state_hotkey_load = true;
+    else
+        g_state_hotkey_save = true;
+}
+
+bool bluewake_state_slot_info(int slot, char* when, size_t size) {
+    char path[1100];
+    struct stat info;
+    if (!host_state_slot_path(slot, path, sizeof path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode))
+        return false;
+    if (when != NULL && size != 0) {
+        const time_t taken = info.st_mtime;
+        struct tm local;
+#if defined(_WIN32)
+        localtime_s(&local, &taken);
+#else
+        localtime_r(&taken, &local);
+#endif
+        strftime(when, size, "%Y-%m-%d %H:%M", &local);
+    }
+    return true;
+}
+
 // BLUEWAKE_STATE_TEST_LOAD=retrace (testing only): F8 at that retrace, once.
 static u64 g_state_test_load_retrace;
 static bool g_state_test_load_done;
@@ -7600,6 +7639,7 @@ unsigned bluewake_status_read(char* text, size_t size) {
 
 // F5 / F8 from the window's event observer (mouse_camera.c), main thread.
 void bluewake_save_state_hotkey(bool load) {
+    g_state_hotkey_slot = 0;
     if (load)
         g_state_hotkey_load = true;
     else
@@ -7677,11 +7717,19 @@ static void host_state_try_save(CPUState* cpu, const StaticRecompModuleDesc* mod
     }
     if (g_state_hotkey_save) {
         g_state_hotkey_save = false;
+        const int slot = g_state_hotkey_slot;
         char path[1100];
         mkdir(host_state_dir(), 0755);
-        snprintf(path, sizeof path, "%s/quick-%llu.bwstate", host_state_dir(),
-                 (unsigned long long)g_host_retrace_count);
-        bluewake_status_post(host_state_save(path, cpu, mod, loop) ? "State saved" : "State not saved");
+        if (slot > 0) {
+            char text[48];
+            const bool saved = host_state_slot_path(slot, path, sizeof path) && host_state_save(path, cpu, mod, loop);
+            snprintf(text, sizeof text, saved ? "Saved to slot %d" : "Slot %d not saved", slot);
+            bluewake_status_post(text);
+        } else {
+            snprintf(path, sizeof path, "%s/quick-%llu.bwstate", host_state_dir(),
+                     (unsigned long long)g_host_retrace_count);
+            bluewake_status_post(host_state_save(path, cpu, mod, loop) ? "State saved" : "State not saved");
+        }
     }
     g_state_save_armed = false;
 }
@@ -7702,7 +7750,25 @@ static inline void host_state_turn(CPUState* cpu, const StaticRecompModuleDesc* 
         if (g_state_hotkey_load) {
             g_state_hotkey_load = false;
             const char* unsafe = host_state_unsafe_reason(cpu, loop);
-            if (g_state_last_path[0] == '\0' &&
+            const int slot = g_state_hotkey_slot;
+            char slot_path[1100];
+            if (slot > 0) {
+                char text[48];
+                if (!bluewake_state_slot_info(slot, NULL, 0) ||
+                    !host_state_slot_path(slot, slot_path, sizeof slot_path)) {
+                    fprintf(stderr, "[state] load: slot %d is empty\n", slot);
+                    snprintf(text, sizeof text, "Slot %d is empty", slot);
+                } else if (unsafe != NULL) {
+                    fprintf(stderr, "[state] load: not now (%s)\n", unsafe);
+                    snprintf(text, sizeof text, "Slot %d not loaded: the game was busy", slot);
+                } else if (!host_state_load(slot_path, cpu, mod, loop)) {
+                    fprintf(stderr, "[state] load failed; the machine may be inconsistent\n");
+                    snprintf(text, sizeof text, "Slot %d not loaded", slot);
+                } else {
+                    snprintf(text, sizeof text, "Slot %d loaded", slot);
+                }
+                bluewake_status_post(text);
+            } else if (g_state_last_path[0] == '\0' &&
                 !host_state_latest(g_state_last_path, sizeof g_state_last_path)) {
                 fprintf(stderr, "[state] load: no state in %s yet (F5 saves one)\n", host_state_dir());
                 bluewake_status_post("No state yet (F5 saves one)");

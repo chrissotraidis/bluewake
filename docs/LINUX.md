@@ -226,7 +226,9 @@ on: the sound chip's own program, slower; next launch), the menu's own settings 
 menu is open**, **Menu text size** and **Menu contrast**), and where your saves and session logs are, with
 buttons that open
 the folder and the logs. The menu opens at the size and place you left it. The menu's buttons are the same on every
-desktop build: Resume, Save state (F5), Load latest state (F8) and Quit the game.
+desktop build: Resume, Save state (F5), Load latest state (F8), Save state slots... and Quit the game.
+**Save state slots...** lists five slots, each with the time it was saved: **Save** writes the game over that
+slot and **Load** puts it back. Each slot keeps its state until you save over it; F5 and F8 don't change them.
 
 A setting that applies at the next launch shows **Restart now** beside its note: BlueWake saves your
 settings, closes and starts again by itself.
