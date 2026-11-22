@@ -1,0 +1,75 @@
+From 82128a8df74288107923ca17d8f072e138a04928 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 17:26:10 -0600
+Subject: [PATCH] Smooth Motion: a HUD sprite is not paired with a copy of
+ another size
+
+The last heart beats with a copy of itself behind it that grows to 1.65 times
+its size and fades. At the next beat the copy is drawn at the heart's size
+again, first, and took the heart's own counterpart, so the heart was paired
+with the grown copy: its in-between frames drew it that big, once a beat
+(reported at 240 Hz, where 7 of every 8 frames shown are in-betweens; seen at
+180 Hz too). A screen sprite now has no counterpart of more than 1.4 times its
+width or height: it is drawn as it is. The HUD's icons that really grow do it
+by 1.25 times a frame at most, and still blend.
+
+(As merged into the 0.13.0 batch, codex/0.13.0-batch 1d71d95b29: the diff is against the batch before it.)
+---
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 3348b920fb904606dd895a23b8703c9267714c99..fb9306a51e4ef8ac9f6043e7e902572a4f52320d 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -1772,6 +1772,15 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+     // The nearest matching screen rectangle, consumed once. Occurrence can
+     // change when a counter reuses a glyph or a heart adds an animated copy.
+     // A newly visible digit must not borrow a distant rupee/heart sprite.
++    // Nor one of another size: the last heart beats with a copy of itself
++    // behind it that grows to 1.65 times its size and fades. When the next
++    // beat starts, that copy is drawn at the heart's size again and, drawn
++    // first, takes the heart's own counterpart; the heart was then paired
++    // with the grown copy and its in-between frames drew it that big, once a
++    // beat. A sprite that really grows does it by 1.25 times a frame at most
++    // (the HUD's growing icons), so past 1.4 there is no counterpart: the
++    // sprite is drawn as it is.
++    constexpr double kScreenGrowLimit = 1.4;
+     size_t best = candidates;
+     double score = HUGE_VAL;
+     for (size_t i = 0; i < candidates; ++i) {
+@@ -1781,6 +1790,9 @@ static const gxc::VertexShaderConstants* match_draw(uint64_t key, uint64_t usedM
+       const double height = std::min(screenSprite->screenExtent[1], copies[i].screenExtent[1]);
+       if (!(width > 0.0 && height > 0.0))
+         continue;
++      if (std::max(screenSprite->screenExtent[0], copies[i].screenExtent[0]) > kScreenGrowLimit * width ||
++          std::max(screenSprite->screenExtent[1], copies[i].screenExtent[1]) > kScreenGrowLimit * height)
++        continue;
+       const double reach = std::max(2.0, 0.2 * std::min(width, height));
+       const double dx = screenSprite->screenCenter[0] - copies[i].position[0];
+       const double dy = screenSprite->screenCenter[1] - copies[i].position[1];
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 7a7137ccaad6966e1687eeb45f9a38404998e1b9..83c58b1c05340cb8c427acff2c67a1b21d87a6ea 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -226,6 +226,21 @@ int main() {
+     CHECK(fi::frame_verdict());
+     fi::end_game_frame();
+ 
++    // The last heart's beat: a copy behind it grows to 1.65 times its size and
++    // fades. At the next beat the copy is drawn at the heart's size again,
++    // first, and takes the heart's counterpart; the heart is not paired with
++    // the grown copy (its in-between frames drew it that big, once a beat).
++    quad(20.f, 30.f);
++    blend_plan(hud, at(170.f, 40.f)); // the heart
++    quad(33.f, 49.5f);
++    blend_plan(hud, at(163.5f, 30.25f)); // its copy, grown about the same centre
++    fi::end_game_frame();
++    quad(20.f, 30.f);
++    blend_plan(hud, at(170.f, 40.f)); // the copy, back at the heart's size
++    CHECK(blend_plan(hud, at(170.f, 40.f)) == nullptr); // the heart: no counterpart of its size left
++    CHECK(fi::blended_positions() == nullptr);
++    fi::end_game_frame();
++
+     // Invalid bounds do not leave a stale interpolated vertex buffer behind.
+     hud.constants = at(170.f, 40.f);
+     hud.vertices[0] = INFINITY;
+--
+2.50.1

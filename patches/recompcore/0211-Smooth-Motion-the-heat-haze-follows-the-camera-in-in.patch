@@ -1,0 +1,180 @@
+From 13dca1fcef0dbb3600ba2fd4689830caa2f8ad4f Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 13:30:37 -0600
+Subject: [PATCH] Smooth Motion: the heat haze follows the camera in in-between
+ frames
+
+The heat haze's particles read the frame's copy through a texgen that
+projects their position onto the screen (S * P * M_now). In an in-between
+frame their position matrix carries the camera's half step, which the
+texgen never saw: the haze read the copy where the real frame's camera put
+the particle, and showed the scene a step behind it while the camera turned
+(lava rooms, the sepia boss replays).
+
+A texgen that maps the position through its own texture matrix, with the
+q row of a projection along the view's depth, now follows the in-between
+matrix: T_step = T_now * M_now^-1 * M_step. A projector's matrix (a light's,
+the sun shadows') is blended as before.
+---
+ .../graphics/aurora/lib/gfx/frame_interp.cpp  | 61 ++++++++++++++++++-
+ .../graphics/aurora/lib/gfx/frame_interp.hpp  |  4 ++
+ .../aurora/tests/frame_interp_test.cpp        | 39 ++++++++++++
+ 3 files changed, 103 insertions(+), 1 deletion(-)
+
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 4f590b0c9e..89f7f44805 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -1472,8 +1472,25 @@ static bool view_eye(const float view[][4], double eye[3]) noexcept {
+   return std::isfinite(eye[0]) && std::isfinite(eye[1]) && std::isfinite(eye[2]);
+ }
+ 
++// Bit per texgen that maps the vertex's position (its source row Geom, a
++// regular texgen) through its own static texture matrix, not one picked per
++// vertex (follow_screen_texgens()).
++uint8_t position_texgens(const gxc::DrawPlan& plan) noexcept {
++  const auto& shader = plan.pipeline.shader;
++  uint8_t mask = 0;
++  for (unsigned i = 0; i < shader.num_tex_gens && i < gxc::kMaxTexGens; ++i) {
++    const auto& texgen = shader.tex_gens[i];
++    const bool perVertex = shader.has_tex_mtx_idx && ((shader.tex_mtx_idx_mask >> i) & 1u);
++    if (texgen.texgentype == static_cast<uint8_t>(gxc::TexGenType::Regular) &&
++        texgen.sourcerow == static_cast<uint8_t>(gxc::TexSourceRow::Geom) && !perVertex)
++      mask |= static_cast<uint8_t>(1u << i);
++  }
++  return mask;
++}
++
+ void capture_draw(const gxc::DrawPlan& plan, DrawInput& out, bool positionsWritten) noexcept {
+   out.key = draw_key_of(plan);
++  out.positionTexgens = position_texgens(plan);
+   out.usedMatrixRows = used_matrix_rows(plan);
+   out.haveSamples = false;
+   out.positions.clear();
+@@ -2176,6 +2193,44 @@ static void blend_pixel(const gxc::PixelShaderConstants& pixel, size_t recorded)
+   g_haveBlendedPixel = true;
+ }
+ 
++// A texgen that projects the position onto the screen (its texture matrix T
++// is S * P * M_now for the draw's position matrix M_now: the heat haze's
++// particles read the frame's copy so) projects what the in-between matrix
++// M_step draws: T_step = T_now * M_now^-1 * M_step. Blended or kept as now,
++// the haze read the copy where the real frame's camera put the particle, a
++// step behind the scene it bends. Told apart from a projector's matrix (a
++// light's, the sun shadows') by its q row: S * P's divides by the depth along
++// the view, (0, 0, k, 0).
++void follow_screen_texgens(uint8_t texgens, const gxc::VertexShaderConstants& current,
++                           gxc::VertexShaderConstants& out) {
++  double nowInverse[3][4];
++  if (texgens == 0 || !affine_inverse(current.posnormalmatrix, nowInverse))
++    return;
++  double step[3][4];
++  for (int r = 0; r < 3; ++r)
++    for (int c = 0; c < 4; ++c)
++      step[r][c] = out.posnormalmatrix[r][c];
++  for (int t = 0; t < 8; ++t) {
++    if (((texgens >> t) & 1u) == 0)
++      continue;
++    double now[3][4];
++    for (int r = 0; r < 3; ++r)
++      for (int c = 0; c < 4; ++c)
++        now[r][c] = current.texmatrices[t * 3 + r][c];
++    double screen[3][4]; // S * P = T_now * M_now^-1
++    affine_multiply(now, nowInverse, screen);
++    const double k = screen[2][2];
++    if (!(std::fabs(k) > 1e-6) || std::fabs(screen[2][0]) > 1e-3 * std::fabs(k) ||
++        std::fabs(screen[2][1]) > 1e-3 * std::fabs(k) || std::fabs(screen[2][3]) > 1e-3 * std::fabs(k))
++      continue;
++    double moved[3][4];
++    affine_multiply(screen, step, moved);
++    for (int r = 0; r < 3; ++r)
++      for (int c = 0; c < 4; ++c)
++        out.texmatrices[t * 3 + r][c] = static_cast<float>(moved[r][c]);
++  }
++}
++
+ const gxc::VertexShaderConstants* blend_draw(const DrawInput& input, const gxc::VertexShaderConstants& current,
+                                              bool repeatsLastDraw, const gxc::PixelShaderConstants* pixel) {
+   g_haveBlendedPositions = false;
+@@ -2192,8 +2247,12 @@ const gxc::VertexShaderConstants* blend_draw(const DrawInput& input, const gxc::
+                                                         input.haveSamples ? &input.samples : nullptr,
+                                                         input.screenSpace ? &input : nullptr,
+                                                         input.haveCentre ? &input : nullptr, pixel);
+-  if (result != nullptr)
++  if (result != nullptr) {
+     bump(g_blendedBlocks);
++    if (input.usedMatrixRows == 0)
++      for (int step = 0; step < g_frameSteps; ++step)
++        follow_screen_texgens(input.positionTexgens, current, g_blended[step]);
++  }
+   g_currentTagged = false;
+   g_currentAge = 0;
+   if (pixel != nullptr)
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index 07de43ae1a..b261dae908 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -126,6 +126,10 @@ struct DrawInput {
+   // A night star (camera_anchored() in frame_interp.cpp): its centre is kept
+   // from the camera's eye, and its in-between frames go with the camera.
+   bool cameraAnchored = false;
++  // Bit per texgen that maps the vertex's position through its own texture
++  // matrix (position_texgens() in frame_interp.cpp): one that projects onto
++  // the screen follows the in-between position matrix (the heat haze).
++  uint8_t positionTexgens = 0;
+ };
+ // `positionsWritten`: whether the game wrote an indexed draw's position array
+ // this frame or the one before (gxcore_draw's positions_written()). Only such
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 397881c1e5..6193a51580 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -310,6 +310,45 @@ int main() {
+     fi::end_game_frame();
+   }
+ 
++  // The heat haze: a texgen projecting the position onto the screen (S * P *
++  // M_now) projects what the in-between matrix draws, S * P * M_step; a
++  // projector's (a light's, its q row not the view's depth) is blended as any
++  // texture matrix.
++  {
++    const float screen[3][4] = {{0.75f, 0, -0.5f, 0}, {0, -1.f, -0.5f, 0}, {0, 0, -1.f, 0}};
++    const float light[3][4] = {{0.01f, 0, 0, 0.5f}, {0, 0, 0.01f, 0.5f}, {0.3f, 0, 0.9f, 5.f}};
++    const auto with_texgens = [&](float x) {
++      auto c = draw_at(x, 0, -300, x);
++      for (int r = 0; r < 3; ++r)
++        for (int k = 0; k < 4; ++k) {
++          c.texmatrices[r][k] = screen[r][0] * c.posnormalmatrix[0][k] + screen[r][1] * c.posnormalmatrix[1][k] +
++                                screen[r][2] * c.posnormalmatrix[2][k] + (k == 3 ? screen[r][3] : 0.f);
++          c.texmatrices[3 + r][k] = light[r][k] + x * 0.01f;
++        }
++      return c;
++    };
++    fi::DrawInput haze;
++    haze.key = 4242;
++    haze.positionTexgens = 0b11;
++    fi::blend_draw(haze, with_texgens(0.f));
++    fi::end_game_frame();
++    const auto now = with_texgens(10.f);
++    const auto* blended = fi::blend_draw(haze, now);
++    CHECK(blended != nullptr);
++    if (blended != nullptr) {
++      CHECK(near(blended->posnormalmatrix[0][3], 5.f));
++      for (int r = 0; r < 3; ++r)
++        for (int k = 0; k < 4; ++k) {
++          const float expected = screen[r][0] * blended->posnormalmatrix[0][k] +
++                                 screen[r][1] * blended->posnormalmatrix[1][k] +
++                                 screen[r][2] * blended->posnormalmatrix[2][k] + (k == 3 ? screen[r][3] : 0.f);
++          CHECK(std::fabs(blended->texmatrices[r][k] - expected) < 1e-3f);
++          CHECK(near(blended->texmatrices[3 + r][k], light[r][k] + 0.05f));
++        }
++    }
++    fi::end_game_frame();
++  }
++
+   // A collapsed (hidden) object is not grown halfway.
+   {
+     auto shown = draw_at(0, 0, -300);
+-- 
+2.46.0
+
