@@ -24,6 +24,9 @@ Steps, each logged under OUT/logs:
 
 The APK contains code translated from YOUR disc: it is yours alone. Never share
 or upload it.
+
+--ci-container runs the same build inside the Android build container
+(scripts/android/Dockerfile): the toolchain is the image, not this machine.
 """
 import argparse
 import hashlib
@@ -65,6 +68,12 @@ TARGET_SDK = 35
 # module trained with the gate open is not reused for one trained without.
 MODULE_FLAGS = tuple(dict.fromkeys((*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_memory", "lean_deadlines",
                                     "native_entries", "behaviour_timing", "direct_gate")))
+# --ci-container: build in the Android build container (scripts/android/Dockerfile), so an APK does not depend
+# on the toolchain installed on this machine. The Linux host build's flag of the same name works the same way
+# (scripts/linux/build.py): the image holds the toolchain, and this command is re-run inside it with the
+# checkout and the output directory writable and the disc read-only.
+CI_CONTAINER_IMAGE = "bluewake-android-ci:local"
+CI_CONTAINER_ENV = "BLUEWAKE_ANDROID_CI_CONTAINER"
 
 
 def module_request(args):
@@ -79,6 +88,74 @@ def first_existing(*candidates):
         if c and Path(c).exists():
             return Path(c)
     return None
+
+
+def inside(path, parent):
+    try:
+        Path(path).resolve().relative_to(Path(parent).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def git_metadata_paths():
+    """The checkout's git directories, when they are not inside ROOT (a worktree keeps its .git elsewhere)."""
+    paths = []
+    for query in ("--git-dir", "--git-common-dir"):
+        value = subprocess.check_output(["git", "rev-parse", query], cwd=ROOT, text=True).strip()
+        path = Path(value) if Path(value).is_absolute() else ROOT / value
+        path = path.resolve()
+        if not inside(path, ROOT) and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def container_mounts(disc, out):
+    """Ordered bind mounts; later mounts narrow access granted by parents."""
+    disc, out = disc.resolve(), out.resolve()
+    mounts = [(ROOT, "rw")]
+    mounts.extend((path, "ro") for path in git_metadata_paths())
+    if not inside(out, ROOT):
+        mounts.append((out, "rw"))
+    # The disc is the player's own, and a build only reads it.
+    mounts.append((disc, "ro"))
+    return mounts
+
+
+def run_in_ci_container(args):
+    """Re-run this exact builder invocation inside the Android build container."""
+    if shutil.which("git") is None:
+        die("--ci-container requires Git on the host so the checkout can be mounted")
+    docker = shutil.which("docker")
+    if docker is None:
+        die("--ci-container requires Docker; install it and start the Docker daemon")
+    disc = args.disc.resolve()
+    if not disc.is_file():
+        die(f"disc image not found: {disc}")
+    daemon = subprocess.run([docker, "info"], capture_output=True, text=True)
+    if daemon.returncode:
+        detail = (daemon.stderr or daemon.stdout).strip().splitlines()
+        die("Docker is installed but its daemon is unavailable" + (f": {detail[-1]}" if detail else ""))
+
+    step("build the Android build container")
+    dockerfile = ROOT / "scripts/android/Dockerfile"
+    # The NDK, the SDK's build-tools and the JDK run on x86-64 and compile for arm64 Android, so the image is
+    # x86-64 on every host; Docker Desktop emulates it on Apple silicon, which works and is slow.
+    image = subprocess.run([docker, "build", "--platform", "linux/amd64", "--file", str(dockerfile),
+                            "--tag", CI_CONTAINER_IMAGE, str(dockerfile.parent)])
+    if image.returncode:
+        die(f"Docker could not build {CI_CONTAINER_IMAGE} (exit {image.returncode})")
+
+    args.out.resolve().mkdir(parents=True, exist_ok=True)
+    command = [docker, "run", "--rm", "--init", "--platform", "linux/amd64",
+               "--user", f"{os.getuid()}:{os.getgid()}",
+               "--env", "HOME=/tmp", "--env", f"{CI_CONTAINER_ENV}=1"]
+    for path, mode in container_mounts(args.disc, args.out):
+        command.extend(["--volume", f"{path}:{path}:{mode}"])
+    command.extend(["--workdir", str(Path.cwd().resolve()), CI_CONTAINER_IMAGE,
+                    "python3", str(Path(__file__).resolve()), *sys.argv[1:]])
+    step("run the Android build in the container")
+    return subprocess.run(command).returncode
 
 
 class AndroidBuilder(wb.Builder):
@@ -912,7 +989,20 @@ def parse_args(argv=None):
     parser.add_argument("--ndk", type=Path, help="the Android NDK (default: the newest in the SDK)")
     parser.add_argument("--sdk", type=Path, help="the Android SDK (default: ANDROID_HOME)")
     parser.add_argument("--jdk", type=Path, help="a JDK 17 (default: JAVA_HOME)")
+    parser.add_argument("--ci-container", action="store_true",
+                        help="build in the Android build container (scripts/android/Dockerfile): no clang, cmake, "
+                             "JDK, Android SDK or NDK needed on this machine, and one pinned toolchain")
     args = parser.parse_args(argv)
+    if args.ci_container:
+        # The image is the toolchain: a host path to one of these does not exist inside the container.
+        for name in ("sdk", "ndk", "jdk", "llvm"):
+            if getattr(args, name) is not None:
+                parser.error(f"--ci-container builds with the image's toolchain: drop --{name}")
+        if WINDOWS:
+            parser.error("--ci-container builds on a Linux or macOS host; on Windows follow the toolchain steps "
+                         "in docs/ANDROID.md")
+        if args.device or args.train_app:
+            parser.error("--ci-container cannot reach the phone: train on the host and pass the profile with --profile")
     # The Windows builder's defaults and the same checks (scripts/windows/build.py main).
     if not args.conservative:
         for name in wb.WINDOWS_DEFAULT_OPTIMIZATIONS:
@@ -968,6 +1058,12 @@ def parse_args(argv=None):
 def main():
     args = parse_args()
     try:
+        # --ci-container: the toolchain is the container, so the command is re-run inside it (once: the env
+        # variable marks the run that is already in there).
+        if args.ci_container and not os.environ.get(CI_CONTAINER_ENV):
+            sys.exit(run_in_ci_container(args))
+        if os.environ.get(CI_CONTAINER_ENV):
+            print(f"Android build container: {CI_CONTAINER_IMAGE}")
         AndroidBuilder(args).build()
     except wb.BuildError as error:
         print(f"\nbuilder: {error}", file=sys.stderr)
