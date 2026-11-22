@@ -154,7 +154,7 @@ time BlueWake starts and never change your saves.
 
 | Mod | What it does |
 | --- | --- |
-| **Widescreen 16:9 / 16:10 / 21:9** | A wider view with the HUD placed to fit. Built in; on Mac, Windows and Linux it's **F1 › Mods › Widescreen** |
+| **Widescreen 16:9 / 16:10 / 21:9 / 21:9 · 2560x1080 / 21:9 · 3440x1440** | A wider view with the HUD placed to fit. Built in; on Mac, Windows and Linux it's **F1 › Mods › Widescreen**. `21:9` is 21/9 = 2.3333 and leaves a thin bar on a real ultrawide panel; the two named presets are 2560x1080's and 3440x1440's own shape |
 | **Wind Waker HD textures** | First in Mods on every build: turn **HD textures** on, see how many textures it found, and choose or install a pack, such as Hypatia's HD pack (see the FAQ) or [the textures from your own Wind Waker HD disc](docs/WWHD_TEXTURES.md) |
 | **Better Wind Waker** | Swift Sail, instant text, faster animations and more, each set separately |
 | **Gameplay extras** | Jump & Sprint, Fast Transitions and Quick Doors, under **⋯ › Gameplay** (iPhone and iPad) or **F1 › Gameplay** (Mac, Windows and Linux) |

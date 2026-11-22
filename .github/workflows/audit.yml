@@ -41,6 +41,8 @@ jobs:
         run: python3 tests/test_guest_checkpoints.py
       - name: Check the benchmark tour on synthetic logs
         run: python3 tests/test_bench_tour.py
+      - name: Every widescreen preset is what its generator makes, and names every pool constant
+        run: python3 tests/test_widescreen_aspect.py
       - name: Check the rendered benchmark on a fake app
         run: |
           python3 -m venv "$RUNNER_TEMP/render-tests"

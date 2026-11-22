@@ -86,7 +86,18 @@ std::atomic<unsigned> g_hotkeys{0};
 std::string default_pack_folder() { return g_data_dir + "Load\\Textures\\GZLE01"; }
 
 double aspect_ratio(const std::string& aspect) {
-    return aspect == "16:9" ? 16.0 / 9.0 : aspect == "16:10" ? 1.6 : aspect == "21:9" ? 21.0 / 9.0 : 4.0 / 3.0;
+    if (aspect == "16:9")
+        return 16.0 / 9.0;
+    if (aspect == "16:10")
+        return 1.6;
+    if (aspect == "21:9")
+        return 21.0 / 9.0;
+    // The two shapes ultrawide monitors are; see host_apply_aspect.
+    if (aspect == "64:27")
+        return 2560.0 / 1080.0;
+    if (aspect == "43:18")
+        return 3440.0 / 1440.0;
+    return 4.0 / 3.0;
 }
 
 // A window a good size for this screen: the tallest multiple of 240 lines that
