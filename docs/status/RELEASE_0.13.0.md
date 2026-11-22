@@ -58,7 +58,7 @@ Not in 0.13.0: #629 (changes requested), #584 (needs a rebase).
 | 2 | Windows tasks | To do | WINDOWS_BUILD_0.13.0.md |
 | 3 | What changed for PadMint | Passed | `git diff v0.12.0 -- padmint.json` is empty; `check_padmint_catalog.py`: recipe and PadMint both offer macos-arm64, windows-arm64, windows-x86_64 |
 | 4 | Artifacts | Apple-side passed; Windows and Linux to come | Above: `check_public_assets.sh` and PadMint `audit` on the IPA, the source zip and `padmint.json` |
-| 5 | PadMint player check, with the checkout | Running | PadMint `main` `bf95a5f`, Apple Python 3.9.6, an empty PadMint folder, the checkout of `bb790d4`, the release IPA and the GZLE01 disc |
+| 5 | PadMint player check, with the checkout | Passed | PadMint `main` `bf95a5f`, Apple Python 3.9.6, an empty PadMint folder, a clean copy of `bb790d4`, the release IPA and the GZLE01 disc: passed in 9,002 s (2 h 30 min), with local training through the iPhone module, signing and packaging. The personal build was kept private and its temporary folder moved to the Trash |
 | 6 | Player-facing text | To do after publishing | A README pull request names 0.13.0's downloads |
 | 7 | `SHA256SUMS` | To do | From the draft's downloads, after the Windows and Linux files are uploaded |
 | 8-12 | After publishing | To do | |
