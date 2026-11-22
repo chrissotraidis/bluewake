@@ -28,7 +28,7 @@ The import retains its attribution. Certification scripts record hashes and
 modify only a player's locally generated source; translated bodies stay private.
 
 BlueWake's source is published here. Mac, iPhone and iPad apps are built by each player from their own
-disc ([docs/BUILD_YOUR_OWN.md](docs/BUILD_YOUR_OWN.md)). Two exceptions: the maintainers publish a
+disc ([docs/BUILD_YOUR_OWN.md](docs/BUILD_YOUR_OWN.md)). Two exceptions: BlueWake publishes a
 ready-made Windows build on the Releases page, as Wind Waker Recomp did, and may publish a ready-made
 Linux build under the same rules (none has been published yet). These contain code translated from the
 game but no disc image, game assets, saves or console keys, and they need the player's own disc. They
