@@ -419,6 +419,20 @@ void hd_textures_section() {
         else
             line = std::to_string(textures) + " textures in " + launch_choices().texture_pack;
         ImGui::TextColored(bw_texture_pack::state_color(state), "%s", line.c_str());
+        // What the renderer registered when BlueWake started (#336): the files
+        // above are only what is on disk. The menu never changes the variable,
+        // so it still names the folder this session loaded.
+        const char* started = std::getenv("DOL_AURORA_TEXTURE_PACK");
+        const long loaded = dol_aurora_texture_pack_replacements();
+        if (on && started != nullptr && launch_choices().texture_pack == started) {
+            if (loaded > 0)
+                ImGui::TextDisabled("%ld loaded when BlueWake started.", loaded);
+            else
+                ImGui::TextColored(bw_texture_pack::state_color(bw_texture_pack::PackState::Empty),
+                                   "None loaded when BlueWake started: no file is named like a GZLE01 texture (tex1_...).");
+        } else if (on) {
+            ImGui::TextDisabled("Loaded when BlueWake starts again.");
+        }
     }
     const std::string default_folder = bw_platform::default_pack_folder();
     if (ImGui::SmallButton("Choose texture pack folder..."))

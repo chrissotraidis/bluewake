@@ -281,3 +281,12 @@ King of Red Lions' nose sharp. The frontend test now triggers a Z16 copy. Patch 
 soft that blur is: off, light, the default, strong, and the game's own 1x blur at any render scale, its copy blurred
 on the GPU) and aurora_set_game_dof_start (0 to 100: the start moved farther out by a factor of the game's own, which
 follows the camera's focus, about eleven times as far at 100). Both start as the game has them.
+
+Patch 0209 adds DOL_AURORA_TEXTURE_REPORT_MISSING: each texture the game draws that an HD pack has no file for is logged
+once with the file name the pack would need (2 also lists the pack's nearest candidates), and with the host's texture
+dumps on it is written as an editable RGBA DDS under the cache folder's texture_dumps, for pack makers. Patch 0210 adds
+DOL_AURORA_TEXTURE_PACK_SKIP, replacement names whose files are left out after the pack and its optional folders load,
+so the game's own texture stays: BlueWake lists the game's 37 toon tables there when "Keep the game's shading tables"
+is on, because Hypatia's pack redraws 15 of them and its shadow threshold table shrinks the shadow in Link's hair.
+It also adds dol_aurora_texture_pack_replacements(), the replacements registered at start (-1 without a pack), which
+the Mods menu shows under the file count.

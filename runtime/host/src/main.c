@@ -1,5 +1,6 @@
 #include "gxruntime/boot.h"
 #include "gxruntime/aurora_backend.h"
+#include "texture_pack_tables.h"
 #include "gxruntime/headless_backend.h"
 #include "feature_dispatch.h"
 #include "stage_select.h"
@@ -8099,12 +8100,27 @@ int main(int argc, char** argv) {
             vsync = false;
         if (vsync_env != NULL && vsync_env[0] != '\0')
             vsync = vsync_env[0] != '0';
+        const char* dumps_env = getenv("BLUEWAKE_TEXTURE_DUMPS");
+        const bool texture_dumps = dumps_env != NULL && dumps_env[0] == '1';
+        if (texture_dumps) {
+            // With the dumps, the log names each missing texture's file once.
+            setenv("DOL_AURORA_TEXTURE_REPORT_MISSING", "1", 0);
+        }
+        // BLUEWAKE_TEXTURE_PACK_KEEP_TABLES=1 (Mods: "Keep the game's shading
+        // tables"): a pack's files for the game's toon tables are left out, so
+        // the game shades with its own (texture_pack_tables.h).
+        const char* keep_tables = getenv("BLUEWAKE_TEXTURE_PACK_KEEP_TABLES");
+        if (keep_tables != NULL && keep_tables[0] == '1')
+            setenv("DOL_AURORA_TEXTURE_PACK_SKIP", BLUEWAKE_TOON_TABLES, 0);
         const AuroraBackendConfig aurora_config = {
             .app_name = "BlueWake",
             .window_width = 960u,
             .window_height = 720u,
             .vsync = vsync,
-            .allow_texture_dumps = false,
+            /* BLUEWAKE_TEXTURE_DUMPS=1 (Mods: "Save the textures the pack lacks"):
+               each texture the pack misses is written once as an editable DDS
+               under the cache folder's texture_dumps. */
+            .allow_texture_dumps = texture_dumps,
             .info_logging = true,
             .graphics_logging = getenv("DOL_AURORA_RECOMP_GRAPHICS_LOG") != NULL,
             .force_untextured = false,

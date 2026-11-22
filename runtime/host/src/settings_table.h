@@ -81,6 +81,16 @@ struct Setting {
 inline constexpr Setting kSettings[] = {
     {.key = "DOL_AURORA_TEXTURE_PACK", .old_windows = "texture_pack", .label = "HD textures", .tab = Tab::Mods,
      .control = Control::Custom, .next_launch = Os::All},
+    // main.c: a pack's files for the game's toon tables (texture_pack_tables.h) left out.
+    {.key = "BLUEWAKE_TEXTURE_PACK_KEEP_TABLES", .kind = Kind::Bool, .label = "Keep the game's shading tables",
+     .tab = Tab::Mods, .control = Control::Switch,
+     .note = "A pack's versions of the tables the game shades with are left out, so Link's hair and metal keep the game's shadows. Hypatia's pack changes them.",
+     .needs_set = "DOL_AURORA_TEXTURE_PACK", .next_launch = Os::All},
+    // main.c: Aurora's report and dumps of the textures a pack has no file for.
+    {.key = "BLUEWAKE_TEXTURE_DUMPS", .kind = Kind::Bool, .label = "Save the textures the pack lacks",
+     .tab = Tab::Mods, .control = Control::Switch,
+     .note = "For pack makers: each texture the pack has no file for is named in the log and saved once as an editable .dds in texture_dumps, in BlueWake's data folder.",
+     .needs_set = "DOL_AURORA_TEXTURE_PACK", .next_launch = Os::All},
     {.key = "BLUEWAKE_ASPECT", .old_windows = "aspect", .kind = Kind::Choice, .fallback = "4:3",
      .label = "Widescreen", .tab = Tab::Mods, .control = Control::Custom, .next_launch = Os::All},
     // letterbox.c: the cutscene's band between the bars zoomed to fill the screen; opening.c: the legend unstretched.
