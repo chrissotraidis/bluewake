@@ -1,6 +1,6 @@
 # What we're doing
 
-The dated plan, and the five-step loop every session follows. Owner: Chris. Updated November 16, 2026. The ranked
+The dated plan, and the five-step loop every session follows. Owner: Chris. Updated November 22, 2026. The ranked
 backlog is [PRIORITIES.md](PRIORITIES.md), the speed strategy and its runbook are [PERFORMANCE.md](PERFORMANCE.md),
 and the standards everything is held to are in [DIRECTION.md](DIRECTION.md). The daily sections from October 11 to
 15, with every measurement, are kept in [status/GOAL_LOOP_2026-10-15.md](status/GOAL_LOOP_2026-10-15.md).
@@ -30,6 +30,25 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 | 1. Lean what we have, and catch up with Elliott | 0.7.0 and the next two weeks | Lean block copies (the default since 0.7.0), draw fusion, his faster loads and natives rounds 4, 5 and 7, his upload changes, hidden symbols, Smooth Motion pacing | Faster on the benchmark, and the game plays the same |
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
 | 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
+
+## November 22: 0.13.0
+
+Every open pull request and issue was read and reviewed on GitHub. Eighteen pull requests went into `main` together
+(#636), with RecompCore's batch merged as RecompCore#66: the heat haze and the Picto Box in Dragon Roost Cavern, the
+heart and the HD look's shading in Smooth Motion, Wind Waker HD's light (#533), the cheaper HD effects (#586), the
+texture pack count (#627), the ultrawide presets (#623), no heart pulsing (#628), five save state slots (#632), the
+boat's zoom and Sail on Z (#633, #634), and the Windows zip's stage select names (#616). A Mac build matched 0.12.0's
+frames with the defaults and its 31 benchmark checkpoints, and stayed within 2.4% of its speed (the
+[contents](https://github.com/chrissotraidis/bluewake/pull/636) have the numbers).
+
+| Next, in order | Evidence and scope | Done when |
+| --- | --- | --- |
+| The Windows zip and the Linux AppImage | [WINDOWS_BUILD_0.13.0.md](status/WINDOWS_BUILD_0.13.0.md), on Chris's PC from the freeze commit | Both uploaded to the v0.13.0 draft and their results merged |
+| Release gate and publication | The 0.13.0 release record (`status/RELEASE_0.13.0.md`, its own pull request): the Apple-side artifacts, PadMint's player check with the checkout | Every line before tagging has a status; Chris publishes |
+| #629, speed up while a key is held | Changes requested: the right stick's click is the zoom, first person and a remappable button | Changed, then merged for 0.13.0 or the next release |
+| #584, the art fixes for the modules linked low | Needs a rebase: hook id 6 is #589's, and #623's variants | Rebased and checked on a Mac, off by default |
+| #621, a freeze leaving Dragon Roost Cavern's room 9 | A heap header overwritten 4 bytes past a `d_a_door10`; the reporter offered to test | The write's retrace and PC, from the reporter's heap watch |
+
 
 ## November 16: Linux CI signing-key download
 
