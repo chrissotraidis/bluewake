@@ -1,0 +1,40 @@
+From c0f5f918026efe3168bdde42f3af0a55a3325e5e Mon Sep 17 00:00:00 2001
+From: Chris Sotraidis <56282582+chrissotraidis@users.noreply.github.com>
+Date: Sun, 22 Nov 2026 18:39:51 +0900
+Subject: [PATCH] Aurora: #65's texture pack count and skipped names read #51's
+ optional folders
+
+#51 keeps a texture pack's optional/ folders in gx_aurora::g_texture_pack_optional, so they can load and drop while running; #65's count of what loaded and its DOL_AURORA_TEXTURE_PACK_SKIP read the local list #51 replaced (s_optional), which no longer exists. They read g_texture_pack_optional now. A folder loaded later while running still brings its own files, as before #65.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 37b88eae47..3501a4e783 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -410,8 +410,8 @@ bool dol_aurora_initialize(int argc, char** argv,
+             }
+         }
+         long registered = static_cast<long>(s_texture_pack.registrations.size());
+-        for (const auto& group : s_optional)
+-            registered += static_cast<long>(group.registrations.size());
++        for (const auto& folder : gx_aurora::g_texture_pack_optional)
++            registered += static_cast<long>(folder.second.registrations.size());
+         // DOL_AURORA_TEXTURE_PACK_SKIP: comma-separated replacement names
+         // (tex1_WxH_hash[_tlut]_fmt) whose files are not used, so the game's
+         // own texture stays: lookup tables a pack should not have replaced
+@@ -433,8 +433,8 @@ bool dol_aurora_initialize(int argc, char** argv,
+                         files += registration.key == replacementKey ? 1 : 0;
+                 };
+                 count(s_texture_pack);
+-                for (const auto& group : s_optional)
+-                    count(group);
++                for (const auto& folder : gx_aurora::g_texture_pack_optional)
++                    count(folder.second);
+                 if (files == 0)
+                     continue;
+                 aurora::texture::unregister_replacements(replacementKey);
+-- 
+2.46.0
+

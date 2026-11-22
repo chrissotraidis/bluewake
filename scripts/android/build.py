@@ -24,6 +24,9 @@ Steps, each logged under OUT/logs:
 
 The APK contains code translated from YOUR disc: it is yours alone. Never share
 or upload it.
+
+--ci-container runs the same build inside the Android build container
+(scripts/android/Dockerfile): the toolchain is the image, not this machine.
 """
 import argparse
 import hashlib
@@ -65,6 +68,12 @@ TARGET_SDK = 35
 # module trained with the gate open is not reused for one trained without.
 MODULE_FLAGS = tuple(dict.fromkeys((*wb.WINDOWS_DEFAULT_OPTIMIZATIONS, "lean_memory", "lean_deadlines",
                                     "native_entries", "behaviour_timing", "direct_gate")))
+# --ci-container: build in the Android build container (scripts/android/Dockerfile), so an APK does not depend
+# on the toolchain installed on this machine. The Linux host build's flag of the same name works the same way
+# (scripts/linux/build.py): the image holds the toolchain, and this command is re-run inside it with the
+# checkout and the output directory writable and the disc read-only.
+CI_CONTAINER_IMAGE = "bluewake-android-ci:local"
+CI_CONTAINER_ENV = "BLUEWAKE_ANDROID_CI_CONTAINER"
 
 
 def module_request(args):
@@ -81,7 +90,84 @@ def first_existing(*candidates):
     return None
 
 
+def inside(path, parent):
+    try:
+        Path(path).resolve().relative_to(Path(parent).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def git_metadata_paths():
+    """The checkout's git directories, when they are not inside ROOT (a worktree keeps its .git elsewhere)."""
+    paths = []
+    for query in ("--git-dir", "--git-common-dir"):
+        value = subprocess.check_output(["git", "rev-parse", query], cwd=ROOT, text=True).strip()
+        path = Path(value) if Path(value).is_absolute() else ROOT / value
+        path = path.resolve()
+        if not inside(path, ROOT) and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def container_mounts(disc, out):
+    """Ordered bind mounts; later mounts narrow access granted by parents."""
+    disc, out = disc.resolve(), out.resolve()
+    mounts = [(ROOT, "rw")]
+    mounts.extend((path, "ro") for path in git_metadata_paths())
+    if not inside(out, ROOT):
+        mounts.append((out, "rw"))
+    # The disc is the player's own, and a build only reads it.
+    mounts.append((disc, "ro"))
+    return mounts
+
+
+def run_in_ci_container(args):
+    """Re-run this exact builder invocation inside the Android build container."""
+    if shutil.which("git") is None:
+        die("--ci-container requires Git on the host so the checkout can be mounted")
+    docker = shutil.which("docker")
+    if docker is None:
+        die("--ci-container requires Docker; install it and start the Docker daemon")
+    disc = args.disc.resolve()
+    if not disc.is_file():
+        die(f"disc image not found: {disc}")
+    daemon = subprocess.run([docker, "info"], capture_output=True, text=True)
+    if daemon.returncode:
+        detail = (daemon.stderr or daemon.stdout).strip().splitlines()
+        die("Docker is installed but its daemon is unavailable" + (f": {detail[-1]}" if detail else ""))
+
+    step("build the Android build container")
+    dockerfile = ROOT / "scripts/android/Dockerfile"
+    # The NDK, the SDK's build-tools and the JDK run on x86-64 and compile for arm64 Android, so the image is
+    # x86-64 on every host; Docker Desktop emulates it on Apple silicon, which works and is slow.
+    image = subprocess.run([docker, "build", "--platform", "linux/amd64", "--file", str(dockerfile),
+                            "--tag", CI_CONTAINER_IMAGE, str(dockerfile.parent)])
+    if image.returncode:
+        die(f"Docker could not build {CI_CONTAINER_IMAGE} (exit {image.returncode})")
+
+    args.out.resolve().mkdir(parents=True, exist_ok=True)
+    command = [docker, "run", "--rm", "--init", "--platform", "linux/amd64",
+               "--user", f"{os.getuid()}:{os.getgid()}",
+               "--env", "HOME=/tmp", "--env", f"{CI_CONTAINER_ENV}=1"]
+    for path, mode in container_mounts(args.disc, args.out):
+        command.extend(["--volume", f"{path}:{path}:{mode}"])
+    command.extend(["--workdir", str(Path.cwd().resolve()), CI_CONTAINER_IMAGE,
+                    "python3", str(Path(__file__).resolve()), *sys.argv[1:]])
+    step("run the Android build in the container")
+    return subprocess.run(command).returncode
+
+
 class AndroidBuilder(wb.Builder):
+    # A playback that stops advancing is the stall reported in #571: the process
+    # stays alive, the game thread stays busy, and the session log stops. Minutes
+    # with no retrace is not a slow frame - the instrumented module runs the
+    # opening's room load at tens of retraces a second - and waiting out the
+    # three-hour cap instead throws away the only evidence the stall leaves. The
+    # loop samples every 15 s, so that is the granularity of the report.
+    # BLUEWAKE_STALL_SECONDS shortens it for a reproduction that expects a stall.
+    STALL_SECONDS = float(os.environ.get("BLUEWAKE_STALL_SECONDS", 480))
+
     def __init__(self, args):
         super().__init__(args)
         self.app_build = self.out / "host-tools"
@@ -390,7 +476,7 @@ class AndroidBuilder(wb.Builder):
                 return found[0]
         die("SDL's Java sources were not found in the app build (_deps/sdl-src)")
 
-    def package(self, module, lib, apk_name="WindWakerRecomp.apk", pkg_dir="apk", provenance=True):
+    def package(self, module, lib, apk_name="WindWakerRecomp.apk", pkg_dir="apk", provenance=True, debug=False):
         pkg = self.out / pkg_dir
         shutil.rmtree(pkg, ignore_errors=True)
         (pkg / "classes").mkdir(parents=True)
@@ -447,7 +533,12 @@ class AndroidBuilder(wb.Builder):
         manifest = (ROOT / "android/AndroidManifest.xml").read_text(encoding="utf-8")
         manifest = manifest.replace("@PACKAGE@", self.app_id).replace(
             "@LABEL@", xml_escape(self.args.label, {'"': "&quot;", "'": "&apos;"}))
-        manifest = manifest.replace("@DEBUGGABLE@", "true" if getattr(self.args, "debuggable", False) else "false")
+        # A debuggable app is the only one `adb` can act as its own user inside
+        # (`run-as`), and a training APK is a throwaway: marking it so is what
+        # lets a playback that stops advancing be stack-dumped
+        # (capture_stalled_playback).
+        debuggable = debug or getattr(self.args, "debuggable", False)
+        manifest = manifest.replace("@DEBUGGABLE@", "true" if debuggable else "false")
         (pkg / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
         res_zip = pkg / "res.zip"
         self.run("apk-aapt2-compile", [self.build_tools / ("aapt2" + EXE), "compile", "--dir", ROOT / "android/res",
@@ -578,7 +669,8 @@ class AndroidBuilder(wb.Builder):
         if " bluewake_profile_write" not in exported:
             die("the instrumented module does not export bluewake_profile_write")
         print(f"instrumented game module built ({int(time.monotonic() - start) // 60} min)")
-        apk = self.package(module, lib, "WindWakerRecomp-training.apk", "apk-training", provenance=False)
+        apk = self.package(module, lib, "WindWakerRecomp-training.apk", "apk-training", provenance=False,
+                           debug=True)
         print(f"installing the training APK on {self.args.device}")
         self.adb("shell", "am", "force-stop", self.app_id)
         self.adb("install", "-r", "-g", apk, timeout=900)
@@ -652,7 +744,8 @@ class AndroidBuilder(wb.Builder):
         if self.args.device not in devices:
             die(f"device {self.args.device} is not connected (adb devices)")
         lib = self.build_app(self.out / "app-train", generate=True, name="app-train")
-        apk = self.package(module, lib, "WindWakerRecomp-app-training.apk", "apk-app-training", provenance=False)
+        apk = self.package(module, lib, "WindWakerRecomp-app-training.apk", "apk-app-training", provenance=False,
+                           debug=True)
         print(f"installing the app's training APK on {self.args.device}")
         self.adb("shell", "am", "force-stop", self.app_id)
         self.adb("install", "-r", "-g", apk, timeout=900)
@@ -676,6 +769,12 @@ class AndroidBuilder(wb.Builder):
         remote = f"{self.DEVICE_FILES}/pgo/{name}"
         self.adb("shell", "rm", "-rf", remote)
         self.adb("shell", "mkdir", "-p", remote)
+        # The app writes its card, its sram and its profile into this directory,
+        # and one `adb shell mkdir` leaves behind is not always one it may write
+        # (0770 shell:shell): the playback then ends at start-up with "cannot lock
+        # <card>: another BlueWake session may be using this card" and the profile
+        # write answers Permission denied.
+        self.adb("shell", "chmod", "777", remote)
         # The game module's training runs headless and unpaced. The app's
         # (train_app_on_device) draws every frame at the game's own pace, with
         # the player's settings: its counts are of the GX worker, Aurora and the
@@ -711,20 +810,38 @@ class AndroidBuilder(wb.Builder):
         start = time.monotonic()
         log_name = None
         text = ""
+        progress, progressed = 0, start
         while True:
             time.sleep(15)
             elapsed = int(time.monotonic() - start)
             if log_name is None:
                 now = set(self.adb("shell", f"ls {self.DEVICE_FILES}/logs", capture=True, check=False).split())
-                new = sorted(now - before)
+                # The app keeps a `session-in-progress` marker beside the logs, and
+                # it sorts after every `session-*.log`: taking the newest name
+                # without this filter reads the marker instead of the log.
+                new = sorted(n for n in now - before if n.startswith("session-") and n.endswith(".log"))
                 log_name = new[-1] if new else None
             if log_name is not None:
                 text = self.adb("shell", f"cat {self.DEVICE_FILES}/logs/{log_name}", capture=True, check=False)
                 if "[android] host returned" in text:
                     break
                 observed_retraces = re.findall(r"retrace=(\d+)", text[-20000:])
+                latest = int(observed_retraces[-1]) if observed_retraces else 0
                 print(f"  {name}: {elapsed // 60}m {elapsed % 60:02d}s, retrace "
-                      f"{observed_retraces[-1] if observed_retraces else 0}/{self.TRAINING_RETRACES}", flush=True)
+                      f"{latest}/{self.TRAINING_RETRACES}", flush=True)
+                if latest > progress:
+                    progress, progressed = latest, time.monotonic()
+                elif time.monotonic() - progressed > self.STALL_SECONDS:
+                    stalled = int(time.monotonic() - progressed)
+                    outcome = self.capture_stalled_playback(run, name, text, latest, stalled, log_name)
+                    if outcome == "recovered":
+                        progressed = time.monotonic()
+                        continue
+                    if outcome == "gone":
+                        die(f"the training playback {name} ended without a retrace past {latest} "
+                            f"(device log {log_name}); the session log is in {run}")
+                    die(f"the training playback {name} stopped advancing at retrace {latest} for {stalled // 60}m; "
+                        f"what the process was doing: {run}")
             if elapsed > 60 and not self.adb("shell", "pidof", self.app_id, check=False).stdout.strip():
                 die(f"the training playback {name} stopped early (device log {log_name})")
             if elapsed > 3 * 3600:
@@ -756,6 +873,105 @@ class AndroidBuilder(wb.Builder):
             raw.append(run / f)
         print(f"  {name}: done in {int(time.monotonic() - start) // 60} min, {len(raw)} profile(s)")
         return raw
+
+    def thread_census(self, pid):
+        """Every thread of the app's process: its name, its state, and the CPU
+        time it has used, from /proc/<pid>/task/*/stat (utime + stime)."""
+        out = self.adb("shell", f"cat /proc/{pid}/task/*/stat", check=False, capture=True)
+        threads = {}
+        for line in out.splitlines():
+            if "(" not in line or ")" not in line:
+                continue
+            head, tail = line.rsplit(")", 1)
+            tid, comm = head.split("(", 1)
+            fields = tail.split()
+            if len(fields) < 13 or not tid.strip().isdigit():
+                continue
+            threads[int(tid)] = {"tid": int(tid), "comm": comm.strip(), "state": fields[0],
+                                 "cpu": int(fields[11]) + int(fields[12])}
+        return threads
+
+    def capture_stalled_playback(self, run, name, text, retrace, stalled_seconds, log_name):
+        """The evidence a playback that stopped advancing leaves behind.
+
+        The stall is a spin, not a blocked read: the game thread keeps burning
+        most of a core while the log stops. So the questions are which thread is
+        spending that CPU and where it is inside. /proc/<pid>/task/*/stat answers
+        the first (two samples, five seconds apart), and its busiest thread is
+        the one the stack is taken of. `debuggerd -b` answers the second when the
+        caller may look inside the process; from `adb shell` it is root-only even
+        for a debuggable app, so the route that works is the training APK being
+        debuggable, which lets `run-as` send SIGABRT as the app's own user and
+        leaves the crash_dump tombstone - that thread's backtrace, with symbols -
+        in `logcat -b crash`. Neither route needs root, and neither needs a build
+        of its own beyond the app already being the training one.
+
+        Returns "stalled" when the playback is still where it was, "recovered"
+        when it moved on while the census ran (the evidence is kept and the run
+        is watched rather than killed - a load that took eight minutes and
+        finished is not a dead session), and "gone" when there is no process
+        left to look at.
+        """
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "session.log").write_text(text, encoding="utf-8")
+        # `pidof` can answer more than one pid while an old process is still going;
+        # /proc/<pid>/task takes one.
+        pids = self.adb("shell", "pidof", self.app_id, check=False).stdout.split()
+        pid = pids[0] if pids else ""
+        if not pid:
+            print(f"  {name}: no process left to look at; session log saved in {run}")
+            return "gone"
+        first = self.thread_census(pid)
+        time.sleep(5)
+        second = self.thread_census(pid)
+        if not first or not second:
+            print(f"  {name}: /proc/{pid}/task was unreadable; session log saved in {run}")
+            return "stalled"
+        rows = []
+        for tid, thread in sorted(second.items()):
+            thread["spent"] = thread["cpu"] - first.get(tid, {}).get("cpu", thread["cpu"])
+            rows.append(thread)
+        rows.sort(key=lambda thread: (thread["spent"], thread["tid"]), reverse=True)
+        (run / "threads.txt").write_text(
+            f"playback {name}: no retrace for {stalled_seconds} s, stopped at retrace {retrace}\n"
+            f"threads of pid {pid}, CPU in jiffies over the 5 s the census took\n"
+            "tid    state  cpu   comm\n"
+            + "".join(f"{t['tid']:<6} {t['state']:<6} {t['spent']:>4}  {t['comm']}\n" for t in rows),
+            encoding="utf-8")
+        print(f"  {name}: threads and their CPU in {run / 'threads.txt'}", flush=True)
+        # The census takes five seconds, which is long enough for a load that was
+        # merely slow to finish: check before aborting anything.
+        later = self.adb("shell", f"cat {self.DEVICE_FILES}/logs/{log_name}", capture=True, check=False)
+        observed = re.findall(r"retrace=(\d+)", later[-20000:])
+        moved = int(observed[-1]) if observed else retrace
+        if moved > retrace:
+            print(f"  {name}: retrace moved {retrace} to {moved} while the census ran; watching on", flush=True)
+            return "recovered"
+        # Not capture=True: adb's answer to `debuggerd` puts the refusal on stderr,
+        # and the refusal is the half that decides which route runs.
+        stacks = self.adb("shell", "debuggerd", "-b", pid, check=False)
+        stack_text = (stacks.stdout or "") + (stacks.stderr or "")
+        if stacks.returncode == 0 and stack_text.strip():
+            (run / "stacks.txt").write_text(stack_text, encoding="utf-8")
+            print(f"  {name}: native stacks from debuggerd in {run / 'stacks.txt'}", flush=True)
+            return "stalled"
+        busiest = next((t for t in rows if t["spent"] > 0), None)
+        if busiest is None:
+            print(f"  {name}: no thread spent CPU; neither a stack nor a spin to attribute", flush=True)
+            return "stalled"
+        self.adb("logcat", "-c", check=False)
+        killed = self.adb("shell", "run-as", self.app_id, "kill", "-ABRT", str(busiest["tid"]), check=False)
+        if killed.returncode != 0:
+            print(f"  {name}: no stack: debuggerd answered {stack_text.strip().splitlines()[:1]} and run-as "
+                  f"{killed.stderr.strip().splitlines()[:1]}", flush=True)
+            return "stalled"
+        time.sleep(8)
+        crash = self.adb("logcat", "-d", "-b", "crash", check=False).stdout
+        (run / "stacks.txt").write_text(
+            f"playback {name}: retrace {retrace}, SIGABRT to tid {busiest['tid']} ({busiest['comm']})\n\n{crash}",
+            encoding="utf-8")
+        print(f"  {name}: native stacks from the crash log in {run / 'stacks.txt'}", flush=True)
+        return "stalled"
 
     # --- the pipeline -------------------------------------------------------------
     def build(self):
@@ -912,7 +1128,20 @@ def parse_args(argv=None):
     parser.add_argument("--ndk", type=Path, help="the Android NDK (default: the newest in the SDK)")
     parser.add_argument("--sdk", type=Path, help="the Android SDK (default: ANDROID_HOME)")
     parser.add_argument("--jdk", type=Path, help="a JDK 17 (default: JAVA_HOME)")
+    parser.add_argument("--ci-container", action="store_true",
+                        help="build in the Android build container (scripts/android/Dockerfile): no clang, cmake, "
+                             "JDK, Android SDK or NDK needed on this machine, and one pinned toolchain")
     args = parser.parse_args(argv)
+    if args.ci_container:
+        # The image is the toolchain: a host path to one of these does not exist inside the container.
+        for name in ("sdk", "ndk", "jdk", "llvm"):
+            if getattr(args, name) is not None:
+                parser.error(f"--ci-container builds with the image's toolchain: drop --{name}")
+        if WINDOWS:
+            parser.error("--ci-container builds on a Linux or macOS host; on Windows follow the toolchain steps "
+                         "in docs/ANDROID.md")
+        if args.device or args.train_app:
+            parser.error("--ci-container cannot reach the phone: train on the host and pass the profile with --profile")
     # The Windows builder's defaults and the same checks (scripts/windows/build.py main).
     if not args.conservative:
         for name in wb.WINDOWS_DEFAULT_OPTIMIZATIONS:
@@ -968,6 +1197,12 @@ def parse_args(argv=None):
 def main():
     args = parse_args()
     try:
+        # --ci-container: the toolchain is the container, so the command is re-run inside it (once: the env
+        # variable marks the run that is already in there).
+        if args.ci_container and not os.environ.get(CI_CONTAINER_ENV):
+            sys.exit(run_in_ci_container(args))
+        if os.environ.get(CI_CONTAINER_ENV):
+            print(f"Android build container: {CI_CONTAINER_IMAGE}")
         AndroidBuilder(args).build()
     except wb.BuildError as error:
         print(f"\nbuilder: {error}", file=sys.stderr)

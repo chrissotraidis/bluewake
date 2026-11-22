@@ -317,7 +317,8 @@ static void usage(void) {
     fprintf(stderr,
             "usage: bluewake [options] [DISC.iso]\n"
             "  --widescreen       16:9 (the widescreen mod: a wider camera and HUD)\n"
-            "  --aspect A         4:3 (the game's own), 16:10, 16:9 or 21:9\n"
+            "  --aspect A         4:3 (the game's own), 16:10, 16:9, 21:9, 64:27 (2560x1080)\n"
+            "                     or 43:18 (3440x1440)\n"
             "  --smooth           Smooth Motion (experimental): 60 FPS with in-between\n"
             "                     frames; F10 toggles it\n"
             "  --no-smooth        the game's own 30 FPS (the default)\n"

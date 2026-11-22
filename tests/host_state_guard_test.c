@@ -22,6 +22,9 @@ static bool dol_hle_callback_idle(void) { return true; }
 static bool bluewake_quick_doors_busy(void) { return false; }
 static const char* host_state_dir(void) { return "/synthetic/states"; }
 static bool host_state_latest(char* out, size_t size) { (void)out; (void)size; return false; }
+// The menu's save state slots (main.c, outside the copied sections): none here.
+static bool host_state_slot_path(int slot, char* out, size_t size) { (void)slot; (void)out; (void)size; return false; }
+static bool bluewake_state_slot_info(int slot, char* when, size_t size) { (void)slot; (void)when; (void)size; return false; }
 static bool host_state_save(const char*, CPUState*, const StaticRecompModuleDesc*, const struct HostStateLoop*);
 static bool host_state_load(const char*, CPUState*, const StaticRecompModuleDesc*, const struct HostStateLoop*);
 static void bluewake_status_post(const char* text) { snprintf(status, sizeof status, "%s", text); }

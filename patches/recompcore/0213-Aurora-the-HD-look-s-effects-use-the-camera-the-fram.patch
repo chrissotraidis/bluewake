@@ -1,0 +1,75 @@
+From d2320225845049187d19e6504da339d827d4c2a6 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 16:06:38 -0600
+Subject: [PATCH] Aurora: the HD look's effects take the camera a frame began
+ recording with, not the one set last when it is encoded
+
+post_camera() read post_fx::current_camera() when the real frame was encoded on the render worker. With Smooth
+Motion on, the worker runs behind the game (its in-between frames keep it busy), so a real frame was often encoded
+after the game had set the next frame's camera: its effects rebuilt positions from its depth with the wrong
+camera, and shadows and light jumped for one frame wherever the camera's speed changed.
+
+begin_frame() now keeps the camera the game has set when the frame starts recording (the one its draws are made
+with), and post_camera() returns it; in-between frames move that one as before.
+
+Checked on Windows (RTX 5070 Ti, 180 Hz, Smooth Motion at the display's rate) with recorded pad tours replayed exactly,
+every shown frame dumped: Hyrule Castle's hall went from 12 tile jumps over 15 levels to 2 (both at the tour's last
+frame), the oasis pond from 11 jumps over 10 levels to 1. No change in GPU time.
+
+(As merged into the 0.13.0 batch, codex/0.13.0-batch f1bda1e899: the diff is against the batch before it.)
+---
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 424326a012809511faee5f42e19638811674d41d..72296ad4e246c3772065e88f8aa5bea61074e10a 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1616,6 +1616,14 @@ bool begin_frame(bool preserveEfb) {
+   frame.frameIndex = g_frameIndex;
+   frame.stagingBuffer = *stagingSlot;
+   frame.continuation = preserveEfb;
++  // The camera its draws are made with, taken as it begins recording (post_camera()).
++  {
++    static float lastSeconds = 0.f;
++    frame.postCamera = post_fx::current_camera();
++    frame.havePostCamera = true;
++    frame.previousSeconds = lastSeconds;
++    lastSeconds = frame.postCamera.view[16];
++  }
+   // A real frame starts empty. A continuation (the picto id-buffer read splits
+   // the frame) keeps the snapshot just taken of this frame's EFB.
+   if (!preserveEfb)
+@@ -2014,18 +2022,23 @@ static void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const Frame
+ }
+ 
+ // The camera the HD look's effects are drawn from (post_fx). The real frame
+-// takes the one the game set last and keeps it; an in-between frame takes
+-// that one moved where its matrices put the scenery (frame_interp's
+-// CameraStep), at its own time between the two frames'. Drawn from the latest
+-// camera instead, an in-between frame's shadows sat where the next frame's
+-// camera sees them, and slid against the scenery as the camera turned.
++// takes the one the game had set when the frame began recording (begin_frame),
++// the camera its draws are made with; an in-between frame takes that one moved
++// where its matrices put the scenery (frame_interp's CameraStep), at its own
++// time between the two frames'. Drawn from the latest camera instead, an
++// in-between frame's shadows sat where the next frame's camera sees them, and
++// slid against the scenery as the camera turned. Taken when the frame was
++// encoded, a real frame drawn while the render worker ran behind (Smooth
++// Motion's in-between frames keep it busy) was shaded from the next frame's
++// camera: its depth read back to the wrong places, and shadows and light
++// jumped for a frame wherever the camera's speed changed (Hyrule Castle's
++// hall: 15 to 17 levels of 255, gone with the camera taken here).
+ static post_fx::Camera post_camera(FramePacket& frame) {
+   if (!frame_interp::encoding_interpolated()) {
+-    static float lastSeconds = 0.f;
+-    frame.postCamera = post_fx::current_camera();
+-    frame.havePostCamera = true;
+-    frame.previousSeconds = lastSeconds;
+-    lastSeconds = frame.postCamera.view[16];
++    if (!frame.havePostCamera) {
++      frame.postCamera = post_fx::current_camera();
++      frame.havePostCamera = true;
++    }
+     return frame.postCamera;
+   }
+   if (!frame.havePostCamera)
+--
+2.50.1

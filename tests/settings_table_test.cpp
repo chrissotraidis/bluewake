@@ -15,17 +15,19 @@ using namespace bw_settings;
 // each tab in, and the order the settings file is written in. A key that moves
 // changes where its line sits in the file, never what the file says.
 static const char* const kFileOrder[] = {
-    "DOL_AURORA_TEXTURE_PACK", "BLUEWAKE_ASPECT", "BLUEWAKE_NATIVE_CUTSCENE_FRAMING",
+    "DOL_AURORA_TEXTURE_PACK", "BLUEWAKE_TEXTURE_PACK_KEEP_TABLES", "BLUEWAKE_TEXTURE_DUMPS", "BLUEWAKE_ASPECT", "BLUEWAKE_NATIVE_CUTSCENE_FRAMING",
     "BLUEWAKE_HD_LOOK", "BLUEWAKE_HD_DISTANT_ISLANDS", "BLUEWAKE_HD_AO",
     "BLUEWAKE_HD_CLOUD_SHADOWS", "BLUEWAKE_HD_EDGE_LIGHT", "BLUEWAKE_HD_TORCH_LIGHT", "BLUEWAKE_HD_FAR_BLUR", "BLUEWAKE_HD_BLOOM",
     "BLUEWAKE_HD_CLOUDS", "BLUEWAKE_HD_SKY", "BLUEWAKE_HD_SKY_MODELS", "BLUEWAKE_HD_SKY_LINEAR", "BLUEWAKE_HD_SUNLIGHT",
-    "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "DOL_AURORA_SHOW_FPS", "BLUEWAKE_PERF_OVERLAY",
+    "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "BLUEWAKE_HD_LIGHT", "BLUEWAKE_HD_LIGHT_SHADOWS",
+    "BLUEWAKE_HD_LIGHT_CHARACTERS", "BLUEWAKE_HD_LIGHT_BLOOM", "BLUEWAKE_HD_LIGHT_AO", "BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS",
+    "BLUEWAKE_HD_LIGHT_RIM", "BLUEWAKE_HD_LIGHT_FAR_BLUR", "DOL_AURORA_SHOW_FPS", "BLUEWAKE_PERF_OVERLAY",
     "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES",
     "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST", "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE",
     "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
     "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO", "DOL_AURORA_GAME_DOF", "DOL_AURORA_GAME_DOF_START",
     "BLUEWAKE_MODS", "BLUEWAKE_OPTIONS", "BLUEWAKE_STAGE_SELECT_TOGGLE", "BLUEWAKE_FOREST_WATER_KEEP_TREES",
-    "BLUEWAKE_FOREST_WATER_30_MINUTES", "BLUEWAKE_FADE_FRAMES", "BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS",
+    "BLUEWAKE_FOREST_WATER_30_MINUTES", "BLUEWAKE_FADE_FRAMES", "BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS", "BLUEWAKE_SAIL_ON_Z",
     "BLUEWAKE_CLIMB", "BLUEWAKE_CLIMB_STAMINA", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED",
     "BLUEWAKE_SPRINT_CHOICE", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_LAYOUT_PENDING", "BLUEWAKE_PAD_SWAP_LR",
     "BLUEWAKE_DPAD_MENUS", "BLUEWAKE_BACKGROUND_INPUT", "BLUEWAKE_BUTTON_MAP", "BLUEWAKE_KEY_MAP", "BLUEWAKE_MOUSE_CAMERA",
@@ -34,7 +36,8 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_AIM_INVERT_Y",
     "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
-    "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES",
+    "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
+    "DOL_AURORA_AO_PACKED", "BLUEWAKE_PRESENT_MAILBOX", "BLUEWAKE_NO_GAMESCOPE_WSI",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -136,6 +139,33 @@ int main() {
     const Setting* huge = find("BLUEWAKE_MODULE_HUGEPAGES");
     assert(huge != nullptr && huge == gate + 1 && huge->tab == Tab::Config && huge->group == nullptr);
     assert(!default_on(*huge) && next_launch_on(*huge));
+    // Wind Waker HD's own light: off until turned on, at the next launch, and
+    // its parts' switches under it, on with it.
+    const Setting* hd_light = find("BLUEWAKE_HD_LIGHT");
+    assert(hd_light != nullptr && !default_on(*hd_light) && next_launch_on(*hd_light) &&
+           hd_light->experimental != nullptr && std::strcmp(hd_light->needs, "BLUEWAKE_HD_LOOK") == 0);
+    for (const char* part : {"BLUEWAKE_HD_LIGHT_SHADOWS", "BLUEWAKE_HD_LIGHT_CHARACTERS", "BLUEWAKE_HD_LIGHT_BLOOM",
+                             "BLUEWAKE_HD_LIGHT_AO", "BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS", "BLUEWAKE_HD_LIGHT_RIM",
+                             "BLUEWAKE_HD_LIGHT_FAR_BLUR"}) {
+        const Setting* s = find(part);
+        assert(s != nullptr && default_on(*s) && next_launch_on(*s) && std::strcmp(s->needs, "BLUEWAKE_HD_LIGHT") == 0);
+    }
+    // Then faster cloud shadows (RecompCore #54): off by default, read when the renderer starts.
+    const Setting* clouds = find("DOL_AURORA_CLOUD_NOISE_TEXTURE");
+    assert(clouds != nullptr && clouds == huge + 1 && clouds->tab == Tab::Config && clouds->group == nullptr);
+    assert(!default_on(*clouds) && next_launch_on(*clouds));
+    // Then faster ambient occlusion (RecompCore #54): off by default, read when the renderer starts.
+    const Setting* ao = find("DOL_AURORA_AO_PACKED");
+    assert(ao != nullptr && ao == clouds + 1 && ao->tab == Tab::Config && ao->group == nullptr);
+    assert(!default_on(*ao) && next_launch_on(*ao));
+    // Then presenting with Mailbox (main.c): off by default, read when BlueWake starts.
+    const Setting* mailbox = find("BLUEWAKE_PRESENT_MAILBOX");
+    assert(mailbox != nullptr && mailbox == ao + 1 && mailbox->tab == Tab::Config && mailbox->group == nullptr);
+    assert(!default_on(*mailbox) && next_launch_on(*mailbox));
+    // Then presenting without gamescope's WSI layer (main.c): off by default, read when BlueWake starts.
+    const Setting* no_wsi = find("BLUEWAKE_NO_GAMESCOPE_WSI");
+    assert(no_wsi != nullptr && no_wsi == mailbox + 1 && no_wsi->tab == Tab::Config && no_wsi->group == nullptr);
+    assert(!default_on(*no_wsi) && next_launch_on(*no_wsi));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

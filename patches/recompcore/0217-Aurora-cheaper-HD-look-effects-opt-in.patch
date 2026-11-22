@@ -1,0 +1,429 @@
+From 595a9bda65a8e7d7e6e25dc94d97e398bbf2e420 Mon Sep 17 00:00:00 2001
+From: irregularthanis <343663069+irregularthanis@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 10:20:56 -0600
+Subject: [PATCH] Aurora: cheaper HD look effects (opt-in) (RecompCore #54, as merged)
+
+RecompCore #54 as it was merged into the 0.13.0 batch (codex/0.13.0-batch 595a9bda65), in one patch:
+its 13 commits, with this batch's conflict resolution where there was one (the merge's message).
+
+- b48524af2c Aurora: cloud shadows from a baked noise texture (opt-in)
+- c00b3399da Aurora: ambient occlusion keeps its distance beside it (opt-in)
+- cfc02a90e0 Aurora: full-size effects skip pixels they leave unchanged (opt-in)
+- 066e3327ac Revert "Aurora: full-size effects skip pixels they leave unchanged (opt-in)"
+- e70a1f9192 Aurora: DOL_AURORA_FAR_NO_SKY_PROBE, a diagnostic for the far blur's sky check
+- c9f7f44ab1 Aurora: the full-size effects share one render pass (opt-in)
+- 7823296252 Revert "Aurora: the full-size effects share one render pass (opt-in)"
+- 90fb1b6ed4 Aurora: optionally batch frame staging copies
+- 0354f721d7 Aurora: test staging copy ordering
+- 85f2c3ea01 Revert RecompCore #53's staging-copy batching (retest)
+- 58567c1420 Aurora: in-between frames reuse the real frame's soft blurs (opt-in)
+- dc09a4fb2a Revert "Aurora: in-between frames reuse the real frame's soft blurs (opt-in)"
+- 740132cb99 Revert "Aurora: DOL_AURORA_FAR_NO_SKY_PROBE, a diagnostic for the far blur's sky check"
+---
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+index f462347e64dd7b0c8abf1a47175d5f10e8c3301b..97a59a97b5115b50146f968d7da7eb0716fe3ab3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/post_fx.cpp
+@@ -445,6 +445,20 @@ constexpr size_t kSunMapUniformFloats = 104 + kMaxLights * 8 + 24 + 16;
+ float g_cloudStrength = 0.28f;  // how dark a cloud's shadow is
+ float g_cloudScale = 7000.f;    // world units across one cloud
+ bool g_cloudDebug = false;
++// DOL_AURORA_CLOUD_NOISE_TEXTURE=1: the clouds' noise baked into a world-space texture
++// (fs_cloud_bake) around the camera, and baked again only when the camera or the clouds'
++// drift comes near its edge. It reaches 200,000 units out; the shadows fade out by 160,000.
++bool g_cloudNoiseTexture = false;
++constexpr uint32_t kCloudNoiseTexels = 4096;
++constexpr float kCloudNoiseReach = 200000.f;
++constexpr float kCloudFadeEnd = 160000.f;  // fs_clouds' fade: smoothstep(60000, 160000, distance)
++wgpu::Texture g_cloudNoiseTex;
++wgpu::TextureView g_cloudNoiseView;
++wgpu::Buffer g_cloudBakeBuffer;  // fs_clouds' `bake`: origin (noise space), texel size, texels across
++wgpu::RenderPipeline g_cloudBakePass;
++bool g_cloudNoiseBaked = false;
++bool g_cloudNoiseBaking = false;  // while baking, binding 5 is a stand-in (the texture is the target)
++std::array<float, 2> g_cloudNoiseCentre{};
+ // The camera, for the cloud shadows (aurora_set_world_view): the inverse view
+ // matrix's three rows, then tan(fovy / 2), aspect, near, the sea's height, and
+ // the time in seconds, then the direction to the sun (aurora_set_sun_direction).
+@@ -504,6 +518,12 @@ wgpu::RenderPipeline g_aoApply;        // multiplied into the EFB (sun shadows)
+ uint32_t g_aoSamples = 0;
+ std::array<wgpu::Texture, 2> g_aoTex;
+ std::array<wgpu::TextureView, 2> g_aoView;
++// DOL_AURORA_AO_PACKED=1: the occlusion's quarter-size targets as RG16Float, the shade and its
++// texel's distance together (kAoShader's `packed`). Apart from g_aoTex, which the sun shadows'
++// fallback also draws into at the scene's format.
++bool g_aoPacked = false;
++std::array<wgpu::Texture, 2> g_aoPackedTex;
++std::array<wgpu::TextureView, 2> g_aoPackedView;
+ uint32_t g_farSamples = 0;
+ wgpu::BindGroupLayout g_depthLayout;
+ wgpu::PipelineLayout g_depthPipelineLayout;
+@@ -814,6 +834,14 @@ override fade_start: f32 = 1000.0;
+ override fade_end: f32 = 2500.0;
+ override debug_view: f32 = 0.0;
+ override effect_gain: f32 = 2.0;
++// DOL_AURORA_AO_PACKED=1: the quarter-size occlusion keeps its texel's distance beside it
++// (RG16Float: r the shade, rounded to 8-bit steps as the 8-bit target stored it; g the
++// distance), so the blurs and the upscale read it there instead of from the full-size depth.
++override packed: bool = false;
++
++fn q8(x: f32) -> f32 {
++    return round(clamp(x, 0.0, 1.0) * 255.0) / 255.0;
++}
+ 
+ @group(0) @binding(0) var samp: sampler;
+ @group(0) @binding(1) var src: texture_2d<f32>;
+@@ -869,7 +897,7 @@ fn fs_ao(in: VertexOutput) -> @location(0) vec4<f32> {
+     // and the sea's swells darkened it in a band toward the horizon.
+     let fade = 1.0 - smoothstep(fade_start, fade_end, dist);
+     if (dist <= 0.0 || fade <= 0.0) {
+-        return vec4(1.0);
++        return select(vec4(1.0), vec4(1.0, max(dist, 0.0), 0.0, 1.0), packed);
+     }
+     // About a 60-degree view: a radius r at distance z covers 0.87 r / z of the height.
+     let reach = vec2(size.y / size.x, 1.0) * (0.87 * radius / dist);
+@@ -899,6 +927,9 @@ fn fs_ao(in: VertexOutput) -> @location(0) vec4<f32> {
+         }
+     }
+     let ao = 1.0 - strength * fade * clamp(occluded / 4.0, 0.0, 1.0);
++    if (packed) {
++        return vec4(q8(ao), dist, 0.0, 1.0);
++    }
+     return vec4(vec3(ao), 1.0);
+ }
+ 
+@@ -948,13 +979,16 @@ fn same_surface(dist: f32, other: f32) -> f32 {
+ 
+ // The quarter-size texel's distance: where fs_ao read it.
+ fn texel_distance(t: vec2<i32>) -> f32 {
++    if (packed) {
++        return textureLoad(src, t, 0).g;
++    }
+     return distance_at((vec2<f32>(t) + 0.5) / vec2<f32>(textureDimensions(src)));
+ }
+ 
+ fn blur(p: vec2<i32>, dir: vec2<i32>) -> vec4<f32> {
+     let dist = texel_distance(p);
+     if (dist <= 0.0) {
+-        return vec4(1.0);
++        return select(vec4(1.0), vec4(1.0, 0.0, 0.0, 1.0), packed);
+     }
+     let last = vec2<i32>(textureDimensions(src)) - vec2<i32>(1);
+     var sum = textureLoad(src, p, 0).r * weights[0];
+@@ -967,6 +1001,9 @@ fn blur(p: vec2<i32>, dir: vec2<i32>) -> vec4<f32> {
+             total += w;
+         }
+     }
++    if (packed) {
++        return vec4(q8(sum / total), dist, 0.0, 1.0);
++    }
+     return vec4(vec3(sum / total), 1.0);
+ }
+ 
+@@ -1111,6 +1148,13 @@ struct View {
+ @group(0) @binding(4) var scene: texture_2d<f32>;    // the scene before the effects, for the exposure
+ @group(0) @binding(2) var depth: texture_depth_2d;
+ @group(0) @binding(3) var<uniform> view: View;
++// DOL_AURORA_CLOUD_NOISE_TEXTURE=1: the clouds' noise, baked once into a world-space texture
++// (fs_cloud_bake) and read back with exact bilinear weights (fbm_baked), instead of four octaves
++// of gradient noise for every pixel of both frames. bake: the texture's first texel's place in
++// noise space (xy), one texel's size in noise units (z) and the texels across (w). Only this
++// pass's layout carries them (g_cloudLayout).
++@group(0) @binding(5) var cloud_noise: texture_2d<f32>;
++@group(0) @binding(6) var<uniform> bake: vec4<f32>;
+ 
+ struct VertexOutput {
+     @builtin(position) pos: vec4<f32>,
+@@ -1149,8 +1193,41 @@ fn effect_cover(uv: vec2<f32>, dist: f32) -> f32 {
+     return clamp(max(c.r, max(c.g, c.b)) * effect_gain, 0.0, 1.0) * near;
+ }
+ 
++// The baked noise at p: the four texels around it, blended with exact weights. Outside the
++// texture (never within the clouds' reach, which it covers with room to spare) as computed.
++fn fbm_baked(p: vec2<f32>) -> f32 {
++    let t = (p - bake.xy) / bake.z - 0.5;
++    let i = floor(t);
++    let last = bake.w - 1.0;
++    if (i.x < 0.0 || i.y < 0.0 || i.x >= last || i.y >= last) {
++        return fbm(p);
++    }
++    let f = t - i;
++    let c = vec2<i32>(i);
++    let a = textureLoad(cloud_noise, c, 0).r;
++    let b = textureLoad(cloud_noise, c + vec2(1, 0), 0).r;
++    let e = textureLoad(cloud_noise, c + vec2(0, 1), 0).r;
++    let g = textureLoad(cloud_noise, c + vec2(1, 1), 0).r;
++    return mix(mix(a, b, f.x), mix(e, g, f.x), f.y);
++}
++
++// One texel of the baked noise: fbm where the texel's centre lies in noise space.
++@fragment
++fn fs_cloud_bake(in: VertexOutput) -> @location(0) vec4<f32> {
++    return vec4(fbm(bake.xy + in.pos.xy * bake.z), 0.0, 0.0, 1.0);
++}
++
+ @fragment
+ fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
++    return clouds(in, false);
++}
++
++@fragment
++fn fs_clouds_baked(in: VertexOutput) -> @location(0) vec4<f32> {
++    return clouds(in, true);
++}
++
++fn clouds(in: VertexOutput, baked: bool) -> vec4<f32> {
+     let d = textureLoad(depth, vec2<i32>(in.pos.xy), 0);
+     let ndc = vec2(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+     let ray = vec3(ndc.x * view.lens.x * view.lens.y, ndc.y * view.lens.x, -1.0);
+@@ -1181,7 +1258,13 @@ fn fs_clouds(in: VertexOutput) -> @location(0) vec4<f32> {
+         return vec4(g.x, g.y, fract(world.y / 500.0), 1.0);
+     }
+     let drift = vec2(0.6, 0.25) * view.time.x * 0.02;
+-    let n = fbm(world.xz / scale + drift);
++    let at = world.xz / scale + drift;
++    var n: f32;
++    if (baked) {
++        n = fbm_baked(at);
++    } else {
++        n = fbm(at);
++    }
+     // Not on an effect drawn over the surface (effect_cover()).
+     let cover = effect_cover(in.uv, distance);
+     let shade = smoothstep(0.42, 0.6, n) * strength * (1.0 - smoothstep(60000.0, 160000.0, distance)) *
+@@ -2784,6 +2867,7 @@ wgpu::RenderPipeline make_ao_pipeline(const char* label, const char* entry, wgpu
+       wgpu::ConstantEntry{.key = "fade_end", .value = g_aoFadeEnd},
+       wgpu::ConstantEntry{.key = "debug_view", .value = static_cast<double>(g_aoDebug)},
+       wgpu::ConstantEntry{.key = "effect_gain", .value = g_effectGain},
++      wgpu::ConstantEntry{.key = "packed", .value = g_aoPacked ? 1.0 : 0.0},
+   };
+   const wgpu::BlendState multiply{
+       .color = {.operation = wgpu::BlendOperation::Add,
+@@ -2861,7 +2945,7 @@ wgpu::RenderPipeline make_cloud_pipeline(wgpu::TextureFormat format, uint32_t sa
+                                      wgpu::ConstantEntry{.key = "highlight_to", .value = exposureHighlights[1]}};
+   const wgpu::FragmentState fragment{
+       .module = g_cloudModule,
+-      .entryPoint = exposure ? "fs_exposure" : "fs_clouds",
++      .entryPoint = exposure ? "fs_exposure" : g_cloudNoiseTexture ? "fs_clouds_baked" : "fs_clouds",
+       .constantCount = exposure ? exposureConstants.size() : constants.size(),
+       .constants = exposure ? exposureConstants.data() : constants.data(),
+       .targetCount = targets.size(),
+@@ -2878,6 +2962,27 @@ wgpu::RenderPipeline make_cloud_pipeline(wgpu::TextureFormat format, uint32_t sa
+   return g_device.CreateRenderPipeline(&descriptor);
+ }
+ 
++// The clouds' noise into its texture (DOL_AURORA_CLOUD_NOISE_TEXTURE=1): one value a texel.
++wgpu::RenderPipeline make_cloud_bake_pipeline() {
++  const std::array targets{
++      wgpu::ColorTargetState{.format = wgpu::TextureFormat::R32Float, .blend = nullptr, .writeMask = wgpu::ColorWriteMask::All}};
++  const wgpu::FragmentState fragment{
++      .module = g_cloudModule,
++      .entryPoint = "fs_cloud_bake",
++      .targetCount = targets.size(),
++      .targets = targets.data(),
++  };
++  const wgpu::RenderPipelineDescriptor descriptor{
++      .label = "Cloud noise bake",
++      .layout = g_cloudPipelineLayout,
++      .vertex = {.module = g_cloudModule, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = 1, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return g_device.CreateRenderPipeline(&descriptor);
++}
++
+ wgpu::RenderPipeline make_sun_pipeline(wgpu::TextureFormat format) {
+   const std::array constants{
+       wgpu::ConstantEntry{.key = "strength", .value = g_sunStrength},
+@@ -3214,9 +3319,10 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_blurH = make_pipeline("Bloom blur (horizontal)", "fs_blur_h", format, 1, kReplace);
+     g_blurV = make_pipeline("Bloom blur (vertical)", "fs_blur_v", format, 1, kReplace);
+     g_down = make_pipeline("Far blur downsample", "fs_down", format, 1, kReplace);
+-    g_aoPass = make_ao_pipeline("Ambient occlusion", "fs_ao", format, 1, kReplace);
+-    g_aoBlurH = make_ao_pipeline("Ambient occlusion blur (horizontal)", "fs_ao_blur_h", format, 1, kReplace);
+-    g_aoBlurV = make_ao_pipeline("Ambient occlusion blur (vertical)", "fs_ao_blur_v", format, 1, kReplace);
++    const auto aoFormat = g_aoPacked ? wgpu::TextureFormat::RG16Float : format;
++    g_aoPass = make_ao_pipeline("Ambient occlusion", "fs_ao", aoFormat, 1, kReplace);
++    g_aoBlurH = make_ao_pipeline("Ambient occlusion blur (horizontal)", "fs_ao_blur_h", aoFormat, 1, kReplace);
++    g_aoBlurV = make_ao_pipeline("Ambient occlusion blur (vertical)", "fs_ao_blur_v", aoFormat, 1, kReplace);
+     g_cloudPass = {};
+     g_sunPass = {};
+     g_sunMapPass = {};
+@@ -3287,6 +3393,13 @@ void ensure_targets(const wgpu::Extent3D& sceneSize, wgpu::TextureFormat format,
+     g_farView[i] = g_farTex[i].CreateView();
+     g_aoTex[i] = g_device.CreateTexture(&descriptor);
+     g_aoView[i] = g_aoTex[i].CreateView();
++    if (g_aoPacked) {
++      auto packedDescriptor = descriptor;
++      packedDescriptor.label = "Ambient occlusion (packed)";
++      packedDescriptor.format = wgpu::TextureFormat::RG16Float;
++      g_aoPackedTex[i] = g_device.CreateTexture(&packedDescriptor);
++      g_aoPackedView[i] = g_aoPackedTex[i].CreateView();
++    }
+   }
+ }
+ 
+@@ -3392,10 +3505,16 @@ void draw_with_uniform(const wgpu::CommandEncoder& cmd, const char* label, const
+       wgpu::BindGroupEntry{.binding = 2, .textureView = depthView},
+       wgpu::BindGroupEntry{.binding = 3, .buffer = buffer, .offset = 0, .size = uniformSize},
+       wgpu::BindGroupEntry{.binding = 4, .textureView = scene != nullptr ? *scene : g_farView[0]},
++      // The cloud layout only (DOL_AURORA_CLOUD_NOISE_TEXTURE): the baked noise, or a stand-in while it is
++      // the target or not made, and where it lies.
++      wgpu::BindGroupEntry{.binding = 5,
++                           .textureView = g_cloudNoiseView && !g_cloudNoiseBaking ? g_cloudNoiseView : g_farView[0]},
++      wgpu::BindGroupEntry{.binding = 6, .buffer = g_cloudBakeBuffer, .offset = 0, .size = 16},
+   };
++  const bool cloudLayout = layout.Get() == g_cloudLayout.Get();
+   const wgpu::BindGroupDescriptor bindGroupDescriptor{
+       .layout = layout,
+-      .entryCount = entries.size(),
++      .entryCount = cloudLayout ? entries.size() : entries.size() - 2,
+       .entries = entries.data(),
+   };
+   const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
+@@ -4324,6 +4443,46 @@ void load_cloud_texture(const char* path) {
+   g_cloudTexView = g_cloudTex.CreateView();
+   std::fprintf(stderr, "[cloud-shadows] HD's cloud texture %ux%u, %u mips, from %s\n", width, height, mips, path);
+ }
++
++// DOL_AURORA_CLOUD_NOISE_TEXTURE=1: the baked noise covers where this frame's clouds are read
++// (the camera's place in noise space, with the clouds' drift, out to their fade), baking it again
++// around the camera when that comes within the texture's margin. About every few minutes of play:
++// the drift alone moves the clouds about 84 units a second.
++void ensure_cloud_noise(const wgpu::CommandEncoder& cmd, const Camera& camera, const wgpu::TextureView& depthView) {
++  if (!g_cloudNoiseTex) {
++    const wgpu::TextureDescriptor descriptor{
++        .label = "Cloud noise",
++        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++        .size = {kCloudNoiseTexels, kCloudNoiseTexels, 1},
++        .format = wgpu::TextureFormat::R32Float,
++    };
++    g_cloudNoiseTex = g_device.CreateTexture(&descriptor);
++    g_cloudNoiseView = g_cloudNoiseTex.CreateView();
++    g_cloudNoiseBaked = false;
++  }
++  if (!g_cloudBakePass)
++    g_cloudBakePass = make_cloud_bake_pipeline();
++  // fs_clouds: at = world.xz / scale + vec2(0.6, 0.25) * time * 0.02 (view rows' w: the eye; [16]: seconds).
++  const float seconds = camera.view[16];
++  const std::array<float, 2> centre{camera.view[3] / g_cloudScale + 0.6f * seconds * 0.02f,
++                                    camera.view[11] / g_cloudScale + 0.25f * seconds * 0.02f};
++  const float half = kCloudNoiseReach / g_cloudScale;
++  const float texel = 2.f * half / static_cast<float>(kCloudNoiseTexels);
++  const float margin = (kCloudNoiseReach - kCloudFadeEnd) / g_cloudScale - 2.f * texel;
++  if (g_cloudNoiseBaked && std::abs(centre[0] - g_cloudNoiseCentre[0]) <= margin &&
++      std::abs(centre[1] - g_cloudNoiseCentre[1]) <= margin)
++    return;
++  g_cloudNoiseCentre = centre;
++  const std::array<float, 4> place{centre[0] - half, centre[1] - half, texel, static_cast<float>(kCloudNoiseTexels)};
++  // Queue order: frames already submitted read the old texture before this frame bakes the new one.
++  g_device.GetQueue().WriteBuffer(g_cloudBakeBuffer, 0, place.data(), sizeof(place));
++  g_cloudNoiseBaking = true;
++  draw_with_uniform(cmd, "Cloud noise bake", g_cloudBakePass, g_cloudLayout, camera.view.data(), sizeof(camera.view),
++                    depthView, g_cloudNoiseView, nullptr, nullptr, nullptr);
++  g_cloudNoiseBaking = false;
++  g_cloudNoiseBaked = true;
++  std::fprintf(stderr, "[cloud-noise] baked around %.2f,%.2f (noise units)\n", centre[0], centre[1]);
++}
+ } // namespace
+ 
+ bool draw_actor_shadow(const wgpu::CommandEncoder& cmd, const Camera& camera, const SunMap& sunMap,
+@@ -4724,6 +4883,10 @@ void initialize() {
+   g_aoFadeEnd = env_float("DOL_AURORA_AO_FADE_END", g_aoFadeEnd, g_aoFadeStart + 1.f, 1e9f);
+   g_cloudStrength = env_float("DOL_AURORA_CLOUD_SHADOWS_STRENGTH", g_cloudStrength, 0.f, 1.f);
+   g_cloudScale = env_float("DOL_AURORA_CLOUD_SHADOWS_SCALE", g_cloudScale, 1.f, 1e7f);
++  const char* aoPacked = std::getenv("DOL_AURORA_AO_PACKED");
++  g_aoPacked = aoPacked != nullptr && aoPacked[0] == '1';
++  const char* cloudNoise = std::getenv("DOL_AURORA_CLOUD_NOISE_TEXTURE");
++  g_cloudNoiseTexture = cloudNoise != nullptr && cloudNoise[0] == '1';
+   g_sunStrength = env_float("DOL_AURORA_SUN_SHADOWS_STRENGTH", g_sunStrength, 0.f, 1.f);
+   if (const char* colour = std::getenv("DOL_AURORA_SUN_SHADOWS_COLOUR")) {
+     float c[3];
+@@ -4985,15 +5148,36 @@ void initialize() {
+                       .viewDimension = wgpu::TextureViewDimension::e2D},
+       },
+   };
++  // The clouds' baked noise and where it lies (DOL_AURORA_CLOUD_NOISE_TEXTURE=1; else stand-ins): the cloud
++  // layout only.
++  std::array<wgpu::BindGroupLayoutEntry, std::tuple_size_v<std::remove_cv_t<decltype(cloudEntries)>> + 2> cloudNoiseEntries{};
++  std::copy(cloudEntries.begin(), cloudEntries.end(), cloudNoiseEntries.begin());
++  cloudNoiseEntries[cloudEntries.size()] = wgpu::BindGroupLayoutEntry{
++      .binding = 5,
++      .visibility = wgpu::ShaderStage::Fragment,
++      .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                  .viewDimension = wgpu::TextureViewDimension::e2D},
++  };
++  cloudNoiseEntries[cloudEntries.size() + 1] = wgpu::BindGroupLayoutEntry{
++      .binding = 6,
++      .visibility = wgpu::ShaderStage::Fragment,
++      .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = 16},
++  };
+   const wgpu::BindGroupLayoutDescriptor cloudLayoutDescriptor{
+       .label = "Cloud shadows",
+-      .entryCount = cloudEntries.size(),
+-      .entries = cloudEntries.data(),
++      .entryCount = cloudNoiseEntries.size(),
++      .entries = cloudNoiseEntries.data(),
+   };
+   g_cloudLayout = g_device.CreateBindGroupLayout(&cloudLayoutDescriptor);
+   const wgpu::PipelineLayoutDescriptor cloudPipelineLayoutDescriptor{.bindGroupLayoutCount = 1,
+                                                                      .bindGroupLayouts = &g_cloudLayout};
+   g_cloudPipelineLayout = g_device.CreatePipelineLayout(&cloudPipelineLayoutDescriptor);
++  const wgpu::BufferDescriptor bakeBufferDescriptor{
++      .label = "Cloud noise place",
++      .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
++      .size = 16,
++  };
++  g_cloudBakeBuffer = g_device.CreateBuffer(&bakeBufferDescriptor);
+   auto torchEntries = cloudEntries;
+   torchEntries[3].buffer.minBindingSize = kTorchUniformSize;
+   const wgpu::BindGroupLayoutDescriptor torchLayoutDescriptor{
+@@ -5121,10 +5305,17 @@ void shutdown() {
+   g_aoBlurH = g_aoBlurV = g_aoUpscale = {};
+   g_aoTex = {};
+   g_aoView = {};
++  g_aoPackedTex = {};
++  g_aoPackedView = {};
+   g_aoSamples = 0;
+   g_aoModule = {};
+   g_cloudPass = {};
+   g_cloudSamples = 0;
++  g_cloudBakePass = {};
++  g_cloudNoiseView = {};
++  g_cloudNoiseTex = {};
++  g_cloudBakeBuffer = {};
++  g_cloudNoiseBaked = false;
+   g_sunPass = {};
+   g_sunSamples = 0;
+   g_sunModule = {};
+@@ -6259,13 +6450,12 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+       size.height >= 4) {
+     const webgpu::gpu_prof::Zone zone{cmd, "Ambient occlusion"};
+     ensure_targets(size, format, msaaSamples);
+-    draw_depth(cmd, "Ambient occlusion", g_aoPass, g_aoView[1], shadeDepthView, g_aoView[0], nullptr, false);
+-    draw_depth(cmd, "Ambient occlusion blur (horizontal)", g_aoBlurH, g_aoView[0], shadeDepthView, g_aoView[1], nullptr,
+-               false);
+-    draw_depth(cmd, "Ambient occlusion blur (vertical)", g_aoBlurV, g_aoView[1], shadeDepthView, g_aoView[0], nullptr,
+-               false);
++    const auto& ao = g_aoPacked ? g_aoPackedView : g_aoView;
++    draw_depth(cmd, "Ambient occlusion", g_aoPass, ao[1], shadeDepthView, ao[0], nullptr, false);
++    draw_depth(cmd, "Ambient occlusion blur (horizontal)", g_aoBlurH, ao[0], shadeDepthView, ao[1], nullptr, false);
++    draw_depth(cmd, "Ambient occlusion blur (vertical)", g_aoBlurV, ao[1], shadeDepthView, ao[0], nullptr, false);
+     // With DOL_AURORA_AO_DEBUG=1 the occlusion replaces the scene; with 2 it tints it.
+-    draw_depth(cmd, "Ambient occlusion apply", g_aoUpscale, g_aoView[0], shadeDepthView, dst, resolve, true, effectView);
++    draw_depth(cmd, "Ambient occlusion apply", g_aoUpscale, ao[0], shadeDepthView, dst, resolve, true, effectView);
+   }
+   if (sun_shadows_enabled() && g_module && depthView && msaaSamples == 1) {
+     if (camera.valid) {
+@@ -6341,6 +6531,8 @@ void encode(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& scene, con
+     if (camera.valid) {
+       const webgpu::gpu_prof::Zone zone{cmd, "Cloud shadows"};
+       ensure_targets(size, format, msaaSamples);
++      if (g_cloudNoiseTexture)
++        ensure_cloud_noise(cmd, camera, shadeDepthView);
+       draw_with_view(cmd, "Cloud shadows", g_cloudPass, camera.view, shadeDepthView, dst, resolve, &effectView);
+     }
+   }
+--
+2.50.1

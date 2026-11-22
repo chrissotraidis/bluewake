@@ -29,9 +29,12 @@ class ImportJob {
         std::string message;   // progress, or the result in plain words
         std::string output;    // the new pack folder, on success
         size_t files_read = 0, files_total = 0, replacements = 0;
+        size_t sky_stages = 0, shaded_models = 0; // the HD look's parts so far (ImportProgress)
+        bool cloud_shadow = false;
         // On success, what did not make it into the pack: textures whose name
         // already had a replacement, and HD resources that could not be read.
         size_t conflicts = 0, unsupported = 0;
+        std::string left_out;  // and the HD look's optional parts the discs did not give
     };
 
     // Starts an import of the Wind Waker HD dump at hd_picked (its folder or its

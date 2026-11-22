@@ -1,0 +1,153 @@
+From 4e09a24728636c90eba7b3bfd519513fbfff6ada Mon Sep 17 00:00:00 2001
+From: Maximilian <m.marowsky@googlemail.com>
+Date: Wed, 18 Nov 2026 12:47:49 +0100
+Subject: [PATCH 210/210] Aurora: a texture pack's files can be skipped by
+ name, and the count it loaded is readable
+
+DOL_AURORA_TEXTURE_PACK_SKIP takes comma-separated replacement names
+(tex1_WxH[_m]_hash[_tlut]_fmt); after the pack and its optional folders load,
+those keys are unregistered, so the game's own texture stays. A game's toon
+ramps and shading thresholds are data its shading reads, not pictures: an HD
+pack's redrawn versions change how characters are shaded (Hypatia's Wind Waker
+pack shrinks the shadow in Link's hair and makes its edge jagged).
+
+dol_aurora_texture_pack_replacements() returns the replacements registered at
+start (the pack, its optional folders, less the skipped), -1 without a pack,
+so a menu can say whether a pack really loaded rather than counting files.
+aurora::texture::parse_replacement_name() exposes the loader's name parser.
+---
+ GXRuntime/backends/aurora/aurora_backend.cpp  | 40 +++++++++++++++++++
+ .../aurora/include/aurora/texture.hpp         |  6 +++
+ .../aurora/lib/gfx/texture_replacement.cpp    |  9 +++++
+ GXRuntime/include/gxruntime/aurora_backend.h  |  6 +++
+ 4 files changed, 61 insertions(+)
+
+diff --git a/GXRuntime/backends/aurora/aurora_backend.cpp b/GXRuntime/backends/aurora/aurora_backend.cpp
+index 2c64fda709..330219b68e 100644
+--- a/GXRuntime/backends/aurora/aurora_backend.cpp
++++ b/GXRuntime/backends/aurora/aurora_backend.cpp
+@@ -37,6 +37,9 @@ void* g_host_event_user = nullptr;
+ DolAuroraHoldFn g_host_hold = nullptr;
+ bool g_hold_redraw = false;
+ void* g_host_hold_user = nullptr;
++// Replacements the texture pack registered at start (DOL_AURORA_TEXTURE_PACK,
++// with its optional folders, less any skipped), -1 with no pack.
++long g_texture_pack_replacements = -1;
+ bool g_graphics_log = false;
+ bool g_force_untextured = false;
+ bool g_gx_core_enabled = true;
+@@ -415,6 +418,41 @@ bool dol_aurora_initialize(int argc, char** argv,
+                              s_optional.back().registrations.size());
+             }
+         }
++        long registered = static_cast<long>(s_texture_pack.registrations.size());
++        for (const auto& group : s_optional)
++            registered += static_cast<long>(group.registrations.size());
++        // DOL_AURORA_TEXTURE_PACK_SKIP: comma-separated replacement names
++        // (tex1_WxH_hash[_tlut]_fmt) whose files are not used, so the game's
++        // own texture stays: lookup tables a pack should not have replaced
++        // (a game's toon ramps, which shading reads as data, not as a picture).
++        if (const char* skip = std::getenv("DOL_AURORA_TEXTURE_PACK_SKIP"); skip != nullptr && skip[0] != '\0') {
++            std::string list = skip;
++            size_t skipped = 0;
++            for (size_t start = 0; start <= list.size();) {
++                const size_t end = std::min(list.find(',', start), list.size());
++                const std::string name = list.substr(start, end - start);
++                start = end + 1;
++                const auto key = aurora::texture::parse_replacement_name(name);
++                if (!key.has_value())
++                    continue;
++                const aurora::texture::ReplacementKey replacementKey{*key};
++                size_t files = 0;
++                const auto count = [&](const aurora::texture::ReplacementGroup& group) {
++                    for (const auto& registration : group.registrations)
++                        files += registration.key == replacementKey ? 1 : 0;
++                };
++                count(s_texture_pack);
++                for (const auto& group : s_optional)
++                    count(group);
++                if (files == 0)
++                    continue;
++                aurora::texture::unregister_replacements(replacementKey);
++                skipped += files;
++            }
++            registered -= static_cast<long>(skipped);
++            std::fprintf(stderr, "[mods] texture-pack skipped=%zu\n", skipped);
++        }
++        gx_aurora::g_texture_pack_replacements = registered;
+     }
+ 
+     gx_aurora::g_graphics_log = backend_config->graphics_logging;
+@@ -602,6 +640,8 @@ void dol_aurora_set_hold(DolAuroraHoldFn should_hold, void* user) {
+     gx_aurora::g_host_hold_user = user;
+ }
+ 
++long dol_aurora_texture_pack_replacements(void) { return gx_aurora::g_texture_pack_replacements; }
++
+ const char* dol_aurora_backend_name(void) {
+     switch (gx_aurora::g_backend) {
+     case BACKEND_D3D11: return "D3D11";
+diff --git a/GXRuntime/graphics/aurora/include/aurora/texture.hpp b/GXRuntime/graphics/aurora/include/aurora/texture.hpp
+index cd32c87ae0..117df74e6c 100644
+--- a/GXRuntime/graphics/aurora/include/aurora/texture.hpp
++++ b/GXRuntime/graphics/aurora/include/aurora/texture.hpp
+@@ -3,6 +3,7 @@
+ 
+ #include <cstdint>
+ #include <filesystem>
++#include <optional>
+ #include <span>
+ #include <string_view>
+ #include <variant>
+@@ -59,6 +60,11 @@ void unregister_replacements(const ReplacementGroup& group);
+ void unregister_replacements(const ReplacementKey& key);
+ void clear_replacements();
+ 
++// The source key a Dolphin-format replacement name stands for
++// ("tex1_WxH[_m]_hash[_tlut]_fmt", with or without .png/.dds), or nothing if
++// the name does not follow that form.
++std::optional<TextureSourceKey> parse_replacement_name(std::string_view name);
++
+ ReplacementGroup load_replacement_directory(const std::filesystem::path& root, ReplacementOptions options = {});
+ void reload_replacement_directory(const std::filesystem::path& root, ReplacementGroup& group,
+                                   ReplacementOptions options = {});
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+index ad037a8275..365d7c91f3 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/texture_replacement.cpp
+@@ -1117,6 +1117,15 @@ void unregister_replacements(std::span<const ReplacementRegistration> registrati
+ 
+ void unregister_replacements(const ReplacementGroup& group) { unregister_replacements(group.registrations); }
+ 
++std::optional<TextureSourceKey> parse_replacement_name(std::string_view name) {
++  if (name.ends_with(".dds") || name.ends_with(".png") || name.ends_with(".DDS") || name.ends_with(".PNG")) {
++    return parse_replacement_filename(name);
++  }
++  std::string withExtension{name};
++  withExtension += ".dds";
++  return parse_replacement_filename(withExtension);
++}
++
+ void unregister_replacements(const ReplacementKey& key) {
+   std::lock_guard lk(s_registryMutex);
+   const auto it = s_entriesByKey.find(key);
+diff --git a/GXRuntime/include/gxruntime/aurora_backend.h b/GXRuntime/include/gxruntime/aurora_backend.h
+index 8bca53c961..21c4c79b1c 100644
+--- a/GXRuntime/include/gxruntime/aurora_backend.h
++++ b/GXRuntime/include/gxruntime/aurora_backend.h
+@@ -111,6 +111,12 @@ void dol_aurora_gx_drain(void);
+ // Request recovery on the audio-owning host thread after an OS interruption.
+ void dol_aurora_audio_resume(void);
+ 
++/* The texture replacements Aurora registered from DOL_AURORA_TEXTURE_PACK at
++   start (with the optional folders it loaded, less the files
++   DOL_AURORA_TEXTURE_PACK_SKIP left out), so a menu can say whether a pack
++   really loaded; -1 when no pack was set. Fixed until the app starts again. */
++long dol_aurora_texture_pack_replacements(void);
++
+ /* The graphics API Aurora actually chose ("Vulkan", "D3D12", "Metal", "OpenGL",
+    "OpenGL ES", ...), or NULL before it started. What was asked for is usually
+    "auto", so this is how a host tells a slow fallback (OpenGL ES where Vulkan
+-- 
+2.52.0
+
