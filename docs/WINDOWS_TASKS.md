@@ -1,6 +1,6 @@
 # Windows tasks
 
-Work that needs a Windows PC. Elliott owns Windows; anyone with the hardware can help. Read
+Work that needs a Windows PC. Anyone with the hardware can help. Read
 [AGENTS.md](../AGENTS.md) first. One pull request per task, results in the linked issue.
 
 **You need:** Windows 10 or 11 (x64), a CPU with AVX2, a Direct3D 12 GPU, your own USA `GZLE01` revision 0
