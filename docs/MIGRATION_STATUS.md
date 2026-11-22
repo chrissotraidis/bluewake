@@ -2,7 +2,7 @@
 
 Elliott Tate's [Wind-Waker-Recomp](https://github.com/elliotttate/Wind-Waker-Recomp) and BlueWake are one
 project, and BlueWake is where development continues. Bug reports, requests and pull requests go to
-[BlueWake's issues](https://github.com/chrissotraidis/bluewake/issues). Updated October 15, 2026.
+[BlueWake's issues](https://github.com/chrissotraidis/bluewake/issues). Updated November 22, 2026.
 
 How the move happened, step by step, is in [the migration log](status/WIND_WAKER_RECOMP_MIGRATION_2026-10-04.md);
 the detailed evidence is in [the reconciliation ledger](status/FORK_RECONCILIATION_2026-10-02.md).
@@ -19,9 +19,9 @@ the detailed evidence is in [the reconciliation ledger](status/FORK_RECONCILIATI
   authors of its open pull requests were asked to reopen them here; the Android port is now #93.
 - Wind-Waker-Recomp's README, issue form and download links point here, and its releases were unpublished
   (kept as drafts) on October 4. Elliott no longer maintains Wind-Waker-Recomp or works on BlueWake.
-- Releases: Windows builds from `main` since 0.5.0 (October 5), the latest 0.7.0. Mac, iPhone and iPad: the app
-  without game code, and you build the game with PadMint. Linux: built from source since 0.7.0; a ready-made
-  AppImage is allowed and waits for a contributor's own-disc build ([AGENTS.md](../AGENTS.md#releases)).
+- Releases: a ready-made Windows build from `main` since 0.5.0 (October 5) and a Linux AppImage since 0.10.0, both
+  built on a maintainer's PC from their own disc. Mac, iPhone and iPad: the app without game code, and you build the
+  game with PadMint. Android is built from source, experimental ([AGENTS.md](../AGENTS.md#releases)).
 
 ## Open
 
