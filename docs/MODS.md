@@ -13,7 +13,7 @@ effect the next time BlueWake starts, and none of them changes your saves.
 | Widescreen 21:9 · 3440x1440 | The same code recomputed for the 2.3889 shape 3440x1440 ultrawides are (Windows, Linux, Mac) | Nothing; it is built in |
 | Native cutscene framing | In widescreen, cutscenes fill the screen instead of a strip between black bars, as Wind Waker HD shows them, and the opening legend keeps its shape instead of being stretched (Windows, Linux, Mac) | Nothing; it is built in |
 | HD Textures | Replaces the game's textures with a Dolphin-format pack, such as [Hypatia's HD pack](https://forums.dolphin-emu.org/Thread-hypatia-s-tloz-the-wind-waker-hd-pack-v2-0001a) or [the textures from your own Wind Waker HD disc](WWHD_TEXTURES.md) | The pack's `tex1_…` images: on iPhone and iPad in `Documents/BlueWake/Load/Textures/GZLE01` (Install Texture Pack… copies them there); on the desktop, any folder picked with Choose texture pack folder… |
-| Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart. With them, BlueWake's own sea compass switch: on, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD; and its shorter Triforce quest: five chests that held Triforce Charts give their shards, as in Wind Waker HD | Nothing; it is built in |
+| Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart. With them, BlueWake's own switches: the sea compass (on, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD); no heart pulsing, where the HUD's heart no longer beats and its low-health beat with it; and its shorter Triforce quest: five chests that held Triforce Charts give their shards, as in Wind Waker HD | Nothing; it is built in |
 
 On the iPad, `Documents/BlueWake` is **On My iPad › BlueWake › BlueWake** in the Files app.
 
@@ -119,8 +119,9 @@ values and changed message data. BlueWake does the same things at runtime, from
 - **Option sites.** The instructions a setting changes (a `nop`, a branch made unconditional, a
   different constant) are listed with the setting's switch. DolRecomp's `--option-sites` translates each
   site both ways and picks one by `dolrecomp_option_flags[switch]` at run time, so the game is translated
-  once for every combination of settings. Only the 16 chunks that hold a site differ from the base
-  translation; they are the `betterww` mod's variants (3 more combine with a widescreen mod).
+  once for every combination of settings. Only the chunks that hold a site differ from the base
+  translation (13 of main.dol's 206 chunks with the current list); they are the `betterww` mod's
+  variants (3 more combine with a widescreen mod).
 - **Native code.** What Better Wind Waker's added assembly did is C in `runtime/host/src/game_options.c`,
   called from hook sites: turning with the stick while swinging on a rope, negating the camera's
   C-stick axis, turning the wind to blow from behind King of Red Lions (through the game's own
