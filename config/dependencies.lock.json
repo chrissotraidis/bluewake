@@ -112,9 +112,9 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "13dca1fcef0dbb3600ba2fd4689830caa2f8ad4f",
+      "sha": "a6251c7a95deb202cba2c279d59ac6afdff5c24d",
       "branch": "bluewake-next",
-      "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/62 (open; #61 merged)",
+      "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/63 (open, on #62; #61 merged)",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
       "verified": "2026-11-07",
