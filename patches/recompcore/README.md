@@ -328,3 +328,9 @@ noise once into a texture around the camera, and `DOL_AURORA_AO_PACKED` keeps ea
 distance beside its shade, both opt-in. Its merge with #51's post_fx.cpp is irregularthanis's own, from his Steam Deck
 test of the two together (`test/hd-light-51-with-54`, `d2cf074e`).
 
+
+Patch 0218 (Chris, on the batch): #65's count of what a pack loaded and its `DOL_AURORA_TEXTURE_PACK_SKIP` read #51's
+`gx_aurora::g_texture_pack_optional` (the optional folders, which can now load and drop while running) instead of the
+local list #51 replaced. Without it the batch didn't compile. A folder loaded later while running still brings its own
+files.
+
