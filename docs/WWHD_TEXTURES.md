@@ -231,9 +231,23 @@ leaves that folder out; the HD look's **HD's clouds in the sky** switch loads it
 ([WWHD_LOOK.md](WWHD_LOOK.md)), and the report lists them under `optional`. HD's sky and light palettes for
 every stage on both discs (each stage's Pale and Virt tables, 130 stages) go in `optional/hd-sky/stages.bin`
 for the HD look's `BLUEWAKE_HD_SKY`; the report gives their count under `optional.hd-sky`. Both importers make
-the same bytes (`scripts/wwhd/sky.py`, `runtime/host/src/wwhd/sky.h`). Tiny placeholders and shader ramp textures stay
+the same bytes (`scripts/wwhd/sky.py`, `runtime/host/src/wwhd/sky.h`). HD's cloud shadow texture (`ww_shadow_clouds`,
+the sea stage's 4096 x 4096 BC4 with its mips) goes in `optional/hd-cloud-shadow/ww_shadow_clouds.dds`, its blocks as
+they are, for the HD look's cloud shadows on HD's rule; the report names it under `optional.hd-cloud-shadow` (null
+when the HD disc has no sea stage). Both importers write it (`scripts/wwhd/cloud_shadow.py`,
+`runtime/host/src/wwhd/cloud_shadow.h`). Tiny placeholders and shader ramp textures stay
 original. Different UV layouts or changed names need separate, verified
 mappings and are not guessed.
+
+HD's models also give the HD look's sun shadows their normals and vertex colours. HD remade its models on the
+GameCube's vertex positions, so each GameCube model with an HD model of the same name (a stage's rooms against HD's
+`<stage>_<room>.szs`, an object archive against HD's archive of the same name) is matched position by position, and
+HD's normal is turned back into the GameCube joint's own frame. Three tables come out, each keyed by the GameCube's
+exact positions: `optional/hd-normals/<stage>.bin` for each stage's rooms and Stage.arc (models matched by half their
+positions or more), `optional/hd-normals/objects.bin` for every object model drawn without normals of its own
+(matched by 95% or more), and `optional/hd-colours/objects.bin` for those objects' HD vertex colours. The report
+counts the models matched and skipped under `optional.hd-normals`. Both importers make the same bytes
+(`scripts/wwhd/normals.py`, `runtime/host/src/wwhd/normals.h`).
 
 This imports compatible model artwork. Wii U models, shaders, lighting,
 normal/bake maps, redesigned HUD layouts and gameplay are not imported.
