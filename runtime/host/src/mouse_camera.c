@@ -212,6 +212,12 @@ static bool g_stick_owns;       // the last camera_draw was the follow camera, t
 static bool g_stick_aims;       // ... or an aiming view: the stick aims, as the mouse does (aim_frame)
 static bool g_stick_zooms;      // ... one that zooms (telescope, Picto Box): the left stick zooms
 static bool g_stick_can_zoom;   // ... and the current engine is a normal follow camera
+// The boat's camera (rideCamera, engine 8), the player in control: the same
+// R3 + up/down gesture changes its distance (boat_zoom_frame), kept apart from
+// the follow camera's. There a tap does nothing, as before; the rest of the
+// time the right stick stays the game's C-stick.
+static bool g_stick_boat_zoom;
+static double g_boat_zoom = 1.0;
 // Held on a controller's D-pad in the telescope or the Picto Box (whose zoom
 // the C-stick's up and down were), or the left stick pushed all the way: this
 // much of their 1x-9x zoom a second.
@@ -555,6 +561,7 @@ static void read_stick_settings(void) {
     }
     if (!g_stick_on) {
         g_stick_owns = g_stick_aims = g_stick_zooms = g_stick_can_zoom = g_first_person = g_conducting = false;
+        g_stick_boat_zoom = false;
         g_stick_zoom_axis = 0.0;
         g_stick_zoom_gesture = (BwStickZoomGesture){0};
         g_enter_from = g_exit_from = 0;
@@ -749,15 +756,21 @@ void bluewake_mouse_camera_pad(DolPadState* pad) {
     const bool pressed = click && !g_stick_click_down;
     double zoom_axis = 0.0;
     const BwStickZoomAction zoom_action = bw_stick_zoom_update(
-        &g_stick_zoom_gesture, g_stick_zoom_on && g_stick_can_zoom, click, x, y, kStickDeadZone, &zoom_axis);
+        &g_stick_zoom_gesture, g_stick_zoom_on && (g_stick_can_zoom || g_stick_boat_zoom), click, x, y,
+        kStickDeadZone, &zoom_axis);
     g_stick_zoom_axis = zoom_action == BW_STICK_ZOOM_ACTIVE ? zoom_axis : 0.0;
-    const bool first_person_tap = zoom_action == BW_STICK_ZOOM_TAP;
+    const bool first_person_tap = zoom_action == BW_STICK_ZOOM_TAP && !g_stick_boat_zoom;
     if (first_person_tap)
         fprintf(stderr, "[stick] first-person tap\n");
     const BwStickTapAction tap_action =
         bw_stick_tap_update(&g_enter_from, g_retrace, first_person_tap, g_first_person, 30u);
     if (zoom_action == BW_STICK_ZOOM_FINISHED)
-        fprintf(stderr, "[stick] camera distance x%.2f\n", g_zoom);
+        fprintf(stderr, g_stick_boat_zoom ? "[stick] boat camera distance x%.2f\n" : "[stick] camera distance x%.2f\n",
+                g_stick_boat_zoom ? g_boat_zoom : g_zoom);
+    // On the boat the right stick is the game's C-stick: while the click is
+    // held to zoom, and until the stick is back at the centre after it, the
+    // boat's camera must not also turn by it.
+    const bool boat_zooming = g_stick_boat_zoom && (click ? g_stick_zoom_gesture.zooming : g_stick_zoom_gesture.block_camera);
     // Pushed mostly up or down it zooms (aim_frame), so it does not also aim.
     // Mostly left or right it is the game's: "keep this picture?" and the
     // gallery choose with it, and the zoom flag stays set there (#191).
@@ -769,6 +782,9 @@ void bluewake_mouse_camera_pad(DolPadState* pad) {
         // the game's own C-stick (its eased camera, first person's push down
         // out, the telescope's zoom) must not also take it. The keyboard's
         // C-stick still goes through while the stick rests.
+        if (sqrt(x * x + y * y) > kStickInUse)
+            pad->substick_x = pad->substick_y = 0;
+    } else if (boat_zooming) {
         if (sqrt(x * x + y * y) > kStickInUse)
             pad->substick_x = pad->substick_y = 0;
     } else if (sqrt(x * x + y * y) > kStickInUse && !bluewake_game_options_invert_camera_x() &&
@@ -1050,6 +1066,52 @@ static void aim_frame(CPUState* cpu, u32 player) {
     }
 }
 
+// The boat's camera styles (rideCamera, engine 8), GZLE01's dCamParam_c::styles
+// in the DOL's data, with their distance (parameter 10) as the game has it. The
+// boat's camera eases to its style's distance each frame, so the distance it
+// is to go to is scaled, not the eased one, in the style itself: only the
+// style in use, from the game's own value every frame, so nothing compounds,
+// and every other boat style is put back to the game's value. A save state
+// taken while zoomed keeps the scaled value until the next boat frame here.
+static const struct {
+    u32 style;
+    float distance;
+} kBoatStyles[] = {
+    {0x80355D00u, 800.f},  // BW07
+    {0x80356018u, 900.f},  // BP07
+    {0x80356228u, 800.f},  // BN07
+    {0x803564BCu, 1000.f}, // BP08
+    {0x80356540u, 1000.f}, // BN08
+    {0x80358850u, 500.f},  // BE08
+    {0x803588D4u, 750.f},  // BE07
+};
+enum { kEngineRide = 8 };
+
+static int boat_style_index(CPUState* cpu, u32 style) {
+    if (style == 0u || style_engine(cpu, style) != (u32)kEngineRide)
+        return -1;
+    for (int i = 0; i < (int)(sizeof kBoatStyles / sizeof kBoatStyles[0]); ++i)
+        if (kBoatStyles[i].style == style)
+            return i;
+    return -1;
+}
+
+// At camera_draw, every frame: scales the boat camera's style while the boat's
+// camera is up, the player in control, and the gesture's zoom is on.
+static void boat_zoom_frame(CPUState* cpu, u32 style, bool player) {
+    const int current = player && g_stick_zoom_on ? boat_style_index(cpu, style) : -1;
+    g_stick_boat_zoom = g_stick_on && current >= 0;
+    if (g_stick_boat_zoom && g_stick_zoom_axis != 0.0)
+        g_boat_zoom = bw_stick_zoom_advance(g_boat_zoom, g_stick_zoom_axis, g_stick_zoom_speed * 2.0, kGameFrameSeconds,
+                                            kZoomMin, kZoomMax);
+    for (int i = 0; i < (int)(sizeof kBoatStyles / sizeof kBoatStyles[0]); ++i) {
+        const u32 address = kBoatStyles[i].style + kStyleParams + 4u * 10u;
+        const float want = kBoatStyles[i].distance * (float)(i == current && g_stick_boat_zoom ? g_boat_zoom : 1.0);
+        if (read_f32(cpu, address) != want)
+            write_f32(cpu, address, want);
+    }
+}
+
 // The wheel in third person scales the follow camera's distance. That camera
 // keeps its distance anywhere between two limits (mWork.follow.m398 / m39C,
 // eased each frame toward the style's p11 / p10 by p14) and leaves it where
@@ -1183,6 +1245,7 @@ static void camera_frame(CPUState* cpu, u32 process) {
     g_subject_step = g_first_person ? (int)mem_read32(cpu, camera + kSubjectStep) : -1;
     g_stick_owns = false;
     g_stick_can_zoom = false;
+    boat_zoom_frame(cpu, style, !aiming && player_in_control(cpu));
     g_aiming = aiming && player_in_control(cpu);
     g_stick_aims = g_aiming && g_stick_on && g_stick_aim_on;
     g_stick_zooms = g_stick_aims && (mem_read16(cpu, style + kStyleFlags) & kStyleZoom) != 0u;
