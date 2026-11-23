@@ -102,7 +102,7 @@ const char* const kDistanceBlurShown[] = {"Off", "Light", "Default", "Strong", "
 const char* const kDistanceBlurStored[] = {"0", "1", "2", "3", "4"};
 // The HD look's sunlight and sun shadows, as HD's or softer (settings_table.h).
 const char* const kSunlightShown[] = {"As in HD", "Softer", "Much softer"};
-const char* const kSunlightStored[] = {"0.37", "0.3", "0.22"};
+const char* const kSunlightStored[] = {"0.4545", "0.37", "0.3"};
 const char* const kShadowShown[] = {"As in HD", "Lighter", "Much lighter"};
 const char* const kShadowStored[] = {"1", "0.8", "0.6"};
 const char* const kTextSizeShown[] = {"Smaller", "Normal", "Large", "Larger", "Largest"};
@@ -110,8 +110,8 @@ const char* const kTextSizeStored[] = {"0.85", "1", "1.15", "1.3", "1.5"};
 // The frame rate's three modes, and the panel's numbers (perf_monitor.h).
 const char* const kPerfShown[] = {"Off", "Frame rate", "Full panel"};
 const char* const kPerfStored[] = {"off", "fps", "full"};
-const char* const kInterpPacingShown[] = {"Automatic", "Never pause"};
-const char* const kInterpPacingStored[] = {"", "0"};
+const char* const kInterpPacingShown[] = {"Automatic", "Never pause", "Step down (experimental)"};
+const char* const kInterpPacingStored[] = {"", "0", "step"};
 
 // Beside the control when it fits there. A list or a slider fills its line,
 // and after one the note went past the edge and, wrapped to nothing there, was
@@ -371,7 +371,8 @@ void apply_now(const bw_settings::Setting& s) {
         bluewake_dpad_menus_reload();
     // Everything the mouse, the sticks and gyro aiming do is read back together.
     else if (std::strncmp(key, "BLUEWAKE_MOUSE_", 15) == 0 || std::strncmp(key, "BLUEWAKE_STICK_", 15) == 0 ||
-             std::strncmp(key, "BLUEWAKE_GYRO_", 14) == 0 || std::strcmp(key, "BLUEWAKE_AIM_INVERT_Y") == 0)
+             std::strncmp(key, "BLUEWAKE_GYRO_", 14) == 0 || std::strcmp(key, "BLUEWAKE_AIM_INVERT_Y") == 0 ||
+             std::strcmp(key, "BLUEWAKE_SAIL_ON_Z") == 0)
         bluewake_mouse_camera_reload();
     else if (std::strncmp(key, "BLUEWAKE_HAPTICS", 16) == 0)
         bluewake_haptics_reload();
@@ -419,6 +420,20 @@ void hd_textures_section() {
         else
             line = std::to_string(textures) + " textures in " + launch_choices().texture_pack;
         ImGui::TextColored(bw_texture_pack::state_color(state), "%s", line.c_str());
+        // What the renderer registered when BlueWake started (#336): the files
+        // above are only what is on disk. The menu never changes the variable,
+        // so it still names the folder this session loaded.
+        const char* started = std::getenv("DOL_AURORA_TEXTURE_PACK");
+        const long loaded = dol_aurora_texture_pack_replacements();
+        if (on && started != nullptr && launch_choices().texture_pack == started) {
+            if (loaded > 0)
+                ImGui::TextDisabled("%ld loaded when BlueWake started.", loaded);
+            else
+                ImGui::TextColored(bw_texture_pack::state_color(bw_texture_pack::PackState::Empty),
+                                   "None loaded when BlueWake started: no file is named like a GZLE01 texture (tex1_...).");
+        } else if (on) {
+            ImGui::TextDisabled("Loaded when BlueWake starts again.");
+        }
     }
     const std::string default_folder = bw_platform::default_pack_folder();
     if (ImGui::SmallButton("Choose texture pack folder..."))
@@ -600,13 +615,14 @@ bool draw_custom(const bw_settings::Setting& s) {
     if (std::strcmp(s.key, "BLUEWAKE_ASPECT") == 0) {
         // The chosen shape is the menu's copy (launch_choices): the picture, the mods and the
         // Display tab's "keep the shape" all follow it.
-        static const char* const kAspects[] = {"Off (4:3, the game's)", "16:10", "16:9", "21:9"};
-        static const char* const kAspectValues[] = {"4:3", "16:10", "16:9", "21:9"};
+        static const char* const kAspects[] = {"Off (4:3, the game's)", "16:10", "16:9", "21:9 (2.3333)",
+                                               "21:9 · 2560x1080", "21:9 · 3440x1440"};
+        static const char* const kAspectValues[] = {"4:3", "16:10", "16:9", "21:9", "64:27", "43:18"};
         int aspect = 0;
-        for (int i = 0; i < 4; ++i)
+        for (int i = 0; i < 6; ++i)
             if (launch_choices().aspect == kAspectValues[i])
                 aspect = i;
-        if (bw_menu_combo(s.label, &aspect, kAspects, 4)) {
+        if (bw_menu_combo(s.label, &aspect, kAspects, 6)) {
             launch_choices().aspect = kAspectValues[aspect];
             choice_changed(s.key);
         }
@@ -707,7 +723,7 @@ bool draw_custom(const bw_settings::Setting& s) {
     }
     if (std::strcmp(s.key, "DOL_AURORA_ASPECT_FIT") == 0) {
         // When the window isn't the picture's shape: black bars, or the picture
-        // stretched to fill it. A widened picture (16:10, 16:9, 21:9) always
+        // stretched to fill it. A widened picture (16:10 up to 43:18) always
         // keeps its shape, so the choice is only for 4:3.
         if (launch_choices().aspect != "4:3") {
             ImGui::TextDisabled("Widened pictures always keep their shape (black bars rather than stretching).");
@@ -773,7 +789,7 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
     if (std::strcmp(key, "DOL_AURORA_FRAME_INTERP_PACING") == 0) {
         *shown = bw_desktop::kInterpPacingShown;
         *stored = bw_desktop::kInterpPacingStored;
-        *count = 2;
+        *count = 3;
         return true;
     }
     if (std::strcmp(key, "BLUEWAKE_MENU_TEXT_SIZE") == 0) {
@@ -1055,6 +1071,54 @@ void draw_stage_select_question(const BwMenuPad& pad, const bw_platform::Look& l
         close_menu();
 }
 
+// The footer's Save state slots...: the five slots (save_state.h), each with
+// when it was saved, saved over or loaded on its own. Save or Load closes the
+// menu; the game does it at its next clean point, as F5 and F8. True: closed.
+static constexpr const char* kStateSlotsPopup = "Save state slots";
+static bool state_slots_popup() {
+    bool chosen = false;
+    if (!ImGui::BeginPopup(kStateSlotsPopup))
+        return false;
+    ImGui::TextUnformatted("Save state slots");
+    ImGui::TextDisabled("Each slot keeps one state until you save over it. F5 and F8 don't change them.");
+    ImGui::Separator();
+    if (ImGui::BeginTable("##slots", 3, ImGuiTableFlags_SizingFixedFit)) {
+        for (int slot = 1; slot <= BLUEWAKE_STATE_SLOTS; ++slot) {
+            char when[32];
+            const bool used = bluewake_state_slot_info(slot, when, sizeof when);
+            ImGui::PushID(slot);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Slot %d", slot);
+            ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
+            if (used)
+                ImGui::TextUnformatted(when);
+            else
+                ImGui::TextDisabled("Empty");
+            ImGui::TableNextColumn();
+            if (ImGui::Button("Save")) {
+                bluewake_save_state_slot(slot, false);
+                chosen = true;
+            }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!used);
+            if (ImGui::Button("Load")) {
+                bluewake_save_state_slot(slot, true);
+                chosen = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (chosen)
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return chosen;
+}
+
 void draw_menu(const bw_platform::Look& look) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
@@ -1248,6 +1312,9 @@ void draw_menu(const bw_platform::Look& look) {
             bluewake_save_state_hotkey(true);
             open = false;
             break;
+        case BW_MENU_STATE_SLOTS:
+            ImGui::OpenPopup(kStateSlotsPopup);
+            break;
         case BW_MENU_QUIT:
             close_menu();
             quit_game();
@@ -1255,6 +1322,8 @@ void draw_menu(const bw_platform::Look& look) {
         case BW_MENU_NONE:
             break;
         }
+        if (state_slots_popup())
+            open = false;
         // The game's B ends an edit, or closes the menu (menu_shared.h).
         if (bw_menu_back(pad.back))
             open = false;

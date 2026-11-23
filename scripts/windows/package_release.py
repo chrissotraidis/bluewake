@@ -9,7 +9,8 @@ Writes, in --out:
   SHA256SUMS                          both zips' digests
 
 The app zip holds BlueWake.exe and the DLLs beside it (gGZLE01_recomp.dll among
-them), Aurora's pipeline seed, the DSP files, BuilderProvenance.json, a README
+them), Aurora's pipeline seed, the DSP files, the stage select's English names
+(stage_select/, the repository's own text), BuilderProvenance.json, a README
 and the licenses. The build folder also holds the disc (game/GZLE01.iso),
 files from it and maybe nodtool.exe (it embeds Wii keys): none of them is on
 the allowlist, and the script refuses to write the zip if one gets in anyway.
@@ -161,6 +162,8 @@ def stage_app(app, stage, version):
     (stage / "dsp").mkdir()
     for name in ("dsp_rom.bin", "dsp_coef.bin"):
         shutil.copy2(app / "dsp" / name, stage / "dsp" / name)
+    # The stage select's English names (F7), which the app finds beside itself (win_settings.cpp).
+    shutil.copytree(app / "stage_select", stage / "stage_select")
     licenses = stage / "licenses"
     licenses.mkdir()
     for name, source in REQUIRED_LICENSES.items():
@@ -200,7 +203,8 @@ def main():
     args = parser.parse_args()
 
     app = args.app
-    for need in ("BlueWake.exe", "gGZLE01_recomp.dll", "BuilderProvenance.json", "dsp/dsp_rom.bin"):
+    for need in ("BlueWake.exe", "gGZLE01_recomp.dll", "BuilderProvenance.json", "dsp/dsp_rom.bin",
+                 "stage_select/names.tsv"):
         if not (app / need).is_file():
             sys.exit(f"{app / need} is missing: run scripts/windows/build.py first")
     provenance = json.loads((app / "BuilderProvenance.json").read_text())

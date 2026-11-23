@@ -1,15 +1,38 @@
 # Making BlueWake faster
 
 How BlueWake gets faster, in three steps of growing size, and how to prove each step. [GOAL_LOOP.md](GOAL_LOOP.md)
-says which step is being done on which day. Owner: Chris. Updated October 23, 2026; add every result to "Results".
+says which step is being done on which day. Owner: Chris. Updated November 22, 2026; add every result to "Results".
 
-**Current defaults:** #335 is merged with Chris's approval: new Windows/Linux builds use behaviour timing;
+## Where speed stands, November 22
+
+- **Defaults.** Every builder uses the module preparations: lean blocks, memory and deadlines, and behaviour timing
+  (on the Mac and iPhone too since 0.9.0, #431), FP checks per stretch (#553), and since 0.11.0 the direct-call gate,
+  "Faster calls" (#552, #567). Game code on 2 MB pages (#554) stays opt-in, Linux only.
+- **Steam Deck** ([#215](https://github.com/chrissotraidis/bluewake/issues/215)). The game thread is the limit at busy
+  views, Outset most of all. 0.11.0's stack measured +16 to 22% in irregularthanis's Deck runs. With the HD look at
+  3x and Smooth Motion, #586's four switches (0.13.0, off by default) took seven scenes from 27.07 to 29.54 game
+  FPS in Game Mode, and six of them held 30. The busiest Outset view stays near 26, held by the game thread. Next:
+  decide whether those switches become the default in Game Mode, after a Deck run from a release build.
+- **Slower PCs** ([#427](https://github.com/chrissotraidis/bluewake/issues/427)). The same game-thread limit. On
+  Chris's Ryzen 7 5700U the 0.11.0 tour was 15 to 20% faster than 0.10.0's at every stop.
+- **Android** ([#560](https://github.com/chrissotraidis/bluewake/issues/560)). Heavy scenes run at 66 to 70% speed,
+  with the main thread saturating the phone's prime core. #586 gave no gain on a Pixel 8a, which isn't waiting on
+  its GPU. #551's draw-done overlap measured +3.6% on the phone, but a desktop run found it isn't bit-identical, so
+  it waits until that's understood.
+- **Natives** ([#451](https://github.com/chrissotraidis/bluewake/issues/451), #179). #593 fixed the generators on
+  its branch and re-certified round 7 (19 natives, no mismatches), then measured no Deck gain and was closed
+  unmerged. In `main` the generators still stop at the inline register-save form, and rounds 4, 5 and 7 stay opt-in.
+- **Releases since 0.11.0** each stayed within a few percent of the one before on the tour, with identical
+  checkpoints (the rows below).
+
+
+**Defaults on October 23:** #335 is merged with Chris's approval: new Windows/Linux builds use behaviour timing;
 `--no-behaviour-timing` opts out and `--conservative` keeps the plain translation. Mac/iOS remain opt-in.
 The Deck and Windows play checks below support that decision. Android's October 14 alternating cool-start
 comparison now reaches full speed at Outset on the Fold 7. The Android builder (#93, merged October 17) inherits
 the timing default and has the same opt-out. Earlier measurements below retain their original dates.
 
-## The next measurement
+## The next measurement (October 23)
 
 The October 23 review narrows the immediate work:
 
@@ -156,6 +179,12 @@ the same"; correctness fixes keep the strict cycle-exact comparison.
 | Oct 14 | Behaviour timing, [LiquidAzir's alternating cool-start runs](https://github.com/chrissotraidis/bluewake/pull/93#issuecomment-6176898869) | Galaxy Z Fold 7, Snapdragon 8 Elite | Outset pier; four 60-second counts, each starting at 33.9 °C/full clocks, all ending at 2.0 GHz | 89.9% / 90.8%; 136.3 M / 135.8 M instructions, 35.8 M / 35.4 M cycles per retrace | 100.0% / 100.0%; 128.5 M / 129.0 M instructions, 32.0 M cycles per retrace | Contributor-reported, same earlier builds based on `42610f2`, installed alternately with increasing version numbers. Clears the Outset gate on this phone; no other-phone or sustained-gameplay claim |
 | Oct 20 | The Windows and Linux recipe on the Mac: `--combined-optimizations --lean-blocks --lean-memory --lean-deadlines --behaviour-timing`, against the default Mac build ([record](status/APPLE_RECIPE_TOUR_2026-10-20.md)) | M3 Max, macOS, both trained, `f2611b1`, the same disc | The benchmark tour's five stops; headless, three alternating pairs; rendered runs | 47.4 / 48.6 / 64.2 / 38.5 / 35.3 game frames a second; rendered busy 53 to 89%; module 527 MB, compile 90 min | 77.9 / 82.2 / 113.7 / 65.7 / 59.8 (64 to 77% faster); rendered busy 33 to 53%; module 447 MB, compile 24 min | Not cycle-identical, by design (behaviour timing); each build repeats itself exactly. Not yet played by hand on the Mac, or measured on an iPhone or iPad |
 | Oct 20 | The same recipe on iOS, against the PadMint 0.8.0 build players get ([record](status/APPLE_RECIPE_TOUR_2026-10-20.md#the-same-on-an-ipad-pro-m2-october-20)) | iPad Pro 12.9 (M2), the same published app, `f2611b1` | The tour's route and stops from a card continue; headless and paced, two alternating pairs | 52.2 / 52.5 / 76.0 / 42.5 / 39.0 game frames a second; busy at 30 FPS 50 to 88%; module 527 MB | 92.2 / 93.4 / 136.3 / 76.7 / 68.2 (75 to 81% faster); busy at 30 FPS 34 to 53%; module 447 MB, compile 20 min | Checkpoints can't tell on the device (card continues differ run to run). Not yet played by hand |
+| Nov 7 | 0.11.0's speed stack: Faster calls (#552), FP checks (#553), game code on 2 MB pages (#554, opt-in) | Steam Deck (irregularthanis) | Their own PRs' Deck runs | 0.10.0's defaults | Faster calls alone +5.5%; FP checks +2 to 3%; 2 MB pages +4.5%; the stack with 2 MB pages +16 to 22% | Exact, per each PR |
+| Nov 7 | 0.11.0 against 0.10.0 ([record](status/WINDOWS_BUILD_0.11.0.md)) | Ryzen 7 5700U, Windows (Chris's PC) | The benchmark tour | | 15 to 20% faster at every stop | See the record |
+| Nov 10 | #586's four switches (cloud noise texture, packed AO, Mailbox, no gamescope WSI) | Steam Deck LCD, Game Mode (irregularthanis) | Seven scenes at 3x with the full HD look and Smooth Motion, paced, three interleaved launches each | 27.07 game FPS | 29.54 (+9.1%); six of seven hold 30 | Guest checkpoints identical |
+| Nov 11 | #586's effect switches on Android | Pixel 8a (jkoehler11) | The card spot | | No gain: the phone isn't waiting on its GPU there | |
+| Nov 15 | 0.12.0 against 0.11.0 ([record](status/WINDOWS_BUILD_0.12.0.md#results)) | Ryzen 7 5700U, Windows | The tour, headless, four four-run sets | Outset 63.49 | Outset 60.78 (−4.27%); the other stops −1.7 to +1.3% | Yes, all 31 checkpoints; the 3% gate was waived, cause not established |
+| Nov 22 | 0.13.0 against 0.12.0 ([record](status/RELEASE_0.13.0.md)) | M3 Max, macOS, `--no-train` builds | The tour, headless, one setup state, 4 and 5 interleaved runs | 115.09 / 121.92 / 177.41 / 97.22 / 88.91 | 113.73 / 119.92 / 178.03 / 99.18 / 91.07 (−1.6 to +2.4%; runs of one build spread 6 to 9%) | Yes, all 31 checkpoints |
 
 Windows gameplay with behaviour timing was also checked by pdale-boop on October 13 (Windows 11, i5-12600KF,
 RTX 5070 Ti): menus, stage/spawn sweeps with the test card unchanged, all three Lenzo photos using the unmerged

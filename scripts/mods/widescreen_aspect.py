@@ -14,12 +14,19 @@ a target aspect A it is interpolated between the game's own 4:3 value and the
 The 4:3 values are the game's (read from main.dol for the constants, from the
 decompiled tuning constructors for the runtime structures). A constant load can
 only reach the existing pool around r2, so it takes the nearest constant there;
-the choices for 16:10 are within about a pixel, and those for 21:9 (t = 2.25,
-beyond the 16:9 code) within half a pixel. The Picto Box gallery's picture
-viewport is computed instead (picture_viewport) and written into pool padding.
+the choices for 16:10 and 21:9 are within about a pixel, 64:27's HUD shift within
+four (a 0.6% of the screen's width), and 43:18's within one. The Picto Box
+gallery's picture viewport is computed instead (picture_viewport) and written
+into pool padding.
 
     widescreen_aspect.py 16:10 > mods/widescreen/GZLE01-16x10.gecko
     widescreen_aspect.py 21:9 > mods/widescreen/GZLE01-21x9.gecko
+    widescreen_aspect.py 64:27 > mods/widescreen/GZLE01-64x27.gecko
+    widescreen_aspect.py 43:18 > mods/widescreen/GZLE01-43x18.gecko
+
+21:9 is the 21/9 the ultrawide code was first derived for (t = 2.25) and is not
+the shape of any real panel; 64:27 is 2560x1080 and 43:18 is 3440x1440, the two
+shapes ultrawide monitors actually are (t = 2.3333 and t = 2.375).
 """
 import math
 import struct
@@ -55,7 +62,8 @@ HALF_WRITES = {
 # with its arrow, on screen. It moves with the HUD shift past 16:9's instead
 # (-256 - (257 - 114)), keeping 16:9's few units of clearance off the left edge.
 HALF_OVERRIDES = {
-    0x803E68E8: {"21:9": -399},
+    # -256 - (the HUD shift - 114): -399 at 21:9, -408 at 64:27, -413 at 43:18
+    0x803E68E8: {"21:9": -399, "64:27": -408, "43:18": -413},
 }
 # Instruction immediates the 16:9 code sets: address -> 4:3 value.
 LI_IMMEDIATES = {
@@ -66,7 +74,13 @@ LI_IMMEDIATES = {
 # The added dPlace_name_c code stores this float (lis r0, hi) at 0x800037E4.
 LIS_FLOAT = (0x800037E4, -9.0)
 
-R2 = 0x803FFD00
+# The game's small-data base, i.e. what r2 holds where these loads run: the
+# displacements below are relative to it, and a load can only name a signed
+# 16-bit one, so the pool a variant may use is r2 +/- 32767. Derived from the
+# pool itself - two adjacent words -130.0 and 130.0 at d = -18772 and -18768,
+# with 114.0, 206.0 and 1.3333 at -27188, -28500 and -30556 - which puts it at
+# 0x803AD6C0 (scripts/mods/pool_pick.py finds it the same way).
+R2 = 0x803AD6C0
 # Loads that the 16:9 code points at pool constants: the 16:9 constant's r2
 # offset -> {aspect: r2 offset of the constant to use}. 114 is the HUD shift
 # (0 at 4:3), 206 the rupee counter x (320 at 4:3), 1.3333 the boomerang
@@ -75,11 +89,16 @@ R2 = 0x803FFD00
 # the side margins (the telescope's mask): 130 covers 16:10 and 16:9, so only
 # 21:9 (margins of 265.5 and 272.6) needs larger ones; the bars only overlap.
 POOL_SWAPS = {
-    -18772: {"21:9": -21120},  # -130.0 -> -288.0 (needs <= -265.5)
-    -18768: {"21:9": -29036},  # 130.0  -> 292.5  (needs >= 288 and 272.6)
-    -27188: {"16:10": -21536, "21:9": -19536},  # 114.0  -> 68.0, 257.0 (wants 68.4, 256.5)
-    -28500: {"16:10": -19520, "21:9": -24296},  # 206.0  -> 250.5, 63.0 (wants 251.6, 63.5)
-    -30556: {"16:10": -32212, "21:9": -32576},  # 1.3333 -> 1.2, 1.75 (wants 1.2, 1.75)
+    # -130.0 -> -288.0 / -275.0 / -288.0 (needs <= 265.5 / 275.0 / 279.75)
+    -18772: {"21:9": -21120, "64:27": -20468, "43:18": -21120},
+    # 130.0 -> 292.5 / 285.0 / 288.0 (needs >= 273.25 / 283.0 / 287.875)
+    -18768: {"21:9": -29036, "64:27": -28608, "43:18": -19224},
+    # 114.0 -> 68.0 / 257.0 / 270.0 / 270.0 (wants 68.4 / 256.5 / 266.0 / 270.75)
+    -27188: {"16:10": -21536, "21:9": -19536, "64:27": -31744, "43:18": -31744},
+    # 206.0 -> 250.5 / 63.0 / 54.0 / 49.0 (wants 251.6 / 63.5 / 54.0 / 49.25)
+    -28500: {"16:10": -19520, "21:9": -24296, "64:27": -13776, "43:18": -22624},
+    # 1.3333 -> 1.2 / 1.75 / 1.78 / 1.7917 (wants 1.2 / 1.75 / 1.7778 / 1.79167)
+    -30556: {"16:10": -32212, "21:9": -32576, "64:27": -20632, "43:18": -15664},
 }
 # The Picto Box gallery draws a photo in its own 2D projection, -9 to 650
 # across (the C_MTXOrtho at 0x80227BB8), squeezed into a viewport whose x and
@@ -106,7 +125,8 @@ def picture_viewport(lerp):
     return (PICTURE_ORTHO[0] - left) * scale, (PICTURE_ORTHO[1] - PICTURE_ORTHO[0]) * scale
 
 
-ASPECTS = {"16:9": ASPECT_169, "16:10": 16.0 / 10.0, "21:9": 21.0 / 9.0}
+ASPECTS = {"16:9": ASPECT_169, "16:10": 16.0 / 10.0, "21:9": 21.0 / 9.0,
+           "64:27": 2560.0 / 1080.0, "43:18": 3440.0 / 1440.0}
 
 
 def f32_bits(v):

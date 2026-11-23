@@ -210,7 +210,7 @@ game and move to turn the camera, Esc releases it.
 A few words at the bottom left say what each key did.
 
 The optional controller zoom is under **Controls** in the settings menu. Enable it,
-then hold the right-stick click and move that stick up or down; tapping the click
+then hold the right-stick click and move that stick up or down, on foot or on the boat; tapping the click
 still enters or leaves first person. Its speed is adjustable beside the option.
 
 The settings menu's **Display** tab has what the Windows one has: a **Fullscreen** button for this session
@@ -219,14 +219,16 @@ picture's shape** (black bars rather than stretching a 4:3 picture; a widened on
 **Pause while the window is in the background** and **Compile shaders before playing**. The settings
 that are new on Linux are off until you turn them on. The widescreen choice is under **Mods**, after HD
 textures. Under **Gameplay**, Jump & Sprint (with a **Sprint speed**) and Fast transitions are one
-switch each, as on the iPad.
+switch each, as on the iPad, and **Sailing › Sail on Z** (off) makes Z raise and lower the sail on the boat.
 
 **Config** is the last tab: **Exact sound** (off: Dolphin's high-level Zelda sound, the default and faster;
 on: the sound chip's own program, slower; next launch), the menu's own settings (**Pause the game while the
 menu is open**, **Menu text size** and **Menu contrast**), and where your saves and session logs are, with
 buttons that open
 the folder and the logs. The menu opens at the size and place you left it. The menu's buttons are the same on every
-desktop build: Resume, Save state (F5), Load latest state (F8) and Quit the game.
+desktop build: Resume, Save state (F5), Load latest state (F8), Save state slots... and Quit the game.
+**Save state slots...** lists five slots, each with the time it was saved: **Save** writes the game over that
+slot and **Load** puts it back. Each slot keeps its state until you save over it; F5 and F8 don't change them.
 
 A setting that applies at the next launch shows **Restart now** beside its note: BlueWake saves your
 settings, closes and starts again by itself.

@@ -1,0 +1,223 @@
+From a6251c7a95deb202cba2c279d59ac6afdff5c24d Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 22:33:53 -0600
+Subject: [PATCH] Aurora: a copy into an earlier copy's buffer updates that
+ copy's texture
+
+With the Picto Box up in a room with heat haze (Dragon Roost Cavern's lava
+room), its window showed the room as it was when the Picto Box came up,
+with hard-edged patches of the nearby wall over it, and did not follow the
+stick.
+
+The camera's viewport then starts above the screen, so Wind Waker's
+drawDepth copies the frame that many rows into its 320x240 buffer
+(0x0062C720, 24 rows into 0x00624F20). The heat haze reads the buffer from
+its start. On the GameCube that is one block of memory and the haze sees the
+new rows; here each copy is its own texture, found by its address, so the
+haze kept the last copy made at the buffer's start, the frame from before
+the Picto Box.
+
+A copy that lies inside an earlier copy's buffer, of its format and width,
+at a whole row (gxcore::efb_copy_row_within), now goes into that copy's
+texture at that row as well, as it would into the buffer's memory. The
+texture encode test covers the rows it finds and the copies it leaves alone.
+
+(As merged into the 0.13.0 batch, codex/0.13.0-batch 0dbeeadcf9: the diff is against the batch before it.)
+---
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 025ab59674de04dce2cafea7a4a43903c7b4880c..424326a012809511faee5f42e19638811674d41d 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -199,6 +199,9 @@ struct RenderPass {
+   // much of it replaces the sharp copy (the game's depth of field steps).
+   float resolveBlurSigma = 0.f;
+   float resolveBlurMix = 1.f;
++  // The earlier copy's texture the resolved copy also goes into, and where.
++  TextureHandle resolveWithin;
++  uint32_t resolveWithinY = 0;
+   Vec4<float> clearColorValue{0.f, 0.f, 0.f, 0.f};
+   float clearDepthValue = gx::UseReversedZ ? 0.f : 1.f;
+   wgpu::LoadOp colorLoadOp = wgpu::LoadOp::Undefined;
+@@ -885,7 +888,7 @@ PipelineRef pipeline_ref(const clear::PipelineConfig& config) {
+ 
+ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
+                   Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat, float blurSigma,
+-                  float blurMix) {
++                  float blurMix, TextureHandle within, uint32_t withinY) {
+   // Resolve current render pass
+   auto& prevPass = current_render_passes()[g_currentRenderPass];
+   prevPass.resolveTarget = std::move(texture);
+@@ -893,6 +896,8 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
+   prevPass.resolveFormat = resolveFormat;
+   prevPass.resolveBlurSigma = blurSigma;
+   prevPass.resolveBlurMix = blurMix;
++  prevPass.resolveWithin = std::move(within);
++  prevPass.resolveWithinY = withinY;
+   // Push UV transform uniform for tex_copy_conv (crop region in UV space)
+   const auto srcW = static_cast<float>(prevPass.targetSize.width);
+   const auto srcH = static_cast<float>(prevPass.targetSize.height);
+@@ -2722,6 +2727,21 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+     if (!isDepth && (passInfo.resolveBlurSigma > 0.f || passInfo.resolveBlurMix < 1.f)) {
+       tex_copy_conv::blur(cmd, passInfo.resolveTarget, passInfo.resolveBlurSigma, passInfo.resolveBlurMix);
+     }
++    const auto& within = passInfo.resolveWithin;
++    if (within && within->texture && within->format == passInfo.resolveTarget->format &&
++        within->size.width == dstSize.width && passInfo.resolveWithinY < within->size.height) {
++      const wgpu::TexelCopyTextureInfo src{.texture = passInfo.resolveTarget->texture};
++      const wgpu::TexelCopyTextureInfo dst{
++          .texture = within->texture,
++          .origin = wgpu::Origin3D{.x = 0, .y = passInfo.resolveWithinY},
++      };
++      const wgpu::Extent3D size{
++          .width = dstSize.width,
++          .height = std::min(dstSize.height, within->size.height - passInfo.resolveWithinY),
++          .depthOrArrayLayers = 1,
++      };
++      cmd.CopyTextureToTexture(&src, &dst, &size);
++    }
+   }
+ }
+ 
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.hpp b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+index 81be09f2782cc0138e4b25b13b58aec78dcd61ca..6eb89a58202d632909c62f46653c979636f4d443 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.hpp
+@@ -259,9 +259,12 @@ float calculate_fps() noexcept;
+ // Game frames finished a second (each one presents once, or twice with an
+ // in-between frame); calculate_fps() counts every present.
+ float calculate_game_fps() noexcept;
++// `within`: the texture of an earlier, larger copy whose buffer this copy
++// lands in, `withinY` rows down (its pixels): the copy goes there too, as it
++// would into that buffer's memory.
+ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
+                   Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat = GX_TF_RGBA8,
+-                  float blurSigma = 0.f, float blurMix = 1.f);
++                  float blurSigma = 0.f, float blurMix = 1.f, TextureHandle within = {}, uint32_t withinY = 0);
+ 
+ struct ColorPassDescriptor {
+   const char* label = nullptr;
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+index 19542f98af2e80fa2bba39801c947304ce32c000..14e981da6b768d5e90588739ab3d53f7dd0e62ff 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/gxcore_draw.cpp
+@@ -367,6 +367,10 @@ struct EfbCopyBinding {
+   uint32_t byte_size = 0;
+   uint64_t memory_epoch = 0;
+   bool memory_epoch_valid = false;
++  // The copy's format and size in the guest's texels.
++  uint32_t format = 0;
++  uint32_t width = 0;
++  uint32_t height = 0;
+ };
+ absl::flat_hash_map<uint32_t, EfbCopyBinding> g_efbCopyTextures;
+ 
+@@ -1731,12 +1735,43 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+   if (!it->second) {
+     return;
+   }
++  // A copy into the middle of an earlier copy's buffer, of its format and
++  // width: Wind Waker's drawDepth, its viewport above the screen (the Picto
++  // Box's), copies the rest of the frame that many rows into its 320x240
++  // buffer, whose start the heat haze samples (the Picto Box's window showed
++  // the frame from before the Picto Box under it). Into memory, the copy
++  // changes those rows of the buffer; so it goes into the earlier copy's
++  // texture there too.
++  TextureHandle within;
++  uint32_t withinY = 0;
++  uint32_t withinAddress = 0;
++  const gxc::EfbCopyExtent extent{cmd.dest_address, cmd.byte_size, cmd.format, cmd.destination_width,
++                                  cmd.destination_height};
++  for (const auto& [address, binding] : g_efbCopyTextures) {
++    const int64_t rows = binding.handle ? gxc::efb_copy_row_within(
++                                              {address, binding.byte_size, binding.format, binding.width,
++                                               binding.height},
++                                              extent)
++                                        : -1;
++    if (rows < 0)
++      continue;
++    within = binding.handle;
++    withinY = static_cast<uint32_t>(std::lround(double(rows) * binding.handle->size.height / binding.height));
++    withinAddress = address;
++    break;
++  }
+   uint64_t memoryEpoch = 0;
+   const bool memoryEpochValid =
+       cmd.byte_size != 0u && efb_copy_epoch(cmd.dest_address, cmd.byte_size, &memoryEpoch);
+   g_efbCopyTextures.insert_or_assign(
+       cmd.dest_address,
+-      EfbCopyBinding{it->second, cmd.byte_size, memoryEpoch, memoryEpochValid});
++      EfbCopyBinding{it->second, cmd.byte_size, memoryEpoch, memoryEpochValid, cmd.format, cmd.destination_width,
++                     cmd.destination_height});
++  if (within) {
++    // The earlier copy's texture is current again: its memory as it is now.
++    auto& binding = g_efbCopyTextures[withinAddress];
++    binding.memory_epoch_valid = efb_copy_epoch(withinAddress, binding.byte_size, &binding.memory_epoch);
++  }
+   float clearDepthValue = static_cast<float>(cmd.clear_z) / 16777215.f;
+   if (gx::UseReversedZ) {
+     clearDepthValue = 1.f - clearDepthValue;
+@@ -1748,7 +1783,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+                                 static_cast<float>(cmd.clear_g) / 255.f,
+                                 static_cast<float>(cmd.clear_b) / 255.f,
+                                 static_cast<float>(cmd.clear_a) / 255.f},
+-                    clearDepthValue, fmt, blurSigma, blurMix);
++                    clearDepthValue, fmt, blurSigma, blurMix, std::move(within), withinY);
+ }
+ 
+ // Uniform de-duplication across consecutive draws.
+diff --git a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp
+index 7d47933ce6d2a9d3dfe0ef8d646dd2bb74dd0435..286dfc1337e900d3de56449aa909ee6a0036318f 100644
+--- a/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp
++++ b/GXRuntime/graphics/gxcore/include/gxruntime/gxcore/texture_encode.hpp
+@@ -13,4 +13,29 @@ std::vector<std::uint8_t> encode_efb_copy(std::uint32_t format,
+     std::uint32_t width, std::uint32_t height,
+     std::span<const std::uint8_t> rgba,
+     std::uint32_t render_width, std::uint32_t render_height);
++
++// An EFB copy's destination in guest memory: its address, size in bytes, GX
++// format and size in texels.
++struct EfbCopyExtent {
++  std::uint32_t address = 0;
++  std::uint32_t byte_size = 0;
++  std::uint32_t format = 0;
++  std::uint32_t width = 0;
++  std::uint32_t height = 0;
++};
++// The row of `earlier`'s buffer at which `later` starts, when `later` lies
++// inside that buffer past its start, with its format and width, at a whole
++// row: in memory it rewrites those rows (Wind Waker's drawDepth copies a frame
++// whose viewport starts above the screen that many rows into its buffer).
++// -1 otherwise.
++constexpr std::int64_t efb_copy_row_within(const EfbCopyExtent& earlier, const EfbCopyExtent& later) {
++  if (later.address <= earlier.address || later.format != earlier.format || later.width != earlier.width ||
++      earlier.height == 0u || later.byte_size == 0u || earlier.byte_size % earlier.height != 0u)
++    return -1;
++  const std::uint64_t offset = later.address - earlier.address;
++  const std::uint64_t row_bytes = earlier.byte_size / earlier.height;
++  if (row_bytes == 0u || offset % row_bytes != 0u || offset + later.byte_size > earlier.byte_size)
++    return -1;
++  return static_cast<std::int64_t>(offset / row_bytes);
++}
+ }
+diff --git a/GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp b/GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp
+index d5fabd06e51a437eae4baeca506af221c60187ae..fdbaa7a1ded39e28e9e740edfa57a7fa81da120a 100644
+--- a/GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp
++++ b/GXRuntime/graphics/gxcore/tests/gxcore_texture_encode_test.cpp
+@@ -49,4 +49,15 @@ int main() {
+   assert(encode_efb_copy(1, 0, 1, rgba, 6, 3).empty());
+   assert(encode_efb_copy(1, 2, 1, rgba, 7, 3).empty());
+   assert(encode_efb_copy(1, UINT32_MAX, UINT32_MAX, rgba, 6, 3).empty());
++
++  // Wind Waker's drawDepth with the Picto Box up: 320x216 RGBA8 24 rows into
++  // its 320x240 buffer.
++  const EfbCopyExtent buffer{0x00624F20u, 307200u, 6u, 320u, 240u};
++  assert(efb_copy_row_within(buffer, {0x0062C720u, 276480u, 6u, 320u, 216u}) == 24);
++  assert(efb_copy_row_within(buffer, buffer) == -1);                                  // the same buffer again
++  assert(efb_copy_row_within(buffer, {0x0062C720u, 276480u, 1u, 320u, 216u}) == -1);  // another format
++  assert(efb_copy_row_within(buffer, {0x0062C720u, 138240u, 6u, 160u, 216u}) == -1);  // another width
++  assert(efb_copy_row_within(buffer, {0x0062C730u, 276480u, 6u, 320u, 216u}) == -1);  // not at a row
++  assert(efb_copy_row_within(buffer, {0x0062C720u, 307200u, 6u, 320u, 240u}) == -1);  // past its end
++  assert(efb_copy_row_within(buffer, {0x0061D720u, 276480u, 6u, 320u, 216u}) == -1);  // before it
+ }
+--
+2.50.1

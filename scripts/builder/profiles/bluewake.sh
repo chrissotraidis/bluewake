@@ -50,7 +50,8 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # SDL3's UIKit scene geometry (one app instance, external displays left to the system, orientation from the app's scene) in the vendored Aurora's SDL patch chain (RecompCore #60): patches/recompcore/0206; pin #60's head until it merges.
 # The game's depth copy read as GX_TF_Z16 (target 0xB), and steps for its depth of field and where it starts (RecompCore #61): patches/recompcore/0207-0208; #61's head, merged into bluewake-next for 0.12.0.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
-RECOMPCORE_SHA=2159e88b10f1d4c77cfb67041382b623b4462205
+# 0.13.0's batch (RecompCore #66, merged into bluewake-next as 7d3c18b1): #65, #62, #63, #58, #59, #51, #64 and #54 merged in that order, and a fix for #65 with #51: patches/recompcore/0209-0218; the pin is #66's head.
+RECOMPCORE_SHA=c0f5f918026efe3168bdde42f3af0a55a3325e5e
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

@@ -48,6 +48,7 @@ Runs:
                             benchmark_on_steamdeck runs; no pictures
   --every N                 retraces between captured frames (default 300;
                             0 for none)
+  --paced                   measure paced, as played (default: unpaced)
   --cpu-profile             one more run of each build under Linux perf, not
                             measured: per scene, over the same window as FPS,
                             counters per game frame for the game thread (the
@@ -65,10 +66,19 @@ Target:
                             Support/BlueWake/GZLE01.card; on Windows,
                             %APPDATA%\BlueWake\GZLE01.card). Only read, and
                             only needed until the state exists
-  --display auto|headless|desktop
+  --display auto|headless|desktop|gamemode
                             headless runs the game under offscreen gamescope;
-                            desktop uses the running session (DISPLAY=:0)
+                            desktop uses the running session (DISPLAY=:0);
+                            gamemode starts each run through a Steam shortcut
+                            in the Deck's Game Mode, as the player does, so
+                            what the screen costs (gamescope on the panel,
+                            the Steam overlay) is measured too
                             (default: auto, gamescope if there is one)
+  --steam-game-id ID        with gamemode: the game id of a non-Steam shortcut
+                            whose target is ~/bluewake-render/gamemode-target.sh
+                            on the Deck (written by the first gamemode run; the
+                            SteamGameId of a game it started). The runs play on
+                            the Deck's screen: leave its controls alone
   --size WxH                headless size (default 1280x800 on a Deck)
   --set-build BUILD:KEY=VALUE
                             set one variable only for a labeled build; repeatable
@@ -176,11 +186,16 @@ while [[ $# -gt 0 ]]; do
         --keep-remote) keep_remote=1 ;;
         --headless) options+=(--headless) ;;
         --cpu-profile) options+=(--cpu-profile) ;;
+        --paced) options+=(--paced) ;;
         --pairs|--runs|--warmup|--retraces|--every)
             [[ ${2:-} =~ ^[0-9]+$ ]] || die "$1 needs a number"
             options+=("$1" "$2"); shift ;;
         --display)
-            [[ ${2:-} =~ ^(auto|headless|desktop)$ ]] || die "--display must be auto, headless or desktop"
+            [[ ${2:-} =~ ^(auto|headless|desktop|gamemode)$ ]] ||
+                die "--display must be auto, headless, desktop or gamemode"
+            options+=("$1" "$2"); shift ;;
+        --steam-game-id)
+            [[ ${2:-} =~ ^[0-9]+$ ]] || die "--steam-game-id needs a number"
             options+=("$1" "$2"); shift ;;
         --size)
             [[ ${2:-} =~ ^[0-9]+x[0-9]+$ ]] || die "--size must be WxH"
@@ -316,6 +331,7 @@ CHECK
 ) || die "target check failed"
     printf 'Staging builds and harness in %s:%s...\n' "$target" "$root"
     apps=()
+    declare -A staged=()  # SHA-256 -> remote path: the same AppImage under several labels is copied once
     for i in "${!images[@]}"; do
         if [[ $(basename "${images[$i]}") == bluewake ]]; then
             # A Linux folder build: the folder, without the player's user/ and logs, under its generated label.
@@ -331,8 +347,13 @@ CHECK
             apps+=(--app "${names[$i]}=$remote")
             continue
         fi
-        remote="$root/${names[$i]}.AppImage"
         hash=$(sha256 "${images[$i]}")
+        if [[ -n ${staged[$hash]-} ]]; then
+            apps+=(--app "${names[$i]}=${staged[$hash]}")
+            continue
+        fi
+        remote="$root/${names[$i]}.AppImage"
+        staged[$hash]=$remote
         "${scp_command[@]}" -q "${images[$i]}" "$target:$remote"
         "${ssh_command[@]}" "$target" "chmod 0755 $(quote "$remote") &&
             test \"\$(sha256sum $(quote "$remote") | cut -d' ' -f1)\" = $hash" ||

@@ -281,3 +281,56 @@ King of Red Lions' nose sharp. The frontend test now triggers a Z16 copy. Patch 
 soft that blur is: off, light, the default, strong, and the game's own 1x blur at any render scale, its copy blurred
 on the GPU) and aurora_set_game_dof_start (0 to 100: the start moved farther out by a factor of the game's own, which
 follows the camera's focus, about eleven times as far at 100). Both start as the game has them.
+
+Patch 0209 adds DOL_AURORA_TEXTURE_REPORT_MISSING: each texture the game draws that an HD pack has no file for is logged
+once with the file name the pack would need (2 also lists the pack's nearest candidates), and with the host's texture
+dumps on it is written as an editable RGBA DDS under the cache folder's texture_dumps, for pack makers. Patch 0210 adds
+DOL_AURORA_TEXTURE_PACK_SKIP, replacement names whose files are left out after the pack and its optional folders load,
+so the game's own texture stays: BlueWake lists the game's 37 toon tables there when "Keep the game's shading tables"
+is on, because Hypatia's pack redraws 15 of them and its shadow threshold table shrinks the shadow in Link's hair.
+It also adds dol_aurora_texture_pack_replacements(), the replacements registered at start (-1 without a pack), which
+the Mods menu shows under the file count.
+
+Patches 0211 to 0217 are the rest of the 0.13.0 batch, merged into RecompCore's `codex/0.13.0-batch` (`595a9bda`) in this
+order after #65 (0209-0210): one patch for each pull request, its diff as merged, so the series applied in order to
+`bluewake-next` (`b16f5027`) gives the batch's tree.
+
+Patch 0211 (pdale-boop, RecompCore #62): with Smooth Motion, a texgen that projects the vertex's position onto the
+screen through its own texture matrix (the heat haze's particles, which read the frame's copy) follows the in-between
+frame's position matrix. The haze in lava rooms and the sepia boss replays had read the copy where the real frame's
+camera put it, a step behind the scene it bends. A projector's matrix (a light's, the sun shadows') is left alone.
+
+Patch 0212 (pdale-boop, RecompCore #63): a copy into the buffer of an earlier copy updates that earlier copy's texture,
+and its memory epoch is refreshed. In Dragon Roost Cavern's lava room the Picto Box's window had frozen on the room
+as it was when it was raised.
+
+Patch 0213 (pdale-boop, RecompCore #58): the HD look's effects take the camera the frame began recording with, not
+the one set last when the render worker encodes it. With Smooth Motion the worker often encodes a real frame after
+the game has moved on, and the floor's shading and shadows jumped for one frame when the camera sped up or slowed down.
+
+Patch 0214 (pdale-boop, RecompCore #59): `DOL_AURORA_FRAME_INTERP_PACING=step`, opt-in. At 120 Hz and up, Smooth
+Motion drops one in-between frame at a time when rendering can't keep up and brings them back after a few calm
+seconds; a frame after a long wait no longer counts as a load's fast-forward, and pipeline compiles don't count as
+overload. 60 and 90 Hz keep their rule.
+
+Patch 0215 (pdale-boop, RecompCore #51, 23 commits): Wind Waker HD's light and shadows, measured against HD in Cemu:
+its sun shadow pass, facing term, bias and cascades, its actor light, bloom, SSAO, rim light, cloud shadows, far blur,
+monotone and fog curve, each behind the host's switches, and a texture pack's `optional/` folders loaded and dropped
+while running. Its merge keeps #63's copy bindings and #65's texture report beside its own changes (the merge's
+message).
+
+Patch 0216 (pdale-boop, RecompCore #64): with Smooth Motion, a HUD sprite is not paired with a copy more than 1.4 times
+its size. The last heart's beat draws a copy of it that grows to 1.65 times and fades; the heart had been paired with
+the grown copy and drawn that big in its in-between frames, once a beat.
+
+Patch 0217 (irregularthanis, RecompCore #54, 13 commits): `DOL_AURORA_CLOUD_NOISE_TEXTURE` bakes the HD look's cloud
+noise once into a texture around the camera, and `DOL_AURORA_AO_PACKED` keeps each quarter-size occlusion texel's
+distance beside its shade, both opt-in. Its merge with #51's post_fx.cpp is irregularthanis's own, from his Steam Deck
+test of the two together (`test/hd-light-51-with-54`, `d2cf074e`).
+
+
+Patch 0218 (Chris, on the batch): #65's count of what a pack loaded and its `DOL_AURORA_TEXTURE_PACK_SKIP` read #51's
+`gx_aurora::g_texture_pack_optional` (the optional folders, which can now load and drop while running) instead of the
+local list #51 replaced. Without it the batch didn't compile. A folder loaded later while running still brings its own
+files.
+

@@ -8,25 +8,30 @@ effect the next time BlueWake starts, and none of them changes your saves.
 | --- | --- | --- |
 | Widescreen 16:9 | The community 16:9 code (Dolphin's GZLE01 Gecko code): a wider field of view with the HUD placed for 16:9, letterboxed on a 4:3 iPad | Nothing; it is built in |
 | Widescreen 16:10 | The same code with its aspect-dependent values recomputed for 16:10 (Mac displays, most iPads' shape is closer to it); one widescreen mod at a time | Nothing; it is built in |
-| Widescreen 21:9 | The same code recomputed for 21:9 ultrawide desktop displays (Windows, Linux, Mac) | Nothing; it is built in |
+| Widescreen 21:9 | The same code recomputed for 21:9 ultrawide desktop displays (Windows, Linux, Mac). It is 21/9 = 2.3333, which no panel is: on a 2560x1080 or 3440x1440 monitor it leaves a thin black bar beside the picture | Nothing; it is built in |
+| Widescreen 21:9 · 2560x1080 | The same code recomputed for the 2.3704 shape most 2560x1080 ultrawides are, so the picture reaches the edges (Windows, Linux, Mac) | Nothing; it is built in |
+| Widescreen 21:9 · 3440x1440 | The same code recomputed for the 2.3889 shape 3440x1440 ultrawides are (Windows, Linux, Mac) | Nothing; it is built in |
 | Native cutscene framing | In widescreen, cutscenes fill the screen instead of a strip between black bars, as Wind Waker HD shows them, and the opening legend keeps its shape instead of being stretched (Windows, Linux, Mac) | Nothing; it is built in |
 | HD Textures | Replaces the game's textures with a Dolphin-format pack, such as [Hypatia's HD pack](https://forums.dolphin-emu.org/Thread-hypatia-s-tloz-the-wind-waker-hd-pack-v2-0001a) or [the textures from your own Wind Waker HD disc](WWHD_TEXTURES.md) | The pack's `tex1_…` images: on iPhone and iPad in `Documents/BlueWake/Load/Textures/GZLE01` (Install Texture Pack… copies them there); on the desktop, any folder picked with Choose texture pack folder… |
-| Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart. With them, BlueWake's own sea compass switch: on, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD; and its shorter Triforce quest: five chests that held Triforce Charts give their shards, as in Wind Waker HD | Nothing; it is built in |
+| Better Wind Waker | [Better Wind Waker](https://github.com/WideBoner/betterww)'s quality-of-life changes from Wind Waker HD, each its own setting: Swift or Brisk Sail, instant text, faster rolling, grappling, block pushing, climbing and crawling, Tingle Chests without the Tuner, an unrestricted boat, no song replays, turning while swinging, a faster Ballad of Gales, skipping the opening movie, an inverted camera, a revealed sea chart. With them, BlueWake's own switches: the sea compass (on, the red end points the way you're sailing, on a north-up dial, as in Wind Waker HD); no heart pulsing, where the HUD's heart no longer beats and its low-health beat with it; and its shorter Triforce quest: five chests that held Triforce Charts give their shards, as in Wind Waker HD | Nothing; it is built in |
 
 On the iPad, `Documents/BlueWake` is **On My iPad › BlueWake › BlueWake** in the Files app.
 
 ## Installing
 
 **Widescreen:** on iPhone and iPad, turn on *Widescreen 16:9* or *Widescreen 16:10* (turning one on turns
-the other off); on Mac, Windows and Linux, pick 16:10, 16:9 or 21:9 in **F1 › Mods › Widescreen**. Then
+the other off); on Mac, Windows and Linux, pick 16:10, 16:9, 21:9 or one of the two 2560x1080 / 3440x1440
+presets in **F1 › Mods › Widescreen**. Then
 restart BlueWake. The 16:10 code is generated from the 16:9 one by `scripts/mods/widescreen_aspect.py`:
 each value it changes (the camera aspect, which also widens the game's view culling, the 2D bounds, HUD
 and map positions, a few instruction immediates) is interpolated between the game's 4:3 value and the
 16:9 value, and the three HUD constants it loads from the game's pool take the nearest pool value. The 21:9
 code is generated the same way, with the 16:9 change carried on 2.25 times as far (its pool constants land
 within half a pixel); the HUD elements the 16:9 code leaves in place stay where the 4:3 game puts them, so
-at 21:9 they sit further in from the edges. On the desktop hosts, `BLUEWAKE_ASPECT=16:10`, `16:9` or
-`21:9` (the menu's aspect setting, or `--aspect`) selects the mod and the frame buffer shape together.
+at 21:9 they sit further in from the edges. The 2560x1080 (`64:27`) and 3440x1440 (`43:18`) presets are
+generated the same way at t = 2.3333 and 2.375, and take the nearest pool constant to each value their wider
+HUD wants. On the desktop hosts, `BLUEWAKE_ASPECT=16:10`, `16:9`, `21:9`, `64:27` or `43:18` (the menu's
+aspect setting, or `--aspect`) selects the mod and the frame buffer shape together.
 At 21:9 the picture is no taller than 4:3's, so the follow camera starts one wheel notch further back
 (`BLUEWAKE_CAMERA_DISTANCE`, 1.12 there and 1 otherwise; the wheel still moves it from there). At the default 3× render resolution 16:9
 renders 2560×1440 and 16:10 2304×1440 (the 4:3 picture's height, widened), so the game's letterbox bars line up with the scene;
@@ -50,7 +55,21 @@ each part does.
 memory. Copy the folder of `tex1_…` images (in Hypatia's pack, the `GZL` folder) into
 `Load/Textures/GZLE01`, turn on *HD Textures* and restart. Subfolders are searched, `_mipN`
 sidecar mipmaps are used, and PNG and DDS files both work. The menu shows how many textures it found. On the desktop, **Choose texture pack folder…** uses a
-pack where it is, with nothing copied.
+pack where it is, with nothing copied, and the line under the count says how many the renderer loaded when BlueWake
+started (none, in red, when no file is named like a GZLE01 texture).
+
+Two switches under it, on Mac, Linux and Windows, both off until turned on and both for the next launch:
+
+- **Keep the game's shading tables** leaves out a pack's files for the 37 textures the game shades with rather than
+  draws (its toon tables: light and shadow thresholds, metal and ice ramps; `runtime/host/src/texture_pack_tables.h`).
+  Hypatia's pack replaces 15 of them, 12 as faithful enlargements; three differ: its shadow threshold table shrinks
+  the shadow in Link's hair and makes its edge jagged, a rock's ramp is solid where the game's fades, and the
+  Chuchu's ramp is lighter. With the switch on, the game's own tables stay and the rest of the pack is unchanged. `BLUEWAKE_TEXTURE_PACK_KEEP_TABLES=1`; Aurora's `DOL_AURORA_TEXTURE_PACK_SKIP` takes
+  any list of `tex1_…` names.
+- **Save the textures the pack lacks** is for pack makers: each texture the game draws that the pack has no file for
+  is named once in the log (`texture_replacement: missing runtime key … file=tex1_….dds`) and saved as an editable
+  `.dds` in `texture_dumps`, in BlueWake's data folder, ready to paint or upscale and put in the pack under that name.
+  `BLUEWAKE_TEXTURE_DUMPS=1`; `DOL_AURORA_TEXTURE_REPORT_MISSING=1` alone logs the names without saving files.
 
 You can also [import compatible textures from your own Wii U Wind Waker HD
 disc](WWHD_TEXTURES.md). The local importer creates a Dolphin-format pack;
@@ -100,8 +119,9 @@ values and changed message data. BlueWake does the same things at runtime, from
 - **Option sites.** The instructions a setting changes (a `nop`, a branch made unconditional, a
   different constant) are listed with the setting's switch. DolRecomp's `--option-sites` translates each
   site both ways and picks one by `dolrecomp_option_flags[switch]` at run time, so the game is translated
-  once for every combination of settings. Only the 16 chunks that hold a site differ from the base
-  translation; they are the `betterww` mod's variants (3 more combine with a widescreen mod).
+  once for every combination of settings. Only the chunks that hold a site differ from the base
+  translation (13 of main.dol's 206 chunks with the current list); they are the `betterww` mod's
+  variants (3 more combine with a widescreen mod).
 - **Native code.** What Better Wind Waker's added assembly did is C in `runtime/host/src/game_options.c`,
   called from hook sites: turning with the stick while swinging on a rope, negating the camera's
   C-stick axis, turning the wind to blow from behind King of Red Lions (through the game's own

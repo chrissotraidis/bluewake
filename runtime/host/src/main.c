@@ -1,5 +1,6 @@
 #include "gxruntime/boot.h"
 #include "gxruntime/aurora_backend.h"
+#include "texture_pack_tables.h"
 #include "gxruntime/headless_backend.h"
 #include "feature_dispatch.h"
 #include "stage_select.h"
@@ -1122,9 +1123,11 @@ static void host_mods_enable(void* lib, CPUState* cpu) {
             g_options_mod = true;
     }
     // The widescreen mods patch the same code for different shapes; the
-    // composite has no variant for two of them. If asked for more than one,
-    // the first of these is kept: 21:9, then 16:10, then 16:9.
-    static const char* const kWidescreens[] = {"widescreen219", "widescreen1610", "widescreen"};
+    // composite has no variant for more than one of them. If asked for more
+    // than one, the first of these is kept: the widest first, so 43:18, then
+    // 64:27, 21:9, 16:10 and 16:9.
+    static const char* const kWidescreens[] = {"widescreen4318", "widescreen6427", "widescreen219",
+                                               "widescreen1610", "widescreen"};
     const char* kept = NULL;
     for (size_t w = 0; w < sizeof kWidescreens / sizeof kWidescreens[0]; ++w) {
         for (u32 i = 0; i < available && name != NULL; ++i) {
@@ -6759,8 +6762,9 @@ static bool host_bundle_defaults(char* module, size_t module_size) {
 #endif
 }
 
-/* BLUEWAKE_ASPECT: the picture's shape. 4:3 is the game's own; 16:10, 16:9 and
-   21:9 turn on the matching widescreen mod (a wider camera, culling and HUD) and
+/* BLUEWAKE_ASPECT: the picture's shape. 4:3 is the game's own; 16:10, 16:9,
+   21:9, 64:27 (2560x1080) and 43:18 (3440x1440) turn on the matching widescreen
+   mod (a wider camera, culling and HUD) and
    ask the renderer for a frame buffer of that shape (DOL_AURORA_ASPECT_RATIO),
    which also sizes the window unless DOL_AURORA_WINDOW does. Explicit
    BLUEWAKE_MODS or DOL_AURORA_ASPECT_RATIO settings are kept. */
@@ -6787,8 +6791,19 @@ static void host_apply_aspect(void) {
         // look further up or down): the follow camera starts a little
         // further back, as one notch of the wheel out would put it.
         setenv("BLUEWAKE_CAMERA_DISTANCE", "1.12", 0);
+    } else if (strcmp(aspect, "64:27") == 0 || strcmp(aspect, "43:18") == 0) {
+        // The two shapes ultrawide monitors actually are: 2560x1080 and
+        // 3440x1440. 21:9 is 21/9 = 2.3333, which is 40 pixels of black bars
+        // beside the picture on a 3440x1440 panel; these are the panels' own
+        // ratios, so the picture reaches the edge. Same rule as 21:9 for the
+        // camera and the crop.
+        const bool pane = strcmp(aspect, "43:18") == 0;
+        mod = pane ? "widescreen4318" : "widescreen6427";
+        ratio = pane ? "2.3889" : "2.3704";
+        crop = pane ? 24.f / 43.f : 9.f / 16.f;
+        setenv("BLUEWAKE_CAMERA_DISTANCE", "1.12", 0);
     } else {
-        fprintf(stderr, "[aspect] unknown BLUEWAKE_ASPECT=%s (4:3, 16:10, 16:9 or 21:9); keeping 4:3\n", aspect);
+        fprintf(stderr, "[aspect] unknown BLUEWAKE_ASPECT=%s (4:3, 16:10, 16:9, 21:9, 64:27 or 43:18); keeping 4:3\n", aspect);
         return;
     }
     setenv("DOL_AURORA_ASPECT_RATIO", ratio, 0);
@@ -6885,6 +6900,9 @@ static HostStateRequest g_state_requests[HOST_STATE_MAX_REQUESTS];
 static u32 g_state_request_count;
 static volatile bool g_state_hotkey_save;
 static volatile bool g_state_hotkey_load;
+// The menu's save state slots (1..BLUEWAKE_STATE_SLOTS): the slot the pending
+// save or load is for, 0 for F5's quick-<retrace> file and F8's last state.
+static volatile int g_state_hotkey_slot;
 static bool g_state_save_armed;
 static u64 g_state_armed_retrace;
 static u64 g_state_poll_retrace = UINT64_MAX;
@@ -7511,6 +7529,42 @@ static bool host_state_latest(char* out, size_t size) {
     return found;
 }
 
+// A menu slot's file: slot-N.bwstate beside the quick states.
+static bool host_state_slot_path(int slot, char* out, size_t size) {
+    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
+        return false;
+    return snprintf(out, size, "%s/slot-%d.bwstate", host_state_dir(), slot) < (int)size;
+}
+
+// The menu's Save / Load for one slot, at the game's next clean point, as F5 / F8.
+void bluewake_save_state_slot(int slot, bool load) {
+    if (slot < 1 || slot > BLUEWAKE_STATE_SLOTS)
+        return;
+    g_state_hotkey_slot = slot;
+    if (load)
+        g_state_hotkey_load = true;
+    else
+        g_state_hotkey_save = true;
+}
+
+bool bluewake_state_slot_info(int slot, char* when, size_t size) {
+    char path[1100];
+    struct stat info;
+    if (!host_state_slot_path(slot, path, sizeof path) || stat(path, &info) != 0 || !S_ISREG(info.st_mode))
+        return false;
+    if (when != NULL && size != 0) {
+        const time_t taken = info.st_mtime;
+        struct tm local;
+#if defined(_WIN32)
+        localtime_s(&local, &taken);
+#else
+        localtime_r(&taken, &local);
+#endif
+        strftime(when, size, "%Y-%m-%d %H:%M", &local);
+    }
+    return true;
+}
+
 // BLUEWAKE_STATE_TEST_LOAD=retrace (testing only): F8 at that retrace, once.
 static u64 g_state_test_load_retrace;
 static bool g_state_test_load_done;
@@ -7585,6 +7639,7 @@ unsigned bluewake_status_read(char* text, size_t size) {
 
 // F5 / F8 from the window's event observer (mouse_camera.c), main thread.
 void bluewake_save_state_hotkey(bool load) {
+    g_state_hotkey_slot = 0;
     if (load)
         g_state_hotkey_load = true;
     else
@@ -7662,11 +7717,19 @@ static void host_state_try_save(CPUState* cpu, const StaticRecompModuleDesc* mod
     }
     if (g_state_hotkey_save) {
         g_state_hotkey_save = false;
+        const int slot = g_state_hotkey_slot;
         char path[1100];
         mkdir(host_state_dir(), 0755);
-        snprintf(path, sizeof path, "%s/quick-%llu.bwstate", host_state_dir(),
-                 (unsigned long long)g_host_retrace_count);
-        bluewake_status_post(host_state_save(path, cpu, mod, loop) ? "State saved" : "State not saved");
+        if (slot > 0) {
+            char text[48];
+            const bool saved = host_state_slot_path(slot, path, sizeof path) && host_state_save(path, cpu, mod, loop);
+            snprintf(text, sizeof text, saved ? "Saved to slot %d" : "Slot %d not saved", slot);
+            bluewake_status_post(text);
+        } else {
+            snprintf(path, sizeof path, "%s/quick-%llu.bwstate", host_state_dir(),
+                     (unsigned long long)g_host_retrace_count);
+            bluewake_status_post(host_state_save(path, cpu, mod, loop) ? "State saved" : "State not saved");
+        }
     }
     g_state_save_armed = false;
 }
@@ -7687,7 +7750,25 @@ static inline void host_state_turn(CPUState* cpu, const StaticRecompModuleDesc* 
         if (g_state_hotkey_load) {
             g_state_hotkey_load = false;
             const char* unsafe = host_state_unsafe_reason(cpu, loop);
-            if (g_state_last_path[0] == '\0' &&
+            const int slot = g_state_hotkey_slot;
+            char slot_path[1100];
+            if (slot > 0) {
+                char text[48];
+                if (!bluewake_state_slot_info(slot, NULL, 0) ||
+                    !host_state_slot_path(slot, slot_path, sizeof slot_path)) {
+                    fprintf(stderr, "[state] load: slot %d is empty\n", slot);
+                    snprintf(text, sizeof text, "Slot %d is empty", slot);
+                } else if (unsafe != NULL) {
+                    fprintf(stderr, "[state] load: not now (%s)\n", unsafe);
+                    snprintf(text, sizeof text, "Slot %d not loaded: the game was busy", slot);
+                } else if (!host_state_load(slot_path, cpu, mod, loop)) {
+                    fprintf(stderr, "[state] load failed; the machine may be inconsistent\n");
+                    snprintf(text, sizeof text, "Slot %d not loaded", slot);
+                } else {
+                    snprintf(text, sizeof text, "Slot %d loaded", slot);
+                }
+                bluewake_status_post(text);
+            } else if (g_state_last_path[0] == '\0' &&
                 !host_state_latest(g_state_last_path, sizeof g_state_last_path)) {
                 fprintf(stderr, "[state] load: no state in %s yet (F5 saves one)\n", host_state_dir());
                 bluewake_status_post("No state yet (F5 saves one)");
@@ -7708,10 +7789,34 @@ static inline void host_state_turn(CPUState* cpu, const StaticRecompModuleDesc* 
         host_state_try_save(cpu, mod, loop, retrace_boundary);
 }
 
+// BLUEWAKE_NO_GAMESCOPE_WSI took effect (set at the top of main, read where vsync is chosen).
+static bool g_host_no_gamescope_wsi;
+
 int main(int argc, char** argv) {
     // The options menu's saved choices, before anything reads the environment.
     bluewake_settings_load();
     host_apply_aspect();
+#if defined(__linux__) && !defined(__ANDROID__)
+    // BLUEWAKE_NO_GAMESCOPE_WSI=1 (Config > Performance): present through Xwayland with FIFO and
+    // four swap-chain images instead of gamescope's Vulkan WSI layer. In Steam Deck Game Mode the
+    // layer held the game in present ~100 ms a second at a busy Outset view with Smooth Motion
+    // (26.3-27.3 game frames a second; 29.9-30.0 this way, presents 16.7 ms apart, spread 0.7 ms).
+    // Mailbox through Xwayland was as fast but felt choppy: a newer frame replaced one not yet
+    // shown. FIFO shows each frame; the fourth image keeps it from holding the game, as three did
+    // (27.8). The Vulkan loader and Mesa read these when the renderer starts Vulkan, so they are
+    // set here, before anything does (#586). A value set before BlueWake starts wins.
+    g_host_no_gamescope_wsi = false;
+    {
+        const char* no_wsi = getenv("BLUEWAKE_NO_GAMESCOPE_WSI");
+        if (no_wsi != NULL && no_wsi[0] == '1' && getenv("GAMESCOPE_WAYLAND_DISPLAY") != NULL) {
+            setenv("ENABLE_GAMESCOPE_WSI", "0", 1);
+            setenv("vk_x11_override_min_image_count", "4", 0);
+            g_host_no_gamescope_wsi = true;
+            fprintf(stderr, "[present] gamescope's WSI layer off: FIFO through Xwayland, %s swap-chain images\n",
+                    getenv("vk_x11_override_min_image_count"));
+        }
+    }
+#endif
 #if defined(__APPLE__) || defined(__ANDROID__)
     // Draw fusion (RecompCore patch 0166, Elliott Tate): a display list's strips
     // as one draw, a tenth of the draws. On for Windows and Linux, where it has
@@ -8064,14 +8169,38 @@ int main(int argc, char** argv) {
         if (getenv("WAYLAND_DISPLAY") != NULL)
             vsync = false;
 #endif
+        // BLUEWAKE_PRESENT_MAILBOX=1 (Config > Performance): Mailbox wherever BlueWake runs.
+        // Under gamescope (Steam Deck Game Mode) the FIFO wait holds the game thread the same
+        // way: with Smooth Motion presenting twice a game frame, two of the three swapchain
+        // images are always queued, and a frame that runs late waits for a vblank. Measured
+        // on a Steam Deck at 3x with the HD look: 27.3 -> 30.0 game frames a second (#586).
+        const char* mailbox_env = getenv("BLUEWAKE_PRESENT_MAILBOX");
+        // Not with gamescope's layer off: Mailbox through Xwayland drops in-between frames.
+        if (mailbox_env != NULL && mailbox_env[0] == '1' && !g_host_no_gamescope_wsi)
+            vsync = false;
         if (vsync_env != NULL && vsync_env[0] != '\0')
             vsync = vsync_env[0] != '0';
+        const char* dumps_env = getenv("BLUEWAKE_TEXTURE_DUMPS");
+        const bool texture_dumps = dumps_env != NULL && dumps_env[0] == '1';
+        if (texture_dumps) {
+            // With the dumps, the log names each missing texture's file once.
+            setenv("DOL_AURORA_TEXTURE_REPORT_MISSING", "1", 0);
+        }
+        // BLUEWAKE_TEXTURE_PACK_KEEP_TABLES=1 (Mods: "Keep the game's shading
+        // tables"): a pack's files for the game's toon tables are left out, so
+        // the game shades with its own (texture_pack_tables.h).
+        const char* keep_tables = getenv("BLUEWAKE_TEXTURE_PACK_KEEP_TABLES");
+        if (keep_tables != NULL && keep_tables[0] == '1')
+            setenv("DOL_AURORA_TEXTURE_PACK_SKIP", BLUEWAKE_TOON_TABLES, 0);
         const AuroraBackendConfig aurora_config = {
             .app_name = "BlueWake",
             .window_width = 960u,
             .window_height = 720u,
             .vsync = vsync,
-            .allow_texture_dumps = false,
+            /* BLUEWAKE_TEXTURE_DUMPS=1 (Mods: "Save the textures the pack lacks"):
+               each texture the pack misses is written once as an editable DDS
+               under the cache folder's texture_dumps. */
+            .allow_texture_dumps = texture_dumps,
             .info_logging = true,
             .graphics_logging = getenv("DOL_AURORA_RECOMP_GRAPHICS_LOG") != NULL,
             .force_untextured = false,
