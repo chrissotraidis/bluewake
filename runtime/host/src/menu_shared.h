@@ -250,8 +250,10 @@ inline void bw_menu_tooltip(const char* text) {
 }
 
 // A slider with its name above it and the bar the full width, which a
-// controller nudges left and right a twentieth of its range at a time.
-inline bool bw_menu_slider(const char* label, float* value, float low, float high, const char* format) {
+// controller nudges left and right a twentieth of its range at a time, or a
+// step at a time when it has steps (a drag lands on one too).
+inline bool bw_menu_slider(const char* label, float* value, float low, float high, const char* format,
+                           float step = 0.f) {
     ImGui::PushID(label);
     ImGui::TextWrapped("%s", label);
     ImGui::SetNextItemWidth(-1.f);
@@ -264,10 +266,12 @@ inline bool bw_menu_slider(const char* label, float* value, float low, float hig
     bool changed = ImGui::SliderFloat("##value", value, low, high, format);
     if (cursor_on)
         ImGui::PopStyleColor();
-    if (const int step = bw_menu_slider_nudge()) {
-        *value = std::clamp(*value + static_cast<float>(step) * (high - low) / 20.f, low, high);
+    if (const int nudge = bw_menu_slider_nudge()) {
+        *value = std::clamp(*value + static_cast<float>(nudge) * (step > 0.f ? step : (high - low) / 20.f), low, high);
         changed = true;
     }
+    if (changed && step > 0.f)
+        *value = std::clamp(low + std::round((*value - low) / step) * step, low, high);
     ImGui::PopID();
     return changed;
 }

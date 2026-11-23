@@ -9,6 +9,7 @@
 #pragma once
 #include <imgui.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -61,8 +62,18 @@ inline bool draw_slider(const bw_settings::Setting& s) {
     float value = std::strtof(get(s.key, fallback_text).c_str(), nullptr);
     if (!(value > 0.f))
         value = fallback;
-    if (!bw_menu_slider(s.label, &value, s.low, s.high, s.shown != nullptr ? s.shown : "%.2f"))
+    const char* format = s.shown != nullptr ? s.shown : "%.2f";
+    // A factor's bar moves over the factor shown, a step at a time; the file
+    // keeps the stored value nearest it.
+    if (s.doubles_every > 0.f) {
+        float factor = bw_settings::factor_shown(s, value);
+        if (!bw_menu_slider(s.label, &factor, bw_settings::factor_low(s), bw_settings::factor_high(s), format,
+                            s.step))
+            return false;
+        value = bw_settings::factor_stored(s, factor);
+    } else if (!bw_menu_slider(s.label, &value, s.low, s.high, format, s.step)) {
         return false;
+    }
     char text[24];
     std::snprintf(text, sizeof text, s.stored != nullptr ? s.stored : "%.3f", value);
     put(s.key, text);

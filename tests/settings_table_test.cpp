@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <cstddef>
 #include <cstring>
@@ -119,6 +120,26 @@ int main() {
     assert(find("BLUEWAKE_NOT_A_SETTING") == nullptr);
     assert(default_on(*find("BLUEWAKE_MOUSE_CAMERA")) && !default_on(*find("BLUEWAKE_HD_LOOK")));
     assert(std::strcmp(find("BLUEWAKE_ASPECT")->old_windows, "aspect") == 0);
+    // Where the distance blur starts reads as RecompCore's factor, 2^(3.5 * value / 100)
+    // (#598): 1.00x to 10.00x a quarter at a time; the file keeps whole numbers.
+    const Setting* dof_start = find("DOL_AURORA_GAME_DOF_START");
+    assert(dof_start != nullptr && dof_start->control == Control::Slider && dof_start->step == 0.25f);
+    assert(std::fabs(dof_start->doubles_every * 3.5f - 100.f) < 0.01f && std::strcmp(dof_start->stored, "%.0f") == 0);
+    assert(factor_low(*dof_start) == 1.f && factor_high(*dof_start) == 10.f);
+    // Every step keeps a stored value of its own, in order, that reads back as that step.
+    float last = -1.f;
+    for (int k = 0; k <= 36; ++k) {
+        const float factor = 1.f + 0.25f * static_cast<float>(k);
+        const float stored = factor_stored(*dof_start, factor);
+        assert(stored > last && stored <= dof_start->high);
+        assert(factor_shown(*dof_start, stored) == factor);
+        last = stored;
+    }
+    assert(factor_stored(*dof_start, 10.f) == 95.f);
+    // A value saved before the steps (57 was 3.99x; 100, past the new top) shows the nearest step.
+    assert(factor_shown(*dof_start, 57.f) == 4.f && factor_shown(*dof_start, 100.f) == 10.f);
+    for (const Setting& s : kSettings)
+        assert((s.doubles_every == 0.f && s.step == 0.f) || s.control == Control::Slider);
     const Setting* pacing = find("DOL_AURORA_FRAME_INTERP_PACING");
     assert(pacing != nullptr && pacing->kind == Kind::Choice && pacing->control == Control::Chooser);
     assert(std::strcmp(fallback_for(*pacing), "") == 0 && next_launch_on(*pacing));
