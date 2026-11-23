@@ -1,6 +1,5 @@
 #include "turbo.h"
 
-#include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_keyboard.h>
 
 #include <stdio.h>
@@ -33,7 +32,7 @@ static double g_factor = 3.0;
 // BLUEWAKE_TURBO_TEST=retrace:length (testing only): held meanwhile, so the
 // speed-up can be timed without a keyboard.
 static unsigned long long g_test_start, g_test_length;
-static bool g_held;    // Tab, or a controller's right stick, down this retrace
+static bool g_held;    // Tab down this retrace
 static bool g_was_held;
 static unsigned long long g_retrace;
 
@@ -61,7 +60,7 @@ void bluewake_turbo_attach(void) {
     bluewake_turbo_reload();
     if (g_on && g_factor > 1.0)
         fprintf(stderr,
-                "[turbo] hold Tab (or the right stick's click) to run %.2fx faster; "
+                "[turbo] hold Tab to run %.2fx faster; "
                 "the sound is skipped while it is held\n",
                 g_factor);
 }
@@ -72,28 +71,13 @@ static bool tab_held(void) {
     return keys != NULL && count > SDL_SCANCODE_TAB && keys[SDL_SCANCODE_TAB];
 }
 
-// Any connected controller's right stick click. A GameCube pad has no such
-// button, so it collides with nothing the game reads.
-static bool pad_held(void) {
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    bool held = false;
-    for (int i = 0; ids != NULL && i < count && !held; ++i) {
-        SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
-        if (pad != NULL && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK))
-            held = true;
-    }
-    SDL_free(ids);
-    return held;
-}
-
 void bluewake_turbo_retrace(void) {
     ++g_retrace;
     if (!g_on || g_factor <= 1.0) {
         g_held = false;
         return;
     }
-    g_held = tab_held() || pad_held() ||
+    g_held = tab_held() ||
              (g_retrace >= g_test_start && g_retrace < g_test_start + g_test_length);
     if (g_held != g_was_held) {
         g_was_held = g_held;

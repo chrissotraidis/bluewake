@@ -242,12 +242,14 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_SPRINT_CHOICE", .old_windows = "sprint_speed", .kind = Kind::Float, .fallback = "1.5",
      .low = 1.1f, .high = 2.f, .label = "Sprint speed", .tab = Tab::Gameplay, .needs = "BLUEWAKE_JUMP_BUTTON",
      .shown = "%.2fx", .stored = "%.2f"},
-    // Holding Tab (or a controller's right stick click) runs the game faster
-    // than realtime; turbo.c divides the retrace pace and skips the sound.
+    // Holding Tab runs the game faster than realtime; turbo.c divides the
+    // retrace pace and skips the sound. Tab only: the right stick's click is
+    // first person and its hold is the controller zoom, so the pad stays the
+    // game's (the maintainer's review of #629).
     {.key = "BLUEWAKE_TURBO", .kind = Kind::Bool,
-     .label = "Speed up while the key is held (Tab, or the right stick's click)",
+     .label = "Speed up while Tab is held",
      .tab = Tab::Gameplay, .control = Control::Custom,
-     .note = "Runs the game faster than realtime for as long as the key is held: the picture keeps up, and "
+     .note = "Runs the game faster than realtime for as long as Tab is held: the picture keeps up, and "
              "the sound is skipped while it is held and starts again when it is let go. Off by default.",
      .group = "Speed up"},
     {.key = "BLUEWAKE_TURBO_SPEED", .kind = Kind::Float, .fallback = "3", .low = 1.5f, .high = 5.f,

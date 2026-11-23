@@ -672,7 +672,7 @@ bool draw_custom(const bw_settings::Setting& s) {
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_TURBO") == 0) {
-        // Speed up while the key is held, with its factor under it. The factor
+        // Speed up while Tab is held, with its factor under it. The factor
         // is written always, so turning the switch off and on again keeps it.
         bool on = env_on(s.key, false);
         float factor = static_cast<float>(std::atof(env("BLUEWAKE_TURBO_SPEED", "3").c_str()));
@@ -694,7 +694,7 @@ bool draw_custom(const bw_settings::Setting& s) {
         ImGui::EndDisabled();
         ImGui::EndGroup();
         if (!on)
-            bw_menu::greyed_why("Turn on \"Speed up while the key is held\" to change this.");
+            bw_menu::greyed_why("Turn on \"Speed up while Tab is held\" to change this.");
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_JUMP_BUTTON") == 0) {

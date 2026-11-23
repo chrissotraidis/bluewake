@@ -7,10 +7,11 @@
 extern "C" {
 #endif
 
-// Holding Tab — or a controller's right stick click, which the GameCube
-// mapping leaves free — runs the game faster than realtime: each retrace is
-// paced that much closer to the last, and the sound is skipped while it is
-// held (see turbo.c for why that is the half that decides the speed).
+// Holding Tab runs the game faster than realtime — Tab only: a controller's
+// right stick click is first person, and its hold is the controller zoom, so
+// the pad stays the game's. Each retrace is paced that much closer to the
+// last, and the sound is skipped while it is held (see turbo.c for why that is
+// the half that decides the speed).
 //
 //   BLUEWAKE_TURBO=1                   the switch (the menu's, settings.ini)
 //   BLUEWAKE_TURBO_SPEED=3             how many times realtime (1: off)
