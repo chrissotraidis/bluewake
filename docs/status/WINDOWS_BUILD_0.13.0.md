@@ -167,21 +167,46 @@ AppImage out as `/mnt/c/BlueWake-private/BlueWake-v0.13.0-linux-x86_64.AppImage`
 
 ## Results
 
-To be filled in by the agent.
+Completed on CHRIS-MINI, a Windows 11 PC with a Ryzen 7 5700U and AMD Radeon graphics, with Ubuntu under WSL 2 for Linux. The
+desktop candidate uses freeze `bb790d49` plus [#646](https://github.com/chrissotraidis/bluewake/pull/646), a Windows builder
+change that affects the instrumented training DLL. The first build failed with Windows loader error 193: its x64
+PE image was 2,182,811,648 bytes, above the 2 GiB limit. At `-O1` the training image was 1,055,281,152 bytes and both
+opening playbacks and the five tour playbacks completed. The final Windows module used the resulting profile, its usual
+optimization settings and all the mod variants. Windows host CI, Linux host/AppImage CI, audit, attribution and
+sanitizer checks passed for the builder fix.
 
 | | |
 | --- | --- |
-| Commit built | |
-| Build time, jobs, clang, RecompCore, provenance, mod variants | |
-| Module SHA-256 | |
-| Speed: 0.12.0 and 0.13.0 per stop, checkpoints | |
-| a. Start and look | |
-| b. Heat haze and the Picto Box | |
-| c. The heart | |
-| d. Ultrawide presets | |
-| e. No heart pulsing | |
-| f. Save state slots | |
-| g. The stage select's names | |
-| Zip SHA-256, uploaded to the v0.13.0 draft | |
-| AppImage: build time, clang, audit line, headless start, SHA-256, uploaded | |
+| Commit built | `314b7e8a8ecf29f15e52a64b20a7a096d7e5bf61` (0.13.0 build 14; freeze plus the Windows training fix), both platforms, clean |
+| Build time, jobs, clang, RecompCore, provenance, mod variants | Windows: 1h42m19s for the retry, six jobs, clang 22.1.3, RecompCore `c0f5f918026efe3168bdde42f3af0a55a3325e5e`. The build kept all variants including `widescreen6427` and `widescreen4318` and both Better Wind Waker combinations. The build receipt has `fp_checks: true`, `direct_gate_training: true` and `local_training: true`. The app used its optimization profile. |
+| Module SHA-256 | `20b12eeffd950a5aba7d3d86cdc4d4526957c1773af0aeeeb5642a12e482e079` (matches build receipt) |
+| Speed: 0.12.0 and 0.13.0 per stop, checkpoints | Passed. Four runs in 0.12.0, 0.13.0, 0.13.0, 0.12.0 order from the 0.11.0 tour state. All five stops loaded in each run. All 31 checkpoints matched within and across versions, including CPU cycles, MEM1, MEM2 and aliases. All three slower stop means were within 3% (below). |
+| a. Start and look | Scripted Quest Log 1 at Outset with more than two minutes of movement and camera input. D3D12, draw fusion and gate on; zero fatal lines and a clean menu quit. Human visual acceptance pending. |
+| b. Heat haze and the Picto Box | Scripted Dragon Roost Cavern room 2 camera sweep. Reviewed real and in-between samples at a 60 fps target without an obvious lagging edge. With Smooth Motion on and off, 75 captures per run show the Picto Box follows turns and the monochrome photo preview matches the last aiming view. Both runs exited 0; human visual acceptance pending. |
+| c. The heart | Display-rate runs at 60 presented fps, with automatic Smooth Motion pausing disabled to collect the evidence. Each version produced 301 real and 301 in-between frames over game frames 600–900. 0.12.0's in-between heart exceeded the adjacent real frames roughly every 23 game frames. None of the 300 comparable 0.13.0 in-between frames exceeded their adjacent real frames. |
+| d. Ultrawide presets | Both 16:9 client captures (1024×576) reached Outset and the HUD stayed inside the picture. 43:18 gave bars of 73 and 74 pixels (~12.8% each), and 64:27 gave 72 and 72 (12.5%). Both runs exited 0. An actual ultrawide display was unavailable. |
+| e. No heart pulsing | 42 sampled frames per setting. The glow was visible in the Better Wind Waker control and absent in all samples with `no_heart_pulse`. Both runs exited 0. |
+| f. Save state slots | Automated Windows menu input on a copied card. Slot 2 retained its timestamp after quitting and restarting and restored the same Outset scene from the title screen. An empty slot read Empty and its Load button was disabled. F5 and F8 passed independently, with all 161 host fields restored on both loads. |
+| g. The stage select's names | Unpacked the Windows ZIP after checking all 39 members' CRCs. Its `stage_select/names.tsv` matches the repository byte for byte. The automated F7 session showed the English names. |
+| Zip SHA-256, uploaded to the v0.13.0 draft | `dfc385d4e5f36ef904e5b52223082907661b8770f339184ead5a86a11b0cc12d`; uploaded to the existing draft, GitHub SHA-256 matches. |
+| AppImage: build time, clang, audit line, headless start, SHA-256, uploaded | 2h18m06s including container preparation, six jobs, clang 22.1.8, RecompCore `c0f5f91`. Audit: 14 ELF files; maximum GLIBC_2.38; no private game files. The clean-data headless app reached `title-ready` at retrace 328, ran to retrace 1500 and exited 0, with `gate=on` and no fatal lines. SHA-256 `f8225afa0742a266e81218960e8841737ac861fddc0a99f4137d9948197e84ff`; uploaded to the existing draft, GitHub SHA-256 matches. |
 
+Mean game frames per second from the four-run headless tour (higher is faster).
+
+| Stop | 0.12.0 | 0.13.0 | Change |
+| --- | ---: | ---: | ---: |
+| Outset | 61.63125 | 62.76670 | +1.84% |
+| Windfall | 66.40000 | 65.86590 | −0.80% |
+| Dragon Roost Cavern | 85.63405 | 85.84130 | +0.24% |
+| Forest Haven | 57.98650 | 57.30385 | −1.18% |
+| Sea by the Fortress | 66.78125 | 66.75680 | −0.04% |
+
+Used the versioned build's own dependency licenses for the Windows packager. Moved portable test data out of the app
+folder before packaging. The original card and tour-state hashes matched before and after. Logs, frames, saves, the
+packager's source ZIP and its checksum file stayed on this PC.
+
+The existing v0.13.0 release is still a draft. Only the Windows ZIP and Linux AppImage were added. The draft
+target and existing source ZIP still reference the original freeze. The desktop artifacts use the builder-only
+fix in #646, so the source package and release target need to be reconciled before publication. The Mac
+release-content gate and Chris's hands-on visual review remain open. Linux graphical gameplay was outside this
+handoff's checks.
