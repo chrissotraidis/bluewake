@@ -8,34 +8,26 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
-import android.opengl.EGL14;
-import android.opengl.EGLConfig;
-import android.opengl.EGLContext;
-import android.opengl.EGLDisplay;
-import android.opengl.EGLSurface;
-import android.opengl.GLES20;
-import android.os.Build;
+import android.os.BatteryManager;
 import android.os.PowerManager;
 import android.view.View;
 
 import java.util.Locale;
 
 /**
- * The performance panel: the frame rate and the frame times with a graph of them, and the machine's processor,
- * memory and graphics card — the Android counterpart of the desktop's F9 panel (runtime/host/src/perf_overlay.h,
- * drawn there by desktop_menu.cpp).
+ * The performance bar: one row across the top of the picture, in the shape of the Steam Deck's overlay — the frame
+ * rate with a graph of the frame times beside it, then the processor, the graphics card, memory and the battery, each a
+ * name in its part's colour with the numbers that belong to it.
  *
- * The numbers are perf_monitor.c's, through Shell.nativePerfSnapshot; the shapes are this file's, in the desktop
- * panel's colours and order, in the Android idiom: a rounded translucent plate in the picture's top right corner,
- * over the game and under the menu. A bar under a number is that number's share of something (a load against 100%, a
- * memory against the whole of it, a clock against the card's top, a temperature against 100 C, a frame time against
- * the graph's 50 ms floor).
- *
- * A phone withholds more than a desktop: /proc/stat is denied to apps, so there is no machine-wide load and the row
- * shows the game's own share; the thermal zones are denied too, so the platform's thermal status stands beside the
- * numbers where the temperature would be; and the card publishes no counters, so its clock and the processors' mean
- * clock are what the platform will give. Whatever is left unknown reads "-". The parts' names come from the build and
- * from the driver's own GL renderer, which is also where the card's name comes from when it is not in the panel.
+ * The numbers are perf_monitor.c's, through Shell.nativePerfSnapshot; the shapes are this file's. A bar under a number
+ * is that number's share of something (a load against 100%, a memory against the whole of it, a frame time against the
+ * graph's floor, a battery against full). A part the phone cannot report is left out rather than drawn as a row of
+ * dashes: /proc/stat and the thermal zones are denied to apps, so the processor's number is the game's own share and
+ * its second column is the mean clock of the cores — or the platform's thermal word, in the warning colour, once the
+ * phone is warm enough (moderate or worse; a phone reads "light" for most of a session) — and a card that publishes no
+ * counters loses its part of the bar. The segments are
+ * measured from the widest value each one can print, and the least useful are dropped when the picture is narrow: once
+ * per layout, never per frame, so the bar does not change shape under the eye.
  */
 @SuppressLint("ViewConstructor")
 final class PerfPanelView extends View {
@@ -50,53 +42,65 @@ final class PerfPanelView extends View {
     private static final int GPU = Color.rgb(140, 211, 79);
     private static final int CPU = Color.rgb(47, 150, 204);
     private static final int RAM = Color.rgb(204, 115, 179);
+    private static final int BATT = Color.rgb(209, 209, 219);
     private static final int RATE = Color.rgb(242, 242, 242);
-    private static final int NAME = Color.rgb(209, 209, 219);
-    private static final int DIM = Color.argb(130, 255, 255, 255);
+    private static final int DIM = Color.argb(150, 255, 255, 255);
+    private static final int CAPTION = Color.argb(200, 255, 255, 255);
     private static final int LINE = Color.rgb(237, 194, 84);
+    private static final int WARN = Color.rgb(255, 204, 77);
     /** A value that is a plain number (a memory's total, a status): no bar. */
     private static final float NO_BAR = -1f;
 
+    // The widest each column can print, so a number's growth never moves the row: a share of one core passes 100% on
+    // a phone, a memory's two halves are both below 99.9 GB, and a status word is at most "emergency".
+    private static final String RATE_RESERVE = "888", SHARE_RESERVE = "game 888%", PLAIN_SHARE_RESERVE = "888%",
+            MEMORY_RESERVE = "88.8/88.8 GB", GAME_MEMORY_RESERVE = "game 88.8 GB", CLOCK_RESERVE = "8.8 GHz",
+            SECOND_RESERVE = "emergency", GPU_CLOCK_RESERVE = "8888 MHz";
+
     private final float[] values = new float[FIELDS];
+    /** What Shell.nativePerfSnapshot writes the parts' names into: the bar is too narrow to carry them. */
     private final String[] names = new String[3];
-    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint plate = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint value = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint footer = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint rate = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint dim = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint caption = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Path graph = new Path();
+    private final Paint plot = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path line = new Path();
     private final RectF box = new RectF();
-    private final float dp, row, gap, graphHeight, captionHeight, footerHeight, pad, labelWidth, col1, col2, col3,
-            round;
-    // Which rows this phone can fill at all. Decided from the first numbers, not per frame, so the panel does not
-    // change shape under the eye; a phone that reports no graphics card counters keeps that row out rather than
-    // showing four dashes forever.
-    private boolean decided, showGpu, showVram;
-    // What the platform says about itself: neither name is in sysfs an app may read.
-    private String socName, gpuName, thermal;
-    private boolean probed;
+
+    private final float dp, padX, padY, inner, gap, gapPart, barHeight, radius, maxGraph, minGraph;
+    // What this phone can fill at all, decided from the first numbers: a card with no counters loses its part.
+    private boolean decided, showGpu;
+    // What fits across the picture at this width: the optional columns, and the graph's width within that budget.
+    private boolean fitClock, fitGameMem, fitGpu;
+    private float graphWidth = -1f;
+    private String thermal;
 
     PerfPanelView(Context context) {
         super(context);
         dp = getResources().getDisplayMetrics().density;
-        row = 19f * dp;
-        gap = 4f * dp;
-        graphHeight = 46f * dp;
-        footerHeight = 15f * dp;
-        pad = 10f * dp;
-        labelWidth = 62f * dp;
-        col1 = 62f * dp;
-        col2 = 88f * dp;
-        col3 = 94f * dp;
-        round = 9f * dp;
-        captionHeight = 15f * dp;   // the graph's own line: what it plots, and its top
-        setPaint(label, 12f, "sans-serif-medium", DIM);
+        padX = 10f * dp;
+        padY = 5f * dp;
+        inner = 26f * dp;
+        gap = 14f * dp;
+        gapPart = 4f * dp;
+        barHeight = 3f * dp;
+        radius = 9f * dp;
+        maxGraph = 96f * dp;
+        minGraph = 60f * dp;
+        setPaint(label, 10f, "sans-serif-medium", DIM);
         setPaint(value, 13f, "sans-serif-medium", Color.WHITE);
-        setPaint(footer, 11f, "sans-serif", NAME);
-        setPaint(caption, 11f, "sans-serif", DIM);
-        value.setFontFeatureSettings("tnum");
-        label.setFontFeatureSettings("tnum");
-        footer.setFontFeatureSettings("tnum");
+        setPaint(rate, 17f, "sans-serif-medium", RATE);
+        setPaint(dim, 11f, "sans-serif", DIM);
+        setPaint(caption, 8f, "sans-serif", DIM);
+        setPaint(plot, 1.4f * dp, "sans-serif", LINE);
+        plot.setStyle(Paint.Style.STROKE);
+        for (Paint p : new Paint[] {label, value, rate, dim, caption}) {
+            p.setFontFeatureSettings("tnum");
+        }
+        thermal = thermalWord(context);
     }
 
     private void setPaint(Paint p, float size, String family, int color) {
@@ -105,64 +109,8 @@ final class PerfPanelView extends View {
         p.setColor(color);
     }
 
-    /**
-     * The two names and the thermal status, once: the build names the SoC, the driver names the card, and the power
-     * service gives the thermal status — none of them needs a permission, where sysfs is denied.
-     */
-    private void probe(Context context) {
-        probed = true;
-        if (Build.VERSION.SDK_INT >= 31) {
-            socName = Build.SOC_MODEL;
-        }
-        if (socName == null || socName.isEmpty()) {
-            socName = Build.HARDWARE;
-        }
-        gpuName = glRenderer();
-        thermal = thermalWord(context);
-    }
-
-    /** The card's name from the driver that draws it: an off-screen EGL surface, GL_RENDERER, then teardown. */
-    private String glRenderer() {
-        final EGLDisplay display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-        if (display == EGL14.EGL_NO_DISPLAY) {
-            return null;
-        }
-        final int[] version = new int[2];
-        if (!EGL14.eglInitialize(display, version, 0, version, 1)) {
-            return null;
-        }
-        final EGLConfig[] configs = new EGLConfig[1];
-        final int[] configAttribs = {EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT, EGL14.EGL_NONE};
-        if (!EGL14.eglChooseConfig(display, configAttribs, 0, configs, 0, 1, new int[1], 0) || configs[0] == null) {
-            EGL14.eglTerminate(display);
-            return null;
-        }
-        final int[] contextAttribs = {EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE};
-        final EGLContext eglContext = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT, contextAttribs, 0);
-        if (eglContext == EGL14.EGL_NO_CONTEXT) {
-            EGL14.eglTerminate(display);
-            return null;
-        }
-        final int[] surfaceAttribs = {EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE};
-        final EGLSurface surface = EGL14.eglCreatePbufferSurface(display, configs[0], surfaceAttribs, 0);
-        String renderer = null;
-        if (surface != EGL14.EGL_NO_SURFACE && EGL14.eglMakeCurrent(display, surface, surface, eglContext)) {
-            renderer = GLES20.glGetString(GLES20.GL_RENDERER);
-            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT);
-        }
-        if (surface != EGL14.EGL_NO_SURFACE) {
-            EGL14.eglDestroySurface(display, surface);
-        }
-        EGL14.eglDestroyContext(display, eglContext);
-        EGL14.eglTerminate(display);
-        return renderer;
-    }
-
     /** The platform's own thermal answer, where the phone's zones are not readable. */
     private static String thermalWord(Context context) {
-        if (Build.VERSION.SDK_INT < 29) {
-            return null;
-        }
         final PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         if (power == null) {
             return null;
@@ -186,7 +134,25 @@ final class PerfPanelView extends View {
         }
     }
 
-    /** Read the numbers again: called on the overlay's half second tick while the panel is shown. */
+    /**
+     * Whether the platform is warm enough that its thermal word says more than the clock: a phone reads "light" for
+     * most of a session, which would cost the clock for nothing, so only moderate and worse take the column.
+     */
+    private boolean warm() {
+        return thermal != null && !thermal.equals("nominal") && !thermal.equals("light");
+    }
+
+    /** The battery's charge, which the platform answers without a permission; -1 where it will not. */
+    private int batteryPercent() {
+        final BatteryManager battery = (BatteryManager) getContext().getSystemService(Context.BATTERY_SERVICE);
+        if (battery == null) {
+            return -1;
+        }
+        final int percent = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+        return percent >= 0 && percent <= 100 ? percent : -1;
+    }
+
+    /** Read the numbers again: called on the overlay's half second tick while the bar is shown. */
     void refresh() {
         try {
             Shell.nativePerfSnapshot(values, names);
@@ -194,14 +160,11 @@ final class PerfPanelView extends View {
             // Before libmain.so is loaded: the next tick reads them.
             return;
         }
-        if (!probed) {
-            probe(getContext());
-        }
+        thermal = thermalWord(getContext());
         if (!decided && known(values[FPS]) && values[FPS] > 0f) {
             decided = true;
-            showGpu = known(values[GPU_PCT]) || known(values[GPU_TEMP]) || known(values[GPU_CLOCK]);
-            showVram = known(values[VRAM_USED]) || known(values[VRAM_TOTAL]);
-            requestLayout();
+            showGpu = known(values[GPU_PCT]) || known(values[GPU_CLOCK]);
+            layoutRow();
         }
         invalidate();
     }
@@ -218,217 +181,252 @@ final class PerfPanelView extends View {
         return String.format(Locale.US, format, a, b);
     }
 
-    /** The card's name: the sampler's if the loader gave it, else the renderer's own. */
-    private String card() {
-        if (names[1] != null && !names[1].isEmpty()) {
-            return names[1];
+    // ---------------------------------------------------------------- the row's budget
+
+    private float text(Paint p, String s) {
+        return p.measureText(s);
+    }
+
+    /** A part's width: its name, then the widest number it can print. */
+    private float part(String title, String reserve) {
+        return text(label, title) + gapPart + text(value, reserve);
+    }
+
+    /** Everything the bar would draw with its current options on, in pixels. */
+    private float rowWidth() {
+        float w = text(label, "FPS") + gapPart + text(rate, RATE_RESERVE);
+        w += gap + graphWidth;
+        w += gap + part("CPU", SHARE_RESERVE);
+        if (fitClock) {
+            w += gapPart + text(dim, SECOND_RESERVE);
         }
-        return gpuName != null && !gpuName.isEmpty() ? gpuName : null;
-    }
-
-    /** The processor's name: the sampler's (a Linux sysfs SoC) or the build's. */
-    private String processor() {
-        if (names[0] != null && !names[0].isEmpty()) {
-            return names[0];
+        if (fitGpu) {
+            w += gap + part("GPU", PLAIN_SHARE_RESERVE) + gapPart + text(dim, GPU_CLOCK_RESERVE);
         }
-        return socName != null && !socName.isEmpty() ? socName : null;
+        w += gap + part("RAM", MEMORY_RESERVE);
+        if (fitGameMem) {
+            w += gapPart + text(dim, GAME_MEMORY_RESERVE);
+        }
+        w += gap + part("BATT", PLAIN_SHARE_RESERVE);
+        return w;
     }
 
-    private float panelWidth() {
-        return pad * 2f + labelWidth + col1 + col2 + col3;
-    }
-
-    private int rowCount() {
-        return 3 + (showGpu ? 1 : 0) + (showVram ? 1 : 0);   // CPU, RAM, frame, and the card's rows when it has any
-    }
-
-    private String[] footerLines() {
-        final String[] all = {card(), processor(), thermal != null ? "thermal: " + thermal : null};
-        int n = 0;
-        for (String line : all) {
-            if (line != null && !line.isEmpty()) {
-                ++n;
+    /**
+     * Fits the row to the picture. The segments are measured from the widest value each can print, and the least
+     * useful are dropped in order until the row fits — once per layout, so the bar is fixed for the width it has.
+     */
+    private void layoutRow() {
+        final float available = getWidth() - padX * 2f;
+        if (available <= 0f) {
+            return;
+        }
+        fitClock = true;
+        fitGameMem = true;
+        fitGpu = showGpu;
+        graphWidth = maxGraph;
+        for (int attempt = 0; attempt < 8; attempt++) {
+            if (rowWidth() <= available) {
+                break;
+            }
+            if (fitGameMem) {
+                fitGameMem = false;
+            } else if (fitClock) {
+                fitClock = false;
+            } else if (fitGpu) {
+                fitGpu = false;
+            } else if (graphWidth > minGraph) {
+                graphWidth = Math.max(minGraph, graphWidth - 18f * dp);
+            } else {
+                break;   // nothing left worth dropping: the row is drawn as it is
             }
         }
-        final String[] kept = new String[n];
-        n = 0;
-        for (String line : all) {
-            if (line != null && !line.isEmpty()) {
-                kept[n++] = line;
-            }
-        }
-        return kept;
+        invalidate();
     }
 
-    private float panelHeight() {
-        return pad * 2f + row * rowCount() + gap * 2f + captionHeight + graphHeight
-                + footerHeight * footerLines().length;
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (w != oldw || graphWidth < 0f) {
+            layoutRow();
+        }
     }
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        setMeasuredDimension(panelWidthPx(), panelHeightPx());
+        final int w = MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY
+                ? MeasureSpec.getSize(widthMeasureSpec)
+                : Math.round(maxGraph * 3f);
+        setMeasuredDimension(w, panelHeightPx());
     }
 
-    /** The plate's size in pixels, for the overlay's layout (it is WRAP_CONTENT otherwise). */
-    int panelWidthPx() {
-        return Math.round(panelWidth());
-    }
-
+    /** The bar's height in pixels: one row of numbers and the little bar under each of them. */
     int panelHeightPx() {
-        return Math.round(panelHeight());
+        return Math.round(padY * 2f + inner);
     }
+
+    // ---------------------------------------------------------------- drawing
 
     @Override
     protected void onDraw(Canvas canvas) {
-        final float w = panelWidth();
-        paint.setColor(Color.argb(158, 0, 0, 0));
-        box.set(0f, 0f, w, panelHeight());
-        canvas.drawRoundRect(box, round, round, paint);
-
-        float y = pad;
-        if (showGpu)
-            y = part(canvas, y, "GPU", GPU,
-                    known(values[GPU_PCT]) ? fmt("%.0f%%", values[GPU_PCT]) : null,
-                    known(values[GPU_PCT]) ? values[GPU_PCT] / 100f : NO_BAR,
-                    known(values[GPU_TEMP]) ? fmt("%.0f C", values[GPU_TEMP]) : null,
-                    known(values[GPU_TEMP]) ? values[GPU_TEMP] / 100f : NO_BAR,
-                    known(values[GPU_CLOCK]) ? fmt("%.0f MHz", values[GPU_CLOCK]) : null,
-                    known(values[GPU_CLOCK]) ? values[GPU_CLOCK] / 3000f : NO_BAR);
-        if (showVram)
-            y = part(canvas, y, "VRAM", GPU,
-                    known(values[VRAM_USED]) ? fmt("%.1f GB", values[VRAM_USED] / 1024f) : null,
-                    known(values[VRAM_TOTAL]) && values[VRAM_TOTAL] > 0f ? values[VRAM_USED] / values[VRAM_TOTAL] : NO_BAR,
-                    known(values[VRAM_TOTAL]) ? "of " + fmt("%.1f GB", values[VRAM_TOTAL] / 1024f) : null, NO_BAR,
-                    null, NO_BAR);
-        // The processor: the machine-wide share and the temperature where the platform gives them; where it does not
-        // (a phone), the mean clock of its cores with the fastest of them as the bar's top.
-        final boolean clocked = !known(values[CPU_TEMP]) && known(values[CPU_CLOCK]);
-        y = part(canvas, y, "CPU", CPU,
-                known(values[CPU_TOTAL]) ? fmt("%.0f%%", values[CPU_TOTAL]) : null,
-                known(values[CPU_TOTAL]) ? values[CPU_TOTAL] / 100f : NO_BAR,
-                known(values[CPU_TEMP]) ? fmt("%.0f C", values[CPU_TEMP])
-                        : clocked ? fmt("%.2f/%.1f GHz", values[CPU_CLOCK] / 1000f, values[CPU_CLOCK_MAX] / 1000f) : null,
-                known(values[CPU_TEMP]) ? values[CPU_TEMP] / 100f
-                        : clocked && values[CPU_CLOCK_MAX] > 0f ? values[CPU_CLOCK] / values[CPU_CLOCK_MAX] : NO_BAR,
-                known(values[CPU_GAME]) ? "game " + fmt("%.0f%%", values[CPU_GAME]) : null,
-                known(values[CPU_GAME]) ? values[CPU_GAME] / 100f : NO_BAR);
-        y = part(canvas, y, "RAM", RAM,
-                known(values[RAM_USED]) ? fmt("%.1f GB", values[RAM_USED] / 1024f) : null,
-                known(values[RAM_TOTAL]) && values[RAM_TOTAL] > 0f ? values[RAM_USED] / values[RAM_TOTAL] : NO_BAR,
-                known(values[RAM_TOTAL]) ? "of " + fmt("%.1f GB", values[RAM_TOTAL] / 1024f) : null, NO_BAR,
-                known(values[RAM_GAME]) ? "game " + fmt("%.1f GB", values[RAM_GAME] / 1024f) : null,
-                known(values[RAM_TOTAL]) && values[RAM_TOTAL] > 0f ? values[RAM_GAME] / values[RAM_TOTAL] : NO_BAR);
-        y = part(canvas, y, known(values[FPS]) && values[FPS] > 0f ? fmt("%.0f FPS", values[FPS]) : "-", RATE,
-                known(values[MS_AVG]) ? fmt("%.1f ms", values[MS_AVG]) : null,
-                known(values[MS_AVG]) ? values[MS_AVG] / 50f : NO_BAR,
-                known(values[MS_MAX]) ? fmt("%.1f ms", values[MS_MAX]) : null,
-                known(values[MS_MAX]) ? values[MS_MAX] / 50f : NO_BAR,
-                null, NO_BAR);
-        y += gap;
-        drawGraphCaption(canvas, y, w);
-        y += captionHeight;
-        drawGraph(canvas, y, w);
-        y += graphHeight + gap;
-        // The names last and brighter than a disabled line, as on the desktop: they are the last thing read, and the
-        // game behind them is busy.
-        for (String line : footerLines()) {
-            canvas.drawText(line, pad, y + footerHeight * 0.8f, footer);
-            y += footerHeight;
+        final float w = getWidth(), h = panelHeightPx();
+        if (graphWidth < 0f) {
+            layoutRow();
         }
+        plate.setColor(Color.argb(158, 0, 0, 0));
+        box.set(0f, 0f, w, h);
+        canvas.drawRoundRect(box, radius, radius, plate);
+
+        final Paint.FontMetrics metrics = value.getFontMetrics();
+        final float baseline = padY + inner * 0.5f - (metrics.ascent + metrics.descent) * 0.5f;
+        float x = padX;
+
+        // The frame rate first, as the Deck's bar has it, with the graph of the frame times beside it.
+        label.setColor(DIM);
+        canvas.drawText("FPS", x, baseline, label);
+        x += text(label, "FPS") + gapPart;
+        rate.setColor(known(values[FPS]) && values[FPS] > 0f && values[FPS] < 27f ? WARN : RATE);
+        final String shown = known(values[FPS]) && values[FPS] > 0f ? fmt("%.0f", values[FPS]) : "-";
+        final float rateWidth = text(rate, RATE_RESERVE);
+        canvas.drawText(shown, x + rateWidth - text(rate, shown), baseline, rate);
+        x += rateWidth;
+
+        x = drawGraph(canvas, x + gap, padY, graphWidth, inner) + gap;
+
+        // The processor: the game's own share, because the machine's is not readable by an app, and then the mean
+        // clock of the cores — or the platform's thermal word, in the warning colour, once the phone is warm enough
+        // for that to be the more useful of the two.
+        final String share = known(values[CPU_GAME]) ? "game " + fmt("%.0f%%", values[CPU_GAME]) : null;
+        x = drawPart(canvas, x, baseline, "CPU", CPU, share, SHARE_RESERVE,
+                known(values[CPU_GAME]) ? values[CPU_GAME] / 100f : NO_BAR) + gap;
+        if (fitClock) {
+            final boolean throttled = warm();
+            final String second = throttled ? thermal
+                    : known(values[CPU_CLOCK]) ? fmt("%.1f GHz", values[CPU_CLOCK] / 1000f) : null;
+            if (second != null) {
+                dim.setColor(throttled ? WARN : DIM);
+                canvas.drawText(second, x, baseline, dim);
+            }
+            x += text(dim, SECOND_RESERVE) + gap;
+        }
+
+        if (fitGpu) {
+            x = drawPart(canvas, x, baseline, "GPU", GPU,
+                    known(values[GPU_PCT]) ? fmt("%.0f%%", values[GPU_PCT]) : null, PLAIN_SHARE_RESERVE,
+                    known(values[GPU_PCT]) ? values[GPU_PCT] / 100f : NO_BAR) + gapPart;
+            if (known(values[GPU_CLOCK])) {
+                dim.setColor(DIM);
+                canvas.drawText(fmt("%.0f MHz", values[GPU_CLOCK]), x, baseline, dim);
+            }
+            x += text(dim, GPU_CLOCK_RESERVE) + gap;
+        }
+
+        final String memory = known(values[RAM_TOTAL]) && values[RAM_TOTAL] > 0f
+                ? known(values[RAM_USED]) ? fmt("%.1f/%.1f GB", values[RAM_USED] / 1024f, values[RAM_TOTAL] / 1024f)
+                : null
+                : known(values[RAM_USED]) ? fmt("%.1f GB", values[RAM_USED] / 1024f) : null;
+        x = drawPart(canvas, x, baseline, "RAM", RAM, memory, MEMORY_RESERVE,
+                known(values[RAM_TOTAL]) && values[RAM_TOTAL] > 0f && known(values[RAM_USED])
+                        ? values[RAM_USED] / values[RAM_TOTAL] : NO_BAR) + gapPart;
+        if (fitGameMem) {
+            if (known(values[RAM_GAME])) {
+                dim.setColor(DIM);
+                canvas.drawText("game " + fmt("%.1f GB", values[RAM_GAME] / 1024f), x, baseline, dim);
+            }
+            x += text(dim, GAME_MEMORY_RESERVE) + gap;
+        }
+
+        // The battery closes the row at the bar's right edge, as the Deck's does: the room the reserved widths leave
+        // over becomes one gap before it rather than a tail after it.
+        final float batteryWidth = part("BATT", PLAIN_SHARE_RESERVE);
+        final int battery = batteryPercent();
+        drawPart(canvas, Math.max(x, w - padX - batteryWidth), baseline, "BATT",
+                battery >= 0 && battery <= 15 ? WARN : BATT, battery >= 0 ? battery + "%" : null,
+                PLAIN_SHARE_RESERVE, battery >= 0 ? battery / 100f : NO_BAR);
     }
 
     /**
-     * One part: its name in the part's colour, then up to three numbers in the panel's columns, each right aligned,
-     * each with a thin bar under it when it is a share (a negative share means a plain number).
+     * One part: its name in the part's colour, then its number, under which a thin bar shows the number's share of
+     * what it is measured against (a negative share means a plain number, and draws none). Returns the row's next x:
+     * the part is given the width of its widest number, so the columns do not move as the numbers change.
      */
-    private float part(Canvas canvas, float y, String title, int color, String first, float firstShare,
-                       String second, float secondShare, String third, float thirdShare) {
-        final float baseline = y + row * 0.72f;
+    private float drawPart(Canvas canvas, float x, float baseline, String title, int color, String text,
+                           String reserve, float share) {
         label.setColor(color);
-        canvas.drawText(title, pad, baseline, label);
-        final float x1 = pad + labelWidth, x2 = x1 + col1, x3 = x2 + col2;
-        column(canvas, x1, col1, baseline, first, firstShare, color);
-        column(canvas, x2, col2, baseline, second, secondShare, color);
-        column(canvas, x3, col3, baseline, third, thirdShare, color);
-        return y + row;
-    }
-
-    private void column(Canvas canvas, float x, float width, float baseline, String text, float share, int color) {
-        final float right = x + width;
+        canvas.drawText(title, x, baseline, label);
+        final float numbers = x + text(label, title) + gapPart;
         if (text == null || text.isEmpty()) {
-            value.setColor(DIM);
-            canvas.drawText("-", right - value.measureText("-"), baseline, value);
-            return;
-        }
-        value.setColor(Color.WHITE);
-        canvas.drawText(text, right - value.measureText(text), baseline, value);
-        if (share < 0f) {
-            return;
-        }
-        final float bar = 2.2f * dp;
-        final float top = baseline + 2.6f * dp;
-        paint.setColor(Color.argb(52, Color.red(color), Color.green(color), Color.blue(color)));
-        box.set(x, top, right, top + bar);
-        canvas.drawRoundRect(box, bar * 0.5f, bar * 0.5f, paint);
-        final float filled = (right - x) * Math.min(1f, share);
-        if (filled > 0f) {
-            paint.setColor(color);
-            box.set(x, top, x + Math.max(filled, bar), top + bar);
-            canvas.drawRoundRect(box, bar * 0.5f, bar * 0.5f, paint);
-        }
-    }
-
-    /** What the graph plots, and the frame time at its top: a line is only a number with a scale beside it. */
-    private void drawGraphCaption(Canvas canvas, float y, float w) {
-        float top = known(values[MS_MAX]) ? values[MS_MAX] : 0f;
-        if (top < 50f) {
-            top = 50f;
-        }
-        final float baseline = y + captionHeight * 0.85f;
-        canvas.drawText("frame time, ms", pad, baseline, caption);
-        final String scale = String.format(Locale.US, "0\u2013%.0f ms", top);
-        canvas.drawText(scale, w - pad - caption.measureText(scale), baseline, caption);
-    }
-
-    /**
-     * The frame times as a graph: the worst frame sets its top and 50 ms (20 FPS) is the least height it shows, so a
-     * good run still reads as a line — the same rule as the desktop panel's.
-     */
-    private void drawGraph(Canvas canvas, float y, float w) {
-        final float left = pad, right = w - pad;
-        box.set(left, y, right, y + graphHeight);
-        paint.setColor(Color.argb(89, 0, 0, 0));
-        canvas.drawRoundRect(box, 4f * dp, 4f * dp, paint);
-        paint.setColor(Color.argb(40, 255, 255, 255));
-        canvas.drawLine(left, y + graphHeight * 0.5f, right, y + graphHeight * 0.5f, paint);
-
-        final int count = Math.min(120, Math.max(0, (int) values[FRAME_COUNT]));
-        if (count < 2) {
-            return;
-        }
-        float top = known(values[MS_MAX]) ? values[MS_MAX] : 0f;
-        if (top < 50f) {
-            top = 50f;
-        }
-        final float step = (right - left) / 119f;
-        graph.reset();
-        for (int i = 0; i < count; i++) {
-            final float ms = values[FRAMES + i];
-            final float px = right - step * (count - 1 - i);
-            final float py = y + graphHeight - 1.5f * dp
-                    - Math.min(1f, Math.max(0f, ms / top)) * (graphHeight - 3f * dp);
-            if (i == 0) {
-                graph.moveTo(px, py);
-            } else {
-                graph.lineTo(px, py);
+            dim.setColor(DIM);
+            canvas.drawText("-", numbers, baseline, dim);
+        } else {
+            value.setColor(Color.WHITE);
+            canvas.drawText(text, numbers, baseline, value);
+            if (share >= 0f) {
+                bar(canvas, numbers, numbers + text(value, text), baseline, color, Math.min(1f, share));
             }
         }
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(1.4f * dp);
-        paint.setStrokeJoin(Paint.Join.ROUND);
-        paint.setColor(LINE);
-        canvas.drawPath(graph, paint);
-        paint.setStyle(Paint.Style.FILL);
+        return numbers + text(value, reserve);
+    }
+
+    /** A number's share: a dim track with the filled part in the part's colour, under the number it belongs to. */
+    private void bar(Canvas canvas, float left, float right, float baseline, int color, float share) {
+        final float top = baseline + 3f * dp;
+        plate.setColor(Color.argb(95, Color.red(color), Color.green(color), Color.blue(color)));
+        box.set(left, top, right, top + barHeight);
+        canvas.drawRoundRect(box, barHeight * 0.5f, barHeight * 0.5f, plate);
+        final float filled = (right - left) * share;
+        if (filled > 0f) {
+            plate.setColor(color);
+            box.set(left, top, left + Math.max(filled, barHeight), top + barHeight);
+            canvas.drawRoundRect(box, barHeight * 0.5f, barHeight * 0.5f, plate);
+        }
+    }
+
+    /**
+     * The frame times as a graph, with its own caption and scale inside its plate: a line is a projection of numbers,
+     * so it says what it plots on the left and where its top is on the right.
+     */
+    private float drawGraph(Canvas canvas, float x, float top, float w, float h) {
+        box.set(x, top, x + w, top + h);
+        plate.setColor(Color.argb(89, 0, 0, 0));
+        canvas.drawRoundRect(box, 4f * dp, 4f * dp, plate);
+
+        float graphTop = known(values[MS_MAX]) ? values[MS_MAX] : 0f;
+        if (graphTop < 50f) {
+            graphTop = 50f;
+        }
+        final float captionBase = top + 7.5f * dp;
+        caption.setColor(CAPTION);
+        canvas.drawText("frame time, ms", x + 5f * dp, captionBase, caption);
+        final String scale = String.format(Locale.US, "0\u2013%.0f ms", graphTop);
+        canvas.drawText(scale, x + w - 5f * dp - caption.measureText(scale), captionBase, caption);
+
+        final float plotTop = top + 9.5f * dp, plotBottom = top + h - 2f * dp;
+        caption.setColor(Color.argb(40, 255, 255, 255));
+        canvas.drawLine(x + 5f * dp, (plotTop + plotBottom) * 0.5f, x + w - 5f * dp, (plotTop + plotBottom) * 0.5f,
+                caption);
+
+        final int count = Math.min(120, Math.max(0, (int) values[FRAME_COUNT]));
+        final float left = x + 5f * dp, right = x + w - 5f * dp;
+        if (count >= 2) {
+            final float step = (right - left) / 119f;
+            line.reset();
+            for (int i = 0; i < count; i++) {
+                final float ms = values[FRAMES + i];
+                final float px = right - step * (count - 1 - i);
+                final float py = plotBottom - Math.min(1f, Math.max(0f, ms / graphTop)) * (plotBottom - plotTop);
+                if (i == 0) {
+                    line.moveTo(px, py);
+                } else {
+                    line.lineTo(px, py);
+                }
+            }
+            plot.setStyle(Paint.Style.STROKE);
+            plot.setStrokeWidth(1.4f * dp);
+            plot.setStrokeJoin(Paint.Join.ROUND);
+            plot.setColor(LINE);
+            canvas.drawPath(line, plot);
+            plot.setStyle(Paint.Style.FILL);
+        }
+        return x + w;
     }
 }
