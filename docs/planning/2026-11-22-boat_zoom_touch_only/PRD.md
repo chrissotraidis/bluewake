@@ -9,6 +9,7 @@
 ## What changes for players
 
 - Nothing with the zoom in use: it zooms as before.
+- The boat still remembers its own zoom level while the game runs, as in #633: off the boat the game's distance is back, and boarding again returns to the last boat zoom.
 - With the zoom unused, BlueWake no longer writes the boat camera's data at all.
 
 ## Success
