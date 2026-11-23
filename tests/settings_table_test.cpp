@@ -38,6 +38,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
     "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
     "DOL_AURORA_AO_PACKED", "BLUEWAKE_PRESENT_MAILBOX", "BLUEWAKE_NO_GAMESCOPE_WSI",
+    "BLUEWAKE_ART_FIXES",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -166,6 +167,13 @@ int main() {
     const Setting* no_wsi = find("BLUEWAKE_NO_GAMESCOPE_WSI");
     assert(no_wsi != nullptr && no_wsi == mailbox + 1 && no_wsi->tab == Tab::Config && no_wsi->group == nullptr);
     assert(!default_on(*no_wsi) && next_launch_on(*no_wsi));
+    // Then the art fixes (#545), a pane of their own, off by default until each
+    // platform is checked, read when the module loads (the "moduleart" mod).
+    const Setting* art = find("BLUEWAKE_ART_FIXES");
+    assert(art != nullptr && art == no_wsi + 1 && art->tab == Tab::Config && art->group != nullptr &&
+           std::strcmp(art->group, "Fixes") == 0);
+    for (const Os os : {Os::Windows, Os::Linux, Os::Mac})
+        assert(!default_on(*art, os) && next_launch_on(*art, os));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

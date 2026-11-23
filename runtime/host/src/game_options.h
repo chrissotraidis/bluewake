@@ -13,10 +13,17 @@
 // BLUEWAKE_OPTIONS adjusts the defaults: a comma-separated list of option
 // names, each turned on, or off when it starts with '-'; "none" first turns
 // every option off. The options take effect only while the mod that carries
-// their sites ("betterww") is enabled.
+// their sites ("betterww") is enabled. The art fixes' option
+// (mods/moduleart/options.txt) has no switch of its own: it is on while its
+// mod ("moduleart") is, and is not one of the options listed below.
+
+// The art fixes' window for a pointer into one of the four modules' own data
+// (main.c's host_art_fix_window), or the pointer unchanged.
+typedef u32 (*BluewakeArtFixWindowFn)(u32 address);
 
 // At boot, after the mods are enabled and before the first dispatch.
-void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled);
+// `art_fix_window` is NULL unless the art fixes are on.
+void bluewake_game_options_enable(void* lib, CPUState* cpu, bool mod_enabled, BluewakeArtFixWindowFn art_fix_window);
 // Once per retrace.
 void bluewake_game_options_retrace(CPUState* cpu);
 // A save state was loaded: instant text looks for the messages again

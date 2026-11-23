@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Add BlueWake's code mods (widescreen 16:9, 16:10, 21:9 and the two panel presets 64:27
-# and 43:18, Better Wind Waker's options,
-# and each widescreen with them) to a device build's composite source, after
+# and 43:18, Better Wind Waker's options, each widescreen with them, and the art fixes)
+# to a device build's composite source, after
 # scripts/ios/build_device.sh has built it.
 #
 #   scripts/mods/build_mods.sh BUILD_DIR [DISC.iso]
@@ -20,12 +20,19 @@ dolrecomp=${DOLRECOMP:-$B/dolrecomp/dolrecomp}
 # translator emits both behaviours at each option site.
 options=$root/mods/betterww/options.txt
 python3 "$root/scripts/mods/game_options.py" sites "$options" > "$M/option-sites.txt"
+# The art fixes (mods/moduleart/options.txt): hooks in four modules only.
+art_options=$root/mods/moduleart/options.txt
+python3 "$root/scripts/mods/game_options.py" sites "$art_options" > "$M/option-sites-art.txt"
 sites=()
 
-translate() {  # DOL OUT_DIR [RELS_DIR]; with the option sites while sites=(--option-sites FILE)
+translate() {  # DOL|- OUT_DIR [RELS_DIR]; with the option sites while sites=(--option-sites FILE); - is no DOL
     rm -rf "$2"
-    "$dolrecomp" --gamecube --backend c --cpu gekko --partition-instructions 4096 ${sites[@]+"${sites[@]}"} \
-        "$1" "$2/dol" -j 8 >"$2.log" 2>&1
+    mkdir -p "$2"
+    : >"$2.log"
+    if [ "$1" != - ]; then
+        "$dolrecomp" --gamecube --backend c --cpu gekko --partition-instructions 4096 ${sites[@]+"${sites[@]}"} \
+            "$1" "$2/dol" -j 8 >>"$2.log" 2>&1
+    fi
     if [ $# -gt 2 ]; then
         "$dolrecomp" --gamecube --backend c --cpu gekko --rel-base 0xC0400000 ${sites[@]+"${sites[@]}"} \
             "$3" "$2/rels" -j 8 >>"$2.log" 2>&1
@@ -100,6 +107,17 @@ combo() {  # NAME WIDESCREEN: a widescreen with the options (its main.dol, Bette
     composite "$M/$1/translated/dol/generated" "$M/betterww/translated/rels/generated/rels"         "$B/game/rels" "$M/$2/main.dol" "$M/$1/composite-src"
 }
 
+moduleart() {
+    echo "==> art fixes"
+    # The modules translated with the art fixes' hooks, beside the base game's
+    # executable; the variants are the four modules' chunks that hold a hook.
+    sites=(--option-sites "$M/option-sites-art.txt")
+    mkdir -p "$M/moduleart"
+    translate - "$M/moduleart/translated" "$B/game/rels"
+    composite "$B/translated/dol/generated" "$M/moduleart/translated/rels/generated/rels" \
+        "$B/game/rels" "$B/game/main.dol" "$M/moduleart/composite-src"
+}
+
 base() {
     composite "$B/translated/dol/generated" "$B/translated/rels/generated/rels" "$B/game/rels"         "$B/game/main.dol" "$M/composite-src.base"
 }
@@ -116,7 +134,7 @@ together() {  # COMMAND...: each command at once; stop when any of them fails
         exit 1
     fi
 }
-together widescreen widescreen1610 widescreen219 widescreen6427 widescreen4318 betterww base
+together widescreen widescreen1610 widescreen219 widescreen6427 widescreen4318 betterww moduleart base
 together "combo combo widescreen" "combo combo1610 widescreen1610" "combo combo219 widescreen219" \
     "combo combo6427 widescreen6427" "combo combo4318 widescreen4318"
 
@@ -133,8 +151,9 @@ python3 "$root/scripts/mods/build_mod_variants.py" --composite-src "$M/composite
     --combo "widescreen6427+betterww:$M/combo6427/composite-src" \
     --mod "widescreen4318:$M/widescreen4318/composite-src:$M/widescreen4318/main.dol:$M/widescreen4318/runtime.json" \
     --combo "widescreen4318+betterww:$M/combo4318/composite-src" \
+    --mod "moduleart:$M/moduleart/composite-src:$B/game/main.dol" \
     --exclusive widescreen,widescreen1610,widescreen219,widescreen6427,widescreen4318 \
-    --options "$options" --rels-bin-dir "$B/game/rels"
+    --options "$options" --options "$art_options" --rels-bin-dir "$B/game/rels"
 if ! cmp -s "$M/composite-src.base/generated.h" "$B/composite-src/generated.h"; then
     echo "build_mods: $B/composite-src was generated from other inputs; rebuild it first" >&2
     exit 1

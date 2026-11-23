@@ -613,7 +613,8 @@ int main(void) {{
                        + ("lean_deadlines\n" if getattr(self.args, "lean_deadlines", False) else "")
                        + ("behaviour_timing\n" if getattr(self.args, "behaviour_timing", False) else "")).encode())
         for f in (sorted((ROOT / "scripts/mods").glob("*")) + sorted((ROOT / "mods/widescreen").glob("*.gecko"))
-                  + [ROOT / "mods/betterww/options.txt", ROOT / "scripts/windows/fast_blocks.py",
+                  + [ROOT / "mods/betterww/options.txt", ROOT / "mods/moduleart/options.txt",
+                     ROOT / "scripts/windows/fast_blocks.py",
                      ROOT / "scripts/windows/return_ranges.py",
                      ROOT / "scripts/windows/global_guest_cpu.py", ROOT / "scripts/windows/chunk_headers.py",
                      ROOT / "cmake/composite/inline_fp.h", ROOT / "cmake/composite/gather_pipe.h",
