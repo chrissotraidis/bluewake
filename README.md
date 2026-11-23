@@ -131,7 +131,8 @@ This writes `build/macos/packaged/BlueWake.app`, which you can move anywhere. Sa
   boss fights are largely untested, so please [report](#getting-help) what you find there.
 - **Touch controls** with a layout editor, and **controllers and keyboards** with button remapping
 - **Settings:** FPS display, render resolution up to 4×, 16× anisotropic filtering, aspect ratio,
-  save backup and restore, and Report a Problem
+  save backup and restore, and Report a Problem; the settings menu itself in
+  [another language](docs/LANGUAGES.md), from a file
 - **Mods:** widescreen, HD texture packs, [Better Wind Waker](https://github.com/WideBoner/betterww),
   optional gameplay tweaks and the experimental Smooth Motion
 
@@ -405,6 +406,7 @@ other upstream projects with their authors.
 - [Apple TV build](docs/TVOS_BUILD.md) and [device build options](docs/DEVICE_BUILD.md)
 - [Mods](docs/MODS.md), [Wind Waker HD textures](docs/WWHD_TEXTURES.md) and the
   [developers' stage select](docs/STAGE_SELECT.md)
+- [The menu in another language](docs/LANGUAGES.md): a text file a translator writes, no build needed
 - [The Builder](docs/BUILDER.md): how the build works, and reusing it for other ports
 - What's being worked on: [the plan](docs/GOAL_LOOP.md) and [the priorities](docs/PRIORITIES.md); how Wind Waker
   Recomp became BlueWake: [migration status](docs/MIGRATION_STATUS.md)

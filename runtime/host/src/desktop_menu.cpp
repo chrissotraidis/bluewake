@@ -15,6 +15,7 @@
 #include "dolphin_save_menu.h"
 #include "fps_position.h"
 #include "input_remap.h"
+#include "language.h"
 #include "menu_draw.h"
 #include "menu_shared.h"
 #include "option_notes.h"
@@ -80,6 +81,29 @@ float g_menu_scale = 1.f;  // the menu's scale as last drawn, for the size it is
 // at the first frame and when the player changes it.
 bool g_menu_pauses = false;
 bw_texture_pack::Counter g_pack_count; // textures in the pack, counted once per opening
+// The catalogs in the languages folder, listed when the menu opens: a file
+// dropped in while it is closed appears the next time it is opened, and the
+// folder is read once rather than every frame the Config tab is drawn.
+struct LanguageList {
+    std::string folder;
+    std::vector<std::string> codes;   // file names without .txt, in order
+    std::vector<std::string> names;   // what each one calls itself
+    void forget() {
+        folder.clear();
+        codes.clear();
+        names.clear();
+    }
+    void fill(const std::string& at) {
+        if (at == folder && !codes.empty())
+            return;
+        forget();
+        folder = at;
+        codes = bw_lang::available(folder);
+        for (const std::string& code : codes)
+            names.push_back(bw_lang::display_name(folder, code));
+    }
+};
+LanguageList g_languages;
 bool g_stage_select_question = false;  // the menu shows only the stage select's question
 Uint64 g_safe_mode_since = 0;
 Uint64 g_installed_ms = 0;
@@ -468,6 +492,35 @@ void hd_textures_section() {
     ImGui::Spacing();
 }
 
+// The player's system language as SDL reports it: "es", "pt-br", "" when the
+// system names none. A language with a country first, so a catalog called
+// pt-br.txt is preferred to pt.txt on a Brazilian system.
+std::string system_language() {
+    std::string language;
+    int count = 0;
+    SDL_Locale** locales = SDL_GetPreferredLocales(&count);
+    if (locales != nullptr) {
+        for (int i = 0; i < count && language.empty(); ++i) {
+            if (locales[i]->language == nullptr || locales[i]->language[0] == '\0')
+                continue;
+            language = locales[i]->language;
+            if (locales[i]->country != nullptr && locales[i]->country[0] != '\0')
+                language = language + "-" + locales[i]->country;
+        }
+        SDL_free(locales);
+    }
+    return language;
+}
+
+// Where a language catalog is read from: `languages` in the folder the
+// settings file is in, so the folder a translator is told about is the one
+// beside the settings they can already find (Config's "Your files" names it).
+std::string language_folder() {
+    if (!settings_path().empty())
+        return bw_lang::folder_for(std::filesystem::path(settings_path()).parent_path().string());
+    return bw_lang::folder_for(data_dir());
+}
+
 // A Custom row draws itself: the switch that needs a button beside it, the
 // settings that are one choice, the tables of keys and buttons, and the
 // next-launch choices this menu keeps a copy of.
@@ -487,6 +540,47 @@ bool draw_custom(const bw_settings::Setting& s) {
             toggle_fullscreen();
         return true;
     }
+    if (std::strcmp(s.key, "BLUEWAKE_LANGUAGE") == 0) {
+        // System first (what a player who has never chosen gets, named after
+        // the catalog it means), then English, then every catalog in the folder
+        // by the name it gives itself. Picking one reads that file now: the
+        // menu looks its text up as it draws (language.h), so the rows under
+        // this one are already in the new language and no restart is asked for.
+        const std::string folder = language_folder();
+        const std::string system = system_language();
+        g_languages.fill(folder);
+        const std::string follows = bw_lang::resolve(folder, "", system);
+        const std::string follows_name =
+            follows.empty() ? bw_lang::text("language.english", "English") : bw_lang::display_name(folder, follows);
+        std::vector<std::string> names;
+        names.push_back(bw_lang::fill("language.system", "System (%s)", follows_name.c_str()));
+        names.push_back(bw_lang::text("language.english", "English"));
+        names.insert(names.end(), g_languages.names.begin(), g_languages.names.end());
+        std::vector<const char*> shown;
+        for (const std::string& name : names)
+            shown.push_back(name.c_str());
+        const std::string now = env(s.key);
+        int at = 0;
+        for (size_t i = 0; i < g_languages.codes.size(); ++i)
+            if (now == g_languages.codes[i])
+                at = static_cast<int>(i) + 2;
+        if (now == "en")
+            at = 1;
+        if (bw_menu_combo(bw_lang::label(s), &at, shown.data(), static_cast<int>(shown.size()))) {
+            const char* chosen = at == 0 ? "" : at == 1 ? "en" : g_languages.codes[static_cast<size_t>(at) - 2].c_str();
+            bw_menu::put(s.key, chosen);
+            bw_lang::load(folder, bw_lang::resolve(folder, env(s.key), system));
+            apply_now(s);
+        }
+        // The list holds sixteen names side by side at most (bw_menu_combo); a
+        // folder with more says so rather than dropping one without a word.
+        if (shown.size() > 16)
+            ImGui::TextDisabled("%s", bw_lang::fill("language.too_many",
+                                                    "%d more catalogs than this list can show, which holds the first "
+                                                    "14. Move the ones you do not read out of the folder.",
+                                                    std::to_string(static_cast<int>(shown.size()) - 16).c_str()));
+        return true;
+    }
     if (std::strcmp(s.key, "DOL_AURORA_FRAME_INTERP") == 0) {
         // The switch and its rate are one list. The display's choice is named
         // Display, not its rate, which can be one of the fixed choices (120 Hz);
@@ -496,7 +590,7 @@ bool draw_custom(const bw_settings::Setting& s) {
         const char* const kSmooth[] = {"Off (30 FPS)", "60 FPS", "120 FPS", "Display"};
         const int requested = smooth_requested();
         int smooth = !env_on(s.key, false) ? 0 : requested == -1 ? 3 : requested >= 3 ? 2 : 1;
-        if (bw_menu_combo(s.label, &smooth, kSmooth, 4))
+        if (bw_menu_combo(bw_lang::label(s), &smooth, kSmooth, 4))
             set_smooth_motion(smooth == 0 ? nullptr : smooth == 3 ? "display" : smooth == 2 ? "3" : "1");
         const int most = env_on(s.key, false) ? (bw_smooth_steps(smooth_requested(), refresh) + 1) * 30 : 30;
         if (refresh > 0.f)
@@ -517,7 +611,7 @@ bool draw_custom(const bw_settings::Setting& s) {
             if (kBwFpsPositionOrder[i] == position)
                 at = i;
         }
-        if (bw_menu_spot_chooser(s.label, &at, names, spots, BW_FPS_POSITIONS)) {
+        if (bw_menu_spot_chooser(bw_lang::label(s), &at, names, spots, BW_FPS_POSITIONS)) {
             set_env(s.key, kBwFpsPositionValues[kBwFpsPositionOrder[at]]);
             apply_fps_position();
         }
@@ -527,7 +621,7 @@ bool draw_custom(const bw_settings::Setting& s) {
         // The swaps above are greyed while a layout is set: say why where it is set.
         if (!env(s.key).empty())
             ImGui::TextDisabled("Swap A and B and Swap X and Y are off while you use a custom layout.");
-        if (!bw_menu_pane(s.label))
+        if (!bw_menu_pane(bw_lang::label(s)))
             return true;
         ImGui::TextWrapped("Choose which controller button presses each GameCube button. Picking one that is "
                            "already used swaps the two.");
@@ -538,7 +632,7 @@ bool draw_custom(const bw_settings::Setting& s) {
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_KEY_MAP") == 0) {
-        if (!bw_menu_pane(s.label))
+        if (!bw_menu_pane(bw_lang::label(s)))
             return true;
         ImGui::TextWrapped("Choose the key for each GameCube button. Picking one that is already used swaps the two.");
         BwKeyMap keys;
@@ -548,7 +642,7 @@ bool draw_custom(const bw_settings::Setting& s) {
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_MOUSE_BUTTONS") == 0) {
-        if (!bw_menu_pane(s.label))
+        if (!bw_menu_pane(bw_lang::label(s)))
             return true;
         ImGui::TextWrapped("What each mouse button presses while the mouse is the camera. The first left click "
                            "only hands the mouse to the game.");
@@ -583,14 +677,14 @@ bool draw_custom(const bw_settings::Setting& s) {
                                                "Enhanced (shaped, with the triggers)"};
         const std::string mode = env(s.key, bw_settings::fallback_for(s));
         int haptics = mode.empty() || mode[0] == 'e' || mode[0] == '1' ? 2 : mode[0] == 'c' ? 1 : 0;
-        if (bw_menu_combo(s.label, &haptics, kHaptics, 3)) {
+        if (bw_menu_combo(bw_lang::label(s), &haptics, kHaptics, 3)) {
             set_env(s.key, haptics == 0 ? "off" : haptics == 1 ? "classic" : "enhanced");
             bluewake_haptics_reload();
         }
         ImGui::BeginGroup();
         ImGui::BeginDisabled(haptics != 2);
         float strength = static_cast<float>(std::clamp(env_int("BLUEWAKE_HAPTICS_STRENGTH", 80), 0, 100));
-        if (slider(bw_menu::setting("BLUEWAKE_HAPTICS_STRENGTH").label, &strength, 0.f, 100.f, "%.0f%%")) {
+        if (slider(bw_lang::label(bw_menu::setting("BLUEWAKE_HAPTICS_STRENGTH")), &strength, 0.f, 100.f, "%.0f%%")) {
             set_env("BLUEWAKE_HAPTICS_STRENGTH", std::to_string(static_cast<int>(std::lround(strength))));
             bluewake_haptics_reload();
             bluewake_haptics_preview();  // a buzz at the new strength
@@ -622,7 +716,7 @@ bool draw_custom(const bw_settings::Setting& s) {
         for (int i = 0; i < 6; ++i)
             if (launch_choices().aspect == kAspectValues[i])
                 aspect = i;
-        if (bw_menu_combo(s.label, &aspect, kAspects, 6)) {
+        if (bw_menu_combo(bw_lang::label(s), &aspect, kAspects, 6)) {
             launch_choices().aspect = kAspectValues[aspect];
             choice_changed(s.key);
         }
@@ -633,7 +727,7 @@ bool draw_custom(const bw_settings::Setting& s) {
     }
     if (std::strcmp(s.key, "BLUEWAKE_MODS") == 0) {
         // Better Wind Waker, and its own options once the game has read them.
-        if (bw_menu_checkbox(s.label, &launch_choices().betterww))
+        if (bw_menu_checkbox(bw_lang::label(s), &launch_choices().betterww))
             choice_changed(s.key);
         restart_note();
         if (launch_choices().options.empty()) {
@@ -679,8 +773,8 @@ bool draw_custom(const bw_settings::Setting& s) {
         bool stage_select = false;
         bw_menu::draw_switch(s, &stage_select);
         restart_note();
-        if (s.note != nullptr)
-            ImGui::TextWrapped("%s", s.note);
+        if (const char* note = bw_lang::note(s))
+            ImGui::TextWrapped("%s", note);
         bw_stage_select_save_warning();
         if (bw_stage_select_button())
             close_menu();
@@ -707,13 +801,13 @@ bool draw_custom(const bw_settings::Setting& s) {
                 bluewake_sprint_reload();
             }
         };
-        if (bw_menu_checkbox(s.label, &extras))
+        if (bw_menu_checkbox(bw_lang::label(s), &extras))
             apply_sprint();
         if (later)
             restart_note();
         ImGui::BeginGroup();
         ImGui::BeginDisabled(!extras);
-        if (slider(bw_menu::setting("BLUEWAKE_SPRINT_CHOICE").label, &choice, 1.1f, 2.f, "%.2fx"))
+        if (slider(bw_lang::label(bw_menu::setting("BLUEWAKE_SPRINT_CHOICE")), &choice, 1.1f, 2.f, "%.2fx"))
             apply_sprint();
         ImGui::EndDisabled();
         ImGui::EndGroup();
@@ -1213,14 +1307,14 @@ void draw_menu(const bw_platform::Look& look) {
         // flattened for navigation, so the D-pad moves from the tabs through the
         // options to the buttons below without A to enter it and B to leave it.
         struct Tab {
-            const char* label;
+            bw_settings::Tab which;  // the table's tab, so the name can be translated
             void (*draw)();
         };
-        static const Tab kTabs[] = {{"Display", display_tab},
-                                    {"Gameplay", gameplay_tab},
-                                    {"Mods", mods_tab},
-                                    {"Controls", controls_tab},
-                                    {"Config", config_tab}};
+        static const Tab kTabs[] = {{bw_settings::Tab::Display, display_tab},
+                                    {bw_settings::Tab::Gameplay, gameplay_tab},
+                                    {bw_settings::Tab::Mods, mods_tab},
+                                    {bw_settings::Tab::Controls, controls_tab},
+                                    {bw_settings::Tab::Config, config_tab}};
         constexpr int kTabCount = static_cast<int>(sizeof kTabs / sizeof kTabs[0]);
         static int shown = 0;
         int request = -1;
@@ -1263,7 +1357,8 @@ void draw_menu(const bw_platform::Look& look) {
         }
         if (ImGui::BeginTabBar("##tabs")) {
             for (int i = 0; i < kTabCount; ++i) {
-                if (!ImGui::BeginTabItem(kTabs[i].label, nullptr, i == request ? ImGuiTabItemFlags_SetSelected : 0))
+                if (!ImGui::BeginTabItem(bw_lang::tab(kTabs[i].which), nullptr,
+                                         i == request ? ImGuiTabItemFlags_SetSelected : 0))
                     continue;
                 shown = i;
                 ImGui::PushID(i);
@@ -1415,6 +1510,12 @@ void save_at_exit() { save(); }
 
 void install() {
     g_installed_ms = SDL_GetTicks();
+    // The menu's language: the catalog BLUEWAKE_LANGUAGE names, or the system's
+    // when the player has never chosen one, read now so the first frame is
+    // already in it. Every string falls back to its English, so a missing or
+    // half-written file is a menu in English, never a blank one.
+    const std::string folder = language_folder();
+    bw_lang::load(folder, bw_lang::resolve(folder, env("BLUEWAKE_LANGUAGE"), system_language()));
     if (const char* test = std::getenv("BLUEWAKE_SETTINGS_TEST_OPEN"))
         if (std::sscanf(test, "%lf:%lf", &g_test_open_at, &g_test_open_for) != 2)
             g_test_open_at = -1.0;
@@ -1434,6 +1535,7 @@ void open_menu() {
         return;
     capture_launch_choices();
     g_pack_count.forget();
+    g_languages.forget();  // a catalog dropped in since the last opening is listed
     g_open = true;
     bluewake_haptics_block(true);
     bw_platform::menu_opened(true);
