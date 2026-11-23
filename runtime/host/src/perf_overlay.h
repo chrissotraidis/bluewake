@@ -119,11 +119,11 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
     // at this text size otherwise.
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.4f * font_size, 0.3f * font_size));
     if (ImGui::BeginTable("##bluewake-perf-numbers", 4, ImGuiTableFlags_SizingFixedFit)) {
-        static const char* const kFirst[] = {"GPU", "VRAM", "CPU", "RAM", "60 FPS"};
+        static const char* const kFirst[] = {"GPU", "VRAM", "SHARED", "CPU", "RAM", "60 FPS"};
         static const char* const kValue[] = {"100%", "888.8 GB", "888.8 ms"};
         static const char* const kOf[] = {"188 C", "888.8 GB", "8888.8 ms"};
         static const char* const kShare[] = {"888 W", "8888 MHz", "game 100%", "game 888.8 GB"};
-        ImGui::TableSetupColumn("##labels", ImGuiTableColumnFlags_WidthFixed, column_width(kFirst, 5));
+        ImGui::TableSetupColumn("##labels", ImGuiTableColumnFlags_WidthFixed, column_width(kFirst, 6));
         ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthFixed, column_width(kValue, 3));
         ImGui::TableSetupColumn("##of", ImGuiTableColumnFlags_WidthFixed, column_width(kOf, 3));
         ImGui::TableSetupColumn("##share", ImGuiTableColumnFlags_WidthFixed, column_width(kShare, 4));
@@ -135,7 +135,7 @@ inline void draw_perf_panel(const BwPerfStats& stats, const BwPerfPicture& pictu
         number("%.0f%%", stats.gpu_pct, stats.gpu_pct / 100.f, gpu_color);
         number("%.0f C", stats.gpu_temp_c, stats.gpu_temp_c / 100.f, gpu_color);
         number("%.0f W", stats.gpu_power_w, stats.gpu_power_w / 300.f, gpu_color);
-        label("VRAM", gpu_color);
+        label(stats.vram_shared ? "SHARED" : "VRAM", gpu_color);
         number("%.1f GB", stats.vram_used_mb / 1024.f,
                stats.vram_total_mb > 0.f ? stats.vram_used_mb / stats.vram_total_mb : -1.f, gpu_color);
         ImGui::TableNextColumn();

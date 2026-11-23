@@ -9,6 +9,8 @@
 // the overlay is on, so leaving it off costs one comparison per frame.
 #pragma once
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -33,7 +35,22 @@ typedef struct {
     float cpu_clock_mhz, cpu_clock_max_mhz;
     float ram_used_mb, ram_total_mb, ram_game_mb;
     float gpu_pct, gpu_temp_c, gpu_power_w, gpu_clock_mhz, vram_used_mb, vram_total_mb;
+    // The memory above is the machine's own, shared with the card (an APU's GTT), not a
+    // card's own: the panel labels the row for it (#535).
+    bool vram_shared;
 } BwPerfStats;
+
+// One card's counters as the scan found them: whether each file is there at all, beside
+// what it reads. A card with no such files is not a candidate; a card whose files read 0
+// is — an idle card, or an APU whose VRAM is a carve-out it does not use (#535).
+typedef struct {
+    bool has_vram_total, has_busy;
+    unsigned long long vram_total, busy;
+} BwPerfCardProbe;
+
+// Which probe's card the panel reports, or -1: the first with memory of its own (a
+// discrete card beside an APU), then the first that publishes the counters at all.
+int bw_perf_card_choice(const BwPerfCardProbe* probes, int count);
 
 // A stored setting ("off", "fps", "full") as the mode, and the mode as it is stored.
 int bw_perf_mode_of(const char* value);

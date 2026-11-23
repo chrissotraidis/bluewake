@@ -102,6 +102,23 @@ void bw_perf_snapshot(BwPerfStats* out) {
         *out = g.stats;
 }
 
+// The sysfs scan is Linux's and Android's, but the choice it makes is pure, and every
+// platform's test binary links it.
+int bw_perf_card_choice(const BwPerfCardProbe* probes, int count) {
+    if (probes == NULL || count <= 0)
+        return -1;
+    // A card with memory of its own first (a discrete card beside an APU), then any card
+    // that publishes the counters: an APU's VRAM is a carve-out that reads 0, and skipping
+    // zeroes found no card at all on an integrated Radeon (#535).
+    for (int i = 0; i < count; ++i)
+        if (probes[i].has_vram_total && probes[i].vram_total != 0ull)
+            return i;
+    for (int i = 0; i < count; ++i)
+        if (probes[i].has_vram_total || probes[i].has_busy)
+            return i;
+    return -1;
+}
+
 // The machine's counters as they were at the last read, for the deltas that
 // make a load a share rather than a total since the machine came up.
 static struct {
@@ -328,9 +345,31 @@ static int read_line(const char* path, char* out, size_t size) {
 
 // A number in a file of one, as sysfs keeps them: 0 when it is not there.
 static unsigned long long read_number(const char* dir, const char* name) {
+    unsigned long long value = 0ull;
     char path[224], line[64];
     snprintf(path, sizeof path, "%s/%s", dir, name);
-    return read_line(path, line, sizeof line) ? strtoull(line, NULL, 10) : 0ull;
+    if (!read_line(path, line, sizeof line))
+        return 0ull;
+    value = strtoull(line, NULL, 10);
+    return value;
+}
+
+// The value, and whether the counter exists at all. 0 is a reading on an idle card and a
+// missing file everywhere else, and the card scan has to tell them apart (#535).
+static bool read_number_if(const char* dir, const char* name, unsigned long long* out) {
+    char path[224], line[64];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    if (!read_line(path, line, sizeof line))
+        return false;
+    *out = strtoull(line, NULL, 10);
+    return true;
+}
+
+// Where the cards' counters are read from: /sys/class/drm, unless a test points it at a
+// prepared tree (the APU case needs a card no CI machine has).
+static const char* drm_root(void) {
+    const char* root = getenv("BLUEWAKE_DRM_ROOT");
+    return root != NULL && root[0] != '\0' ? root : "/sys/class/drm";
 }
 
 // The hwmon directory called one of these (k10temp, amdgpu...), so the
@@ -660,23 +699,40 @@ static void sample_machine(unsigned long long now_ns) {
                             : -1.f;
     }
 
-    // The card the game draws on: the first that reports its memory (amdgpu's
-    // counters below /sys/class/drm/cardN/device, its temperature and power in
-    // the hwmon beside them). A driver that reports none leaves the numbers at
-    // "-", and the load stays unknown.
+    // The card the game draws on, chosen by what it publishes rather than by what it reads
+    // at this instant: a card's counters read 0 while it is idle, and an APU's VRAM is a
+    // carve-out that reads 0 always — the memory is the system's, accounted in
+    // mem_info_gtt_* — so a scan that skipped zeroes found no card on an integrated
+    // Radeon at all and left every GPU cell at "-" (#535). The counters are read on every
+    // sample; only the line below is once.
     static int card_logged;
-    for (int card = 0; card < 10 && !card_logged; ++card) {
+    BwPerfCardProbe probes[10];
+    memset(probes, 0, sizeof probes);
+    for (int card = 0; card < 10; ++card) {
+        char probe_base[96];
+        snprintf(probe_base, sizeof probe_base, "%s/card%d/device", drm_root(), card);
+        probes[card].has_vram_total = read_number_if(probe_base, "mem_info_vram_total", &probes[card].vram_total);
+        probes[card].has_busy = read_number_if(probe_base, "gpu_busy_percent", &probes[card].busy);
+    }
+    const int chosen = bw_perf_card_choice(probes, 10);
+    if (chosen >= 0) {
         char base[96];
-        snprintf(base, sizeof base, "/sys/class/drm/card%d/device", card);
-        const unsigned long long vram_total = read_number(base, "mem_info_vram_total");
-        const unsigned long long vram_used = read_number(base, "mem_info_vram_used");
-        const unsigned long long busy = read_number(base, "gpu_busy_percent");
-        if (vram_total == 0ull && vram_used == 0ull && busy == 0ull)
-            continue;   // no counters here: not the card that draws
-        if (vram_total != 0ull)
+        snprintf(base, sizeof base, "%s/card%d/device", drm_root(), chosen);
+        const unsigned long long vram_total = probes[chosen].vram_total;
+        const unsigned long long busy = probes[chosen].busy;
+        if (vram_total != 0ull) {
             s->vram_total_mb = (float)((double)vram_total / 1048576.0);
-        if (vram_used != 0ull)
-            s->vram_used_mb = (float)((double)vram_used / 1048576.0);
+            s->vram_used_mb = (float)((double)read_number(base, "mem_info_vram_used") / 1048576.0);
+        } else {
+            // An APU's memory is the machine's: amdgpu accounts what it hands the card in
+            // mem_info_gtt_*, and the row is labelled shared rather than as the card's own.
+            const unsigned long long shared_total = read_number(base, "mem_info_gtt_total");
+            if (shared_total != 0ull) {
+                s->vram_total_mb = (float)((double)shared_total / 1048576.0);
+                s->vram_used_mb = (float)((double)read_number(base, "mem_info_gtt_used") / 1048576.0);
+                s->vram_shared = true;
+            }
+        }
         s->gpu_pct = (float)busy;
         char hwmon_root[128], hwmon[192];
         snprintf(hwmon_root, sizeof hwmon_root, "%s/hwmon", base);
@@ -695,18 +751,20 @@ static void sample_machine(unsigned long long now_ns) {
             if (hz >= 1000000ull && hz <= 10000000000ull)
                 s->gpu_clock_mhz = (float)((double)hz / 1e6);
         }
+        if (!card_logged) {
+            card_logged = 1;
+            fprintf(stderr,
+                    "[perf] panel card: \"%s\" (vulkan), %s %.0f/%.0f MB; %s: busy %.0f%%, temp %.0f C, "
+                    "power %.0f W, clock %.0f MHz (from freq1_input)\n",
+                    s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_shared ? "shared" : "vram",
+                    s->vram_used_mb, s->vram_total_mb, base, s->gpu_pct,
+                    s->gpu_temp_c, s->gpu_power_w, s->gpu_clock_mhz);
+        }
+    } else if (!card_logged) {
         card_logged = 1;
-        fprintf(stderr,
-                "[perf] panel card: \"%s\" (vulkan), vram %.0f/%.0f MB; %s: busy %.0f%%, temp %.0f C, "
-                "power %.0f W, clock %.0f MHz (from freq1_input)\n",
-                s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_used_mb, s->vram_total_mb, base, s->gpu_pct,
-                s->gpu_temp_c, s->gpu_power_w, s->gpu_clock_mhz);
-    }
-    if (!card_logged) {
-        card_logged = 1;
-        fprintf(stderr, "[perf] panel card: no /sys/class/drm/card*/device reports counters (gpu name from "
+        fprintf(stderr, "[perf] panel card: no %s/card*/device reports counters (gpu name from "
                         "vulkan: \"%s\", vram total %.0f MB)\n",
-                s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_total_mb);
+                drm_root(), s->gpu_name[0] != '\0' ? s->gpu_name : "?", s->vram_total_mb);
     }
 #if defined(__ANDROID__)
     android_parts(s);
