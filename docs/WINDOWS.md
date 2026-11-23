@@ -149,7 +149,7 @@ Run `build\windows\BlueWake\BlueWake.exe`.
 | Jump / Sprint | Space / Shift; turn on Jump & Sprint in settings (Gameplay) |
 | Speed up | Hold Tab; turn on Speed up in settings (Gameplay), with its own factor |
 | HD look | F2 |
-| Save state / load the latest | F5 / F8 |
+| Save state / load the latest | F5 / F8; five more slots under the menu's **Save state slots...** |
 | Stage select | F7, once it's on in settings |
 | Frame rate | F9 |
 | Smooth Motion | F10 |
@@ -160,7 +160,7 @@ A few words at the bottom left say what each key did.
 Game controllers work through SDL (Xbox, PlayStation, Switch Pro and others). The title screen wants A to reach
 the file menu. To choose which controller button presses each GameCube button, open settings and use
 **Controls › Controller button mapping**. The optional controller zoom is
-also under **Controls**: when enabled, hold the right-stick click and move that stick up or down; a tap still
+also under **Controls**: when enabled, hold the right-stick click and move that stick up or down, on foot or on the boat; a tap still
 enters or leaves first person. The mouse turns the game's own camera around Link and tilts it, and a left click is A; a
 cutscene, door, Z-target or first-person view takes the camera back.
 **Controls › Mouse button mapping** sets what the left, middle, right and side buttons press, and **Keyboard mapping**

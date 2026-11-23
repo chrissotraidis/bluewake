@@ -81,6 +81,16 @@ struct Setting {
 inline constexpr Setting kSettings[] = {
     {.key = "DOL_AURORA_TEXTURE_PACK", .old_windows = "texture_pack", .label = "HD textures", .tab = Tab::Mods,
      .control = Control::Custom, .next_launch = Os::All},
+    // main.c: a pack's files for the game's toon tables (texture_pack_tables.h) left out.
+    {.key = "BLUEWAKE_TEXTURE_PACK_KEEP_TABLES", .kind = Kind::Bool, .label = "Keep the game's shading tables",
+     .tab = Tab::Mods, .control = Control::Switch,
+     .note = "A pack's versions of the tables the game shades with are left out, so Link's hair and metal keep the game's shadows. Hypatia's pack changes them.",
+     .needs_set = "DOL_AURORA_TEXTURE_PACK", .next_launch = Os::All},
+    // main.c: Aurora's report and dumps of the textures a pack has no file for.
+    {.key = "BLUEWAKE_TEXTURE_DUMPS", .kind = Kind::Bool, .label = "Save the textures the pack lacks",
+     .tab = Tab::Mods, .control = Control::Switch,
+     .note = "For pack makers: each texture the pack has no file for is named in the log and saved once as an editable .dds in texture_dumps, in BlueWake's data folder.",
+     .needs_set = "DOL_AURORA_TEXTURE_PACK", .next_launch = Os::All},
     {.key = "BLUEWAKE_ASPECT", .old_windows = "aspect", .kind = Kind::Choice, .fallback = "4:3",
      .label = "Widescreen", .tab = Tab::Mods, .control = Control::Custom, .next_launch = Os::All},
     // letterbox.c: the cutscene's band between the bars zoomed to fill the screen; opening.c: the legend unstretched.
@@ -99,7 +109,7 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_HD_AO", .kind = Kind::Bool, .on = Os::All, .label = "Soft shading (ambient occlusion)",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
      .pane = "Wind Waker HD look settings"},
-    {.key = "BLUEWAKE_HD_CLOUD_SHADOWS", .kind = Kind::Bool, .on = Os::All, .label = "Cloud shadows outdoors",
+    {.key = "BLUEWAKE_HD_CLOUD_SHADOWS", .kind = Kind::Bool, .label = "Cloud shadows outdoors",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_LOOK",
      .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_EDGE_LIGHT", .kind = Kind::Bool, .on = Os::All, .label = "Edge light outdoors",
@@ -134,9 +144,9 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_HD_SKY_LINEAR", .kind = Kind::Bool, .label = "HD's dawn and dusk colours (blended in linear light)",
      .control = Control::Switch, .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
     // How strong HD's brighter sunlight is (hd_look.c sky_brightness()): the
-    // power its factor for the hour is taken to, as HD's (0.37, 1.5 times at
+    // power its factor for the hour is taken to, as HD's (1/2.2, 1.65 times at
     // noon) or softer, for players who find it too bright.
-    {.key = "BLUEWAKE_HD_SUNLIGHT", .kind = Kind::Choice, .fallback = "0.37", .label = "HD sunlight",
+    {.key = "BLUEWAKE_HD_SUNLIGHT", .kind = Kind::Choice, .fallback = "0.4545", .label = "HD sunlight",
      .control = Control::Chooser, .note = "How much brighter HD's sun makes the scenery and Link.",
      .needs = "BLUEWAKE_HD_SKY", .pane = "Wind Waker HD look settings"},
     {.key = "BLUEWAKE_HD_SUN_SHADOWS", .kind = Kind::Bool, .label = "Sun shadows outdoors (from the HD look)",
@@ -146,6 +156,36 @@ inline constexpr Setting kSettings[] = {
     // lighter, for players who find them too dark.
     {.key = "BLUEWAKE_HD_SHADOW_STRENGTH", .kind = Kind::Choice, .fallback = "1", .label = "Sun shadow darkness",
      .control = Control::Chooser, .needs = "BLUEWAKE_HD_SUN_SHADOWS", .pane = "Wind Waker HD look settings"},
+    // Wind Waker HD's own light and shadows (hd_look.c bluewake_hd_look_defaults()): HD's versions of the look's
+    // parts, with a pack imported from the HD disc (its normals and colours). Off, an imported pack gives the
+    // look as it was, on HD's textures. Each part below has its own switch, on with this one.
+    {.key = "BLUEWAKE_HD_LIGHT", .kind = Kind::Bool, .label = "Wind Waker HD's own light and shadows",
+     .control = Control::Switch,
+     .note = "HD's shadows, light on characters, bloom, soft shading, cloud shadows, rim light and far blur, in place of the look's own. Needs HD textures imported from your HD disc.",
+     .needs = "BLUEWAKE_HD_LOOK", .needs_set = "DOL_AURORA_TEXTURE_PACK", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All,
+     .experimental = "Played on Windows (Direct3D 12) and Linux (Vulkan) against Wind Waker HD in Cemu; not yet on a Mac."},
+    {.key = "BLUEWAKE_HD_LIGHT_SHADOWS", .kind = Kind::Bool, .on = Os::All, .label = "HD's sun shadows and shading",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LIGHT", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All},
+    {.key = "BLUEWAKE_HD_LIGHT_CHARACTERS", .kind = Kind::Bool, .on = Os::All, .label = "HD's light on characters",
+     .control = Control::Switch, .note = "Needs HD's sky and light for its colours.", .needs = "BLUEWAKE_HD_LIGHT",
+     .pane = "Wind Waker HD look settings", .next_launch = Os::All},
+    {.key = "BLUEWAKE_HD_LIGHT_BLOOM", .kind = Kind::Bool, .on = Os::All, .label = "HD's bloom",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LIGHT", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All},
+    {.key = "BLUEWAKE_HD_LIGHT_AO", .kind = Kind::Bool, .on = Os::All, .label = "HD's soft shading",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LIGHT", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All},
+    {.key = "BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS", .kind = Kind::Bool, .on = Os::All, .label = "HD's cloud shadows",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LIGHT", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All},
+    {.key = "BLUEWAKE_HD_LIGHT_RIM", .kind = Kind::Bool, .on = Os::All, .label = "HD's rim light",
+     .control = Control::Switch, .note = "In place of the edge light, so it needs that on.",
+     .needs = "BLUEWAKE_HD_LIGHT", .pane = "Wind Waker HD look settings", .next_launch = Os::All},
+    {.key = "BLUEWAKE_HD_LIGHT_FAR_BLUR", .kind = Kind::Bool, .on = Os::All, .label = "HD's far blur",
+     .control = Control::Switch, .needs = "BLUEWAKE_HD_LIGHT", .pane = "Wind Waker HD look settings",
+     .next_launch = Os::All},
     {.key = "DOL_AURORA_SHOW_FPS", .old_windows = "show_fps", .kind = Kind::Bool,
      .label = "Show the frame rate   (F9)", .control = Control::Switch},
     {.key = "BLUEWAKE_PERF_OVERLAY", .kind = Kind::Choice, .fallback = "off", .label = "Performance panel",
@@ -184,7 +224,7 @@ inline constexpr Setting kSettings[] = {
      .fallback = "1"},
     {.key = "DOL_AURORA_FRAME_INTERP_PACING", .kind = Kind::Choice,
      .label = "Smooth Motion under sustained load", .control = Control::Chooser,
-     .note = "Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch.",
+     .note = "Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch. Step down (experimental) drops one in-between frame at a time at 120 Hz and up, instead of stalling.",
      .next_launch = Os::All},
     {.key = "DOL_AURORA_FPS_POSITION", .old_windows = "fps_position", .kind = Kind::Choice,
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
@@ -228,6 +268,13 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_QUICK_DOORS", .old_windows = "quick_doors", .kind = Kind::Bool, .on = Os::Linux | Os::Mac,
      .label = "Quick doors (no walk-in or door closing behind Link)", .tab = Tab::Gameplay,
      .control = Control::Switch, .next_launch = Os::Windows},
+    // Sail on Z (mouse_camera.c, sail_on_z_frame): on the boat Z is the sail;
+    // the save's Z item is never written. Off by default.
+    {.key = "BLUEWAKE_SAIL_ON_Z", .kind = Kind::Bool, .label = "Sail on Z (on the boat, Z raises and lowers the sail)",
+     .tab = Tab::Gameplay, .control = Control::Switch,
+     .note = "Experimental. Only while Link is on the boat and has the sail. Your Z item stays as you set it, "
+             "on the boat and everywhere else, and in your saves. Off by default.",
+     .group = "Sailing"},
     {.key = "BLUEWAKE_CLIMB", .old_windows = "climb", .kind = Kind::Bool, .label = "Wall climbing (experimental)",
      .tab = Tab::Gameplay, .control = Control::Switch, .group = "Climbing"},
     {.key = "BLUEWAKE_CLIMB_STAMINA", .old_windows = "climb_stamina", .kind = Kind::Float, .fallback = "12",
@@ -312,7 +359,8 @@ inline constexpr Setting kSettings[] = {
      .stored = "%.0f"},
     {.key = "BLUEWAKE_STICK_ZOOM", .old_windows = "stick_zoom", .kind = Kind::Bool,
      .label = "Hold the right-stick click and move it up/down to zoom", .tab = Tab::Controls,
-     .control = Control::Switch},
+     .control = Control::Switch,
+     .note = "On foot and on the boat; the boat keeps its own distance."},
     {.key = "BLUEWAKE_STICK_ZOOM_SPEED", .old_windows = "stick_zoom_speed", .kind = Kind::Float,
      .fallback = "1.275", .low = 0.25f, .high = 2.f, .label = "Controller zoom speed", .tab = Tab::Controls,
      .control = Control::Slider, .needs = "BLUEWAKE_STICK_ZOOM", .shown = "%.2fx", .stored = "%.3f"},
@@ -375,6 +423,47 @@ inline constexpr Setting kSettings[] = {
      .note = "Experimental. Keeps the game's code on 2 MB memory pages so the processor finds it "
              "faster. Uses about 370 MB more memory. Linux only (elsewhere it does nothing). Off by "
              "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
+    // The HD look's cloud shadows from a noise texture baked once around the camera
+    // (RecompCore #54, DOL_AURORA_CLOUD_NOISE_TEXTURE) instead of four octaves of noise
+    // for every pixel of both frames. Opt-in: 14.5% of the frame at 4x with the HD look
+    // and Smooth Motion on a Steam Deck; read when the renderer starts.
+    {.key = "DOL_AURORA_CLOUD_NOISE_TEXTURE", .kind = Kind::Bool,
+     .label = "Faster cloud shadows", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Works out the HD look's cloud shadows once and reuses them, instead "
+             "of for every pixel of every frame. The shadows can differ by less than one shade "
+             "step. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
+    // The HD look's ambient occlusion keeps each quarter-size texel's distance beside its
+    // shade (RecompCore #54, DOL_AURORA_AO_PACKED), so its blurs and its upscale don't read
+    // the full-size depth again. Opt-in; read when the renderer starts.
+    {.key = "DOL_AURORA_AO_PACKED", .kind = Kind::Bool,
+     .label = "Faster ambient occlusion", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Keeps the HD look's shading-in-corners data together so it is read "
+             "once instead of again for every pixel. The shading can differ very slightly. Off by "
+             "default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
+    // Present with Mailbox instead of the blocking FIFO wherever BlueWake runs
+    // (BLUEWAKE_PRESENT_MAILBOX, main.c): under gamescope the FIFO wait held the game
+    // thread with Smooth Motion. Opt-in; read when BlueWake starts. BLUEWAKE_VSYNC wins.
+    {.key = "BLUEWAKE_PRESENT_MAILBOX", .kind = Kind::Bool,
+     .label = "Present without waiting for the display", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. Hands each finished frame to the screen without waiting for a free "
+             "slot, so a late frame doesn't hold up the game. The screen still shows whole "
+             "frames. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
+    // Present through Xwayland with FIFO and four swap-chain images instead of gamescope's Vulkan
+    // WSI layer (BLUEWAKE_NO_GAMESCOPE_WSI; main.c sets ENABLE_GAMESCOPE_WSI=0 and Mesa's
+    // vk_x11_override_min_image_count=4 under gamescope, and keeps FIFO over the Mailbox switch):
+    // in Steam Deck Game Mode the layer held the game in present at busy views with Smooth Motion.
+    // Opt-in; Linux; read when BlueWake starts.
+    {.key = "BLUEWAKE_NO_GAMESCOPE_WSI", .kind = Kind::Bool,
+     .label = "Present without gamescope's frame layer", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. In Steam Deck Game Mode, hands frames to the screen the plain way instead of "
+             "through gamescope's own layer, which can hold the game back in busy places with Smooth Motion. "
+             "Every frame is still shown in turn (it overrides \"Present without waiting for the display\"). "
+             "Does nothing outside gamescope. Off by default; measured on a Steam Deck. Takes effect when "
+             "BlueWake starts again.",
      .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,

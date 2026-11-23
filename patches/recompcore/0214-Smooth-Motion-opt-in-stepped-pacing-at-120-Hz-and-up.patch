@@ -1,0 +1,308 @@
+From 80d7da2b3a182c617b74aa7c2553fc02f00906e9 Mon Sep 17 00:00:00 2001
+From: pdale-boop <237306950+pdale-boop@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 23:25:33 -0600
+Subject: [PATCH] Smooth Motion: opt-in stepped pacing at 120 Hz and up
+ (DOL_AURORA_FRAME_INTERP_PACING=step)
+
+At 120 Hz and up, Smooth Motion never backed off when rendering couldn't keep up: pacing only lowered in-between
+frames at 60 and 90 Hz by default, and acquire_frame_slot() took any frame started under 20 ms after the one before
+for a load's fast-forward. After a long wait for a frame slot the game starts its next frame at once to catch up, so
+every wait that mattered was left out ([interp-stats]: budget=5, cut=0, render_worker=0/0ms). A render worker that
+couldn't keep up held the game 50-70 ms at a time and never caught up: Hyrule Castle's hall with the HD look's sun
+shadows on Windows (RTX 5070 Ti), 180 Hz at render scale 4, 359 hitches over 70 ms and 25.8 game frames a second;
+120 Hz at scales 6 and 8, about 400 hitches a minute at 26.7 and 18.4.
+
+New, all of it only with DOL_AURORA_FRAME_INTERP_PACING=step (BlueWake's "Step down (experimental)" in Display >
+Smooth Motion under sustained load), off by default; unset (Automatic), 0 (Never pause) and 1 behave as before:
+- every rate is paced, and 120 Hz and up (3 or more in-between frames) drop and bring back one at a time: a sustained
+  overload (3 of the last 8 game frames, as before) drops one, 3 s of calm brings one back, with the longer wait
+  after an overload soon after coming back, and two settles between drops. 60 and 90 Hz keep their rule;
+- fast-forward is judged over the last 8 frames' starts (under 160 ms for the 8), not the last one's;
+- a wait while pipelines are queued, or were made over the last two frames, isn't an overload: the compiles on
+  arriving somewhere had stepped 180 Hz down for 15 s with nothing overloaded.
+frame_interp::stepped_pacing() tells common.cpp. frame_interp_test runs with "step": stepping at 180 and 120 Hz, and
+the one-or-none rule at 90 Hz.
+
+With "step": 180 Hz at scale 4, 0 and 1 hitches at 29.96 game frames a second; 120 Hz at scale 6, 1-4 hitches at
+29.89; at the window's own size (2560x1080, not overloaded), 95% of a Hyrule walk at the full 5 in-between frames.
+
+(As merged into the 0.13.0 batch, codex/0.13.0-batch c67efad041: the diff is against the batch before it.)
+---
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/common.cpp b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+index 72296ad4e246c3772065e88f8aa5bea61074e10a..7a33e22359ef94236b77342e69bbe105a760c09f 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/common.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/common.cpp
+@@ -1469,17 +1469,41 @@ static size_t acquire_frame_slot() {
+   ZoneScopedN("Acquire frame slot");
+   const auto waitStart = PresentClock::now();
+   // Frames coming faster than the game's own rate (a load's fast-forward)
+-  // outrun the presents by design; waiting for them is no overload.
++  // outrun the presents by design; waiting for them is no overload. With
++  // stepped pacing (frame_interp::stepped_pacing(), experimental), judged over
++  // the last 8 frames' starts (under 20 ms apart on average), not the last
++  // one's: after a long wait the game starts its next frame soon, to catch up,
++  // and a render worker falling behind read as fast-forward at every wait that
++  // mattered (Hyrule at 180 Hz with the HD look's shadows: 50 ms waits, each
++  // frame started 12-16 ms after the one before).
++  static const bool stepped = frame_interp::stepped_pacing();
+   static PresentClock::time_point lastStart{};
+-  const bool fastForward = waitStart - lastStart < std::chrono::milliseconds{20};
++  static std::array<PresentClock::time_point, 8> starts{};
++  static size_t nextStart = 0;
++  const auto eightAgo = starts[nextStart];
++  starts[nextStart] = waitStart;
++  nextStart = (nextStart + 1) % starts.size();
++  const bool fastForward =
++      stepped ? eightAgo != PresentClock::time_point{} && waitStart - eightAgo < std::chrono::milliseconds{20 * 8}
++              : waitStart - lastStart < std::chrono::milliseconds{20};
+   lastStart = waitStart;
++  // With it, nor is a wait while pipelines compile (a new area, a first effect): the worker stalls on them once, and
++  // that isn't the scene too heavy. Counted as overloads, the compiles on arriving somewhere took 180 Hz to 120 for the
++  // next 15 s with nothing overloaded (Hyrule at the window's own size, Nov 10). Pipelines queued now, or made over
++  // the last two frames (the worker runs a frame or two behind the game), leave the wait out.
++  static uint32_t lastCreated = 0;
++  static int quietFrames = 0;
++  const uint32_t created = __atomic_load_n(&g_stats.createdPipelines, __ATOMIC_RELAXED);
++  const bool compiling = created != lastCreated || __atomic_load_n(&g_stats.queuedPipelines, __ATOMIC_RELAXED) != 0;
++  lastCreated = created;
++  quietFrames = !stepped ? 2 : compiling ? 0 : std::min(quietFrames + 1, 2);
+   while (true) {
+     if (const auto slot = g_frameSlots.try_acquire()) {
+       const auto waitDuration = PresentClock::now() - waitStart;
+       const double waitMs = std::chrono::duration<double, std::milli>{waitDuration}.count();
+       TracyPlot("aurora: frameSlotWaitMs", waitMs);
+       // The game waited for the render worker: fewer in-between frames.
+-      if (waitMs >= 3.0 && !fastForward)
++      if (waitMs >= 3.0 && !fastForward && quietFrames >= 2)
+         frame_interp::note_overload(frame_interp::OverloadCause::RenderWorker, waitMs);
+       return *slot;
+     }
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+index 89f7f44805b8e26fb778d7722afea22ef72a5af2..3348b920fb904606dd895a23b8703c9267714c99 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.cpp
+@@ -2571,35 +2571,54 @@ static bool slow_game(Pacing& p) {
+   return p.slowChecks >= 2;
+ }
+ 
++// DOL_AURORA_FRAME_INTERP_PACING, read once: -1 unset (automatic), 0 never, 1 lowers 120 Hz's too, 2 "step".
++static int pacing_setting() {
++  static const int setting = [] {
++    const char* env = std::getenv("DOL_AURORA_FRAME_INTERP_PACING");
++    if (env == nullptr || env[0] == '\0')
++      return -1;
++    return std::strcmp(env, "step") == 0 ? 2 : env[0] != '0' ? 1 : 0;
++  }();
++  return setting;
++}
++
++bool stepped_pacing() noexcept { return pacing_setting() == 2; }
++
+ // Recording thread, between game frames: the next frame's in-between frames.
+ // Overloads (the GPU a frame behind, or the game waiting on rendering) in 3 of
+-// the last 8 game frames take 60 Hz to none (and 120 Hz to 60, when pacing
+-// is asked for there); one now and then (a texture loading, a late drawable)
+-// is not a scene too heavy, and dropping on each one put 120 Hz at 60 most
+-// times it did not need to be. The frames in
+-// flight still report the overload a drop answers, so a second drop waits a
+-// few frames. Calm for 3 s brings one level back, and a level that overloads
+-// again soon after coming back waits twice as long the next time (up to 30 s),
+-// so a scene just too heavy for 120 settles at 60 instead of stuttering
+-// between them.
++// the last 8 game frames take 60 and 90 Hz to one in-between frame and then
++// none, and 120 Hz and up (3 in-between frames or more) to one fewer at a
++// time; one now and then (a texture loading, a late drawable) is not a scene
++// too heavy, and dropping on each one put 120 Hz at 60 most times it did not
++// need to be (nor do waits while pipelines compile count: acquire_frame_slot()).
++// The frames in flight still report the overload a drop answers, so a second
++// drop waits a few frames. Calm for 3 s brings one level back, and a level that
++// overloads again soon after coming back waits twice as long the next time (up
++// to 30 s), so a scene just too heavy for a level settles below it instead of
++// stuttering between them.
+ static void pace_steps() {
+   static constexpr int kCalmStart = 90;  // game frames, 3 s
+   static constexpr int kCalmMost = 900;  // 30 s
+   static constexpr int kCalmMostSlow = 3600; // 2 min, after the game itself ran slow
+   static constexpr uint64_t kSettle = 4; // game frames between drops
+   static constexpr uint64_t kSoon = 300; // an overload within 10 s of coming back
+-  // DOL_AURORA_FRAME_INTERP_PACING: 0 never lowers them, 1 lowers 120 Hz's
+-  // too. Unset, only 60 Hz's are: 120 Hz stays 120, where a drop to 60 for a
+-  // stall of a few frames, over by the time it dropped, was felt more than the
+-  // stall.
+-  static const int setting = [] {
+-    const char* env = std::getenv("DOL_AURORA_FRAME_INTERP_PACING");
+-    return env != nullptr && env[0] != '\0' ? (env[0] != '0' ? 1 : 0) : -1;
+-  }();
++  // DOL_AURORA_FRAME_INTERP_PACING (pacing_setting()): 0 never lowers them (the
++  // menu's "Never pause"), 1 lowers 120 Hz's too. Unset, 120 Hz's aren't: 120 Hz
++  // stays 120, where a drop to 60 for a stall of a few frames, over by the time
++  // it dropped, was felt more than the stall. "step" (the menu's "Step down",
++  // experimental) paces every rate, and three or more (120 Hz and up; 180 Hz's
++  // are 5) go down one at a time, so a drop shows one display refresh in a few
++  // held, not half the rate. Unpaced, a render worker that couldn't keep up
++  // held the game 50-70 ms at a time and never caught up: 180 Hz at render
++  // scale 4 (Hyrule, 26 game frames a second) and 120 Hz at scale 6 and 8
++  // (about 400 hitches a minute, 18-27 game frames a second; stepped, none and
++  // 30).
++  static const int setting = pacing_setting();
+   auto& p = g_pacing;
+   ++p.frame;
+   const int wanted = g_steps.load(std::memory_order_relaxed);
+-  const bool pacing = setting == 1 || (setting < 0 && wanted < 3);
++  const bool stepped = setting == 2 && wanted >= 3;
++  const bool pacing = setting >= 1 || (setting < 0 && wanted < 3);
+   // The game running slow counts at any number of in-between frames (slow
+   // motion is worse than fewer of them) unless pacing is off altogether, or
+   // the CPU has threads to spare. The slow-game rule was measured on four
+@@ -2626,11 +2645,12 @@ static void pace_steps() {
+                .lastEnd = p.lastEnd};
+   } else if (sustained) {
+     p.calm = 0;
+-    if (p.budget > 0 && p.frame - p.lastDrop >= kSettle) {
++    // A step down answers less of the backlog than a drop to one: twice the settle before the next.
++    if (p.budget > 0 && p.frame - p.lastDrop >= (stepped ? 2 * kSettle : kSettle)) {
+       if (p.lastRaise != 0 && p.frame - p.lastRaise < kSoon)
+         p.calmNeeded = std::min(p.calmNeeded * 2, slow ? kCalmMostSlow : kCalmMost);
+       const int before = p.budget;
+-      p.budget = p.budget > 1 ? 1 : 0;
++      p.budget = stepped ? p.budget - 1 : p.budget > 1 ? 1 : 0;
+       p.lastDrop = p.frame;
+       p.recent = 0;
+       const int why = g_overloadWhy.load(std::memory_order_relaxed);
+@@ -2652,7 +2672,7 @@ static void pace_steps() {
+   } else if (p.budget < wanted) {
+     if (++p.calm >= p.calmNeeded) {
+       const int before = p.budget;
+-      p.budget = p.budget == 0 ? 1 : wanted;
++      p.budget = stepped ? p.budget + 1 : p.budget == 0 ? 1 : wanted;
+       p.calm = 0;
+       p.lastRaise = p.frame;
+       bump(g_raises);
+diff --git a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+index b261dae908bf54a0b1e612ace21d4d8e4d097f87..60b96ba5e1ea1df1793ba9d6277961abb98b3423 100644
+--- a/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
++++ b/GXRuntime/graphics/aurora/lib/gfx/frame_interp.hpp
+@@ -58,6 +58,9 @@ enum class OverloadCause : uint8_t {
+ void note_overload(OverloadCause cause, double waitMs) noexcept;
+ const char* overload_reason(OverloadCause cause) noexcept;
+ bool frame_skipped() noexcept;
++// DOL_AURORA_FRAME_INTERP_PACING=step (the menu's "Step down", experimental): 120 Hz and up drop one in-between
++// frame at a time, and common.cpp's overload checks leave out a catch-up frame and waits while pipelines compile.
++bool stepped_pacing() noexcept;
+ 
+ // Counts since the start, for attributing missing in-between frames
+ // (DOL_AURORA_FRAME_INTERP_STATS=1 logs them each second as [interp-stats]).
+diff --git a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+index 6193a51580933e7f80faacbb92ef6568217d44de..7a7137ccaad6966e1687eeb45f9a38404998e1b9 100644
+--- a/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
++++ b/GXRuntime/graphics/aurora/tests/frame_interp_test.cpp
+@@ -108,8 +108,9 @@ static const gxc::VertexShaderConstants* blend_plan(const gxc::DrawPlan& plan, c
+ }
+ 
+ int main() {
+-  // Pacing at 120 Hz as well, for its checks (unset, 120 Hz is never lowered).
+-  setenv("DOL_AURORA_FRAME_INTERP_PACING", "1", 1);
++  // Stepped pacing (the menu's "Step down"), for its checks: 120 Hz and up go down one in-between frame at a time,
++  // 60 and 90 Hz by their rule (unset, 120 Hz is never lowered).
++  setenv("DOL_AURORA_FRAME_INTERP_PACING", "step", 1);
+   fi::set_enabled(true);
+   const uint64_t kShip = 11, kTree = 22, kHud = 33;
+ 
+@@ -1436,10 +1437,10 @@ int main() {
+     CHECK(fi::draw_key(plan) == 0);
+   }
+ 
+-  // Pacing: overloads in 3 of 8 game frames take 120 Hz to 60, and more after
+-  // the frames in flight to none; one now and then does nothing. 3 s of calm
+-  // brings a level back, and an overload soon after coming back makes the
+-  // next wait twice as long.
++  // Pacing at 90 Hz (2 in-between frames, below stepping): overloads in 3 of 8
++  // game frames take it to 60, and more after the frames in flight to none; one
++  // now and then does nothing. 3 s of calm brings a level back, and an overload
++  // soon after coming back makes the next wait twice as long.
+   {
+     const auto overload_frames = [](int n) {
+       for (int i = 0; i < n; ++i) {
+@@ -1447,18 +1448,18 @@ int main() {
+         fi::end_game_frame();
+       }
+     };
+-    fi::set_steps(3);
++    fi::set_steps(2);
+     fi::end_game_frame();
+-    CHECK(fi::frame_steps() == 3 && !fi::frame_skipped());
++    CHECK(fi::frame_steps() == 2 && !fi::frame_skipped());
+     // Now and then: never a drop.
+     for (int i = 0; i < 40; ++i) {
+       overload_frames(1);
+       for (int j = 0; j < 8; ++j)
+         fi::end_game_frame();
+     }
+-    CHECK(fi::frame_steps() == 3);
++    CHECK(fi::frame_steps() == 2);
+     overload_frames(2);
+-    CHECK(fi::frame_steps() == 3);
++    CHECK(fi::frame_steps() == 2);
+     overload_frames(1);
+     CHECK(fi::frame_steps() == 1 && !fi::frame_skipped());
+     overload_frames(3); // still the frames in flight: no second drop
+@@ -1472,7 +1473,7 @@ int main() {
+     CHECK(!fi::frame_skipped() && fi::frame_steps() == 1);
+     for (int i = 0; i < 90; ++i)
+       fi::end_game_frame();
+-    CHECK(fi::frame_steps() == 3);
++    CHECK(fi::frame_steps() == 2);
+     overload_frames(3);
+     CHECK(fi::frame_steps() == 1);
+     for (int i = 0; i < 90; ++i)
+@@ -1480,7 +1481,7 @@ int main() {
+     CHECK(fi::frame_steps() == 1);
+     for (int i = 0; i < 90; ++i)
+       fi::end_game_frame();
+-    CHECK(fi::frame_steps() == 3);
++    CHECK(fi::frame_steps() == 2);
+     // A new setting starts over at it.
+     overload_frames(3);
+     CHECK(fi::frame_steps() == 1);
+@@ -1489,6 +1490,39 @@ int main() {
+     CHECK(fi::frame_steps() == 1 && !fi::frame_skipped());
+   }
+ 
++  // Pacing at 180 Hz (5 in-between frames): one fewer at a time, a second drop only after two settles (the frames
++  // in flight still report the first), and 3 s of calm bringing one back at a time.
++  {
++    const auto overload_frames = [](int n) {
++      for (int i = 0; i < n; ++i) {
++        fi::note_overload(fi::OverloadCause::RenderWorker, 50.0);
++        fi::end_game_frame();
++      }
++    };
++    fi::set_steps(5);
++    fi::end_game_frame();
++    CHECK(fi::frame_steps() == 5);
++    overload_frames(3);
++    CHECK(fi::frame_steps() == 4 && !fi::frame_skipped());
++    overload_frames(3); // the frames in flight: no second drop yet
++    CHECK(fi::frame_steps() == 4);
++    overload_frames(5); // eight frames after the first drop: the next
++    CHECK(fi::frame_steps() == 3);
++    for (int i = 0; i < 90; ++i)
++      fi::end_game_frame();
++    CHECK(fi::frame_steps() == 4);
++    for (int i = 0; i < 90; ++i)
++      fi::end_game_frame();
++    CHECK(fi::frame_steps() == 5);
++    // 120 Hz (3 in-between frames) steps too: one fewer, not down to 60.
++    fi::set_steps(3);
++    fi::end_game_frame();
++    overload_frames(3);
++    CHECK(fi::frame_steps() == 2 && !fi::frame_skipped());
++    fi::set_steps(1);
++    fi::end_game_frame();
++  }
++
+   // Stats: each overload counted under its cause with its wait, and pacing's
+   // budget changes; a paused frame's verdict counts as skipped, a cut as cut.
+   {
+--
+2.50.1

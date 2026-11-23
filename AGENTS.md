@@ -1,8 +1,10 @@
 # Agent instructions
 
-Chris runs this repository. Elliott is co-maintainer. These rules apply to every person and every bot
-working here, including bots either of them runs. If another file in the repository disagrees with this
-one, this one wins.
+Chris runs and maintains this repository. BlueWake continues Elliott Tate's Wind Waker Recomp
+([docs/MIGRATION_STATUS.md](docs/MIGRATION_STATUS.md)). Elliott no longer maintains Wind Waker Recomp or works on
+BlueWake, so treat his work as history and don't wait on him or assign him anything. These rules apply to every
+person and every bot working here, including any bot a contributor runs. If another file in the repository
+disagrees with this one, this one wins.
 
 ## Where things are
 
@@ -39,6 +41,9 @@ one, this one wins.
   signatures. Turn off your tool's attribution setting (`.claude/settings.json` does this for Claude Code).
 - Keep human authorship. When bringing in someone else's work, cherry-pick it with its author, or credit
   them with a `Co-authored-by:` line.
+- This rule keeps the history tidy. Commits and GitHub's contributor list show the people working on BlueWake,
+  whatever tools they use. AI tools are welcome here, and BlueWake is built with substantial AI assistance
+  (the README says so). The person who directs the work and opens the pull request is its author.
 - The "No bot or AI contributors" check (`scripts/check_attribution.py`) must pass on every pull request.
 
 ## How to make changes
@@ -59,8 +64,8 @@ one, this one wins.
 
 ## Keep Windows in step
 
-Chris works on a Mac; Elliott builds and tests Windows. Write every fix so the Windows build gets it
-just by building from `main`:
+Chris works on a Mac, and contributors with a Windows PC test Windows ([docs/WINDOWS_TASKS.md](docs/WINDOWS_TASKS.md)).
+Write every fix so the Windows build gets it just by building from `main`:
 
 - Put game, audio, timing and logging changes in shared code (`runtime/host/src`, or RecompCore for the
   runtime). The Windows build compiles the same files.
@@ -76,13 +81,13 @@ just by building from `main`:
 
 - Write as the person whose account posts, in the first person and in plain, friendly language. If a bot
   drafts a reply, it is still that person's reply: say "I", and don't mention bots, agents or AI models.
-- Post only from your own maintainer's account. Never post as or for the other maintainer.
+- Post only from the account of the person you work for. Never post as or for anyone else.
 - Don't close an issue until the reporter confirms the fix, unless it is a clear duplicate or off-topic, or
   the fix is in a release and the reporter hasn't replied for 14 days since that was posted on the issue. Then
   close it, name the release, and ask them to reopen it if it still happens. Say why when you close it.
 - Ask for what helps: the platform, the BlueWake version and the session log. Don't promise dates.
 - Don't post, push, or open issues or pull requests on other repositories (including
-  `elliotttate/Wind-Waker-Recomp`) unless the maintainer asks for that specific action.
+  `elliotttate/Wind-Waker-Recomp`) unless Chris asks for that specific action.
 
 ## Releases
 
@@ -123,7 +128,7 @@ Only Chris publishes or changes releases.
 
 ## Personal builds stay personal
 
-The game module (`gGZLE01_recomp.dylib`) is translated from the player's own disc. An IPA or app that contains it is a personal build: never upload, attach, commit or link it anywhere. The maintainers' Windows and Linux release builds are the only exceptions. Public Mac, iPhone and iPad releases hold source plus the app without game code (`scripts/builder/build.sh --app-only --ipa BlueWake-vX.Y.Z-ios-unsigned.ipa`, checked with PadMint's `audit` before upload); players add their own module with PadMint (`padmint make bluewake ios`) or `scripts/builder/build.sh DISC.iso --ipa OUT.ipa`.
+The game module (`gGZLE01_recomp.dylib`) is translated from the player's own disc. An IPA or app that contains it is a personal build: never upload, attach, commit or link it anywhere. BlueWake's Windows and Linux release builds are the only exceptions. Public Mac, iPhone and iPad releases hold source plus the app without game code (`scripts/builder/build.sh --app-only --ipa BlueWake-vX.Y.Z-ios-unsigned.ipa`, checked with PadMint's `audit` before upload); players add their own module with PadMint (`padmint make bluewake ios`) or `scripts/builder/build.sh DISC.iso --ipa OUT.ipa`.
 
 Never commit or upload disc images, files extracted from a disc, saves or memory cards, signing
 certificates or profiles, or console keys. Test with copies of saves, and never delete a player's data.

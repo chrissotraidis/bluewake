@@ -22,7 +22,8 @@
 // and light (BLUEWAKE_HD_SKY): its palettes over every stage's own, its
 // brightness for the hour and its light schedule, from the pack's
 // optional/hd-sky, with HD's sky models (BLUEWAKE_HD_SKY_MODELS) and its blend
-// in linear light (BLUEWAKE_HD_SKY_LINEAR); each off until set to 1 (sky()).
+// in linear light (BLUEWAKE_HD_SKY_LINEAR); each off until set to 1 (sky()), but
+// the linear blend, which a pack imported from the HD disc turns on (bluewake_hd_look_defaults).
 // Read again by the settings menus.
 void bluewake_hd_look_reload(void);
 // The softer starting strengths for Aurora's parts; call before Aurora starts.

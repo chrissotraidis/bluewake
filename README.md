@@ -39,8 +39,9 @@ alone: never share or upload it.**
 
 ## Coming from Wind Waker Recomp?
 
-Wind Waker Recomp has moved here. Its creator, [Elliott](https://github.com/elliotttate), now
-maintains BlueWake together with Chris, and his work is part of BlueWake with his authorship kept.
+Wind Waker Recomp has moved here. Its creator, [Elliott](https://github.com/elliotttate), no longer
+maintains Wind Waker Recomp or works on BlueWake. His work from that project is part of BlueWake, with his
+authorship kept, and Chris maintains BlueWake.
 
 - **Windows:** BlueWake's Windows build, on the [latest release](https://github.com/chrissotraidis/bluewake/releases/latest),
   is built from BlueWake itself and replaces Wind Waker Recomp 0.4.0. Smooth
@@ -154,10 +155,10 @@ time BlueWake starts and never change your saves.
 
 | Mod | What it does |
 | --- | --- |
-| **Widescreen 16:9 / 16:10 / 21:9** | A wider view with the HUD placed to fit. Built in; on Mac, Windows and Linux it's **F1 › Mods › Widescreen** |
+| **Widescreen 16:9 / 16:10 / 21:9 / 21:9 · 2560x1080 / 21:9 · 3440x1440** | A wider view with the HUD placed to fit. Built in; on Mac, Windows and Linux it's **F1 › Mods › Widescreen**. `21:9` is 21/9 = 2.3333 and leaves a thin bar on a real ultrawide panel; the two named presets are 2560x1080's and 3440x1440's own shape |
 | **Wind Waker HD textures** | First in Mods on every build: turn **HD textures** on, see how many textures it found, and choose or install a pack, such as Hypatia's HD pack (see the FAQ) or [the textures from your own Wind Waker HD disc](docs/WWHD_TEXTURES.md) |
 | **Better Wind Waker** | Swift Sail, instant text, faster animations and more, each set separately |
-| **Gameplay extras** | Jump & Sprint, Fast Transitions and Quick Doors, and Speed up (hold Tab to run the game faster than realtime), under **⋯ › Gameplay** (iPhone and iPad) or **F1 › Gameplay** (Mac, Windows and Linux) |
+| **Gameplay extras** | Jump & Sprint, Fast Transitions, Quick Doors and Sail on Z (Mac, Windows and Linux), and Speed up (hold Tab to run the game faster than realtime), under **⋯ › Gameplay** (iPhone and iPad) or **F1 › Gameplay** (Mac, Windows and Linux) |
 
 Code mods are built into your app, so a module built before an update does not gain newer Better Wind
 Waker settings or 16:10 until you rebuild it. More in [docs/MODS.md](docs/MODS.md).
@@ -384,6 +385,18 @@ Don't delete `%APPDATA%\BlueWake` to troubleshoot: it holds your saves and setti
 
 </details>
 
+<details>
+<summary><strong>Was AI used to make it?</strong></summary>
+
+Yes. BlueWake uses substantial AI assistance for code, tests, documentation, debugging and maintenance.
+There is no audited percentage of AI-generated code. [The plan](docs/GOAL_LOOP.md),
+[the priorities](docs/PRIORITIES.md) and each release's record say what was actually checked, and on what.
+Commits and the contributor list name the people working on BlueWake, whatever tools they use. This
+describes BlueWake's workflow, and leaves the authorship of Wind Waker, Wind Waker Recomp and BlueWake's
+other upstream projects with their authors.
+
+</details>
+
 ## Documentation
 
 - [Build your own BlueWake](docs/BUILD_YOUR_OWN.md): the player's guide for iPhone, iPad and Mac
@@ -400,9 +413,10 @@ Don't delete `%APPDATA%\BlueWake` to troubleshoot: it holds your saves and setti
 
 ## Credits
 
-- [Elliott (@elliotttate)](https://github.com/elliotttate), co-maintainer, whose
+- [Elliott (@elliotttate)](https://github.com/elliotttate), whose
   [Wind Waker Recomp](https://github.com/elliotttate/Wind-Waker-Recomp) brought the Windows port and
-  the rendering, camera, gameplay and performance work now in BlueWake
+  the rendering, camera, gameplay and performance work now in BlueWake. He is no longer active on
+  either project.
 - [SunPad](https://github.com/chrissotraidis/sunpad), the Super Mario Sunshine port whose touch
   controls BlueWake adapts
 - [Dolphin](https://dolphin-emu.org/), for the compatibility runtime, DSP audio, the texture-pack
