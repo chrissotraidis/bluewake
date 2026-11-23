@@ -1258,7 +1258,10 @@ int main(void) {
 
         exe = self.build_app()
         start = time.monotonic()
-        module = self.compile_composite(work / "composite", "0", ["-fprofile-instr-generate"],
+        # The extra widescreen variants can push the instrumented -O0 DLL past
+        # the Windows loader's 2 GiB PE32+ image limit. Keep the profile counters
+        # and use -O1 for this training DLL.
+        module = self.compile_composite(work / "composite", "1", ["-fprofile-instr-generate"],
                                         ["-fprofile-instr-generate"], "training-composite")
         print(f"instrumented game module built ({int(time.monotonic() - start) // 60} min)")
         attempt = Path(tempfile.mkdtemp(prefix="attempt-", dir=work))
