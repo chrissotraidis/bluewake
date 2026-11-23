@@ -3,3 +3,4 @@
 [Product brief](PRD.md) · [Technical plan](TECH_PLAN.md) · [Progress](PROGRESS.md) · Follow-up to [#586 review](https://github.com/chrissotraidis/bluewake/pull/586#pullrequestreview-6011550248)
 
 - 2026-11-22: `.platforms = Os::Linux` on the row; test extended with `kLinuxOnly`; both settings tests pass locally. Draft PR opened.
+- 2026-11-22: tested on a Steam Deck in Game Mode (build main-642-643, 23eb4da30 = main + #642 + #643): the switch still shows under Config and stays on with the owner's settings. Marked ready for review.
