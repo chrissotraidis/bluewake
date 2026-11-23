@@ -181,8 +181,8 @@ sanitizer checks passed for the builder fix.
 | Build time, jobs, clang, RecompCore, provenance, mod variants | Windows: 1h42m19s for the retry, six jobs, clang 22.1.3, RecompCore `c0f5f918026efe3168bdde42f3af0a55a3325e5e`. The build kept all variants including `widescreen6427` and `widescreen4318` and both Better Wind Waker combinations. The build receipt has `fp_checks: true`, `direct_gate_training: true` and `local_training: true`. The app used its optimization profile. |
 | Module SHA-256 | `20b12eeffd950a5aba7d3d86cdc4d4526957c1773af0aeeeb5642a12e482e079` (matches build receipt) |
 | Speed: 0.12.0 and 0.13.0 per stop, checkpoints | Passed. Four runs in 0.12.0, 0.13.0, 0.13.0, 0.12.0 order from the 0.11.0 tour state. All five stops loaded in each run. All 31 checkpoints matched within and across versions, including CPU cycles, MEM1, MEM2 and aliases. All three slower stop means were within 3% (below). |
-| a. Start and look | Scripted Quest Log 1 at Outset with more than two minutes of movement and camera input. D3D12, draw fusion and gate on; zero fatal lines and a clean menu quit. Human visual acceptance pending. |
-| b. Heat haze and the Picto Box | Scripted Dragon Roost Cavern room 2 camera sweep. Reviewed real and in-between samples at a 60 fps target without an obvious lagging edge. With Smooth Motion on and off, 75 captures per run show the Picto Box follows turns and the monochrome photo preview matches the last aiming view. Both runs exited 0; human visual acceptance pending. |
+| a. Start and look | Scripted Quest Log 1 at Outset with more than two minutes of movement and camera input. D3D12, draw fusion and gate on; zero fatal lines and a clean menu quit. Chris accepted the scripted evidence for the handoff. |
+| b. Heat haze and the Picto Box | Scripted Dragon Roost Cavern room 2 camera sweep. Reviewed real and in-between samples at a 60 fps target without an obvious lagging edge. With Smooth Motion on and off, 75 captures per run show the Picto Box follows turns and the monochrome photo preview matches the last aiming view. Both runs exited 0; Chris accepted the scripted evidence for the handoff. |
 | c. The heart | Display-rate runs at 60 presented fps, with automatic Smooth Motion pausing disabled to collect the evidence. Each version produced 301 real and 301 in-between frames over game frames 600–900. 0.12.0's in-between heart exceeded the adjacent real frames roughly every 23 game frames. None of the 300 comparable 0.13.0 in-between frames exceeded their adjacent real frames. |
 | d. Ultrawide presets | Both 16:9 client captures (1024×576) reached Outset and the HUD stayed inside the picture. 43:18 gave bars of 73 and 74 pixels (~12.8% each), and 64:27 gave 72 and 72 (12.5%). Both runs exited 0. An actual ultrawide display was unavailable. |
 | e. No heart pulsing | 42 sampled frames per setting. The glow was visible in the Better Wind Waker control and absent in all samples with `no_heart_pulse`. Both runs exited 0. |
@@ -208,5 +208,5 @@ packager's source ZIP and its checksum file stayed on this PC.
 The existing v0.13.0 release is still a draft. Only the Windows ZIP and Linux AppImage were added. The draft
 target and existing source ZIP still reference the original freeze. The desktop artifacts use the builder-only
 fix in #646, so the source package and release target need to be reconciled before publication. The Mac
-release-content gate and Chris's hands-on visual review remain open. Linux graphical gameplay was outside this
-handoff's checks.
+release-content gate remains open. Chris waived the hands-on Windows checks and accepted the scripted
+evidence for this handoff. Linux graphical gameplay was outside the handoff's checks.
