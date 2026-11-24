@@ -1077,8 +1077,10 @@ static void aim_frame(CPUState* cpu, u32 player) {
 // boat's camera eases to its style's distance each frame, so the distance it
 // is to go to is scaled, not the eased one, in the style itself: only the
 // style in use, from the game's own value every frame, so nothing compounds,
-// and every other boat style is put back to the game's value. A save state
-// taken while zoomed keeps the scaled value until the next boat frame here.
+// and put back to the game's value once the zoom is off. A style the zoom
+// never scaled is never written: with the zoom unused, the game's data is left
+// alone. A save state taken while zoomed keeps the scaled value until the zoom
+// is used on that style again in a later run.
 static const struct {
     u32 style;
     float distance;
@@ -1092,6 +1094,8 @@ static const struct {
     {0x803588D4u, 750.f},  // BE07
 };
 enum { kEngineRide = 8 };
+// Which boat styles this run has scaled and not yet put back.
+static bool g_boat_style_wrote[sizeof kBoatStyles / sizeof kBoatStyles[0]];
 
 static int boat_style_index(CPUState* cpu, u32 style) {
     if (style == 0u || style_engine(cpu, style) != (u32)kEngineRide)
@@ -1112,9 +1116,13 @@ static void boat_zoom_frame(CPUState* cpu, u32 style, bool player) {
                                             kZoomMin, kZoomMax);
     for (int i = 0; i < (int)(sizeof kBoatStyles / sizeof kBoatStyles[0]); ++i) {
         const u32 address = kBoatStyles[i].style + kStyleParams + 4u * 10u;
-        const float want = kBoatStyles[i].distance * (float)(i == current && g_stick_boat_zoom ? g_boat_zoom : 1.0);
+        const bool scaled = i == current && g_stick_boat_zoom && g_boat_zoom != 1.0;
+        if (!scaled && !g_boat_style_wrote[i])
+            continue;
+        const float want = kBoatStyles[i].distance * (float)(scaled ? g_boat_zoom : 1.0);
         if (read_f32(cpu, address) != want)
             write_f32(cpu, address, want);
+        g_boat_style_wrote[i] = scaled;
     }
 }
 
