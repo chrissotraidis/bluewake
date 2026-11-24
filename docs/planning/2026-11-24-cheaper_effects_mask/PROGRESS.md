@@ -38,3 +38,20 @@
 
   Switch on against off: +3.0 retraces a second (+5.9 %), −2.5 ms (−10.2 %). The one pass is in use in this scene ("Effects mask (both)" in the GPU profile, no two-pass zones). Pictures on a desktop: the one-pass frames are identical, pixel for pixel, to the half-size two-pass ones (three same-frame pairs), so the scene table above stands for both. No validation errors. Pipelines made in a run: about the same with the switch on as off (the variants compile once and are cached); a first-use hitch was not looked for specifically.
 - 2026-11-24: the brief and the technical plan brought up to what was built (both parts under one switch, the third idea dropped, the switch's final name).
+- 2026-11-24: the render bench on the owner's Deck (`scripts/render_bench --display gamemode --paced --pairs 2 --states`), through the owner's Steam shortcut with the owner's settings (3x, HD look, Smooth Motion, the texture pack, #655's switch on; the FPS counter off), build `4cc7b447b`, the switch on (A) against off (B), ten save states of 1800 retraces: 8 measured runs A/B/B/A/A/B/B/A and a picture run of each. Guest checkpoints identical across every run (6 each). Medians over the four runs of each:
+
+  | Scene | Game frames a second, off → on | GPU busy per shown frame, off → on | Change |
+  |---|---|---|---|
+  | Outset: bench view | 25.0 → 25.2 | 21.7 → 21.0 ms | −0.7 ms |
+  | Outset: coast (butterflies) | 30.7 → 30.9 | 19.7 → 19.0 ms | −0.6 ms |
+  | Outset: ordinary play | 29.9 → 30.0 | 17.7 → 17.4 ms | −0.3 ms |
+  | Outset: busy view | 29.4 → 28.9 | 19.8 → 19.8 ms | 0.0 ms |
+  | Outset: busiest view | 25.9 → 26.2 | 20.1 → 19.5 ms | −0.6 ms |
+  | Dragon Roost Cavern: lava room | 29.9 → 30.0 | 18.3 → 18.5 ms | +0.2 ms |
+  | Hyrule Castle | 30.0 → 29.9 | 16.5 → 16.9 ms | +0.4 ms |
+  | Sea: shipwreck | 29.7 → 29.5 | 18.2 → 18.5 ms | +0.4 ms |
+  | Windfall: night rain | 29.3 → 29.9 | 17.8 → 16.6 ms | −1.2 ms |
+  | Sea: Big Octo fight | 24.9 → 26.3 | 25.1 → 22.5 ms | −2.6 ms |
+
+  Overall (each run's geometric mean over the scenes, the median over runs): 28.37 → 28.61 game frames a second, +0.84 %. The gains are in the scenes below full speed; in scenes already at 30 the GPU time is level or a little up (the Deck's GPU lowers its clock with its load, 200 to 1600 MHz, so a millisecond is not the same work there; a clock log is being taken with the next bench to check this).
+- 2026-11-24: two things about the tool in this mode. Its analysis found no numbers at first ("0/8 runs loaded every scene", empty tables): Game Mode's session log has a time before each line, and `bench_tour.scan_log` wants `[perf]` at the line's start. The table above is from the same `analyze` over the logs with the times taken off. And its picture verdicts (four "failed", four "changed") compare frames that are mostly not the same game frame in Game Mode: of 50 pairs, 13 are (the HUD's hearts identical). Those 13: identical in Hyrule Castle; 63.9 dB or better elsewhere (largest difference 18 of 255, at most 0.022 % of pixels over 8). Sheets of the worst same-frame pair of each scene that has one are in `images/bench-*.jpg`; the Big Octo fight, the lava room, ordinary play and the busy view had none on the Deck (the Big Octo sheet is the desktop's same-frame pair).
