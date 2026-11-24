@@ -67,5 +67,44 @@ ok &= check("frame inside the inline block", """            if (!(s.downcount - 
 # Text without the frame form is untouched.
 ok &= check("no frame", "    ctx->gpr[3] = 1u;\n", "    ctx->gpr[3] = 1u;\n")
 
+# The inline register save's *gate* is a boundary: the translation only takes the inline
+# form when bw_direct_call_ready holds at the call, and with the host busy it runs the
+# routine through the chassis instead. The native has to decline there (gx_silent) rather
+# than run past the boundary — that is what made cBgW::MakeBlckBnd diverge.
+inline_gpr = native_gx_gen.Gen.inline_gpr
+
+GATED = """            ctx->lr = 0x80247CE8u;
+            ctx->pc = 0x80328F38u;
+            /* bluewake: _savegpr/_restgpr inline (scripts/windows/inline_save_restore_gpr.py) */
+            if (bw_direct_call_ready(ctx, 0x80328F38u) &&
+                bw_inline_gpr_memory_ready(ctx, 27u)) {
+            if (ctx->downcount - 6 > -(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET) {
+                ctx->downcount -= 7;
+                u8* const slots = bw_inline_gpr_frame(ctx, 27u, true);
+                write_be32(slots + 0, (u32)ctx->gpr[27]);
+                ctx->cycle_observation_suffix = 0u;
+                ctx->pc = 0x80247CE8u;
+                if (ctx->downcount <= -(s64)DOLRECOMP_C_LOOP_CYCLE_BUDGET || edge_pending(ctx))
+                    return;
+                goto label_80247CE8;
+            }
+            }
+            ctx->pc = 0x80247CE8u;
+            return;
+"""
+
+gated = inline_gpr(None, GATED)
+want = "if (!gx_silent(&s, 0x80328F38u) || !gx_silent(&s, 0x80247CE8u))"
+if want not in gated or "bw_direct_call_ready" in gated or "goto label_80247CE8;" not in gated:
+    print("FAIL gated save\n--- got\n" + gated)
+    ok = False
+
+UNGATED = GATED.replace("""            if (bw_direct_call_ready(ctx, 0x80328F38u) &&
+                bw_inline_gpr_memory_ready(ctx, 27u)) {
+""", "")
+if "gx_silent" in inline_gpr(None, UNGATED):
+    print("FAIL ungated save gained a gate")
+    ok = False
+
 print("test_native_generator_frame:", "OK" if ok else "FAILED")
 sys.exit(0 if ok else 1)

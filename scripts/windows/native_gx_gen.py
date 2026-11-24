@@ -432,8 +432,15 @@ class Gen:
         # test, and on to the return address; the routine itself (through the
         # chassis) otherwise, which declines here.
         def save_restore(m):
-            ret, room, cycles, body = m.group(1), m.group(2), m.group(3), m.group(4)
-            return (f"            lr = 0x{ret}u;\n"
+            ret, room, cycles, body = m.group("ret"), m.group("room"), m.group("cycles"), m.group("body")
+            # The translation gates the inline form on bw_direct_call_ready at the call and on
+            # the frame being RAM. The frame is gx_ld32/gx_stp32's business (a frame that is
+            # not MEM1 marks the run bad and replays); the call being ready is a boundary this
+            # native has to honour, or it runs past a boundary the translation stops at.
+            gate = m.group("gate")
+            silent = (f"            if (!gx_silent(&s, 0x{gate}u) || !gx_silent(&s, 0x{ret}u))\n"
+                      f"                return 0; /* the host has something to do there */\n") if gate else ""
+            return (silent + f"            lr = 0x{ret}u;\n"
                     f"            if (!(s.downcount - {room} > -s.budget))\n"
                     f"                return 0; /* the routine itself, through the chassis */\n"
                     f"            s.downcount -= {cycles};\n"
@@ -443,24 +450,24 @@ class Gen:
                     "                return 0;\n"
                     f"            goto label_{ret};\n")
         return re.sub(
-            r"            ctx->lr = 0x([0-9A-F]{8})u;\n"
-            # direct_calls.py and inline_save_restore_gpr.py now put the callee's address
-            # in the pc and gate the inline form on the call being ready and the saved
-            # registers' memory being RAM. A gate that fails runs the same routine
-            # through the chassis, and a frame that is not RAM marks the run bad here,
-            # so neither changes what this native produces.
+            r"            ctx->lr = 0x(?P<ret>[0-9A-F]{8})u;\n"
+            # direct_calls.py and inline_save_restore_gpr.py put the callee's address in the
+            # pc and gate the inline form on the call being ready and on the saved registers'
+            # memory being RAM. The frame is gx_ld32/gx_stp32's business now; the gate is a
+            # boundary, so a host that is not quiet there runs the routine through the
+            # chassis and this native declines (gx_silent) rather than running past it.
             r"(?:            ctx->pc = 0x[0-9A-F]{8}u;\n)?"
             r"            /\* bluewake: _savegpr/_restgpr inline \(scripts/windows/inline_save_restore_gpr\.py\) \*/\n"
-            r"(?:            if \(bw_direct_call_ready\(ctx, 0x[0-9A-F]{8}u\) &&\n"
+            r"(?:            if \(bw_direct_call_ready\(ctx, 0x(?P<gate>[0-9A-F]{8})u\) &&\n"
             r"                bw_inline_gpr_memory_ready\(ctx, \d+u\)\) \{\n)?"
-            r"            if \(ctx->downcount - (\d+) > -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET\) \{\n"
-            r"                ctx->downcount -= (\d+);\n"
-            r"((?:                (?!ctx->cycle_observation_suffix)[^\n]*\n)*?)"
+            r"            if \(ctx->downcount - (?P<room>\d+) > -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET\) \{\n"
+            r"                ctx->downcount -= (?P<cycles>\d+);\n"
+            r"(?P<body>(?:                (?!ctx->cycle_observation_suffix)[^\n]*\n)*?)"
             r"                ctx->cycle_observation_suffix = 0u;\n"
-            r"                ctx->pc = 0x\1u;\n"
+            r"                ctx->pc = 0x(?P=ret)u;\n"
             r"                if \(ctx->downcount <= -\(s64\)DOLRECOMP_C_LOOP_CYCLE_BUDGET \|\|[^\n]*\n"
             r"(?:                    [^\n]*\n)*?                    return;\n"
-            r"                goto label_\1;\n"
+            r"                goto label_(?P=ret);\n"
             r"            \}\n"
             r"(?:            \}\n)?"
             r"            ctx->pc = 0x[0-9A-F]{8}u;\n"
@@ -496,6 +503,13 @@ class Gen:
                      else "return 0;")
             if after != "return 0;":
                 native.stops_at.add(ret)
+            # The translation's gate is a boundary too: with the host busy at the call or at
+            # the return, the routine runs through the chassis (the stop above), so the
+            # native has to decline there rather than run past it.
+            gate = re.search(r"bw_direct_call_ready\(ctx, 0x([0-9A-F]{8})u\) &&", m.group(0))
+            if gate:
+                native.boundaries |= {int(gate.group(1), 16), ret}
+                cond = f"gx_silent(&s, 0x{gate.group(1)}u) && gx_silent(&s, 0x{ret:08X}u) && {cond}"
             return (f"            if (!({cond})) {{\n{fail}\n            }}\n"
                     f"            lr = 0x{ret:08X}u;\n"
                     f"            s.downcount -= {cycles};\n"
