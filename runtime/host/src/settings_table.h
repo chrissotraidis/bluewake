@@ -476,6 +476,16 @@ inline constexpr Setting kSettings[] = {
              "Does nothing outside gamescope. Off by default; measured on a Steam Deck. Takes effect when "
              "BlueWake starts again.",
      .next_launch = Os::All, .platforms = Os::Linux},
+    // Distance blur: Light (DOL_AURORA_GAME_DOF=1) blurs a full-size copy of the picture in
+    // two passes; RecompCore #67 (DOL_AURORA_GAME_DOF_FAST) takes the copy down to half size
+    // and blends that back in one pass. Opt-in; read when the renderer first makes that copy.
+    {.key = "DOL_AURORA_GAME_DOF_FAST", .kind = Kind::Bool,
+     .label = "Faster Light distance blur", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. With Distance blur set to Light, blurs a half-size copy of the picture "
+             "instead of the full-size one. The blur can differ very slightly. Does nothing at the "
+             "other Distance blur settings. Off by default; measured on a Steam Deck. Takes effect "
+             "when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
