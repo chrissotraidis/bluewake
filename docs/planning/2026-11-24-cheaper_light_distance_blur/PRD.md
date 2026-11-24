@@ -30,7 +30,7 @@ The other HD effects, one off at a time in the same scene with Light on: ambient
 - The far blur (second in the table above); a follow-up if this one works out.
 - Changing any default.
 - Ambient occlusion, the other effect this scene is sensitive to (off: 59.6, 58.7); #586's packed AO is already on here.
-- An intermittent crash seen in 2 of about 21 measurement runs, near the end of the run (ImGui's draw in the deferred present on the render worker): reported apart.
+- An intermittent crash seen in 2 of about 21 measurement runs, near the end of the run (ImGui's draw in the deferred present on the render worker): reported apart as #656.
 
 ## Success
 

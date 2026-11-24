@@ -15,26 +15,30 @@ Wind Waker's depth of field (`drawDepth`) copies the EFB at half size and draws 
 
 So Light is the only step that runs the separable blur on a full-size target: at 3x, two 7-tap passes over the whole render target and a `CopyTextureToTexture` back, in the real frame and again in Smooth Motion's in-between frame. Off makes the same full-size copy without the blur and holds full speed, so the blur passes are the cost, not the copy.
 
-## Change (RecompCore)
+## Change (RecompCore #67), as built
 
-Behind `DOL_AURORA_GAME_DOF_FAST` (`aurora_set_game_dof_fast`), step 1 only:
+Behind `DOL_AURORA_GAME_DOF_FAST` (`aurora_set_game_dof_fast`; read at the first blur, after the host's settings are in the environment), in `tex_copy_conv::blur`:
 
-- Run the two blur passes on a half-size scratch target (a bilinear downsample of the copy as the first pass's source), with sigma halved so the blur covers the same picture distance.
-- Compose into the full-size copy in one pass: the sharp full-size copy and the half-size blurred one, mixed half in as today. This replaces the second full-size pass and the copy back.
-- Cost: two half-size passes (a quarter of the pixels each) and one full-size composite with two taps, against two full-size 7-tap passes and a full-size copy.
+- **One half-size pass:** the copy is taken down to half its size with the linear sampler (a 2x2 box), plus four side taps for what the box and the stretch back leave of the sigma. In the copy's texels the box has a variance of 1/4 and the linear stretch back 2/3, so they already make a sigma of about 0.96; Light's is 1, so the side taps weigh about 0.01.
+- **One full-size pass:** that half is stretched back over the copy itself with the linear sampler and blended in by `mix` through the blend constant. No scratch target at the full size and no copy back.
+- Against two full-size passes of 7 texel loads each and a `CopyTextureToTexture`.
+- It only stands in where it fits: a sigma from about 0.96 to 1.25, a `mix` above 0, and a copy that can be a render attachment. Everything else (steps 3 and 4, a converted copy) takes the existing path. The GPU profiler zone is "EFB copy blur (fast)".
 
-To settle while building: whether the composite can write the copy in place or needs the scratch and a copy back; if the half-size blur shows on thin bright edges at 1x and 2x, keep full size below a render scale of 3.
+This differs from the first plan (two blur passes at half size and a composite reading the sharp copy): the box and the stretch turned out to be nearly the whole of a sigma-1 blur, and blending into the copy removed the scratch and the copy back.
 
-## Change (BlueWake)
+## Change (BlueWake), as built
 
-- `settings_table.h`: `DOL_AURORA_GAME_DOF_FAST`, a switch in Config's Performance section, off by default, needing `DOL_AURORA_GAME_DOF`; `desktop_menu.cpp` passes it on; `settings_table_test.cpp` lists it.
-- The RecompCore pin.
+- `settings_table.h`: `DOL_AURORA_GAME_DOF_FAST`, "Faster Light distance blur", a switch in Config after the other performance switches, off by default, taking effect at the next start. It does not depend on another setting in the table: at the other Distance blur steps it does nothing, as its note says.
+- `settings_table_test.cpp`: its place in the file order and its own assertions.
+- The RecompCore pin (#67's head).
+- The renderer reads the variable itself, as it does `DOL_AURORA_AO_PACKED`; the menu does not pass it on.
 
-## Verification
+## Verification, as done and still to do
 
-- Pictures: the rain state and a clear-day distance view, switch off against on, at 1x, 2x and 3x; PSNR and the pictures in the PR.
-- Speed: the table in the PRD again with the switch on, in Game Mode, 3 launches a setting.
-- GPU profile (`DOL_AURORA_GPU_PROF=1`): the "EFB copy blur" zone before and after.
+- Speed, done: the rain state in Game Mode, two runs a setting, interleaved (PROGRESS.md). A render bench over ten states (the eight of the earlier render work, this rain state and the Big Octo fight) with the switch on against off is the fuller check.
+- GPU profile, done: the blur's zone 0.85–0.95 ms to 0.24 ms.
+- Pictures, done for the rain state at 3x (PSNR 62.5 dB). Still to do: the other scenes, from the render bench.
+- Against the PRD's first success line: Light with the switch on reached 58.2 to 58.9 retraces a second against Default's 59.8, so 0.9 to 1.6 short of Default, not within 1.
 
 ## How the scene was measured
 
