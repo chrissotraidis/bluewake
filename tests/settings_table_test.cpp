@@ -55,6 +55,8 @@ static const char* const kWindowsOnlyNextLaunch[] = {"BLUEWAKE_FAST_FORWARD", "B
                                                      "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};
 static const char* const kFilledEverywhere[] = {"BLUEWAKE_DSP_MODE", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};
 static const char* const kWindowsOnly[] = {"DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION"};
+// Linux only: gamescope's frame layer (Steam Deck Game Mode) has no Mac or Windows match.
+static const char* const kLinuxOnly[] = {"BLUEWAKE_NO_GAMESCOPE_WSI"};
 static const char* const kNotFilled[] = {"DOL_AURORA_FORCE_ANISO", "BLUEWAKE_MENU_PLACE",
                                          "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
                                          "BLUEWAKE_DOLPHIN_SAVE_FOLDER", "DOL_AURORA_WINDOW",
@@ -108,8 +110,12 @@ int main() {
         if (windows_only)
             assert(!next_launch_on(s, Os::Mac));
         // Where it exists.
-        assert(exists_on(s, Os::Windows));
-        assert(exists_on(s, Os::Mac) == !listed(kWindowsOnly, s.key) && exists_on(s, Os::Linux) == exists_on(s, Os::Mac));
+        if (listed(kLinuxOnly, s.key)) {
+            assert(exists_on(s, Os::Linux) && !exists_on(s, Os::Mac) && !exists_on(s, Os::Windows));
+        } else {
+            assert(exists_on(s, Os::Windows));
+            assert(exists_on(s, Os::Mac) == !listed(kWindowsOnly, s.key) && exists_on(s, Os::Linux) == exists_on(s, Os::Mac));
+        }
         // Windows puts every default in the environment at launch; Mac and Linux
         // only the three whose game default differs.
         assert(filled_on(s, Os::Windows) == !listed(kNotFilled, s.key));
