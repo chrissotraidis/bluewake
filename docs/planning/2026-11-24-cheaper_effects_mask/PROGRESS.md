@@ -28,3 +28,12 @@
   | Lava room, 3x, 2x, 1x | | 10 of 12 | identical | 0 | none |
 
   No validation errors in any run. The lava room state draws no effects mask at all (no mask zones in its GPU profile), so it says nothing; Hyrule Castle draws it and is identical. **Not covered by any saved state:** effects at their own depth (a lava geyser, a particle's dust), which take the sea mask's depth path, and the dark-effect case the pass over white exists for (a door's dust in Dragon Roost Cavern). Both need states made for them.
+- 2026-11-24: the second candidate, under the same switch: both targets in one pass (RecompCore #68's next commit). Each effect gets a two-target variant of its pipeline (`PipelineConfig::softTarget` 2, no new field, so the pipeline cache keeps what it has); a pass whose effects all have theirs ready writes the mask and the one over white at once, any other keeps the two passes. Effects with destination alpha, a depth texture or an early depth pass have no variant. `DOL_AURORA_EFFECT_MASK_SINGLE=0` keeps the two passes, for measuring. Build `4cc7b447b`, the owner's Deck in Game Mode, the Big Octo state, 3x, three runs each, interleaved:
+
+  | Effects mask | Retraces a second | GPU busy per shown frame |
+  |---|---|---|
+  | Full size, two passes (switch off) | 49.9, 50.3, 50.0 | 24.2, 24.5, 24.9 ms |
+  | Half size, two passes (`…_SINGLE=0`) | 52.6, 52.1, 52.5 | 22.5, 22.8, 22.8 ms |
+  | **Half size, one pass (switch on)** | **53.1, 52.8, 53.2** | **21.9, 22.2, 22.0 ms** |
+
+  Switch on against off: +3.0 retraces a second (+5.9 %), −2.5 ms (−10.2 %). The one pass is in use in this scene ("Effects mask (both)" in the GPU profile, no two-pass zones). Pictures on a desktop: the one-pass frames are identical, pixel for pixel, to the half-size two-pass ones (three same-frame pairs), so the scene table above stands for both. No validation errors. Pipelines made in a run: about the same with the switch on as off (the variants compile once and are cached); a first-use hitch was not looked for specifically.
