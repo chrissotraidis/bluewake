@@ -147,6 +147,7 @@ Run `build\windows\BlueWake\BlueWake.exe`.
 | Camera | Click the game, then move the mouse (Esc releases it) |
 | Settings | F1 or Esc after releasing the mouse |
 | Jump / Sprint | Space / Shift; turn on Jump & Sprint in settings (Gameplay) |
+| Speed up | Hold Tab; turn on Speed up in settings (Gameplay), with its own factor |
 | HD look | F2 |
 | Save state / load the latest | F5 / F8; five more slots under the menu's **Save state slots...** |
 | Stage select | F7, once it's on in settings |

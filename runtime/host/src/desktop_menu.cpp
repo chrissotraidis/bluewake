@@ -39,6 +39,7 @@ extern "C" {
 #include "quick_doors.h"
 #include "save_state.h"
 #include "sprint.h"
+#include "turbo.h"
 }
 
 #include "gxruntime/aurora_backend.h"
@@ -684,6 +685,32 @@ bool draw_custom(const bw_settings::Setting& s) {
         bw_stage_select_save_warning();
         if (bw_stage_select_button())
             close_menu();
+        return true;
+    }
+    if (std::strcmp(s.key, "BLUEWAKE_TURBO") == 0) {
+        // Speed up while Tab is held, with its factor under it. The factor
+        // is written always, so turning the switch off and on again keeps it.
+        bool on = env_on(s.key, false);
+        float factor = static_cast<float>(std::atof(env("BLUEWAKE_TURBO_SPEED", "3").c_str()));
+        if (factor < 1.5f || factor > 5.f)
+            factor = 3.f;
+        const auto apply_turbo = [&]() {
+            char text[16];
+            std::snprintf(text, sizeof text, "%.1f", factor);
+            set_env("BLUEWAKE_TURBO_SPEED", text);
+            set_env(s.key, on ? "1" : "0");
+            bluewake_turbo_reload();
+        };
+        if (bw_menu_checkbox(s.label, &on))
+            apply_turbo();
+        ImGui::BeginGroup();
+        ImGui::BeginDisabled(!on);
+        if (slider(bw_menu::setting("BLUEWAKE_TURBO_SPEED").label, &factor, 1.5f, 5.f, "%.1fx"))
+            apply_turbo();
+        ImGui::EndDisabled();
+        ImGui::EndGroup();
+        if (!on)
+            bw_menu::greyed_why("Turn on \"Speed up while Tab is held\" to change this.");
         return true;
     }
     if (std::strcmp(s.key, "BLUEWAKE_JUMP_BUTTON") == 0) {
