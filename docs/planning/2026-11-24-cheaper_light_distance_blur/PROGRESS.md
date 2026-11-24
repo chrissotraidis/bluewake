@@ -14,3 +14,4 @@
   | Default | 59.8, 59.8 | 16.5, 16.8 ms | none |
 
 - 2026-11-24: pictures, switch off against on, the same state on a desktop (both at full speed, so the captured frames are the same game frames; the Deck's settings, 3x, a 2560x1440 window): PSNR 62.47, 62.78 and 62.46 dB at retraces 101400, 101700 and 102001, the largest difference 8 to 10 of 255 on any channel. A fourth pair was captured a game frame apart (the rain had moved) and is left out. Pictures in `images/` (the difference times 16). Still to do: a clear-day distance view, and 1x and 2x.
+- 2026-11-24: the technical plan brought up to what was built (one half-size pass and a blend back, not two blur passes and a composite; the switch does not depend on another setting; the menu does not pass it on). The PRD's first success line is not quite met: 0.9 to 1.6 retraces a second short of Default, not within 1. A render bench over ten states, switch on against off, is to follow.
