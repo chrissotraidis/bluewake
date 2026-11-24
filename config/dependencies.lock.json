@@ -112,7 +112,7 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "f612af1b90f5c1fcea4c6f777064620292d1149b",
+      "sha": "62254253ade6fdb0db30737710ac25de60e2a1e2",
       "branch": "bluewake-next",
       "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/68 (the effects' mask at half size, opt-in; its head, stacked on #67); before it: https://github.com/chrissotraidis/RecompCore/pull/67 (a fast blur for the depth of field step 1, opt-in; its head, on bluewake-next after #66); before it: https://github.com/chrissotraidis/RecompCore/pull/66 (merged into bluewake-next as 7d3c18b1): #65, #62, #63, #58, #59, #51, #64 and #54, and a fix for #65 with #51",
       "license": "GPL-3.0",
