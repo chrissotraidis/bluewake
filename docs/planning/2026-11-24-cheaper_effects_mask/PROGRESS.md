@@ -55,3 +55,19 @@
 
   Overall (each run's geometric mean over the scenes, the median over runs): 28.37 → 28.61 game frames a second, +0.84 %. The gains are in the scenes below full speed; in scenes already at 30 the GPU time is level or a little up (the Deck's GPU lowers its clock with its load, 200 to 1600 MHz, so a millisecond is not the same work there; a clock log is being taken with the next bench to check this).
 - 2026-11-24: two things about the tool in this mode. Its analysis found no numbers at first ("0/8 runs loaded every scene", empty tables): Game Mode's session log has a time before each line, and `bench_tour.scan_log` wants `[perf]` at the line's start. The table above is from the same `analyze` over the logs with the times taken off. And its picture verdicts (four "failed", four "changed") compare frames that are mostly not the same game frame in Game Mode: of 50 pairs, 13 are (the HUD's hearts identical). Those 13: identical in Hyrule Castle; 63.9 dB or better elsewhere (largest difference 18 of 255, at most 0.022 % of pixels over 8). Sheets of the worst same-frame pair of each scene that has one are in `images/bench-*.jpg`; the Big Octo fight, the lava room, ordinary play and the busy view had none on the Deck (the Big Octo sheet is the desktop's same-frame pair).
+- 2026-11-24: a second bench the same way, build `4cc7b447b` three ways by its switches (neither, #655's faster blur, both), twelve measured runs interleaved, the median of four each. Both switches against neither:
+
+  | Scene | Game fps, neither switch | Game fps, both switches | Change | GPU time, neither switch | GPU time, both switches | Change |
+  |---|---|---|---|---|---|---|
+  | Windfall: night rain | 27.2 | 29.9 | **+9.8 %** | 18.7 ms | 16.6 ms | **−11.6 %** |
+  | Outset: busy view | 27.4 | 28.9 | **+5.2 %** | 20.6 ms | 20.0 ms | **−3.0 %** |
+  | Outset: bench view | 23.6 | 25.1 | **+6.1 %** | 22.9 ms | 21.0 ms | **−8.5 %** |
+  | Sea: Big Octo fight | 23.4 | 26.2 | **+11.7 %** | 26.6 ms | 22.7 ms | **−14.6 %** |
+  | Sea: shipwreck | 28.3 | 29.4 | **+3.9 %** | 18.9 ms | 18.5 ms | −1.7 % |
+  | Outset: busiest view | 24.7 | 26.0 | **+5.5 %** | 22.0 ms | 19.5 ms | **−11.0 %** |
+  | Outset: coast (butterflies) | 29.4 | 31.0 | **+5.3 %** | 21.3 ms | 19.3 ms | **−9.3 %** |
+  | Outset: ordinary play | 29.4 | 30.0 | +1.8 % | 18.1 ms | 17.9 ms | −1.3 % |
+  | Hyrule Castle | 29.9 | 29.9 | 0.0 % | 17.9 ms | 16.9 ms | **−5.6 %** |
+  | Dragon Roost Cavern: lava room | 30.0 | 29.9 | −0.2 % | 18.3 ms | 17.6 ms | **−3.9 %** |
+  Overall: 27.23 game frames a second with neither, 28.32 with the blur (+4.0 %), 28.54 with both (+4.8 %). This switch over the blur alone: the Big Octo fight 24.6 → 26.2 (+6.3 %, GPU time −10.0 %), the rainy Windfall 29.3 → 29.9 (+2.2 %, −8.8 %), which repeats the first bench; the Outset busy view 29.3 → 28.9 (−1.4 %) and the shipwreck −0.9 %, neither explained. In percent the first bench reads: Big Octo +5.6 % and −10.5 %, the rain +2.0 % and −7.0 %, the others within 2 % of game frames a second.
+- 2026-11-24: the Deck's GPU clock, logged about once a second through that bench (`/sys/class/drm/card*/device/pp_dpm_sclk`, samples with the GPU over 80 % busy): lower on average with this switch on in eight of the ten scenes, by 1 to 5 % (the shipwreck 1230 → 1206 MHz, the lava room 1157 → 1127, the Big Octo fight 1429 → 1359). So GPU time understates the saving where the clock fell; it does not explain Hyrule Castle (level clock, GPU time up 2 to 3 % in both benches).
