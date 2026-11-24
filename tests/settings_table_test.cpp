@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <cstddef>
 #include <cstring>
@@ -16,32 +17,26 @@ using namespace bw_settings;
 // changes where its line sits in the file, never what the file says.
 static const char* const kFileOrder[] = {
     "DOL_AURORA_TEXTURE_PACK", "BLUEWAKE_TEXTURE_PACK_KEEP_TABLES", "BLUEWAKE_TEXTURE_DUMPS", "BLUEWAKE_ASPECT", "BLUEWAKE_NATIVE_CUTSCENE_FRAMING",
-    "BLUEWAKE_HD_LOOK", "BLUEWAKE_HD_DISTANT_ISLANDS", "BLUEWAKE_HD_AO",
-    "BLUEWAKE_HD_CLOUD_SHADOWS", "BLUEWAKE_HD_EDGE_LIGHT", "BLUEWAKE_HD_TORCH_LIGHT", "BLUEWAKE_HD_FAR_BLUR", "BLUEWAKE_HD_BLOOM",
-    "BLUEWAKE_HD_CLOUDS", "BLUEWAKE_HD_SKY", "BLUEWAKE_HD_SKY_MODELS", "BLUEWAKE_HD_SKY_LINEAR", "BLUEWAKE_HD_SUNLIGHT",
-    "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH", "BLUEWAKE_HD_LIGHT", "BLUEWAKE_HD_LIGHT_SHADOWS",
-    "BLUEWAKE_HD_LIGHT_CHARACTERS", "BLUEWAKE_HD_LIGHT_BLOOM", "BLUEWAKE_HD_LIGHT_AO", "BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS",
-    "BLUEWAKE_HD_LIGHT_RIM", "BLUEWAKE_HD_LIGHT_FAR_BLUR", "DOL_AURORA_SHOW_FPS", "BLUEWAKE_PERF_OVERLAY",
-    "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES",
-    "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST", "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE",
-    "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
-    "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO", "DOL_AURORA_GAME_DOF", "DOL_AURORA_GAME_DOF_START",
-    "BLUEWAKE_MODS", "BLUEWAKE_OPTIONS", "BLUEWAKE_STAGE_SELECT_TOGGLE", "BLUEWAKE_FOREST_WATER_KEEP_TREES",
-    "BLUEWAKE_FOREST_WATER_30_MINUTES", "BLUEWAKE_FADE_FRAMES", "BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS", "BLUEWAKE_SAIL_ON_Z",
-    "BLUEWAKE_CLIMB", "BLUEWAKE_CLIMB_STAMINA", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED",
-    "BLUEWAKE_SPRINT_CHOICE", "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_LAYOUT_PENDING", "BLUEWAKE_PAD_SWAP_LR",
-    "BLUEWAKE_DPAD_MENUS", "BLUEWAKE_BACKGROUND_INPUT", "BLUEWAKE_BUTTON_MAP", "BLUEWAKE_KEY_MAP", "BLUEWAKE_MOUSE_CAMERA",
-    "BLUEWAKE_MOUSE_SENSITIVITY", "BLUEWAKE_MOUSE_INVERT_Y", "BLUEWAKE_MOUSE_BUTTONS", "BLUEWAKE_STICK_CAMERA",
-    "BLUEWAKE_STICK_CAMERA_SPEED", "BLUEWAKE_STICK_AIM", "BLUEWAKE_STICK_AIM_SPEED", "BLUEWAKE_STICK_ZOOM", "BLUEWAKE_STICK_ZOOM_SPEED",
-    "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_AIM_INVERT_Y",
-    "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH",
-    "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_LANGUAGE", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
-    "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
-    "DOL_AURORA_AO_PACKED", "BLUEWAKE_PRESENT_MAILBOX", "BLUEWAKE_NO_GAMESCOPE_WSI",
-    "BLUEWAKE_MENU_PAUSES",
-    "BLUEWAKE_MENU_TEXT_SIZE",
-    "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
-    "BLUEWAKE_DOLPHIN_SAVE_FOLDER", "DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION",
+    "BLUEWAKE_HD_LOOK", "BLUEWAKE_HD_DISTANT_ISLANDS", "BLUEWAKE_HD_AO", "BLUEWAKE_HD_CLOUD_SHADOWS", "BLUEWAKE_HD_EDGE_LIGHT",
+    "BLUEWAKE_HD_TORCH_LIGHT", "BLUEWAKE_HD_FAR_BLUR", "BLUEWAKE_HD_BLOOM", "BLUEWAKE_HD_CLOUDS", "BLUEWAKE_HD_SKY",
+    "BLUEWAKE_HD_SKY_MODELS", "BLUEWAKE_HD_SKY_LINEAR", "BLUEWAKE_HD_SUNLIGHT", "BLUEWAKE_HD_SUN_SHADOWS", "BLUEWAKE_HD_SHADOW_STRENGTH",
+    "BLUEWAKE_HD_LIGHT", "BLUEWAKE_HD_LIGHT_SHADOWS", "BLUEWAKE_HD_LIGHT_CHARACTERS", "BLUEWAKE_HD_LIGHT_BLOOM", "BLUEWAKE_HD_LIGHT_AO",
+    "BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS", "BLUEWAKE_HD_LIGHT_RIM", "BLUEWAKE_HD_LIGHT_FAR_BLUR", "DOL_AURORA_SHOW_FPS", "BLUEWAKE_PERF_OVERLAY",
+    "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES", "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST",
+    "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE", "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
+    "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO", "DOL_AURORA_GAME_DOF", "DOL_AURORA_GAME_DOF_START", "BLUEWAKE_MODS",
+    "BLUEWAKE_OPTIONS", "BLUEWAKE_STAGE_SELECT_TOGGLE", "BLUEWAKE_FOREST_WATER_KEEP_TREES", "BLUEWAKE_FOREST_WATER_30_MINUTES", "BLUEWAKE_FADE_FRAMES",
+    "BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS", "BLUEWAKE_SAIL_ON_Z", "BLUEWAKE_CLIMB", "BLUEWAKE_CLIMB_STAMINA",
+    "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED", "BLUEWAKE_SPRINT_CHOICE", "BLUEWAKE_TURBO", "BLUEWAKE_TURBO_SPEED",
+    "BLUEWAKE_PAD_SWAP_AB", "BLUEWAKE_PAD_LAYOUT_PENDING", "BLUEWAKE_PAD_SWAP_LR", "BLUEWAKE_DPAD_MENUS", "BLUEWAKE_BACKGROUND_INPUT",
+    "BLUEWAKE_BUTTON_MAP", "BLUEWAKE_KEY_MAP", "BLUEWAKE_MOUSE_CAMERA", "BLUEWAKE_MOUSE_SENSITIVITY", "BLUEWAKE_MOUSE_INVERT_Y",
+    "BLUEWAKE_MOUSE_BUTTONS", "BLUEWAKE_STICK_CAMERA", "BLUEWAKE_STICK_CAMERA_SPEED", "BLUEWAKE_STICK_AIM", "BLUEWAKE_STICK_AIM_SPEED",
+    "BLUEWAKE_STICK_ZOOM", "BLUEWAKE_STICK_ZOOM_SPEED", "BLUEWAKE_STICK_CAMERA_INVERT_X", "BLUEWAKE_STICK_CAMERA_INVERT_Y", "BLUEWAKE_AIM_INVERT_Y",
+    "BLUEWAKE_GYRO_AIM", "BLUEWAKE_GYRO_AIM_SPEED", "BLUEWAKE_HAPTICS", "BLUEWAKE_HAPTICS_STRENGTH", "BLUEWAKE_HAPTICS_TRIGGERS",
+    "BLUEWAKE_LANGUAGE", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH", "BLUEWAKE_DIRECT_GATE",
+    "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE", "DOL_AURORA_AO_PACKED", "BLUEWAKE_PRESENT_MAILBOX", "BLUEWAKE_NO_GAMESCOPE_WSI",
+    "BLUEWAKE_MENU_PAUSES", "BLUEWAKE_MENU_TEXT_SIZE", "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE",
+    "BLUEWAKE_TEXTURE_PACK_FOLDER", "BLUEWAKE_DOLPHIN_SAVE_FOLDER", "DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION",
 };
 
 // Each platform's rules, as the menus had them in code before the table held
@@ -55,6 +50,8 @@ static const char* const kWindowsOnlyNextLaunch[] = {"BLUEWAKE_FAST_FORWARD", "B
                                                      "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};
 static const char* const kFilledEverywhere[] = {"BLUEWAKE_DSP_MODE", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED"};
 static const char* const kWindowsOnly[] = {"DOL_AURORA_WINDOW", "BLUEWAKE_WINDOW_POSITION"};
+// Linux only: gamescope's frame layer (Steam Deck Game Mode) has no Mac or Windows match.
+static const char* const kLinuxOnly[] = {"BLUEWAKE_NO_GAMESCOPE_WSI"};
 static const char* const kNotFilled[] = {"BLUEWAKE_LANGUAGE", "DOL_AURORA_FORCE_ANISO", "BLUEWAKE_MENU_PLACE",
                                          "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
                                          "BLUEWAKE_DOLPHIN_SAVE_FOLDER", "DOL_AURORA_WINDOW",
@@ -108,8 +105,12 @@ int main() {
         if (windows_only)
             assert(!next_launch_on(s, Os::Mac));
         // Where it exists.
-        assert(exists_on(s, Os::Windows));
-        assert(exists_on(s, Os::Mac) == !listed(kWindowsOnly, s.key) && exists_on(s, Os::Linux) == exists_on(s, Os::Mac));
+        if (listed(kLinuxOnly, s.key)) {
+            assert(exists_on(s, Os::Linux) && !exists_on(s, Os::Mac) && !exists_on(s, Os::Windows));
+        } else {
+            assert(exists_on(s, Os::Windows));
+            assert(exists_on(s, Os::Mac) == !listed(kWindowsOnly, s.key) && exists_on(s, Os::Linux) == exists_on(s, Os::Mac));
+        }
         // Windows puts every default in the environment at launch; Mac and Linux
         // only the three whose game default differs.
         assert(filled_on(s, Os::Windows) == !listed(kNotFilled, s.key));
@@ -119,6 +120,26 @@ int main() {
     assert(find("BLUEWAKE_NOT_A_SETTING") == nullptr);
     assert(default_on(*find("BLUEWAKE_MOUSE_CAMERA")) && !default_on(*find("BLUEWAKE_HD_LOOK")));
     assert(std::strcmp(find("BLUEWAKE_ASPECT")->old_windows, "aspect") == 0);
+    // Where the distance blur starts reads as RecompCore's factor, 2^(3.5 * value / 100)
+    // (#598): 1.00x to 10.00x a quarter at a time; the file keeps whole numbers.
+    const Setting* dof_start = find("DOL_AURORA_GAME_DOF_START");
+    assert(dof_start != nullptr && dof_start->control == Control::Slider && dof_start->step == 0.25f);
+    assert(std::fabs(dof_start->doubles_every * 3.5f - 100.f) < 0.01f && std::strcmp(dof_start->stored, "%.0f") == 0);
+    assert(factor_low(*dof_start) == 1.f && factor_high(*dof_start) == 10.f);
+    // Every step keeps a stored value of its own, in order, that reads back as that step.
+    float last = -1.f;
+    for (int k = 0; k <= 36; ++k) {
+        const float factor = 1.f + 0.25f * static_cast<float>(k);
+        const float stored = factor_stored(*dof_start, factor);
+        assert(stored > last && stored <= dof_start->high);
+        assert(factor_shown(*dof_start, stored) == factor);
+        last = stored;
+    }
+    assert(factor_stored(*dof_start, 10.f) == 95.f);
+    // A value saved before the steps (57 was 3.99x; 100, past the new top) shows the nearest step.
+    assert(factor_shown(*dof_start, 57.f) == 4.f && factor_shown(*dof_start, 100.f) == 10.f);
+    for (const Setting& s : kSettings)
+        assert((s.doubles_every == 0.f && s.step == 0.f) || s.control == Control::Slider);
     const Setting* pacing = find("DOL_AURORA_FRAME_INTERP_PACING");
     assert(pacing != nullptr && pacing->kind == Kind::Choice && pacing->control == Control::Chooser);
     assert(std::strcmp(fallback_for(*pacing), "") == 0 && next_launch_on(*pacing));

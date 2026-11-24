@@ -107,6 +107,13 @@ static void take_away(CPUState* cpu, u32 camera) {
 void bluewake_letterbox_hook(CPUState* cpu, u32 address) {
     if (cpu == NULL)
         return;
+    // Another camera (r3 at both entries): the held one was deleted with its
+    // scene (a door into a new area), and its memory may be another actor's or
+    // a heap block's header by now, so nothing goes back (#621).
+    if (g_held && cpu->gpr[3] != g_camera) {
+        g_held = false;
+        rearm();
+    }
     if (address == BLUEWAKE_LETTERBOX_CAMERA_EXECUTE) {
         if (g_held)
             put_back(cpu);

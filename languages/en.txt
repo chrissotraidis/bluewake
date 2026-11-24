@@ -129,7 +129,7 @@ setting.DOL_AURORA_GAME_DOF.label = Distance blur
 setting.DOL_AURORA_GAME_DOF.note = How soft the game blurs what is far away. Strong and GameCube matter at render scales above 1x.
 
 setting.DOL_AURORA_GAME_DOF_START.label = Distance blur starts
-setting.DOL_AURORA_GAME_DOF_START.note = 0 starts the blur where the game does, just past what the camera looks at. Each step moves it farther out: twice as far at 29, four times at 57, about eleven times at 100.
+setting.DOL_AURORA_GAME_DOF_START.note = How far out the blur starts, as a multiple of where the game starts it (1.00x), just past what the camera looks at.
 
 setting.BLUEWAKE_MODS.label = Better Wind Waker
 
@@ -161,6 +161,12 @@ setting.BLUEWAKE_JUMP_BUTTON.label = Jump & Sprint (Space or the left bumper jum
 setting.BLUEWAKE_JUMP_BUTTON.group = Jump & Sprint
 
 setting.BLUEWAKE_SPRINT_CHOICE.label = Sprint speed
+
+setting.BLUEWAKE_TURBO.label = Speed up while Tab is held
+setting.BLUEWAKE_TURBO.note = Runs the game faster than realtime for as long as Tab is held: the picture keeps up, and the sound is skipped while it is held and starts again when it is let go. Off by default.
+setting.BLUEWAKE_TURBO.group = Speed up
+
+setting.BLUEWAKE_TURBO_SPEED.label = Speed-up factor
 
 setting.BLUEWAKE_PAD_SWAP_AB.label = Nintendo button layout
 setting.BLUEWAKE_PAD_SWAP_AB.note = For Switch controllers and Joy-Cons: A, B, X and Y do what their letters say. On by itself the first time BlueWake starts with one.

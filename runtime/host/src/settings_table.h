@@ -14,6 +14,7 @@
 // Wind Waker's options) take their names and defaults from it. No ImGui here,
 // so the host tests can read it.
 #pragma once
+#include <cmath>
 #include <cstring>
 
 namespace bw_settings {
@@ -64,6 +65,12 @@ struct Setting {
     const char* pane = nullptr;
     const char* shown = nullptr;         // Slider: how its value reads ("%.0f seconds"), nullptr for "%.2f"
     const char* stored = nullptr;        // Slider: how it is written to the file, nullptr for "%.3f"
+    // Slider: shown as a factor, 2 to the power of value / doubles_every, read
+    // with `shown`; 0 shows the value itself.
+    float doubles_every = 0.f;
+    // Slider: the bar moves in steps of this much of what it shows (a pad's or
+    // key's press is one step); 0 for a twentieth of its range a press.
+    float step = 0.f;
     const char* dead_when = nullptr;     // greyed while this setting has a value
     Os next_launch = Os::None;           // where it takes effect only when BlueWake starts again
     Os platforms = Os::All;              // where it exists (the file keeps it, the menu draws it)
@@ -238,12 +245,15 @@ inline constexpr Setting kSettings[] = {
      .control = Control::Chooser,
      .note = "How soft the game blurs what is far away. Strong and GameCube matter at render scales above 1x."},
     // Where that blur starts (aurora_set_game_dof_start): 0 as the game puts it,
-    // each step farther out by the same factor, about 11 times as far at 100.
-    {.key = "DOL_AURORA_GAME_DOF_START", .kind = Kind::Int, .fallback = "0", .high = 100.f,
+    // each step farther out by the same factor, 2^(3.5 * value / 100). The menu
+    // shows that factor (#598), 1.00x to 10.00x a quarter at a time; the file
+    // keeps the whole number nearest each (95 for 10x; the game takes up to 100).
+    {.key = "DOL_AURORA_GAME_DOF_START", .kind = Kind::Int, .fallback = "0", .high = 95.f,
      .label = "Distance blur starts", .control = Control::Slider,
-     .note = "0 starts the blur where the game does, just past what the camera looks at. Each step moves it farther "
-             "out: twice as far at 29, four times at 57, about eleven times at 100.",
-     .needs = "DOL_AURORA_GAME_DOF", .shown = "%.0f", .stored = "%.0f"},
+     .note = "How far out the blur starts, as a multiple of where the game starts it (1.00x), just past what the "
+             "camera looks at.",
+     .needs = "DOL_AURORA_GAME_DOF", .shown = "%.2fx", .stored = "%.0f", .doubles_every = 100.f / 3.5f,
+     .step = 0.25f},
     {.key = "BLUEWAKE_MODS", .old_windows = "betterww", .label = "Better Wind Waker", .tab = Tab::Mods,
      .control = Control::Custom, .next_launch = Os::All},
     {.key = "BLUEWAKE_OPTIONS", .tab = Tab::Mods, .next_launch = Os::All}, // Windows: option.NAME
@@ -289,6 +299,19 @@ inline constexpr Setting kSettings[] = {
     {.key = "BLUEWAKE_SPRINT_CHOICE", .old_windows = "sprint_speed", .kind = Kind::Float, .fallback = "1.5",
      .low = 1.1f, .high = 2.f, .label = "Sprint speed", .tab = Tab::Gameplay, .needs = "BLUEWAKE_JUMP_BUTTON",
      .shown = "%.2fx", .stored = "%.2f"},
+    // Holding Tab runs the game faster than realtime; turbo.c divides the
+    // retrace pace and skips the sound. Tab only: the right stick's click is
+    // first person and its hold is the controller zoom, so the pad stays the
+    // game's (the maintainer's review of #629).
+    {.key = "BLUEWAKE_TURBO", .kind = Kind::Bool,
+     .label = "Speed up while Tab is held",
+     .tab = Tab::Gameplay, .control = Control::Custom,
+     .note = "Runs the game faster than realtime for as long as Tab is held: the picture keeps up, and "
+             "the sound is skipped while it is held and starts again when it is let go. Off by default.",
+     .group = "Speed up"},
+    {.key = "BLUEWAKE_TURBO_SPEED", .kind = Kind::Float, .fallback = "3", .low = 1.5f, .high = 5.f,
+     .label = "Speed-up factor", .tab = Tab::Gameplay, .needs = "BLUEWAKE_TURBO",
+     .shown = "%.1fx", .stored = "%.1f"},
     // A and B, and X and Y, swapped (desktop_menu.cpp, apply_controller); the
     // key is the one Swap A and B had, so a file that turned it on keeps it.
     {.key = "BLUEWAKE_PAD_SWAP_AB", .old_windows = "controller_swap_ab", .kind = Kind::Bool,
@@ -453,7 +476,8 @@ inline constexpr Setting kSettings[] = {
     // WSI layer (BLUEWAKE_NO_GAMESCOPE_WSI; main.c sets ENABLE_GAMESCOPE_WSI=0 and Mesa's
     // vk_x11_override_min_image_count=4 under gamescope, and keeps FIFO over the Mailbox switch):
     // in Steam Deck Game Mode the layer held the game in present at busy views with Smooth Motion.
-    // Opt-in; Linux; read when BlueWake starts.
+    // Opt-in; Linux only (gamescope is Linux's), so the Mac and Windows menus and
+    // files leave it out; read when BlueWake starts.
     {.key = "BLUEWAKE_NO_GAMESCOPE_WSI", .kind = Kind::Bool,
      .label = "Present without gamescope's frame layer", .tab = Tab::Config, .control = Control::Switch,
      .note = "Experimental. In Steam Deck Game Mode, hands frames to the screen the plain way instead of "
@@ -461,7 +485,7 @@ inline constexpr Setting kSettings[] = {
              "Every frame is still shown in turn (it overrides \"Present without waiting for the display\"). "
              "Does nothing outside gamescope. Off by default; measured on a Steam Deck. Takes effect when "
              "BlueWake starts again.",
-     .next_launch = Os::All},
+     .next_launch = Os::All, .platforms = Os::Linux},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
@@ -530,6 +554,29 @@ inline bool switch_on(const char* value, bool fallback) {
     if (value == nullptr || value[0] == '\0')
         return fallback;
     return value[0] != '0' && std::strcmp(value, "off") != 0 && std::strcmp(value, "false") != 0;
+}
+
+// A factor slider (doubles_every): what the menu shows for a stored value, on
+// the row's step and within its range, and the whole stored value nearest a
+// factor shown. Each step keeps a stored value of its own, so a value read
+// back from the file shows the step it was saved from.
+inline float factor_low(const Setting& s) { return std::exp2(s.low / s.doubles_every); }
+inline float factor_on_step(const Setting& s, float factor) {
+    return s.step > 0.f ? factor_low(s) + std::round((factor - factor_low(s)) / s.step) * s.step : factor;
+}
+// The last step at or under the stored maximum's factor (10.00x for 95's 10.02x).
+inline float factor_high(const Setting& s) {
+    const float top = std::exp2(s.high / s.doubles_every);
+    const float high = factor_on_step(s, top);
+    return high > top ? high - s.step : high;
+}
+inline float factor_shown(const Setting& s, float stored) {
+    const float factor = factor_on_step(s, std::exp2(std::round(stored) / s.doubles_every));
+    return factor < factor_low(s) ? factor_low(s) : factor > factor_high(s) ? factor_high(s) : factor;
+}
+inline float factor_stored(const Setting& s, float factor) {
+    const float stored = std::round(s.doubles_every * std::log2(factor));
+    return stored < s.low ? s.low : stored > s.high ? s.high : stored;
 }
 
 } // namespace bw_settings
