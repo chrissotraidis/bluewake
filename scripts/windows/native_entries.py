@@ -81,25 +81,25 @@ ENTRIES = {
     0x802F5090: ("J3DMtxCalcBasic::calcTransform", "mtxcalc",
                  [(0x802F16E0, 0x802F5090, 0x802F525C), (0x802D96E0, 0x802DA64C, 0x802DA724),
                   (0x803096E0, 0x8030D0FC, 0x8030D1C8), (0x803096E0, 0x8030D0C8, 0x8030D0FC)],
-                 "3e442f9bac67c268093ed4abdbcb9c4659fad59339a700282a7eb9e023b11d67"),
+                 "83c924d36e8a5565b9adf71583c31940a616c45a650422b54ff137189aa0c5d4"),
     0x802F52BC: ("J3DMtxCalcSoftimage::calcTransform", "mtxcalc",
                  [(0x802F16E0, 0x802F52BC, 0x802F5508), (0x802D96E0, 0x802DA724, 0x802DA7E4),
                   (0x803096E0, 0x8030D0FC, 0x8030D1C8), (0x803096E0, 0x8030D0C8, 0x8030D0FC)],
-                 "7ad20637ab7fb125cfee5c1aa81bd982abfc8bbe5f26747bae359fa320fd56d2"),
+                 "bfdc0438b3192d02f98ed6f4ee2bc170d70e1df92778d9772433a96167a06249"),
     0x802F5508: ("J3DMtxCalcMaya::calcTransform", "mtxcalc",
                  [(0x802F16E0, 0x802F5508, 0x802F56E0), (0x802F56E0, 0x802F56E0, 0x802F5724),
                   (0x802D96E0, 0x802DA64C, 0x802DA724), (0x803096E0, 0x8030D0FC, 0x8030D1C8),
                   (0x803096E0, 0x8030D0C8, 0x8030D0FC)],
-                 "8df3c54d0620dc3152b7b640038b7637d9514d3e51cd6133f4dfb4b836f9c324"),
+                 "dd42975d290f1fd91df14ded76b6fa5182c54e2c3833725f261fa71c8874ff10"),
 }
 # --- The third set (tests/native_search_test.c): strcmp, and dStage_searchName
 # with the strcmps it calls in strcmp's chunk, which its native stands in for
 # too. ---
 ENTRIES[0x8032DB44] = ("strcmp", "search", [(0x8032D6E0, 0x8032DB44, 0x8032DC6C)],
-                       "0a578813114c0553f81a447d7d0c6ef7d36b22afc5e5f6465ae01517bb5a2375")
+                       "4fc244dad5336be67069073e11ecfef8c97e52c67fc20342138b2e1b106455f3")
 ENTRIES[0x80041544] = ("dStage_searchName", "search",
                        [(0x8003D6E0, 0x80041544, 0x800415B4), (0x8032D6E0, 0x8032DB44, 0x8032DC6C)],
-                       "bdf91cee67046b81e7b60bb4669129749a912db84cd9fd96028b74a4cac01dd7")
+                       "a854564282cb55761d2270061eb438c54ebeb472fd8cb2c92d63752f49c7e838")
 # cTgIt_JudgeFilter with fopAcM_findObjectCB as its judge (one call), with the
 # callees its native stands in for: fopAcM_findObjectCB, dStage_searchName and
 # strcmp; and cNdIt_Judge's loop, which the walk native the host may call
@@ -118,7 +118,7 @@ ENTRIES[0x80245640] = ("cTgIt_JudgeFilter", "search",
 for _resume in (0x8004156C, 0x80041578, 0x80041588):
     ENTRIES[_resume] = ("dStage_searchName at %08X" % _resume, "search",
                         [(0x8003D6E0, 0x80041544, 0x800415B4), (0x8032D6E0, 0x8032DB44, 0x8032DC6C)],
-                        "bdf91cee67046b81e7b60bb4669129749a912db84cd9fd96028b74a4cac01dd7")
+                        "a854564282cb55761d2270061eb438c54ebeb472fd8cb2c92d63752f49c7e838")
 # --- end of the resumable entries ---
 # prepare_native_j3d.py's hooks, in the J3DGetTranslateRotateMtx fragments
 # (it runs first): not part of the translation certified here.
