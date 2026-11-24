@@ -11,6 +11,8 @@ jobs:
         run: python3 -c "import json; d=json.load(open('config/dependencies.lock.json')); assert len(d['dependencies']) > 0"
       - name: Preserve platform signing identities
         run: python3 tests/test_signing_entitlements.py
+      - name: The native generators read the inline frame form
+        run: python3 tests/test_native_generator_frame.py
       - name: Check synthetic profiling fixtures
         run: python3 tests/test_sample_owners.py
       - name: Keep retrace and display timing separate

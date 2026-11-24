@@ -165,6 +165,7 @@ class Gen:
 
     def transform(self, native, chunk, leader, text, from_copy):
         out = self.inline_gpr(text) if not native.stops else self.inline_gpr_stops(native, chunk, text)
+        out = self.inline_gpr_frame(out)
         # Nothing after an unconditional transfer (blr, b, bctr) runs; the
         # copies chain the next block's text after it all the same.
         m = re.search(r"\n    // [0-9A-F]{8}: (?:blr|b +0x[0-9A-F]{8}|bctr)\n    \{\n(?:        [^\n]*\n)*    \}\n", out)
@@ -395,6 +396,35 @@ class Gen:
         native.reach.add(target)
         native.boundaries.add(target)
         return f"if (!gx_silent(&s, 0x{target:08X}u))\n        return 0;\n    goto B_{target:08X};"
+
+    def inline_gpr_frame(self, text):
+        """inline_save_restore_gpr.py's frame form (#451): the saved registers through a
+        host pointer to the frame's MEM1 bytes (cmake/composite/inline_gpr.h's
+        bw_inline_gpr_frame: r11 - 4 * (32 - first), lowest register first). Here the
+        same addresses through the run's own memory: a save's stores as gx_stp32 (each
+        clears a matching reservation, as the helper clears it once for the frame), a
+        restore's loads as gx_ld32; a frame that is not MEM1 marks the run bad, which
+        replays the block in the translation. The name is per frame — a native can hold
+        a save and a restore, and inline_gpr inlines both into one scope."""
+        out = []
+        name = None
+        count = 0
+        for line in text.splitlines(keepends=True):
+            m = re.match(r"( +)u8\* const slots = bw_inline_gpr_frame\(ctx, (\d+)u, (?:true|false)\);\n$",
+                         line)
+            if m:
+                first = int(m.group(2))
+                name = f"slots_{count}"
+                count += 1
+                out.append(f"{m.group(1)}const u32 {name} = ctx->gpr[11] - {4 * (32 - first)}u;\n")
+                continue
+            if name is not None:
+                line = re.sub(r"write_be32\(slots \+ (\d+), (\(u32\)ctx->gpr\[\d+\])\);",
+                              lambda mm: f"gx_stp32(&s, 0u, {name} + {mm.group(1)}u, {mm.group(2)});", line)
+                line = re.sub(r"read_be32\(slots \+ (\d+)\)",
+                              lambda mm: f"gx_ld32(&s, {name} + {mm.group(1)}u)", line)
+            out.append(line)
+        return "".join(out)
 
     def inline_gpr(self, text):
         # The inline _savegpr_N/_restgpr_N (inline_save_restore_gpr.py): its
