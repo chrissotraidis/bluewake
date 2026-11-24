@@ -17,7 +17,7 @@ Measured in Steam Deck Game Mode through the owner's shortcut and settings, a sa
 | Default (2) | 59.7 | 17.4 ms |
 | Strong (3) | 58.8 | 17.3 ms |
 
-The other HD effects, one off at a time in the same scene with Light on: far blur 57.4, cloud shadows 56.2, bloom 56.0, edge light 55.2 (baseline 55.2). Render scale 2 instead of 3: 60.0. Smooth Motion off: 59.9.
+The other HD effects, one off at a time in the same scene with Light on: ambient occlusion 59.6 and 58.7, far blur 57.4, cloud shadows 56.2, bloom 56.0, edge light 55.2 (baseline 55.2). Render scale 2 instead of 3: 60.0. Smooth Motion off: 59.9.
 
 ## What changes for players
 
@@ -29,7 +29,8 @@ The other HD effects, one off at a time in the same scene with Light on: far blu
 
 - The far blur (second in the table above); a follow-up if this one works out.
 - Changing any default.
-- The two startup crashes seen while measuring (`BLUEWAKE_HD_LOOK=0` and `BLUEWAKE_HD_AO=0` set in the environment with the rest of the HD settings on): to be reported apart.
+- Ambient occlusion, the other effect this scene is sensitive to (off: 59.6, 58.7); #586's packed AO is already on here.
+- An intermittent crash seen in 2 of about 21 measurement runs, near the end of the run (ImGui's draw in the deferred present on the render worker): reported apart.
 
 ## Success
 
