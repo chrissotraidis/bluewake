@@ -52,7 +52,8 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
 # 0.13.0's batch (RecompCore #66, merged into bluewake-next as 7d3c18b1): #65, #62, #63, #58, #59, #51, #64 and #54 merged in that order, and a fix for #65 with #51: patches/recompcore/0209-0218; the pin is #66's head.
 # A fast blur for the game's depth of field step 1, opt-in (RecompCore #67, on bluewake-next after #66): pin #67's head until it merges.
-RECOMPCORE_SHA=7558a8657dafb427927cf17c8987d7097e429ccc
+# The effects' mask at half size, opt-in (RecompCore #68, stacked on #67): pin #68's head until both merge.
+RECOMPCORE_SHA=f612af1b90f5c1fcea4c6f777064620292d1149b
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

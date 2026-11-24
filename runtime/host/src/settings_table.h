@@ -486,6 +486,16 @@ inline constexpr Setting kSettings[] = {
              "other Distance blur settings. Off by default; measured on a Steam Deck. Takes effect "
              "when BlueWake starts again.",
      .next_launch = Os::All},
+    // The HD look's shading leaves a scene's blended effects alone through a mask that draws
+    // them again, twice, at the full size; RecompCore #68 (DOL_AURORA_EFFECT_MASK_FAST) draws
+    // it at half size. Opt-in; read when the renderer first draws the mask.
+    {.key = "DOL_AURORA_EFFECT_MASK_FAST", .kind = Kind::Bool,
+     .label = "Faster effects mask", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. With the HD look's shadows or shading on, the sprays, sparks and smoke "
+             "of a scene are drawn again at half size instead of full size to keep the shading off "
+             "them. Their edges can differ very slightly. Off by default; measured on a Steam Deck. "
+             "Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
