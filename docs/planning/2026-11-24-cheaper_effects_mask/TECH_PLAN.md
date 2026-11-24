@@ -29,12 +29,15 @@ Not built: the third idea of the first plan, the soft effects' mask at their own
 
 `DOL_AURORA_EFFECT_MASK_FAST`, "Faster effects mask": a Config switch after "Faster Light distance blur", off by default, taking effect at the next start, with its place in the settings test and its own assertions, and the RecompCore pin (#68's head). The renderer reads the variable itself. This branch sits on #655's: both add a switch at the same place in the table.
 
-## Verification, as done and still to do
+## Verification, as done
 
-- Speed, done: the Big Octo state in Game Mode, three runs a setting, interleaved (PROGRESS.md): 50.1 to 53.0 retraces a second, 24.5 to 22.0 ms.
-- GPU profile, done: the mask's zones, and "Effects mask (both)" in place of the two passes in that scene.
-- Pictures, done: seven scenes on a desktop with the Deck's settings, PSNR 57 dB or better, and the one-pass frames identical to the two-pass ones. A render bench on the Deck over ten states (the eight of the earlier render work, the rain state and the Big Octo fight) with the switch on against off replaces these as the PR's pictures.
-- Still to do: a state with effects at their own depth (a lava geyser, a particle's dust), and one with the dark-effect case the pass over white exists for (a door's dust in Dragon Roost Cavern); a look for a hitch at a variant's first use.
+- Speed in the Big Octo state, Game Mode, three runs a setting, interleaved (PROGRESS.md): 50.1 to 53.0 retraces a second, 24.5 to 22.0 ms.
+- GPU profile: the mask's zones, and "Effects mask (both)" in place of the two passes in that scene.
+- The render bench on the Deck in Game Mode over ten states (the eight of the earlier render work, the rain state and the Big Octo fight), the switch on against off with #655's on, four runs each: Big Octo +5.6 % game frames a second and −10.5 % GPU time, the rain +2.0 % and −7.0 %, +0.84 % overall. Again three ways with #655's switch: +4.8 % overall with both.
+- Two states made for the cases the ten lacked: a lava geyser (+7.0 %, −6.2 %; the one pass with the half-size depth, no fallback) and a dark effect, the ash at Dragon Roost Cavern's entrance (+2.8 %, −3.5 %), in place of a door's dust, which is gone on a file that has finished the dungeon.
+- Pictures from the bench's picture runs on the Deck at 3x, same-frame pairs: 63.9 dB or better in the scenes that had one, the geyser 88.0 dB, the ash 64.1 dB; the Big Octo fight on a desktop 61.1 dB. On a desktop the one-pass frames are identical to the two-pass ones.
+- First use of a variant: no run reported a dip.
+- Not established: whether any benched scene draws an effect at its own depth (`effectOwnDepth`); the GPU profile does not show it. Not explained: about 1 % fewer game frames a second with the switch in the Outset busy view and at the shipwreck. Not checked: 1x and 2x, and other platforms.
 
 ## How the scene was measured
 
