@@ -37,3 +37,4 @@
   | **Half size, one pass (switch on)** | **53.1, 52.8, 53.2** | **21.9, 22.2, 22.0 ms** |
 
   Switch on against off: +3.0 retraces a second (+5.9 %), −2.5 ms (−10.2 %). The one pass is in use in this scene ("Effects mask (both)" in the GPU profile, no two-pass zones). Pictures on a desktop: the one-pass frames are identical, pixel for pixel, to the half-size two-pass ones (three same-frame pairs), so the scene table above stands for both. No validation errors. Pipelines made in a run: about the same with the switch on as off (the variants compile once and are cached); a first-use hitch was not looked for specifically.
+- 2026-11-24: the brief and the technical plan brought up to what was built (both parts under one switch, the third idea dropped, the switch's final name).

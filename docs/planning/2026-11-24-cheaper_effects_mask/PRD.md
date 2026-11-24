@@ -27,13 +27,13 @@ The effects together cost about 7.3 ms a frame, but one at a time they come to a
 
 ## What changes for players
 
-- A new opt-in switch under Config's Performance section, off by default (working name: **Faster effects mask**).
+- A new opt-in switch in Config beside the other performance switches, off by default: **Faster effects mask**.
 - With it on, scenes with many particles and the HD look's shading cost less GPU time; the picture should be the same to the eye.
 - Nothing changes with the switch off.
 
 ## Not in scope
 
-- Holding this scene at full speed at 3x: about 8 ms has to go and the mask is 2 to 3 of them. That needs the render scale to follow the GPU's load, which is its own plan.
+- Holding this scene at full speed at 3x: about 8 ms has to go and the switch takes 2.5 of them. That needs the render scale to follow the GPU's load, which is its own plan (#659).
 - Changing any default.
 
 ## Success

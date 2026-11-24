@@ -14,23 +14,27 @@ So a scene's blended effects are rasterized three times at the render size, and 
 
 Efficient soft effects (`DOL_AURORA_EFFICIENT_EFFECTS`) already draws the soft effects themselves at a reduced size; the mask still draws them at the full size.
 
-## Candidates, to measure in this order
+## What was built (RecompCore #68)
 
-1. **Half-size mask targets.** Both targets at half the render size, tested against a half-size depth (the farthest of each 2x2, so an effect in front of any of the four counts), read by the shading passes with a linear sample. A mask is a soft weight; its consumers are low-frequency. Expected: about a quarter of the fill for both passes.
-2. **One pass for black and white.** The two passes draw the same draws with the same blending over different clears: two colour attachments in one pass, the effect pipelines' fragment output written to both. Halves the vertex and raster work; needs a two-target variant of each effect pipeline, so it costs pipelines (and their first-use compiles).
-3. **The soft effects' mask at their own size.** With Efficient soft effects on, draw the mask for those effects into the reduced-size soft target's size instead of the full one.
+Both under one switch, `DOL_AURORA_EFFECT_MASK_FAST` (read when the mask is first drawn, after the host's settings are in the environment):
 
-1 is the first to build: it needs no new pipelines per effect and takes both passes at once. 2 and 3 only if 1 leaves a visible cost or a visible difference.
+1. **Half size.** The mask's two targets are made at half the render size (`effect_mask_size`). The effects are drawn into them with the viewports and scissors halved the way a run of soft effects' are (`g_softScale`), against a half-size depth made for them (`effect_mask_small_depth`): the farthest of each 2x2 of the pass's depth, so an effect in front of any of the four is drawn. For effects at their own depth the half-size depth is made from the sea mask's instead, in place of the full-size copy, and made again for the second target; otherwise it is made once. The cover (`effect_cover_view`) reads the half-size targets between their texels (four `textureLoad`s, weighted); the shading's depth reads the texel over each pixel. With the switch off the shaders' `mask_small` constant is false and the reads are the same `textureLoad`s as before.
+2. **One pass.** The mask and the pass over white are the same draws with the same blending over two clears. Each effect gets a two-target variant of its pipeline (`DrawData::maskPipeline`; `PipelineConfig::softTarget` 2, a free value of an existing field, so the pipeline cache keeps what it has): the generated fragment entry becomes a function and a new entry writes its colour to both targets. A pass whose effects all have their variant ready is drawn once into both targets ("Effects mask (both)"); any other keeps the two passes, so the result is the same either way. No variant for an effect with destination alpha (dual-source blending takes one target), a depth texture or an early depth pass. `DOL_AURORA_EFFECT_MASK_SINGLE=0` keeps the two passes, for measuring.
 
-## The switch
+Passes with a stencil keep the full-size path.
 
-`DOL_AURORA_EFFECT_MASK_FAST` (working name), off by default, read when the renderer starts; in BlueWake a Config switch beside the other Performance switches, with its test entries, and the RecompCore pin.
+Not built: the third idea of the first plan, the soft effects' mask at their own reduced size. With both targets at half size already it has little left to give.
 
-## Verification
+## The switch (BlueWake)
 
-- Speed: the PRD's table again with the switch on, in Game Mode, at least two runs a setting, interleaved.
-- GPU profile (`DOL_AURORA_GPU_PROF=1`): the three mask zones before and after.
-- Pictures: the Big Octo state, a lava room (effects at their own depth), a door's dust (the opacity case the white pass exists for) and a plain view; switch off against on at 1x, 2x and 3x; PSNR and the pictures in the PR.
+`DOL_AURORA_EFFECT_MASK_FAST`, "Faster effects mask": a Config switch after "Faster Light distance blur", off by default, taking effect at the next start, with its place in the settings test and its own assertions, and the RecompCore pin (#68's head). The renderer reads the variable itself. This branch sits on #655's: both add a switch at the same place in the table.
+
+## Verification, as done and still to do
+
+- Speed, done: the Big Octo state in Game Mode, three runs a setting, interleaved (PROGRESS.md): 50.1 to 53.0 retraces a second, 24.5 to 22.0 ms.
+- GPU profile, done: the mask's zones, and "Effects mask (both)" in place of the two passes in that scene.
+- Pictures, done: seven scenes on a desktop with the Deck's settings, PSNR 57 dB or better, and the one-pass frames identical to the two-pass ones. A render bench on the Deck over ten states (the eight of the earlier render work, the rain state and the Big Octo fight) with the switch on against off replaces these as the PR's pictures.
+- Still to do: a state with effects at their own depth (a lava geyser, a particle's dust), and one with the dark-effect case the pass over white exists for (a door's dust in Dragon Roost Cavern); a look for a hitch at a variant's first use.
 
 ## How the scene was measured
 
