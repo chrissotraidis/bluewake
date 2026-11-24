@@ -29,5 +29,6 @@
   | Outset: ordinary play | 29.4 | 30.0 | +1.8 % | 18.1 ms | 17.3 ms | **−4.3 %** |
   | Hyrule Castle | 29.9 | 30.0 | +0.1 % | 17.9 ms | 16.5 ms | **−8.1 %** |
   | Dragon Roost Cavern: lava room | 30.0 | 30.0 | 0.0 % | 18.3 ms | 18.7 ms | **+2.3 %** |
+
   Overall (each run's geometric mean over the scenes, the median over runs): 27.23 → 28.32 game frames a second, +4.0 %; with #658's switch as well 28.54, +4.8 %. The gain is in seven scenes of ten, not only the rain. The lava room's GPU time is up 2.3 % at an unchanged 30: the Deck's GPU clock, logged about once a second through the bench, averaged 1289 MHz there with the switch off and 1157 MHz with it on (lower with the switch on in eight of ten scenes), so a millisecond is less work with the switch on.
 - 2026-11-24: pictures from the bench's picture runs on the Deck (`images/bench-*.jpg`: switch off, switch on, the difference times 16). 17 of 50 pairs were the same game frame (largest difference 30 of 255 or less; the others are a frame apart and differ by over 100). The worst same-frame pair of each scene: 53.9 dB (Outset busiest view, largest difference 19, 0.065 % of pixels over 8) to identical (Hyrule Castle). The first picture runs did not start: a network drop left Steam waiting on a "cloud sync failed" dialog; they were taken again after it was dismissed.
