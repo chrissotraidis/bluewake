@@ -125,7 +125,9 @@ values and changed message data. BlueWake does the same things at runtime, from
 - **Native code.** What Better Wind Waker's added assembly did is C in `runtime/host/src/game_options.c`,
   called from hook sites: turning with the stick while swinging on a rope, negating the camera's
   C-stick axis, turning the wind to blow from behind King of Red Lions (through the game's own
-  `dKyw_tact_wind_set`, entered from the hook) and Swift Sail's braking.
+  `dKyw_tact_wind_set`, entered from the hook), Swift Sail's braking, and its steadier boat (at twice the
+  speed the boat's spring onto the swells overshot and sank him up to 60 units, the sea showing through
+  the deck; `sail_steady.h` keeps him within 20 of the water).
 - **Values.** The constants a setting changes (rolling speed, block pushing frames, the boat's speed) are
   written at boot while it is on; a module's go to its data at the linked address, where it stays for the
   session.

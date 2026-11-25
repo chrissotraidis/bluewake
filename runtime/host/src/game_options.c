@@ -1,5 +1,6 @@
 #include "game_options.h"
 #include "bmg_patch.h"
+#include "sail_steady.h"
 
 #include <dlfcn.h>
 #include <stdio.h>
@@ -16,6 +17,7 @@ enum {
     HOOK_SAIL_BRAKE = 4,
     HOOK_SAIL_IDLE_BRAKE = 5,
     HOOK_HD_TRIFORCE = 6,
+    HOOK_SAIL_STEADY = 7,
 };
 
 typedef u32 (*NativeHookFn)(CPUState* ctx, u32 id);
@@ -94,6 +96,24 @@ static u32 hook_sail_wind(CPUState* cpu) {
     return 0x8008A7D0u; // dKyw_tact_wind_set__Fss
 }
 
+// Swift Sail's steadier boat (sail_steady.h), in daShip_c::setYPos after the
+// game holds him between 40 above and 60 below the water: r30 is the boat,
+// current.pos.y at 0x1FC, his height's speed at 0x3D0, the water's at 0x3F4.
+static u32 hook_sail_steady(CPUState* cpu) {
+    const u32 ship = cpu->gpr[30];
+    float y = f32_from_bits(mem_read32(cpu, ship + 0x1FCu));
+    float sink = f32_from_bits(mem_read32(cpu, ship + 0x3D0u));
+    const float water = f32_from_bits(mem_read32(cpu, ship + 0x3F4u));
+    if (sail_steady(&y, water, &sink)) {
+        u32 bits;
+        memcpy(&bits, &y, sizeof bits);
+        mem_write32(cpu, ship + 0x1FCu, bits);
+        memcpy(&bits, &sink, sizeof bits);
+        mem_write32(cpu, ship + 0x3D0u, bits);
+    }
+    return 0u;
+}
+
 // Shorter Triforce quest, after the chest's item is read into r4 for
 // fopAcM_createItemForTrBoxDemo: Triforce Chart n (item 0xFF - n, so 0xFE is
 // Chart 1 and 0xF7 Chart 8) becomes Triforce Shard n (0x60 + n), the shard
@@ -141,6 +161,8 @@ static u32 native_hook(CPUState* cpu, u32 id) {
         return 0u;
     case HOOK_HD_TRIFORCE:
         return hook_hd_triforce(cpu);
+    case HOOK_SAIL_STEADY:
+        return hook_sail_steady(cpu);
     default:
         return 0u;
     }
