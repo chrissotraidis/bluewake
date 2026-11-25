@@ -247,3 +247,22 @@
   | Dragon Roost ash | 47.1 |
 
   MSAA moves the picture far more than either filter (37 to 50 dB in ten scenes): it smooths the geometry's edges as it is drawn. Hyrule Castle turns grey under MSAA: the pass that keeps its colour (BlueWake's monotone handling) skips a multisampled frame too, and the game's own black-and-white look shows. Big Octo's difference is mostly its rain, which falls differently between runs. Its GPU cost on the Deck is not measured yet.
+- 2026-11-25: MSAA's cost on the owner's Deck, its own screen (Steam restarted by the owner first), build `2373cd97f`: 2x Off against 2x with 4x MSAA, the depth-reading HD effects off in both, two launches a scene, no pictures. 48 of 48 launches went through. Medians:
+
+  | Scene | fps, 2x Off | fps, MSAA 4x | GPU ms, 2x Off | GPU ms, MSAA 4x |
+  |---|---|---|---|---|
+  | Outset | 30.0 | 28.4 (−5.1 %) | **9.7** | **12.8** (+32 %) |
+  | Lava room | 30.0 | 30.0 (+0.0 %) | **6.4** | **10.7** (+66 %) |
+  | Hyrule Castle | 29.9 | 30.0 (+0.0 %) | **4.2** | **7.4** (+78 %) |
+  | Butterfly room | 30.9 | 30.9 (+0.2 %) | **7.3** | **10.9** (+49 %) |
+  | Shipwreck | 29.9 | 29.9 (−0.1 %) | **5.7** | **7.7** (+35 %) |
+  | Outset: play | 29.9 | 30.0 (+0.0 %) | **7.3** | **7.9** (+8 %) |
+  | Outset: heavy | 30.0 | 30.0 (+0.0 %) | **10.3** | **15.1** (+46 %) |
+  | Outset: busiest | 30.0 | 29.0 (−3.4 %) | **9.4** | **11.6** (+23 %) |
+  | Rain, Windfall | 30.0 | 29.9 (−0.1 %) | **8.2** | **10.2** (+24 %) |
+  | Big Octo | 30.0 | 30.0 (+0.0 %) | **10.8** | **13.3** (+23 %) |
+  | Lava geyser | 30.0 | 30.0 (+0.0 %) | **7.6** | **10.4** (+36 %) |
+  | Dragon Roost ash | 30.0 | 30.0 (+0.0 %) | **8.8** | **8.6** (−2 %) |
+  | **Median** | | | | **+2.6 ms** |
+
+  MSAA adds 2.6 ms of GPU time a frame (median of twelve scenes; up to 4.8 ms in Outset: heavy), three to five times SMAA High's pass, and already costs game frames in Outset (28.4) and Outset: busiest (29.0) with the HD look off. With it on there is less room still, and keeping the HD look under MSAA needs the effects reworked first. Recommendation to the owner: stop at the probe.

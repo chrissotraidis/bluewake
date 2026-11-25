@@ -100,8 +100,9 @@ These are the original's Low, Medium and High presets. `smaa_tables.hpp` holds t
 
 **MSAA probe on a desktop** (build `2373cd97f`): twelve states at 2x with and without 4x MSAA, depth-reading effects off in both, all clean; MSAA moves the picture 37 to 50 dB from 2x Off in ten scenes, much more than either filter.
 
+**MSAA on the owner's Deck** (its own screen, build `2373cd97f`, HD effects off in both): +2.6 ms of GPU time a frame at 2x (median), game frames lost in Outset and Outset: busiest.
+
 **Still to do**
 
 - By eye on the Deck: HUD text, grass and rigging in motion, the pause screen (the owner, so far: "barely any difference").
-- MSAA's GPU cost on the Deck, if it is to go further.
 - The crash at shutdown seen once in eight desktop runs of SMAA Low (two repeats clean; none since in 84 + 24 desktop runs).

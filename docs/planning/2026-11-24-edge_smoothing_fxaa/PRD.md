@@ -50,4 +50,4 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 - **Under 1 ms:** every level of both methods is, a pass (FXAA 0.48 to 0.63 ms, SMAA 0.79 to 0.95, medians); with Smooth Motion on it runs twice a game frame, so only FXAA Low stays under 1 ms a game frame (0.96 ms).
 - **Pictures:** all twelve scenes with the owner's HD texture pack, each level against 2x Off: 42 to 62 dB, changes on edges only. Small at the Deck's screen size.
 - **The owner's eye:** "barely any difference on the screen for every filter", in play on the Deck.
-- **MSAA:** a probe runs on a desktop and changes the picture far more than either filter; it turns the HD look off while on, and its cost on the Deck is not measured.
+- **MSAA:** a probe; it changes the picture far more than either filter, but turns the HD look off while on and costs 2.6 ms of GPU time a frame on the Deck at 2x (median; game frames lost in two Outset scenes even with the HD look off). Recommended: stop at the probe; the owner decides.
