@@ -35,7 +35,7 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 ## Possible follow-ups
 
 - **SMAA:** asked for by the owner on 2026-11-24 as the next step, and written in this PR as a second method in the same chooser. To be built and measured after FXAA's bench.
-- **Multisampling (MSAA):** needs the sea mask, the sun shadows, the monotone and the HD look's depth passes to work on a multisampled frame, and does nothing inside transparent textures (grass, leaves).
+- **Multisampling (MSAA):** needs the sea mask, the sun shadows, the monotone and the HD look's depth passes to work on a multisampled frame, and does nothing inside transparent textures (grass, leaves). A probe is in this PR (2026-11-25, the owner's choice of "probe first"): a startup setting, 4x only, with those effects off while it is on.
 - A sharpening step after the smoothing, if fine detail softens.
 
 ## Success
@@ -46,7 +46,8 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 
 ## Where it stands (2026-11-25)
 
-- **Frames a second and GPU time:** measured for FXAA on the owner's Deck, but docked to a 1080p screen: 2x takes 22 to 37 % off 3x's GPU time, and the smoothing costs no game frames. Not yet measured on the Deck's own screen, nor for SMAA.
-- **Under 1 ms:** FXAA Low is (0.6 to 0.8 ms); Medium is in ten scenes of twelve; High is in seven.
-- **Pictures:** all twelve scenes for both methods, from a desktop. At the Deck's screen size the smoothing brings 2x only slightly nearer 3x (FXAA +0.15 dB, SMAA +0.3 on average); the shrink to the screen already does most of it.
-- **The owner's eye:** not yet.
+- **Frames a second and GPU time:** measured for both methods on the owner's Deck, its own screen. 2x takes about a third off 3x's GPU time and reaches full speed in every scene; neither method costs a game frame a second.
+- **Under 1 ms:** every level of both methods is, a pass (FXAA 0.48 to 0.63 ms, SMAA 0.79 to 0.95, medians); with Smooth Motion on it runs twice a game frame, so only FXAA Low stays under 1 ms a game frame (0.96 ms).
+- **Pictures:** all twelve scenes with the owner's HD texture pack, each level against 2x Off: 42 to 62 dB, changes on edges only. Small at the Deck's screen size.
+- **The owner's eye:** "barely any difference on the screen for every filter", in play on the Deck.
+- **MSAA:** a probe runs on a desktop and changes the picture far more than either filter; it turns the HD look off while on, and its cost on the Deck is not measured.

@@ -81,21 +81,27 @@ These are the original's Low, Medium and High presets. `smaa_tables.hpp` holds t
 - **The game's frame copy:** where the effects go in before the game's full-size copy, the copy holds the smoothed scene (as it holds bloom today). The pause screen's background and the motion blur read that copy.
 - **Cost at 3x and 4x:** a full-screen pass with up to 9 + 24 lookups a pixel on an edge; meant for 2x and under. To be measured.
 
+## MSAA probe, as written (RecompCore #69)
+
+- `DOL_AURORA_MSAA=4` (startup, in the Aurora backend) sets `AuroraConfig::msaa`, which nothing set before; WebGPU allows 1 or 4 samples, so other values leave it off. Not in the menu.
+- Under it the EFB depth is multisampled. Before an EFB depth copy or the depth peek reads it, one full-screen pass writes sample 0 of each pixel to a single-sample depth of the same size (`resolve_msaa_depth` in `common.cpp`), and both read that. Sample 0 rather than an average, so a copied depth is one the scene had.
+- Still off under it: every effect that reads the depth (ambient occlusion, sun and cloud shadows, edge light, far blur, bloom, exposure, the sea mask), the monotone's colour, and the edge smoothing filters. Keeping them would mean making that single-sample depth once a frame for all of them: the larger step, not taken.
+
 ## Verification, as done so far
 
-**On the owner's Deck** (Game Mode, the owner's settings, twelve states, `render_bench --paced`, build `5941dffe9`), FXAA only: 3x as the base against 2x with the smoothing Off, Low, Medium and High, three or four launches a scene. The Deck was docked to a 1920×1080 screen for the whole run, and the run stopped before its last pass and its picture passes (Steam's "Unable to Sync" dialog after a network drop). Numbers and what they show: [Progress](PROGRESS.md).
+**On the owner's Deck, its own screen** (Game Mode, the owner's settings with the HD texture pack, twelve states, `render_bench --paced`, build `e40240187`), both methods: 3x as the base, then 2x Off and each of the six levels, two launches a setting and scene. Numbers: [Progress](PROGRESS.md).
 
-- 2x against 3x: 22 to 37 % less GPU time, ten of twelve scenes at full speed.
-- The smoothing: no change in game frames a second; its own GPU time 0.6 to 0.8 ms at Low, 0.6 to 1.1 at Medium, 0.8 to 1.2 at High.
+- 2x against 3x: about a third less GPU time (half in the lava room); every scene at full speed, where 3x leaves four below it.
+- The smoothing: no change in game frames a second at any level; its own GPU time a pass FXAA 0.48 / 0.55 / 0.63 ms, SMAA 0.79 / 0.85 / 0.95 (medians), twice that a game frame with Smooth Motion on.
 
-**On a desktop** (headless, build `e40240187`): both methods' shaders compile and run with no validation errors; pictures of all twelve states at 3x, 2x and 2x with each of the six modes, compared with 3x at 1280×720 and at 1920×1080.
+(An earlier FXAA-only run, run while the Deck was docked to a 1080p screen, gave the same picture for fps; it is in Progress and superseded here.)
 
-- At 1280×720 plain 2x is 37 to 47 dB from 3x; FXAA moves that +0.15 dB on average, SMAA +0.3.
-- At 1920×1080 plain 2x is 40.5 dB from 3x on average; FXAA High +0.3, SMAA High +0.5.
+**On a desktop, with the owner's HD texture pack** (headless, build `e40240187`): pictures of the twelve states at 2x Off and each level, compared with 2x Off at 1280×720. Every level stays 42 to 62 dB from plain 2x (medians 49.0 to 51.1); the changes sit on edges only.
+
+**MSAA probe on a desktop** (build `2373cd97f`): twelve states at 2x with and without 4x MSAA, depth-reading effects off in both, all clean; MSAA moves the picture 37 to 50 dB from 2x Off in ten scenes, much more than either filter.
 
 **Still to do**
 
-- SMAA's bench on the Deck (the same five-way run: 3x, then 2x Off, SMAA Low, Medium, High).
-- The comparison on the Deck's own screen, not docked; the fourth pass of FXAA's run.
-- By eye on the Deck: HUD text, grass and rigging in motion, the pause screen.
-- The crash at shutdown seen once in eight desktop runs of SMAA Low (two repeats clean).
+- By eye on the Deck: HUD text, grass and rigging in motion, the pause screen (the owner, so far: "barely any difference").
+- MSAA's GPU cost on the Deck, if it is to go further.
+- The crash at shutdown seen once in eight desktop runs of SMAA Low (two repeats clean; none since in 84 + 24 desktop runs).

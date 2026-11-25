@@ -125,3 +125,125 @@
 
   At the Deck's screen size, plain 2x is already within 37 to 47 dB of 3x, and the smoothing moves that little: FXAA by +0.15 dB on average (it is a little farther from 3x in Hyrule Castle, −0.6 to −0.7), SMAA by +0.3 (nearer in ten or eleven scenes of twelve). The butterfly room is the one scene where both gain clearly (+2.2 to +2.6): large flat shapes with long edges. The shrink to 1280×720 already averages 1.78 drawn pixels into each shown one, which hides most of what the smoothing does at the drawn size (the crops above). The HUD shows in every difference because it is drawn at the render scale too.
 - 2026-11-25: the same frames shrunk or stretched to 1920×1080 instead, for a docked Deck: plain 2x is farther from 3x there (40.5 dB on average over the twelve scenes against 42.1 at 1280×720), and the smoothing brings a little more: FXAA High +0.3 dB on average, SMAA High +0.5.
+
+- 2026-11-25: Steam's "Unable to Sync" on every launch came from its controller-layout sync (Steam keeps layouts in its own cloud space, AppID 241100): it failed during last night's network drop and Steam kept that failure until restarted. The owner restarted Steam and the launches went through.
+- 2026-11-25: the bench on the owner's Deck, on its own screen (undocked), build `e40240187`, both methods: 3x as the base, then 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High; two launches a setting and scene (the owner asked for half the earlier runs: the FXAA run's fps had held with three or four), then one picture launch each. 200 of 200 measured launches went through. Medians:
+
+  **Game frames a second** (the change against 3x in parentheses):
+
+  | Scene | 3x | 2x Off | FXAA Low | FXAA Medium | FXAA High | SMAA Low | SMAA Medium | SMAA High |
+  |---|---|---|---|---|---|---|---|---|
+  | Outset | 25.2 | 29.4 (+16.6 %) | 29.2 (+15.9 %) | 29.2 (+15.8 %) | 29.3 (+16.0 %) | 29.2 (+15.6 %) | 29.1 (+15.4 %) | 29.2 (+15.7 %) |
+  | Lava room | 30.0 | 30.0 (−0.1 %) | 30.0 (−0.1 %) | 30.0 (−0.1 %) | 29.9 (−0.1 %) | 30.0 (−0.1 %) | 30.0 (−0.1 %) | 29.9 (−0.1 %) |
+  | Hyrule Castle | 30.0 | 29.9 (−0.2 %) | 29.9 (−0.2 %) | 29.9 (−0.2 %) | 29.9 (−0.2 %) | 29.9 (−0.2 %) | 30.0 (−0.2 %) | 29.9 (−0.2 %) |
+  | Butterfly room | 31.0 | 31.0 (+0.0 %) | 31.0 (−0.0 %) | 31.0 (−0.0 %) | 31.0 (−0.0 %) | 31.0 (−0.0 %) | 31.0 (−0.0 %) | 31.0 (−0.0 %) |
+  | Shipwreck | 29.5 | 30.0 (+1.5 %) | 30.0 (+1.4 %) | 30.0 (+1.4 %) | 30.0 (+1.4 %) | 30.0 (+1.4 %) | 30.0 (+1.4 %) | 30.0 (+1.4 %) |
+  | Outset: play | 30.0 | 30.0 (−0.0 %) | 30.0 (−0.0 %) | 30.0 (−0.0 %) | 30.0 (+0.0 %) | 30.0 (−0.0 %) | 30.0 (−0.0 %) | 30.0 (+0.0 %) |
+  | Outset: heavy | 29.0 | 30.0 (+3.5 %) | 30.0 (+3.5 %) | 30.0 (+3.5 %) | 30.0 (+3.5 %) | 30.0 (+3.5 %) | 30.0 (+3.5 %) | 30.0 (+3.5 %) |
+  | Outset: busiest | 26.1 | 29.6 (+13.6 %) | 29.4 (+12.7 %) | 29.5 (+13.1 %) | 29.5 (+13.0 %) | 29.4 (+12.5 %) | 29.5 (+13.1 %) | 29.5 (+13.0 %) |
+  | Rain, Windfall | 29.9 | 29.9 (+0.2 %) | 30.0 (+0.2 %) | 30.0 (+0.2 %) | 29.9 (+0.2 %) | 30.0 (+0.2 %) | 30.0 (+0.2 %) | 30.0 (+0.3 %) |
+  | Big Octo | 26.2 | 30.0 (+14.6 %) | 30.0 (+14.6 %) | 30.0 (+14.6 %) | 30.0 (+14.6 %) | 30.0 (+14.6 %) | 30.0 (+14.6 %) | 30.0 (+14.6 %) |
+  | Lava geyser | 29.3 | 30.0 (+2.3 %) | 30.0 (+2.2 %) | 30.0 (+2.3 %) | 30.0 (+2.3 %) | 30.0 (+2.3 %) | 29.9 (+2.2 %) | 30.0 (+2.3 %) |
+  | Dragon Roost ash | 27.8 | 29.9 (+7.7 %) | 29.9 (+7.7 %) | 29.9 (+7.7 %) | 30.0 (+7.8 %) | 30.0 (+7.7 %) | 29.9 (+7.7 %) | 29.9 (+7.7 %) |
+
+  **GPU time a shown frame, ms** (the change against 3x in parentheses):
+
+  | Scene | 3x | 2x Off | FXAA Low | FXAA Medium | FXAA High | SMAA Low | SMAA Medium | SMAA High |
+  |---|---|---|---|---|---|---|---|---|
+  | Outset | **20.9** | **13.5** (−35.3 %) | **14.6** (−30.3 %) | **13.8** (−33.9 %) | **14.6** (−30.1 %) | **14.2** (−32.1 %) | **14.3** (−31.4 %) | **14.7** (−29.9 %) |
+  | Lava room | **18.5** | **8.9** (−51.9 %) | **9.4** (−49.0 %) | **8.8** (−52.2 %) | **9.2** (−50.0 %) | **9.7** (−47.6 %) | **9.6** (−48.1 %) | **9.8** (−47.0 %) |
+  | Hyrule Castle | **16.9** | **11.1** (−34.3 %) | **12.0** (−29.4 %) | **11.9** (−29.8 %) | **12.0** (−28.9 %) | **11.9** (−29.5 %) | **12.1** (−28.5 %) | **11.9** (−29.5 %) |
+  | Butterfly room | **20.2** | **12.8** (−36.6 %) | **14.5** (−28.0 %) | **13.0** (−35.4 %) | **13.8** (−31.8 %) | **12.4** (−38.7 %) | **13.0** (−35.3 %) | **13.5** (−32.9 %) |
+  | Shipwreck | **18.3** | **12.0** (−34.3 %) | **11.8** (−35.3 %) | **12.5** (−31.8 %) | **13.4** (−27.1 %) | **11.1** (−39.5 %) | **12.0** (−34.7 %) | **12.7** (−30.4 %) |
+  | Outset: play | **17.5** | **11.4** (−34.9 %) | **11.4** (−34.8 %) | **11.3** (−35.2 %) | **10.4** (−40.7 %) | **13.4** (−23.8 %) | **11.0** (−37.2 %) | **12.8** (−26.8 %) |
+  | Outset: heavy | **20.3** | **13.0** (−35.8 %) | **14.5** (−28.7 %) | **15.1** (−25.7 %) | **13.5** (−33.2 %) | **14.1** (−30.6 %) | **13.0** (−35.7 %) | **14.1** (−30.5 %) |
+  | Outset: busiest | **19.2** | **12.1** (−36.9 %) | **12.9** (−32.7 %) | **12.9** (−32.9 %) | **13.5** (−29.8 %) | **13.6** (−28.9 %) | **13.5** (−29.9 %) | **13.5** (−29.8 %) |
+  | Rain, Windfall | **16.2** | **9.7** (−40.3 %) | **14.3** (−11.7 %) | **14.0** (−13.7 %) | **11.3** (−30.1 %) | **13.4** (−17.1 %) | **12.2** (−25.0 %) | **11.2** (−30.6 %) |
+  | Big Octo | **23.7** | **16.0** (−32.4 %) | **16.1** (−32.3 %) | **16.3** (−31.4 %) | **16.7** (−29.7 %) | **16.8** (−29.0 %) | **16.6** (−30.2 %) | **16.7** (−29.8 %) |
+  | Lava geyser | **19.4** | **13.2** (−31.8 %) | **13.4** (−31.0 %) | **15.1** (−22.1 %) | **14.9** (−23.2 %) | **14.7** (−24.1 %) | **14.6** (−24.9 %) | **13.8** (−29.1 %) |
+  | Dragon Roost ash | **16.3** | **14.6** (−10.2 %) | **11.0** (−32.2 %) | **11.1** (−31.7 %) | **14.0** (−13.7 %) | **13.4** (−17.4 %) | **11.4** (−30.0 %) | **15.0** (−7.5 %) |
+
+  **The smoothing pass itself, GPU time a pass, ms at 2x** (from the GPU profile's in-between frames, which every profile line carries; with Smooth Motion on it runs twice a game frame, once for the in-between frame and once for the real one):
+
+  | Scene | FXAA Low | FXAA Medium | FXAA High | SMAA Low | SMAA Medium | SMAA High |
+  |---|---|---|---|---|---|---|
+  | Outset | 0.56 | 0.62 | 0.73 | 0.89 | 0.98 | 1.14 |
+  | Lava room | 0.43 | 0.48 | 0.54 | 0.76 | 0.81 | 0.87 |
+  | Hyrule Castle | 0.42 | 0.45 | 0.53 | 0.70 | 0.74 | 0.78 |
+  | Butterfly room | 0.48 | 0.56 | 0.64 | 0.86 | 0.92 | 1.05 |
+  | Shipwreck | 0.47 | 0.53 | 0.62 | 0.74 | 0.81 | 0.89 |
+  | Outset: play | 0.50 | 0.57 | 0.64 | 0.81 | 0.89 | 1.00 |
+  | Outset: heavy | 0.51 | 0.59 | 0.68 | 0.82 | 0.91 | 1.02 |
+  | Outset: busiest | 0.53 | 0.61 | 0.71 | 0.88 | 1.00 | 1.06 |
+  | Rain, Windfall | 0.44 | 0.48 | 0.55 | 0.71 | 0.76 | 0.85 |
+  | Big Octo | 0.47 | 0.53 | 0.63 | 0.70 | 0.81 | 0.87 |
+  | Lava geyser | 0.42 | 0.48 | 0.52 | 0.74 | 0.79 | 0.85 |
+  | Dragon Roost ash | 0.53 | 0.60 | 0.70 | 0.85 | 0.96 | 1.02 |
+  | **Median** | **0.48** | **0.55** | **0.63** | **0.79** | **0.85** | **0.95** |
+
+  2x takes about a third off 3x's GPU time (half in the lava room) and brings the four scenes that 3x leaves below full speed (Outset 25.2, Outset: busiest 26.1, Big Octo 26.2, Dragon Roost ash 27.8) to it. Neither method costs a game frame a second at any level. The whole-frame GPU time swings by a few ms between launches of one setting, more than the pass costs, so the pass's own time is the figure to compare the levels by: FXAA 0.48 / 0.55 / 0.63 ms (median of the twelve scenes), SMAA 0.79 / 0.85 / 0.95, twice that a game frame with Smooth Motion on.
+- 2026-11-25: the first table of the pass's cost added the zones of the per-launch summary, which keeps only the largest; SMAA's real-frame zone and its sub-passes came and went there (counted twice in some cells, missing in others). The table above uses the in-between frame's zone, present in every profile line, over how often it ran.
+- 2026-11-25: the Deck's picture launches are not frame-exact (Game Mode, paced): a setting's capture sometimes lands a game frame from 2x Off's, and five of 96 failed when Steam's connection dropped at 10:16. They are not used. The owner's HD texture pack was copied to the desktop and the pictures taken there instead.
+- 2026-11-25: pictures of the twelve scenes at 2x with the owner's HD texture pack (all 3,546 replacements loaded), on a desktop, headless, each filter level against 2x Off at 1280×720 (the owner asked to leave 3x out). A capture can land a retrace apart between runs, so each level's frame is the one of its four that matches 2x Off's. Each sheet, left to right: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High; under each level its difference from 2x Off, eight times stronger, with its PSNR.
+
+  ![Outset: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-01-outset.jpg)
+
+  ![Lava room: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-02-lava-room.jpg)
+
+  ![Hyrule Castle: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-03-hyrule-castle.jpg)
+
+  ![Butterfly room: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-04-butterfly-room.jpg)
+
+  ![Shipwreck: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-05-shipwreck.jpg)
+
+  ![Outset: play: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-06-play.jpg)
+
+  ![Outset: heavy: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-07-heavy.jpg)
+
+  ![Outset: busiest: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-08-busiest.jpg)
+
+  ![Rain, Windfall: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-09-rain-windfall.jpg)
+
+  ![Big Octo: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-10-big-octo.jpg)
+
+  ![Lava geyser: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-11-lava-geyser.jpg)
+
+  ![Dragon Roost ash: 2x Off, FXAA Low, Medium, High, SMAA Low, Medium, High, and each one's difference from 2x Off](images/vs2x-12-drc-ash.jpg)
+
+  How far each level moves the picture from 2x Off at 1280×720, PSNR in dB (lower is a bigger change):
+
+  | Scene | FXAA Low | FXAA Medium | FXAA High | SMAA Low | SMAA Medium | SMAA High |
+  |---|---|---|---|---|---|---|
+  | Outset | 42.6 | 42.5 | 42.4 | 44.0 | 42.9 | 43.5 |
+  | Lava room | 48.6 | 48.2 | 48.0 | 49.2 | 48.2 | 48.1 |
+  | Hyrule Castle | 55.0 | 54.7 | 54.2 | 60.5 | 56.3 | 57.5 |
+  | Butterfly room | 46.9 | 46.5 | 46.4 | 50.0 | 47.7 | 48.2 |
+  | Shipwreck | 54.8 | 54.6 | 54.0 | 57.2 | 55.4 | 55.3 |
+  | Outset: play | 47.1 | 46.9 | 46.7 | 48.9 | 47.7 | 48.0 |
+  | Outset: heavy | 48.6 | 48.3 | 48.1 | 49.9 | 48.7 | 49.2 |
+  | Outset: busiest | 43.5 | 43.5 | 43.3 | 44.6 | 43.7 | 44.1 |
+  | Rain, Windfall | 53.3 | 53.6 | 53.1 | 62.0 | 56.9 | 56.9 |
+  | Big Octo | 53.8 | 53.8 | 53.2 | 56.0 | 54.5 | 54.0 |
+  | Lava geyser | 57.3 | 57.2 | 56.9 | 62.0 | 59.5 | 60.0 |
+  | Dragon Roost ash | 50.4 | 50.1 | 49.9 | 52.2 | 50.3 | 51.0 |
+  | **Median** | **49.5** | **49.2** | **49.0** | **51.1** | **49.5** | **50.1** |
+
+  The changes sit on edges only (palm trunks, flowers, rigging, Link's outline); everything else is untouched. Every level stays 42 to 62 dB from plain 2x: small at the Deck's screen size, which matches what the owner saw in play. FXAA's three levels change about the same amount (High a little most); SMAA Low changes the least, and SMAA Medium and High sit near FXAA.
+- 2026-11-25: MSAA as a probe, on the owner's go-ahead ("probe first"). The renderer already supported multisampling but nothing set it (RecompCore #69, `DOL_AURORA_MSAA=4`; WebGPU allows only 1 or 4 samples). The first build stopped the renderer at once: the game's first EFB depth copy ("Depth tex copies from multisampled EFB targets are not supported"; the depth peek had the same stop). A small full-screen pass now writes sample 0 of each pixel to a single-sample depth for those two. With that, twelve scenes at 2x with and without MSAA, the depth-reading HD effects off in both (they skip a multisampled frame), ran cleanly on a desktop:
+
+  | Scene | MSAA 4x against 2x Off (HD effects off in both), dB |
+  |---|---|
+  | Outset | 36.7 |
+  | Lava room | 40.5 |
+  | Hyrule Castle | 24.8 |
+  | Butterfly room | 45.3 |
+  | Shipwreck | 46.7 |
+  | Outset: play | 43.1 |
+  | Outset: heavy | 43.3 |
+  | Outset: busiest | 40.7 |
+  | Rain, Windfall | 49.5 |
+  | Big Octo | 29.6 |
+  | Lava geyser | 47.8 |
+  | Dragon Roost ash | 47.1 |
+
+  MSAA moves the picture far more than either filter (37 to 50 dB in ten scenes): it smooths the geometry's edges as it is drawn. Hyrule Castle turns grey under MSAA: the pass that keeps its colour (BlueWake's monotone handling) skips a multisampled frame too, and the game's own black-and-white look shows. Big Octo's difference is mostly its rain, which falls differently between runs. Its GPU cost on the Deck is not measured yet.

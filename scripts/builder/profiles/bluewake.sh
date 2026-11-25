@@ -52,7 +52,7 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
 # 0.13.0's batch (RecompCore #66, merged into bluewake-next as 7d3c18b1): #65, #62, #63, #58, #59, #51, #64 and #54 merged in that order, and a fix for #65 with #51: patches/recompcore/0209-0218; the pin is #66's head.
 # Edge smoothing (FXAA or SMAA) after the effects and before the HUD, opt-in (RecompCore #69, on bluewake-next after #66): pin #69's head until it merges.
-RECOMPCORE_SHA=9b27cb3507b5c01c2c071ad1e7bc19bdcb7383f5
+RECOMPCORE_SHA=943ecae27786e7f2ce6eb7ed406f67659b4aefab
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2
