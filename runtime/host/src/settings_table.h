@@ -237,14 +237,15 @@ inline constexpr Setting kSettings[] = {
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_FORCE_ANISO", .old_windows = "anisotropy", .kind = Kind::Int, .fallback = "1", .low = 1.f,
      .high = 16.f, .label = "Texture filtering", .control = Control::Chooser, .fill = Os::None},
-    // Edge smoothing (aurora_set_fxaa, RecompCore #69): FXAA, one pass over the
-    // finished scene before the HUD. Its levels set how faint an edge it takes
-    // and how far along it it looks. Off by default; takes effect at once.
-    {.key = "DOL_AURORA_FXAA", .kind = Kind::Choice, .fallback = "0", .label = "Edge smoothing (FXAA)",
+    // Edge smoothing (aurora_set_edge_smoothing, RecompCore #69): over the
+    // finished scene before the HUD, FXAA (one pass, 1 to 3) or SMAA (three
+    // passes, 4 to 6). A method's levels set how faint an edge it takes and how
+    // far along it it looks. Off by default; takes effect at once.
+    {.key = "DOL_AURORA_EDGE_SMOOTHING", .kind = Kind::Choice, .fallback = "0", .label = "Edge smoothing",
      .control = Control::Chooser,
-     .note = "Smooths jagged edges in the finished picture, before the HUD is drawn. Higher levels smooth "
-             "fainter and longer edges and cost a little more. Meant for lower render resolutions; it can "
-             "soften fine detail slightly."},
+     .note = "Smooths jagged edges in the finished picture, before the HUD is drawn. FXAA is cheapest and can "
+             "soften fine detail slightly; SMAA keeps detail sharper and costs more. Higher levels smooth "
+             "fainter and longer edges. Meant for lower render resolutions."},
     // The game's own distance blur (aurora_set_game_dof): at render scales
     // above 1x it fades, since its half-size copy of the picture is made at the
     // render scale. Default leaves it so; GameCube gives its 1x blur at any

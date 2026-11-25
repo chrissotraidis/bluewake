@@ -20,12 +20,12 @@ flowchart LR
 
 In `post_fx.cpp`:
 
-- `aurora_set_fxaa(int level)` and `DOL_AURORA_FXAA`: 0 off, 1 low, 2 medium, 3 high. The variable is read when the level is first asked for, after the host's settings are in the environment.
-- `encode_fxaa()`: copies the frame buffer to a texture of its own (`CopyTextureToTexture`), then one full-screen pass reads the copy with the linear sampler and writes the frame buffer. The EFB's alpha is kept.
+- `aurora_set_edge_smoothing(int mode)` and `DOL_AURORA_EDGE_SMOOTHING`: 0 off; 1 to 3 FXAA low, medium, high; 4 to 6 SMAA low, medium, high. The variable is read when the mode is first asked for, after the host's settings are in the environment. (The first build, the one benched on the Deck, had FXAA alone as `aurora_set_fxaa` and `DOL_AURORA_FXAA`, 0 to 3.)
+- `encode_edge_smoothing()`: copies the frame buffer to a texture of its own (`CopyTextureToTexture`); FXAA is then one full-screen pass that reads the copy with the linear sampler and writes the frame buffer. The EFB's alpha is kept.
 - It runs at the end of `encode()` for an ordinary frame (`Phase::Full`) and at the end of `encode_late()` for a monotone frame (Frozen Hyrule), so after bloom in both.
 - Left out when the frame is multisampled or the target is not the frame buffer.
 - `post_fx::any_enabled()` is true with the level above 0, so the scene pass is split before the HUD with the HD look off too.
-- GPU profiler zone: "Smooth edges (FXAA)".
+- GPU profiler zones: "Smooth edges (FXAA)", "Smooth edges (SMAA)" with its three passes inside.
 
 The shader follows FXAA's method (T. Lottes), written for this renderer in WGSL:
 
@@ -42,10 +42,35 @@ The shader follows FXAA's method (T. Lottes), written for this renderer in WGSL:
 
 `DOL_AURORA_FXAA_EDGE`, `_EDGE_MIN` and `_SUBPIXEL` set a level's values apart, for tuning before the levels are final.
 
+### SMAA, as written (not yet built)
+
+SMAA 1x ([iryoku/smaa](https://github.com/iryoku/smaa), MIT), its three passes written in WGSL for this renderer:
+
+```mermaid
+flowchart LR
+    A["Scene copy"] --> B["1. Edges<br/>(RG8 target)"]
+    B --> C["2. Blending weights<br/>(RGBA8 target)"]
+    T["Area and search tables"] --> C
+    A --> D["3. Blend into the frame buffer"]
+    C --> D
+```
+
+1. **Edges:** where a pixel's brightness steps from its left or upper neighbour by more than the threshold, unless a step beside it is more than twice as strong. Pixels with no edge are discarded.
+2. **Weights:** for each edge pixel, how long the edge line runs each way and what crosses its ends; the area table turns that shape into how much of the pixel the true edge covers. The search table lets one lookup cover two pixels.
+3. **Blend:** each pixel mixed with the neighbour across its strongest edge by that coverage. Pixels away from edges are copied as they are, which is why SMAA softens textures less than FXAA.
+
+| Level | Threshold | Lookups each way (two pixels each) | Diagonals | Corners kept |
+|---|---|---|---|---|
+| Low | 0.15 | 4 | no | no |
+| Medium | 0.1 | 8 | no | no |
+| High | 0.1 | 16 | 8 lookups | yes |
+
+These are the original's Low, Medium and High presets. `smaa_tables.hpp` holds the two tables with the original's notice: the search table whole (64×16), and the first 160×80 part of the area table, which is all that SMAA 1x reads (26 KB in place of 179 KB). `DOL_AURORA_SMAA_THRESHOLD` sets a level's threshold apart.
+
 ## Change (BlueWake), as written
 
-- `settings_table.h`: `DOL_AURORA_FXAA`, a chooser under Display after Texture filtering, fallback 0.
-- `desktop_menu.cpp`: its choices (Off, Low, Medium, High), `aurora_set_fxaa()` at the first frame (`apply_live()`) and when the chooser moves (`apply_now()`).
+- `settings_table.h`: `DOL_AURORA_EDGE_SMOOTHING`, a chooser under Display after Texture filtering, fallback 0.
+- `desktop_menu.cpp`: its choices (Off; FXAA Low, Medium, High; SMAA Low, Medium, High), `aurora_set_edge_smoothing()` at the first frame (`apply_live()`) and when the chooser moves (`apply_now()`).
 - `tests/settings_table_test.cpp`: its place in the file order, and a case for its place, kind, fallback and that it needs no restart.
 - The pin: RecompCore #69's head.
 

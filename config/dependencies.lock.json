@@ -112,9 +112,9 @@
     {
       "id": "recompcore",
       "url": "https://github.com/chrissotraidis/RecompCore",
-      "sha": "7ebb6b501ee8caa20d8cfde087c0767e5ad851b6",
+      "sha": "9b27cb3507b5c01c2c071ad1e7bc19bdcb7383f5",
       "branch": "bluewake-next",
-      "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/69 (edge smoothing, FXAA, after the effects and before the HUD, opt-in; its head, on bluewake-next after #66); before it: https://github.com/chrissotraidis/RecompCore/pull/66 (merged into bluewake-next as 7d3c18b1): #65, #62, #63, #58, #59, #51, #64 and #54, and a fix for #65 with #51",
+      "upstream_pull_request": "https://github.com/chrissotraidis/RecompCore/pull/69 (edge smoothing, FXAA or SMAA, after the effects and before the HUD, opt-in; its head, on bluewake-next after #66); before it: https://github.com/chrissotraidis/RecompCore/pull/66 (merged into bluewake-next as 7d3c18b1): #65, #62, #63, #58, #59, #51, #64 and #54, and a fix for #65 with #51",
       "license": "GPL-3.0",
       "role": "static-recomp runtime (GXRuntime), vendored Aurora renderer at GXRuntime/graphics/aurora, Dolphin DSP donor sources, and the DolRecomp translator as the DolRecomp submodule; the product source for the iPad build (scripts/ios/build_device.sh)",
       "verified": "2026-11-22",

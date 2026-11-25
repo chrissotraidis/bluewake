@@ -20,8 +20,8 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 
 ## What changes for players
 
-- A new chooser under Display, after Texture filtering: **Edge smoothing (FXAA)**, with Off (the default), Low, Medium and High.
-- With it on, jagged edges in the scene are smoothed in one pass over the finished picture. The HUD and the menus are drawn afterwards and stay as sharp as before.
+- A new chooser under Display, after Texture filtering: **Edge smoothing**, with Off (the default), FXAA Low, Medium and High, and SMAA Low, Medium and High.
+- With it on, jagged edges in the scene are smoothed over the finished picture: FXAA in one pass, the cheapest; SMAA in three, which keeps fine detail sharper and costs more. The HUD and the menus are drawn afterwards and stay as sharp as before.
 - The levels set how faint an edge is smoothed and how far along a nearly level or upright edge the pass looks. Higher levels cost a little more.
 - It takes effect at once, so it can be compared while playing.
 - Nothing changes with it Off.
@@ -34,7 +34,7 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 
 ## Possible follow-ups
 
-- **SMAA:** three passes and two lookup textures; sharper than FXAA on textures, for more GPU time. A second choice in the same chooser if FXAA's softness shows at 2x.
+- **SMAA:** asked for by the owner on 2026-11-24 as the next step, and written in this PR as a second method in the same chooser. To be built and measured after FXAA's bench.
 - **Multisampling (MSAA):** needs the sea mask, the sun shadows, the monotone and the HD look's depth passes to work on a multisampled frame, and does nothing inside transparent textures (grass, leaves).
 - A sharpening step after the smoothing, if fine detail softens.
 
