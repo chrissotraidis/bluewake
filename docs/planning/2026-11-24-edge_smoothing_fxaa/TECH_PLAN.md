@@ -81,19 +81,21 @@ These are the original's Low, Medium and High presets. `smaa_tables.hpp` holds t
 - **The game's frame copy:** where the effects go in before the game's full-size copy, the copy holds the smoothed scene (as it holds bloom today). The pause screen's background and the motion blur read that copy.
 - **Cost at 3x and 4x:** a full-screen pass with up to 9 + 24 lookups a pixel on an edge; meant for 2x and under. To be measured.
 
-## Verification, planned
+## Verification, as done so far
 
-On the owner's Deck in Game Mode, the owner's settings, the twelve states of #655 and #658, `render_bench --paced`, five labels on one build, reported in this order:
+**On the owner's Deck** (Game Mode, the owner's settings, twelve states, `render_bench --paced`, build `5941dffe9`), FXAA only: 3x as the base against 2x with the smoothing Off, Low, Medium and High, three or four launches a scene. The Deck was docked to a 1920×1080 screen for the whole run, and the run stopped before its last pass and its picture passes (Steam's "Unable to Sync" dialog after a network drop). Numbers and what they show: [Progress](PROGRESS.md).
 
-| Label | Render resolution | Edge smoothing |
-|---|---|---|
-| A | 2x | Off |
-| B | 3x | Off |
-| C | 2x | Low |
-| D | 2x | Medium |
-| E | 2x | High |
+- 2x against 3x: 22 to 37 % less GPU time, ten of twelve scenes at full speed.
+- The smoothing: no change in game frames a second; its own GPU time 0.6 to 0.8 ms at Low, 0.6 to 1.1 at Medium, 0.8 to 1.2 at High.
 
-- Game frames a second and GPU time a shown frame, medians of four launches a scene, in percent against A.
-- The pass's own GPU time at each level from its profiler zone.
-- Pictures: the same frame of each state under the five, each shrunk to 1280×720 as the Deck shows it, side by side, with a 1:1 crop of an edge.
+**On a desktop** (headless, build `e40240187`): both methods' shaders compile and run with no validation errors; pictures of all twelve states at 3x, 2x and 2x with each of the six modes, compared with 3x at 1280×720 and at 1920×1080.
+
+- At 1280×720 plain 2x is 37 to 47 dB from 3x; FXAA moves that +0.15 dB on average, SMAA +0.3.
+- At 1920×1080 plain 2x is 40.5 dB from 3x on average; FXAA High +0.3, SMAA High +0.5.
+
+**Still to do**
+
+- SMAA's bench on the Deck (the same five-way run: 3x, then 2x Off, SMAA Low, Medium, High).
+- The comparison on the Deck's own screen, not docked; the fourth pass of FXAA's run.
 - By eye on the Deck: HUD text, grass and rigging in motion, the pause screen.
+- The crash at shutdown seen once in eight desktop runs of SMAA Low (two repeats clean).
