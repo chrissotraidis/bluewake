@@ -40,6 +40,6 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 
 ## Success
 
-- On the owner's Deck, 2x with edge smoothing against 3x as played today, over the twelve bench scenes of #655 and #658: game frames a second and GPU time reported for 3x, 2x and 2x with the smoothing, with pictures of each as the Deck shows them (1280×720).
+- On the owner's Deck, 2x with edge smoothing against 3x as played today, over the twelve bench scenes of #655 and #658: game frames a second and GPU time reported for 2x, 3x, and 2x with the smoothing at Low, Medium and High, with pictures of each as the Deck shows them (1280×720).
 - The smoothing pass costs less than 1 ms of GPU time a shown frame at 2x on the Deck.
 - The owner prefers 2x with the smoothing to plain 2x in play, and sees no blurred HUD text.

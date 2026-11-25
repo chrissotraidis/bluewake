@@ -58,15 +58,17 @@ The shader follows FXAA's method (T. Lottes), written for this renderer in WGSL:
 
 ## Verification, planned
 
-On the owner's Deck in Game Mode, the owner's settings, the twelve states of #655 and #658, `render_bench --paced`, three labels on one build:
+On the owner's Deck in Game Mode, the owner's settings, the twelve states of #655 and #658, `render_bench --paced`, five labels on one build, reported in this order:
 
 | Label | Render resolution | Edge smoothing |
 |---|---|---|
-| A | 3x | Off |
-| B | 2x | Off |
-| C | 2x | the level chosen from the pictures |
+| A | 2x | Off |
+| B | 3x | Off |
+| C | 2x | Low |
+| D | 2x | Medium |
+| E | 2x | High |
 
 - Game frames a second and GPU time a shown frame, medians of four launches a scene, in percent against A.
-- The pass's own GPU time from its profiler zone.
-- Pictures: the same frame of each state under A, B and C, each shrunk to 1280×720 as the Deck shows it, side by side with differences, and a 1:1 crop of an edge.
+- The pass's own GPU time at each level from its profiler zone.
+- Pictures: the same frame of each state under the five, each shrunk to 1280×720 as the Deck shows it, side by side, with a 1:1 crop of an edge.
 - By eye on the Deck: HUD text, grass and rigging in motion, the pause screen.
