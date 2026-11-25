@@ -90,13 +90,13 @@ if (dolrecomp_option_flags[2u]) {
 `runtime/host/src/sail_steady.h` holds the rule as a pure function, so it can be tested without the game:
 
 ```c
-#define SAIL_STEADY_DEPTH 20.0f
+#define SAIL_STEADY_DEPTH 12.0f
 
 static inline int sail_steady(float* y, float water, float* sink) {
     const float lowest = water - SAIL_STEADY_DEPTH;
     if (!(*y < lowest))
         return 0;            // at or above the new floor: untouched
-    *y = lowest;             // hold at 20 under the water
+    *y = lowest;             // hold at 12 under the water
     if (*sink < 0.0f)
         *sink = 0.0f;        // and stop the spring pushing further down
     return 1;
@@ -109,9 +109,9 @@ Clearing the downward spring speed matters: without it `m03D0` would keep drivin
 flowchart TD
     S["setYPos: the game's pull, spring, jitter"] --> H{"the game's hold:<br/>−60 ≤ y − water ≤ +40"}
     H --> K["hook 7 (Swift Sail on)"]
-    K --> Q{"y < water − 20 ?"}
+    K --> Q{"y < water − 12 ?"}
     Q -- no --> N["unchanged"]
-    Q -- yes --> Y["y = water − 20<br/>sink speed = max(sink, 0)"]
+    Q -- yes --> Y["y = water − 12<br/>sink speed = max(sink, 0)"]
     N --> R["rest of setYPos:<br/>pitch and roll jitter"]
     Y --> R
 ```
@@ -127,7 +127,7 @@ Brisk Sail turns Swift Sail's sites on, so it gets the hook too.
 
 ## Risks
 
-- **Too stiff:** at 20 the boat may look glued to the water in big swells. `SAIL_STEADY_DEPTH` is the one constant to tune; the owner judges on the Deck.
+- **Too stiff:** at 12 (20 at first; the owner still saw the water touch the floor) the boat may look glued to the water in big swells. `SAIL_STEADY_DEPTH` is the one constant to tune; the owner judges on the Deck.
 - **Only the sinking:** if the bobbing still looks strong, the tilt and the spring's strength come next.
 
 ## Verification

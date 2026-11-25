@@ -6,7 +6,7 @@ With Swift Sail (Better Wind Waker's option, on by default) King of Red Lions sa
 
 ## What changes for players
 
-- With Swift Sail on, the boat no longer sinks into the swells deeper than 20 units (the game allows 60). The sea stays below the deck.
+- With Swift Sail on, the boat no longer sinks into the swells deeper than 12 units (the game allows 60). The sea stays below the deck.
 - Nothing else: speed, steering, the wind, braking and collisions are as before. With Swift Sail off the game is unchanged.
 
 ## Not in scope

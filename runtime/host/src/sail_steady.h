@@ -11,7 +11,7 @@
 #ifndef BLUEWAKE_SAIL_STEADY_H
 #define BLUEWAKE_SAIL_STEADY_H
 
-#define SAIL_STEADY_DEPTH 20.0f
+#define SAIL_STEADY_DEPTH 12.0f
 
 // y: the boat's height (current.pos.y); water: the water's height under him
 // (m03F4); sink: his height's own speed (m03D0, units a frame). Returns 1 when

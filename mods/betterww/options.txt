@@ -54,7 +54,7 @@ site 0x80213858 instant_text insn 0x88030031   # dMsg_finishProc
 # speeds up faster and brakes harder (Brisk Sail brakes harder still; the native
 # braking reads which). Brisk Sail turns these sites on too. At twice the speed
 # the boat's spring onto the swells overshoots and he sank up to 60 units, the
-# sea showing through the deck; the native hook in setYPos keeps him within 20.
+# sea showing through the deck; the native hook in setYPos keeps him within 12.
 hook  d_a_ship.rel+0xBA00 swift_sail before 3    # b (after bl setShipSailState)
 hook  d_a_ship.rel+0x3A74 swift_sail before 4    # bl cLib_addCalc: braking with A
 hook  d_a_ship.rel+0x3BC8 swift_sail before 5    # bl cLib_addCalc: braking when idle
