@@ -30,12 +30,12 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 
 - Changing any default, the render resolution's included.
 - The Android and iOS menus.
-- An automatic render resolution ([#659](https://github.com/chrissotraidis/bluewake/pull/659)): related, apart.
+- An automatic render resolution ([#659](https://github.com/chrissotraidis/bluewake/pull/659)): closed by the owner on 2026-11-25; 2x reaches full speed in every bench scene on the Deck.
 
 ## Possible follow-ups
 
 - **SMAA:** asked for by the owner on 2026-11-24 as the next step, and written in this PR as a second method in the same chooser. To be built and measured after FXAA's bench.
-- **Multisampling (MSAA):** needs the sea mask, the sun shadows, the monotone and the HD look's depth passes to work on a multisampled frame, and does nothing inside transparent textures (grass, leaves). A probe is in this PR (2026-11-25, the owner's choice of "probe first"): a startup setting, 4x only, with those effects off while it is on.
+- **Multisampling (MSAA):** needs the sea mask, the sun shadows, the monotone and the HD look's depth passes to work on a multisampled frame, and does nothing inside transparent textures (grass, leaves). A probe is in this PR (2026-11-25, the owner's choice of "probe first"): a startup setting, 4x only, with those effects off while it is on. Measured and stopped there on 2026-11-25 (+2.6 ms a frame on the Deck at 2x; see Where it stands).
 - A sharpening step after the smoothing, if fine detail softens.
 
 ## Success
@@ -50,4 +50,4 @@ What 2x gives up is edge smoothing. The renderer has no anti-aliasing a player c
 - **Under 1 ms:** every level of both methods is, a pass (FXAA 0.48 to 0.63 ms, SMAA 0.79 to 0.95, medians); with Smooth Motion on it runs twice a game frame, so only FXAA Low stays under 1 ms a game frame (0.96 ms).
 - **Pictures:** all twelve scenes with the owner's HD texture pack, each level against 2x Off: 42 to 62 dB, changes on edges only. Small at the Deck's screen size.
 - **The owner's eye:** "barely any difference on the screen for every filter", in play on the Deck.
-- **MSAA:** a probe; it changes the picture far more than either filter, but turns the HD look off while on and costs 2.6 ms of GPU time a frame on the Deck at 2x (median; game frames lost in two Outset scenes even with the HD look off). Recommended: stop at the probe; the owner decides.
+- **MSAA:** a probe; it changes the picture far more than either filter, but turns the HD look off while on and costs 2.6 ms of GPU time a frame on the Deck at 2x (median; game frames lost in two Outset scenes even with the HD look off). Stopped at the probe by the owner (2026-11-25): the probe stays in RecompCore #69, off unless set, and its data stays here for reference.

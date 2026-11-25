@@ -266,3 +266,4 @@
   | **Median** | | | | **+2.6 ms** |
 
   MSAA adds 2.6 ms of GPU time a frame (median of twelve scenes; up to 4.8 ms in Outset: heavy), three to five times SMAA High's pass, and already costs game frames in Outset (28.4) and Outset: busiest (29.0) with the HD look off. With it on there is less room still, and keeping the HD look under MSAA needs the effects reworked first. Recommendation to the owner: stop at the probe.
+- 2026-11-25: the owner's decisions: keep both methods in (#661 and RecompCore #69 stay as they are); stop MSAA at the probe, keeping it in RecompCore #69 (off unless `DOL_AURORA_MSAA=4`) with its reasoning and data here and in the PR descriptions for future reference; close #659 (automatic render scale), as the owner plays at 2x. Four superseded builds removed from the Deck (blur, deck-plus-3, hdlight-stack, main-642-643); hd, mask and smooth kept.
