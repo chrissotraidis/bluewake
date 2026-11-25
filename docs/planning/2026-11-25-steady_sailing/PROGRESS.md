@@ -4,3 +4,4 @@
 - 2026-11-25: hook 7 in Swift Sail's sites, `sail_steady.h` and its test; `sail_steady_test` passes, the option list checks (18 options, 41 sites).
 - 2026-11-25: built (stack `4fdd81f27`); the hook is in the translated `d_a_ship` code behind Swift Sail's switch. On the owner's Deck as BlueWake-sail. The technical plan now has the height code, the cause, the hook site's disassembly, the native code and diagrams, at the owner's request.
 - 2026-11-25: on the Deck the owner found it much better, but the water still just touched the boat's floor: the limit goes from 20 to 12. The test's expected heights now read `SAIL_STEADY_DEPTH` (they were written at 20 in this PR), and two cases are added (just below the floor; the limit between the water and the game's 60).
+- 2026-11-25: the owner sailed on the Deck at 12 with and without Swift and Brisk Sail (build `c5e32da35`): "feels good". The logs agree: hook 7 ran with Swift Sail on and no sailing hook ran with both off.

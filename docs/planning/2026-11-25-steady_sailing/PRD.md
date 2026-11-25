@@ -18,3 +18,7 @@ With Swift Sail (Better Wind Waker's option, on by default) King of Red Lions sa
 
 - On the owner's Deck, sailing with Swift Sail at full speed: no sea showing through the deck.
 - The boat still rides the swells visibly (it rises and falls, only not as deep).
+
+## Where it stands (2026-11-25)
+
+- Checked by the owner on the Deck at 12 units, with and without Swift and Brisk Sail: "feels good".

@@ -135,4 +135,4 @@ Brisk Sail turns Swift Sail's sites on, so it gets the hook too.
 - `tests/sail_steady_test.c` (the audit workflow, under sanitizers): untouched on, above and at the floor; held below it with the downward speed stopped; a rising boat keeps its rise; negative heights. Passes locally.
 - `scripts/mods/game_options.py check` reads the list (18 options, 41 sites).
 - The hook appears in the build's translated `d_a_ship` code behind Swift Sail's switch.
-- Still to do: the owner sails on the Deck with Swift Sail at full speed.
+- On the owner's Deck (build `c5e32da35`), with and without Swift and Brisk Sail: "feels good"; the water stays below the floor. The hook ran only with Swift Sail on.
