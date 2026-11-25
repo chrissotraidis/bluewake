@@ -68,6 +68,7 @@ void aurora_set_frame_interpolation(bool enabled);
 void aurora_set_frame_interp_steps(int steps);
 void aurora_set_fps_overlay(bool enabled);
 void aurora_set_forced_anisotropy(unsigned samples);
+void aurora_set_fxaa(int level);
 void aurora_set_game_dof(int step);
 void aurora_set_game_dof_start(int start);
 }
@@ -98,6 +99,9 @@ const char* const kScaleShown[] = {"Window", "1x", "2x", "3x", "4x"};
 const char* const kScaleStored[] = {"0", "1", "2", "3", "4"};
 const char* const kAnisoShown[] = {"Off (the game's)", "2x", "4x", "8x", "16x"};
 const char* const kAnisoStored[] = {"1", "2", "4", "8", "16"};
+// Edge smoothing (aurora_set_fxaa's levels): one pass over the finished scene.
+const char* const kEdgeSmoothingShown[] = {"Off", "Low", "Medium", "High"};
+const char* const kEdgeSmoothingStored[] = {"0", "1", "2", "3"};
 // The game's distance blur (aurora_set_game_dof's steps); Default is as before.
 const char* const kDistanceBlurShown[] = {"Off", "Light", "Default", "Strong", "GameCube"};
 const char* const kDistanceBlurStored[] = {"0", "1", "2", "3", "4"};
@@ -301,6 +305,7 @@ void apply_live() {
     read_menu_pauses();
     aurora_set_frame_buffer_scale(static_cast<float>(env_int("DOL_AURORA_RENDER_SCALE", 0)));
     aurora_set_forced_anisotropy(static_cast<unsigned>(env_int("DOL_AURORA_FORCE_ANISO", 1)));
+    aurora_set_fxaa(env_int("DOL_AURORA_FXAA", 0));
     aurora_set_game_dof(env_int("DOL_AURORA_GAME_DOF", 2));
     aurora_set_game_dof_start(env_int("DOL_AURORA_GAME_DOF_START", 0));
     aurora_set_efficient_effects(env_on("DOL_AURORA_EFFICIENT_EFFECTS", false));
@@ -345,6 +350,8 @@ void apply_now(const bw_settings::Setting& s) {
         aurora_set_frame_buffer_scale(static_cast<float>(std::atoi(value.c_str())));
     else if (std::strcmp(key, "DOL_AURORA_FORCE_ANISO") == 0)
         aurora_set_forced_anisotropy(static_cast<unsigned>(std::atoi(value.c_str())));
+    else if (std::strcmp(key, "DOL_AURORA_FXAA") == 0)
+        aurora_set_fxaa(std::atoi(value.c_str()));
     else if (std::strcmp(key, "DOL_AURORA_GAME_DOF") == 0)
         aurora_set_game_dof(std::atoi(value.c_str()));
     else if (std::strcmp(key, "DOL_AURORA_GAME_DOF_START") == 0)
@@ -793,6 +800,12 @@ bool choices(const char* key, const char* const** shown, const char* const** sto
         *shown = bw_desktop::kAnisoShown;
         *stored = bw_desktop::kAnisoStored;
         *count = 5;
+        return true;
+    }
+    if (std::strcmp(key, "DOL_AURORA_FXAA") == 0) {
+        *shown = bw_desktop::kEdgeSmoothingShown;
+        *stored = bw_desktop::kEdgeSmoothingStored;
+        *count = 4;
         return true;
     }
     if (std::strcmp(key, "DOL_AURORA_GAME_DOF") == 0) {
