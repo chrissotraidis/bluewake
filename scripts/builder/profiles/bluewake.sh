@@ -51,9 +51,8 @@ PROFILE_HOST_PGO=scripts/builder/profiles/bluewake/host.profdata
 # The game's depth copy read as GX_TF_Z16 (target 0xB), and steps for its depth of field and where it starts (RecompCore #61): patches/recompcore/0207-0208; #61's head, merged into bluewake-next for 0.12.0.
 RECOMPCORE_URL=https://github.com/chrissotraidis/RecompCore.git
 # 0.13.0's batch (RecompCore #66, merged into bluewake-next as 7d3c18b1): #65, #62, #63, #58, #59, #51, #64 and #54 merged in that order, and a fix for #65 with #51: patches/recompcore/0209-0218; the pin is #66's head.
-# A fast blur for the game's depth of field step 1, opt-in (RecompCore #67, on bluewake-next after #66): pin #67's head until it merges.
-# The effects' mask at half size, opt-in (RecompCore #68, stacked on #67): pin #68's head until both merge.
-RECOMPCORE_SHA=8c2434c0df54eb0204a72a95496011fdfc36e71a
+# 0.13.0's second batch (RecompCore #70, on bluewake-next after #66): the fast Light distance blur (#67), the faster effects mask (#68) and edge smoothing (#69), all opt-in (irregularthanis): patches/recompcore/0219-0221; the pin is #70's head.
+RECOMPCORE_SHA=d733290f1d47acc12a464c77de5e50099b680890
 DOLRECOMP_SHA=b8b534591cba8ca7cd43943a655ee6e2591cf5de
 DAWN_URL=https://github.com/encounter/dawn/releases/download/v20260618.032059/dawn-ios-arm64.tar.gz
 DAWN_SHA256=ada0bafc173152d80eba7c3b2f9609a71185d5809cbd5dd3251b91a0803a7ae2

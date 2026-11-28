@@ -334,3 +334,19 @@ Patch 0218 (Chris, on the batch): #65's count of what a pack loaded and its `DOL
 local list #51 replaced. Without it the batch didn't compile. A folder loaded later while running still brings its own
 files.
 
+Patches 0219 to 0221 are 0.13.0's second batch (RecompCore #70, `codex/0.13.0-batch-2`, `d733290f`), one patch for
+each pull request as merged, so the series applied in order to `bluewake-next` (`7d3c18b1`) gives the batch's tree.
+All three are off by default.
+
+Patch 0219 (irregularthanis, RecompCore #67): `DOL_AURORA_GAME_DOF_FAST` makes the game's distance blur at its Light
+step on a half-size copy, blended back over the picture in one pass, instead of two full-size blur passes and a copy
+back.
+
+Patch 0220 (irregularthanis, RecompCore #68): `DOL_AURORA_EFFECT_MASK_FAST` draws the effects mask and its pass over
+white at half the render size against a half-size depth, and in one pass with two targets where every effect of the
+pass has that variant ready. The shading and the cover read the half-size mask between its texels.
+
+Patch 0221 (irregularthanis, RecompCore #69): `DOL_AURORA_EDGE_SMOOTHING` smooths edges in the finished scene before
+the HUD is drawn, with FXAA (one pass) or SMAA (three passes) at three levels each. It also carries a probe,
+`DOL_AURORA_MSAA=4`, which draws with four samples and turns the depth-reading effects off.
+
