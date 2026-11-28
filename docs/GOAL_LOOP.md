@@ -31,7 +31,23 @@ The full reasoning is in [PERFORMANCE.md](PERFORMANCE.md#the-plan). In short:
 | 2. Behavior, not cycles | 0.8 (weeks) | Lighter timing, natives that remove round trips, cached display lists | The benchmark, and plays the same |
 | 3. Follow the decompilation | Months | Natives compiled from its source, drawing at the GX/J3D API level, matched scenes ported | Each piece checked against the recompilation |
 
-## November 22: 0.13.0
+## November 28: 0.13.0, build 15
+
+0.13.0 (build 14) was never published. By the time its Windows and Linux files were ready, `main` had the fix for the
+door freeze (#653, #621) and more contributor work, so Chris decided to keep the version and freeze it again as build
+15. The second contents pull request (#666) brought #665, #662, #655, #658, #661, #649, #654 and #660, with RecompCore's
+second batch (RecompCore#70: #67, #68, #69, all opt-in). The [release record](status/RELEASE_0.13.0.md) lists everything
+in 0.13.0 and what wasn't checked by hand.
+
+| Next, in order | Evidence and scope | Done when |
+| --- | --- | --- |
+| The Apple-side files and PadMint's player check | The release record, lines 3 to 5, on the Mac from the freeze commit | The draft holds build 15's IPA, source zip and `padmint.json`, and the player check has passed |
+| The Windows zip and the Linux AppImage | [WINDOWS_BUILD_0.13.0.md](status/WINDOWS_BUILD_0.13.0.md), build 15, on Chris's PC | Both uploaded to the v0.13.0 draft and their results merged |
+| Publication | The record's lines before tagging all have a status | Chris publishes; then #641 and the record's lines 8 to 12 |
+| #657, the stop leaving the pirate ship at Windfall | Very likely #621's trim (`0x4281FFFE` is 65.0) on a build before #653; asked on the issue | The reporter's save state on a build with #653 |
+| Next release: #648, #626, #559, #584 | Each needs one check named on its pull request (a menu on a screen, the Deck run, a phone run, a rebase with hook id 8) | Checked, then merged |
+
+## November 22: 0.13.0 (build 14, not published)
 
 Every open pull request and issue was read and reviewed on GitHub. Eighteen pull requests went into `main` together
 (#636), with RecompCore's batch merged as RecompCore#66: the heat haze and the Picto Box in Dragon Roost Cavern, the

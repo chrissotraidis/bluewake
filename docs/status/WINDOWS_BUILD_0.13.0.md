@@ -10,6 +10,11 @@ Written for the agent on Chris's Windows PC to run on its own as a goal loop, as
 Linux AppImage in WSL), and look at the screen for about 15 minutes when the agent asks (step 4). The test card from
 0.12.0 is already on the PC (`C:\BlueWake-private\GZLE01.card`).
 
+**Build 15 (November 28).** Build 14 was made and checked here on November 23 ([its results](#results-build-14-not-published))
+but never published. 0.13.0 is now frozen again as build 15, with the fix for the door freeze and the rest of the
+contributors' work below. Follow this file again from the start for build 15: a new build folder, every step, and
+the [build 15 results](#results-build-15). The files uploaded in step 7 replace build 14's in the draft.
+
 **What happens after:** the agent uploads the Windows zip and the Linux AppImage to the existing **draft** v0.13.0
 release and opens a pull request with the results. Codex on the Mac checks both with the release gate, and Chris
 publishes.
@@ -37,6 +42,20 @@ publishes.
 - **Save state slots** (#632): five slots in the menu's footer, beside F5 and F8.
 - **The Windows zip carries the stage select's English names** (#616).
 
+New in build 15:
+
+- **Native cutscene framing** (Mods, off by default): no freeze or crash a few doors after a door into a new area
+  (#653, #621).
+- **Gameplay › Speed up while Tab is held** (#629), off, 1.5x to 5x.
+- **Display › Distance blur starts** reads 1.00x to 10.00x in quarters (#651).
+- **Config › Performance › Faster Light distance blur** and **Faster effects mask** (#655, #658; RecompCore #67, #68),
+  and **Display › Edge smoothing**, FXAA or SMAA (#661; RecompCore #69). All off.
+- **Swift Sail** (Better Wind Waker): the boat no longer sinks far enough into the swells for the sea to show through
+  the deck (#662).
+- The gamescope switch is on Linux only (#642), and the boat zoom leaves the game's camera data alone while it's off
+  (#643).
+- The Windows training DLL fits the loader's limit (#646), the fix build 14 needed here.
+
 ## Rules for the agent
 
 - Read [AGENTS.md](../../AGENTS.md) first. Do only what this file says: no code edits, no refactors. If anything in
@@ -57,7 +76,7 @@ Check each line; if one fails, stop and ask Chris.
 
 | Check | How | Passes when |
 | --- | --- | --- |
-| The commit | `git fetch origin`, then `git log origin/main --merges --grep "Freeze 0.13.0" -1 --format=%H` gives the freeze commit; `git checkout --detach COMMIT`, then `git status --short` | One commit is found, the tree is clean, and `version.json` says 0.13.0, build 14 |
+| The commit | `git fetch origin`, then `git log origin/main --merges --grep "Freeze 0.13.0, build 15" -1 --format=%H` gives the freeze commit; `git checkout --detach COMMIT`, then `git status --short` | One commit is found, the tree is clean, and `version.json` says 0.13.0, build 15 |
 | The tools | `python --version`, `clang --version`, `cmake --version`, `ninja --version`, `gh auth status` | As for 0.12.0: Python 3.10+, clang 22 or newer, CMake and Ninja on PATH, `gh` logged in |
 | The disc | `C:\BlueWake-private\GZLE01.iso`, or the one 0.12.0's build used | One exists. Otherwise ask Chris for the path |
 | The card | `C:\BlueWake-private\GZLE01.card` | It exists; it is the card 0.12.0's checks used |
@@ -74,7 +93,7 @@ Check each line; if one fails, stop and ask Chris.
 python scripts\windows\build.py DISC --out build\windows-0.13.0 --jobs 6
 ```
 
-No extra options. Note the build time and clang version; that it fetched RecompCore `c0f5f91`; that the mods step made
+No extra options. Note the build time and clang version; that it fetched RecompCore `d733290`; that the mods step made
 `widescreen6427` and `widescreen4318` and their combos; that `BuilderProvenance.json` has `"fp_checks": true` and
 `"direct_gate_training": true`; and the SHA-256 of `build\windows-0.13.0\BlueWake\gGZLE01_recomp.dll`.
 
@@ -112,8 +131,12 @@ F1 › Quit the game.
 | e | No heart pulsing (#628) | Rendered runs warped to Outset with `--set BLUEWAKE_MODS=betterww`, `BLUEWAKE_OPTIONS=no_heart_pulse` and without it, `--capture 900:7` | With it the last heart's glowing copy is never drawn in any frame; without it, it is |
 | f | Save state slots (#632) | Chris opens F1, presses **Save state slots…**, saves slot 2, quits; starts again, loads slot 2, then tries Load on an empty slot; then F5 and F8 | Slot 2 shows its time after the restart and loads where it was saved; the empty slot says so; F5 and F8 work as before |
 | g | The stage select's names (#616) | After step 5, unpack the zip into an empty folder | It holds `stage_select\names.tsv`, identical to `config\stage_select\names.tsv` |
+| h | Speed up while Tab is held (#629) | Chris turns on F1 › Gameplay › **Speed up while Tab is held**, closes the menu at Outset and holds Tab for about ten seconds, then lets go | The game runs visibly faster while Tab is held and the log has a `[turbo]` line; after letting go it plays at normal speed with its sound |
+| i | Distance blur starts (#651) | Chris opens F1 › Display and moves **Distance blur starts** with the arrow keys | It reads 1.00x to 10.00x and moves 0.25x a press |
+| j | The new display and speed switches (#655, #658, #661) | Rendered runs warped to Outset with the HD look on (`--set BLUEWAKE_HD_LOOK=1`): once plain, once with `DOL_AURORA_GAME_DOF=1` and `DOL_AURORA_GAME_DOF_FAST=1`, once with `DOL_AURORA_EFFECT_MASK_FAST=1`, once with `DOL_AURORA_EDGE_SMOOTHING=3` (FXAA High), `--capture 900:3`; compare with `frame_compare.py` | Every run reaches Outset and exits 0 with no fatal or validation lines; each switch's frames differ from the plain run's only slightly (no black, missing or garbled picture) |
+| k | The defaults, unchanged | The plain run in j against the same run on build 14's app if it is still on this PC (`build\windows-0.13.0`), else skip | The frames match, or the difference is named |
 
-If Chris has had enough, a, b and f are the ones that need him; c, d, e and g the agent does alone.
+If Chris has had enough, a, b, f, h and i are the ones that need him; c, d, e, g, j and k the agent does alone.
 
 **5. Package.** Delete `user\` and `portable.txt` from the build folder, then:
 
@@ -132,7 +155,7 @@ git checkout --detach COMMIT && git status --short
 python3 scripts/linux/build.py ~/bw-private/GZLE01.iso --out build/linux-0.13.0 --ci-container --appimage --jobs 6
 ```
 
-Passes when it fetched RecompCore `c0f5f91`, printed clang 22, and the AppImage audit's line reports GLIBC no higher than
+Passes when it fetched RecompCore `d733290`, printed clang 22, and the AppImage audit's line reports GLIBC no higher than
 2.39. Then start the app folder headless from an empty data folder; it reaches the title screen and quits by itself:
 
 ```
@@ -152,8 +175,9 @@ AppImage out as `/mnt/c/BlueWake-private/BlueWake-v0.13.0-linux-x86_64.AppImage`
    gh release view v0.13.0 --json isDraft,assets
    ```
    It must still be a draft.
-2. On a branch `codex/windows-0.13.0-results` from `origin/main`, fill in the Results table below and open a pull request
-   "Windows 0.13.0 build results", with no logs or frames attached. Mark the WINDOWS_TASKS.md rows each check covered.
+2. On a branch `codex/windows-0.13.0-build15-results` from `origin/main`, fill in the build 15 results table below and
+   open a pull request "Windows 0.13.0 build 15 results", with no logs or frames attached. Mark the WINDOWS_TASKS.md
+   rows each check covered.
 3. Tell Chris it's done, with the results table and the pull request link. Then stop.
 
 ## Stop and ask Chris
@@ -165,7 +189,29 @@ AppImage out as `/mnt/c/BlueWake-private/BlueWake-v0.13.0-linux-x86_64.AppImage`
 - A check shows missing or broken drawing beyond the changes above; the game crashes; a save or a state doesn't load.
 - The AppImage build fails, its audit fails or reports GLIBC above 2.39, or the headless start doesn't reach the title.
 
-## Results
+## Results, build 15
+
+| | |
+| --- | --- |
+| Commit built | |
+| Build time, jobs, clang, RecompCore, provenance, mod variants | |
+| Module SHA-256 | |
+| Speed: 0.12.0 and 0.13.0 per stop, checkpoints | |
+| a. Start and look | |
+| b. Heat haze and the Picto Box | |
+| c. The heart | |
+| d. Ultrawide presets | |
+| e. No heart pulsing | |
+| f. Save state slots | |
+| g. The stage select's names | |
+| h. Speed up while Tab is held | |
+| i. Distance blur starts | |
+| j. The new display and speed switches | |
+| k. The defaults, unchanged | |
+| Zip SHA-256, uploaded to the v0.13.0 draft | |
+| AppImage: build time, clang, audit line, headless start, SHA-256, uploaded | |
+
+## Results, build 14 (not published)
 
 Completed on CHRIS-MINI, a Windows 11 PC with a Ryzen 7 5700U and AMD Radeon graphics, with Ubuntu under WSL 2 for Linux. The
 desktop candidate uses freeze `bb790d49` plus [#646](https://github.com/chrissotraidis/bluewake/pull/646), a Windows builder
