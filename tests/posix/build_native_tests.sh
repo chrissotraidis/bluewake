@@ -26,4 +26,23 @@ build_one native_search_test.c "$ROOT/cmake/composite/native_search.c"
 build_one native_mtxcalc_test.c "$ROOT/cmake/composite/native_mtxcalc.c"
 build_one native_leaf_test.c "$ROOT/cmake/composite/native_libm.c $ROOT/cmake/composite/native_bgblk.c $ROOT/cmake/composite/native_rot.c $ROOT/cmake/composite/native_calc.c $ROOT/cmake/composite/native_geom.c $ROOT/cmake/composite/native_jas.c"
 
+# The sets whose Windows recipe names its own sources: the background and judge
+# tests carry their own chunk lookup (they link direct_calls.c for the edge
+# filter's state), and the FIFO writer test needs gather_pipe.c instead.
+build_one native_bg_test.c "$ROOT/cmake/composite/native_bg.c"
+build_one native_search_judge_test.c "$ROOT/cmake/composite/native_search.c"
+
+# The FIFO writer and vector tests do not link direct_calls.c: they never touch the
+# edge filter, and direct_calls.c names a chunk lookup they do not provide.
+build_one_plain() {
+    local test="$1"; shift
+    local srcs="$1"; shift
+    local name="${test%.c}"
+    echo "=== building $name ==="
+    $CC $CFLAGS -o "$OUT/$name" "$ROOT/tests/$test" $srcs $GRTLIB -ldl -lm -pthread
+    echo "    -> $OUT/$name"
+}
+build_one_plain native_fifo_test.c "$ROOT/cmake/composite/native_fifo.c $ROOT/cmake/composite/gather_pipe.c"
+build_one_plain native_vec_test.c "$ROOT/cmake/composite/native_vec.c"
+
 echo "done. run: $OUT/native_search_test $SO"

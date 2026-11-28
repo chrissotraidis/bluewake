@@ -26,7 +26,8 @@ static const char* const kFileOrder[] = {
     "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES",
     "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST", "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE",
     "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
-    "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO", "DOL_AURORA_GAME_DOF", "DOL_AURORA_GAME_DOF_START",
+    "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO", "DOL_AURORA_EDGE_SMOOTHING", "DOL_AURORA_GAME_DOF",
+    "DOL_AURORA_GAME_DOF_START",
     "BLUEWAKE_MODS", "BLUEWAKE_OPTIONS", "BLUEWAKE_STAGE_SELECT_TOGGLE", "BLUEWAKE_FOREST_WATER_KEEP_TREES",
     "BLUEWAKE_FOREST_WATER_30_MINUTES", "BLUEWAKE_FADE_FRAMES", "BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS", "BLUEWAKE_SAIL_ON_Z",
     "BLUEWAKE_CLIMB", "BLUEWAKE_CLIMB_STAMINA", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED",
@@ -39,6 +40,7 @@ static const char* const kFileOrder[] = {
     "BLUEWAKE_HAPTICS_TRIGGERS", "BLUEWAKE_DSP_MODE", "DOL_AURORA_EFFICIENT_EFFECTS", "BLUEWAKE_GATHER_PIPE_BATCH",
     "BLUEWAKE_DIRECT_GATE", "BLUEWAKE_MODULE_HUGEPAGES", "DOL_AURORA_CLOUD_NOISE_TEXTURE",
     "DOL_AURORA_AO_PACKED", "BLUEWAKE_PRESENT_MAILBOX", "BLUEWAKE_NO_GAMESCOPE_WSI",
+    "DOL_AURORA_GAME_DOF_FAST", "DOL_AURORA_EFFECT_MASK_FAST",
     "BLUEWAKE_MENU_PAUSES",
     "BLUEWAKE_MENU_TEXT_SIZE",
     "BLUEWAKE_MENU_CONTRAST", "BLUEWAKE_MENU_PLACE", "BLUEWAKE_MENU_SIZE", "BLUEWAKE_TEXTURE_PACK_FOLDER",
@@ -126,6 +128,12 @@ int main() {
     assert(find("BLUEWAKE_NOT_A_SETTING") == nullptr);
     assert(default_on(*find("BLUEWAKE_MOUSE_CAMERA")) && !default_on(*find("BLUEWAKE_HD_LOOK")));
     assert(std::strcmp(find("BLUEWAKE_ASPECT")->old_windows, "aspect") == 0);
+    // Edge smoothing (FXAA or SMAA, RecompCore #69): a chooser under Display after Texture filtering, off
+    // by default, applied while the game runs.
+    const Setting* fxaa = find("DOL_AURORA_EDGE_SMOOTHING");
+    assert(fxaa != nullptr && fxaa == find("DOL_AURORA_FORCE_ANISO") + 1 && fxaa->control == Control::Chooser);
+    assert(fxaa->kind == Kind::Choice && std::strcmp(fxaa->fallback, "0") == 0 && !next_launch_on(*fxaa, Os::Linux) && !next_launch_on(*fxaa, Os::Windows));
+    assert(fxaa->tab == find("DOL_AURORA_FORCE_ANISO")->tab);
     // Where the distance blur starts reads as RecompCore's factor, 2^(3.5 * value / 100)
     // (#598): 1.00x to 10.00x a quarter at a time; the file keeps whole numbers.
     const Setting* dof_start = find("DOL_AURORA_GAME_DOF_START");
@@ -193,6 +201,14 @@ int main() {
     const Setting* no_wsi = find("BLUEWAKE_NO_GAMESCOPE_WSI");
     assert(no_wsi != nullptr && no_wsi == mailbox + 1 && no_wsi->tab == Tab::Config && no_wsi->group == nullptr);
     assert(!default_on(*no_wsi) && next_launch_on(*no_wsi));
+    // Then the faster Light distance blur (RecompCore #67): off by default, read when the renderer starts.
+    const Setting* dof_fast = find("DOL_AURORA_GAME_DOF_FAST");
+    assert(dof_fast != nullptr && dof_fast == no_wsi + 1 && dof_fast->tab == Tab::Config && dof_fast->group == nullptr);
+    assert(!default_on(*dof_fast) && next_launch_on(*dof_fast));
+    // Then the faster effects mask (RecompCore #68): off by default, read when the renderer starts.
+    const Setting* mask_fast = find("DOL_AURORA_EFFECT_MASK_FAST");
+    assert(mask_fast != nullptr && mask_fast == dof_fast + 1 && mask_fast->tab == Tab::Config && mask_fast->group == nullptr);
+    assert(!default_on(*mask_fast) && next_launch_on(*mask_fast));
     // A switch left empty (KEY= in an older settings file) shows its default,
     // as the game's readers take it: the stick camera is on there, not off.
     const bool stick = default_on(*find("BLUEWAKE_STICK_CAMERA"));

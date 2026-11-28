@@ -751,7 +751,9 @@ final class Overlay extends FrameLayout implements TouchControlsView.Listener, M
     }
 
     private float maxRefreshRate() {
-        Display display = activity.getDisplay();
+        // getDefaultDisplay(), not Context#getDisplay(): that one is API 30 and the app builds for Android 10
+        // (API 29), where opening the ⋯ menu threw NoSuchMethodError.
+        Display display = activity.getWindowManager().getDefaultDisplay();
         float best = 60f;
         if (display != null)
             for (Display.Mode mode : display.getSupportedModes()) best = Math.max(best, mode.getRefreshRate());

@@ -237,6 +237,15 @@ inline constexpr Setting kSettings[] = {
      .label = "FPS position", .control = Control::Custom, .needs = "DOL_AURORA_SHOW_FPS"},
     {.key = "DOL_AURORA_FORCE_ANISO", .old_windows = "anisotropy", .kind = Kind::Int, .fallback = "1", .low = 1.f,
      .high = 16.f, .label = "Texture filtering", .control = Control::Chooser, .fill = Os::None},
+    // Edge smoothing (aurora_set_edge_smoothing, RecompCore #69): over the
+    // finished scene before the HUD, FXAA (one pass, 1 to 3) or SMAA (three
+    // passes, 4 to 6). A method's levels set how faint an edge it takes and how
+    // far along it it looks. Off by default; takes effect at once.
+    {.key = "DOL_AURORA_EDGE_SMOOTHING", .kind = Kind::Choice, .fallback = "0", .label = "Edge smoothing",
+     .control = Control::Chooser,
+     .note = "Smooths jagged edges in the finished picture, before the HUD is drawn. FXAA is cheapest and can "
+             "soften fine detail slightly; SMAA keeps detail sharper and costs more. Higher levels smooth "
+             "fainter and longer edges. Meant for lower render resolutions."},
     // The game's own distance blur (aurora_set_game_dof): at render scales
     // above 1x it fades, since its half-size copy of the picture is made at the
     // render scale. Default leaves it so; GameCube gives its 1x blur at any
@@ -476,6 +485,26 @@ inline constexpr Setting kSettings[] = {
              "Does nothing outside gamescope. Off by default; measured on a Steam Deck. Takes effect when "
              "BlueWake starts again.",
      .next_launch = Os::All, .platforms = Os::Linux},
+    // Distance blur: Light (DOL_AURORA_GAME_DOF=1) blurs a full-size copy of the picture in
+    // two passes; RecompCore #67 (DOL_AURORA_GAME_DOF_FAST) takes the copy down to half size
+    // and blends that back in one pass. Opt-in; read when the renderer first makes that copy.
+    {.key = "DOL_AURORA_GAME_DOF_FAST", .kind = Kind::Bool,
+     .label = "Faster Light distance blur", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. With Distance blur set to Light, blurs a half-size copy of the picture "
+             "instead of the full-size one. The blur can differ very slightly. Does nothing at the "
+             "other Distance blur settings. Off by default; measured on a Steam Deck. Takes effect "
+             "when BlueWake starts again.",
+     .next_launch = Os::All},
+    // The HD look's shading leaves a scene's blended effects alone through a mask that draws
+    // them again, twice, at the full size; RecompCore #68 (DOL_AURORA_EFFECT_MASK_FAST) draws
+    // it at half size. Opt-in; read when the renderer first draws the mask.
+    {.key = "DOL_AURORA_EFFECT_MASK_FAST", .kind = Kind::Bool,
+     .label = "Faster effects mask", .tab = Tab::Config, .control = Control::Switch,
+     .note = "Experimental. With the HD look's shadows or shading on, the sprays, sparks and smoke "
+             "of a scene are drawn again at half size instead of full size to keep the shading off "
+             "them. Their edges can differ very slightly. Off by default; measured on a Steam Deck. "
+             "Takes effect when BlueWake starts again.",
+     .next_launch = Os::All},
     // The game waits while the menu is open, or runs on with its input kept from
     // it. Off on Windows until a paused game, and the picture behind the menu,
     // are checked there.
