@@ -26,7 +26,8 @@ static const char* const kFileOrder[] = {
     "DOL_AURORA_ASPECT_FIT", "BLUEWAKE_PICTO_CROP", "BLUEWAKE_LOOSE_REL_RETRACES",
     "BLUEWAKE_PAUSE_UNFOCUSED", "BLUEWAKE_SHADERS_FIRST", "DOL_AURORA_FULLSCREEN", "DOL_AURORA_RENDER_SCALE",
     "DOL_AURORA_FRAME_INTERP", "DOL_AURORA_FRAME_INTERP_STEPS", "DOL_AURORA_FRAME_INTERP_PACING",
-    "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO", "DOL_AURORA_GAME_DOF", "DOL_AURORA_GAME_DOF_START",
+    "DOL_AURORA_FPS_POSITION", "DOL_AURORA_FORCE_ANISO", "DOL_AURORA_EDGE_SMOOTHING", "DOL_AURORA_GAME_DOF",
+    "DOL_AURORA_GAME_DOF_START",
     "BLUEWAKE_MODS", "BLUEWAKE_OPTIONS", "BLUEWAKE_STAGE_SELECT_TOGGLE", "BLUEWAKE_FOREST_WATER_KEEP_TREES",
     "BLUEWAKE_FOREST_WATER_30_MINUTES", "BLUEWAKE_FADE_FRAMES", "BLUEWAKE_FAST_FORWARD", "BLUEWAKE_QUICK_DOORS", "BLUEWAKE_SAIL_ON_Z",
     "BLUEWAKE_CLIMB", "BLUEWAKE_CLIMB_STAMINA", "BLUEWAKE_JUMP_BUTTON", "BLUEWAKE_SPRINT_SPEED",
@@ -127,6 +128,12 @@ int main() {
     assert(find("BLUEWAKE_NOT_A_SETTING") == nullptr);
     assert(default_on(*find("BLUEWAKE_MOUSE_CAMERA")) && !default_on(*find("BLUEWAKE_HD_LOOK")));
     assert(std::strcmp(find("BLUEWAKE_ASPECT")->old_windows, "aspect") == 0);
+    // Edge smoothing (FXAA or SMAA, RecompCore #69): a chooser under Display after Texture filtering, off
+    // by default, applied while the game runs.
+    const Setting* fxaa = find("DOL_AURORA_EDGE_SMOOTHING");
+    assert(fxaa != nullptr && fxaa == find("DOL_AURORA_FORCE_ANISO") + 1 && fxaa->control == Control::Chooser);
+    assert(fxaa->kind == Kind::Choice && std::strcmp(fxaa->fallback, "0") == 0 && !next_launch_on(*fxaa, Os::Linux) && !next_launch_on(*fxaa, Os::Windows));
+    assert(fxaa->tab == find("DOL_AURORA_FORCE_ANISO")->tab);
     // Where the distance blur starts reads as RecompCore's factor, 2^(3.5 * value / 100)
     // (#598): 1.00x to 10.00x a quarter at a time; the file keeps whole numbers.
     const Setting* dof_start = find("DOL_AURORA_GAME_DOF_START");
