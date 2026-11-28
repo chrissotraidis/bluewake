@@ -71,6 +71,10 @@ jobs:
         run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/bmg_patch_test.c -o "$RUNNER_TEMP/bluewake_bmg_patch_test"
           "$RUNNER_TEMP/bluewake_bmg_patch_test"
+      - name: Keep Swift Sail's boat above the deck line under sanitizers
+        run: |
+          cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/sail_steady_test.c -o "$RUNNER_TEMP/bluewake_sail_steady_test"
+          "$RUNNER_TEMP/bluewake_sail_steady_test"
       - name: Preserve audio DMA stereo order under sanitizers
         run: |
           cc -std=c11 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/audio_dma_stereo_test.c -o "$RUNNER_TEMP/bluewake_audio_dma_stereo_test"

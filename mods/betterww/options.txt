@@ -52,10 +52,13 @@ site 0x80213858 instant_text insn 0x88030031   # dMsg_finishProc
 # Swift Sail: the wind turns to blow from behind the boat whenever the sail is
 # up (native, after KoRL's sail sound call), the boat sails twice as fast,
 # speeds up faster and brakes harder (Brisk Sail brakes harder still; the native
-# braking reads which). Brisk Sail turns these sites on too.
+# braking reads which). Brisk Sail turns these sites on too. At twice the speed
+# the boat's spring onto the swells overshoots and he sank up to 60 units, the
+# sea showing through the deck; the native hook in setYPos keeps him within 12.
 hook  d_a_ship.rel+0xBA00 swift_sail before 3    # b (after bl setShipSailState)
 hook  d_a_ship.rel+0x3A74 swift_sail before 4    # bl cLib_addCalc: braking with A
 hook  d_a_ship.rel+0x3BC8 swift_sail before 5    # bl cLib_addCalc: braking when idle
+hook  d_a_ship.rel+0x2788 swift_sail before 7    # lfs f1, 0x10C(r31) in setYPos, after his height is held to the water
 site  d_a_ship.rel+0x3A7C swift_sail insn 0xC03F0044   # lfs f1, 0x154(r31): cruising speed 10 -> 30
 site  d_a_ship.rel+0x2DD0 swift_sail insn 0xC06401A4   # lfs f3, 0xEC(r4): acceleration 0.1 -> 0.2
 site  d_a_ship.rel+0x2E18 swift_sail insn 0xC07F0008   # lfs f3, 0x80(r31): 5 -> 10
