@@ -418,8 +418,43 @@ those alternatives. FUSE is also optional; use
 
 Run the AppImage setup in Steam Deck's Desktop Mode. It creates application-menu
 and Desktop launchers there; if extract-and-run mode was needed during setup,
-the generated launchers preserve that fallback. This improves Desktop Mode
-installation but does not add BlueWake to Steam's Gaming Mode library.
+the generated launchers preserve that fallback.
+
+It also adds BlueWake to **Steam's own library**, which is what makes it
+launchable from Gaming Mode: the setup window offers *Add BlueWake to the Steam
+library (Gaming Mode)* where Steam's Game Mode exists — a Deck (`SteamDeck=1`),
+SteamOS (`ID=steamos`), or a Game Mode image such as Bazzite — and leaves the
+option out everywhere else. There is no manual *Add a Non-Steam Game* step.
+
+The entry is written to Steam's own non-Steam shortcut list
+(`userdata/<account>/config/shortcuts.vdf`), with the same app id Steam would
+compute, so the tile can be given artwork later. What to know about it:
+
+- **Re-running setup repairs it.** A shortcut is matched by name: running setup
+  again with the same AppImage changes nothing, and running it after the
+  AppImage has moved or been renamed updates that one entry instead of adding a
+  second one. `./BlueWake-x86_64.AppImage --add-to-steam` does the same repair
+  without the rest of setup.
+- **With Steam running** — which on a Deck it always is — the entry is made
+  through SteamOS's own `steamos-add-to-steam`, so Steam adds it live instead of
+  the file being overwritten when it exits. Without that helper the window asks
+  for Steam to be closed first, and nothing is written rather than silently
+  lost.
+- **A Deck with more than one account directory** is not ambiguous: the one
+  whose `shortcuts.vdf` Steam has touched most recently is the account it is
+  signed in to, and that is the library written.
+- **If extract-and-run mode was needed**, the shortcut keeps it: Steam runs
+  `/usr/bin/env APPIMAGE_EXTRACT_AND_RUN=1 <the AppImage>`, the same command the
+  Desktop launcher carries.
+- **Nothing is forced through Proton.** The entry is a native Linux program, and
+  no compatibility tool is configured for it.
+- **`BLUEWAKE_STEAM=0`** turns all of this off: nothing is detected, offered or
+  written.
+
+The writer is covered by `tests/linux_steam_test.c` against synthetic shortcut
+lists — add, re-add (byte-identical), a moved AppImage, other games' entries
+left alone, and the refusal while Steam is running — with no Steam and no Deck
+involved.
 
 ## Releases
 

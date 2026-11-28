@@ -12,6 +12,7 @@
 #include "bluewake_version.h"
 #include "disc_import.h"
 #include "linux_disc.h"
+#include "linux_steam.h"
 #include "disc_import_stages.h"
 
 #include <SDL3/SDL.h>
@@ -370,6 +371,7 @@ struct Job {
     std::string data_dir, install_display, disc, textures, appimage, config;
     bool textures_enabled = false;
     bool install_shortcuts = false;
+    bool steam_shortcut = false;
     std::map<std::string, std::string>* settings = nullptr;
     std::chrono::steady_clock::time_point started;
     int already_prepared = 0;
@@ -460,6 +462,30 @@ struct Job {
         if (install_shortcuts && !install_application_shortcuts(appimage, why)) {
             why = "Could not install the application shortcuts: " + why;
             return false;
+        }
+        if (steam_shortcut) {
+            // What Steam runs, and what marks the entry as this AppImage's.
+            // The .desktop entry carries APPIMAGE_EXTRACT_AND_RUN in an `env`
+            // prefix; a Steam shortcut has nowhere to put an environment
+            // variable, so the same prefix goes on its command line.
+            std::string exe = appimage, options;
+            const char* extract = std::getenv("APPIMAGE_EXTRACT_AND_RUN");
+            if (extract != nullptr && extract[0] != '\0' && std::strcmp(extract, "0") != 0) {
+                exe = "/usr/bin/env";
+                options = "APPIMAGE_EXTRACT_AND_RUN=1 " + appimage;
+            }
+            char steam_detail[512]{};
+            const int added = bw_steam_add_shortcut(exe.c_str(), appimage.c_str(), "BlueWake",
+                                                    options.c_str(), steam_detail, sizeof steam_detail);
+            if (added == BW_STEAM_FAILED) {
+                why = std::string("Could not add BlueWake to the Steam library: ") + steam_detail;
+                return false;
+            }
+            note(added == BW_STEAM_UNCHANGED
+                     ? "the Steam library already has BlueWake"
+                     : added == BW_STEAM_UPDATED
+                           ? "the Steam library entry was updated for this AppImage"
+                           : "BlueWake was added to the Steam library");
         }
         return true;
     }
@@ -640,6 +666,10 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
     const std::string appimage = appimage_env != nullptr ? appimage_env : "";
     const bool can_install_shortcuts = !appimage.empty();
     bool install_shortcuts = can_install_shortcuts;
+    // Steam's Game Mode: offered only where Steam's Game Mode exists (a Deck,
+    // SteamOS, a Game Mode image), and on by default there.
+    const bool steam_offered = bw_steam_available();
+    bool steam_shortcut = steam_offered;
 
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         std::fprintf(stderr, "[setup] SDL initialization failed: %s\n", SDL_GetError());
@@ -832,6 +862,17 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
                 ImGui::BeginDisabled(!can_install_shortcuts);
                 ImGui::Checkbox("Add or update application-menu and Desktop shortcuts", &install_shortcuts);
                 ImGui::EndDisabled();
+
+                if (steam_offered) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted("Steam");
+                    ImGui::TableNextColumn();
+                    ImGui::BeginDisabled(!can_install_shortcuts);
+                    ImGui::Checkbox("Add BlueWake to the Steam library (Gaming Mode)", &steam_shortcut);
+                    ImGui::EndDisabled();
+                }
                 ImGui::EndTable();
             }
             ImGui::TextColored(install_valid ? kDone : ImVec4(1.f, .65f, .25f, 1.f), "%s",
@@ -870,6 +911,7 @@ extern "C" int bw_linux_setup(const char* install_dir, char* install_dir_out, si
                 job->textures_enabled = textures_enabled;
                 job->textures = textures;
                 job->install_shortcuts = install_shortcuts;
+                job->steam_shortcut = steam_shortcut && steam_offered;
                 job->appimage = appimage;
                 job->config = config;
                 job->settings = &settings;

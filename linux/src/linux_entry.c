@@ -42,6 +42,7 @@
 #include "linux_disc.h"
 #include "linux_crash.h"
 #include "linux_setup.h"
+#include "linux_steam.h"
 #include "launch_marker.h"
 #include "settings_menu.h"
 
@@ -319,6 +320,8 @@ static void usage(void) {
             "  --widescreen       16:9 (the widescreen mod: a wider camera and HUD)\n"
             "  --aspect A         4:3 (the game's own), 16:10, 16:9, 21:9, 64:27 (2560x1080)\n"
             "                     or 43:18 (3440x1440)\n"
+            "  --add-to-steam     put BlueWake in the Steam library, for Gaming Mode\n"
+            "                     (also repairs the entry after the AppImage moves)\n"
             "  --smooth           Smooth Motion (experimental): 60 FPS with in-between\n"
             "                     frames; F10 toggles it\n"
             "  --no-smooth        the game's own 30 FPS (the default)\n"
@@ -378,6 +381,7 @@ int main(int argc, char** argv) {
     const char* module_arg = NULL;
     int setup_requested = 0;
     int iso_picker_requested = 0;
+    int add_to_steam_requested = 0;
     char mods[256] = "";
     for (int i = 1; i < argc; i++) {
         const char* a = argv[i];
@@ -400,6 +404,8 @@ int main(int argc, char** argv) {
             snprintf(mods + strlen(mods), sizeof mods - strlen(mods), "%s%s", mods[0] ? "," : "", argv[++i]);
         } else if (strcmp(a, "--setup") == 0) {
             setup_requested = 1;
+        } else if (strcmp(a, "--add-to-steam") == 0) {
+            add_to_steam_requested = 1;
         } else if (strcmp(a, "--iso") == 0) {
             iso_picker_requested = 1;
         } else if (strcmp(a, "--betterww") == 0) {
@@ -450,6 +456,47 @@ int main(int argc, char** argv) {
     }
     if (mods[0] != '\0')
         setenv("BLUEWAKE_MODS", mods, 1);
+
+    // --add-to-steam: the repair path after the AppImage has moved or been
+    // renamed (the Steam tile is the counterpart of the .desktop launchers).
+    // Done and gone; nothing of the game runs.
+    if (add_to_steam_requested) {
+        const char* appimage = getenv("APPIMAGE");
+        if (appimage == NULL || appimage[0] == '\0') {
+            fprintf(stderr, "BlueWake: --add-to-steam needs the AppImage (APPIMAGE is not set)\n");
+            return 2;
+        }
+        if (!bw_steam_available()) {
+            fprintf(stderr, "BlueWake: Steam's Game Mode is not offered here (%s)\n",
+                    bw_steam_reason());
+            return 1;
+        }
+        // The same command line install_application_shortcuts writes into the
+        // .desktop entry's Exec: a Steam shortcut has nowhere to put an
+        // environment variable but there.
+        static char options[8192];
+        static const char* exe = NULL;
+        exe = appimage;
+        const char* extract = getenv("APPIMAGE_EXTRACT_AND_RUN");
+        if (extract != NULL && extract[0] != '\0' && strcmp(extract, "0") != 0) {
+            exe = "/usr/bin/env";
+            snprintf(options, sizeof options, "APPIMAGE_EXTRACT_AND_RUN=1 %s", appimage);
+        }
+        char detail[512] = "";
+        const int result =
+            bw_steam_add_shortcut(exe, appimage, "BlueWake", options, detail, sizeof detail);
+        if (result == BW_STEAM_FAILED) {
+            fprintf(stderr, "BlueWake: %s\n", detail);
+            return 1;
+        }
+        fprintf(stderr, "BlueWake: %s\n",
+                result == BW_STEAM_ADDED
+                    ? "added to the Steam library; it is in Gaming Mode's library now"
+                    : result == BW_STEAM_UPDATED
+                          ? "the Steam library entry now points at this AppImage"
+                          : "the Steam library already has BlueWake");
+        return 0;
+    }
 
     const char* explicit_disc = getenv("BLUEWAKE_DISC");
     const int has_explicit_disc = explicit_disc != NULL && explicit_disc[0] != '\0';
