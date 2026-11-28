@@ -33,11 +33,13 @@ This differs from the first plan (two blur passes at half size and a composite r
 - The RecompCore pin (#67's head).
 - The renderer reads the variable itself, as it does `DOL_AURORA_AO_PACKED`; the menu does not pass it on.
 
-## Verification, as done and still to do
+## Verification, as done
 
-- Speed, done: the rain state in Game Mode, two runs a setting, interleaved (PROGRESS.md). A render bench over ten states (the eight of the earlier render work, this rain state and the Big Octo fight) with the switch on against off is the fuller check.
-- GPU profile, done: the blur's zone 0.85–0.95 ms to 0.24 ms.
-- Pictures, done for the rain state at 3x (PSNR 62.5 dB). Still to do: the other scenes, from the render bench.
+- Speed in the rain state, Game Mode, two runs a setting, interleaved (PROGRESS.md): 54.5 to 58.5 retraces a second.
+- GPU profile: the blur's zone 0.85–0.95 ms to 0.24 ms.
+- The render bench on the Deck in Game Mode over ten states (the eight of the earlier render work, this rain state and the Big Octo fight), three ways with #658's switch, four runs each: +4.0 % game frames a second overall with this switch, 4 to 7 % in seven scenes. Two later states (a lava geyser, dark ash) the same way: +6.1 % and +6.7 %.
+- Pictures from the bench's picture runs on the Deck at 3x, the worst same-frame pair of each of the twelve scenes: 53.9 dB or better, largest difference 22 of 255. The rain state on a desktop: 62.5 dB.
+- Not checked: 1x and 2x, and other platforms.
 - Against the PRD's first success line: Light with the switch on reached 58.2 to 58.9 retraces a second against Default's 59.8, so 0.9 to 1.6 short of Default, not within 1.
 
 ## How the scene was measured
