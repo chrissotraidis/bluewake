@@ -114,6 +114,7 @@ set(BLUEWAKE_HOST_SOURCES
     ${BLUEWAKE_HOST_SRC}/perf_monitor.c
     ${BLUEWAKE_HOST_SRC}/game_options.c
     ${BLUEWAKE_HOST_SRC}/desktop_menu.cpp
+    ${BLUEWAKE_HOST_SRC}/language.cpp
     ${BLUEWAKE_HOST_SRC}/desktop_settings.cpp
     ${BLUEWAKE_HOST_SRC}/mouse_camera.c
     ${BLUEWAKE_HOST_SRC}/texture_pack_menu.cpp
@@ -561,6 +562,13 @@ target_link_libraries(bluewake_settings_state_test PRIVATE bluewake_posix_compat
 add_executable(bluewake_settings_table_test ${BLUEWAKE_REPO_ROOT}/tests/settings_table_test.cpp)
 target_compile_features(bluewake_settings_table_test PRIVATE cxx_std_20)
 add_test(NAME bluewake_settings_table_test COMMAND bluewake_settings_table_test)
+
+# A language catalog read as a translator writes it: no window, no ImGui.
+add_executable(bluewake_i18n_test ${BLUEWAKE_REPO_ROOT}/tests/i18n_test.cpp
+                                  ${BLUEWAKE_HOST_SRC}/language.cpp)
+target_compile_features(bluewake_i18n_test PRIVATE cxx_std_20)
+target_include_directories(bluewake_i18n_test PRIVATE ${BLUEWAKE_HOST_SRC})
+add_test(NAME bluewake_i18n_test COMMAND bluewake_i18n_test)
 
 add_executable(bluewake_settings_file_test ${BLUEWAKE_REPO_ROOT}/tests/settings_file_test.cpp)
 target_compile_features(bluewake_settings_file_test PRIVATE cxx_std_20)

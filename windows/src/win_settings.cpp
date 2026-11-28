@@ -34,6 +34,7 @@
 #include "desktop_menu.h"
 #include "desktop_theme.h"
 #include "gxruntime/aurora_backend.h"
+#include "language.h"
 #include "save_state.h"
 
 #include <algorithm>
@@ -205,7 +206,21 @@ void load_font(SDL_Window* w) {
     if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(w)))
         scale = std::max(scale, mode->h / 900.0f);
     scale = std::min(scale, 4.0f);
-    static const ImWchar ranges[] = {0x0020, 0x00FF, 0x2010, 0x205E, 0x2190, 0x2193, 0};
+    // The characters the menu has: the ranges it always had, plus every
+    // character the loaded catalog uses (language.h), so a menu in Russian or
+    // Greek is letters rather than boxes. Static: the atlas reads it while it
+    // builds, and keeps the ranges it was given.
+    static ImVector<ImWchar> ranges;
+    {
+        static const ImWchar kBase[] = {0x0020, 0x00FF, 0x2010, 0x205E, 0x2190, 0x2193, 0};
+        ImFontGlyphRangesBuilder builder;
+        builder.AddRanges(kBase);
+        for (const unsigned int point : bw_lang::characters())
+            if (point <= 0xFFFF)  // BMP: ImWchar is 16 bits
+                builder.AddChar(static_cast<ImWchar>(point));
+        ranges.clear();
+        builder.BuildRanges(&ranges);
+    }
     auto* atlas = new ImFontAtlas();  // for the life of the process
     atlas->Flags |= ImFontAtlasFlags_NoMouseCursors;
     ImFont* font = nullptr;
@@ -215,10 +230,10 @@ void load_font(SDL_Window* w) {
     if (length > 0 && length < MAX_PATH - 32) {
         const std::string path = std::string(fonts) + "\\Fonts\\segoeui.ttf";
         if (GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES)
-            font = atlas->AddFontFromFileTTF(path.c_str(), std::round(15.0f * scale), nullptr, ranges);
+            font = atlas->AddFontFromFileTTF(path.c_str(), std::round(15.0f * scale), nullptr, ranges.Data);
         if (font != nullptr)
             menu = atlas->AddFontFromFileTTF(path.c_str(), std::round(15.0f * scale * bluewake_ui::kTextLargest),
-                                             nullptr, ranges);
+                                             nullptr, ranges.Data);
     }
     if (font == nullptr) {
         // ImGui's own, at a whole multiple so its pixels stay square.
@@ -292,10 +307,15 @@ void save_state_key() { bluewake_save_state_hotkey(false); }
 namespace bw_platform {
 
 bool ready(SDL_Window* window) {
-    if (g_first_frame_at != 0)
+    // Built once, and again whenever a catalog is loaded: a language can need
+    // characters the font it was built with has none of (language.h).
+    static int loaded = -1;
+    if (g_first_frame_at != 0 && loaded == bw_lang::generation())
         return true;
-    g_first_frame_at = SDL_GetTicks();
+    if (g_first_frame_at == 0)
+        g_first_frame_at = SDL_GetTicks();
     load_font(window);
+    loaded = bw_lang::generation();
     return false;  // the font is ImGui's default from the next frame
 }
 

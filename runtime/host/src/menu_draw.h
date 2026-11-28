@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <string>
 #include "menu_shared.h"
+#include "language.h"
 #include "settings_table.h"
 
 namespace bw_menu {
@@ -49,7 +50,7 @@ inline const bw_settings::Setting& setting(const char* key) {
 // moved it, and *value is where it now stands.
 inline bool draw_switch(const bw_settings::Setting& s, bool* value) {
     *value = on(s.key, bw_settings::default_on(s));
-    if (!bw_menu_checkbox(s.label, value))
+    if (!bw_menu_checkbox(bw_lang::label(s), value))
         return false;
     put(s.key, *value ? "1" : "0");
     return true;
@@ -67,11 +68,11 @@ inline bool draw_slider(const bw_settings::Setting& s) {
     // keeps the stored value nearest it.
     if (s.doubles_every > 0.f) {
         float factor = bw_settings::factor_shown(s, value);
-        if (!bw_menu_slider(s.label, &factor, bw_settings::factor_low(s), bw_settings::factor_high(s), format,
-                            s.step))
+        if (!bw_menu_slider(bw_lang::label(s), &factor, bw_settings::factor_low(s), bw_settings::factor_high(s),
+                            format, s.step))
             return false;
         value = bw_settings::factor_stored(s, factor);
-    } else if (!bw_menu_slider(s.label, &value, s.low, s.high, format, s.step)) {
+    } else if (!bw_menu_slider(bw_lang::label(s), &value, s.low, s.high, format, s.step)) {
         return false;
     }
     char text[24];
@@ -113,19 +114,21 @@ inline void draw_setting(const bw_settings::Setting& s) {
         off_need = s.needs_set;
     const bool waiting = off_need != nullptr;
     const bool overridden = s.dead_when != nullptr && !get(s.dead_when, "").empty();
-    if (s.group != nullptr)
-        s.group[0] == '\0' ? ImGui::Separator() : ImGui::SeparatorText(s.group);
+    if (const char* heading = bw_lang::group(s))
+        heading[0] == '\0' ? ImGui::Separator() : ImGui::SeparatorText(heading);
     ImGui::BeginGroup();
     ImGui::BeginDisabled(waiting || overridden);
     draw_control(s);
     ImGui::EndDisabled();
     ImGui::EndGroup();
     if (waiting || overridden) {
-        char why[160];
-        if (waiting)
-            std::snprintf(why, sizeof why, "Turn on \"%s\" to change this.", setting(off_need).label);
-        else
-            std::snprintf(why, sizeof why, "Off while \"%s\" is set.", setting(s.dead_when).label);
+        // The sentence comes from the catalog, with the switch's name in its
+        // one %s: a translator moves that name wherever their language wants it.
+        const char* why = waiting
+                              ? bw_lang::fill("menu.turn_on", "Turn on \"%s\" to change this.",
+                                              bw_lang::label(setting(off_need)))
+                              : bw_lang::fill("menu.off_while", "Off while \"%s\" is set.",
+                                              bw_lang::label(setting(s.dead_when)));
         ImGui::PushID(s.key);
         greyed_why(why);
         ImGui::PopID();
@@ -167,7 +170,7 @@ inline void draw_control(const bw_settings::Setting& s) {
         for (int i = 0; i < count; ++i)
             if (now == stored[i])
                 index = i;
-        if (bw_menu_combo(s.label, &index, shown, count)) {
+        if (bw_menu_combo(bw_lang::label(s), &index, shown, count)) {
             put(s.key, stored[index]);
             edited = true;
         }
@@ -177,8 +180,8 @@ inline void draw_control(const bw_settings::Setting& s) {
         break;
     }
     next_launch_note(s);
-    if (s.note != nullptr)
-        ImGui::TextDisabled("%s", s.note);
+    if (const char* note = bw_lang::note(s))
+        ImGui::TextDisabled("%s", note);
     if (edited)
         changed(s);
 }
@@ -204,8 +207,8 @@ inline void draw_tab(bw_settings::Tab tab) {
             continue;
         ImGui::Indent();
         draw_setting(s);
-        if (s.experimental != nullptr)
-            ImGui::TextDisabled("Experimental: %s", s.experimental);
+        if (const char* line = bw_lang::experimental(s))
+            ImGui::TextDisabled("%s: %s", bw_lang::text("menu.experimental", "Experimental"), line);
         ImGui::Unindent();
     }
 }
@@ -213,13 +216,13 @@ inline void draw_tab(bw_settings::Tab tab) {
 // The Experimental section: every row with an experimental line that is not
 // in a pane, each with that line under it saying what has not been checked yet.
 inline void draw_experimental() {
-    ImGui::SeparatorText("Experimental");
-    ImGui::TextDisabled("Off by default, and still being checked.");
+    ImGui::SeparatorText(bw_lang::text("menu.experimental", "Experimental"));
+    ImGui::TextDisabled("%s", bw_lang::text("menu.experimental_note", "Off by default, and still being checked."));
     for (const bw_settings::Setting& s : bw_settings::kSettings) {
         if (s.experimental == nullptr || s.pane != nullptr)
             continue;
         draw_setting(s);
-        ImGui::TextDisabled("%s", s.experimental);
+        ImGui::TextDisabled("%s", bw_lang::experimental(s));
     }
 }
 

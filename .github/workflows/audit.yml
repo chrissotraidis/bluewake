@@ -48,6 +48,8 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/render-tests"
           "$RUNNER_TEMP/render-tests/bin/python" -m pip install --quiet numpy pillow
           "$RUNNER_TEMP/render-tests/bin/python" tests/test_render_bench.py
+      - name: Every language catalog names the keys the menu asks for, with the same %s and %d
+        run: python3 tests/test_i18n_strings.py
       - name: Preserve direct-call host boundaries and preparation
         run: |
           python3 tests/test_direct_calls.py
@@ -79,6 +81,10 @@ jobs:
           "$RUNNER_TEMP/bluewake_settings_table_test"
           c++ -std=c++20 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all tests/settings_file_test.cpp -o "$RUNNER_TEMP/bluewake_settings_file_test"
           "$RUNNER_TEMP/bluewake_settings_file_test"
+      - name: Read a language catalog on the Mac under sanitizers
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -I runtime/host/src tests/i18n_test.cpp runtime/host/src/language.cpp -o "$RUNNER_TEMP/bluewake_i18n_test"
+          "$RUNNER_TEMP/bluewake_i18n_test"
       - name: Preserve iOS HD import cancellation and file-access lifetime
         run: |
           xcrun --sdk macosx clang++ -std=c++17 -O1 -fobjc-arc -Werror=objc-method-access -Werror=arc-retain-cycles -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I apple/ios/src -framework Foundation tests/wwhd_ios_import_operation_test.mm -o "$RUNNER_TEMP/bluewake_wwhd_ios_import_operation_test"

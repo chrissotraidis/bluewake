@@ -5,6 +5,7 @@
 #include "settings_menu.h"
 #include "desktop_menu.h"
 #include "desktop_theme.h"
+#include "language.h"
 #include "launch_marker.h"
 
 // The host's modules are C.
@@ -73,6 +74,14 @@ std::string importer_pack_folder() {
 float g_font_dpi = 1.f;
 ImFont* g_menu_font = nullptr;
 
+// The characters the atlas is built with: ASCII and Latin-1 as before, and
+// every character the loaded catalog uses (language.h), so a menu in Russian,
+// Greek or Polish is letters rather than boxes. It has to outlive the atlas,
+// which reads it while it builds. The font itself has to have them: DejaVu,
+// Liberation, Noto and the Mac's system font cover Latin, Greek and Cyrillic;
+// a script none of them has would need a font file beside the app.
+static ImVector<ImWchar> g_menu_ranges;
+
 // The menu's font, drawn at the display's scale times the largest text size
 // (desktop_theme.h) and shown smaller, so every text size is sharp.
 void load_font(SDL_Window* window) {
@@ -80,6 +89,15 @@ void load_font(SDL_Window* window) {
     const float font_px = 17.f * g_font_dpi * bluewake_ui::kTextLargest;
     auto* atlas = new ImFontAtlas(); // Process lifetime; never mutate Aurora's live atlas.
     atlas->Flags |= ImFontAtlasFlags_NoMouseCursors;
+    g_menu_ranges.clear();
+    {
+        ImFontGlyphRangesBuilder builder;
+        builder.AddRanges(atlas->GetGlyphRangesDefault());
+        for (const unsigned int point : bw_lang::characters())
+            if (point > 0x7F && point <= 0xFFFF)  // BMP: ImWchar is 16 bits
+                builder.AddChar(static_cast<ImWchar>(point));
+        builder.BuildRanges(&g_menu_ranges);
+    }
     ImFont* font = nullptr;
 #if defined(__linux__)
     // A metric-compatible sans from common distro font packages; DejaVu first.
@@ -90,11 +108,11 @@ void load_font(SDL_Window* window) {
         "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     };
     for (const char* path : kLinuxFonts) {
-        font = atlas->AddFontFromFileTTF(path, font_px);
+        font = atlas->AddFontFromFileTTF(path, font_px, nullptr, g_menu_ranges.Data);
         if (font != nullptr) break;
     }
 #else
-    font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", font_px);
+    font = atlas->AddFontFromFileTTF("/System/Library/Fonts/SFNS.ttf", font_px, nullptr, g_menu_ranges.Data);
 #endif
     if (font == nullptr) {
         ImFontConfig config;
@@ -141,11 +159,13 @@ void toggle_menu() { bw_desktop::menu_open() ? bw_desktop::close_menu() : bw_des
 namespace bw_platform {
 
 bool ready(SDL_Window* window) {
-    static bool loaded = false;
-    if (loaded)
+    // Built once, and again whenever a catalog is loaded: a language can need
+    // characters the font it was built with has none of (language.h).
+    static int loaded = -1;
+    if (loaded == bw_lang::generation())
         return true;
     load_font(window);
-    loaded = true;
+    loaded = bw_lang::generation();
     return false;  // the font is drawn from the next frame
 }
 

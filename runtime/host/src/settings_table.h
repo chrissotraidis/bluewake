@@ -395,6 +395,16 @@ inline constexpr Setting kSettings[] = {
      .high = 100.f, .label = "Vibration strength", .tab = Tab::Controls},
     {.key = "BLUEWAKE_HAPTICS_TRIGGERS", .old_windows = "haptics_triggers", .kind = Kind::Bool, .on = Os::All,
      .label = "Trigger feedback (Xbox impulse triggers, DualSense trigger vibration)", .tab = Tab::Controls},
+    // The menu's own language: a catalog in the languages folder beside the
+    // settings file (language.h, docs/LANGUAGES.md). Read at launch, and again
+    // when it changes, so every row's text and the tab names follow at once.
+    // Nothing is filled in: English is the absence of a catalog, not a default.
+    {.key = "BLUEWAKE_LANGUAGE", .kind = Kind::Text, .label = "Language", .tab = Tab::Config,
+     .control = Control::Custom,
+     .note = "Your system's language when there is a catalog for it, or one you pick. A file you add "
+             "to the languages folder beside your settings file appears here the next time this menu "
+             "opens.",
+     .group = "Language", .fill = Os::None},
     {.key = "BLUEWAKE_DSP_MODE", .old_windows = "lle_audio", .kind = Kind::Choice, .fallback = "hle",
      .tab = Tab::Config, .control = Control::Custom, .group = "Sound", .next_launch = Os::All,
      .fill = Os::All},

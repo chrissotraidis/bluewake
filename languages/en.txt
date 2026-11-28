@@ -1,0 +1,263 @@
+# The settings menu, in English: the file a translator starts from.
+#
+# Copy it into the languages folder beside the settings file under the name of
+# your language (es.txt, de.txt, ...), translate the text after each `=`, and
+# pick that name in F1 > Config > Language. A line you leave out stays English.
+#
+# Keep every %s and %d as it is, spaces either side of `=` are trimmed, `#`
+# starts a comment, and `language.name` is what the menu's list will call your
+# language. Nothing here is written back: your file is only ever read.
+
+# The menu's own text.
+language.english = English
+language.system = System (%s)
+language.too_many = %d more catalogs than this list can show, which holds the first 14. Move the ones you do not read out of the folder.
+menu.experimental = Experimental
+menu.experimental_note = Off by default, and still being checked.
+menu.off_while = Off while "%s" is set.
+menu.turn_on = Turn on "%s" to change this.
+tab.config = Config
+tab.controls = Controls
+tab.display = Display
+tab.gameplay = Gameplay
+tab.mods = Mods
+
+# Every setting, in the order the menu draws it.
+
+setting.DOL_AURORA_TEXTURE_PACK.label = HD textures
+
+setting.BLUEWAKE_TEXTURE_PACK_KEEP_TABLES.label = Keep the game's shading tables
+setting.BLUEWAKE_TEXTURE_PACK_KEEP_TABLES.note = A pack's versions of the tables the game shades with are left out, so Link's hair and metal keep the game's shadows. Hypatia's pack changes them.
+
+setting.BLUEWAKE_TEXTURE_DUMPS.label = Save the textures the pack lacks
+setting.BLUEWAKE_TEXTURE_DUMPS.note = For pack makers: each texture the pack has no file for is named in the log and saved once as an editable .dds in texture_dumps, in BlueWake's data folder.
+
+setting.BLUEWAKE_ASPECT.label = Widescreen
+
+setting.BLUEWAKE_NATIVE_CUTSCENE_FRAMING.label = Native cutscene framing
+setting.BLUEWAKE_NATIVE_CUTSCENE_FRAMING.note = In widescreen, cutscenes fill the screen without black bars, and the opening legend isn't stretched.
+
+setting.BLUEWAKE_HD_LOOK.label = Wind Waker HD look   (F2)
+setting.BLUEWAKE_HD_LOOK.note = The HD release's look, rebuilt piece by piece. Its settings below turn each piece off on its own. Off by default.
+
+setting.BLUEWAKE_HD_DISTANT_ISLANDS.label = Islands on the horizon from further away
+
+setting.BLUEWAKE_HD_AO.label = Soft shading (ambient occlusion)
+
+setting.BLUEWAKE_HD_CLOUD_SHADOWS.label = Cloud shadows outdoors
+
+setting.BLUEWAKE_HD_EDGE_LIGHT.label = Edge light outdoors
+
+setting.BLUEWAKE_HD_TORCH_LIGHT.label = Torch light
+
+setting.BLUEWAKE_HD_FAR_BLUR.label = A soft distance (far blur)
+
+setting.BLUEWAKE_HD_BLOOM.label = Bloom
+
+setting.BLUEWAKE_HD_CLOUDS.label = HD's clouds in the sky
+setting.BLUEWAKE_HD_CLOUDS.note = Wind Waker HD's soft sky clouds, from the HD textures. A pack imported before this switch needs importing again.
+
+setting.BLUEWAKE_HD_SKY.label = HD's sky and light
+setting.BLUEWAKE_HD_SKY.note = Wind Waker HD's colours for every place, its brighter sunlight and its earlier sunset. A pack imported before this switch needs importing again.
+setting.BLUEWAKE_HD_SKY.experimental = Checked on Linux (Vulkan) against Wind Waker HD at Windfall through the day, and at every stage select place once at noon; not yet on Windows or a Mac.
+
+setting.BLUEWAKE_HD_SKY_MODELS.label = HD's taller haze and cloud layers
+
+setting.BLUEWAKE_HD_SKY_LINEAR.label = HD's dawn and dusk colours (blended in linear light)
+
+setting.BLUEWAKE_HD_SUNLIGHT.label = HD sunlight
+setting.BLUEWAKE_HD_SUNLIGHT.note = How much brighter HD's sun makes the scenery and Link.
+
+setting.BLUEWAKE_HD_SUN_SHADOWS.label = Sun shadows outdoors (from the HD look)
+setting.BLUEWAKE_HD_SUN_SHADOWS.experimental = From a shadow map, so what is off screen still casts. Played on Linux (Vulkan) and Windows (Direct3D 12); not yet on a Mac.
+
+setting.BLUEWAKE_HD_SHADOW_STRENGTH.label = Sun shadow darkness
+
+setting.BLUEWAKE_HD_LIGHT.label = Wind Waker HD's own light and shadows
+setting.BLUEWAKE_HD_LIGHT.note = HD's shadows, light on characters, bloom, soft shading, cloud shadows, rim light and far blur, in place of the look's own. Needs HD textures imported from your HD disc.
+setting.BLUEWAKE_HD_LIGHT.experimental = Played on Windows (Direct3D 12) and Linux (Vulkan) against Wind Waker HD in Cemu; not yet on a Mac.
+
+setting.BLUEWAKE_HD_LIGHT_SHADOWS.label = HD's sun shadows and shading
+
+setting.BLUEWAKE_HD_LIGHT_CHARACTERS.label = HD's light on characters
+setting.BLUEWAKE_HD_LIGHT_CHARACTERS.note = Needs HD's sky and light for its colours.
+
+setting.BLUEWAKE_HD_LIGHT_BLOOM.label = HD's bloom
+
+setting.BLUEWAKE_HD_LIGHT_AO.label = HD's soft shading
+
+setting.BLUEWAKE_HD_LIGHT_CLOUD_SHADOWS.label = HD's cloud shadows
+
+setting.BLUEWAKE_HD_LIGHT_RIM.label = HD's rim light
+setting.BLUEWAKE_HD_LIGHT_RIM.note = In place of the edge light, so it needs that on.
+
+setting.BLUEWAKE_HD_LIGHT_FAR_BLUR.label = HD's far blur
+
+setting.DOL_AURORA_SHOW_FPS.label = Show the frame rate   (F9)
+
+setting.BLUEWAKE_PERF_OVERLAY.label = Performance panel
+setting.BLUEWAKE_PERF_OVERLAY.note = Off, the frame rate alone. Full adds a panel in the corner: the frame times and a graph of them, the machine's CPU, memory and graphics card load, temperatures, power and clocks, and how the picture is scaled. F9 cycles all three.
+
+setting.DOL_AURORA_ASPECT_FIT.label = Keep the picture's shape (black bars rather than stretching)
+
+setting.BLUEWAKE_PICTO_CROP.label = Picto Box photos keep their 4:3 shape in widescreen
+setting.BLUEWAKE_PICTO_CROP.experimental = Checked on Windows (Direct3D 12) and Linux (Vulkan) at 16:9, 16:10 and 21:9; not yet on a Mac.
+
+setting.BLUEWAKE_LOOSE_REL_RETRACES.label = A load time for loose RELs (the stage select's Wind Temple R04 and R08 load)
+setting.BLUEWAKE_LOOSE_REL_RETRACES.experimental = Every stage select place checked headless on Windows and Linux; not yet played through, or on a Mac.
+
+setting.BLUEWAKE_PAUSE_UNFOCUSED.label = Pause while the window is in the background
+
+setting.BLUEWAKE_SHADERS_FIRST.label = Compile shaders before playing
+setting.BLUEWAKE_SHADERS_FIRST.note = At start, wait until the shaders from earlier play are ready, so nothing is missing from the picture the first time it is drawn. Otherwise they are made while you play.
+
+setting.DOL_AURORA_FULLSCREEN.label = Start in fullscreen
+
+setting.DOL_AURORA_RENDER_SCALE.label = Render resolution
+setting.DOL_AURORA_RENDER_SCALE.note = Each step draws the game's own picture that many times larger. Window follows the window's pixels.
+
+setting.DOL_AURORA_FRAME_INTERP.label = Smooth Motion (experimental)   (F10)
+
+setting.DOL_AURORA_FRAME_INTERP_PACING.label = Smooth Motion under sustained load
+setting.DOL_AURORA_FRAME_INTERP_PACING.note = Automatic pauses in-between frames under sustained load. Never pause may turn a presentation stall into a longer hitch. Step down (experimental) drops one in-between frame at a time at 120 Hz and up, instead of stalling.
+
+setting.DOL_AURORA_FPS_POSITION.label = FPS position
+
+setting.DOL_AURORA_FORCE_ANISO.label = Texture filtering
+
+setting.DOL_AURORA_GAME_DOF.label = Distance blur
+setting.DOL_AURORA_GAME_DOF.note = How soft the game blurs what is far away. Strong and GameCube matter at render scales above 1x.
+
+setting.DOL_AURORA_GAME_DOF_START.label = Distance blur starts
+setting.DOL_AURORA_GAME_DOF_START.note = How far out the blur starts, as a multiple of where the game starts it (1.00x), just past what the camera looks at.
+
+setting.BLUEWAKE_MODS.label = Better Wind Waker
+
+setting.BLUEWAKE_STAGE_SELECT_TOGGLE.label = Developers' stage select (F7)
+setting.BLUEWAKE_STAGE_SELECT_TOGGLE.note = F7 during play opens the menu the developers used to jump to any room, from your own file; F7 in the menu goes back. On a controller, Back (View on Xbox, Share or Create on PlayStation) opens these settings and the button below does the same. Off by default.
+
+setting.BLUEWAKE_FOREST_WATER_KEEP_TREES.label = Keep watered trees when time runs out
+setting.BLUEWAKE_FOREST_WATER_KEEP_TREES.note = Forest Water still expires. Refill and continue with the remaining trees.
+setting.BLUEWAKE_FOREST_WATER_KEEP_TREES.group = Forest Water Challenge
+
+setting.BLUEWAKE_FOREST_WATER_30_MINUTES.label = 30-minute Forest Water timer
+setting.BLUEWAKE_FOREST_WATER_30_MINUTES.note = Applies the next time you collect Forest Water. Both options are off by default.
+
+setting.BLUEWAKE_FAST_FORWARD.label = Fast transitions (short fades, no waiting in the black)
+setting.BLUEWAKE_FAST_FORWARD.group = Doors and exits
+
+setting.BLUEWAKE_QUICK_DOORS.label = Quick doors (no walk-in or door closing behind Link)
+
+setting.BLUEWAKE_SAIL_ON_Z.label = Sail on Z (on the boat, Z raises and lowers the sail)
+setting.BLUEWAKE_SAIL_ON_Z.note = Experimental. Only while Link is on the boat and has the sail. Your Z item stays as you set it, on the boat and everywhere else, and in your saves. Off by default.
+setting.BLUEWAKE_SAIL_ON_Z.group = Sailing
+
+setting.BLUEWAKE_CLIMB.label = Wall climbing (experimental)
+setting.BLUEWAKE_CLIMB.group = Climbing
+
+setting.BLUEWAKE_CLIMB_STAMINA.label = Climbing stamina
+
+setting.BLUEWAKE_JUMP_BUTTON.label = Jump & Sprint (Space or the left bumper jumps; Shift or the left stick click sprints)
+setting.BLUEWAKE_JUMP_BUTTON.group = Jump & Sprint
+
+setting.BLUEWAKE_SPRINT_CHOICE.label = Sprint speed
+
+setting.BLUEWAKE_TURBO.label = Speed up while Tab is held
+setting.BLUEWAKE_TURBO.note = Runs the game faster than realtime for as long as Tab is held: the picture keeps up, and the sound is skipped while it is held and starts again when it is let go. Off by default.
+setting.BLUEWAKE_TURBO.group = Speed up
+
+setting.BLUEWAKE_TURBO_SPEED.label = Speed-up factor
+
+setting.BLUEWAKE_PAD_SWAP_AB.label = Nintendo button layout
+setting.BLUEWAKE_PAD_SWAP_AB.note = For Switch controllers and Joy-Cons: A, B, X and Y do what their letters say. On by itself the first time BlueWake starts with one.
+setting.BLUEWAKE_PAD_SWAP_AB.group = Controller
+
+setting.BLUEWAKE_PAD_SWAP_LR.label = Swap L and R (the triggers)
+
+setting.BLUEWAKE_DPAD_MENUS.label = D-pad moves the cursor in Items and Quest Status
+
+setting.BLUEWAKE_BACKGROUND_INPUT.label = Controller works while another window is in front
+setting.BLUEWAKE_BACKGROUND_INPUT.note = The keyboard and mouse stay with the window in front. With Pause while the window is in the background on, the game waits there anyway.
+
+setting.BLUEWAKE_BUTTON_MAP.label = Controller button mapping
+
+setting.BLUEWAKE_KEY_MAP.label = Keyboard mapping
+
+setting.BLUEWAKE_MOUSE_CAMERA.label = Mouse camera (click the game to use it)
+
+setting.BLUEWAKE_MOUSE_SENSITIVITY.label = Mouse sensitivity
+
+setting.BLUEWAKE_MOUSE_INVERT_Y.label = Invert the mouse's up and down
+
+setting.BLUEWAKE_MOUSE_BUTTONS.label = Mouse button mapping
+
+setting.BLUEWAKE_STICK_CAMERA.label = Direct right-stick camera and aiming
+setting.BLUEWAKE_STICK_CAMERA.note = On: the right stick turns and tilts the camera at once, with no easing, and its click is first person. Off: the GameCube camera, where up/down zooms. Still zooming? Press L to center the camera.
+
+setting.BLUEWAKE_STICK_CAMERA_SPEED.label = Right-stick turn speed
+
+setting.BLUEWAKE_STICK_AIM.label = The right stick aims too (first person, items)
+setting.BLUEWAKE_STICK_AIM.note = Off: the right stick still turns the camera, and first person and items aim with the left stick, as in the GameCube game.
+
+setting.BLUEWAKE_STICK_AIM_SPEED.label = Right-stick aim speed (first person, items)
+
+setting.BLUEWAKE_STICK_ZOOM.label = Hold the right-stick click and move it up/down to zoom
+setting.BLUEWAKE_STICK_ZOOM.note = On foot and on the boat; the boat keeps its own distance.
+
+setting.BLUEWAKE_STICK_ZOOM_SPEED.label = Controller zoom speed
+
+setting.BLUEWAKE_STICK_CAMERA_INVERT_X.label = Invert the right stick's left and right
+
+setting.BLUEWAKE_STICK_CAMERA_INVERT_Y.label = Invert the right stick's up and down
+
+setting.BLUEWAKE_AIM_INVERT_Y.label = Invert the left stick's up and down when aiming (first person, items)
+
+setting.BLUEWAKE_GYRO_AIM.label = Gyro aiming: move the controller to aim (DualSense, DualShock 4, Switch Pro, Steam Deck)
+
+setting.BLUEWAKE_GYRO_AIM_SPEED.label = Gyro aim speed
+
+setting.BLUEWAKE_HAPTICS.label = Controller vibration
+setting.BLUEWAKE_HAPTICS.group = Haptics
+
+setting.BLUEWAKE_HAPTICS_STRENGTH.label = Vibration strength
+
+setting.BLUEWAKE_HAPTICS_TRIGGERS.label = Trigger feedback (Xbox impulse triggers, DualSense trigger vibration)
+
+setting.BLUEWAKE_LANGUAGE.label = Language
+setting.BLUEWAKE_LANGUAGE.note = Your system's language when there is a catalog for it, or one you pick. A file you add to the languages folder beside your settings file appears here the next time this menu opens.
+setting.BLUEWAKE_LANGUAGE.group = Language
+
+setting.BLUEWAKE_DSP_MODE.group = Sound
+
+setting.DOL_AURORA_EFFICIENT_EFFECTS.label = Efficient soft effects
+setting.DOL_AURORA_EFFICIENT_EFFECTS.note = Experimental. Draws soft see-through effects, such as haze, smoke, fog and clouds, at lower resolution and blends them in once. Much faster at high render resolutions, slightly softer effects. Off by default; measured on a Steam Deck, not yet on Windows or a Mac.
+setting.DOL_AURORA_EFFICIENT_EFFECTS.group = Performance
+
+setting.BLUEWAKE_GATHER_PIPE_BATCH.label = Batch the game's graphics commands
+setting.BLUEWAKE_GATHER_PIPE_BATCH.note = Hands the game's graphics commands to the renderer in runs instead of one at a time. Takes effect when BlueWake starts again.
+
+setting.BLUEWAKE_DIRECT_GATE.label = Faster calls inside the game's code
+setting.BLUEWAKE_DIRECT_GATE.note = Checks, without a call, whether the game's code can call its next function directly. The game plays the same either way; turn it off if you suspect it. Takes effect when BlueWake starts again.
+
+setting.BLUEWAKE_MODULE_HUGEPAGES.label = Game code on large memory pages
+setting.BLUEWAKE_MODULE_HUGEPAGES.note = Experimental. Keeps the game's code on 2 MB memory pages so the processor finds it faster. Uses about 370 MB more memory. Linux only (elsewhere it does nothing). Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.
+
+setting.DOL_AURORA_CLOUD_NOISE_TEXTURE.label = Faster cloud shadows
+setting.DOL_AURORA_CLOUD_NOISE_TEXTURE.note = Experimental. Works out the HD look's cloud shadows once and reuses them, instead of for every pixel of every frame. The shadows can differ by less than one shade step. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.
+
+setting.DOL_AURORA_AO_PACKED.label = Faster ambient occlusion
+setting.DOL_AURORA_AO_PACKED.note = Experimental. Keeps the HD look's shading-in-corners data together so it is read once instead of again for every pixel. The shading can differ very slightly. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.
+
+setting.BLUEWAKE_PRESENT_MAILBOX.label = Present without waiting for the display
+setting.BLUEWAKE_PRESENT_MAILBOX.note = Experimental. Hands each finished frame to the screen without waiting for a free slot, so a late frame doesn't hold up the game. The screen still shows whole frames. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.
+
+setting.BLUEWAKE_NO_GAMESCOPE_WSI.label = Present without gamescope's frame layer
+setting.BLUEWAKE_NO_GAMESCOPE_WSI.note = Experimental. In Steam Deck Game Mode, hands frames to the screen the plain way instead of through gamescope's own layer, which can hold the game back in busy places with Smooth Motion. Every frame is still shown in turn (it overrides "Present without waiting for the display"). Does nothing outside gamescope. Off by default; measured on a Steam Deck. Takes effect when BlueWake starts again.
+
+setting.BLUEWAKE_MENU_PAUSES.label = Pause the game while the menu is open
+setting.BLUEWAKE_MENU_PAUSES.group = The menu
+
+setting.BLUEWAKE_MENU_TEXT_SIZE.label = Menu text size
+
+setting.BLUEWAKE_MENU_CONTRAST.label = Menu contrast
+setting.BLUEWAKE_MENU_CONTRAST.note = How far this menu's panels, outlines and quiet text stand off its background. It changes as you move it.
