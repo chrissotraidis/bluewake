@@ -9,12 +9,16 @@ The record for 0.13.0: what it contains, the exact artifacts, and every check wi
 the door freeze (#621) and more contributor work. Chris decided to keep the version number and rebuild every file from
 build 15. The draft's build 14 files are replaced, and nothing from build 14 ships.
 
+**November 28, evening:** the Apple-side files are in the draft and passed the release gate, PadMint's `audit` and its
+player check. Next: the Windows zip and the AppImage on Chris's PC
+([WINDOWS_BUILD_0.13.0.md](WINDOWS_BUILD_0.13.0.md), build 15), then `SHA256SUMS`, then Chris publishes.
+
 ## The release
 
 | | |
 | --- | --- |
 | Version | 0.13.0, build 15 (`version.json`) |
-| Release commit | The merge of the freeze pull request (build 15); recorded here when the artifacts are made |
+| Release commit | `c4167ab72285ef3fd55e115066c58910510fe0e2`, the merge of the freeze pull request #667 |
 | RecompCore | `d733290f1d47acc12a464c77de5e50099b680890`: RecompCore#70's head, on `bluewake-next` after RecompCore#66 (`7d3c18b1`). #66 is #65, #62, #63, #58, #59, #51, #64 and #54 with a fix for #65 with #51 (patches 0209-0218). #70 is #68 with #67, then #69 (patches 0219-0221) |
 | Previous release | 0.12.0, November 15 (`df9e46f`) |
 
@@ -22,9 +26,9 @@ build 15. The draft's build 14 files are replaced, and nothing from build 14 shi
 
 | Artifact | SHA-256 | Where it comes from | Content gate |
 | --- | --- | --- | --- |
-| `BlueWake-v0.13.0-ios-unsigned.ipa` | To come | `build.sh --app-only` on the Mac from a clean checkout of the release commit | |
-| `BlueWake-v0.13.0-source.zip` | To come | `git archive --format=zip --prefix=bluewake-0.13.0/` of the release commit | |
-| `BlueWake-v0.13.0-padmint.json` | To come | `padmint.json` at the release commit | |
+| `BlueWake-v0.13.0-ios-unsigned.ipa` | `0250ae0e4f3cd2984989d4cd0a9f239da0e3ef8c74eed13cb0f6e612f2f7ee92` | `build.sh --app-only` on the Mac into a fresh build folder from a clean checkout of `c4167ab` (765 build steps); its provenance names `c4167ab`, unmodified, `containsTranslatedGameCode: false`; RecompCore `d733290` | Pass; PadMint `audit` pass (0 address-named functions) |
+| `BlueWake-v0.13.0-source.zip` | `1dad9514304a1395b884c48f3fe6b35faf4f63dd08ceff11a15aa4832b60b0a0` | `git archive --format=zip --prefix=bluewake-0.13.0/` of `c4167ab` (21 MB; build 14's was 11 MB, the difference is #655's, #658's and #661's pictures in `docs/planning`) | Pass; PadMint `audit` pass (11 address-named functions, as 0.12.0's) |
+| `BlueWake-v0.13.0-padmint.json` | `f9dcb0d04324e1fa94bb2e2aceb27f78c90f21e9cc6bff15711922275e7b5195` | `padmint.json` at `c4167ab`, byte for byte 0.12.0's | Pass; PadMint `audit` pass |
 | `BlueWake-v0.13.0-windows-x64.zip` | To come | Chris's PC, from the release commit and his own disc | |
 | `BlueWake-v0.13.0-linux-x86_64.AppImage` | To come | WSL with Docker on Chris's PC, the CI container | |
 | `SHA256SUMS` | To come | From the files downloaded back from the draft | |
@@ -70,12 +74,22 @@ and the drafts #551, #562, #618, #342 and #347.
 | --- | --- | --- | --- |
 | 1 | Scope | Passed | Above; every new setting is off by default except #617's fix (checked on Windows by its author, frames unchanged on the Mac), #625's (Smooth Motion only), #651's slider labels, #649's panel and #665's Android fix |
 | 2 | Windows tasks | To do | WINDOWS_BUILD_0.13.0.md, build 15 |
-| 3 | What changed for PadMint | To do | `git diff v0.12.0 -- padmint.json` and `check_padmint_catalog.py` at the release commit |
-| 4 | Artifacts | To do | |
-| 5 | PadMint player check, with the checkout | To do | |
+| 3 | What changed for PadMint | Passed | `git diff v0.12.0 c4167ab -- padmint.json` is empty; `check_padmint_catalog.py`: the recipe and PadMint both offer macos-arm64, windows-arm64, windows-x86_64 |
+| 4 | Artifacts | Apple-side passed; Windows and Linux to come | Above: `check_public_assets.sh` (the maintainer's release gate) and PadMint `audit` (PadMint `main` `087a083`, Apple Python 3.9.6) on the IPA, the source zip and `padmint.json`. Build 14's five files were deleted from the draft and these three uploaded on November 28; GitHub's SHA-256 digests match. The draft targets `c4167ab` |
+| 5 | PadMint player check, with the checkout | Passed | PadMint `main` `087a083`, Apple Python 3.9.6, an empty PadMint folder, a clean checkout of `c4167ab`, the release IPA and the GZLE01 disc: passed in 10,558 s (2 h 56 min, November 28, with other builds and an Android emulator running on the same Mac), with local training through the iPhone module, signing and packaging. No catalog changes were listed. The personal build was kept private and its temporary folder moved to the Trash |
 | 6 | Player-facing text | To do after publishing | #641 names 0.13.0's downloads |
 | 7 | `SHA256SUMS` | To do | From the draft's downloads, after the Windows and Linux files are uploaded |
 | 8-12 | After publishing | To do | |
+
+**Build 15 on the Mac (M3 Max), November 28:** a personal `--no-train` build of #666 (the release commit's code;
+#655's planning notes and the freeze's docs came after) from Chris's disc. It compiled RecompCore `d733290` with
+Metal, and a rendered warp to Outset (`sea:44:0`) arrived and exited 0. Against build 14's candidate `36190741`, built
+the same way, seven headless tours loaded the same setup state (old, new, new, old, old, new, old). All 31 checkpoints
+matched in every pairing, guest memory included, so the defaults compute exactly what build 14 did. The speed numbers
+aren't a result: the Mac was busy with other work for part of the session (two of the old runs show the game thread
+busy only 62-80% at some stops). The one adjacent pair taken without that (runs 6 and 7) differs by −2.7% to +1.1% per
+stop. The rendered picture comparison at four places was stopped after one run because it kept opening the game's
+window on Chris's screen. The new switches weren't tried on the Mac.
 
 ## Build 14 (not published)
 
